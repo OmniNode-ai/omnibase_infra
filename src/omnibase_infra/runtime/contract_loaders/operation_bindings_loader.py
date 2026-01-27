@@ -49,8 +49,9 @@ See Also:
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
-from typing import Literal
+from typing import Final, Literal
 
 import yaml
 
@@ -99,6 +100,33 @@ ERROR_CODE_INVALID_CONTEXT_PATH = "BINDING_LOADER_016"
 # Binding validation errors (020-029)
 ERROR_CODE_UNKNOWN_OPERATION = "BINDING_LOADER_020"
 ERROR_CODE_DUPLICATE_PARAMETER = "BINDING_LOADER_021"
+ERROR_CODE_INVALID_CONTEXT_PATH_NAME = "BINDING_LOADER_022"
+"""Invalid context path name format.
+
+Context path names must:
+- Start with a lowercase letter
+- Contain only lowercase letters, numbers, and underscores
+- Not be empty
+- Not contain dots (used for path traversal)
+"""
+
+# =============================================================================
+# Context Path Validation Pattern
+# =============================================================================
+
+CONTEXT_PATH_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]*$")
+"""Pattern for valid context path names.
+
+Context paths must:
+- Start with a lowercase letter
+- Contain only lowercase letters (a-z), numbers (0-9), and underscores
+- Be at least 1 character long
+
+Examples:
+- Valid: ``tenant_id``, ``request_id``, ``user123``
+- Invalid: ``TenantId`` (uppercase), ``123abc`` (starts with number),
+  ``tenant.id`` (contains dot), ``tenant-id`` (contains dash)
+"""
 
 # File/contract errors (030-039)
 ERROR_CODE_CONTRACT_NOT_FOUND = "BINDING_LOADER_030"
@@ -153,6 +181,9 @@ def _check_file_size(contract_path: Path, operation: str) -> None:
 def _parse_expression(
     expression: str,
     contract_path: Path,
+    max_expression_length: int | None = None,
+    max_path_segments: int | None = None,
+    additional_context_paths: frozenset[str] | None = None,
 ) -> tuple[Literal["payload", "envelope", "context"], tuple[str, ...]]:
     """Parse and validate binding expression at load time.
 
@@ -163,6 +194,12 @@ def _parse_expression(
     Args:
         expression: Expression in ${source.path.to.field} format.
         contract_path: Path for error context.
+        max_expression_length: Override default expression length limit.
+            If None, uses the default MAX_EXPRESSION_LENGTH (256).
+        max_path_segments: Override default path segment limit.
+            If None, uses the default MAX_PATH_SEGMENTS (20).
+        additional_context_paths: Additional valid context paths beyond
+            the base VALID_CONTEXT_PATHS set.
 
     Returns:
         Tuple of (source, path_segments) where:
@@ -177,6 +214,10 @@ def _parse_expression(
         - BINDING_LOADER_013: Expression too long
         - BINDING_LOADER_014: Empty path segment
         - BINDING_LOADER_016: Invalid context path
+
+    .. versionchanged:: 0.2.7
+        Added max_expression_length, max_path_segments, and additional_context_paths
+        parameters for per-contract guardrail overrides.
     """
     ctx = ModelInfraErrorContext.with_correlation(
         transport_type=EnumInfraTransportType.FILESYSTEM,
@@ -187,7 +228,12 @@ def _parse_expression(
     parser = BindingExpressionParser()
 
     try:
-        return parser.parse(expression)
+        return parser.parse(
+            expression,
+            max_expression_length=max_expression_length,
+            max_path_segments=max_path_segments,
+            additional_context_paths=additional_context_paths,
+        )
     except BindingExpressionParseError as e:
         # Use typed error code from the exception - no string matching needed
         error_code = e.error_code.value
@@ -286,6 +332,9 @@ def _parse_expression(
 def _parse_binding_entry(
     raw_binding: dict[str, object],
     contract_path: Path,
+    max_expression_length: int | None = None,
+    max_path_segments: int | None = None,
+    additional_context_paths: frozenset[str] | None = None,
 ) -> ModelParsedBinding:
     """Parse a raw binding dict into ModelParsedBinding.
 
@@ -295,6 +344,10 @@ def _parse_binding_entry(
     Args:
         raw_binding: Raw binding dict from YAML.
         contract_path: Path for error context.
+        max_expression_length: Override default expression length limit.
+        max_path_segments: Override default path segment limit.
+        additional_context_paths: Additional valid context paths beyond
+            the base VALID_CONTEXT_PATHS set.
 
     Returns:
         ModelParsedBinding with pre-parsed expression components.
@@ -302,6 +355,10 @@ def _parse_binding_entry(
     Raises:
         ProtocolConfigurationError: If binding or expression is invalid.
         ValidationError: If raw binding doesn't match ModelOperationBinding schema.
+
+    .. versionchanged:: 0.2.7
+        Added max_expression_length, max_path_segments, and additional_context_paths
+        parameters for per-contract guardrail overrides.
     """
     # First validate as ModelOperationBinding (raw YAML structure)
     # This validates required fields and types
@@ -311,6 +368,9 @@ def _parse_binding_entry(
     source, path_segments = _parse_expression(
         operation_binding.expression,
         contract_path,
+        max_expression_length=max_expression_length,
+        max_path_segments=max_path_segments,
+        additional_context_paths=additional_context_paths,
     )
 
     return ModelParsedBinding(
@@ -321,6 +381,118 @@ def _parse_binding_entry(
         default=operation_binding.default,
         original_expression=operation_binding.expression,
     )
+
+
+def _validate_additional_context_paths(
+    paths: list[str],
+    contract_path: Path,
+) -> frozenset[str]:
+    """Validate additional context path names and return as frozenset.
+
+    Context path names must:
+    - Start with a lowercase letter
+    - Contain only lowercase letters (a-z), numbers (0-9), and underscores
+    - Not be empty
+    - Not contain dots (reserved for path traversal)
+    - Not duplicate base context paths (now_iso, dispatcher_id, correlation_id)
+
+    Args:
+        paths: List of additional context path names from contract.yaml.
+        contract_path: Path for error context.
+
+    Returns:
+        Frozenset of validated context path names.
+
+    Raises:
+        ProtocolConfigurationError: If any path name is invalid.
+            Error code: INVALID_CONTEXT_PATH_NAME (BINDING_LOADER_022).
+    """
+    if not paths:
+        return frozenset()
+
+    validated: set[str] = set()
+    ctx = ModelInfraErrorContext.with_correlation(
+        transport_type=EnumInfraTransportType.FILESYSTEM,
+        operation="validate_additional_context_paths",
+        target_name=str(contract_path),
+    )
+
+    for path in paths:
+        # Check for empty string
+        if not path:
+            logger.error(
+                "Empty string in additional_context_paths at %s",
+                contract_path,
+            )
+            raise ProtocolConfigurationError(
+                f"Empty string in additional_context_paths. "
+                f"Context path names cannot be empty. "
+                f"Error code: INVALID_CONTEXT_PATH_NAME ({ERROR_CODE_INVALID_CONTEXT_PATH_NAME})",
+                context=ctx,
+            )
+
+        # Check pattern
+        if not CONTEXT_PATH_NAME_PATTERN.match(path):
+            logger.error(
+                "Invalid context path name '%s' in additional_context_paths at %s: "
+                "must match pattern ^[a-z][a-z0-9_]*$",
+                path,
+                contract_path,
+            )
+            raise ProtocolConfigurationError(
+                f"Invalid context path name '{path}' in additional_context_paths. "
+                f"Names must start with a lowercase letter and contain only "
+                f"lowercase letters, numbers, and underscores. "
+                f"Error code: INVALID_CONTEXT_PATH_NAME ({ERROR_CODE_INVALID_CONTEXT_PATH_NAME})",
+                context=ctx,
+            )
+
+        # Check for dots (reserved for path traversal)
+        if "." in path:
+            logger.error(
+                "Context path name '%s' contains dot at %s: dots are reserved for path traversal",
+                path,
+                contract_path,
+            )
+            raise ProtocolConfigurationError(
+                f"Context path name '{path}' contains a dot. "
+                f"Dots are reserved for path traversal in expressions. "
+                f"Use underscores instead (e.g., 'tenant_id' not 'tenant.id'). "
+                f"Error code: INVALID_CONTEXT_PATH_NAME ({ERROR_CODE_INVALID_CONTEXT_PATH_NAME})",
+                context=ctx,
+            )
+
+        # Check for collision with base context paths
+        if path in VALID_CONTEXT_PATHS:
+            logger.error(
+                "Context path name '%s' duplicates base context path at %s",
+                path,
+                contract_path,
+            )
+            raise ProtocolConfigurationError(
+                f"Context path name '{path}' duplicates a base context path. "
+                f"Base context paths ({sorted(VALID_CONTEXT_PATHS)}) are automatically available. "
+                f"Error code: INVALID_CONTEXT_PATH_NAME ({ERROR_CODE_INVALID_CONTEXT_PATH_NAME})",
+                context=ctx,
+            )
+
+        # Check for duplicates within the list
+        if path in validated:
+            logger.error(
+                "Duplicate context path name '%s' in additional_context_paths at %s",
+                path,
+                contract_path,
+            )
+            raise ProtocolConfigurationError(
+                f"Duplicate context path name '{path}' in additional_context_paths. "
+                f"Each context path name must be unique. "
+                f"Error code: INVALID_CONTEXT_PATH_NAME ({ERROR_CODE_INVALID_CONTEXT_PATH_NAME})",
+                context=ctx,
+            )
+
+        validated.add(path)
+
+    return frozenset(validated)
 
 
 def _check_duplicate_parameters(
@@ -491,11 +663,43 @@ def load_operation_bindings_subcontract(
         )
         version = ModelSemVer(major=1, minor=0, patch=0)
 
+    # Parse optional guardrail overrides
+    max_expression_length_override: int | None = bindings_section.get(
+        "max_expression_length"
+    )
+    max_path_segments_override: int | None = bindings_section.get("max_path_segments")
+
+    # Parse and validate additional_context_paths (optional)
+    raw_additional_context_paths: list[str] = bindings_section.get(
+        "additional_context_paths", []
+    )
+    additional_context_paths: frozenset[str] = _validate_additional_context_paths(
+        raw_additional_context_paths,
+        contract_path,
+    )
+
+    if additional_context_paths:
+        logger.debug(
+            "Loaded %d additional context paths from contract.yaml at %s: %s",
+            len(additional_context_paths),
+            contract_path,
+            sorted(additional_context_paths),
+        )
+
     # Parse global_bindings (optional)
     global_bindings: list[ModelParsedBinding] | None = None
     raw_global = bindings_section.get("global_bindings", [])
     if raw_global:
-        global_bindings = [_parse_binding_entry(b, contract_path) for b in raw_global]
+        global_bindings = [
+            _parse_binding_entry(
+                b,
+                contract_path,
+                max_expression_length=max_expression_length_override,
+                max_path_segments=max_path_segments_override,
+                additional_context_paths=additional_context_paths or None,
+            )
+            for b in raw_global
+        ]
         _check_duplicate_parameters(global_bindings, "global_bindings", contract_path)
         logger.debug(
             "Loaded %d global bindings from contract.yaml at %s",
@@ -524,7 +728,14 @@ def load_operation_bindings_subcontract(
 
         # Parse all bindings for this operation
         parsed_list = [
-            _parse_binding_entry(b, contract_path) for b in operation_binding_list
+            _parse_binding_entry(
+                b,
+                contract_path,
+                max_expression_length=max_expression_length_override,
+                max_path_segments=max_path_segments_override,
+                additional_context_paths=additional_context_paths or None,
+            )
+            for b in operation_binding_list
         ]
 
         # Check for duplicates within this operation's bindings
@@ -542,13 +753,17 @@ def load_operation_bindings_subcontract(
 
     return ModelOperationBindingsSubcontract(
         version=version,
+        additional_context_paths=list(additional_context_paths),
         bindings=parsed_bindings,
         global_bindings=global_bindings,
+        max_expression_length=max_expression_length_override or MAX_EXPRESSION_LENGTH,
+        max_path_segments=max_path_segments_override or MAX_PATH_SEGMENTS,
     )
 
 
 __all__ = [
     # Loader-specific constants
+    "CONTEXT_PATH_NAME_PATTERN",
     "MAX_CONTRACT_FILE_SIZE_BYTES",
     # Re-exported binding constants (canonical source: omnibase_infra.models.bindings)
     "MAX_EXPRESSION_LENGTH",
@@ -563,6 +778,7 @@ __all__ = [
     "ERROR_CODE_EXPRESSION_TOO_LONG",
     "ERROR_CODE_FILE_SIZE_EXCEEDED",
     "ERROR_CODE_INVALID_CONTEXT_PATH",
+    "ERROR_CODE_INVALID_CONTEXT_PATH_NAME",
     "ERROR_CODE_INVALID_SOURCE",
     "ERROR_CODE_MISSING_PATH_SEGMENT",
     "ERROR_CODE_PATH_TOO_DEEP",

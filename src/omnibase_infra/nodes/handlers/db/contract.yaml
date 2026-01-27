@@ -33,6 +33,11 @@ operation_bindings:
     major: 1
     minor: 0
     patch: 0
+  # Guardrail overrides (optional) - customize limits for this handler
+  # Defaults: max_expression_length=256, max_path_segments=20
+  # Bounds: expression_length=[32,1024], path_segments=[3,50]
+  max_expression_length: 512 # Allow longer expressions for complex SQL bindings
+  max_path_segments: 25 # Allow deeper nested paths for complex payloads
   global_bindings:
     - parameter_name: "correlation_id"
       expression: "${envelope.correlation_id}"

@@ -1558,6 +1558,29 @@ class MessageDispatchEngine:
                 "correlation_id": correlation_id,
             }
 
+            # Check for declared additional_context_paths that are not provided
+            # This is a CONTRACT: if handler declares additional_context_paths,
+            # the dispatch engine should provide them. Log warning if missing.
+            declared_additional_paths = (
+                entry.operation_bindings.additional_context_paths
+            )
+            if declared_additional_paths:
+                missing_paths = [
+                    path
+                    for path in declared_additional_paths
+                    if path not in dispatch_context
+                ]
+                if missing_paths:
+                    self._logger.warning(
+                        "Dispatcher '%s' declares additional_context_paths %s "
+                        "but these are not provided in dispatch context. "
+                        "Bindings using these paths will resolve to None unless "
+                        "they have defaults. correlation_id=%s",
+                        entry.dispatcher_id,
+                        missing_paths,
+                        correlation_id,
+                    )
+
             # Resolve all bindings for this operation
             resolution = self._binding_resolver.resolve(
                 operation=operation,

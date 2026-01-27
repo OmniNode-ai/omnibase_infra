@@ -498,3 +498,227 @@ class TestBindingExpressionParserThreadSafety:
         source, segments = parser.parse("${payload.other.field}")
         assert source == "payload"
         assert segments == ("other", "field")
+
+
+class TestBindingExpressionParserConfigurableLimits:
+    """Tests for configurable guardrail limits.
+
+    These tests verify that per-contract guardrail overrides work correctly,
+    including:
+    - Default limits preserved when not overridden
+    - Custom limits applied when specified
+    - Custom limits can be tighter (security hardening)
+    - Custom limits can be looser within bounds
+
+    .. versionadded:: 0.2.7
+        Added as part of OMN-1518 - Configurable guardrail limits.
+    """
+
+    @pytest.fixture
+    def parser(self) -> BindingExpressionParser:
+        """Create a fresh parser instance for each test."""
+        return BindingExpressionParser()
+
+    # -------------------------------------------------------------------------
+    # Default limits tests
+    # -------------------------------------------------------------------------
+
+    def test_default_max_expression_length_enforced(
+        self, parser: BindingExpressionParser
+    ) -> None:
+        """Without override, MAX_EXPRESSION_LENGTH (256) is enforced."""
+        # Create expression just over default limit
+        long_path = "a" * 250
+        expression = f"${{payload.{long_path}}}"
+        assert len(expression) > MAX_EXPRESSION_LENGTH
+
+        with pytest.raises(ValueError, match="max length"):
+            parser.parse(expression)
+
+    def test_default_max_path_segments_enforced(
+        self, parser: BindingExpressionParser
+    ) -> None:
+        """Without override, MAX_PATH_SEGMENTS (20) is enforced."""
+        # Create path with exactly MAX_PATH_SEGMENTS + 1 segments
+        deep_path = ".".join(["a"] * (MAX_PATH_SEGMENTS + 1))
+        expression = f"${{payload.{deep_path}}}"
+
+        with pytest.raises(ValueError, match="max segments"):
+            parser.parse(expression)
+
+    # -------------------------------------------------------------------------
+    # Custom limits - looser (relaxed)
+    # -------------------------------------------------------------------------
+
+    def test_custom_max_expression_length_relaxed(
+        self, parser: BindingExpressionParser
+    ) -> None:
+        """Custom max_expression_length allows longer expressions."""
+        # Create expression over default but under custom limit
+        long_path = "a" * 300
+        expression = f"${{payload.{long_path}}}"
+        assert len(expression) > MAX_EXPRESSION_LENGTH
+        assert len(expression) < 512
+
+        # Should succeed with custom limit
+        source, segments = parser.parse(expression, max_expression_length=512)
+        assert source == "payload"
+        assert segments[0] == long_path
+
+    def test_custom_max_path_segments_relaxed(
+        self, parser: BindingExpressionParser
+    ) -> None:
+        """Custom max_path_segments allows deeper paths."""
+        # Create path deeper than default but within custom limit
+        deep_path = ".".join([f"f{i}" for i in range(25)])
+        expression = f"${{payload.{deep_path}}}"
+
+        # Should succeed with custom limit
+        source, segments = parser.parse(expression, max_path_segments=30)
+        assert source == "payload"
+        assert len(segments) == 25
+
+    # -------------------------------------------------------------------------
+    # Custom limits - tighter (security hardening)
+    # -------------------------------------------------------------------------
+
+    def test_custom_max_expression_length_tighter(
+        self, parser: BindingExpressionParser
+    ) -> None:
+        """Custom max_expression_length can be tighter than default."""
+        # Expression that passes default (256) but fails custom (100)
+        path = "a" * 80
+        expression = f"${{payload.{path}}}"
+        assert len(expression) < MAX_EXPRESSION_LENGTH
+        assert len(expression) > 50
+
+        # Should fail with tighter limit
+        with pytest.raises(ValueError, match="max length"):
+            parser.parse(expression, max_expression_length=50)
+
+    def test_custom_max_path_segments_tighter(
+        self, parser: BindingExpressionParser
+    ) -> None:
+        """Custom max_path_segments can be tighter than default."""
+        # Path that passes default (20) but fails custom (5)
+        deep_path = ".".join(["field"] * 10)
+        expression = f"${{payload.{deep_path}}}"
+
+        # Should fail with tighter limit
+        with pytest.raises(ValueError, match="max segments"):
+            parser.parse(expression, max_path_segments=5)
+
+    # -------------------------------------------------------------------------
+    # Custom limits - boundary tests
+    # -------------------------------------------------------------------------
+
+    def test_custom_expression_length_at_boundary(
+        self, parser: BindingExpressionParser
+    ) -> None:
+        """Expression at exactly custom limit parses successfully."""
+        custom_limit = 100
+        # Calculate padding: ${payload.} = 10 chars, so path = limit - 11
+        path_len = custom_limit - len("${payload.}")
+        path = "a" * path_len
+        expression = f"${{payload.{path}}}"
+        assert len(expression) == custom_limit
+
+        source, _segments = parser.parse(expression, max_expression_length=custom_limit)
+        assert source == "payload"
+
+    def test_custom_path_segments_at_boundary(
+        self, parser: BindingExpressionParser
+    ) -> None:
+        """Path with exactly custom segment limit parses successfully."""
+        custom_limit = 10
+        path = ".".join(["f"] * custom_limit)
+        expression = f"${{payload.{path}}}"
+
+        source, segments = parser.parse(expression, max_path_segments=custom_limit)
+        assert source == "payload"
+        assert len(segments) == custom_limit
+
+    # -------------------------------------------------------------------------
+    # Additional context paths tests
+    # -------------------------------------------------------------------------
+
+    def test_additional_context_paths_accepted(
+        self, parser: BindingExpressionParser
+    ) -> None:
+        """Additional context paths are accepted when provided."""
+        additional = frozenset({"tenant_id", "request_id"})
+
+        # Parse with additional context paths
+        source, segments = parser.parse(
+            "${context.tenant_id}",
+            additional_context_paths=additional,
+        )
+        assert source == "context"
+        assert segments == ("tenant_id",)
+
+    def test_additional_context_paths_not_accepted_by_default(
+        self, parser: BindingExpressionParser
+    ) -> None:
+        """Additional context paths are rejected without override."""
+        with pytest.raises(ValueError, match="Invalid context path"):
+            parser.parse("${context.tenant_id}")
+
+    def test_base_context_paths_still_valid_with_additional(
+        self, parser: BindingExpressionParser
+    ) -> None:
+        """Base context paths remain valid when additional paths provided."""
+        additional = frozenset({"tenant_id"})
+
+        # Base paths should still work
+        source, segments = parser.parse(
+            "${context.now_iso}",
+            additional_context_paths=additional,
+        )
+        assert source == "context"
+        assert segments == ("now_iso",)
+
+    def test_invalid_additional_context_path_rejected(
+        self, parser: BindingExpressionParser
+    ) -> None:
+        """Paths not in base or additional are still rejected."""
+        additional = frozenset({"tenant_id"})
+
+        with pytest.raises(ValueError, match="Invalid context path"):
+            parser.parse(
+                "${context.unknown_path}",
+                additional_context_paths=additional,
+            )
+
+    # -------------------------------------------------------------------------
+    # Combined limits tests
+    # -------------------------------------------------------------------------
+
+    def test_both_limits_can_be_customized(
+        self, parser: BindingExpressionParser
+    ) -> None:
+        """Both max_expression_length and max_path_segments can be customized."""
+        # Create expression that would fail default limits
+        deep_path = ".".join([f"f{i}" for i in range(25)])
+        expression = f"${{payload.{deep_path}}}"
+
+        # Should succeed with both limits relaxed
+        source, segments = parser.parse(
+            expression,
+            max_expression_length=512,
+            max_path_segments=30,
+        )
+        assert source == "payload"
+        assert len(segments) == 25
+
+    def test_none_values_use_defaults(self, parser: BindingExpressionParser) -> None:
+        """Passing None explicitly uses default limits."""
+        # Expression at default limit should work
+        path = "a" * (MAX_EXPRESSION_LENGTH - len("${payload.}"))
+        expression = f"${{payload.{path}}}"
+
+        source, _segments = parser.parse(
+            expression,
+            max_expression_length=None,
+            max_path_segments=None,
+        )
+        assert source == "payload"

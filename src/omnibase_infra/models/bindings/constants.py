@@ -36,6 +36,46 @@ path traversal. Also limits complexity of binding expressions.
 """
 
 # =============================================================================
+# JSON Recursion Depth Limits
+# =============================================================================
+
+DEFAULT_JSON_RECURSION_DEPTH: Final[int] = 100
+"""Default maximum recursion depth for JSON compatibility validation.
+
+This constant limits how deeply nested structures are validated in
+``_is_json_compatible_recursive()``. It prevents stack overflow on
+pathological inputs such as deeply nested dicts/lists or cyclic
+references that somehow bypass Python's normal recursion limit.
+
+The value of 100 is chosen to:
+- Allow normal JSON structures (rarely exceed 10-20 levels)
+- Prevent stack overflow on malicious or malformed inputs
+- Align with common JSON parser depth limits
+
+.. versionadded:: 0.2.6
+"""
+
+MIN_JSON_RECURSION_DEPTH: Final[int] = 10
+"""Minimum configurable JSON recursion depth.
+
+Values below this threshold would be too restrictive for practical use,
+as even simple nested structures (like user -> address -> country)
+can easily reach 5+ levels.
+
+.. versionadded:: 0.2.6
+"""
+
+MAX_JSON_RECURSION_DEPTH: Final[int] = 1000
+"""Maximum configurable JSON recursion depth.
+
+Values above this threshold increase risk of stack overflow and would
+exceed any reasonable JSON structure depth. Most JSON parsers use
+similar limits (e.g., Python's json module has implicit limits).
+
+.. versionadded:: 0.2.6
+"""
+
+# =============================================================================
 # Valid Sources and Context Paths
 # =============================================================================
 
@@ -93,9 +133,12 @@ Examples of valid expressions:
 """
 
 __all__: list[str] = [
+    "DEFAULT_JSON_RECURSION_DEPTH",
     "EXPRESSION_PATTERN",
     "MAX_EXPRESSION_LENGTH",
+    "MAX_JSON_RECURSION_DEPTH",
     "MAX_PATH_SEGMENTS",
+    "MIN_JSON_RECURSION_DEPTH",
     "VALID_CONTEXT_PATHS",
     "VALID_SOURCES",
 ]

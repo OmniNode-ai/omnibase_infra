@@ -1304,10 +1304,495 @@ class TestErrorContext:
 
 
 # =============================================================================
+# TestConfigurableGuardrailLimits
+# =============================================================================
+
+
+class TestConfigurableGuardrailLimits:
+    """Tests for per-contract guardrail limit overrides.
+
+    These tests verify that max_expression_length and max_path_segments
+    can be overridden per-contract, and that the bounds are validated.
+
+    .. versionadded:: 0.2.7
+        Added as part of OMN-1518 - Configurable guardrail limits.
+    """
+
+    def test_default_limits_when_not_specified(self, tmp_path: Path) -> None:
+        """Defaults are used when limits not specified in contract."""
+        contract = {
+            "operation_bindings": {
+                "bindings": {
+                    "op": [{"parameter_name": "p", "expression": "${payload.x}"}]
+                },
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        result = load_operation_bindings_subcontract(
+            contract_path, io_operations=["op"]
+        )
+
+        # Should have default values
+        assert result.max_expression_length == MAX_EXPRESSION_LENGTH
+        assert result.max_path_segments == MAX_PATH_SEGMENTS
+
+    def test_custom_limits_loaded_from_contract(self, tmp_path: Path) -> None:
+        """Custom limits are correctly loaded from contract."""
+        contract = {
+            "operation_bindings": {
+                "max_expression_length": 512,
+                "max_path_segments": 30,
+                "bindings": {
+                    "op": [{"parameter_name": "p", "expression": "${payload.x}"}]
+                },
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        result = load_operation_bindings_subcontract(
+            contract_path, io_operations=["op"]
+        )
+
+        assert result.max_expression_length == 512
+        assert result.max_path_segments == 30
+
+    def test_custom_limits_applied_to_expression_validation(
+        self, tmp_path: Path
+    ) -> None:
+        """Custom limits are used during expression validation."""
+        # Create expression that's over default (256) but under custom (512)
+        long_path = "a" * 300
+        expression = f"${{payload.{long_path}}}"
+        assert len(expression) > MAX_EXPRESSION_LENGTH
+
+        contract = {
+            "operation_bindings": {
+                "max_expression_length": 512,
+                "bindings": {"op": [{"parameter_name": "p", "expression": expression}]},
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        # Should succeed with custom limit
+        result = load_operation_bindings_subcontract(
+            contract_path, io_operations=["op"]
+        )
+
+        assert "op" in result.bindings
+        assert result.bindings["op"][0].path_segments[0] == long_path
+
+    def test_custom_path_segments_applied_to_validation(self, tmp_path: Path) -> None:
+        """Custom max_path_segments limit is used during validation."""
+        # Create path deeper than default (20) but under custom (30)
+        deep_path = ".".join([f"f{i}" for i in range(25)])
+        expression = f"${{payload.{deep_path}}}"
+
+        contract = {
+            "operation_bindings": {
+                "max_path_segments": 30,
+                "bindings": {"op": [{"parameter_name": "p", "expression": expression}]},
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        # Should succeed with custom limit
+        result = load_operation_bindings_subcontract(
+            contract_path, io_operations=["op"]
+        )
+
+        assert "op" in result.bindings
+        assert len(result.bindings["op"][0].path_segments) == 25
+
+    def test_tighter_limits_can_be_set(self, tmp_path: Path) -> None:
+        """Limits can be set tighter than defaults for security hardening."""
+        # Expression that passes default but fails custom
+        expression = "${payload.moderately_long_field_name}"  # ~40 chars
+        assert len(expression) < MAX_EXPRESSION_LENGTH
+        assert len(expression) > 32  # Still above minimum
+
+        contract = {
+            "operation_bindings": {
+                "max_expression_length": 32,  # Minimum allowed
+                "bindings": {"op": [{"parameter_name": "p", "expression": expression}]},
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        # Should fail with tighter limit
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_operation_bindings_subcontract(contract_path, io_operations=["op"])
+
+        assert "EXPRESSION_TOO_LONG" in str(exc_info.value)
+
+    def test_limits_below_minimum_rejected(self, tmp_path: Path) -> None:
+        """Limits below minimum bounds are rejected by Pydantic."""
+        from pydantic import ValidationError
+
+        contract = {
+            "operation_bindings": {
+                "max_expression_length": 10,  # Below minimum of 32
+                "bindings": {},
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        # ValidationError from Pydantic when creating the model
+        with pytest.raises((ProtocolConfigurationError, ValidationError)):
+            load_operation_bindings_subcontract(contract_path, io_operations=[])
+
+    def test_limits_above_maximum_rejected(self, tmp_path: Path) -> None:
+        """Limits above maximum bounds are rejected by Pydantic."""
+        from pydantic import ValidationError
+
+        contract = {
+            "operation_bindings": {
+                "max_expression_length": 2000,  # Above maximum of 1024
+                "bindings": {},
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        # ValidationError from Pydantic when creating the model
+        with pytest.raises((ProtocolConfigurationError, ValidationError)):
+            load_operation_bindings_subcontract(contract_path, io_operations=[])
+
+    def test_limits_at_boundary_valid(self, tmp_path: Path) -> None:
+        """Limits at exact boundary values are valid."""
+        contract = {
+            "operation_bindings": {
+                "max_expression_length": 32,  # Minimum
+                "max_path_segments": 50,  # Maximum
+                "bindings": {
+                    "op": [{"parameter_name": "p", "expression": "${payload.x}"}]
+                },
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        result = load_operation_bindings_subcontract(
+            contract_path, io_operations=["op"]
+        )
+
+        assert result.max_expression_length == 32
+        assert result.max_path_segments == 50
+
+    def test_limits_apply_to_global_bindings(self, tmp_path: Path) -> None:
+        """Custom limits apply to global_bindings as well."""
+        # Deep path in global binding
+        deep_path = ".".join([f"f{i}" for i in range(25)])
+        expression = f"${{envelope.{deep_path}}}"
+
+        contract = {
+            "operation_bindings": {
+                "max_path_segments": 30,
+                "global_bindings": [
+                    {"parameter_name": "deep", "expression": expression}
+                ],
+                "bindings": {},
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        result = load_operation_bindings_subcontract(contract_path, io_operations=[])
+
+        assert result.global_bindings is not None
+        assert len(result.global_bindings[0].path_segments) == 25
+
+
+# =============================================================================
+# TestAdditionalContextPathsValidation
+# =============================================================================
+
+
+class TestAdditionalContextPathsValidation:
+    """Tests for additional_context_paths validation.
+
+    These tests verify that additional_context_paths in contract.yaml are
+    properly validated for:
+    - Valid identifier pattern (^[a-z][a-z0-9_]*$)
+    - No empty strings
+    - No dots (reserved for path traversal)
+    - No special characters
+    - No duplicates
+    - No collision with base context paths
+
+    .. versionadded:: 0.2.7
+        Created as part of additional_context_paths extensibility feature.
+    """
+
+    def test_valid_additional_context_paths_loaded(self, tmp_path: Path) -> None:
+        """Valid additional_context_paths are loaded and returned."""
+        contract = {
+            "operation_bindings": {
+                "additional_context_paths": ["tenant_id", "request_id"],
+                "bindings": {
+                    "test.op": [
+                        {"parameter_name": "t", "expression": "${context.tenant_id}"}
+                    ]
+                },
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        result = load_operation_bindings_subcontract(
+            contract_path, io_operations=["test.op"]
+        )
+
+        assert "tenant_id" in result.additional_context_paths
+        assert "request_id" in result.additional_context_paths
+        assert len(result.additional_context_paths) == 2
+
+    def test_additional_context_path_with_numbers(self, tmp_path: Path) -> None:
+        """Context path names containing numbers are valid."""
+        contract = {
+            "operation_bindings": {
+                "additional_context_paths": ["region_v2", "user123"],
+                "bindings": {},
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        result = load_operation_bindings_subcontract(contract_path, io_operations=[])
+
+        assert "region_v2" in result.additional_context_paths
+        assert "user123" in result.additional_context_paths
+
+    def test_additional_context_path_with_underscores(self, tmp_path: Path) -> None:
+        """Context path names containing underscores are valid."""
+        contract = {
+            "operation_bindings": {
+                "additional_context_paths": ["tenant_region_id"],
+                "bindings": {},
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        result = load_operation_bindings_subcontract(contract_path, io_operations=[])
+
+        assert "tenant_region_id" in result.additional_context_paths
+
+    def test_empty_string_in_additional_context_paths_fails(
+        self, tmp_path: Path
+    ) -> None:
+        """Empty string in additional_context_paths raises error."""
+        from omnibase_infra.runtime.contract_loaders.operation_bindings_loader import (
+            ERROR_CODE_INVALID_CONTEXT_PATH_NAME,
+        )
+
+        contract = {
+            "operation_bindings": {
+                "additional_context_paths": ["valid", ""],
+                "bindings": {},
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_operation_bindings_subcontract(contract_path, io_operations=[])
+
+        assert ERROR_CODE_INVALID_CONTEXT_PATH_NAME in str(exc_info.value)
+        assert "empty" in str(exc_info.value).lower()
+
+    def test_uppercase_context_path_fails(self, tmp_path: Path) -> None:
+        """Context path with uppercase letters fails pattern validation."""
+        from omnibase_infra.runtime.contract_loaders.operation_bindings_loader import (
+            ERROR_CODE_INVALID_CONTEXT_PATH_NAME,
+        )
+
+        contract = {
+            "operation_bindings": {
+                "additional_context_paths": ["TenantId"],
+                "bindings": {},
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_operation_bindings_subcontract(contract_path, io_operations=[])
+
+        assert ERROR_CODE_INVALID_CONTEXT_PATH_NAME in str(exc_info.value)
+
+    def test_path_starting_with_number_fails(self, tmp_path: Path) -> None:
+        """Context path starting with a number fails pattern validation."""
+        from omnibase_infra.runtime.contract_loaders.operation_bindings_loader import (
+            ERROR_CODE_INVALID_CONTEXT_PATH_NAME,
+        )
+
+        contract = {
+            "operation_bindings": {
+                "additional_context_paths": ["123abc"],
+                "bindings": {},
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_operation_bindings_subcontract(contract_path, io_operations=[])
+
+        assert ERROR_CODE_INVALID_CONTEXT_PATH_NAME in str(exc_info.value)
+
+    def test_path_with_special_chars_fails(self, tmp_path: Path) -> None:
+        """Context path with special characters (hyphen) fails."""
+        from omnibase_infra.runtime.contract_loaders.operation_bindings_loader import (
+            ERROR_CODE_INVALID_CONTEXT_PATH_NAME,
+        )
+
+        contract = {
+            "operation_bindings": {
+                "additional_context_paths": ["tenant-id"],
+                "bindings": {},
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_operation_bindings_subcontract(contract_path, io_operations=[])
+
+        assert ERROR_CODE_INVALID_CONTEXT_PATH_NAME in str(exc_info.value)
+
+    def test_duplicate_additional_context_path_fails(self, tmp_path: Path) -> None:
+        """Duplicate context path names raise error."""
+        from omnibase_infra.runtime.contract_loaders.operation_bindings_loader import (
+            ERROR_CODE_INVALID_CONTEXT_PATH_NAME,
+        )
+
+        contract = {
+            "operation_bindings": {
+                "additional_context_paths": ["tenant_id", "tenant_id"],
+                "bindings": {},
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_operation_bindings_subcontract(contract_path, io_operations=[])
+
+        assert ERROR_CODE_INVALID_CONTEXT_PATH_NAME in str(exc_info.value)
+        assert "duplicate" in str(exc_info.value).lower()
+
+    def test_collision_with_base_context_path_fails(self, tmp_path: Path) -> None:
+        """Additional path that duplicates base path raises error."""
+        from omnibase_infra.runtime.contract_loaders.operation_bindings_loader import (
+            ERROR_CODE_INVALID_CONTEXT_PATH_NAME,
+        )
+
+        contract = {
+            "operation_bindings": {
+                # now_iso is a base context path
+                "additional_context_paths": ["now_iso"],
+                "bindings": {},
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_operation_bindings_subcontract(contract_path, io_operations=[])
+
+        assert ERROR_CODE_INVALID_CONTEXT_PATH_NAME in str(exc_info.value)
+
+    def test_bindings_can_use_additional_context_paths(self, tmp_path: Path) -> None:
+        """Bindings can reference additional_context_paths in expressions."""
+        contract = {
+            "operation_bindings": {
+                "additional_context_paths": ["tenant_id"],
+                "bindings": {
+                    "db.query": [
+                        {
+                            "parameter_name": "tenant",
+                            "expression": "${context.tenant_id}",
+                            "required": True,
+                        }
+                    ]
+                },
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        result = load_operation_bindings_subcontract(
+            contract_path, io_operations=["db.query"]
+        )
+
+        binding = result.bindings["db.query"][0]
+        assert binding.source == "context"
+        assert binding.path_segments == ("tenant_id",)
+
+    def test_bindings_cannot_use_undeclared_additional_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """Bindings cannot reference context paths not declared in additional_context_paths."""
+        contract = {
+            "operation_bindings": {
+                "additional_context_paths": ["tenant_id"],
+                "bindings": {
+                    "db.query": [
+                        {
+                            "parameter_name": "req",
+                            "expression": "${context.request_id}",  # Not declared
+                            "required": True,
+                        }
+                    ]
+                },
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_operation_bindings_subcontract(
+                contract_path, io_operations=["db.query"]
+            )
+
+        assert ERROR_CODE_INVALID_CONTEXT_PATH in str(exc_info.value)
+
+    def test_empty_additional_context_paths_list(self, tmp_path: Path) -> None:
+        """Empty additional_context_paths list is valid."""
+        contract = {
+            "operation_bindings": {
+                "additional_context_paths": [],
+                "bindings": {
+                    "test.op": [
+                        {"parameter_name": "ts", "expression": "${context.now_iso}"}
+                    ]
+                },
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        result = load_operation_bindings_subcontract(
+            contract_path, io_operations=["test.op"]
+        )
+
+        assert result.additional_context_paths == []
+
+    def test_missing_additional_context_paths_defaults_to_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """Missing additional_context_paths defaults to empty list."""
+        contract = {
+            "operation_bindings": {
+                "bindings": {
+                    "test.op": [
+                        {"parameter_name": "ts", "expression": "${context.now_iso}"}
+                    ]
+                },
+            },
+        }
+        contract_path = _write_contract(contract, tmp_path)
+
+        result = load_operation_bindings_subcontract(
+            contract_path, io_operations=["test.op"]
+        )
+
+        assert result.additional_context_paths == []
+
+
+# =============================================================================
 # Module Exports
 # =============================================================================
 
 __all__ = [
+    "TestAdditionalContextPathsValidation",
+    "TestConfigurableGuardrailLimits",
     "TestContextPathValidation",
     "TestDuplicateParameterValidation",
     "TestEdgeCases",

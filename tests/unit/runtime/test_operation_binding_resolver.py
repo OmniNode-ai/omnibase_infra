@@ -1249,3 +1249,202 @@ class TestResolverInstanceBehavior:
         """Resolver initializes with expression parser."""
         resolver = OperationBindingResolver()
         assert hasattr(resolver, "_parser")
+
+
+# =============================================================================
+# Test Class: Configurable JSON Recursion Depth
+# =============================================================================
+
+
+class TestConfigurableJsonRecursionDepth:
+    """Tests for configurable max_json_recursion_depth in bindings.
+
+    The max_json_recursion_depth setting controls how deeply nested structures
+    are validated for JSON compatibility. This prevents stack overflow on
+    pathological inputs while allowing contract authors to adjust for their
+    specific needs.
+
+    .. versionadded:: 0.2.7
+    """
+
+    def test_default_depth_is_100(self) -> None:
+        """Default max_json_recursion_depth is 100."""
+        subcontract = ModelOperationBindingsSubcontract(bindings={})
+        assert subcontract.max_json_recursion_depth == 100
+
+    def test_custom_depth_from_contract(self) -> None:
+        """Custom max_json_recursion_depth can be set in contract."""
+        subcontract = ModelOperationBindingsSubcontract(
+            bindings={},
+            max_json_recursion_depth=50,
+        )
+        assert subcontract.max_json_recursion_depth == 50
+
+    def test_min_depth_10_is_valid(self) -> None:
+        """Minimum valid depth is 10."""
+        subcontract = ModelOperationBindingsSubcontract(
+            bindings={},
+            max_json_recursion_depth=10,
+        )
+        assert subcontract.max_json_recursion_depth == 10
+
+    def test_max_depth_1000_is_valid(self) -> None:
+        """Maximum valid depth is 1000."""
+        subcontract = ModelOperationBindingsSubcontract(
+            bindings={},
+            max_json_recursion_depth=1000,
+        )
+        assert subcontract.max_json_recursion_depth == 1000
+
+    def test_depth_below_10_rejected(self) -> None:
+        """Depth below 10 is rejected at validation time."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelOperationBindingsSubcontract(
+                bindings={},
+                max_json_recursion_depth=9,
+            )
+
+        # Check error is related to min value
+        error_str = str(exc_info.value)
+        assert "max_json_recursion_depth" in error_str or "10" in error_str
+
+    def test_depth_above_1000_rejected(self) -> None:
+        """Depth above 1000 is rejected at validation time."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as exc_info:
+            ModelOperationBindingsSubcontract(
+                bindings={},
+                max_json_recursion_depth=1001,
+            )
+
+        # Check error is related to max value
+        error_str = str(exc_info.value)
+        assert "max_json_recursion_depth" in error_str or "1000" in error_str
+
+    def test_resolver_uses_contract_depth(
+        self,
+        resolver: OperationBindingResolver,
+        mock_context: MockContext,
+    ) -> None:
+        """Resolver uses max_json_recursion_depth from contract.
+
+        This test creates a deeply nested structure and verifies that the
+        resolver respects the configured depth limit.
+        """
+        # Create a nested payload structure
+        nested_data: dict[str, object] = {"value": "bottom"}
+        for _ in range(25):  # Create 25 levels of nesting
+            nested_data = {"nested": nested_data}
+
+        envelope = {"payload": nested_data}
+
+        # Create binding that traverses the path
+        binding = ModelParsedBinding(
+            parameter_name="data",
+            source="payload",
+            path_segments=("nested",),  # Just get first level
+            required=False,
+            default=None,
+            original_expression="${payload.nested}",
+        )
+
+        # With default depth (100), nested structure should be valid
+        subcontract = ModelOperationBindingsSubcontract(
+            bindings={"test.op": [binding]},
+            max_json_recursion_depth=100,
+        )
+
+        result = resolver.resolve(
+            operation="test.op",
+            bindings_subcontract=subcontract,
+            envelope=envelope,
+            context=mock_context,
+        )
+
+        assert result.success
+        # The nested structure should resolve (depth 25 < limit 100)
+        assert result.resolved_parameters["data"] is not None
+
+    def test_shallow_depth_rejects_deep_nesting(
+        self,
+        resolver: OperationBindingResolver,
+        mock_context: MockContext,
+    ) -> None:
+        """Shallow depth limit rejects deeply nested structures.
+
+        When max_json_recursion_depth is set low (e.g., 10), deeply nested
+        structures that exceed that depth should be rejected as non-JSON-compatible.
+        """
+        # Create a deeply nested structure (20 levels)
+        nested_data: dict[str, object] = {"value": "bottom"}
+        for _ in range(20):
+            nested_data = {"nested": nested_data}
+
+        envelope = {"payload": {"deep": nested_data}}
+
+        binding = ModelParsedBinding(
+            parameter_name="deep_data",
+            source="payload",
+            path_segments=("deep",),
+            required=False,
+            default="fallback",
+            original_expression="${payload.deep}",
+        )
+
+        # With shallow depth limit (10), deep nesting should fail validation
+        subcontract = ModelOperationBindingsSubcontract(
+            bindings={"test.op": [binding]},
+            max_json_recursion_depth=10,
+        )
+
+        result = resolver.resolve(
+            operation="test.op",
+            bindings_subcontract=subcontract,
+            envelope=envelope,
+            context=mock_context,
+        )
+
+        # Resolution succeeds but returns fallback since deep nesting
+        # is not JSON-compatible at depth 10
+        assert result.success
+        assert result.resolved_parameters["deep_data"] == "fallback"
+
+    def test_default_behavior_unchanged(
+        self,
+        resolver: OperationBindingResolver,
+        mock_envelope: MockEnvelope,
+        mock_context: MockContext,
+    ) -> None:
+        """Default behavior (depth=100) is unchanged from previous version.
+
+        This test ensures backward compatibility - existing contracts without
+        max_json_recursion_depth continue to work as before.
+        """
+        binding = ModelParsedBinding(
+            parameter_name="user",
+            source="payload",
+            path_segments=("user_id",),
+            required=True,
+            original_expression="${payload.user_id}",
+        )
+
+        # Create subcontract without specifying depth (uses default)
+        subcontract = ModelOperationBindingsSubcontract(
+            bindings={"test.op": [binding]},
+            # max_json_recursion_depth not specified - should use default 100
+        )
+
+        result = resolver.resolve(
+            operation="test.op",
+            bindings_subcontract=subcontract,
+            envelope=mock_envelope,
+            context=mock_context,
+        )
+
+        assert result.success
+        assert result.resolved_parameters["user"] == "user-456"
+        # Verify default was used
+        assert subcontract.max_json_recursion_depth == 100

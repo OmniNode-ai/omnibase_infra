@@ -62,6 +62,7 @@ from pydantic import BaseModel
 from omnibase_core.types import JsonType
 from omnibase_infra.errors import BindingResolutionError
 from omnibase_infra.models.bindings import (
+    DEFAULT_JSON_RECURSION_DEPTH,
     EXPRESSION_PATTERN,
     MAX_EXPRESSION_LENGTH,
     MAX_PATH_SEGMENTS,
@@ -159,21 +160,17 @@ class BindingExpressionParseError(ValueError):
 # JSON Recursion Depth Limit
 # =============================================================================
 
-_MAX_JSON_RECURSION_DEPTH: Final[int] = 100
-"""Maximum recursion depth for JSON compatibility validation.
-
-This constant limits how deeply nested structures are validated in
-``_is_json_compatible_recursive()``. It prevents stack overflow on
-pathological inputs such as deeply nested dicts/lists or cyclic
-references that somehow bypass Python's normal recursion limit.
-
-The value of 100 is chosen to:
-- Allow normal JSON structures (rarely exceed 10-20 levels)
-- Prevent stack overflow on malicious or malformed inputs
-- Align with common JSON parser depth limits
-
-.. versionadded:: 0.2.6
-"""
+# NOTE: The default value (DEFAULT_JSON_RECURSION_DEPTH = 100) is now imported
+# from omnibase_infra.models.bindings.constants. This enables per-contract
+# configuration via ModelOperationBindingsSubcontract.max_json_recursion_depth.
+#
+# The configurable range is [10, 1000] with sensible defaults:
+# - MIN_JSON_RECURSION_DEPTH = 10 (lower values too restrictive)
+# - MAX_JSON_RECURSION_DEPTH = 1000 (higher values risk stack overflow)
+# - DEFAULT_JSON_RECURSION_DEPTH = 100 (handles normal JSON structures)
+#
+# .. versionchanged:: 0.2.7
+#     Made configurable via contract.yaml. See OMN-1518.
 
 
 # =============================================================================
@@ -181,7 +178,10 @@ The value of 100 is chosen to:
 # =============================================================================
 
 
-def _is_json_compatible(value: object) -> bool:
+def _is_json_compatible(
+    value: object,
+    max_depth: int = DEFAULT_JSON_RECURSION_DEPTH,
+) -> bool:
     """Check if a value is JSON-compatible.
 
     JSON-compatible values are those that can be serialized to JSON:
@@ -193,10 +193,13 @@ def _is_json_compatible(value: object) -> bool:
 
     This function performs recursive validation for nested structures.
     It guards against infinite recursion by limiting depth to
-    ``_MAX_JSON_RECURSION_DEPTH`` levels.
+    ``max_depth`` levels (default: DEFAULT_JSON_RECURSION_DEPTH = 100).
 
     Args:
         value: The value to check for JSON compatibility.
+        max_depth: Maximum recursion depth for validation. Defaults to
+            DEFAULT_JSON_RECURSION_DEPTH (100). Can be configured per-contract
+            via ModelOperationBindingsSubcontract.max_json_recursion_depth.
 
     Returns:
         True if the value is JSON-compatible, False otherwise.
@@ -216,23 +219,34 @@ def _is_json_compatible(value: object) -> bool:
         >>> _is_json_compatible({"key": lambda x: x})
         False
 
+        # With custom depth limit
+        >>> _is_json_compatible({"a": {"b": {"c": 1}}}, max_depth=50)
+        True
+
     .. versionadded:: 0.2.6
+    .. versionchanged:: 0.2.7
+        Added max_depth parameter for per-contract configuration.
     """
-    return _is_json_compatible_recursive(value, depth=0)
+    return _is_json_compatible_recursive(value, depth=0, max_depth=max_depth)
 
 
-def _is_json_compatible_recursive(value: object, depth: int) -> bool:
+def _is_json_compatible_recursive(
+    value: object,
+    depth: int,
+    max_depth: int = DEFAULT_JSON_RECURSION_DEPTH,
+) -> bool:
     """Recursive implementation of JSON compatibility check.
 
     Args:
         value: The value to check.
         depth: Current recursion depth for overflow protection.
+        max_depth: Maximum allowed recursion depth.
 
     Returns:
         True if the value is JSON-compatible, False otherwise.
     """
     # Depth guard to prevent stack overflow on pathological inputs
-    if depth > _MAX_JSON_RECURSION_DEPTH:
+    if depth > max_depth:
         return False
 
     # None is JSON-compatible (maps to JSON null)
@@ -250,12 +264,15 @@ def _is_json_compatible_recursive(value: object, depth: int) -> bool:
 
     # List: all elements must be JSON-compatible
     if isinstance(value, list):
-        return all(_is_json_compatible_recursive(item, depth + 1) for item in value)
+        return all(
+            _is_json_compatible_recursive(item, depth + 1, max_depth) for item in value
+        )
 
     # Dict: keys must be str, values must be JSON-compatible
     if isinstance(value, dict):
         return all(
-            isinstance(k, str) and _is_json_compatible_recursive(v, depth + 1)
+            isinstance(k, str)
+            and _is_json_compatible_recursive(v, depth + 1, max_depth)
             for k, v in value.items()
         )
 
@@ -275,12 +292,12 @@ class BindingExpressionParser:
     constituent parts: source and path segments. It enforces all guardrails
     at parse time to fail fast on invalid expressions.
 
-    Guardrails enforced:
-        - Max expression length: 256 characters
-        - Max path depth: 20 segments
+    Guardrails enforced (default values, can be overridden per-contract):
+        - Max expression length: 256 characters (configurable: 32-1024)
+        - Max path depth: 20 segments (configurable: 3-50)
         - No array indexing (``[0]``, ``[*]``)
         - Source must be: ``payload`` | ``envelope`` | ``context``
-        - Context paths must be in ``VALID_CONTEXT_PATHS``
+        - Context paths must be in ``VALID_CONTEXT_PATHS`` or additional_context_paths
 
     This class is stateless and thread-safe.
 
@@ -292,17 +309,37 @@ class BindingExpressionParser:
         >>> path
         ('user', 'id')
 
+        # With custom limits
+        >>> source, path = parser.parse(
+        ...     "${payload.very.deep.nested.path}",
+        ...     max_expression_length=512,
+        ...     max_path_segments=30,
+        ... )
+
     .. versionadded:: 0.2.6
+    .. versionchanged:: 0.2.7
+        Added max_expression_length, max_path_segments, and additional_context_paths
+        parameters for per-contract guardrail overrides.
     """
 
     def parse(
         self,
         expression: str,
+        max_expression_length: int | None = None,
+        max_path_segments: int | None = None,
+        additional_context_paths: frozenset[str] | None = None,
     ) -> tuple[Literal["payload", "envelope", "context"], tuple[str, ...]]:
         """Parse expression into (source, path_segments).
 
         Args:
             expression: Expression in ``${source.path.to.field}`` format.
+            max_expression_length: Override default expression length limit.
+                If None, uses MAX_EXPRESSION_LENGTH (256).
+            max_path_segments: Override default path segment limit.
+                If None, uses MAX_PATH_SEGMENTS (20).
+            additional_context_paths: Additional valid context paths beyond the
+                base VALID_CONTEXT_PATHS set. If provided, these paths will be
+                accepted for context source expressions.
 
         Returns:
             Tuple of (source, path_segments) where source is one of
@@ -314,11 +351,11 @@ class BindingExpressionParser:
                 any guardrail. The exception includes a typed ``error_code`` attribute
                 for programmatic error handling:
 
-                - ``EXPRESSION_TOO_LONG``: Expression exceeds max length (256 chars)
+                - ``EXPRESSION_TOO_LONG``: Expression exceeds max length
                 - ``EXPRESSION_MALFORMED``: Array access or invalid syntax
                 - ``INVALID_SOURCE``: Source is not valid
                 - ``EMPTY_PATH_SEGMENT``: Path contains empty segments
-                - ``PATH_TOO_DEEP``: Path exceeds max segments (20)
+                - ``PATH_TOO_DEEP``: Path exceeds max segments
                 - ``INVALID_CONTEXT_PATH``: Context path is not in allowlist
 
         Example:
@@ -333,11 +370,25 @@ class BindingExpressionParser:
             Traceback (most recent call last):
                 ...
             BindingExpressionParseError: Array access not allowed in expressions: ...
+
+        .. versionchanged:: 0.2.7
+            Added max_expression_length, max_path_segments, and additional_context_paths
+            parameters for per-contract guardrail overrides.
         """
+        # Use configured limits or defaults
+        effective_max_length = (
+            max_expression_length
+            if max_expression_length is not None
+            else MAX_EXPRESSION_LENGTH
+        )
+        effective_max_segments = (
+            max_path_segments if max_path_segments is not None else MAX_PATH_SEGMENTS
+        )
+
         # Guardrail: max length
-        if len(expression) > MAX_EXPRESSION_LENGTH:
+        if len(expression) > effective_max_length:
             raise BindingExpressionParseError(
-                f"Expression exceeds max length ({len(expression)} > {MAX_EXPRESSION_LENGTH})",
+                f"Expression exceeds max length ({len(expression)} > {effective_max_length})",
                 error_code=EnumBindingParseErrorCode.EXPRESSION_TOO_LONG,
                 expression=expression,
             )
@@ -383,19 +434,24 @@ class BindingExpressionParser:
             )
 
         # Guardrail: max segments
-        if len(path_segments) > MAX_PATH_SEGMENTS:
+        if len(path_segments) > effective_max_segments:
             raise BindingExpressionParseError(
-                f"Path exceeds max segments ({len(path_segments)} > {MAX_PATH_SEGMENTS})",
+                f"Path exceeds max segments ({len(path_segments)} > {effective_max_segments})",
                 error_code=EnumBindingParseErrorCode.PATH_TOO_DEEP,
                 expression=expression,
             )
 
-        # Validate context paths (exhaustive allowlist)
+        # Validate context paths (allowlist with optional extensions)
         if source == "context":
-            if path_segments[0] not in VALID_CONTEXT_PATHS:
+            # Build effective valid context paths
+            effective_context_paths = VALID_CONTEXT_PATHS
+            if additional_context_paths:
+                effective_context_paths = VALID_CONTEXT_PATHS | additional_context_paths
+
+            if path_segments[0] not in effective_context_paths:
                 raise BindingExpressionParseError(
                     f"Invalid context path '{path_segments[0]}'. "
-                    f"Must be one of: {sorted(VALID_CONTEXT_PATHS)}",
+                    f"Must be one of: {sorted(effective_context_paths)}",
                     error_code=EnumBindingParseErrorCode.INVALID_CONTEXT_PATH,
                     expression=expression,
                 )
@@ -505,6 +561,9 @@ class OperationBindingResolver:
         operation_bindings = bindings_subcontract.bindings.get(operation, [])
         bindings_to_process.extend(operation_bindings)
 
+        # Get max JSON recursion depth from contract (or use default)
+        max_json_depth = bindings_subcontract.max_json_recursion_depth
+
         # Process each binding
         for binding in bindings_to_process:
             try:
@@ -512,6 +571,7 @@ class OperationBindingResolver:
                     binding=binding,
                     envelope=envelope,
                     context=context,
+                    max_json_recursion_depth=max_json_depth,
                 )
 
                 if value is None and binding.required:
@@ -560,6 +620,7 @@ class OperationBindingResolver:
         binding: ModelParsedBinding,
         envelope: object,
         context: object | None,
+        max_json_recursion_depth: int = DEFAULT_JSON_RECURSION_DEPTH,
     ) -> JsonType:
         """Resolve a single binding from envelope/context.
 
@@ -567,9 +628,14 @@ class OperationBindingResolver:
             binding: Pre-parsed binding with source and path.
             envelope: Event envelope (dict or Pydantic model).
             context: Dispatch context (dict, Pydantic model, or None).
+            max_json_recursion_depth: Maximum depth for JSON compatibility
+                validation. Defaults to DEFAULT_JSON_RECURSION_DEPTH (100).
 
         Returns:
             Resolved value (may be None if path doesn't exist).
+
+        .. versionchanged:: 0.2.7
+            Added max_json_recursion_depth parameter for per-contract configuration.
         """
         # Get source object based on binding source
         if binding.source == "payload":
@@ -586,7 +652,11 @@ class OperationBindingResolver:
             return None
 
         # Traverse path to get value
-        return self._traverse_path(source_obj, binding.path_segments)
+        return self._traverse_path(
+            source_obj,
+            binding.path_segments,
+            max_json_recursion_depth=max_json_recursion_depth,
+        )
 
     def _get_payload(self, envelope: object) -> object | None:
         """Extract payload from envelope.
@@ -609,6 +679,7 @@ class OperationBindingResolver:
         self,
         obj: object,
         path_segments: tuple[str, ...],
+        max_json_recursion_depth: int = DEFAULT_JSON_RECURSION_DEPTH,
     ) -> JsonType:
         """Traverse path segments to get value.
 
@@ -628,11 +699,16 @@ class OperationBindingResolver:
         Args:
             obj: Starting object to traverse from.
             path_segments: Tuple of field names to traverse.
+            max_json_recursion_depth: Maximum depth for JSON compatibility
+                validation. Defaults to DEFAULT_JSON_RECURSION_DEPTH (100).
 
         Returns:
             Value at path or None if:
             - Path doesn't exist
             - Value at path is not JSON-compatible (logs warning)
+
+        .. versionchanged:: 0.2.7
+            Added max_json_recursion_depth parameter for per-contract configuration.
         """
         current: object = obj
 
@@ -657,7 +733,7 @@ class OperationBindingResolver:
         # resolve to JSON-compatible values. We validate at runtime to
         # catch cases where non-JSON values (e.g., callables, custom objects)
         # are accidentally exposed through the binding path.
-        if not _is_json_compatible(current):
+        if not _is_json_compatible(current, max_depth=max_json_recursion_depth):
             logger.warning(
                 "Binding path '%s' resolved to non-JSON-compatible value of type '%s'. "
                 "Returning None for graceful degradation.",
