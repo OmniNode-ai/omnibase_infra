@@ -25,6 +25,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.services.session import (
     ConfigSessionConsumer,
     ConsumerMetrics,
@@ -134,12 +135,23 @@ class TestConsumerInitialization:
         assert consumer.circuit_state == EnumCircuitState.CLOSED
         assert consumer.consumer_id.startswith("session-consumer-")
 
-    def test_consumer_uses_default_config(self, aggregator: MockAggregator) -> None:
-        """Consumer should work with default config."""
-        config = ConfigSessionConsumer()
+    def test_consumer_requires_explicit_topics(self) -> None:
+        """Consumer config should fail-fast when no topics are configured.
+
+        This validates the intentional change in OMN-1547: topics must now be
+        explicitly configured to prevent silent misconfiguration with
+        environment-specific domain topics.
+        """
+        with pytest.raises(ProtocolConfigurationError, match="No topics configured"):
+            ConfigSessionConsumer()
+
+    def test_consumer_uses_explicit_config(self, aggregator: MockAggregator) -> None:
+        """Consumer should work with explicitly configured topics."""
+        config = ConfigSessionConsumer(topics=["test.session.events.v1"])
         consumer = SessionEventConsumer(config=config, aggregator=aggregator)
 
         assert consumer._config.group_id == "omnibase-infra-session-consumer"
+        assert consumer._config.topics == ["test.session.events.v1"]
 
     def test_consumer_has_metrics(self, consumer: SessionEventConsumer) -> None:
         """Consumer should have metrics instance."""
