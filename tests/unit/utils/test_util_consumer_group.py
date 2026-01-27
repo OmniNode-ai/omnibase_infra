@@ -13,8 +13,11 @@ Test Categories:
     - TestNormalizeKafkaIdentifierEdgeCases: Edge cases and error conditions
     - TestComputeConsumerGroupId: Canonical format and determinism tests
     - TestComputeConsumerGroupIdPurposes: Purpose-based differentiation tests
+    - TestComputeConsumerGroupIdLengthHandling: Length truncation tests
+    - TestPurposeDifferentiationVerification: Explicit purpose differentiation proofs
     - TestModelNodeIdentity: Identity model validation tests
     - TestEnumConsumerGroupPurpose: Enum value and conversion tests
+    - TestIntegration: Integration tests combining components
 
 .. versionadded:: 0.2.6
     Created as part of OMN-1602.
@@ -857,6 +860,195 @@ class TestEnumConsumerGroupPurpose:
         assert EnumConsumerGroupPurpose.INTROSPECTION in values
 
 
+class TestPurposeDifferentiationVerification:
+    """Explicit verification tests for consumer group purpose differentiation.
+
+    This test class provides explicit proof that:
+    1. Same identity with different purposes produces different group IDs
+    2. The derivation from ModelNodeIdentity is deterministic
+    3. All purpose values (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL)
+       produce unique group IDs for the same identity
+    4. The purpose component appears correctly in the derived ID
+
+    .. versionadded:: 0.2.6
+        Created as part of OMN-1602 purpose differentiation verification.
+    """
+
+    @pytest.fixture
+    def standard_identity(self) -> ModelNodeIdentity:
+        """Provide a standard identity for purpose differentiation tests."""
+        return ModelNodeIdentity(
+            env="dev",
+            service="omniintelligence",
+            node_name="event_processor",
+            version="v1",
+        )
+
+    def test_consume_vs_introspection_produces_different_ids(
+        self, standard_identity: ModelNodeIdentity
+    ) -> None:
+        """Prove: CONSUME and INTROSPECTION purposes produce different group IDs.
+
+        This is the primary use case - ensuring event consumption and introspection
+        don't share consumer groups and cause offset conflicts.
+        """
+        consume_id = compute_consumer_group_id(
+            standard_identity, EnumConsumerGroupPurpose.CONSUME
+        )
+        introspection_id = compute_consumer_group_id(
+            standard_identity, EnumConsumerGroupPurpose.INTROSPECTION
+        )
+
+        # CRITICAL: These must be different
+        assert consume_id != introspection_id, (
+            f"CONSUME and INTROSPECTION must produce different group IDs!\n"
+            f"CONSUME: {consume_id}\n"
+            f"INTROSPECTION: {introspection_id}"
+        )
+
+    def test_all_five_purposes_produce_unique_ids(
+        self, standard_identity: ModelNodeIdentity
+    ) -> None:
+        """Prove: All 5 purpose values produce unique group IDs for same identity.
+
+        Each purpose (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL) must
+        produce a distinct consumer group ID to prevent offset conflicts.
+        """
+        # Compute group ID for each purpose
+        purpose_to_id: dict[EnumConsumerGroupPurpose, str] = {
+            purpose: compute_consumer_group_id(standard_identity, purpose)
+            for purpose in EnumConsumerGroupPurpose
+        }
+
+        # Verify we have exactly 5 purposes
+        assert len(purpose_to_id) == 5, "Expected exactly 5 purposes"
+
+        # Verify all IDs are unique
+        all_ids = list(purpose_to_id.values())
+        unique_ids = set(all_ids)
+        assert len(unique_ids) == 5, (
+            f"All 5 purposes must produce unique group IDs!\n"
+            f"Generated IDs: {purpose_to_id}"
+        )
+
+        # Explicit pairwise verification for clarity
+        purposes = list(EnumConsumerGroupPurpose)
+        for i, purpose_a in enumerate(purposes):
+            for purpose_b in purposes[i + 1 :]:
+                id_a = purpose_to_id[purpose_a]
+                id_b = purpose_to_id[purpose_b]
+                assert id_a != id_b, (
+                    f"{purpose_a.name} and {purpose_b.name} must produce "
+                    f"different group IDs!\n"
+                    f"{purpose_a.name}: {id_a}\n"
+                    f"{purpose_b.name}: {id_b}"
+                )
+
+    def test_purpose_component_appears_at_correct_position(
+        self, standard_identity: ModelNodeIdentity
+    ) -> None:
+        """Prove: Purpose component appears as the 4th part in the canonical format.
+
+        Format: {env}.{service}.{node_name}.{purpose}.{version}
+        Index:     0      1          2          3        4
+        """
+        for purpose in EnumConsumerGroupPurpose:
+            group_id = compute_consumer_group_id(standard_identity, purpose)
+            parts = group_id.split(".")
+
+            # Should have exactly 5 parts
+            assert len(parts) == 5, (
+                f"Expected 5 parts in group ID, got {len(parts)}: {group_id}"
+            )
+
+            # Purpose should be at index 3 (4th position)
+            assert parts[3] == purpose.value, (
+                f"Purpose '{purpose.value}' should be at position 3 (4th part), "
+                f"but found '{parts[3]}' in: {group_id}"
+            )
+
+    def test_derivation_is_deterministic_for_each_purpose(
+        self, standard_identity: ModelNodeIdentity
+    ) -> None:
+        """Prove: Same identity + same purpose always produces same group ID.
+
+        The derivation must be deterministic for reliable consumer group behavior.
+        """
+        for purpose in EnumConsumerGroupPurpose:
+            # Call multiple times
+            result_1 = compute_consumer_group_id(standard_identity, purpose)
+            result_2 = compute_consumer_group_id(standard_identity, purpose)
+            result_3 = compute_consumer_group_id(standard_identity, purpose)
+
+            # All must be identical
+            assert result_1 == result_2 == result_3, (
+                f"Derivation is NOT deterministic for {purpose.name}!\n"
+                f"Call 1: {result_1}\n"
+                f"Call 2: {result_2}\n"
+                f"Call 3: {result_3}"
+            )
+
+    def test_canonical_format_structure(
+        self, standard_identity: ModelNodeIdentity
+    ) -> None:
+        """Prove: Group ID follows canonical format {env}.{service}.{node_name}.{purpose}.{version}."""
+        for purpose in EnumConsumerGroupPurpose:
+            group_id = compute_consumer_group_id(standard_identity, purpose)
+            parts = group_id.split(".")
+
+            assert len(parts) == 5, f"Expected 5 parts, got: {parts}"
+
+            # Verify each component
+            assert parts[0] == standard_identity.env.lower()
+            assert parts[1] == standard_identity.service.lower()
+            assert parts[2] == standard_identity.node_name.lower()
+            assert parts[3] == purpose.value  # Purpose
+            assert parts[4] == standard_identity.version.lower()
+
+    def test_different_identities_same_purpose_produce_different_ids(self) -> None:
+        """Prove: Different identities with same purpose produce different IDs.
+
+        This ensures identity differentiation works alongside purpose differentiation.
+        """
+        identity_a = ModelNodeIdentity(
+            env="dev", service="service_a", node_name="node", version="v1"
+        )
+        identity_b = ModelNodeIdentity(
+            env="dev", service="service_b", node_name="node", version="v1"
+        )
+
+        for purpose in EnumConsumerGroupPurpose:
+            id_a = compute_consumer_group_id(identity_a, purpose)
+            id_b = compute_consumer_group_id(identity_b, purpose)
+
+            assert id_a != id_b, (
+                f"Different identities with {purpose.name} purpose should "
+                f"produce different IDs!\n"
+                f"Identity A: {id_a}\n"
+                f"Identity B: {id_b}"
+            )
+
+    def test_purpose_string_value_in_group_id(
+        self, standard_identity: ModelNodeIdentity
+    ) -> None:
+        """Prove: The exact purpose string value appears in the group ID."""
+        expected_values = {
+            EnumConsumerGroupPurpose.CONSUME: "consume",
+            EnumConsumerGroupPurpose.INTROSPECTION: "introspection",
+            EnumConsumerGroupPurpose.REPLAY: "replay",
+            EnumConsumerGroupPurpose.AUDIT: "audit",
+            EnumConsumerGroupPurpose.BACKFILL: "backfill",
+        }
+
+        for purpose, expected_string in expected_values.items():
+            group_id = compute_consumer_group_id(standard_identity, purpose)
+
+            # The purpose string should appear surrounded by dots
+            assert f".{expected_string}." in group_id, (
+                f"Expected '.{expected_string}.' in group ID: {group_id}"
+            )
+
+
 class TestIntegration:
     """Integration tests combining multiple components."""
 
@@ -932,6 +1124,7 @@ __all__: list[str] = [
     "TestComputeConsumerGroupId",
     "TestComputeConsumerGroupIdPurposes",
     "TestComputeConsumerGroupIdLengthHandling",
+    "TestPurposeDifferentiationVerification",
     "TestModelNodeIdentity",
     "TestEnumConsumerGroupPurpose",
     "TestIntegration",

@@ -1038,6 +1038,13 @@ async def bootstrap() -> int:
         # but ModelRuntimeConfig uses 'name'. Map 'name' -> 'service_name'/'node_name'
         # for compatibility. (OMN-1602)
         #
+        # INVARIANT: In the current runtime model, `ModelRuntimeConfig.name` represents
+        # both `service_name` and `node_name` by design; multi-node services require
+        # schema expansion.
+        #
+        # TRIGGER FOR SPLIT: Split when ServiceKernel supports registering multiple
+        # node contracts under one service runtime.
+        #
         # Why both fields get the same value:
         # - For services using simplified config with just 'name', there's no semantic
         #   distinction between service and node - a single service hosts a single node
@@ -1048,8 +1055,6 @@ async def bootstrap() -> int:
         #   e.g., "local.my-service.my-service.introspection.v1"
         # - When service_name == node_name, the format is intentionally redundant but
         #   maintains consistency with multi-node deployments where they would differ
-        # - Future: If multi-node configs are needed, add explicit service_name/node_name
-        #   fields to ModelRuntimeConfig
         runtime_create_start_time = time.time()
         runtime_config_dict = cast("dict[str, object]", config.model_dump())
         if config.name:

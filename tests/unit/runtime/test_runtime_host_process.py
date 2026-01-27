@@ -2971,6 +2971,223 @@ class TestRuntimeHostProcessContainerInjection:
 
 
 # =============================================================================
+# TestRuntimeIdentityMapping
+# =============================================================================
+
+
+class TestRuntimeIdentityMapping:
+    """Tests proving the identity configuration to ModelNodeIdentity mapping (OMN-1602).
+
+    These tests document and verify the intentional relationship between
+    RuntimeHostProcess config parameters (service_name, node_name) and the
+    resulting ModelNodeIdentity fields (service, node_name).
+
+    The current runtime model uses SEPARATE config keys for service_name and
+    node_name, which map directly to ModelNodeIdentity.service and
+    ModelNodeIdentity.node_name respectively. When users provide the SAME value
+    for both keys, the resulting identity will have service == node_name by design.
+
+    This is the expected behavior for single-node deployments where a service
+    consists of exactly one node. Multi-node services (where multiple node types
+    exist within a service) require distinct values for service_name and node_name.
+
+    These tests prevent accidental "cleanup" PRs from changing this behavior by
+    explicitly documenting and testing the mapping.
+
+    Related:
+        - OMN-1602: Derived consumer group IDs from node identity
+        - compute_consumer_group_id(): Uses {env}.{service}.{node_name}.{purpose}.{version}
+        - ModelNodeIdentity: Typed identity model with service and node_name fields
+    """
+
+    @pytest.mark.asyncio
+    async def test_config_maps_service_name_to_identity_service(self) -> None:
+        """Test that config['service_name'] maps to identity.service.
+
+        The RuntimeHostProcess extracts service_name from config and uses it
+        to populate the ModelNodeIdentity.service field.
+        """
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                service_name="my-service",
+                node_name="my-node",
+            )
+        )
+
+        # Verify the mapping
+        assert process.node_identity.service == "my-service"
+
+    @pytest.mark.asyncio
+    async def test_config_maps_node_name_to_identity_node_name(self) -> None:
+        """Test that config['node_name'] maps to identity.node_name.
+
+        The RuntimeHostProcess extracts node_name from config and uses it
+        to populate the ModelNodeIdentity.node_name field.
+        """
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                service_name="my-service",
+                node_name="my-node",
+            )
+        )
+
+        # Verify the mapping
+        assert process.node_identity.node_name == "my-node"
+
+    @pytest.mark.asyncio
+    async def test_same_value_for_service_and_node_produces_matching_identity(
+        self,
+    ) -> None:
+        """Test that passing the same value for service_name and node_name works.
+
+        This is the expected behavior for single-node deployments where a service
+        consists of exactly one node. The resulting identity has service == node_name.
+        This is intentional, not a bug.
+        """
+        # Single-node deployment pattern: same value for both
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                service_name="my-service",
+                node_name="my-service",  # Same value intentionally
+            )
+        )
+
+        # Both should be set to the same value
+        assert process.node_identity.service == "my-service"
+        assert process.node_identity.node_name == "my-service"
+        # And they should be equal
+        assert process.node_identity.service == process.node_identity.node_name
+
+    @pytest.mark.asyncio
+    async def test_derived_group_id_contains_both_service_and_node_slots(self) -> None:
+        """Test that derived consumer group ID includes both service and node slots.
+
+        The consumer group ID format is: {env}.{service}.{node_name}.{purpose}.{version}
+
+        Even when service_name == node_name, both slots are populated in the
+        consumer group ID. This produces a format like:
+            test.my-service.my-service.consume.v1
+
+        This is intentional - it maintains a consistent format and allows
+        future flexibility if multi-node services are implemented.
+        """
+        from omnibase_infra.enums import EnumConsumerGroupPurpose
+        from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
+
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                env="test",
+                service_name="my-service",
+                node_name="my-service",  # Same value intentionally
+                version="v1",
+            )
+        )
+
+        # Compute the group ID
+        group_id = compute_consumer_group_id(
+            process.node_identity,
+            EnumConsumerGroupPurpose.CONSUME,
+        )
+
+        # Verify the format: {env}.{service}.{node_name}.{purpose}.{version}
+        # With same service and node values: test.my-service.my-service.consume.v1
+        assert group_id == "test.my-service.my-service.consume.v1"
+
+        # Verify both slots are populated (service and node_name appear twice)
+        parts = group_id.split(".")
+        assert len(parts) == 5
+        assert parts[0] == "test"  # env
+        assert parts[1] == "my-service"  # service
+        assert parts[2] == "my-service"  # node_name
+        assert parts[3] == "consume"  # purpose
+        assert parts[4] == "v1"  # version
+
+    @pytest.mark.asyncio
+    async def test_distinct_service_and_node_values_produce_distinct_identity(
+        self,
+    ) -> None:
+        """Test that distinct service_name and node_name produce distinct identity fields.
+
+        This is the multi-node deployment pattern where a service contains
+        multiple node types. Each node has the same service but different node_name.
+        """
+        from omnibase_infra.enums import EnumConsumerGroupPurpose
+        from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
+
+        # Multi-node deployment pattern: distinct values
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                env="prod",
+                service_name="omniintelligence",
+                node_name="claude_hook_event_effect",
+                version="v2",
+            )
+        )
+
+        # Verify distinct values
+        assert process.node_identity.service == "omniintelligence"
+        assert process.node_identity.node_name == "claude_hook_event_effect"
+        assert process.node_identity.service != process.node_identity.node_name
+
+        # Verify group ID format
+        group_id = compute_consumer_group_id(
+            process.node_identity,
+            EnumConsumerGroupPurpose.CONSUME,
+        )
+        assert group_id == "prod.omniintelligence.claude_hook_event_effect.consume.v2"
+
+    @pytest.mark.asyncio
+    async def test_process_group_id_uses_identity_based_derivation(self) -> None:
+        """Test that RuntimeHostProcess.group_id is derived from node identity.
+
+        The process.group_id property should return a consumer group ID derived
+        from the node identity, not a hardcoded or user-provided value.
+        """
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                env="staging",
+                service_name="test-service",
+                node_name="test-node",
+                version="v1",
+            )
+        )
+
+        # The group_id should be derived from identity
+        assert process.group_id is not None
+        assert "staging" in process.group_id
+        assert "test-service" in process.group_id
+        assert "test-node" in process.group_id
+
+    @pytest.mark.asyncio
+    async def test_identity_is_accessible_via_node_identity_property(self) -> None:
+        """Test that the full ModelNodeIdentity is accessible via property.
+
+        The RuntimeHostProcess should expose the complete node identity model
+        through the node_identity property for introspection and debugging.
+        """
+        from omnibase_infra.models import ModelNodeIdentity
+
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                env="local",
+                service_name="debug-service",
+                node_name="debug-node",
+                version="v3",
+            )
+        )
+
+        # Access the identity
+        identity = process.node_identity
+
+        # Verify it's the correct type and has all expected fields
+        assert isinstance(identity, ModelNodeIdentity)
+        assert identity.env == "local"
+        assert identity.service == "debug-service"
+        assert identity.node_name == "debug-node"
+        assert identity.version == "v3"
+
+
+# =============================================================================
 # Module Exports
 # =============================================================================
 
@@ -2991,6 +3208,7 @@ __all__: list[str] = [
     "TestRuntimeHostProcessPendingMessageTracking",
     "TestRuntimeHostProcessDrainState",
     "TestRuntimeHostProcessContainerInjection",
+    "TestRuntimeIdentityMapping",
     "MockHandler",
     "MockFailingHandler",
     "MockEventBus",
