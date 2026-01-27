@@ -203,8 +203,8 @@ class TestPartitionKeyEncoding:
         adapter: AdapterProtocolEventPublisherInmemory,
     ) -> None:
         """Verify Unicode partition keys are correctly encoded to UTF-8."""
-        # Unicode partition key with various characters
-        partition_key = "user-partition-key"
+        # Unicode partition key with Japanese, emoji, and accented characters
+        partition_key = "user-こんにちは-🎉-café"
 
         success = await adapter.publish(
             event_type="test.event",

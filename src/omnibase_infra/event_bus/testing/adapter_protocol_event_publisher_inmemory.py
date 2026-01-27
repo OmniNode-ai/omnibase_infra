@@ -271,10 +271,10 @@ class AdapterProtocolEventPublisherInmemory:
             try:
                 corr_uuid = UUID(str(correlation_id))
             except ValueError:
-                # If not a valid UUID, generate one and store original in metadata
+                # If not a valid UUID, generate one and log the original for debugging
                 corr_uuid = uuid4()
                 logger.warning(
-                    "correlation_id is not a valid UUID, using generated UUID",
+                    "correlation_id is not a valid UUID, generating new UUID (original logged)",
                     extra={
                         "original_correlation_id": correlation_id,
                         "generated_uuid": str(corr_uuid),
