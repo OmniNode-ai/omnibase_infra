@@ -23,8 +23,11 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
+from tests.conftest import make_test_node_identity
+
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+
 
 # =============================================================================
 # Fixtures
@@ -201,9 +204,7 @@ class TestModelEventHeadersValidation:
         naive_timestamp = dt(2025, 1, 1, 12, 0, 0)  # No tzinfo
         with pytest.raises(ValidationError) as exc_info:
             ModelEventHeaders(
-                source="test",
-                event_type="event",
-                timestamp=naive_timestamp,
+                source="test", event_type="event", timestamp=naive_timestamp
             )
 
         error_str = str(exc_info.value).lower()
@@ -300,9 +301,7 @@ class TestModelEventMessageValidation:
             timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         message = ModelEventMessage(
-            topic="test.topic",
-            value=b"test-value",
-            headers=headers,
+            topic="test.topic", value=b"test-value", headers=headers
         )
 
         assert message.topic == "test.topic"
@@ -347,9 +346,7 @@ class TestModelEventMessageValidation:
             timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         message = ModelEventMessage(
-            topic="test.topic",
-            value=b"test-value",
-            headers=headers,
+            topic="test.topic", value=b"test-value", headers=headers
         )
 
         with pytest.raises(ValidationError):
@@ -379,10 +376,7 @@ class TestModelEventMessageValidation:
         from omnibase_infra.event_bus.models import ModelEventMessage
 
         with pytest.raises(ValidationError) as exc_info:
-            ModelEventMessage(
-                topic="test.topic",
-                value=b"test-value",
-            )
+            ModelEventMessage(topic="test.topic", value=b"test-value")
         assert "headers" in str(exc_info.value).lower()
 
     def test_message_requires_topic(self) -> None:
@@ -396,10 +390,7 @@ class TestModelEventMessageValidation:
         )
 
         with pytest.raises(ValidationError) as exc_info:
-            ModelEventMessage(
-                value=b"test-value",
-                headers=headers,
-            )
+            ModelEventMessage(value=b"test-value", headers=headers)
         assert "topic" in str(exc_info.value).lower()
 
     def test_message_requires_value(self) -> None:
@@ -413,10 +404,7 @@ class TestModelEventMessageValidation:
         )
 
         with pytest.raises(ValidationError) as exc_info:
-            ModelEventMessage(
-                topic="test.topic",
-                headers=headers,
-            )
+            ModelEventMessage(topic="test.topic", headers=headers)
         assert "value" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
@@ -430,9 +418,7 @@ class TestModelEventMessageValidation:
             timestamp=datetime(2025, 1, 1, tzinfo=UTC),
         )
         message = ModelEventMessage(
-            topic="test.topic",
-            value=b"test-value",
-            headers=headers,
+            topic="test.topic", value=b"test-value", headers=headers
         )
 
         # ack() should not raise (no-op for in-memory)
@@ -453,8 +439,7 @@ class TestInvalidSchemaRejection:
 
         with pytest.raises(ValidationError) as exc_info:
             ModelEventHeaders(
-                event_type="test.event",
-                timestamp=datetime(2025, 1, 1, tzinfo=UTC),
+                event_type="test.event", timestamp=datetime(2025, 1, 1, tzinfo=UTC)
             )
         assert "source" in str(exc_info.value).lower()
 
@@ -464,8 +449,7 @@ class TestInvalidSchemaRejection:
 
         with pytest.raises(ValidationError) as exc_info:
             ModelEventHeaders(
-                source="test-service",
-                timestamp=datetime(2025, 1, 1, tzinfo=UTC),
+                source="test-service", timestamp=datetime(2025, 1, 1, tzinfo=UTC)
             )
         assert "event_type" in str(exc_info.value).lower()
 
@@ -541,8 +525,7 @@ class TestHeaderCompleteness:
 
     @pytest.mark.asyncio
     async def test_published_message_has_complete_headers(
-        self,
-        started_event_bus: EventBusInmemory,
+        self, started_event_bus: EventBusInmemory
     ) -> None:
         """Verify published messages have complete headers."""
         from omnibase_infra.event_bus.models import ModelEventMessage
@@ -552,7 +535,9 @@ class TestHeaderCompleteness:
         async def handler(msg: ModelEventMessage) -> None:
             received_messages.append(msg)
 
-        await started_event_bus.subscribe("test.completeness", "test-group", handler)
+        await started_event_bus.subscribe(
+            "test.completeness", make_test_node_identity("completeness"), handler
+        )
         await started_event_bus.publish("test.completeness", None, b"test-value")
 
         assert len(received_messages) == 1
@@ -571,8 +556,7 @@ class TestHeaderCompleteness:
 
     @pytest.mark.asyncio
     async def test_custom_headers_preserved_through_publish(
-        self,
-        started_event_bus: EventBusInmemory,
+        self, started_event_bus: EventBusInmemory
     ) -> None:
         """Verify custom headers are preserved through publish/subscribe cycle."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
@@ -583,7 +567,9 @@ class TestHeaderCompleteness:
         async def handler(msg: ModelEventMessage) -> None:
             received_messages.append(msg)
 
-        await started_event_bus.subscribe("test.custom", "test-group", handler)
+        await started_event_bus.subscribe(
+            "test.custom", make_test_node_identity("custom"), handler
+        )
 
         custom_headers = ModelEventHeaders(
             source="custom-source",
@@ -597,10 +583,7 @@ class TestHeaderCompleteness:
         )
 
         await started_event_bus.publish(
-            "test.custom",
-            b"custom-key",
-            b"custom-value",
-            custom_headers,
+            "test.custom", b"custom-key", b"custom-value", custom_headers
         )
 
         assert len(received_messages) == 1
@@ -617,8 +600,7 @@ class TestHeaderCompleteness:
 
     @pytest.mark.asyncio
     async def test_message_metadata_preserved(
-        self,
-        started_event_bus: EventBusInmemory,
+        self, started_event_bus: EventBusInmemory
     ) -> None:
         """Verify message metadata (topic, key, offset, partition) is preserved."""
         from omnibase_infra.event_bus.models import ModelEventMessage
@@ -628,7 +610,9 @@ class TestHeaderCompleteness:
         async def handler(msg: ModelEventMessage) -> None:
             received_messages.append(msg)
 
-        await started_event_bus.subscribe("test.metadata", "test-group", handler)
+        await started_event_bus.subscribe(
+            "test.metadata", make_test_node_identity("metadata"), handler
+        )
         await started_event_bus.publish("test.metadata", b"msg-key", b"msg-value")
 
         assert len(received_messages) == 1
@@ -645,8 +629,7 @@ class TestHeaderCompleteness:
 
     @pytest.mark.asyncio
     async def test_sequential_messages_have_unique_ids(
-        self,
-        started_event_bus: EventBusInmemory,
+        self, started_event_bus: EventBusInmemory
     ) -> None:
         """Verify sequential messages have unique correlation and message IDs."""
         from omnibase_infra.event_bus.models import ModelEventMessage
@@ -656,7 +639,9 @@ class TestHeaderCompleteness:
         async def handler(msg: ModelEventMessage) -> None:
             received_messages.append(msg)
 
-        await started_event_bus.subscribe("test.unique", "test-group", handler)
+        await started_event_bus.subscribe(
+            "test.unique", make_test_node_identity("unique"), handler
+        )
 
         # Publish multiple messages
         for i in range(5):

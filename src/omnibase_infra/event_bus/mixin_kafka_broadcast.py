@@ -26,7 +26,6 @@ Usage:
 Design Note:
     This mixin assumes the parent class has:
     - self._environment: str for environment context
-    - self._group: str for consumer group context
     - self.publish(): Async method to publish messages
 """
 
@@ -51,7 +50,6 @@ class ProtocolKafkaBroadcastHost(Protocol):
     """
 
     _environment: str
-    _group: str
 
     async def publish(
         self,
@@ -77,7 +75,6 @@ class MixinKafkaBroadcast:
 
     Required attributes from parent class:
         _environment: str for environment context
-        _group: str for consumer group context
 
     Required methods from parent class:
         publish: Async method to publish messages to a topic
@@ -85,7 +82,6 @@ class MixinKafkaBroadcast:
 
     # Type hints for attributes expected from parent class
     _environment: str
-    _group: str
 
     async def broadcast_to_environment(
         self: ProtocolKafkaBroadcastHost,
@@ -108,7 +104,7 @@ class MixinKafkaBroadcast:
         value = json.dumps(value_dict).encode("utf-8")
 
         headers = ModelEventHeaders(
-            source=f"{self._environment}.{self._group}",
+            source=self._environment,
             event_type="broadcast",
             content_type="application/json",
             timestamp=datetime.now(UTC),
@@ -136,7 +132,7 @@ class MixinKafkaBroadcast:
         value = json.dumps(value_dict).encode("utf-8")
 
         headers = ModelEventHeaders(
-            source=f"{self._environment}.{self._group}",
+            source=self._environment,
             event_type="group_command",
             content_type="application/json",
             timestamp=datetime.now(UTC),
@@ -172,7 +168,7 @@ class MixinKafkaBroadcast:
         value = json.dumps(envelope_dict).encode("utf-8")
 
         headers = ModelEventHeaders(
-            source=f"{self._environment}.{self._group}",
+            source=self._environment,
             event_type=topic,
             content_type="application/json",
             timestamp=datetime.now(UTC),

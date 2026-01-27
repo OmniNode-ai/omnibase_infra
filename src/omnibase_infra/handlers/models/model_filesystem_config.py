@@ -12,6 +12,7 @@ Security:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -60,7 +61,7 @@ class ModelFileSystemConfig(BaseModel):
 
     @field_validator("allowed_paths", mode="before")
     @classmethod
-    def coerce_to_tuple(cls, v: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    def coerce_to_tuple(cls, v: Sequence[str]) -> tuple[str, ...]:
         """Coerce list inputs to immutable tuple for security.
 
         This ensures the allowed_paths whitelist cannot be mutated after
@@ -73,9 +74,8 @@ class ModelFileSystemConfig(BaseModel):
         Returns:
             Immutable tuple of path strings.
         """
-        if isinstance(v, list):
-            return tuple(v)
-        return v
+        # Always return tuple to satisfy return type
+        return tuple(v)
 
     max_read_size: int | None = Field(
         default=None,

@@ -60,7 +60,7 @@ from omnibase_infra.models.registration import (
 )
 
 # Note: ALL_INFRA_AVAILABLE skipif is handled by conftest.py for all E2E tests
-from .conftest import wait_for_consumer_ready
+from .conftest import make_e2e_test_identity, wait_for_consumer_ready
 from .performance_utils import (
     PerformanceThresholds,
     assert_heartbeat_interval,
@@ -207,8 +207,7 @@ class TestSuite1NodeStartupIntrospection:
         """
         # Publish introspection event on startup
         success = await introspectable_test_node.publish_introspection(
-            reason=EnumIntrospectionReason.STARTUP,
-            correlation_id=unique_correlation_id,
+            reason=EnumIntrospectionReason.STARTUP, correlation_id=unique_correlation_id
         )
 
         # Verify publication succeeded
@@ -229,8 +228,7 @@ class TestSuite1NodeStartupIntrospection:
 
     @pytest.mark.asyncio
     async def test_introspection_event_structure_and_completeness(
-        self,
-        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
+        self, introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent]
     ) -> None:
         """Test introspection event has all required fields.
 
@@ -259,17 +257,13 @@ class TestSuite1NodeStartupIntrospection:
 
         # Additional structure validations
         assert isinstance(event.node_id, UUID), "node_id should be a UUID"
-        assert event.node_type in (
-            "effect",
-            "compute",
-            "reducer",
-            "orchestrator",
-        ), f"node_type '{event.node_type}' should be a valid ONEX type"
+        assert event.node_type in ("effect", "compute", "reducer", "orchestrator"), (
+            f"node_type '{event.node_type}' should be a valid ONEX type"
+        )
 
     @pytest.mark.asyncio
     async def test_introspection_event_with_custom_endpoints(
-        self,
-        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
+        self, introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent]
     ) -> None:
         """Test introspection event correctly includes custom endpoints.
 
@@ -319,8 +313,7 @@ class TestSuite1NodeStartupIntrospection:
             threshold_ms=PerformanceThresholds.INTROSPECTION_BROADCAST_MS,
         ) as timing:
             success = await introspectable_test_node.publish_introspection(
-                reason=EnumIntrospectionReason.REQUEST,
-                correlation_id=uuid4(),
+                reason=EnumIntrospectionReason.REQUEST, correlation_id=uuid4()
             )
 
         # Verify publication succeeded
@@ -331,9 +324,7 @@ class TestSuite1NodeStartupIntrospection:
 
     @pytest.mark.asyncio
     async def test_introspection_event_node_types(
-        self,
-        real_kafka_event_bus: EventBusKafka,
-        unique_node_id: UUID,
+        self, real_kafka_event_bus: EventBusKafka, unique_node_id: UUID
     ) -> None:
         """Test introspection events work for all ONEX node types.
 
@@ -441,8 +432,7 @@ class TestSuite2RegistryDualRegistration:
 
         # Create introspection event for a new node
         event: ModelNodeIntrospectionEvent = introspection_event_factory(
-            node_id=unique_node_id,
-            correlation_id=unique_correlation_id,
+            node_id=unique_node_id, correlation_id=unique_correlation_id
         )
 
         # Process the event through the handler using envelope API
@@ -713,8 +703,7 @@ class TestSuite2RegistryDualRegistration:
         now = datetime.now(UTC)
 
         async with timed_operation(
-            "dual_registration",
-            threshold_ms=PerformanceThresholds.DUAL_REGISTRATION_MS,
+            "dual_registration", threshold_ms=PerformanceThresholds.DUAL_REGISTRATION_MS
         ) as timing:
             # Consul registration
             registration_data = {
@@ -829,8 +818,7 @@ class TestSuite2RegistryDualRegistration:
 
         # Create introspection event for the same node
         event: ModelNodeIntrospectionEvent = introspection_event_factory(
-            node_id=unique_node_id,
-            correlation_id=unique_correlation_id,
+            node_id=unique_node_id, correlation_id=unique_correlation_id
         )
 
         # Process the event through the handler using envelope API
@@ -917,8 +905,7 @@ class TestSuite2RegistryDualRegistration:
 
         # Create introspection event for the same node
         event: ModelNodeIntrospectionEvent = introspection_event_factory(
-            node_id=unique_node_id,
-            correlation_id=unique_correlation_id,
+            node_id=unique_node_id, correlation_id=unique_correlation_id
         )
 
         # Process the event through the handler using envelope API
@@ -961,9 +948,7 @@ class TestSuite3ReIntrospection:
 
     @pytest.mark.asyncio
     async def test_registry_publishes_request_introspection_on_startup(
-        self,
-        real_kafka_event_bus: EventBusKafka,
-        wired_container: ModelONEXContainer,
+        self, real_kafka_event_bus: EventBusKafka, wired_container: ModelONEXContainer
     ) -> None:
         """Test registry publishes REQUEST_INTROSPECTION on startup.
 
@@ -995,7 +980,7 @@ class TestSuite3ReIntrospection:
         group_id = f"e2e-test-registry-{correlation_id.hex[:8]}"
         unsubscribe = await real_kafka_event_bus.subscribe(
             topic=request_topic,
-            group_id=group_id,
+            node_identity=make_e2e_test_identity("registry_requests"),
             on_message=on_message,
         )
 
@@ -1086,7 +1071,7 @@ class TestSuite3ReIntrospection:
             group_id = f"e2e-test-introspection-{unique_correlation_id.hex[:8]}"
             unsub_introspection = await real_kafka_event_bus.subscribe(
                 topic=introspection_topic,
-                group_id=group_id,
+                node_identity=make_e2e_test_identity("introspection"),
                 on_message=on_introspection,
             )
 
@@ -1156,8 +1141,7 @@ class TestSuite3ReIntrospection:
 
         # Start introspection tasks
         await introspectable_test_node.start_introspection_tasks(
-            enable_heartbeat=False,
-            enable_registry_listener=True,
+            enable_heartbeat=False, enable_registry_listener=True
         )
 
         # Wait for registry listener's Kafka consumer to be ready.
@@ -1190,7 +1174,7 @@ class TestSuite3ReIntrospection:
             group_id = f"e2e-test-corr-{request_correlation_id.hex[:8]}"
             unsub = await real_kafka_event_bus.subscribe(
                 topic=introspection_topic,
-                group_id=group_id,
+                node_identity=make_e2e_test_identity("correlation"),
                 on_message=on_introspection,
             )
 
@@ -1297,7 +1281,7 @@ class TestSuite4HeartbeatPublishing:
         group_id = f"e2e-heartbeat-{introspectable_test_node.node_id.hex[:8]}"
         unsub = await real_kafka_event_bus.subscribe(
             topic=heartbeat_topic,
-            group_id=group_id,
+            node_identity=make_e2e_test_identity("heartbeat"),
             on_message=on_heartbeat,
         )
 
@@ -1382,7 +1366,7 @@ class TestSuite4HeartbeatPublishing:
         group_id = f"e2e-heartbeat-fields-{introspectable_test_node.node_id.hex[:8]}"
         unsub = await real_kafka_event_bus.subscribe(
             topic=heartbeat_topic,
-            group_id=group_id,
+            node_identity=make_e2e_test_identity("heartbeat_fields"),
             on_message=on_heartbeat,
         )
 
@@ -1415,8 +1399,7 @@ class TestSuite4HeartbeatPublishing:
 
     @pytest.mark.asyncio
     async def test_heartbeat_overhead_within_threshold(
-        self,
-        introspectable_test_node: ProtocolIntrospectableTestNode,
+        self, introspectable_test_node: ProtocolIntrospectableTestNode
     ) -> None:
         """Test heartbeat emission overhead is within acceptable threshold.
 
@@ -1591,7 +1574,7 @@ class TestHeartbeatPerformanceExtended:
         group_id = f"e2e-hb-consistency-{introspectable_test_node.node_id.hex[:8]}"
         unsub = await real_kafka_event_bus.subscribe(
             topic=heartbeat_topic,
-            group_id=group_id,
+            node_identity=make_e2e_test_identity("hb_consistency"),
             on_message=on_heartbeat,
         )
 
@@ -1824,8 +1807,7 @@ class TestSuite5RegistryRecovery:
         handler = HandlerNodeIntrospected(handler_projection_reader)
 
         event = introspection_event_factory(
-            node_id=unique_node_id,
-            correlation_id=unique_correlation_id,
+            node_id=unique_node_id, correlation_id=unique_correlation_id
         )
 
         # Process the event through the handler using envelope API
@@ -2035,8 +2017,7 @@ class TestSuite6MultipleNodes:
         # Step 3: Verify all nodes appear in PostgreSQL (polling already handles retry)
         for i, node_id in enumerate(node_ids):
             projection = await verify_postgres_registration(
-                projection_reader=projection_reader,
-                node_id=node_id,
+                projection_reader=projection_reader, node_id=node_id
             )
             assert projection is not None, (
                 f"Node {i} ({node_id}) should be found in PostgreSQL"
@@ -2105,8 +2086,7 @@ class TestSuite6MultipleNodes:
 
         # Step 3: Verify exactly one registration exists (polling already handles retry)
         projection = await verify_postgres_registration(
-            projection_reader=projection_reader,
-            node_id=unique_node_id,
+            projection_reader=projection_reader, node_id=unique_node_id
         )
 
         assert projection is not None, "Registration should exist"
@@ -2220,8 +2200,7 @@ class TestSuite6MultipleNodes:
         postgres_results: list[ModelRegistrationProjection | None] = []
         for node_id in node_ids:
             pg_result = await verify_postgres_registration(
-                projection_reader=projection_reader,
-                node_id=node_id,
+                projection_reader=projection_reader, node_id=node_id
             )
             postgres_results.append(pg_result)
             assert pg_result is not None, (
@@ -2265,8 +2244,7 @@ class TestSuite7GracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_nodes_work_when_kafka_unavailable(
-        self,
-        unique_node_id: UUID,
+        self, unique_node_id: UUID
     ) -> None:
         """Test nodes continue to function when Kafka is unavailable.
 
@@ -2465,9 +2443,7 @@ class TestSuite7GracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_partial_success_reporting(
-        self,
-        unique_node_id: UUID,
-        unique_correlation_id: UUID,
+        self, unique_node_id: UUID, unique_correlation_id: UUID
     ) -> None:
         """Test partial success is correctly reported.
 
@@ -2491,9 +2467,7 @@ class TestSuite7GracefulDegradation:
 
         # Scenario 1: Consul success, PostgreSQL failure
         consul_success = ModelBackendResult(
-            success=True,
-            duration_ms=45.0,
-            backend_id="consul",
+            success=True, duration_ms=45.0, backend_id="consul"
         )
         postgres_failure = ModelBackendResult(
             success=False,
@@ -2541,9 +2515,7 @@ class TestSuite7GracefulDegradation:
             backend_id="consul",
         )
         postgres_success = ModelBackendResult(
-            success=True,
-            duration_ms=30.0,
-            backend_id="postgres",
+            success=True, duration_ms=30.0, backend_id="postgres"
         )
 
         response2 = ModelRegistryResponse.from_backend_results(
@@ -2588,9 +2560,7 @@ class TestSuite7GracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_partial_success_processing_time_calculation(
-        self,
-        unique_node_id: UUID,
-        unique_correlation_id: UUID,
+        self, unique_node_id: UUID, unique_correlation_id: UUID
     ) -> None:
         """Test processing time is correctly calculated from backend results.
 
@@ -2607,14 +2577,8 @@ class TestSuite7GracefulDegradation:
 
         now = datetime.now(UTC)
 
-        consul_result = ModelBackendResult(
-            success=True,
-            duration_ms=45.5,
-        )
-        postgres_result = ModelBackendResult(
-            success=True,
-            duration_ms=30.2,
-        )
+        consul_result = ModelBackendResult(success=True, duration_ms=45.5)
+        postgres_result = ModelBackendResult(success=True, duration_ms=30.2)
 
         response = ModelRegistryResponse.from_backend_results(
             node_id=unique_node_id,
@@ -2848,8 +2812,7 @@ class TestSuite8RegistrySelfRegistration:
 
     @pytest.mark.asyncio
     async def test_registry_introspection_with_custom_capabilities(
-        self,
-        introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent],
+        self, introspection_event_factory: Callable[..., ModelNodeIntrospectionEvent]
     ) -> None:
         """Test registry introspection includes custom capabilities.
 

@@ -48,12 +48,13 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
 
 from omnibase_infra.enums import (
+    EnumConsumerGroupPurpose,
     EnumHandlerSourceMode,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
@@ -67,6 +68,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.runtime.envelope_validator import (
     normalize_correlation_id,
     validate_envelope,
@@ -75,6 +77,7 @@ from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.models import ModelDuplicateResponse
 from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycleExecutor
 from omnibase_infra.runtime.util_wiring import wire_default_handlers
+from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
 from omnibase_infra.utils.util_env_parsing import parse_env_float
 
 if TYPE_CHECKING:
@@ -90,8 +93,14 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.contract_handler_discovery import (
         ContractHandlerDiscovery,
     )
+    from omnibase_infra.runtime.service_message_dispatch_engine import (
+        MessageDispatchEngine,
+    )
 
 # Imports for PluginLoaderContractSource adapter class
+from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
+    ProtocolEventBusSubscriber,
+)
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import (
     LiteralHandlerKind,
@@ -99,6 +108,10 @@ from omnibase_infra.models.handlers import (
     ModelHandlerDescriptor,
 )
 from omnibase_infra.models.types import JsonDict
+from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+    EventBusSubcontractWiring,
+    load_event_bus_subcontract,
+)
 from omnibase_infra.runtime.handler_identity import (
     HANDLER_IDENTITY_PREFIX,
     handler_identity,
@@ -537,16 +550,40 @@ class RuntimeHostProcess:
         # Topic configuration (config overrides constructor args)
         self._input_topic: str = str(config.get("input_topic", input_topic))
         self._output_topic: str = str(config.get("output_topic", output_topic))
-        # Note: ModelRuntimeConfig uses field name "consumer_group" with alias "group_id".
-        # When config.model_dump() is called, it outputs "consumer_group" by default.
-        # We check both keys to support either field name or alias.
-        # Empty strings and whitespace-only strings fall through to the next option.
-        consumer_group = config.get("consumer_group")
-        group_id = config.get("group_id")
-        self._group_id: str = str(
-            (consumer_group if consumer_group and str(consumer_group).strip() else None)
-            or (group_id if group_id and str(group_id).strip() else None)
-            or DEFAULT_GROUP_ID
+
+        # Node identity configuration (required for consumer group derivation)
+        # Extract components from config - fail-fast if required fields are missing
+        _env = config.get("env")
+        env: str = str(_env).strip() if _env else "local"
+
+        _service_name = config.get("service_name")
+        if not _service_name or not str(_service_name).strip():
+            raise ValueError(
+                "RuntimeHostProcess requires 'service_name' in config. "
+                "This is the service name from your node's contract (e.g., 'omniintelligence'). "
+                "Cannot infer service_name - please provide it explicitly."
+            )
+        service_name: str = str(_service_name).strip()
+
+        _node_name = config.get("node_name")
+        if not _node_name or not str(_node_name).strip():
+            raise ValueError(
+                "RuntimeHostProcess requires 'node_name' in config. "
+                "This is the node name from your contract (e.g., 'claude_hook_event_effect'). "
+                "Cannot infer node_name - please provide it explicitly."
+            )
+        node_name: str = str(_node_name).strip()
+
+        _version = config.get("version")
+        version: str = (
+            str(_version).strip() if _version and str(_version).strip() else "v1"
+        )
+
+        self._node_identity: ModelNodeIdentity = ModelNodeIdentity(
+            env=env,
+            service=service_name,
+            node_name=node_name,
+            version=version,
         )
 
         # Health check configuration (from lifecycle subcontract pattern)
@@ -678,12 +715,22 @@ class RuntimeHostProcess:
         self._idempotency_store: ProtocolIdempotencyStore | None = None
         self._idempotency_config: ModelIdempotencyGuardConfig | None = None
 
+        # Event bus subcontract wiring for contract-driven subscriptions (OMN-1621)
+        # Bridges contract-declared topics to Kafka subscriptions.
+        # None until wired during start() when dispatch_engine is available.
+        self._event_bus_wiring: EventBusSubcontractWiring | None = None
+
+        # Message dispatch engine for routing received messages (OMN-1621)
+        # Used by event_bus_wiring to dispatch messages to handlers.
+        # None = not configured, wiring will be skipped
+        self._dispatch_engine: MessageDispatchEngine | None = None
+
         logger.debug(
             "RuntimeHostProcess initialized",
             extra={
                 "input_topic": self._input_topic,
                 "output_topic": self._output_topic,
-                "group_id": self._group_id,
+                "group_id": self.group_id,
                 "health_check_timeout_seconds": self._health_check_timeout_seconds,
                 "drain_timeout_seconds": self._drain_timeout_seconds,
                 "has_container": self._container is not None,
@@ -742,10 +789,28 @@ class RuntimeHostProcess:
     def group_id(self) -> str:
         """Return the consumer group identifier.
 
+        Computes the consumer group ID from the node identity using the canonical
+        format: ``{env}.{service}.{node_name}.{purpose}.{version}``
+
         Returns:
-            The consumer group ID for this process.
+            The computed consumer group ID for this process.
         """
-        return self._group_id
+        return compute_consumer_group_id(
+            self._node_identity, EnumConsumerGroupPurpose.CONSUME
+        )
+
+    @property
+    def node_identity(self) -> ModelNodeIdentity:
+        """Return the node identity used for consumer group derivation.
+
+        The node identity contains the environment, service name, node name,
+        and version that uniquely identify this runtime host process within
+        the ONEX infrastructure.
+
+        Returns:
+            The immutable node identity for this process.
+        """
+        return self._node_identity
 
     @property
     def is_draining(self) -> bool:
@@ -877,7 +942,7 @@ class RuntimeHostProcess:
             extra={
                 "input_topic": self._input_topic,
                 "output_topic": self._output_topic,
-                "group_id": self._group_id,
+                "group_id": self.group_id,
                 "has_contract_paths": len(self._contract_paths) > 0,
             },
         )
@@ -980,14 +1045,20 @@ class RuntimeHostProcess:
                 registry_protocol_count=registry_protocol_count,
             )
 
+        # Step 4.2: Wire event bus subscriptions from contracts (OMN-1621)
+        # This bridges contract-declared topics to Kafka subscriptions.
+        # Requires dispatch_engine to be available for message routing.
+        await self._wire_event_bus_subscriptions()
+
         # Step 4.5: Initialize idempotency store if configured (OMN-945)
         await self._initialize_idempotency_store()
 
         # Step 5: Subscribe to input topic
         self._subscription = await self._event_bus.subscribe(
             topic=self._input_topic,
-            group_id=self._group_id,
+            node_identity=self._node_identity,
             on_message=self._on_message,
+            purpose=EnumConsumerGroupPurpose.CONSUME,
         )
 
         self._is_running = True
@@ -997,7 +1068,7 @@ class RuntimeHostProcess:
             extra={
                 "input_topic": self._input_topic,
                 "output_topic": self._output_topic,
-                "group_id": self._group_id,
+                "group_id": self.group_id,
                 "registered_handlers": list(self._handlers.keys()),
             },
         )
@@ -1147,6 +1218,10 @@ class RuntimeHostProcess:
 
         # Step 2.5: Cleanup idempotency store if initialized (OMN-945)
         await self._cleanup_idempotency_store()
+
+        # Step 2.6: Cleanup event bus subcontract wiring (OMN-1621)
+        if self._event_bus_wiring:
+            await self._event_bus_wiring.cleanup()
 
         # Step 3: Close event bus
         await self._event_bus.close()
@@ -2382,6 +2457,110 @@ class RuntimeHostProcess:
         logger.debug("Creating and caching container (no container provided at init)")
         self._container = ModelONEXContainer()
         return self._container
+
+    # =========================================================================
+    # Event Bus Subcontract Wiring Methods (OMN-1621)
+    # =========================================================================
+
+    async def _wire_event_bus_subscriptions(self) -> None:
+        """Wire Kafka subscriptions from handler contract event_bus sections.
+
+        This method bridges contract-declared topics to actual Kafka subscriptions
+        using the EventBusSubcontractWiring class. It reads the event_bus subcontract
+        from each handler's contract YAML and creates subscriptions for declared
+        subscribe_topics.
+
+        Preconditions:
+            - self._event_bus must be available and started
+            - self._dispatch_engine must be set (otherwise wiring is skipped)
+            - self._handler_descriptors must be populated
+
+        The wiring creates subscriptions that route messages to the dispatch engine,
+        which then routes to appropriate handlers based on topic/category matching.
+
+        Per ARCH-002: "Runtime owns all Kafka plumbing" - nodes and handlers declare
+        their topic requirements in contracts but never directly interact with Kafka.
+
+        Note:
+            If dispatch_engine is not configured, this method logs a debug message
+            and returns without creating any subscriptions. This allows the runtime
+            to operate in legacy mode without contract-driven subscriptions.
+
+        .. versionadded:: 0.2.5
+            Part of OMN-1621 contract-driven event bus wiring.
+        """
+        # Guard: require both event_bus and dispatch_engine
+        if not self._event_bus:
+            logger.debug("Event bus not available, skipping subcontract wiring")
+            return
+
+        if not self._dispatch_engine:
+            logger.debug(
+                "Dispatch engine not configured, skipping event bus subcontract wiring"
+            )
+            return
+
+        if not self._handler_descriptors:
+            logger.debug(
+                "No handler descriptors available, skipping subcontract wiring"
+            )
+            return
+
+        # Get environment from config, defaulting to "local"
+        config = self._config or {}
+        event_bus_config = config.get("event_bus", {})
+        if isinstance(event_bus_config, dict):
+            environment = str(event_bus_config.get("environment", "local"))
+        else:
+            # Could be a ModelEventBusConfig or similar
+            environment = getattr(event_bus_config, "environment", "local")
+
+        # Create wiring instance
+        # Cast to protocol type - both EventBusKafka and EventBusInmemory implement
+        # the ProtocolEventBusSubscriber interface (subscribe method)
+        self._event_bus_wiring = EventBusSubcontractWiring(
+            event_bus=cast("ProtocolEventBusSubscriber", self._event_bus),
+            dispatch_engine=self._dispatch_engine,
+            environment=environment,
+        )
+
+        # Wire subscriptions for each handler with a contract
+        wired_count = 0
+        for handler_type, descriptor in self._handler_descriptors.items():
+            contract_path_str = descriptor.contract_path
+            if not contract_path_str:
+                continue
+
+            contract_path = Path(contract_path_str)
+
+            # Load event_bus subcontract from contract YAML
+            subcontract = load_event_bus_subcontract(contract_path, logger)
+            if subcontract and subcontract.subscribe_topics:
+                await self._event_bus_wiring.wire_subscriptions(
+                    subcontract=subcontract,
+                    node_name=descriptor.name or handler_type,
+                )
+                wired_count += 1
+                logger.info(
+                    "Wired subscription(s) for handler '%s': topics=%s",
+                    descriptor.name or handler_type,
+                    subcontract.subscribe_topics,
+                )
+
+        if wired_count > 0:
+            logger.info(
+                "Event bus subcontract wiring complete",
+                extra={
+                    "wired_handler_count": wired_count,
+                    "total_handler_count": len(self._handler_descriptors),
+                    "environment": environment,
+                },
+            )
+        else:
+            logger.debug(
+                "No handlers with event_bus subscriptions found",
+                extra={"handler_count": len(self._handler_descriptors)},
+            )
 
     # =========================================================================
     # Idempotency Guard Methods (OMN-945)

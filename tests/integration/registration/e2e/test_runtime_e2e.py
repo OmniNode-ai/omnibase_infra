@@ -65,6 +65,7 @@ from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
 from tests.integration.registration.e2e.conftest import (
+    make_e2e_test_identity,
     wait_for_consumer_ready,
     wrap_event_in_envelope,
 )
@@ -286,10 +287,7 @@ class TestRuntimeE2EFlow:
                 pass
 
     @pytest.mark.asyncio
-    @pytest.mark.skipif(
-        not RUNTIME_PROCESSING_ENABLED,
-        reason=SKIP_PROCESSING_REASON,
-    )
+    @pytest.mark.skipif(not RUNTIME_PROCESSING_ENABLED, reason=SKIP_PROCESSING_REASON)
     async def test_introspection_event_processed_by_runtime(
         self,
         real_kafka_event_bus: EventBusKafka,
@@ -343,10 +341,7 @@ class TestRuntimeE2EFlow:
         assert projection.node_version == introspection_event.node_version
 
     @pytest.mark.asyncio
-    @pytest.mark.skipif(
-        not RUNTIME_PROCESSING_ENABLED,
-        reason=SKIP_PROCESSING_REASON,
-    )
+    @pytest.mark.skipif(not RUNTIME_PROCESSING_ENABLED, reason=SKIP_PROCESSING_REASON)
     async def test_runtime_handles_multiple_events_sequentially(
         self,
         real_kafka_event_bus: EventBusKafka,
@@ -417,8 +412,7 @@ class TestRuntimeE2EFlow:
 
     @pytest.mark.asyncio
     @pytest.mark.skipif(
-        not RUNTIME_OUTPUT_EVENTS_ENABLED,
-        reason=SKIP_OUTPUT_EVENTS_REASON,
+        not RUNTIME_OUTPUT_EVENTS_ENABLED, reason=SKIP_OUTPUT_EVENTS_REASON
     )
     async def test_runtime_publishes_completion_event(
         self,
@@ -454,14 +448,13 @@ class TestRuntimeE2EFlow:
 
         # Subscribe to completion topic (matches docker-compose.e2e.yml ONEX_OUTPUT_TOPIC)
         output_topic = os.getenv(
-            "ONEX_OUTPUT_TOPIC",
-            "dev.onex.evt.registration-completed.v1",
+            "ONEX_OUTPUT_TOPIC", "dev.onex.evt.registration-completed.v1"
         )
         group_id = f"e2e-runtime-{unique_node_id.hex[:8]}"
 
         unsub = await real_kafka_event_bus.subscribe(
             topic=output_topic,
-            group_id=group_id,
+            node_identity=make_e2e_test_identity("runtime"),
             on_message=on_completion,
         )
 
@@ -493,10 +486,7 @@ class TestRuntimeE2EFlow:
             await unsub()
 
     @pytest.mark.asyncio
-    @pytest.mark.skipif(
-        not RUNTIME_CONSUL_ENABLED,
-        reason=SKIP_CONSUL_REASON,
-    )
+    @pytest.mark.skipif(not RUNTIME_CONSUL_ENABLED, reason=SKIP_CONSUL_REASON)
     async def test_runtime_dual_registration_creates_consul_entry(
         self,
         real_kafka_event_bus: EventBusKafka,
@@ -560,8 +550,7 @@ class TestRuntimeErrorHandling:
 
     @pytest.mark.asyncio
     async def test_runtime_handles_malformed_message(
-        self,
-        real_kafka_event_bus: EventBusKafka,
+        self, real_kafka_event_bus: EventBusKafka
     ) -> None:
         """Test runtime doesn't crash on malformed messages."""
         # Publish malformed JSON
@@ -616,8 +605,7 @@ class TestRuntimeErrorHandling:
 
     @pytest.mark.asyncio
     async def test_runtime_handles_missing_fields(
-        self,
-        real_kafka_event_bus: EventBusKafka,
+        self, real_kafka_event_bus: EventBusKafka
     ) -> None:
         """Test runtime handles events with missing required fields."""
         # Publish event missing required fields
@@ -681,10 +669,7 @@ class TestRuntimePerformance:
 
     @pytest.mark.asyncio
     @pytest.mark.slow
-    @pytest.mark.skipif(
-        not RUNTIME_PROCESSING_ENABLED,
-        reason=SKIP_PROCESSING_REASON,
-    )
+    @pytest.mark.skipif(not RUNTIME_PROCESSING_ENABLED, reason=SKIP_PROCESSING_REASON)
     async def test_runtime_processes_event_within_sla(
         self,
         real_kafka_event_bus: EventBusKafka,

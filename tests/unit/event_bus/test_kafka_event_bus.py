@@ -19,6 +19,7 @@ import pytest
 from aiokafka.errors import KafkaError
 from pydantic import BaseModel
 
+from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -27,11 +28,11 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from tests.conftest import make_test_node_identity
 
 # Test fixture constants - use these for assertions to avoid hardcoded values
 TEST_BOOTSTRAP_SERVERS: str = "localhost:9092"
 TEST_ENVIRONMENT: str = "test"
-TEST_GROUP: str = "test-group"
 
 
 class TestKafkaEventBusLifecycle:
@@ -57,7 +58,6 @@ class TestKafkaEventBusLifecycle:
             config = ModelKafkaEventBusConfig(
                 bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
                 environment=TEST_ENVIRONMENT,
-                group=TEST_GROUP,
             )
             bus = EventBusKafka(config=config)
             yield bus
@@ -156,14 +156,12 @@ class TestKafkaEventBusLifecycle:
             await event_bus.initialize(
                 {
                     "environment": "production",
-                    "group": "prod-group",
                     "bootstrap_servers": "kafka.prod:9092",
                     "timeout_seconds": 60,
                 }
             )
 
             assert event_bus.environment == "production"
-            assert event_bus.group == "prod-group"
             health = await event_bus.health_check()
             assert health["started"] is True
 
@@ -177,7 +175,6 @@ class TestKafkaEventBusProperties:
         """Test default property values."""
         event_bus = EventBusKafka()
         assert event_bus.environment == "local"
-        assert event_bus.group == "default"
         assert event_bus.adapter is event_bus
 
     def test_custom_properties(self) -> None:
@@ -185,14 +182,12 @@ class TestKafkaEventBusProperties:
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="kafka.staging:9092",
             environment="staging",
-            group="worker-group",
             timeout_seconds=60,
             max_retry_attempts=5,
             retry_backoff_base=2.0,
         )
         event_bus = EventBusKafka(config=config)
         assert event_bus.environment == "staging"
-        assert event_bus.group == "worker-group"
         assert event_bus.adapter is event_bus
 
     def test_adapter_returns_self(self) -> None:
@@ -235,7 +230,6 @@ class TestKafkaEventBusPublish:
             config = ModelKafkaEventBusConfig(
                 bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
                 environment=TEST_ENVIRONMENT,
-                group=TEST_GROUP,
                 max_retry_attempts=0,  # Disable retries for faster tests
             )
             bus = EventBusKafka(config=config)
@@ -333,7 +327,6 @@ class TestKafkaEventBusPublish:
             config = ModelKafkaEventBusConfig(
                 bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
                 environment=TEST_ENVIRONMENT,
-                group=TEST_GROUP,
                 circuit_breaker_threshold=1,  # Open after 1 failure
             )
             event_bus = EventBusKafka(config=config)
@@ -375,7 +368,6 @@ class TestKafkaEventBusSubscribe:
             config = ModelKafkaEventBusConfig(
                 bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
                 environment=TEST_ENVIRONMENT,
-                group=TEST_GROUP,
             )
             bus = EventBusKafka(config=config)
             yield bus
@@ -399,7 +391,7 @@ class TestKafkaEventBusSubscribe:
                 pass
 
             unsubscribe = await kafka_event_bus.subscribe(
-                "test-topic", "group1", handler
+                "test-topic", make_test_node_identity("1"), handler
             )
 
             # Verify unsubscribe is a callable
@@ -414,7 +406,9 @@ class TestKafkaEventBusSubscribe:
         async def handler(msg: ModelEventMessage) -> None:
             pass
 
-        unsubscribe = await kafka_event_bus.subscribe("test-topic", "group1", handler)
+        unsubscribe = await kafka_event_bus.subscribe(
+            "test-topic", make_test_node_identity("1"), handler
+        )
 
         # Verify subscription exists
         assert len(kafka_event_bus._subscribers["test-topic"]) == 1
@@ -436,8 +430,12 @@ class TestKafkaEventBusSubscribe:
         async def handler2(msg: ModelEventMessage) -> None:
             pass
 
-        await kafka_event_bus.subscribe("test-topic", "group1", handler1)
-        await kafka_event_bus.subscribe("test-topic", "group2", handler2)
+        await kafka_event_bus.subscribe(
+            "test-topic", make_test_node_identity("1"), handler1
+        )
+        await kafka_event_bus.subscribe(
+            "test-topic", make_test_node_identity("2"), handler2
+        )
 
         # Verify both subscriptions exist
         assert len(kafka_event_bus._subscribers["test-topic"]) == 2
@@ -451,7 +449,9 @@ class TestKafkaEventBusSubscribe:
         async def handler(msg: ModelEventMessage) -> None:
             pass
 
-        unsubscribe = await kafka_event_bus.subscribe("test-topic", "group1", handler)
+        unsubscribe = await kafka_event_bus.subscribe(
+            "test-topic", make_test_node_identity("1"), handler
+        )
         await unsubscribe()
         await unsubscribe()  # Should not raise
 
@@ -478,7 +478,6 @@ class TestKafkaEventBusHealthCheck:
             config = ModelKafkaEventBusConfig(
                 bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
                 environment=TEST_ENVIRONMENT,
-                group=TEST_GROUP,
             )
             bus = EventBusKafka(config=config)
             yield bus
@@ -498,7 +497,6 @@ class TestKafkaEventBusHealthCheck:
         assert health["healthy"] is False
         assert health["started"] is False
         assert health["environment"] == TEST_ENVIRONMENT
-        assert health["group"] == TEST_GROUP
         assert health["bootstrap_servers"] == TEST_BOOTSTRAP_SERVERS
         assert health["subscriber_count"] == 0
         assert health["topic_count"] == 0
@@ -1263,7 +1261,9 @@ class TestKafkaEventBusConsumerManagement:
             async def handler(msg: ModelEventMessage) -> None:
                 pass
 
-            await event_bus.subscribe("test-topic", "group1", handler)
+            await event_bus.subscribe(
+                "test-topic", make_test_node_identity("1"), handler
+            )
 
             # Consumer should be started for the topic
             mock_consumer.start.assert_called_once()
@@ -1292,7 +1292,9 @@ class TestKafkaEventBusConsumerManagement:
             async def handler(msg: ModelEventMessage) -> None:
                 pass
 
-            await event_bus.subscribe("test-topic", "group1", handler)
+            await event_bus.subscribe(
+                "test-topic", make_test_node_identity("1"), handler
+            )
             await event_bus.close()
 
             # Consumer should be stopped
@@ -1375,20 +1377,17 @@ class TestKafkaEventBusConfig:
         assert bus is not None
         assert bus.config is not None
         assert bus.environment == bus.config.environment
-        assert bus.group == bus.config.group
 
     def test_from_config_creates_bus(self) -> None:
         """Test from_config() factory method."""
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="custom:9092",
             environment="staging",
-            group="custom-group",
         )
         bus = EventBusKafka.from_config(config)
 
         assert bus.config == config
         assert bus.environment == "staging"
-        assert bus.group == "custom-group"
 
     def test_config_property_returns_model(self) -> None:
         """Test config property returns the config model."""
@@ -1403,19 +1402,16 @@ class TestKafkaEventBusConfig:
         config = ModelKafkaEventBusConfig(
             bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
             environment=TEST_ENVIRONMENT,
-            group=TEST_GROUP,
         )
         bus = EventBusKafka(config=config)
 
         assert bus.environment == "test"
-        assert bus.group == "test-group"
         assert bus.config.bootstrap_servers == TEST_BOOTSTRAP_SERVERS
 
     def test_from_yaml_creates_bus(self, tmp_path: Path) -> None:
         """Test from_yaml() factory method with a temporary config file."""
         config_content = """bootstrap_servers: "yaml-server:9092"
 environment: "yaml-env"
-group: "yaml-group"
 timeout_seconds: 45
 max_retry_attempts: 5
 retry_backoff_base: 2.0
@@ -1433,7 +1429,6 @@ enable_auto_commit: false
         bus = EventBusKafka.from_yaml(config_file)
 
         assert bus.environment == "yaml-env"
-        assert bus.group == "yaml-group"
         assert bus.config.timeout_seconds == 45
         assert bus.config.max_retry_attempts == 5
         assert bus.config.retry_backoff_base == 2.0
@@ -1477,7 +1472,6 @@ enable_auto_commit: false
         bus = EventBusKafka()  # No config, uses internal default
 
         assert bus.environment == "local"
-        assert bus.group == "default"
         assert bus.config.timeout_seconds == 30
         assert bus.config.max_retry_attempts == 3
         assert bus.config.circuit_breaker_threshold == 5
@@ -1487,7 +1481,6 @@ enable_auto_commit: false
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="custom-broker:29092",
             environment="production",
-            group="prod-workers",
             timeout_seconds=60,
             max_retry_attempts=5,
             retry_backoff_base=2.0,
@@ -1503,7 +1496,6 @@ enable_auto_commit: false
 
         assert bus.config == config
         assert bus.environment == "production"
-        assert bus.group == "prod-workers"
         assert bus.config.acks == "1"
         assert bus.config.enable_idempotence is False
 
@@ -1547,7 +1539,6 @@ class TestKafkaEventBusDLQRouting:
         return ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
             environment="test",
-            group="test-group",
             dead_letter_topic="dlq-events",
         )
 
@@ -1591,6 +1582,7 @@ class TestKafkaEventBusDLQRouting:
                 error=error,
                 correlation_id=correlation_id,
                 failure_type="deserialization_error",
+                consumer_group="test.test-service.dlq-test.consume.v1",
             )
 
             # Verify DLQ publish was called (using send_and_wait for cleaner timeout handling)
@@ -1668,6 +1660,7 @@ class TestKafkaEventBusDLQRouting:
                 failed_message=failed_message,
                 error=error,
                 correlation_id=correlation_id,
+                consumer_group="test.test-service.dlq-test.consume.v1",
             )
 
             # Verify DLQ publish was called (using send_and_wait for cleaner timeout handling)
@@ -1758,7 +1751,9 @@ class TestKafkaEventBusDLQRouting:
                 handler_called.set()
                 raise ValueError("Temporary failure")
 
-            await event_bus.subscribe("test-topic", "group1", failing_handler)
+            await event_bus.subscribe(
+                "test-topic", make_test_node_identity("1"), failing_handler
+            )
 
             # Wait for handler to be called
             await asyncio.wait_for(handler_called.wait(), timeout=2.0)
@@ -1790,7 +1785,6 @@ class TestKafkaEventBusDLQRouting:
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="localhost:9092",
             environment="test",
-            group="test-group",
             dead_letter_topic=None,  # No DLQ configured
         )
 
@@ -1829,6 +1823,7 @@ class TestKafkaEventBusDLQRouting:
                 failed_message=failed_message,
                 error=error,
                 correlation_id=correlation_id,
+                consumer_group="test.test-service.dlq-test.consume.v1",
             )
 
             # Verify no additional send calls were made
@@ -1912,6 +1907,7 @@ class TestKafkaEventBusDLQRouting:
                 failed_message=failed_message,
                 error=error,
                 correlation_id=correlation_id,
+                consumer_group="test.test-service.dlq-test.consume.v1",
             )
 
             # Verify the bus is still healthy
@@ -1973,6 +1969,7 @@ class TestKafkaEventBusDLQRouting:
                 error=error,
                 correlation_id=correlation_id,
                 failure_type="deserialization_error",
+                consumer_group="test.test-service.dlq-test.consume.v1",
             )
 
             # Verify DLQ publish was attempted (using send_and_wait for cleaner timeout handling)

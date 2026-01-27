@@ -27,10 +27,6 @@ Environment Variables:
             Default: "local"
             Example: "dev", "staging", "prod"
 
-        KAFKA_GROUP: Consumer group identifier
-            Default: "default"
-            Example: "my-service-group"
-
     Timeout and Retry Settings (with validation):
         KAFKA_TIMEOUT_SECONDS: Timeout for operations (integer, 1-300)
             Default: 30
@@ -124,7 +120,6 @@ class ModelKafkaEventBusConfig(BaseModel):
     Attributes:
         bootstrap_servers: Kafka bootstrap servers (host:port format)
         environment: Environment identifier for message routing
-        group: Consumer group identifier for message routing
         timeout_seconds: Timeout for Kafka operations in seconds
         max_retry_attempts: Maximum retry attempts for publish operations
         retry_backoff_base: Base delay in seconds for exponential backoff
@@ -165,11 +160,6 @@ class ModelKafkaEventBusConfig(BaseModel):
     environment: str = Field(
         default="local",
         description="Environment identifier for message routing (e.g., 'local', 'dev', 'prod')",
-        min_length=1,
-    )
-    group: str = Field(
-        default="default",
-        description="Consumer group identifier for message routing",
         min_length=1,
     )
     timeout_seconds: int = Field(
@@ -408,73 +398,6 @@ class ModelKafkaEventBusConfig(BaseModel):
             )
         return v.strip()
 
-    @field_validator("group", mode="before")
-    @classmethod
-    def validate_group(cls, v: object) -> str:
-        """Validate consumer group identifier.
-
-        Args:
-            v: Group value (any type before Pydantic conversion)
-
-        Returns:
-            Validated group string
-
-        Raises:
-            ProtocolConfigurationError: If group is empty, invalid type, or contains invalid characters
-        """
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.KAFKA,
-            operation="validate_config",
-            target_name="kafka_config",
-            correlation_id=uuid4(),
-        )
-
-        if v is None:
-            raise ProtocolConfigurationError(
-                "group cannot be None",
-                context=context,
-                parameter="group",
-                value=None,
-            )
-        if not isinstance(v, str):
-            raise ProtocolConfigurationError(
-                f"group must be a string, got {type(v).__name__}",
-                context=context,
-                parameter="group",
-                value=type(v).__name__,
-            )
-
-        group_name = v.strip()
-        if not group_name:
-            raise ProtocolConfigurationError(
-                "group cannot be empty",
-                context=context,
-                parameter="group",
-                value=v,
-            )
-
-        # Kafka group names have similar restrictions to topic names
-        # but are generally more permissive
-        if len(group_name) > 255:
-            raise ProtocolConfigurationError(
-                f"group name '{group_name}' exceeds maximum length of 255 characters",
-                context=context,
-                parameter="group",
-                value=group_name,
-            )
-
-        # Check for invalid characters (control characters, null bytes)
-        for char in group_name:
-            if ord(char) < 32 or char == "\x7f":
-                raise ProtocolConfigurationError(
-                    f"group name '{group_name}' contains invalid control character",
-                    context=context,
-                    parameter="group",
-                    value=group_name,
-                )
-
-        return group_name
-
     def apply_environment_overrides(self) -> ModelKafkaEventBusConfig:
         """Apply environment variable overrides to configuration.
 
@@ -482,7 +405,6 @@ class ModelKafkaEventBusConfig(BaseModel):
             - KAFKA_BOOTSTRAP_SERVERS -> bootstrap_servers
             - KAFKA_TIMEOUT_SECONDS -> timeout_seconds
             - KAFKA_ENVIRONMENT -> environment
-            - KAFKA_GROUP -> group
             - KAFKA_MAX_RETRY_ATTEMPTS -> max_retry_attempts
             - KAFKA_CIRCUIT_BREAKER_THRESHOLD -> circuit_breaker_threshold
 
@@ -495,7 +417,6 @@ class ModelKafkaEventBusConfig(BaseModel):
             "KAFKA_BOOTSTRAP_SERVERS": "bootstrap_servers",
             "KAFKA_TIMEOUT_SECONDS": "timeout_seconds",
             "KAFKA_ENVIRONMENT": "environment",
-            "KAFKA_GROUP": "group",
             "KAFKA_MAX_RETRY_ATTEMPTS": "max_retry_attempts",
             "KAFKA_CIRCUIT_BREAKER_THRESHOLD": "circuit_breaker_threshold",
             "KAFKA_CIRCUIT_BREAKER_RESET_TIMEOUT": "circuit_breaker_reset_timeout",
@@ -625,7 +546,6 @@ class ModelKafkaEventBusConfig(BaseModel):
         base_config = cls(
             bootstrap_servers="localhost:9092",
             environment="local",
-            group="default",
             timeout_seconds=30,
             max_retry_attempts=3,
             retry_backoff_base=1.0,
@@ -662,7 +582,6 @@ class ModelKafkaEventBusConfig(BaseModel):
             ```yaml
             bootstrap_servers: "kafka:9092"
             environment: "prod"
-            group: "my-service"
             timeout_seconds: 60
             max_retry_attempts: 5
             circuit_breaker_threshold: 10

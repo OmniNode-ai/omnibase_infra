@@ -1762,13 +1762,14 @@ pattern_exemptions:
       - CLAUDE.md (Type Annotation Conventions)
       - Consul service discovery documentation
     ticket: OMN-1278
-  # ==========================================================================
-  # Declarative Operation Bindings Exemptions (OMN-1518)
+    # ==========================================================================
   # ==========================================================================
   # OperationBindingResolver.resolve() requires multiple parameters for binding
   # resolution: operation, bindings_subcontract, envelope, context, correlation_id.
   # These are distinct inputs required for the resolution process.
   - file_pattern: 'binding_resolver\.py'
+    # Declarative Operation Bindings Exemptions (OMN-1518)
+
     method_pattern: "Function 'resolve'"
     violation_pattern: 'has \d+ parameters'
     reason: >
@@ -1805,6 +1806,21 @@ pattern_exemptions:
     documentation:
       - docs/decisions/adr-declarative-operation-bindings.md
     ticket: OMN-1518
+  # ==========================================================================
+  # ModelNodeIdentity node_name Exemption (OMN-1602)
+  # ==========================================================================
+  # node_name in ModelNodeIdentity is a canonical identifier for the node within
+  # the ONEX infrastructure, NOT a foreign key reference to another entity.
+  # It is one of the four dimensions (env, service, node_name, version) that
+  # uniquely identify a node instance.
+  - file_pattern: 'model_node_identity\.py'
+    violation_pattern: "Field 'node_name' might reference an entity"
+    reason: >
+      node_name is a canonical identifier (e.g., "claude_hook_event_effect") that uniquely identifies a node within its service. It is NOT a foreign key reference - it is the node's own name from its contract. Combined with env, service, and version, it forms the node's identity.
+
+    documentation:
+      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
+    ticket: OMN-1602
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

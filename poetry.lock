@@ -2796,14 +2796,14 @@ files = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.9.6"
+version = "0.9.7"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_core-0.9.6-py3-none-any.whl", hash = "sha256:a66b2029c1234649dacfc2f195966259563462e0b969115177c9a1a3eb120470"},
-    {file = "omnibase_core-0.9.6.tar.gz", hash = "sha256:067291c78ae1e5ec67dce4af7097f759dfbfdce3231aa460af92e351c57657b8"},
+    {file = "omnibase_core-0.9.7-py3-none-any.whl", hash = "sha256:091372c360294488a67344549f6a8fe144abd7d8a5907a372a5011fb7473ce8c"},
+    {file = "omnibase_core-0.9.7.tar.gz", hash = "sha256:af19e03f29d4454694a94296e82baffb7773462d4bcc40776872b1cb08f48f6d"},
 ]
 
 [package.dependencies]
@@ -2824,14 +2824,14 @@ metrics = ["prometheus-client (>=0.21.0,<1.0.0)"]
 
 [[package]]
 name = "omnibase-spi"
-version = "0.6.1"
+version = "0.6.2"
 description = "ONEX Service Provider Interface - Protocol definitions"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_spi-0.6.1-py3-none-any.whl", hash = "sha256:2b1da2f0c0d6c31e26af9f61116ceb094bcf11ae824ce62124bc0076f48d45fb"},
-    {file = "omnibase_spi-0.6.1.tar.gz", hash = "sha256:9009e609ea711b4e2f747e6d11ae15b781565be3de58e985dc4c112999739634"},
+    {file = "omnibase_spi-0.6.2-py3-none-any.whl", hash = "sha256:58635b2288001034368620865ace38b24a2bd56235721d4fcd9e2f1099c20150"},
+    {file = "omnibase_spi-0.6.2.tar.gz", hash = "sha256:6c8daeb51362ab1612b245c2b6804789f4ab4a03df2516aacf562d8650a3411f"},
 ]
 
 [package.dependencies]
@@ -5212,4 +5212,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "cc1736c4dfae18a611f95d15d8f85635214a6834cf34976cd23f9335179c5d6d"
+content-hash = "c64b922416133f132551b48e7d9ce529a2a81f266475167ec8e0f04762182e8b"
