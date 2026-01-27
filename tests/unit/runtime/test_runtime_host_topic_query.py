@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
+from tests.conftest import make_runtime_config
 
 
 class TestGetSubscribersForTopic:
@@ -30,7 +31,7 @@ class TestGetSubscribersForTopic:
     @pytest.fixture
     def runtime(self) -> RuntimeHostProcess:
         """Create a RuntimeHostProcess instance for testing."""
-        return RuntimeHostProcess()
+        return RuntimeHostProcess(config=make_runtime_config())
 
     @pytest.fixture
     def mock_consul_handler(self) -> MagicMock:
@@ -432,7 +433,7 @@ class TestGetSubscribersForTopicIntegration:
     @pytest.fixture
     def runtime(self) -> RuntimeHostProcess:
         """Create a RuntimeHostProcess instance for testing."""
-        return RuntimeHostProcess()
+        return RuntimeHostProcess(config=make_runtime_config())
 
     @pytest.mark.asyncio
     async def test_topic_key_format(
