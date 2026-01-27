@@ -29,11 +29,11 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Final, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 from uuid import UUID
 
+from omnibase_infra.constants_topic_patterns import TOPIC_NAME_PATTERN
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConsulError,
@@ -48,12 +48,6 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
-
-# Topic name pattern: alphanumeric, underscores, hyphens, and periods only.
-# This matches Kafka/Redpanda topic naming conventions and ensures safe
-# interpolation into Consul KV paths (prevents path traversal via slashes).
-# Pattern: ^[a-zA-Z0-9._-]+$
-CONSUL_TOPIC_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
 class ProtocolConsulTopicIndexDependencies(Protocol):
@@ -127,7 +121,7 @@ class MixinConsulTopicIndex:
                 Valid characters: alphanumeric (a-zA-Z0-9), periods (.), underscores (_),
                 and hyphens (-).
         """
-        if not CONSUL_TOPIC_PATTERN.match(topic):
+        if not TOPIC_NAME_PATTERN.match(topic):
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.CONSUL,

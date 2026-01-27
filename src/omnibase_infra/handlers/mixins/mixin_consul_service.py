@@ -25,15 +25,13 @@ from uuid import UUID
 T = TypeVar("T")
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
+from omnibase_infra.constants_topic_patterns import TOPIC_NAME_PATTERN
 from omnibase_infra.enums import EnumInfraTransportType, EnumMessageCategory
 from omnibase_infra.errors import (
     InfraConsulError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
-)
-from omnibase_infra.handlers.mixins.mixin_consul_topic_index import (
-    CONSUL_TOPIC_PATTERN,
 )
 from omnibase_infra.handlers.models.consul import (
     ConsulPayload,
@@ -164,7 +162,7 @@ class MixinConsulService:
 
         Validates:
         1. Topic is a non-empty string after stripping whitespace
-        2. Topic format matches CONSUL_TOPIC_PATTERN (alphanumeric, dots, underscores, hyphens)
+        2. Topic format matches TOPIC_NAME_PATTERN (alphanumeric, dots, underscores, hyphens)
         3. message_category is a valid EnumMessageCategory value
 
         Args:
@@ -198,7 +196,7 @@ class MixinConsulService:
         stripped_topic = raw_topic.strip()
 
         # Validate topic format (fail fast before storage/indexing)
-        if not CONSUL_TOPIC_PATTERN.match(stripped_topic):
+        if not TOPIC_NAME_PATTERN.match(stripped_topic):
             ctx = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.CONSUL,

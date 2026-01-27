@@ -211,6 +211,7 @@ from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.capabilities import ContractCapabilityExtractor
+from omnibase_infra.constants_topic_patterns import TOPIC_NAME_PATTERN
 from omnibase_infra.enums import EnumInfraTransportType, EnumIntrospectionReason
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.discovery import (
@@ -1056,9 +1057,7 @@ class MixinNodeIntrospection:
                 )
 
             # Validate suffix format (alphanumeric, dots, hyphens, underscores)
-            import re
-
-            if not re.match(r"^[a-zA-Z0-9._-]+$", suffix):
+            if not TOPIC_NAME_PATTERN.match(suffix):
                 context = ModelInfraErrorContext.with_correlation(
                     transport_type=EnumInfraTransportType.RUNTIME,
                     operation="_extract_event_bus_config",
