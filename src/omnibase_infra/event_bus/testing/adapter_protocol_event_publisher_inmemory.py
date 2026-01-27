@@ -335,6 +335,34 @@ class AdapterProtocolEventPublisherInmemory:
         """
         return self._metrics.to_dict()
 
+    def reset_metrics(self) -> None:
+        """Reset all publisher metrics to initial values.
+
+        Useful for test isolation when reusing an adapter across multiple
+        test cases without recreating the adapter instance.
+
+        Note:
+            This method does NOT affect the closed state of the adapter.
+            If the adapter has been closed, it remains closed after reset.
+
+        Example:
+            ```python
+            adapter = AdapterProtocolEventPublisherInmemory(bus)
+            await adapter.publish(...)  # metrics.events_published = 1
+
+            adapter.reset_metrics()  # metrics.events_published = 0
+            await adapter.publish(...)  # metrics.events_published = 1
+            ```
+        """
+        self._metrics = ModelPublisherMetrics()
+        logger.debug(
+            "Publisher metrics reset",
+            extra={
+                "service_name": self._service_name,
+                "instance_id": self._instance_id,
+            },
+        )
+
     async def close(self, timeout_seconds: float = 30.0) -> None:
         """Close the publisher.
 

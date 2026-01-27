@@ -41,7 +41,7 @@ See Also:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, NotRequired, TypedDict
 
 from omnibase_core.types import JsonType
 
@@ -51,28 +51,34 @@ if TYPE_CHECKING:
 __all__ = ["TypedDictEnvelopeBuildParams"]
 
 
-class TypedDictEnvelopeBuildParams(TypedDict, total=False):
+class TypedDictEnvelopeBuildParams(TypedDict):
     """TypedDict representing parameters for building a ModelEventEnvelope.
 
     This type provides a type-safe alternative to dict[str, object] for passing
     envelope construction parameters. It enables proper type checking when
     building event envelopes in publisher adapters.
 
-    The TypedDict uses total=False to allow optional fields while still
-    providing type safety for present keys.
+    Required fields (event_type, payload) are enforced by TypedDict's default
+    total=True behavior. Optional fields use NotRequired[] to allow omission
+    while maintaining type safety.
 
     Attributes:
         event_type: Fully-qualified event type identifier
-            (e.g., "omninode.user.event.created.v1"). Required field.
-        payload: Event payload data as JSON-compatible types. Required field.
-            Can be dict, list, str, int, float, bool, or None.
+            (e.g., "omninode.user.event.created.v1"). Required field - must
+            always be provided when constructing the TypedDict.
+        payload: Event payload data as JSON-compatible types. Required field -
+            must always be provided. Can be dict, list, str, int, float, bool,
+            or None.
         correlation_id: Optional correlation ID for request tracing.
             Used to link related events across service boundaries.
+            May be omitted or set to None.
         causation_id: Optional causation ID for event sourcing chains.
             Links this event to the event that caused it.
+            May be omitted or set to None.
         metadata: Optional additional context values for the envelope.
             Keys are string identifiers, values are ContextValue protocol
             implementations (e.g., ProtocolContextStringValue).
+            May be omitted or set to None.
 
     Note:
         The metadata field uses ContextValue from omnibase_spi which is imported
@@ -81,7 +87,14 @@ class TypedDictEnvelopeBuildParams(TypedDict, total=False):
 
     Example:
         ```python
+        # Minimal valid TypedDict (only required fields)
         params: TypedDictEnvelopeBuildParams = {
+            "event_type": "user.created.v1",
+            "payload": {"user_id": "123", "email": "user@example.com"},
+        }
+
+        # Full TypedDict with all fields
+        params_full: TypedDictEnvelopeBuildParams = {
             "event_type": "user.created.v1",
             "payload": {"user_id": "123", "email": "user@example.com"},
             "correlation_id": "corr-abc-123",
@@ -90,13 +103,13 @@ class TypedDictEnvelopeBuildParams(TypedDict, total=False):
         }
 
         # Safe field access
-        event_type: str = params["event_type"]
-        correlation_id: str | None = params.get("correlation_id")
+        event_type: str = params["event_type"]  # Always present
+        correlation_id: str | None = params.get("correlation_id")  # May be absent
         ```
     """
 
     event_type: str
     payload: JsonType
-    correlation_id: str | None
-    causation_id: str | None
-    metadata: dict[str, ContextValue] | None
+    correlation_id: NotRequired[str | None]
+    causation_id: NotRequired[str | None]
+    metadata: NotRequired[dict[str, ContextValue] | None]

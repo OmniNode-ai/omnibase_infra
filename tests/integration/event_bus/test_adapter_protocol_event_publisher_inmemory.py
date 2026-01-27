@@ -711,6 +711,152 @@ class TestMetrics:
 
 
 # =============================================================================
+# Reset Metrics Tests
+# =============================================================================
+
+
+class TestResetMetrics:
+    """Tests for reset_metrics() method behavior.
+
+    Validates that reset_metrics() correctly clears all counters while
+    preserving adapter state (e.g., closed status).
+    """
+
+    @pytest.mark.asyncio
+    async def test_reset_metrics_clears_counters(
+        self,
+        event_bus: EventBusInmemory,
+        adapter: AdapterProtocolEventPublisherInmemory,
+    ) -> None:
+        """Verify reset_metrics clears all counters to initial state.
+
+        Scenario:
+            1. Publish several events to accumulate metrics
+            2. Verify metrics show non-zero values
+            3. Call reset_metrics()
+            4. Verify all metrics are back to initial state
+        """
+        # Publish several events to accumulate metrics
+        for i in range(5):
+            await adapter.publish(
+                event_type=f"reset.test.event.{i}",
+                payload={"sequence": i},
+            )
+
+        # Verify metrics show non-zero values
+        metrics_before = await adapter.get_metrics()
+        assert metrics_before["events_published"] == 5
+        assert metrics_before["total_publish_time_ms"] > 0
+
+        # Reset metrics (synchronous method)
+        adapter.reset_metrics()
+
+        # Verify all metrics are back to initial state
+        metrics_after = await adapter.get_metrics()
+        assert metrics_after["events_published"] == 0
+        assert metrics_after["events_failed"] == 0
+        assert metrics_after["events_sent_to_dlq"] == 0
+        assert metrics_after["total_publish_time_ms"] == 0.0
+        assert metrics_after["avg_publish_time_ms"] == 0.0
+        assert metrics_after["circuit_breaker_opens"] == 0
+        assert metrics_after["retries_attempted"] == 0
+        assert metrics_after["circuit_breaker_status"] == "closed"
+        assert metrics_after["current_failures"] == 0
+
+    @pytest.mark.asyncio
+    async def test_reset_metrics_does_not_affect_closed_state(
+        self,
+        event_bus: EventBusInmemory,
+        adapter: AdapterProtocolEventPublisherInmemory,
+    ) -> None:
+        """Verify reset_metrics does not reopen a closed adapter.
+
+        Scenario:
+            1. Publish an event
+            2. Close the adapter
+            3. Call reset_metrics()
+            4. Verify adapter is still closed (cannot publish)
+            5. Verify metrics were reset
+        """
+        # Publish an event
+        await adapter.publish(
+            event_type="before.close.reset",
+            payload={"data": "test"},
+        )
+
+        # Close the adapter
+        await adapter.close()
+
+        # Verify adapter is closed before reset
+        with pytest.raises(RuntimeError, match="Publisher has been closed"):
+            await adapter.publish(
+                event_type="after.close.before.reset",
+                payload={"should": "fail"},
+            )
+
+        # Reset metrics while closed (synchronous method)
+        adapter.reset_metrics()
+
+        # Verify adapter is still closed after reset
+        with pytest.raises(RuntimeError, match="Publisher has been closed"):
+            await adapter.publish(
+                event_type="after.reset",
+                payload={"should": "still-fail"},
+            )
+
+        # Verify metrics were reset (get_metrics still works after close)
+        metrics = await adapter.get_metrics()
+        assert metrics["events_published"] == 0
+        assert metrics["events_failed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_reset_metrics_allows_fresh_counting(
+        self,
+        event_bus: EventBusInmemory,
+        adapter: AdapterProtocolEventPublisherInmemory,
+    ) -> None:
+        """Verify reset_metrics allows fresh counting from zero.
+
+        Scenario:
+            1. Publish 3 events
+            2. Reset metrics
+            3. Publish 2 more events
+            4. Verify events_published == 2 (not 5)
+        """
+        # Publish 3 events
+        for i in range(3):
+            await adapter.publish(
+                event_type=f"batch.one.{i}",
+                payload={"batch": 1, "seq": i},
+            )
+
+        # Verify 3 events published
+        metrics_batch_one = await adapter.get_metrics()
+        assert metrics_batch_one["events_published"] == 3
+
+        # Reset metrics (synchronous method)
+        adapter.reset_metrics()
+
+        # Publish 2 more events
+        for i in range(2):
+            await adapter.publish(
+                event_type=f"batch.two.{i}",
+                payload={"batch": 2, "seq": i},
+            )
+
+        # Verify events_published == 2 (not 5)
+        metrics_batch_two = await adapter.get_metrics()
+        assert metrics_batch_two["events_published"] == 2, (
+            "After reset, counter should only reflect new publishes. "
+            f"Expected 2, got {metrics_batch_two['events_published']}"
+        )
+
+        # Verify timing metrics also reflect only the second batch
+        assert metrics_batch_two["total_publish_time_ms"] > 0
+        assert metrics_batch_two["avg_publish_time_ms"] > 0
+
+
+# =============================================================================
 # Close/Lifecycle Tests
 # =============================================================================
 
