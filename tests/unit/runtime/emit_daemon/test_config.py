@@ -37,6 +37,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
+from omnibase_core.errors import OnexError
 from omnibase_infra.runtime.emit_daemon.config import ModelEmitDaemonConfig
 
 
@@ -122,55 +123,55 @@ class TestModelEmitDaemonConfigBootstrapServers:
         assert "host2:9092" in config.kafka_bootstrap_servers
 
     def test_missing_port_raises_validation_error(self) -> None:
-        """Test bootstrap_servers without port raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test bootstrap_servers without port raises OnexError."""
+        with pytest.raises(OnexError) as exc_info:
             ModelEmitDaemonConfig(kafka_bootstrap_servers="localhost")
 
         assert "Invalid bootstrap server format" in str(exc_info.value)
         assert "Expected 'host:port'" in str(exc_info.value)
 
     def test_invalid_port_non_numeric_raises_validation_error(self) -> None:
-        """Test bootstrap_servers with non-numeric port raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test bootstrap_servers with non-numeric port raises OnexError."""
+        with pytest.raises(OnexError) as exc_info:
             ModelEmitDaemonConfig(kafka_bootstrap_servers="localhost:notaport")
 
         assert "Invalid port" in str(exc_info.value)
         assert "Port must be a valid integer" in str(exc_info.value)
 
     def test_invalid_port_too_high_raises_validation_error(self) -> None:
-        """Test bootstrap_servers with port > 65535 raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test bootstrap_servers with port > 65535 raises OnexError."""
+        with pytest.raises(OnexError) as exc_info:
             ModelEmitDaemonConfig(kafka_bootstrap_servers="localhost:99999")
 
         assert "Invalid port 99999" in str(exc_info.value)
         assert "Port must be between 1 and 65535" in str(exc_info.value)
 
     def test_invalid_port_zero_raises_validation_error(self) -> None:
-        """Test bootstrap_servers with port 0 raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test bootstrap_servers with port 0 raises OnexError."""
+        with pytest.raises(OnexError) as exc_info:
             ModelEmitDaemonConfig(kafka_bootstrap_servers="localhost:0")
 
         assert "Invalid port 0" in str(exc_info.value)
         assert "Port must be between 1 and 65535" in str(exc_info.value)
 
     def test_invalid_port_negative_raises_validation_error(self) -> None:
-        """Test bootstrap_servers with negative port raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test bootstrap_servers with negative port raises OnexError."""
+        with pytest.raises(OnexError) as exc_info:
             ModelEmitDaemonConfig(kafka_bootstrap_servers="localhost:-1")
 
         # Negative ports are parsed as invalid integers or caught by port range check
         assert "Invalid port" in str(exc_info.value)
 
     def test_empty_host_raises_validation_error(self) -> None:
-        """Test bootstrap_servers with empty host raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test bootstrap_servers with empty host raises OnexError."""
+        with pytest.raises(OnexError) as exc_info:
             ModelEmitDaemonConfig(kafka_bootstrap_servers=":9092")
 
         assert "Host cannot be empty" in str(exc_info.value)
 
     def test_empty_entry_in_list_raises_validation_error(self) -> None:
         """Test bootstrap_servers with empty entry in comma-separated list."""
-        with pytest.raises(ValidationError) as exc_info:
+        with pytest.raises(OnexError) as exc_info:
             ModelEmitDaemonConfig(
                 kafka_bootstrap_servers="localhost:9092,,broker2:9092"
             )
@@ -354,8 +355,8 @@ class TestModelEmitDaemonConfigSpoolConsistency:
         assert config.max_spool_bytes == 5_000_000
 
     def test_spool_messages_zero_bytes_nonzero_raises_error(self) -> None:
-        """Test max_spool_messages=0 with max_spool_bytes>0 raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test max_spool_messages=0 with max_spool_bytes>0 raises OnexError."""
+        with pytest.raises(OnexError) as exc_info:
             ModelEmitDaemonConfig(
                 kafka_bootstrap_servers="localhost:9092",
                 max_spool_messages=0,
@@ -366,8 +367,8 @@ class TestModelEmitDaemonConfigSpoolConsistency:
         assert "max_spool_messages is 0" in str(exc_info.value)
 
     def test_spool_bytes_zero_messages_nonzero_raises_error(self) -> None:
-        """Test max_spool_bytes=0 with max_spool_messages>0 raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test max_spool_bytes=0 with max_spool_messages>0 raises OnexError."""
+        with pytest.raises(OnexError) as exc_info:
             ModelEmitDaemonConfig(
                 kafka_bootstrap_servers="localhost:9092",
                 max_spool_messages=100,
@@ -417,8 +418,8 @@ class TestModelEmitDaemonConfigPaths:
         assert config.spool_dir == spool_path
 
     def test_socket_path_invalid_parent_raises_error(self) -> None:
-        """Test socket_path with invalid parent directory raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test socket_path with invalid parent directory raises OnexError."""
+        with pytest.raises(OnexError) as exc_info:
             ModelEmitDaemonConfig(
                 kafka_bootstrap_servers="localhost:9092",
                 socket_path=Path("/nonexistent/deeply/nested/emit.sock"),
@@ -427,8 +428,8 @@ class TestModelEmitDaemonConfigPaths:
         assert "Parent directory does not exist" in str(exc_info.value)
 
     def test_pid_path_invalid_parent_raises_error(self) -> None:
-        """Test pid_path with invalid parent directory raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        """Test pid_path with invalid parent directory raises OnexError."""
+        with pytest.raises(OnexError) as exc_info:
             ModelEmitDaemonConfig(
                 kafka_bootstrap_servers="localhost:9092",
                 pid_path=Path("/nonexistent/deeply/nested/emit.pid"),

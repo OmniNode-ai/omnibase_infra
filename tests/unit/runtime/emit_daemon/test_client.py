@@ -38,7 +38,6 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -856,7 +855,9 @@ class TestEmitClientError:
     def test_error_has_message_attribute(self) -> None:
         """Test EmitClientError has accessible message."""
         error = EmitClientError("Test error message")
-        assert str(error) == "Test error message"
+        # OnexError stores message as an attribute; str() may include error code
+        assert error.message == "Test error message"
+        assert "Test error message" in str(error)
 
     def test_error_has_reason_attribute(self) -> None:
         """Test EmitClientError has reason attribute."""

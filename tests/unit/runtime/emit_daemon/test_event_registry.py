@@ -16,13 +16,14 @@ Test coverage includes:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 from uuid import UUID
 
 import pytest
 
+from omnibase_core.errors import OnexError
 from omnibase_infra.runtime.emit_daemon.event_registry import (
     EventRegistry,
     ModelEventRegistration,
@@ -145,15 +146,15 @@ class TestEventRegistryResolveTopic:
         assert topic == "production.custom.namespace.topic.v1"
 
     def test_resolve_topic_raises_for_unknown_event_type(self) -> None:
-        """Should raise ValueError for unknown event type."""
+        """Should raise OnexError for unknown event type."""
         registry = EventRegistry()
-        with pytest.raises(ValueError, match=r"Unknown event type: 'unknown\.event'"):
+        with pytest.raises(OnexError, match=r"Unknown event type: 'unknown\.event'"):
             registry.resolve_topic("unknown.event")
 
     def test_resolve_topic_error_includes_registered_types(self) -> None:
         """Should include registered types in error message."""
         registry = EventRegistry()
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(OnexError) as exc_info:
             registry.resolve_topic("unknown.event")
         error_message = str(exc_info.value)
         assert "prompt.submitted" in error_message
@@ -265,9 +266,9 @@ class TestEventRegistryGetPartitionKey:
         assert key == "12345"
 
     def test_partition_key_raises_for_unknown_event_type(self) -> None:
-        """Should raise ValueError for unknown event type."""
+        """Should raise OnexError for unknown event type."""
         registry = EventRegistry()
-        with pytest.raises(ValueError, match="Unknown event type"):
+        with pytest.raises(OnexError, match="Unknown event type"):
             registry.get_partition_key("unknown.event", {"data": "value"})
 
     def test_partition_key_returns_none_for_none_value(self) -> None:
@@ -303,10 +304,10 @@ class TestEventRegistryValidatePayload:
         assert result is True
 
     def test_raises_when_required_field_missing(self) -> None:
-        """Should raise ValueError when required field is missing."""
+        """Should raise OnexError when required field is missing."""
         registry = EventRegistry()
         with pytest.raises(
-            ValueError,
+            OnexError,
             match=r"Missing required fields for 'prompt\.submitted': \['prompt'\]",
         ):
             registry.validate_payload("prompt.submitted", {"session_id": "sess-123"})
@@ -321,16 +322,16 @@ class TestEventRegistryValidatePayload:
                 required_fields=["field_a", "field_b", "field_c"],
             )
         )
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(OnexError) as exc_info:
             registry.validate_payload("multi.required", {"field_a": "value"})
         error_message = str(exc_info.value)
         assert "field_b" in error_message
         assert "field_c" in error_message
 
     def test_raises_for_unknown_event_type(self) -> None:
-        """Should raise ValueError for unknown event type."""
+        """Should raise OnexError for unknown event type."""
         registry = EventRegistry()
-        with pytest.raises(ValueError, match="Unknown event type"):
+        with pytest.raises(OnexError, match="Unknown event type"):
             registry.validate_payload("unknown.event", {"data": "value"})
 
     def test_returns_true_when_no_required_fields(self) -> None:
@@ -555,9 +556,9 @@ class TestEventRegistryInjectMetadata:
         assert enriched["schema_version"] == "1.0.0"
 
     def test_raises_for_unknown_event_type(self) -> None:
-        """Should raise ValueError for unknown event type."""
+        """Should raise OnexError for unknown event type."""
         registry = EventRegistry()
-        with pytest.raises(ValueError, match="Unknown event type"):
+        with pytest.raises(OnexError, match="Unknown event type"):
             registry.inject_metadata("unknown.event", {"data": "value"})
 
 

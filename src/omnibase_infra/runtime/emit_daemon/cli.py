@@ -293,8 +293,8 @@ def _daemonize() -> None:
     # Change working directory to root
     os.chdir("/")
 
-    # Reset file creation mask
-    os.umask(0)
+    # Reset file creation mask to secure default (rw-r--r-- for files, rwxr-xr-x for dirs)
+    os.umask(0o022)
 
     # Redirect standard file descriptors to /dev/null
     devnull = os.open(os.devnull, os.O_RDWR)
@@ -325,7 +325,14 @@ def cmd_start(args: argparse.Namespace) -> None:
 
     # Daemonize if requested
     if args.daemonize:
-        log_file = config.spool_dir.parent / "emit-daemon.log"
+        log_dir = config.spool_dir.parent
+        log_file = log_dir / "emit-daemon.log"
+        # Create log directory BEFORE daemonizing so errors are visible to user
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            print(f"Error: Cannot create log directory: {e}", file=sys.stderr)
+            sys.exit(1)
         print("Starting emit-daemon in background...")
         print(f"  Socket: {config.socket_path}")
         print(f"  PID file: {config.pid_path}")
@@ -339,14 +346,11 @@ def cmd_start(args: argparse.Namespace) -> None:
         root_logger = logging.getLogger()
         for handler in root_logger.handlers[:]:
             root_logger.removeHandler(handler)
-        # Ensure log directory exists before setting up file logging
-        log_dir = config.spool_dir.parent
-        log_dir.mkdir(parents=True, exist_ok=True)
-        # Set up file-based logging instead
+        # Set up file-based logging (directory already exists from above)
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            filename=str(log_dir / "emit-daemon.log"),
+            filename=str(log_file),
             filemode="a",
         )
 
