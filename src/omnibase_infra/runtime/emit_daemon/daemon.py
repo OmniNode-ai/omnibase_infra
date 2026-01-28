@@ -63,6 +63,9 @@ from omnibase_infra.runtime.emit_daemon.queue import BoundedEventQueue, ModelQue
 
 logger = logging.getLogger(__name__)
 
+# Poll interval for publisher loop when queue is empty (seconds)
+PUBLISHER_POLL_INTERVAL_SECONDS: float = 0.1
+
 
 class EmitDaemon:
     """Unix socket daemon for persistent Kafka event emission.
@@ -224,6 +227,9 @@ class EmitDaemon:
                 self._event_bus = EventBusKafka(config=kafka_config)
 
             # Start the event bus (connects to Kafka)
+            # NOTE: hasattr check required because event_bus can be a mock for testing
+            # that may not implement start(). EventBusKafka always has start(), but
+            # test doubles may omit it if they don't need explicit initialization.
             if hasattr(self._event_bus, "start"):
                 await self._event_bus.start()  # type: ignore[union-attr]
 
@@ -317,6 +323,9 @@ class EmitDaemon:
                     )
 
             # Close Kafka connection
+            # NOTE: hasattr check required because event_bus can be a mock for testing
+            # that may not implement close(). EventBusKafka always has close(), but
+            # test doubles may omit it if they don't need explicit cleanup.
             if self._event_bus is not None and hasattr(self._event_bus, "close"):
                 await self._event_bus.close()  # type: ignore[union-attr]
 
@@ -578,7 +587,7 @@ class EmitDaemon:
 
                 if event is None:
                     # Queue empty, wait briefly and check again
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(PUBLISHER_POLL_INTERVAL_SECONDS)
                     continue
 
                 # Attempt to publish

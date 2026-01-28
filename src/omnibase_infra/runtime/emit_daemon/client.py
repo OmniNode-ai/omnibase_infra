@@ -286,8 +286,8 @@ class EmitClient:
                 try:
                     self._writer.close()
                     await self._writer.wait_closed()
-                except Exception:
-                    pass  # Ignore errors during cleanup
+                except Exception as e:
+                    logger.debug(f"Error during disconnect cleanup: {e}")
                 finally:
                     self._writer = None
                     self._reader = None
