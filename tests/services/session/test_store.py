@@ -686,7 +686,7 @@ class TestConfigSessionStorage:
         config = ConfigSessionStorage(
             postgres_password=SecretStr("test"),
         )
-        assert config.postgres_host == "192.168.86.200"
+        assert config.postgres_host == "localhost"
         assert config.postgres_port == 5436
         assert config.postgres_database == "omninode_bridge"
         assert config.postgres_user == "postgres"
