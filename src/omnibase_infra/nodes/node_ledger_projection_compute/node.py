@@ -48,6 +48,8 @@ from omnibase_infra.nodes.reducers.models.model_payload_ledger_append import (
 )
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from omnibase_core.container import ModelONEXContainer
 
 logger = logging.getLogger(__name__)
@@ -163,18 +165,24 @@ class NodeLedgerProjectionCompute(NodeCompute):
         try:
             return headers.model_dump(mode="json")
         except Exception:
-            # Best-effort: return empty on any serialization failure
+            # Best-effort: try to get correlation_id for logging context
+            correlation_id = getattr(headers, "correlation_id", None)
             logger.warning(
-                "Failed to serialize event headers, returning empty dict",
+                "Failed to serialize event headers, returning empty dict. "
+                "correlation_id=%s",
+                correlation_id,
                 exc_info=True,
             )
             return {}
 
-    def _parse_offset(self, offset: str | None) -> int:
+    def _parse_offset(
+        self, offset: str | None, correlation_id: UUID | None = None
+    ) -> int:
         """Parse Kafka offset string to integer.
 
         Args:
             offset: Offset string from Kafka, or None.
+            correlation_id: Optional correlation ID for logging context.
 
         Returns:
             Parsed offset as integer, or 0 if None or unparseable.
@@ -185,8 +193,10 @@ class NodeLedgerProjectionCompute(NodeCompute):
             return int(offset)
         except (ValueError, TypeError):
             logger.warning(
-                "Failed to parse offset '%s' as integer, defaulting to 0",
+                "Failed to parse offset '%s' as integer, defaulting to 0. "
+                "correlation_id=%s",
                 offset,
+                correlation_id,
             )
             return 0
 
@@ -246,6 +256,8 @@ class NodeLedgerProjectionCompute(NodeCompute):
 
         # Extract headers best-effort
         headers = message.headers
+        # Extract correlation_id early for logging context in helper methods
+        correlation_id = headers.correlation_id if headers else None
         onex_headers = self._normalize_headers(headers)
 
         # Build payload with best-effort metadata extraction
@@ -253,13 +265,15 @@ class NodeLedgerProjectionCompute(NodeCompute):
             # Required Kafka position fields (defensive defaults for None)
             topic=message.topic,
             partition=message.partition if message.partition is not None else 0,
-            kafka_offset=self._parse_offset(message.offset),
+            kafka_offset=self._parse_offset(
+                message.offset, correlation_id=correlation_id
+            ),
             # Raw event data as base64
             event_key=event_key_b64,
             event_value=event_value_b64,
             # Extracted metadata (all optional, best-effort)
             onex_headers=onex_headers,
-            correlation_id=headers.correlation_id if headers else None,
+            correlation_id=correlation_id,
             envelope_id=headers.message_id if headers else None,
             event_type=headers.event_type if headers else None,
             source=headers.source if headers else None,

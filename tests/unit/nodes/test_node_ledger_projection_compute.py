@@ -55,7 +55,19 @@ if TYPE_CHECKING:
 # Path Constants
 # =============================================================================
 
-NODE_DIR = Path("src/omnibase_infra/nodes/node_ledger_projection_compute")
+
+def _get_project_root() -> Path:
+    """Find project root by looking for pyproject.toml."""
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "pyproject.toml").exists():
+            return parent
+    # Fallback: 4 levels up from test file (tests/unit/nodes/test_*.py)
+    return current.parent.parent.parent.parent
+
+
+_PROJECT_ROOT = _get_project_root()
+NODE_DIR = _PROJECT_ROOT / "src/omnibase_infra/nodes/node_ledger_projection_compute"
 CONTRACT_PATH = NODE_DIR / "contract.yaml"
 
 
@@ -738,15 +750,25 @@ class TestContractValidation:
         )
 
     def test_contract_version_is_valid_semver(self, contract_data: dict) -> None:
-        """Contract version follows semantic versioning."""
-        contract_version = contract_data.get("contract_version", "")
+        """Contract version follows semantic versioning object structure."""
+        cv = contract_data.get("contract_version", {})
 
-        parts = contract_version.split(".")
-        assert len(parts) == 3, f"Invalid semver format: {contract_version}"
+        # ONEX uses ModelSemver object format, not string
+        assert isinstance(cv, dict), f"contract_version should be dict, got {type(cv)}"
+        assert "major" in cv, "contract_version missing 'major' field"
+        assert "minor" in cv, "contract_version missing 'minor' field"
+        assert "patch" in cv, "contract_version missing 'patch' field"
 
         # Each part should be a valid integer
-        for part in parts:
-            assert part.isdigit(), f"Invalid semver part '{part}' in {contract_version}"
+        assert isinstance(cv["major"], int), (
+            f"major should be int, got {type(cv['major'])}"
+        )
+        assert isinstance(cv["minor"], int), (
+            f"minor should be int, got {type(cv['minor'])}"
+        )
+        assert isinstance(cv["patch"], int), (
+            f"patch should be int, got {type(cv['patch'])}"
+        )
 
     def test_has_consumer_group(self, contract_data: dict) -> None:
         """Contract specifies a consumer group."""
