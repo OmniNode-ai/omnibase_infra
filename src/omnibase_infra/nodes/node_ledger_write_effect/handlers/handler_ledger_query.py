@@ -242,7 +242,7 @@ class HandlerLedgerQuery:
         self,
         start: datetime,
         end: datetime,
-        correlation_id: UUID,
+        correlation_id: UUID | None = None,
         event_type: str | None = None,
         topic: str | None = None,
         limit: int = _DEFAULT_LIMIT,
@@ -253,7 +253,7 @@ class HandlerLedgerQuery:
         Args:
             start: Start of time range (inclusive).
             end: End of time range (exclusive).
-            correlation_id: Correlation ID for distributed tracing.
+            correlation_id: Correlation ID for distributed tracing (auto-generated if None).
             event_type: Optional filter by event type.
             topic: Optional filter by Kafka topic.
             limit: Maximum entries to return (default: 100, max: 10000).
@@ -264,6 +264,10 @@ class HandlerLedgerQuery:
         """
         self._ensure_initialized("ledger.query.by_time_range")
         limit = self._normalize_limit(limit)
+        # Auto-generate correlation_id if not provided
+        effective_correlation_id = (
+            correlation_id if correlation_id is not None else uuid4()
+        )
 
         # Build query model for SQL generation
         query_params = ModelLedgerQuery(
@@ -283,7 +287,7 @@ class HandlerLedgerQuery:
             sql=sql,
             parameters=parameters,
             operation="ledger.query.by_time_range",
-            correlation_id=correlation_id,
+            correlation_id=effective_correlation_id,
         )
 
         return [self._row_to_entry(row) for row in rows]
@@ -550,13 +554,21 @@ OFFSET ${param_index + 1}
 
         The row comes from HandlerDb which returns dict[str, object].
         event_key and event_value are already base64-encoded via SQL encode().
+
+        Raises:
+            RuntimeHostError: If ledger_written_at is not a datetime (data corruption).
         """
         # Extract ledger_written_at which is guaranteed to exist
         ledger_written_at_raw = row["ledger_written_at"]
         if not isinstance(ledger_written_at_raw, datetime):
-            # This should never happen for valid ledger entries
-            raise ValueError(
-                f"ledger_written_at must be datetime, got {type(ledger_written_at_raw)}"
+            # This should never happen for valid ledger entries - indicates data corruption
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="ledger.query.row_to_entry",
+            )
+            raise RuntimeHostError(
+                f"Data integrity error: ledger_written_at must be datetime, got {type(ledger_written_at_raw).__name__}",
+                context=ctx,
             )
 
         return ModelLedgerEntry(

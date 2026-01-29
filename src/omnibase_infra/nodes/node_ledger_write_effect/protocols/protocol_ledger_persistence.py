@@ -97,9 +97,11 @@ class ProtocolLedgerPersistence(Protocol):
         self,
         start: datetime,
         end: datetime,
+        correlation_id: UUID | None = None,
         event_type: str | None = None,
         topic: str | None = None,
-        limit: int = 1000,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[ModelLedgerEntry]:
         """Query ledger entries within a time range.
 
@@ -109,9 +111,11 @@ class ProtocolLedgerPersistence(Protocol):
         Args:
             start: Start of time range (inclusive).
             end: End of time range (exclusive).
+            correlation_id: Correlation ID for distributed tracing (auto-generated if None).
             event_type: Optional filter by event type.
             topic: Optional filter by Kafka topic.
-            limit: Maximum number of entries to return (default: 1000).
+            limit: Maximum number of entries to return (default: 100, max: 10000).
+            offset: Number of entries to skip for pagination (default: 0).
 
         Returns:
             List of ModelLedgerEntry within the time range,
