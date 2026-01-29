@@ -36,6 +36,59 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from omnibase_core.errors import OnexError
 
 
+class ModelEmitDaemonConfigInput(BaseModel):
+    """Intermediate input model for environment variable override parsing.
+
+    This model captures configuration values from kwargs and environment variables
+    before final validation. All fields are optional since we only populate what's
+    actually provided, allowing the final ModelEmitDaemonConfig to apply defaults.
+
+    Purpose:
+        - Eliminates union types in with_env_overrides() method
+        - Provides early validation at parse time with ConfigDict(extra="forbid")
+        - Allows type-safe accumulation of config values from multiple sources
+
+    Usage:
+        This model is used internally by ModelEmitDaemonConfig.with_env_overrides().
+        It should not be used directly - use ModelEmitDaemonConfig instead.
+
+    Note:
+        Validation happens in the final ModelEmitDaemonConfig model, not here.
+        This model only ensures type safety and catches typos in field names.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Path configurations
+    socket_path: Path | None = None
+    pid_path: Path | None = None
+    spool_dir: Path | None = None
+
+    # Limit configurations
+    max_payload_bytes: int | None = None
+    max_memory_queue: int | None = None
+    max_spool_messages: int | None = None
+    max_spool_bytes: int | None = None
+
+    # Kafka configurations
+    kafka_bootstrap_servers: str | None = None
+    kafka_client_id: str | None = None
+    environment: str | None = None
+
+    # Socket permissions
+    socket_permissions: int | None = None
+
+    # Timeout configurations
+    socket_timeout_seconds: float | None = None
+    kafka_timeout_seconds: float | None = None
+    shutdown_drain_seconds: float | None = None
+
+    # Retry configurations
+    max_retry_attempts: int | None = None
+    backoff_base_seconds: float | None = None
+    max_backoff_seconds: float | None = None
+
+
 class ModelEmitDaemonConfig(BaseModel):
     """Configuration model for the Hook Event Emit Daemon.
 
@@ -409,7 +462,9 @@ class ModelEmitDaemonConfig(BaseModel):
         # Marker for fields that should be parsed as octal integers
         OCTAL_INT = "octal_int"
 
-        env_mappings: dict[str, tuple[str, type | str]] = {
+        # Environment variable to field mapping with type converters
+        # Uses object type for converter since it can be type, str marker, or callable
+        env_mappings: dict[str, tuple[str, object]] = {
             "EMIT_DAEMON_SOCKET_PATH": ("socket_path", Path),
             "EMIT_DAEMON_PID_PATH": ("pid_path", Path),
             "EMIT_DAEMON_SPOOL_DIR": ("spool_dir", Path),
@@ -430,35 +485,40 @@ class ModelEmitDaemonConfig(BaseModel):
             "EMIT_DAEMON_MAX_BACKOFF_SECONDS": ("max_backoff_seconds", float),
         }
 
-        # Build final configuration dict with proper types
-        final_config: dict[str, Path | str | int | float] = {}
+        # Build intermediate config using strongly typed input model
+        # This provides early validation and eliminates union types
+        input_fields: dict[str, object] = {}
 
-        # First, apply provided kwargs (convert to proper types)
+        # First, apply provided kwargs (filter None values)
         for key, value in kwargs.items():
             if value is not None:
-                # Trust that kwargs are already properly typed by caller
-                final_config[key] = value  # type: ignore[assignment]
+                input_fields[key] = value
 
-        # Then, apply environment variable overrides
+        # Then, apply environment variable overrides (env takes precedence)
         for env_var, (field_name, field_type) in env_mappings.items():
             env_value = os.environ.get(env_var)
             if env_value is not None:
                 try:
                     if field_type is Path:
-                        final_config[field_name] = Path(env_value)
+                        input_fields[field_name] = Path(env_value)
                     elif field_type == OCTAL_INT:
                         # Parse as octal string (e.g., "660" -> 0o660 = 432)
                         # Handles both "660" and "0o660" formats
-                        final_config[field_name] = int(env_value, 8)
+                        input_fields[field_name] = int(env_value, 8)
                     elif field_type is int:
-                        final_config[field_name] = int(env_value)
+                        input_fields[field_name] = int(env_value)
                     elif field_type is float:
-                        final_config[field_name] = float(env_value)
+                        input_fields[field_name] = float(env_value)
                     else:
-                        final_config[field_name] = env_value
+                        input_fields[field_name] = env_value
                 except ValueError:
                     # Skip invalid env values, let Pydantic validation handle
                     pass
+
+        # Validate through input model first (catches typos, provides type safety)
+        # Then extract only set values for final model construction
+        input_model = ModelEmitDaemonConfigInput.model_validate(input_fields)
+        final_config = input_model.model_dump(exclude_none=True)
 
         return cls.model_validate(final_config)
 
@@ -472,4 +532,4 @@ class ModelEmitDaemonConfig(BaseModel):
         return self.max_spool_messages > 0 and self.max_spool_bytes > 0
 
 
-__all__: list[str] = ["ModelEmitDaemonConfig"]
+__all__: list[str] = ["ModelEmitDaemonConfig", "ModelEmitDaemonConfigInput"]

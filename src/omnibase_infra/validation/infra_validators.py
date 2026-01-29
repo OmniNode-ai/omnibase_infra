@@ -433,7 +433,10 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #                     BoundedEventQueue, EmitClient, EventRegistry return types
 # - 113 (2026-01-29): OMN-1610 emit daemon code review fixes (+1 union)
 #                     env_mappings type annotation for socket_permissions octal parsing
-INFRA_MAX_UNIONS = 113
+# - 111 (2026-01-29): OMN-1610 refactor with_env_overrides() to use strongly typed input model (-2 unions)
+#                     Replaced dict[str, Path | str | int | float] with ModelEmitDaemonConfigInput
+#                     Changed env_mappings from dict[str, tuple[str, type | str]] to dict[str, tuple[str, object]]
+INFRA_MAX_UNIONS = 111
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

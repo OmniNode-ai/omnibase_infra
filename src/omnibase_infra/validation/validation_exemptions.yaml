@@ -1797,6 +1797,20 @@ pattern_exemptions:
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
   # ==========================================================================
+  # Emit Daemon Config Input Model Exemption (OMN-1610)
+  # ==========================================================================
+  # config.py contains ModelEmitDaemonConfigInput (intermediate input model)
+  # and ModelEmitDaemonConfig (final validated config). The input model is
+  # tightly coupled and only used internally by with_env_overrides() factory.
+  - file_pattern: 'emit_daemon/config\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      ModelEmitDaemonConfigInput is an intermediate input model used only by ModelEmitDaemonConfig.with_env_overrides() factory method. It provides early validation for environment variable parsing and is tightly coupled with the main config model. Separating would add complexity without benefit.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+    ticket: OMN-1610
+  # ==========================================================================
   # Contract Linter Models Exemption (PR #57)
   # ==========================================================================
   # linter_contract.py contains domain-grouped validation models and enums
