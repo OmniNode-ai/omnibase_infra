@@ -59,6 +59,17 @@ from omnibase_infra.runtime.emit_daemon.event_registry import (
     EventRegistry,
     ModelEventRegistration,
 )
+from omnibase_infra.runtime.emit_daemon.model_daemon_request import (
+    ModelDaemonEmitRequest,
+    ModelDaemonPingRequest,
+    parse_daemon_request,
+)
+from omnibase_infra.runtime.emit_daemon.model_daemon_response import (
+    ModelDaemonErrorResponse,
+    ModelDaemonPingResponse,
+    ModelDaemonQueuedResponse,
+    parse_daemon_response,
+)
 from omnibase_infra.runtime.emit_daemon.queue import (
     BoundedEventQueue,
     ModelQueuedEvent,
@@ -70,10 +81,17 @@ __all__: list[str] = [
     "EmitClientError",
     "EmitDaemon",
     "EventRegistry",
+    "ModelDaemonEmitRequest",
+    "ModelDaemonErrorResponse",
+    "ModelDaemonPingRequest",
+    "ModelDaemonPingResponse",
+    "ModelDaemonQueuedResponse",
     "ModelEmitDaemonConfig",
     "ModelEventRegistration",
     "ModelQueuedEvent",
     "cli_main",
     "emit_event",
     "emit_event_with_fallback",
+    "parse_daemon_request",
+    "parse_daemon_response",
 ]

@@ -50,9 +50,21 @@ from pathlib import Path
 from types import TracebackType
 from typing import TypeVar
 
+from pydantic import ValidationError
+
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.errors import OnexError
 from omnibase_core.types import JsonType
+from omnibase_infra.runtime.emit_daemon.model_daemon_request import (
+    ModelDaemonEmitRequest,
+    ModelDaemonPingRequest,
+)
+from omnibase_infra.runtime.emit_daemon.model_daemon_response import (
+    ModelDaemonErrorResponse,
+    ModelDaemonPingResponse,
+    ModelDaemonQueuedResponse,
+    parse_daemon_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -434,51 +446,56 @@ class EmitClient:
             print(f"Event queued with ID: {event_id}")
             ```
         """
-        request: JsonType = {
-            "event_type": event_type,
-            "payload": payload,
-        }
+        # Build typed request
+        request = ModelDaemonEmitRequest(event_type=event_type, payload=payload)
+        raw_response = await self._send_request(request.model_dump())
 
-        response = await self._send_request(request)
+        # Parse typed response
+        try:
+            response = parse_daemon_response(raw_response)
+        except (ValueError, ValidationError) as e:
+            raise EmitClientError(
+                f"Invalid daemon response: {e}",
+                reason="invalid_response",
+            ) from e
 
-        status = response.get("status")
-        if status == "queued":
-            event_id = response.get("event_id")
-            if not isinstance(event_id, str):
-                raise EmitClientError(
-                    "Daemon returned invalid event_id",
-                    reason="invalid_event_id",
-                )
+        # Handle response by type
+        if isinstance(response, ModelDaemonQueuedResponse):
             logger.debug(
-                f"Event emitted: {event_id}",
+                f"Event emitted: {response.event_id}",
                 extra={
                     "event_type": event_type,
-                    "event_id": event_id,
+                    "event_id": response.event_id,
                 },
             )
-            return event_id
-        elif status == "error":
-            reason = response.get("reason")
-            reason_str = str(reason) if reason else "unknown"
+            return response.event_id
+        elif isinstance(response, ModelDaemonErrorResponse):
             raise EmitClientError(
-                f"Daemon rejected event: {reason_str}",
-                reason=reason_str,
+                f"Daemon rejected event: {response.reason}",
+                reason=response.reason,
+            )
+        elif isinstance(response, ModelDaemonPingResponse):
+            # Unexpected ping response to emit request
+            raise EmitClientError(
+                "Unexpected ping response to emit request",
+                reason="unexpected_response_type",
             )
         else:
+            # Should be unreachable
             raise EmitClientError(
-                f"Unexpected daemon response status: {status}",
+                "Unexpected daemon response type",
                 reason="unexpected_status",
             )
 
-    async def ping(self) -> dict[str, object]:
+    async def ping(self) -> ModelDaemonPingResponse:
         """Health check the daemon.
 
         Sends a ping command to the daemon to verify it is running and
         get current queue status.
 
         Returns:
-            Dict with daemon status including:
-            - status: "ok" if daemon is healthy
+            ModelDaemonPingResponse with:
+            - status: "ok" (always for successful ping)
             - queue_size: Number of events in memory queue
             - spool_size: Number of events spooled to disk
 
@@ -488,33 +505,48 @@ class EmitClient:
         Example:
             ```python
             status = await client.ping()
-            print(f"Queue size: {status['queue_size']}")
-            print(f"Spool size: {status['spool_size']}")
+            print(f"Queue size: {status.queue_size}")
+            print(f"Spool size: {status.spool_size}")
             ```
         """
-        request: JsonType = {"command": "ping"}
-        response = await self._send_request(request)
+        # Build typed request
+        request = ModelDaemonPingRequest()
+        raw_response = await self._send_request(request.model_dump())
 
-        status = response.get("status")
-        if status == "ok":
+        # Parse typed response
+        try:
+            response = parse_daemon_response(raw_response)
+        except (ValueError, ValidationError) as e:
+            raise EmitClientError(
+                f"Invalid daemon response: {e}",
+                reason="invalid_response",
+            ) from e
+
+        # Handle response by type
+        if isinstance(response, ModelDaemonPingResponse):
             logger.debug(
                 "Daemon ping successful",
                 extra={
-                    "queue_size": response.get("queue_size"),
-                    "spool_size": response.get("spool_size"),
+                    "queue_size": response.queue_size,
+                    "spool_size": response.spool_size,
                 },
             )
             return response
-        elif status == "error":
-            reason = response.get("reason")
-            reason_str = str(reason) if reason else "unknown"
+        elif isinstance(response, ModelDaemonErrorResponse):
             raise EmitClientError(
-                f"Daemon ping error: {reason_str}",
-                reason=reason_str,
+                f"Daemon ping error: {response.reason}",
+                reason=response.reason,
+            )
+        elif isinstance(response, ModelDaemonQueuedResponse):
+            # Unexpected queued response to ping request
+            raise EmitClientError(
+                "Unexpected queued response to ping request",
+                reason="unexpected_response_type",
             )
         else:
+            # Should be unreachable
             raise EmitClientError(
-                f"Unexpected daemon ping response: {status}",
+                "Unexpected daemon ping response type",
                 reason="unexpected_status",
             )
 
@@ -577,14 +609,14 @@ class EmitClient:
         """
         return self._run_async(self._emit_and_disconnect(event_type, payload))
 
-    def ping_sync(self) -> dict[str, object]:
+    def ping_sync(self) -> ModelDaemonPingResponse:
         """Synchronous wrapper for ping().
 
         Creates an event loop if needed, calls ping(), and returns the result.
         Useful for shell scripts and health checks.
 
         Returns:
-            Dict with status, queue_size, spool_size
+            ModelDaemonPingResponse with status, queue_size, spool_size
 
         Raises:
             EmitClientError: If daemon is unavailable
@@ -592,7 +624,7 @@ class EmitClient:
         Example:
             ```python
             status = EmitClient().ping_sync()
-            print(f"Daemon healthy, queue size: {status['queue_size']}")
+            print(f"Daemon healthy, queue size: {status.queue_size}")
             ```
         """
         return self._run_async(self._ping_and_disconnect())
@@ -624,11 +656,11 @@ class EmitClient:
         finally:
             await self._disconnect()
 
-    async def _ping_and_disconnect(self) -> dict[str, object]:
+    async def _ping_and_disconnect(self) -> ModelDaemonPingResponse:
         """Ping daemon and disconnect (for sync wrapper).
 
         Returns:
-            Ping response from daemon
+            Typed ping response from daemon
         """
         try:
             return await self.ping()

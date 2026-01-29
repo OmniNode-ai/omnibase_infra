@@ -136,7 +136,11 @@ class TestEmitClientEmit:
             assert exc_info.value.reason == error_reason
 
     async def test_emit_unexpected_status_raises_emit_client_error(self) -> None:
-        """Test that unexpected status in response raises EmitClientError."""
+        """Test that unexpected status in response raises EmitClientError.
+
+        With typed response models, unknown status values are caught during
+        parse_daemon_response() and result in an "invalid_response" error.
+        """
         response = {"status": "unknown_status"}
         mock_reader, mock_writer = create_mock_reader_writer(response)
 
@@ -149,11 +153,17 @@ class TestEmitClientEmit:
             with pytest.raises(EmitClientError) as exc_info:
                 await client.emit("test.event", {"key": "value"})
 
-            assert "unexpected" in str(exc_info.value).lower()
-            assert exc_info.value.reason == "unexpected_status"
+            # Typed models now catch unknown status during parsing
+            assert "invalid" in str(exc_info.value).lower()
+            assert exc_info.value.reason == "invalid_response"
 
     async def test_emit_invalid_event_id_raises_emit_client_error(self) -> None:
-        """Test that response with invalid event_id raises EmitClientError."""
+        """Test that response with invalid event_id raises EmitClientError.
+
+        With typed response models, Pydantic validates event_id during parsing,
+        so invalid types are caught as "invalid_response" rather than being
+        detected later in the emit() method.
+        """
         response = {"status": "queued", "event_id": 12345}  # Not a string
         mock_reader, mock_writer = create_mock_reader_writer(response)
 
@@ -166,7 +176,8 @@ class TestEmitClientEmit:
             with pytest.raises(EmitClientError) as exc_info:
                 await client.emit("test.event", {"key": "value"})
 
-            assert exc_info.value.reason == "invalid_event_id"
+            # Typed models now catch this during Pydantic validation
+            assert exc_info.value.reason == "invalid_response"
 
     async def test_emit_context_manager_usage(self) -> None:
         """Test emit() works with async context manager."""
@@ -191,8 +202,8 @@ class TestEmitClientEmit:
 class TestEmitClientPing:
     """Test EmitClient.ping() health check functionality."""
 
-    async def test_ping_success_returns_status_dict(self) -> None:
-        """Test that ping() returns dict with status on success."""
+    async def test_ping_success_returns_typed_response(self) -> None:
+        """Test that ping() returns ModelDaemonPingResponse on success."""
         response = {"status": "ok", "queue_size": 5, "spool_size": 10}
         mock_reader, mock_writer = create_mock_reader_writer(response)
 
@@ -203,9 +214,10 @@ class TestEmitClientPing:
             client = EmitClient(socket_path="/tmp/test.sock")
             result = await client.ping()
 
-            assert result["status"] == "ok"
-            assert result["queue_size"] == 5
-            assert result["spool_size"] == 10
+            # Result is now a typed ModelDaemonPingResponse
+            assert result.status == "ok"
+            assert result.queue_size == 5
+            assert result.spool_size == 10
 
     async def test_ping_sends_correct_command(self) -> None:
         """Test that ping() sends correct command format."""
@@ -559,9 +571,10 @@ class TestEmitClientSyncWrappers:
             client = EmitClient(socket_path="/tmp/test.sock")
             result = client.ping_sync()
 
-            assert result["status"] == "ok"
-            assert result["queue_size"] == 3
-            assert result["spool_size"] == 7
+            # Result is now a typed ModelDaemonPingResponse
+            assert result.status == "ok"
+            assert result.queue_size == 3
+            assert result.spool_size == 7
 
     def test_is_daemon_running_sync_works_without_event_loop(self) -> None:
         """Test is_daemon_running_sync() works without running event loop."""

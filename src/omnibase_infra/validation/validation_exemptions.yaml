@@ -1831,6 +1831,12 @@ pattern_exemptions:
     documentation:
       - src/omnibase_infra/runtime/emit_daemon/queue.py
     ticket: OMN-1610
+  - file_pattern: 'emit_daemon/model_daemon_response\.py'
+    violation_pattern: "Field 'event_id' should use UUID type instead of str"
+    reason: event_id is returned as a string in the daemon protocol for JSON serialization compatibility. Matches queue.py event_id.
+    documentation:
+      - src/omnibase_infra/runtime/emit_daemon/model_daemon_response.py
+    ticket: OMN-1610
   - file_pattern: 'emit_daemon/config\.py'
     violation_pattern: "Field 'kafka_client_id' should use UUID type instead of str"
     reason: kafka_client_id is a Kafka client identifier string, not a UUID.
@@ -1850,6 +1856,27 @@ architecture_exemptions:
     violation_pattern: '\d+ models in one file'
     reason: >
       ModelEmitDaemonConfigInput is an intermediate input model used only by ModelEmitDaemonConfig.with_env_overrides() factory method. It provides early validation for environment variable parsing and is tightly coupled with the main config model. Separating would add complexity without benefit.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+    ticket: OMN-1610
+  # ==========================================================================
+  # Emit Daemon Protocol Models Exemption (OMN-1610)
+  # ==========================================================================
+  # Request and response models form discriminated unions that are always used
+  # together. Separating into individual files would break the cohesive API.
+  - file_pattern: 'emit_daemon/model_daemon_request\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      ModelDaemonPingRequest and ModelDaemonEmitRequest form a discriminated union (ModelDaemonRequest) for the daemon protocol. These request types are always parsed together via parse_daemon_request(). Per CLAUDE.md domain-grouping convention for protocol messages.
+
+    documentation:
+      - CLAUDE.md (Protocol File Naming - domain-grouping convention)
+    ticket: OMN-1610
+  - file_pattern: 'emit_daemon/model_daemon_response\.py'
+    violation_pattern: '\d+ models in one file'
+    reason: >
+      ModelDaemonPingResponse, ModelDaemonQueuedResponse, and ModelDaemonErrorResponse form a discriminated union (ModelDaemonResponse) for the daemon protocol. These response types are always parsed together via parse_daemon_response(). Per CLAUDE.md domain-grouping convention for protocol messages.
 
     documentation:
       - CLAUDE.md (Protocol File Naming - domain-grouping convention)

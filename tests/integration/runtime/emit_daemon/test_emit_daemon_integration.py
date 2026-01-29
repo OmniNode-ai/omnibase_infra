@@ -472,11 +472,10 @@ class TestEmitDaemonHealthCheck:
         async with client:
             response = await client.ping()
 
-        assert response["status"] == "ok"
-        assert "queue_size" in response
-        assert "spool_size" in response
-        assert isinstance(response["queue_size"], int)
-        assert isinstance(response["spool_size"], int)
+        # Response is now a typed ModelDaemonPingResponse
+        assert response.status == "ok"
+        assert isinstance(response.queue_size, int)
+        assert isinstance(response.spool_size, int)
 
     @pytest.mark.asyncio
     async def test_is_daemon_running_returns_true(

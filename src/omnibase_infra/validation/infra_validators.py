@@ -440,7 +440,10 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 112 (2026-01-29): OMN-1610 emit daemon + refactor to strongly typed input model
 #                     BoundedEventQueue, EmitClient, EventRegistry, socket_permissions
 #                     Replaced dict unions with ModelEmitDaemonConfigInput
-INFRA_MAX_UNIONS = 112
+# - 113 (2026-01-29): OMN-1610 properly typed daemon protocol models (+1 union)
+#                     Added ModelDaemonRequest, ModelDaemonResponse discriminated unions
+#                     Replaced dict[str, object] soup with strongly typed Pydantic models
+INFRA_MAX_UNIONS = 113
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

@@ -51,7 +51,10 @@ import os
 import signal
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from uuid import UUID, uuid4
+
+from pydantic import ValidationError
 
 from omnibase_core.errors import OnexError
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -59,6 +62,16 @@ from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.runtime.emit_daemon.config import ModelEmitDaemonConfig
 from omnibase_infra.runtime.emit_daemon.event_registry import EventRegistry
+from omnibase_infra.runtime.emit_daemon.model_daemon_request import (
+    ModelDaemonEmitRequest,
+    ModelDaemonPingRequest,
+    parse_daemon_request,
+)
+from omnibase_infra.runtime.emit_daemon.model_daemon_response import (
+    ModelDaemonErrorResponse,
+    ModelDaemonPingResponse,
+    ModelDaemonQueuedResponse,
+)
 from omnibase_infra.runtime.emit_daemon.queue import BoundedEventQueue, ModelQueuedEvent
 
 logger = logging.getLogger(__name__)
@@ -425,6 +438,9 @@ class EmitDaemon:
     async def _process_request(self, line: bytes) -> str:
         """Process a single request line.
 
+        Uses typed request models (ModelDaemonPingRequest, ModelDaemonEmitRequest)
+        for compile-time type safety instead of dict[str, object] with isinstance checks.
+
         Args:
             line: Raw request line (JSON bytes with optional newline)
 
@@ -433,101 +449,93 @@ class EmitDaemon:
         """
         try:
             # Parse JSON request
-            request = json.loads(line.decode("utf-8").strip())
+            raw_request = json.loads(line.decode("utf-8").strip())
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            return json.dumps({"status": "error", "reason": f"Invalid JSON: {e}"})
+            return ModelDaemonErrorResponse(
+                reason=f"Invalid JSON: {e}"
+            ).model_dump_json()
 
-        if not isinstance(request, dict):
-            return json.dumps(
-                {"status": "error", "reason": "Request must be a JSON object"}
-            )
+        if not isinstance(raw_request, dict):
+            return ModelDaemonErrorResponse(
+                reason="Request must be a JSON object"
+            ).model_dump_json()
 
-        # Handle special commands
-        if "command" in request:
-            return await self._handle_command(request)
+        # Parse into typed request model
+        try:
+            request = parse_daemon_request(raw_request)
+        except (ValueError, ValidationError) as e:
+            return ModelDaemonErrorResponse(reason=str(e)).model_dump_json()
 
-        # Handle event submission
-        return await self._handle_event(request)
+        # Dispatch based on request type
+        if isinstance(request, ModelDaemonPingRequest):
+            return await self._handle_ping(request)
+        elif isinstance(request, ModelDaemonEmitRequest):
+            return await self._handle_emit(request)
+        else:
+            # Should be unreachable due to exhaustive type check above
+            return ModelDaemonErrorResponse(
+                reason="Unknown request type"
+            ).model_dump_json()
 
-    async def _handle_command(self, request: dict[str, object]) -> str:
-        """Handle special command requests.
-
-        Args:
-            request: Parsed command request
-
-        Returns:
-            JSON response string
-        """
-        command = request.get("command")
-
-        if command == "ping":
-            return json.dumps(
-                {
-                    "status": "ok",
-                    "queue_size": self._queue.memory_size(),
-                    "spool_size": self._queue.spool_size(),
-                }
-            )
-
-        return json.dumps({"status": "error", "reason": f"Unknown command: {command}"})
-
-    async def _handle_event(self, request: dict[str, object]) -> str:
-        """Handle event submission requests.
+    async def _handle_ping(self, request: ModelDaemonPingRequest) -> str:
+        """Handle ping command request.
 
         Args:
-            request: Parsed event request with event_type and payload
+            request: Typed ping request model
 
         Returns:
-            JSON response string
+            JSON response string with queue status
         """
-        # Validate required fields
-        event_type = request.get("event_type")
-        if not event_type or not isinstance(event_type, str):
-            return json.dumps(
-                {
-                    "status": "error",
-                    "reason": "Missing or invalid 'event_type' field",
-                }
-            )
+        return ModelDaemonPingResponse(
+            queue_size=self._queue.memory_size(),
+            spool_size=self._queue.spool_size(),
+        ).model_dump_json()
 
-        payload = request.get("payload")
-        if payload is None:
-            payload = {}
-        if not isinstance(payload, dict):
-            return json.dumps(
-                {
-                    "status": "error",
-                    "reason": "'payload' must be a JSON object",
-                }
-            )
+    async def _handle_emit(self, request: ModelDaemonEmitRequest) -> str:
+        """Handle event emission request.
+
+        Args:
+            request: Typed emit request model with event_type and payload
+
+        Returns:
+            JSON response string (queued or error)
+        """
+        event_type = request.event_type
+
+        # Normalize payload to dict (JsonType could be various types)
+        raw_payload = request.payload
+        if raw_payload is None:
+            raw_payload = {}
+        if not isinstance(raw_payload, dict):
+            return ModelDaemonErrorResponse(
+                reason="'payload' must be a JSON object"
+            ).model_dump_json()
+
+        # Cast to dict[str, object] after isinstance check for type safety
+        payload: dict[str, object] = cast("dict[str, object]", raw_payload)
 
         # Check payload size
         payload_json = json.dumps(payload)
         if len(payload_json.encode("utf-8")) > self._config.max_payload_bytes:
-            return json.dumps(
-                {
-                    "status": "error",
-                    "reason": f"Payload exceeds maximum size of {self._config.max_payload_bytes} bytes",
-                }
-            )
+            return ModelDaemonErrorResponse(
+                reason=f"Payload exceeds maximum size of {self._config.max_payload_bytes} bytes"
+            ).model_dump_json()
 
         # Validate event type is registered
         try:
             topic = self._registry.resolve_topic(event_type)
         except OnexError as e:
-            return json.dumps({"status": "error", "reason": str(e)})
+            return ModelDaemonErrorResponse(reason=str(e)).model_dump_json()
 
         # Validate payload has required fields
         try:
             self._registry.validate_payload(event_type, payload)
         except OnexError as e:
-            return json.dumps({"status": "error", "reason": str(e)})
+            return ModelDaemonErrorResponse(reason=str(e)).model_dump_json()
 
         # Extract correlation_id from payload if present
         correlation_id = payload.get("correlation_id")
-        if isinstance(correlation_id, str):
-            pass  # Use as-is
-        else:
+        if not isinstance(correlation_id, str):
             correlation_id = None
 
         # Inject metadata into payload
@@ -561,14 +569,11 @@ class EmitDaemon:
                     "topic": topic,
                 },
             )
-            return json.dumps({"status": "queued", "event_id": event_id})
+            return ModelDaemonQueuedResponse(event_id=event_id).model_dump_json()
         else:
-            return json.dumps(
-                {
-                    "status": "error",
-                    "reason": "Failed to queue event (queue may be full)",
-                }
-            )
+            return ModelDaemonErrorResponse(
+                reason="Failed to queue event (queue may be full)"
+            ).model_dump_json()
 
     async def _publisher_loop(self) -> None:
         """Background task that dequeues and publishes events to Kafka.
