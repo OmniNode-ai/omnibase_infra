@@ -219,8 +219,34 @@ class ModelRuntimeContractConfig(BaseModel):
             **Non-standard __bool__ behavior**: This model overrides ``__bool__`` to
             return ``True`` only when all contracts were loaded successfully.
 
+        Note:
+            **Edge case - no contracts found**: Returns ``False`` when
+            ``total_contracts_found == 0``, even if ``total_errors == 0``.
+            This is intentional: an empty result (no contracts discovered)
+            should trigger explicit handling by the caller rather than
+            silently proceeding as if everything succeeded.
+
+        Example:
+            >>> # Empty config with no errors still returns False
+            >>> config = ModelRuntimeContractConfig()
+            >>> bool(config)
+            False
+            >>> config.total_errors
+            0
+            >>> config.total_contracts_found
+            0
+            >>>
+            >>> # Only returns True when contracts are found AND no errors
+            >>> config_with_contracts = ModelRuntimeContractConfig(
+            ...     total_contracts_found=1,
+            ...     total_contracts_loaded=1,
+            ... )
+            >>> bool(config_with_contracts)
+            True
+
         Returns:
-            True if all contracts loaded successfully, False otherwise.
+            True if all contracts loaded successfully (requires at least one
+            contract found and zero errors), False otherwise.
         """
         return self.all_successful
 

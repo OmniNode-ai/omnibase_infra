@@ -29,7 +29,6 @@ Example:
     >>> from pathlib import Path
     >>> from omnibase_infra.runtime import RuntimeContractConfigLoader
     >>>
-    >>> # Uses TRUSTED_HANDLER_NAMESPACE_PREFIXES by default
     >>> loader = RuntimeContractConfigLoader()
     >>> config = loader.load_all_contracts(
     ...     search_paths=[Path("src/omnibase_infra/nodes")],
@@ -52,9 +51,6 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.bindings import ModelOperationBindingsSubcontract
 from omnibase_infra.models.routing import ModelRoutingSubcontract
-from omnibase_infra.runtime.constants_security import (
-    TRUSTED_HANDLER_NAMESPACE_PREFIXES,
-)
 from omnibase_infra.runtime.contract_loaders.handler_routing_loader import (
     load_handler_routing_subcontract,
 )
@@ -81,13 +77,7 @@ class RuntimeContractConfigLoader:
     (handler_routing, operation_bindings) at startup. Individual loaders
     are delegated to for specific subcontract types.
 
-    Attributes:
-        allowed_namespaces: Optional list of allowed namespace prefixes for
-            handler module imports. If set, handler modules outside these
-            namespaces will be rejected for security.
-
     Example:
-        >>> # Default: uses TRUSTED_HANDLER_NAMESPACE_PREFIXES
         >>> loader = RuntimeContractConfigLoader()
         >>> config = loader.load_all_contracts(
         ...     search_paths=[Path("src/nodes")],
@@ -96,30 +86,17 @@ class RuntimeContractConfigLoader:
         ...     print("All contracts loaded successfully")
 
     Note:
-        The allowed_namespaces parameter is passed through to the
-        handler routing loader for security validation. See CLAUDE.md
-        Handler Plugin Loader security patterns.
+        Namespace allowlisting for handler imports is configured at the
+        HandlerPluginLoader layer, not at this config loading layer.
+        See CLAUDE.md Handler Plugin Loader security patterns.
     """
 
-    def __init__(self, allowed_namespaces: list[str] | None = None) -> None:
-        """Initialize loader with optional namespace restrictions.
+    def __init__(self) -> None:
+        """Initialize the contract config loader.
 
-        Args:
-            allowed_namespaces: Optional list of allowed namespace prefixes
-                for handler module imports. If None, defaults to
-                TRUSTED_HANDLER_NAMESPACE_PREFIXES (omnibase_core., omnibase_infra.).
-                Pass an explicit list to extend or override the defaults.
-
-        Security:
-            The default namespaces form a security boundary. Only extend
-            this list via explicit security configuration, not env vars.
-            See constants_security.py for rationale.
+        The loader is stateless and delegates to individual subcontract
+        loaders for handler_routing and operation_bindings sections.
         """
-        self._allowed_namespaces = (
-            allowed_namespaces
-            if allowed_namespaces is not None
-            else list(TRUSTED_HANDLER_NAMESPACE_PREFIXES)
-        )
 
     def load_all_contracts(
         self,
@@ -271,6 +248,15 @@ class RuntimeContractConfigLoader:
 
         Returns:
             ModelContractLoadResult with loaded subcontracts or error.
+
+        Note:
+            Empty operation_bindings sections (present in YAML but containing
+            no bindings or global_bindings) are intentionally treated as "not
+            present" and result in operation_bindings=None. This simplifies
+            downstream consumers who only need to check for None rather than
+            also checking for empty collections. Callers cannot distinguish
+            between "section missing from YAML" and "section present but empty"
+            - both result in operation_bindings=None.
         """
         logger.debug(
             "Loading contract: %s (correlation_id=%s)",
@@ -328,7 +314,10 @@ class RuntimeContractConfigLoader:
                     len(operation_bindings.global_bindings or []),
                 )
             else:
-                # Empty bindings - treat as not present
+                # NOTE: Empty operation_bindings sections (present but no bindings) are
+                # intentionally converted to None. This simplifies downstream consumers
+                # who only care about actionable configuration. Callers cannot distinguish
+                # "missing section" from "empty section" - both result in None.
                 logger.debug(
                     "No operation_bindings content in %s (empty section)",
                     contract_path,
