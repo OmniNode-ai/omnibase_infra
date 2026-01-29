@@ -23,6 +23,8 @@ Expected Behavior:
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import UUID, uuid4
 
 import pytest
@@ -888,3 +890,148 @@ class TestKafkaContractSourceExports:
         assert TOPIC_SUFFIX_CONTRACT_DEREGISTERED == CORE_DEREG
         assert "contract-registered" in TOPIC_SUFFIX_CONTRACT_REGISTERED
         assert "contract-deregistered" in TOPIC_SUFFIX_CONTRACT_DEREGISTERED
+
+
+# =============================================================================
+# Thread Safety Tests
+# =============================================================================
+
+
+class TestKafkaContractSourceThreadSafety:
+    """Tests for thread-safe concurrent access to cache."""
+
+    def test_concurrent_registrations(self) -> None:
+        """Multiple threads registering contracts should not cause race conditions.
+
+        Verify that concurrent calls to on_contract_registered() are thread-safe
+        and all registrations complete successfully without data corruption.
+        """
+        source = KafkaContractSource()
+        num_threads = 10
+        contracts_per_thread = 5
+
+        def register_contracts(thread_id: int) -> list[bool]:
+            results = []
+            for i in range(contracts_per_thread):
+                yaml_content = MINIMAL_HANDLER_CONTRACT_YAML.format(
+                    handler_id=f"handler.thread{thread_id}.contract{i}",
+                    name=f"Handler Thread {thread_id} Contract {i}",
+                )
+                success = source.on_contract_registered(
+                    node_name=f"node.thread{thread_id}.contract{i}",
+                    contract_yaml=yaml_content,
+                )
+                results.append(success)
+            return results
+
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = [
+                executor.submit(register_contracts, i) for i in range(num_threads)
+            ]
+            all_results = []
+            for future in as_completed(futures):
+                all_results.extend(future.result())
+
+        # All registrations should succeed
+        assert all(all_results)
+        assert source.cached_count == num_threads * contracts_per_thread
+
+    def test_concurrent_deregistrations(self) -> None:
+        """Multiple threads deregistering contracts should not cause race conditions."""
+        source = KafkaContractSource()
+        num_contracts = 50
+
+        # Pre-register contracts
+        for i in range(num_contracts):
+            yaml_content = MINIMAL_HANDLER_CONTRACT_YAML.format(
+                handler_id=f"handler.item{i}",
+                name=f"Handler {i}",
+            )
+            source.on_contract_registered(
+                node_name=f"node.item{i}",
+                contract_yaml=yaml_content,
+            )
+        assert source.cached_count == num_contracts
+
+        def deregister_contracts(start: int, count: int) -> list[bool]:
+            results = []
+            for i in range(start, start + count):
+                removed = source.on_contract_deregistered(node_name=f"node.item{i}")
+                results.append(removed)
+            return results
+
+        num_threads = 5
+        contracts_per_thread = num_contracts // num_threads
+
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = [
+                executor.submit(
+                    deregister_contracts, i * contracts_per_thread, contracts_per_thread
+                )
+                for i in range(num_threads)
+            ]
+            all_results = []
+            for future in as_completed(futures):
+                all_results.extend(future.result())
+
+        # All deregistrations should succeed
+        assert all(all_results)
+        assert source.cached_count == 0
+
+    def test_concurrent_mixed_operations(self) -> None:
+        """Mixed concurrent operations should be thread-safe.
+
+        Tests simultaneous registration, deregistration, and discovery.
+        """
+        source = KafkaContractSource(graceful_mode=True)
+        num_iterations = 20
+        errors: list[Exception] = []
+
+        def register_worker() -> None:
+            try:
+                for i in range(num_iterations):
+                    yaml_content = MINIMAL_HANDLER_CONTRACT_YAML.format(
+                        handler_id=f"handler.reg.item{i}",
+                        name=f"Handler Reg {i}",
+                    )
+                    source.on_contract_registered(
+                        node_name=f"node.reg.item{i}",
+                        contract_yaml=yaml_content,
+                    )
+            except Exception as e:
+                errors.append(e)
+
+        def deregister_worker() -> None:
+            try:
+                for i in range(num_iterations):
+                    source.on_contract_deregistered(node_name=f"node.reg.item{i}")
+            except Exception as e:
+                errors.append(e)
+
+        def discover_worker() -> None:
+            import asyncio
+
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    for _ in range(num_iterations):
+                        loop.run_until_complete(source.discover_handlers())
+                finally:
+                    loop.close()
+            except Exception as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=register_worker),
+            threading.Thread(target=deregister_worker),
+            threading.Thread(target=discover_worker),
+        ]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # No exceptions should have occurred
+        assert len(errors) == 0, f"Thread safety errors: {errors}"

@@ -35,6 +35,7 @@ See Also:
 from __future__ import annotations
 
 import logging
+import threading
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -87,6 +88,13 @@ class KafkaContractSource(ProtocolContractSource):
     is read-only from the discover_handlers() perspective - it simply returns
     whatever has been cached from events.
 
+    Thread Safety:
+        This class is thread-safe. All access to the internal cache
+        (``_cached_descriptors``) and error list (``_pending_errors``) is
+        protected by a ``threading.Lock``. Multiple Kafka consumer threads
+        may safely call ``on_contract_registered()`` and
+        ``on_contract_deregistered()`` concurrently.
+
     Attributes:
         source_type: Returns "KAFKA_EVENTS" as the source type identifier.
 
@@ -138,6 +146,10 @@ class KafkaContractSource(ProtocolContractSource):
         # These are cleared on each discover_handlers() call
         self._pending_errors: list[ModelHandlerValidationError] = []
 
+        # Lock for thread-safe access to _cached_descriptors and _pending_errors
+        # Required because Kafka consumer callbacks may run on multiple threads
+        self._lock = threading.Lock()
+
         logger.info(
             "KafkaContractSource initialized",
             extra={
@@ -163,7 +175,8 @@ class KafkaContractSource(ProtocolContractSource):
         Returns:
             Number of handler descriptors currently cached.
         """
-        return len(self._cached_descriptors)
+        with self._lock:
+            return len(self._cached_descriptors)
 
     async def discover_handlers(self) -> ModelContractDiscoveryResult:
         """Return cached descriptors from contract events.
@@ -176,14 +189,16 @@ class KafkaContractSource(ProtocolContractSource):
             ModelContractDiscoveryResult with cached descriptors and any
             validation errors encountered during event processing.
         """
-        # Collect pending errors and clear them
-        errors = list(self._pending_errors)
-        self._pending_errors.clear()
+        # Atomically collect and clear pending state
+        with self._lock:
+            errors = list(self._pending_errors)
+            self._pending_errors.clear()
+            descriptors = list(self._cached_descriptors.values())
 
         logger.info(
             "Handler discovery completed (KAFKA_EVENTS mode)",
             extra={
-                "cached_descriptor_count": len(self._cached_descriptors),
+                "cached_descriptor_count": len(descriptors),
                 "validation_error_count": len(errors),
                 "environment": self._environment,
                 "correlation_id": str(self._correlation_id),
@@ -191,7 +206,7 @@ class KafkaContractSource(ProtocolContractSource):
         )
 
         return ModelContractDiscoveryResult(
-            descriptors=list(self._cached_descriptors.values()),
+            descriptors=descriptors,
             validation_errors=errors,
         )
 
@@ -237,7 +252,8 @@ class KafkaContractSource(ProtocolContractSource):
                 contract_yaml=contract_yaml,
                 correlation_id=event_correlation,
             )
-            self._cached_descriptors[node_name] = descriptor
+            with self._lock:
+                self._cached_descriptors[node_name] = descriptor
 
             logger.info(
                 "Contract registered and cached",
@@ -258,7 +274,8 @@ class KafkaContractSource(ProtocolContractSource):
             )
 
             if self._graceful_mode:
-                self._pending_errors.append(error)
+                with self._lock:
+                    self._pending_errors.append(error)
                 logger.warning(
                     "Contract registration failed (graceful mode)",
                     extra={
@@ -294,7 +311,8 @@ class KafkaContractSource(ProtocolContractSource):
         """
         event_correlation = correlation_id or uuid4()
 
-        removed = self._cached_descriptors.pop(node_name, None)
+        with self._lock:
+            removed = self._cached_descriptors.pop(node_name, None)
 
         if removed:
             logger.info(
@@ -492,9 +510,10 @@ class KafkaContractSource(ProtocolContractSource):
         Returns:
             Number of descriptors that were cleared.
         """
-        count = len(self._cached_descriptors)
-        self._cached_descriptors.clear()
-        self._pending_errors.clear()
+        with self._lock:
+            count = len(self._cached_descriptors)
+            self._cached_descriptors.clear()
+            self._pending_errors.clear()
 
         logger.info(
             "Contract cache cleared",
