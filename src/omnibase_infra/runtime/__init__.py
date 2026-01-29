@@ -254,6 +254,9 @@ from omnibase_infra.runtime.registry_contract_source import (
     store_contract_in_consul,
 )
 
+# Kafka contract source (OMN-1654)
+from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
+
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
 from omnibase_infra.runtime.chain_aware_dispatch import (
     ChainAwareDispatcher,
@@ -413,4 +416,6 @@ __all__: list[str] = [
     "delete_contract_from_consul",
     "list_contracts_in_consul",
     "store_contract_in_consul",
+    # Kafka contract source (OMN-1654)
+    "KafkaContractSource",
 ]
