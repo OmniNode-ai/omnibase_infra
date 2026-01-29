@@ -246,8 +246,8 @@ class EmitDaemon:
                 path=str(self._config.socket_path),
             )
 
-            # Set socket permissions (readable/writable by owner and group)
-            self._config.socket_path.chmod(0o660)
+            # Set socket permissions (configurable, defaults to owner and group read/write)
+            self._config.socket_path.chmod(self._config.socket_permissions)
 
             # Start publisher loop as background task
             self._publisher_task = asyncio.create_task(self._publisher_loop())
@@ -580,6 +580,15 @@ class EmitDaemon:
         """
         logger.info("Publisher loop started")
 
+        # NOTE: Using non-locking total_size() is intentional here.
+        # While this creates a theoretical race condition during shutdown
+        # (a concurrent enqueue could complete after the size check but before
+        # the loop re-evaluates), it avoids lock contention in this hot loop.
+        # For fire-and-forget semantics, this trade-off is acceptable - events
+        # queued during the final shutdown window may be lost, which is
+        # documented behavior (see shutdown_drain_seconds config and the
+        # drain_to_spool() call in stop()). The queue's total_size_locked()
+        # method exists for cases requiring accurate counts.
         while self._running or self._queue.total_size() > 0:
             try:
                 # Dequeue next event
@@ -607,9 +616,12 @@ class EmitDaemon:
                             },
                         )
                     else:
-                        # Re-queue with backoff
-                        backoff = self._config.backoff_base_seconds * (
+                        # Re-queue with backoff (capped to prevent excessive delays)
+                        uncapped_backoff = self._config.backoff_base_seconds * (
                             2 ** (event.retry_count - 1)
+                        )
+                        backoff = min(
+                            uncapped_backoff, self._config.max_backoff_seconds
                         )
                         logger.warning(
                             f"Publish failed for {event.event_id}, retry {event.retry_count}/{self._config.max_retry_attempts} in {backoff}s",

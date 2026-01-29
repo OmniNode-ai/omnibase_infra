@@ -17,11 +17,13 @@ Environment Variable Overrides:
     EMIT_DAEMON_SOCKET_PATH: Override socket_path
     EMIT_DAEMON_PID_PATH: Override pid_path
     EMIT_DAEMON_SPOOL_DIR: Override spool_dir
+    EMIT_DAEMON_SOCKET_PERMISSIONS: Override socket_permissions (octal string, e.g., "660")
     EMIT_DAEMON_KAFKA_BOOTSTRAP_SERVERS: Override kafka_bootstrap_servers
     EMIT_DAEMON_KAFKA_CLIENT_ID: Override kafka_client_id
     EMIT_DAEMON_ENVIRONMENT: Override environment
     EMIT_DAEMON_MAX_RETRY_ATTEMPTS: Override max_retry_attempts
     EMIT_DAEMON_BACKOFF_BASE_SECONDS: Override backoff_base_seconds
+    EMIT_DAEMON_MAX_BACKOFF_SECONDS: Override max_backoff_seconds
 """
 
 from __future__ import annotations
@@ -57,6 +59,7 @@ class ModelEmitDaemonConfig(BaseModel):
         shutdown_drain_seconds: Time to drain queues during graceful shutdown
         max_retry_attempts: Maximum retry attempts before dropping an event
         backoff_base_seconds: Base backoff delay in seconds for exponential backoff
+        max_backoff_seconds: Maximum backoff delay in seconds (caps exponential growth)
 
     Example:
         >>> config = ModelEmitDaemonConfig(
@@ -140,6 +143,18 @@ class ModelEmitDaemonConfig(BaseModel):
         description="Deployment environment (e.g., 'dev', 'staging', 'prod'). Used in topic names.",
     )
 
+    # Socket permissions
+    socket_permissions: int = Field(
+        default=0o660,  # Owner and group read/write
+        ge=0,
+        le=0o777,  # Maximum valid permission mode
+        description=(
+            "Unix permission mode for the socket file. "
+            "Default 0o660 allows owner and group read/write access. "
+            "Use 0o600 for single-user, 0o666 for multi-user development."
+        ),
+    )
+
     # Timeout configurations
     socket_timeout_seconds: float = Field(
         default=5.0,
@@ -172,6 +187,12 @@ class ModelEmitDaemonConfig(BaseModel):
         ge=0.1,
         le=30.0,
         description="Base backoff delay in seconds for exponential backoff",
+    )
+    max_backoff_seconds: float = Field(
+        default=60.0,
+        ge=1.0,
+        le=300.0,
+        description="Maximum backoff delay in seconds (caps exponential growth)",
     )
 
     @field_validator("socket_path", "pid_path", mode="after")
@@ -240,6 +261,38 @@ class ModelEmitDaemonConfig(BaseModel):
                 )
 
         raise OnexError(f"No valid ancestor directory found for spool path: {v}")
+
+    @field_validator("socket_permissions", mode="after")
+    @classmethod
+    def validate_socket_permissions(cls, v: int) -> int:
+        """Validate that socket permissions is a valid Unix permission mode.
+
+        Unix permissions are represented as octal values from 0o000 to 0o777.
+        Each digit represents permissions for owner, group, and others respectively.
+        Values 0-7 encode read (4), write (2), and execute (1) bits.
+
+        Note:
+            The range is already enforced by Field(ge=0, le=0o777), so this
+            validator provides explicit error messages for edge cases.
+
+        Args:
+            v: The permission mode to validate (integer)
+
+        Returns:
+            The validated permission mode
+
+        Raises:
+            OnexError: If the permission mode is invalid
+        """
+        # Range is enforced by Field constraints (ge=0, le=0o777)
+        # This validator provides explicit error messaging
+        if v < 0 or v > 0o777:
+            raise OnexError(
+                f"Invalid socket permissions {oct(v)}. "
+                "Must be between 0o000 and 0o777 (0-511 in decimal)."
+            )
+
+        return v
 
     @field_validator("kafka_bootstrap_servers", mode="after")
     @classmethod
@@ -324,6 +377,7 @@ class ModelEmitDaemonConfig(BaseModel):
             EMIT_DAEMON_SOCKET_PATH -> socket_path
             EMIT_DAEMON_PID_PATH -> pid_path
             EMIT_DAEMON_SPOOL_DIR -> spool_dir
+            EMIT_DAEMON_SOCKET_PERMISSIONS -> socket_permissions (parsed as octal string)
             EMIT_DAEMON_KAFKA_BOOTSTRAP_SERVERS -> kafka_bootstrap_servers
             EMIT_DAEMON_KAFKA_CLIENT_ID -> kafka_client_id
             EMIT_DAEMON_MAX_PAYLOAD_BYTES -> max_payload_bytes
@@ -335,6 +389,7 @@ class ModelEmitDaemonConfig(BaseModel):
             EMIT_DAEMON_SHUTDOWN_DRAIN_SECONDS -> shutdown_drain_seconds
             EMIT_DAEMON_MAX_RETRY_ATTEMPTS -> max_retry_attempts
             EMIT_DAEMON_BACKOFF_BASE_SECONDS -> backoff_base_seconds
+            EMIT_DAEMON_MAX_BACKOFF_SECONDS -> max_backoff_seconds
 
         Args:
             **kwargs: Base configuration values to use if env vars not set
@@ -351,10 +406,15 @@ class ModelEmitDaemonConfig(BaseModel):
             >>> config.kafka_bootstrap_servers
             'kafka:9092'
         """
-        env_mappings: dict[str, tuple[str, type]] = {
+        # Marker for fields that should be parsed as octal integers
+        OCTAL_INT = "octal_int"
+
+        env_mappings: dict[str, tuple[str, type | str]] = {
             "EMIT_DAEMON_SOCKET_PATH": ("socket_path", Path),
             "EMIT_DAEMON_PID_PATH": ("pid_path", Path),
             "EMIT_DAEMON_SPOOL_DIR": ("spool_dir", Path),
+            # NOTE: socket_permissions uses octal string parsing (e.g., "660" -> 0o660)
+            "EMIT_DAEMON_SOCKET_PERMISSIONS": ("socket_permissions", OCTAL_INT),
             "EMIT_DAEMON_KAFKA_BOOTSTRAP_SERVERS": ("kafka_bootstrap_servers", str),
             "EMIT_DAEMON_KAFKA_CLIENT_ID": ("kafka_client_id", str),
             "EMIT_DAEMON_ENVIRONMENT": ("environment", str),
@@ -367,6 +427,7 @@ class ModelEmitDaemonConfig(BaseModel):
             "EMIT_DAEMON_SHUTDOWN_DRAIN_SECONDS": ("shutdown_drain_seconds", float),
             "EMIT_DAEMON_MAX_RETRY_ATTEMPTS": ("max_retry_attempts", int),
             "EMIT_DAEMON_BACKOFF_BASE_SECONDS": ("backoff_base_seconds", float),
+            "EMIT_DAEMON_MAX_BACKOFF_SECONDS": ("max_backoff_seconds", float),
         }
 
         # Build final configuration dict with proper types
@@ -385,6 +446,10 @@ class ModelEmitDaemonConfig(BaseModel):
                 try:
                     if field_type is Path:
                         final_config[field_name] = Path(env_value)
+                    elif field_type == OCTAL_INT:
+                        # Parse as octal string (e.g., "660" -> 0o660 = 432)
+                        # Handles both "660" and "0o660" formats
+                        final_config[field_name] = int(env_value, 8)
                     elif field_type is int:
                         final_config[field_name] = int(env_value)
                     elif field_type is float:
