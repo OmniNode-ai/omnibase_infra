@@ -78,12 +78,14 @@ class ProtocolLedgerPersistence(Protocol):
         self,
         correlation_id: UUID,
         limit: int = 100,
+        offset: int = 0,
     ) -> list[ModelLedgerEntry]:
         """Query ledger entries by correlation ID for distributed tracing.
 
         Args:
             correlation_id: The correlation ID to search for.
             limit: Maximum number of entries to return (default: 100).
+            offset: Number of entries to skip for pagination (default: 0).
 
         Returns:
             List of ModelLedgerEntry matching the correlation ID,

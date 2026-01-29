@@ -25,7 +25,6 @@ Design Decision - Single Handler with Internal Routing:
 
 from __future__ import annotations
 
-import base64
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -234,6 +233,7 @@ class HandlerLedgerQuery:
             sql=_SQL_QUERY_BY_CORRELATION_ID,
             parameters=[str(correlation_id), limit, offset],
             operation="ledger.query.by_correlation_id",
+            correlation_id=correlation_id,
         )
 
         return [self._row_to_entry(row) for row in rows]
@@ -242,6 +242,7 @@ class HandlerLedgerQuery:
         self,
         start: datetime,
         end: datetime,
+        correlation_id: UUID,
         event_type: str | None = None,
         topic: str | None = None,
         limit: int = _DEFAULT_LIMIT,
@@ -252,6 +253,7 @@ class HandlerLedgerQuery:
         Args:
             start: Start of time range (inclusive).
             end: End of time range (exclusive).
+            correlation_id: Correlation ID for distributed tracing.
             event_type: Optional filter by event type.
             topic: Optional filter by Kafka topic.
             limit: Maximum entries to return (default: 100, max: 10000).
@@ -281,6 +283,7 @@ class HandlerLedgerQuery:
             sql=sql,
             parameters=parameters,
             operation="ledger.query.by_time_range",
+            correlation_id=correlation_id,
         )
 
         return [self._row_to_entry(row) for row in rows]
@@ -288,6 +291,7 @@ class HandlerLedgerQuery:
     async def query(
         self,
         query: ModelLedgerQuery,
+        correlation_id: UUID,
     ) -> ModelLedgerQueryResult:
         """Execute a query using the ModelLedgerQuery parameters.
 
@@ -295,6 +299,7 @@ class HandlerLedgerQuery:
 
         Args:
             query: Query parameters model.
+            correlation_id: Correlation ID for distributed tracing.
 
         Returns:
             ModelLedgerQueryResult with entries, total_count, and has_more.
@@ -313,6 +318,7 @@ class HandlerLedgerQuery:
             entries = await self.query_by_time_range(
                 start=query.start_time,
                 end=query.end_time,
+                correlation_id=correlation_id,
                 event_type=query.event_type,
                 topic=query.topic,
                 limit=query.limit,
@@ -321,6 +327,7 @@ class HandlerLedgerQuery:
             total_count = await self._count_by_time_range(
                 start=query.start_time,
                 end=query.end_time,
+                correlation_id=correlation_id,
                 event_type=query.event_type,
                 topic=query.topic,
             )
@@ -328,6 +335,7 @@ class HandlerLedgerQuery:
             # No specific query criteria - would return all events
             # This is likely an error or needs explicit "get all" operation
             ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="ledger.query",
             )
@@ -386,7 +394,7 @@ class HandlerLedgerQuery:
         query = ModelLedgerQuery.model_validate(payload_raw)
 
         # Execute query
-        result = await self.query(query)
+        result = await self.query(query, correlation_id=correlation_id)
 
         return ModelHandlerOutput.for_compute(
             input_envelope_id=input_envelope_id,
@@ -424,6 +432,7 @@ class HandlerLedgerQuery:
         sql: str,
         parameters: list[object],
         operation: str,
+        correlation_id: UUID,
     ) -> list[dict[str, object]]:
         """Execute a query via HandlerDb and return rows."""
         envelope: dict[str, object] = {
@@ -432,6 +441,7 @@ class HandlerLedgerQuery:
                 "sql": sql,
                 "parameters": parameters,
             },
+            "correlation_id": str(correlation_id),
         }
 
         db_result = await self._db_handler.execute(envelope)
@@ -445,6 +455,7 @@ class HandlerLedgerQuery:
             sql=_SQL_COUNT_BY_CORRELATION_ID,
             parameters=[str(correlation_id)],
             operation="ledger.query.count",
+            correlation_id=correlation_id,
         )
         if rows and rows[0].get("total") is not None:
             return int(str(rows[0]["total"]))
@@ -454,6 +465,7 @@ class HandlerLedgerQuery:
         self,
         start: datetime,
         end: datetime,
+        correlation_id: UUID,
         event_type: str | None = None,
         topic: str | None = None,
     ) -> int:
@@ -474,6 +486,7 @@ class HandlerLedgerQuery:
             sql=count_sql,
             parameters=parameters,
             operation="ledger.query.count",
+            correlation_id=correlation_id,
         )
         if rows and rows[0].get("total") is not None:
             return int(str(rows[0]["total"]))
