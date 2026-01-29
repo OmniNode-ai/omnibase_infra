@@ -14,8 +14,8 @@
 -- Uses Kafka position tracking for exactly-once semantics during event replay.
 
 CREATE TABLE IF NOT EXISTS contracts (
-    -- Identity (deterministic - for dedupe)
-    contract_id UUID PRIMARY KEY,
+    -- Identity (derived natural key: node_name:major.minor.patch)
+    contract_id TEXT PRIMARY KEY,
     node_name TEXT NOT NULL,
     version_major INT NOT NULL,
     version_minor INT NOT NULL,
@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS topics (
     topic_suffix TEXT PRIMARY KEY,
     direction TEXT NOT NULL,
 
-    -- Which contracts reference this topic (JSON array of UUIDs)
+    -- Which contracts reference this topic (JSON array of contract_id strings)
     contract_ids JSONB NOT NULL DEFAULT '[]',
 
     -- Lifecycle
@@ -145,7 +145,7 @@ CREATE TRIGGER trigger_topics_updated_at
 -- ============================================================================
 
 COMMENT ON TABLE contracts IS 'ONEX contract registry for NodeContractRegistryReducer (OMN-1653). Stores registered contracts with full YAML for replay.';
-COMMENT ON COLUMN contracts.contract_id IS 'Deterministic UUID from contract metadata or generated hash';
+COMMENT ON COLUMN contracts.contract_id IS 'Derived natural key: node_name:major.minor.patch (e.g., my-node:1.0.0)';
 COMMENT ON COLUMN contracts.node_name IS 'ONEX node name from contract metadata';
 COMMENT ON COLUMN contracts.version_major IS 'Semantic version major component';
 COMMENT ON COLUMN contracts.version_minor IS 'Semantic version minor component';
@@ -163,7 +163,7 @@ COMMENT ON COLUMN contracts.last_event_offset IS 'Kafka offset of last processed
 COMMENT ON TABLE topics IS 'Topic suffixes referenced by contracts for routing discovery (OMN-1653). Uses 5-segment naming.';
 COMMENT ON COLUMN topics.topic_suffix IS 'Topic suffix without environment prefix, e.g., onex.evt.platform.contract-registered.v1';
 COMMENT ON COLUMN topics.direction IS 'Whether contract publishes to or subscribes from this topic';
-COMMENT ON COLUMN topics.contract_ids IS 'JSON array of contract UUIDs that reference this topic';
+COMMENT ON COLUMN topics.contract_ids IS 'JSON array of contract_id strings that reference this topic';
 COMMENT ON COLUMN topics.first_seen_at IS 'Timestamp when topic was first seen in any contract';
 COMMENT ON COLUMN topics.last_seen_at IS 'Timestamp when topic was last seen in any contract';
 COMMENT ON COLUMN topics.is_active IS 'Whether topic is currently referenced by any active contract';

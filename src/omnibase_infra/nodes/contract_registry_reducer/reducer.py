@@ -115,21 +115,25 @@ ContractRegistryEvent = (
 # =============================================================================
 
 # Target processing time for reduce() method (<300ms per event)
+# ONEX_EXCLUDE: io_audit - Module-level config loaded at import, reduce() remains pure
 PERF_THRESHOLD_REDUCE_MS: float = float(
     os.getenv("ONEX_PERF_THRESHOLD_CONTRACT_REDUCE_MS", "300.0")
 )
 
 # Target processing time for intent building (<50ms per intent)
+# ONEX_EXCLUDE: io_audit - Module-level config loaded at import, reduce() remains pure
 PERF_THRESHOLD_INTENT_BUILD_MS: float = float(
     os.getenv("ONEX_PERF_THRESHOLD_CONTRACT_INTENT_BUILD_MS", "50.0")
 )
 
 # Target processing time for staleness computation (<100ms)
+# ONEX_EXCLUDE: io_audit - Module-level config loaded at import, reduce() remains pure
 PERF_THRESHOLD_STALENESS_CHECK_MS: float = float(
     os.getenv("ONEX_PERF_THRESHOLD_STALENESS_CHECK_MS", "100.0")
 )
 
 # Staleness threshold (contracts without heartbeat for this duration are stale)
+# ONEX_EXCLUDE: io_audit - Module-level config loaded at import, reduce() remains pure
 STALENESS_THRESHOLD_SECONDS: int = int(
     os.getenv("ONEX_CONTRACT_STALENESS_THRESHOLD_SECONDS", "300")
 )
@@ -206,6 +210,18 @@ class ContractRegistryReducer:
         offset_raw = event_metadata.get("offset", 0)
         partition = int(partition_raw) if isinstance(partition_raw, (int, str)) else 0
         offset = int(offset_raw) if isinstance(offset_raw, (int, str)) else 0
+
+        # Warn if metadata is incomplete (could cause idempotency issues)
+        if not topic or partition_raw == 0 or offset_raw == 0:
+            _logger.warning(
+                "Event metadata incomplete - idempotency may be compromised",
+                extra={
+                    "topic": topic,
+                    "partition": partition,
+                    "offset": offset,
+                    "event_type": type(event).__name__,
+                },
+            )
 
         # Idempotency guard - skip if we've already processed this event
         if state.is_duplicate_event(topic, partition, offset):
