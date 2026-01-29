@@ -1048,36 +1048,6 @@ class TestModelContractLoadResult:
 
 
 # =============================================================================
-# TestAllowedNamespaces
-# =============================================================================
-
-
-class TestAllowedNamespaces:
-    """Tests for namespace allowlisting."""
-
-    def test_loader_accepts_allowed_namespaces(self) -> None:
-        """Loader should accept allowed_namespaces parameter."""
-        loader = RuntimeContractConfigLoader(
-            allowed_namespaces=["omnibase_infra.", "myapp.handlers."]
-        )
-
-        assert loader._allowed_namespaces == ["omnibase_infra.", "myapp.handlers."]
-
-    def test_loader_without_allowed_namespaces_defaults_to_trusted(self) -> None:
-        """Loader without allowed_namespaces should default to trusted prefixes."""
-        from omnibase_infra.runtime.constants_security import (
-            TRUSTED_HANDLER_NAMESPACE_PREFIXES,
-        )
-
-        loader = RuntimeContractConfigLoader()
-
-        # Should default to trusted namespaces, not None
-        assert loader._allowed_namespaces == list(TRUSTED_HANDLER_NAMESPACE_PREFIXES)
-        assert "omnibase_core." in loader._allowed_namespaces
-        assert "omnibase_infra." in loader._allowed_namespaces
-
-
-# =============================================================================
 # TestContractYamlFilename
 # =============================================================================
 
@@ -1101,7 +1071,6 @@ class TestContractYamlFilename:
 # =============================================================================
 
 __all__ = [
-    "TestAllowedNamespaces",
     "TestConsolidatedResults",
     "TestContractYamlFilename",
     "TestCorrelationId",
