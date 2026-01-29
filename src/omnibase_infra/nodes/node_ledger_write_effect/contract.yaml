@@ -117,26 +117,37 @@ io_operations:
       - total_count: "int"
       - has_more: "bool"
     idempotent: true
-# Handler routing (wraps database handler for PostgreSQL operations)
+# Handler routing for ledger operations
+# Handlers compose with HandlerDb for PostgreSQL operations
 handler_routing:
   routing_strategy: "operation_match"
-  default_handler: "postgres"
   handlers:
-    - handler_type: "postgres"
-      handler:
-        name: "HandlerDb"
-        module: "omnibase_infra.handlers.handler_db"
-      description: "PostgreSQL database handler for ledger storage"
-      supported_operations:
-        - "ledger.append"
-        - "ledger.query"
+    - operation: "ledger.append"
+      handler_class: "HandlerLedgerAppend"
+      handler_module: "omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_append"
+      description: "Idempotent append to event ledger with duplicate detection"
+    - operation: "ledger.query"
+      handler_class: "HandlerLedgerQuery"
+      handler_module: "omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_query"
+      description: "Query ledger by correlation_id, time_range, event_type, topic"
 # Dependencies (protocols this node requires)
+# Note: Ledger handlers compose with HandlerDb internally
 dependencies:
+  - name: "handler_ledger_append"
+    type: "handler"
+    class_name: "HandlerLedgerAppend"
+    module: "omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_append"
+    description: "Handler for idempotent ledger append operations"
+  - name: "handler_ledger_query"
+    type: "handler"
+    class_name: "HandlerLedgerQuery"
+    module: "omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_query"
+    description: "Handler for ledger query operations"
   - name: "handler_db"
     type: "handler"
     class_name: "HandlerDb"
     module: "omnibase_infra.handlers.handler_db"
-    description: "Database handler for PostgreSQL operations"
+    description: "PostgreSQL database handler (composed by ledger handlers)"
 # Error handling configuration
 error_handling:
   retry_policy:
