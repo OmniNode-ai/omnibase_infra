@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeLedgerProjectionCompute
+#
+# COMPUTE node that subscribes to 7 platform event topics for event ledger
+# persistence. This node projects events from the platform event bus into
+# the audit ledger for complete traceability and debugging support.
+#
+# The node subscribes with consumer_purpose="audit" and auto_offset_reset="earliest"
+# to ensure no events are missed and all historical events are captured.
+#
+# Related Tickets:
+#   - OMN-1646: Event Ledger Schema and Models
+#   - OMN-1647: Ledger Write Effect Node
+#   - OMN-1648: Ledger Projection Compute Node
+# Contract identifiers
+name: "node_ledger_projection_compute"
+contract_name: "node_ledger_projection_compute"
+node_name: "node_ledger_projection_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "0.1.0"
+# Node type - COMPUTE for event projection logic
+node_type: "COMPUTE_GENERIC"
+# Description
+description: >
+  COMPUTE node that subscribes to 7 platform event topics for event ledger persistence. Projects events from the platform event bus into the audit ledger, enabling complete traceability and debugging support. Uses consumer_purpose="audit" to indicate non-processing read-only consumption and auto_offset_reset="earliest" to capture all historical events.
+
+# Event bus configuration
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  # Subscribe to all 7 platform event topics for complete audit coverage
+  subscribe_topics:
+    # Node lifecycle events
+    - "onex.evt.platform.node-registration.v1"
+    - "onex.evt.platform.node-introspection.v1"
+    - "onex.evt.platform.node-heartbeat.v1"
+    # Introspection commands
+    - "onex.cmd.platform.request-introspection.v1"
+    # FSM state tracking
+    - "onex.evt.platform.fsm-state-transitions.v1"
+    # Runtime coordination
+    - "onex.intent.platform.runtime-tick.v1"
+    # State snapshots
+    - "onex.snapshot.platform.registration-snapshots.v1"
+  # Audit consumer - read-only, non-processing consumption for ledger persistence
+  consumer_purpose: "audit"
+  # Start from earliest offset to capture all historical events
+  auto_offset_reset: "earliest"
+  # Consumer group for ledger projection
+  consumer_group: "onex-ledger-projection-compute"
+# Strongly typed I/O models
+input_model:
+  name: "ModelEventMessage"
+  module: "omnibase_infra.event_bus.models.model_event_message"
+  description: >
+    Kafka event message containing raw bytes payload and headers. The compute node processes events from all 7 subscribed topics.
+
+output_model:
+  name: "ModelPayloadLedgerAppend"
+  module: "omnibase_infra.nodes.reducers.models.model_payload_ledger_append"
+  description: >
+    Ledger append payload to be passed to NodeLedgerWriteEffect. Contains the event data with Kafka position for idempotent writes.
+
+# Capabilities provided by this node
+capabilities:
+  - name: "ledger.projection"
+    description: "Project platform events into the audit ledger"
+    version: "0.1.0"
+  - name: "ledger.projection.multi_topic"
+    description: "Subscribe to multiple platform topics for comprehensive event capture"
+  - name: "ledger.projection.audit"
+    description: "Non-processing, read-only event consumption for audit purposes"
+# Dependencies (protocols this node requires)
+dependencies:
+  - name: "node_ledger_write_effect"
+    type: "node"
+    class_name: "NodeLedgerWriteEffect"
+    module: "omnibase_infra.nodes.node_ledger_write_effect"
+    description: "Effect node for writing events to the PostgreSQL audit ledger"
+  - name: "protocol_event_envelope"
+    type: "protocol"
+    description: "Protocol for parsing and handling event envelopes"
+    optional: false
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-01-29"
+  ticket: "OMN-1648"
+  tags:
+    - compute
+    - ledger
+    - audit
+    - projection
+    - multi-topic
+    - platform-events
