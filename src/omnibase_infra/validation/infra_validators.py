@@ -429,14 +429,18 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #                    ast.FunctionDef | ast.AsyncFunctionDef for AST method type checking
 # - 105 (2026-01-21): Contract-driven handler config loading (+4 unions)
 #                     ModelHandlerContract transport config fields and lifecycle types
+# - 108 (2026-01-27): OMN-1518 declarative operation bindings (+3 unions)
+#                     ModelEventEnvelope[object] | dict[str, object] for materialized
+#                     envelopes in dispatch engine (3 occurrences in type aliases)
+# - 105 (2026-01-27): OMN-1518 simplify to always-dict envelope format (-3 unions)
+#                     Removed hybrid union types by always materializing to dict format
+#                     Dispatchers now receive consistent dict[str, object] with __bindings
 # - 112 (2026-01-27): OMN-1610 emit daemon for persistent Kafka connections (+7 unions)
 #                     BoundedEventQueue, EmitClient, EventRegistry return types
-# - 113 (2026-01-29): OMN-1610 emit daemon code review fixes (+1 union)
-#                     env_mappings type annotation for socket_permissions octal parsing
-# - 111 (2026-01-29): OMN-1610 refactor with_env_overrides() to use strongly typed input model (-2 unions)
-#                     Replaced dict[str, Path | str | int | float] with ModelEmitDaemonConfigInput
-#                     Changed env_mappings from dict[str, tuple[str, type | str]] to dict[str, tuple[str, object]]
-INFRA_MAX_UNIONS = 111
+# - 112 (2026-01-29): OMN-1610 emit daemon + refactor to strongly typed input model
+#                     BoundedEventQueue, EmitClient, EventRegistry, socket_permissions
+#                     Replaced dict unions with ModelEmitDaemonConfigInput
+INFRA_MAX_UNIONS = 112
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

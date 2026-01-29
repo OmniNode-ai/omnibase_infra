@@ -48,6 +48,7 @@ from omnibase_infra.runtime.models import (
     ModelRuntimeTick,
 )
 from omnibase_infra.runtime.runtime_scheduler import RuntimeScheduler
+from omnibase_infra.topics import SUFFIX_RUNTIME_TICK
 
 # ============================================================================
 # Fixtures
@@ -246,7 +247,7 @@ class TestModelRuntimeSchedulerConfig:
 
         assert config.tick_interval_ms == 1000
         assert config.scheduler_id == "runtime-scheduler-default"
-        assert config.tick_topic == "runtime.tick.v1"
+        assert config.tick_topic == SUFFIX_RUNTIME_TICK
         assert config.persist_sequence_number is True
         assert config.sequence_number_key == "runtime_scheduler_sequence"
         assert config.max_tick_jitter_ms == 100
@@ -1081,7 +1082,7 @@ class TestRuntimeSchedulerConfiguration:
 
         assert config.tick_interval_ms == 1000
         assert config.scheduler_id == "runtime-scheduler-default"
-        assert config.tick_topic == "runtime.tick.v1"
+        assert config.tick_topic == SUFFIX_RUNTIME_TICK
 
     def test_config_jitter_validation(self) -> None:
         """Test max_tick_jitter_ms validation."""

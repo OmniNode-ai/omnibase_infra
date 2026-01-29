@@ -8,6 +8,7 @@ Moved from omniclaude as part of OMN-1526 architectural cleanup.
 from __future__ import annotations
 
 import logging
+from typing import Self
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -42,13 +43,8 @@ class ConfigSessionConsumer(BaseSettings):
 
     # Topics to subscribe
     topics: list[str] = Field(
-        default=[
-            "dev.omniclaude.session.started.v1",
-            "dev.omniclaude.session.ended.v1",
-            "dev.omniclaude.prompt.submitted.v1",
-            "dev.omniclaude.tool.executed.v1",
-        ],
-        description="Kafka topics to consume",
+        default_factory=list,
+        description="Kafka topics to consume. Must be explicitly configured via environment or discovery.",
     )
 
     # Consumer behavior
@@ -96,7 +92,28 @@ class ConfigSessionConsumer(BaseSettings):
     )
 
     @model_validator(mode="after")
-    def validate_timing_relationships(self) -> ConfigSessionConsumer:
+    def validate_topic_configuration(self) -> Self:
+        """Ensure topics are explicitly configured.
+
+        Fails fast if no topics provided, preventing silent misconfiguration.
+
+        Returns:
+            Self if validation passes.
+
+        Raises:
+            ProtocolConfigurationError: If no topics are configured.
+        """
+        if not self.topics:
+            from omnibase_infra.errors import ProtocolConfigurationError
+
+            raise ProtocolConfigurationError(
+                "No topics configured for session consumer. "
+                "Provide explicit 'topics' via configuration or environment variable."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_timing_relationships(self) -> Self:
         """Validate timing relationships between configuration values.
 
         Warns if circuit breaker timeout is very short relative to batch processing,

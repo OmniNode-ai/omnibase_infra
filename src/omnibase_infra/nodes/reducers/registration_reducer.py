@@ -876,6 +876,7 @@ class RegistrationReducer:
             service_name=service_name,
             tags=tags,
             health_check=health_check,
+            event_bus_config=event.event_bus,  # Pass through from introspection event
         )
 
         # ModelIntent.payload expects ProtocolIntentPayload, which our model implements

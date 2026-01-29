@@ -18,6 +18,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.models.registration.model_node_event_bus_config import (
+    ModelNodeEventBusConfig,
+)
+
 # NOTE: ModelIntentPayloadBase was removed in omnibase_core 0.6.2
 # Using pydantic.BaseModel directly as the base class
 
@@ -34,6 +38,8 @@ class ModelPayloadConsulRegister(BaseModel):
         service_name: Service name for Consul service catalog.
         tags: Service tags for filtering and categorization.
         health_check: Optional health check configuration.
+        event_bus_config: Resolved event bus topics for registry storage.
+            If None, node is not included in dynamic topic routing lookups.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -68,6 +74,11 @@ class ModelPayloadConsulRegister(BaseModel):
     health_check: dict[str, str] | None = Field(
         default=None,
         description="Optional health check configuration (HTTP, Interval, Timeout).",
+    )
+
+    event_bus_config: ModelNodeEventBusConfig | None = Field(
+        default=None,
+        description="Resolved event bus topics for registry storage.",
     )
 
 

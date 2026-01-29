@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+# Contract for Database Handler - PostgreSQL database operations
+name: "handler_db"
+node_type: "EFFECT_GENERIC"
+description: "PostgreSQL database handler for query and execute operations using asyncpg"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+input_model:
+  name: "ModelEventEnvelope"
+  module: "omnibase_core.models.events.model_event_envelope"
+output_model:
+  name: "ModelHandlerOutput"
+  module: "omnibase_core.models.dispatch.model_handler_output"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "db"
+      handler:
+        name: "HandlerDb"
+        module: "omnibase_infra.handlers.handler_db"
+      supported_operations:
+        - "db.query"
+        - "db.execute"
+operation_bindings:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  # Guardrail overrides (optional) - customize limits for this handler
+  # Defaults: max_expression_length=256, max_path_segments=20
+  # Bounds: expression_length=[32,1024], path_segments=[3,50]
+  max_expression_length: 512 # Allow longer expressions for complex SQL bindings
+  max_path_segments: 25 # Allow deeper nested paths for complex payloads
+  global_bindings:
+    - parameter_name: "correlation_id"
+      expression: "${envelope.correlation_id}"
+      required: true
+  bindings:
+    "db.query":
+      - parameter_name: "sql"
+        expression: "${payload.sql}"
+        required: true
+      - parameter_name: "parameters"
+        expression: "${payload.parameters}"
+        required: false
+    "db.execute":
+      - parameter_name: "sql"
+        expression: "${payload.sql}"
+        required: true
+      - parameter_name: "parameters"
+        expression: "${payload.parameters}"
+        required: false
+metadata:
+  handler_id: "db-handler"
+  handler_type: "infra_handler"
+  handler_category: "effect"
+  transport_type: "database"
+  security_features:
+    - "Parameterized queries for SQL injection protection"
+    - "DSN credential sanitization"
+    - "Single-statement SQL enforcement"
+  resilience_features:
+    - "Circuit breaker pattern"
+    - "Connection pooling (fixed size: 5)"
+    - "Intelligent error classification (transient vs permanent)"

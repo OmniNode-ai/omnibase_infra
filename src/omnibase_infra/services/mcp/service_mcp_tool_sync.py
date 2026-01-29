@@ -8,7 +8,7 @@ the MCP tool registry in real-time. It supports:
 - Deregistration: Removed orchestrators are removed from tool registry
 - Idempotency: Duplicate/out-of-order events are handled correctly
 
-Event Topic: node.registration.v1
+Event Topic: Uses SUFFIX_NODE_REGISTRATION (onex.evt.platform.node-registration.v1)
 Event Types:
     - registered: New node registered → upsert tool
     - updated: Node updated → upsert tool
@@ -30,6 +30,7 @@ from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.mcp.model_mcp_tool_definition import (
     ModelMCPToolDefinition,
 )
+from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -77,8 +78,8 @@ class ServiceMCPToolSync:
         >>> await sync.stop()
     """
 
-    # Topic for node registration events
-    TOPIC = "node.registration.v1"
+    # Topic for node registration events (uses platform suffix constant)
+    TOPIC = SUFFIX_NODE_REGISTRATION
 
     # MCP tag constants
     TAG_MCP_ENABLED = "mcp-enabled"

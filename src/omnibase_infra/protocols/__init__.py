@@ -8,6 +8,7 @@ components in the ONEX ecosystem.
 Protocols:
     - ProtocolCapabilityProjection: Interface for capability-based projection queries
     - ProtocolCapabilityQuery: Interface for capability-based node discovery service
+    - ProtocolDispatchEngine: Interface for message dispatch engines
     - ProtocolEventBusLike: Interface for event bus abstraction (used by introspection)
     - ProtocolIdempotencyStore: Interface for idempotency checking and deduplication
     - ProtocolMessageDispatcher: Interface for message dispatchers
@@ -63,6 +64,7 @@ from omnibase_infra.protocols.protocol_capability_projection import (
 )
 from omnibase_infra.protocols.protocol_capability_query import ProtocolCapabilityQuery
 from omnibase_infra.protocols.protocol_container_aware import ProtocolContainerAware
+from omnibase_infra.protocols.protocol_dispatch_engine import ProtocolDispatchEngine
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 from omnibase_infra.protocols.protocol_event_projector import ProtocolEventProjector
 from omnibase_infra.protocols.protocol_idempotency_store import (
@@ -90,6 +92,7 @@ __all__: list[str] = [
     "ProtocolEventBusLike",
     "ProtocolEventProjector",
     "ProtocolContainerAware",
+    "ProtocolDispatchEngine",
     "ProtocolIdempotencyStore",
     "ProtocolMessageDispatcher",
     "ProtocolMessageTypeRegistry",

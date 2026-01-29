@@ -20,15 +20,16 @@ from pydantic import ValidationError
 
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.projection import ModelSnapshotTopicConfig
+from omnibase_infra.topics import SUFFIX_REGISTRATION_SNAPSHOTS
 
 
 class TestModelSnapshotTopicConfigDefaults:
     """Tests for default configuration values."""
 
     def test_default_topic(self) -> None:
-        """Test default topic follows ONEX convention."""
+        """Test default topic uses ONEX platform suffix constant."""
         config = ModelSnapshotTopicConfig.default()
-        assert config.topic == "onex.registration.snapshots"
+        assert config.topic == SUFFIX_REGISTRATION_SNAPSHOTS
 
     def test_default_cleanup_policy_is_compact(self) -> None:
         """Test that cleanup_policy defaults to compact."""

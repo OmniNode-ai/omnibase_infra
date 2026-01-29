@@ -48,7 +48,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
@@ -61,6 +61,9 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import (
     EnvelopeValidationError,
+    InfraConsulError,
+    InfraTimeoutError,
+    InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
@@ -93,8 +96,14 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.contract_handler_discovery import (
         ContractHandlerDiscovery,
     )
+    from omnibase_infra.runtime.service_message_dispatch_engine import (
+        MessageDispatchEngine,
+    )
 
 # Imports for PluginLoaderContractSource adapter class
+from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
+    ProtocolEventBusSubscriber,
+)
 from omnibase_infra.models.errors import ModelHandlerValidationError
 from omnibase_infra.models.handlers import (
     LiteralHandlerKind,
@@ -102,6 +111,10 @@ from omnibase_infra.models.handlers import (
     ModelHandlerDescriptor,
 )
 from omnibase_infra.models.types import JsonDict
+from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+    EventBusSubcontractWiring,
+    load_event_bus_subcontract,
+)
 from omnibase_infra.runtime.handler_identity import (
     HANDLER_IDENTITY_PREFIX,
     handler_identity,
@@ -705,6 +718,16 @@ class RuntimeHostProcess:
         self._idempotency_store: ProtocolIdempotencyStore | None = None
         self._idempotency_config: ModelIdempotencyGuardConfig | None = None
 
+        # Event bus subcontract wiring for contract-driven subscriptions (OMN-1621)
+        # Bridges contract-declared topics to Kafka subscriptions.
+        # None until wired during start() when dispatch_engine is available.
+        self._event_bus_wiring: EventBusSubcontractWiring | None = None
+
+        # Message dispatch engine for routing received messages (OMN-1621)
+        # Used by event_bus_wiring to dispatch messages to handlers.
+        # None = not configured, wiring will be skipped
+        self._dispatch_engine: MessageDispatchEngine | None = None
+
         logger.debug(
             "RuntimeHostProcess initialized",
             extra={
@@ -1025,6 +1048,11 @@ class RuntimeHostProcess:
                 registry_protocol_count=registry_protocol_count,
             )
 
+        # Step 4.2: Wire event bus subscriptions from contracts (OMN-1621)
+        # This bridges contract-declared topics to Kafka subscriptions.
+        # Requires dispatch_engine to be available for message routing.
+        await self._wire_event_bus_subscriptions()
+
         # Step 4.5: Initialize idempotency store if configured (OMN-945)
         await self._initialize_idempotency_store()
 
@@ -1193,6 +1221,10 @@ class RuntimeHostProcess:
 
         # Step 2.5: Cleanup idempotency store if initialized (OMN-945)
         await self._cleanup_idempotency_store()
+
+        # Step 2.6: Cleanup event bus subcontract wiring (OMN-1621)
+        if self._event_bus_wiring:
+            await self._event_bus_wiring.cleanup()
 
         # Step 3: Close event bus
         await self._event_bus.close()
@@ -2259,6 +2291,171 @@ class RuntimeHostProcess:
         """
         return self._handlers.get(handler_type)
 
+    async def get_subscribers_for_topic(self, topic: str) -> list[UUID]:
+        """Query Consul for node IDs that subscribe to a topic.
+
+        This method provides dynamic topic-to-subscriber lookup via Consul KV store.
+        Topics are stored at `onex/topics/{topic}/subscribers` and contain a JSON
+        array of node UUID strings.
+
+        Args:
+            topic: Environment-qualified topic string
+                   (e.g., "dev.onex.evt.intent-classified.v1")
+
+        Returns:
+            List of node UUIDs that subscribe to this topic.
+            Empty list if no subscribers registered or Consul unavailable.
+
+        Note:
+            Returns node IDs, not handler names. Node ID is the stable registry key.
+            Handler selection is a separate concern that can change independently.
+
+        Example:
+            >>> runtime = RuntimeHostProcess()
+            >>> await runtime.start()
+            >>> subscribers = await runtime.get_subscribers_for_topic(
+            ...     "dev.onex.evt.intent-classified.v1"
+            ... )
+            >>> print(subscribers)  # [UUID('abc123...'), UUID('def456...')]
+
+        Related:
+            - OMN-1613: Add event bus topic storage to registry for dynamic topic discovery
+            - MixinConsulTopicIndex: Consul mixin that manages topic index storage
+        """
+        consul_handler = self.get_handler("consul")
+        if consul_handler is None:
+            logger.debug(
+                "Consul handler not available for topic subscriber lookup",
+                extra={"topic": topic},
+            )
+            return []
+
+        try:
+            correlation_id = uuid4()
+            envelope: dict[str, object] = {
+                "operation": "consul.kv_get",
+                "payload": {"key": f"onex/topics/{topic}/subscribers"},
+                "correlation_id": str(correlation_id),
+            }
+
+            # Execute the Consul KV get operation
+            # NOTE: MVP adapters use legacy execute(envelope: dict) signature.
+            result = await consul_handler.execute(envelope)  # type: ignore[call-arg]
+
+            # Navigate to the value in the response structure:
+            # ModelHandlerOutput -> result (ModelConsulHandlerResponse)
+            #   -> payload (ModelConsulHandlerPayload) -> data (ConsulPayload)
+            if result is None:
+                return []
+
+            # Check if result has the expected structure
+            if not hasattr(result, "result") or result.result is None:
+                return []
+
+            response = result.result
+            if not hasattr(response, "payload") or response.payload is None:
+                return []
+
+            payload_data = response.payload.data
+            if payload_data is None:
+                return []
+
+            # Check for "not found" response - key doesn't exist
+            if hasattr(payload_data, "found") and payload_data.found is False:
+                return []
+
+            # Get the value field from the payload
+            value = getattr(payload_data, "value", None)
+            if not value:
+                return []
+
+            # Parse JSON array of node ID strings
+            node_ids_raw = json.loads(value)
+            if not isinstance(node_ids_raw, list):
+                logger.warning(
+                    "Topic subscriber value is not a list",
+                    extra={
+                        "topic": topic,
+                        "correlation_id": str(correlation_id),
+                        "value_type": type(node_ids_raw).__name__,
+                    },
+                )
+                return []
+
+            # Convert string UUIDs to UUID objects (skip invalid entries)
+            subscribers: list[UUID] = []
+            invalid_ids: list[str] = []
+            for nid in node_ids_raw:
+                if not isinstance(nid, str):
+                    continue
+                try:
+                    subscribers.append(UUID(nid))
+                except ValueError:
+                    invalid_ids.append(nid)
+
+            if invalid_ids:
+                logger.warning(
+                    "Invalid UUIDs in topic subscriber list",
+                    extra={
+                        "topic": topic,
+                        "correlation_id": str(correlation_id),
+                        "invalid_count": len(invalid_ids),
+                    },
+                )
+            return subscribers
+
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "Failed to parse topic subscriber JSON",
+                extra={
+                    "topic": topic,
+                    "error": str(e),
+                },
+            )
+            return []
+        except InfraConsulError as e:
+            logger.warning(
+                "Consul error querying topic subscribers",
+                extra={
+                    "topic": topic,
+                    "error": str(e),
+                    "error_type": "InfraConsulError",
+                    "consul_key": getattr(e, "consul_key", None),
+                },
+            )
+            return []
+        except InfraTimeoutError as e:
+            logger.warning(
+                "Timeout querying topic subscribers",
+                extra={
+                    "topic": topic,
+                    "error": str(e),
+                    "error_type": "InfraTimeoutError",
+                },
+            )
+            return []
+        except InfraUnavailableError as e:
+            logger.warning(
+                "Service unavailable for topic subscriber query",
+                extra={
+                    "topic": topic,
+                    "error": str(e),
+                    "error_type": "InfraUnavailableError",
+                },
+            )
+            return []
+        except Exception as e:
+            # Graceful degradation - Consul unavailable is not fatal
+            logger.warning(
+                "Failed to query topic subscribers from Consul",
+                extra={
+                    "topic": topic,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+            )
+            return []
+
     # =========================================================================
     # Architecture Validation Methods (OMN-1138)
     # =========================================================================
@@ -2428,6 +2625,110 @@ class RuntimeHostProcess:
         logger.debug("Creating and caching container (no container provided at init)")
         self._container = ModelONEXContainer()
         return self._container
+
+    # =========================================================================
+    # Event Bus Subcontract Wiring Methods (OMN-1621)
+    # =========================================================================
+
+    async def _wire_event_bus_subscriptions(self) -> None:
+        """Wire Kafka subscriptions from handler contract event_bus sections.
+
+        This method bridges contract-declared topics to actual Kafka subscriptions
+        using the EventBusSubcontractWiring class. It reads the event_bus subcontract
+        from each handler's contract YAML and creates subscriptions for declared
+        subscribe_topics.
+
+        Preconditions:
+            - self._event_bus must be available and started
+            - self._dispatch_engine must be set (otherwise wiring is skipped)
+            - self._handler_descriptors must be populated
+
+        The wiring creates subscriptions that route messages to the dispatch engine,
+        which then routes to appropriate handlers based on topic/category matching.
+
+        Per ARCH-002: "Runtime owns all Kafka plumbing" - nodes and handlers declare
+        their topic requirements in contracts but never directly interact with Kafka.
+
+        Note:
+            If dispatch_engine is not configured, this method logs a debug message
+            and returns without creating any subscriptions. This allows the runtime
+            to operate in legacy mode without contract-driven subscriptions.
+
+        .. versionadded:: 0.2.5
+            Part of OMN-1621 contract-driven event bus wiring.
+        """
+        # Guard: require both event_bus and dispatch_engine
+        if not self._event_bus:
+            logger.debug("Event bus not available, skipping subcontract wiring")
+            return
+
+        if not self._dispatch_engine:
+            logger.debug(
+                "Dispatch engine not configured, skipping event bus subcontract wiring"
+            )
+            return
+
+        if not self._handler_descriptors:
+            logger.debug(
+                "No handler descriptors available, skipping subcontract wiring"
+            )
+            return
+
+        # Get environment from config, defaulting to "local"
+        config = self._config or {}
+        event_bus_config = config.get("event_bus", {})
+        if isinstance(event_bus_config, dict):
+            environment = str(event_bus_config.get("environment", "local"))
+        else:
+            # Could be a ModelEventBusConfig or similar
+            environment = getattr(event_bus_config, "environment", "local")
+
+        # Create wiring instance
+        # Cast to protocol type - both EventBusKafka and EventBusInmemory implement
+        # the ProtocolEventBusSubscriber interface (subscribe method)
+        self._event_bus_wiring = EventBusSubcontractWiring(
+            event_bus=cast("ProtocolEventBusSubscriber", self._event_bus),
+            dispatch_engine=self._dispatch_engine,
+            environment=environment,
+        )
+
+        # Wire subscriptions for each handler with a contract
+        wired_count = 0
+        for handler_type, descriptor in self._handler_descriptors.items():
+            contract_path_str = descriptor.contract_path
+            if not contract_path_str:
+                continue
+
+            contract_path = Path(contract_path_str)
+
+            # Load event_bus subcontract from contract YAML
+            subcontract = load_event_bus_subcontract(contract_path, logger)
+            if subcontract and subcontract.subscribe_topics:
+                await self._event_bus_wiring.wire_subscriptions(
+                    subcontract=subcontract,
+                    node_name=descriptor.name or handler_type,
+                )
+                wired_count += 1
+                logger.info(
+                    "Wired subscription(s) for handler '%s': topics=%s",
+                    descriptor.name or handler_type,
+                    subcontract.subscribe_topics,
+                )
+
+        if wired_count > 0:
+            logger.info(
+                "Event bus subcontract wiring complete",
+                extra={
+                    "wired_handler_count": wired_count,
+                    "total_handler_count": len(self._handler_descriptors),
+                    "environment": environment,
+                },
+            )
+        else:
+            logger.debug(
+                "No handlers with event_bus subscriptions found",
+                extra={"handler_count": len(self._handler_descriptors)},
+            )
 
     # =========================================================================
     # Idempotency Guard Methods (OMN-945)

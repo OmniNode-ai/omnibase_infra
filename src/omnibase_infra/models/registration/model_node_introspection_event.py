@@ -26,6 +26,9 @@ from omnibase_infra.models.discovery.model_introspection_performance_metrics imp
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
+from omnibase_infra.models.registration.model_node_event_bus_config import (
+    ModelNodeEventBusConfig,
+)
 from omnibase_infra.models.registration.model_node_metadata import ModelNodeMetadata
 from omnibase_infra.utils import (
     validate_endpoint_urls_dict,
@@ -63,6 +66,8 @@ class ModelNodeIntrospectionEvent(BaseModel):
         deployment_id: Deployment/release identifier.
         epoch: Registration epoch for ordering.
         performance_metrics: Optional metrics from introspection operation.
+        event_bus: Resolved event bus topic configuration for registry-driven routing.
+            If None, node is NOT included in dynamic topic routing lookups.
 
     Example:
         >>> from uuid import uuid4
@@ -178,6 +183,12 @@ class ModelNodeIntrospectionEvent(BaseModel):
     performance_metrics: ModelIntrospectionPerformanceMetrics | None = Field(
         default=None,
         description="Performance metrics from introspection operation",
+    )
+    event_bus: ModelNodeEventBusConfig | None = Field(
+        default=None,
+        description="Resolved event bus topic configuration. "
+        "Contains environment-qualified topic strings for registry-driven routing. "
+        "If None, node is NOT included in dynamic topic routing lookups.",
     )
 
 
