@@ -682,17 +682,23 @@ class TestConfigSessionStorage:
     """Tests for ConfigSessionStorage configuration class."""
 
     def test_config_has_default_values(self) -> None:
-        """Config should have sensible defaults."""
-        config = ConfigSessionStorage(
-            postgres_password=SecretStr("test"),
-        )
-        assert config.postgres_host == "localhost"
-        assert config.postgres_port == 5436
-        assert config.postgres_database == "omninode_bridge"
-        assert config.postgres_user == "postgres"
-        assert config.pool_min_size == 2
-        assert config.pool_max_size == 10
-        assert config.query_timeout_seconds == 30
+        """Config should have sensible defaults defined in Field().
+
+        NOTE: ConfigSessionStorage is a pydantic-settings model that reads from
+        environment variables. To test the *hardcoded* Field() defaults (not
+        env-overridden values), we access model_fields directly. This ensures
+        the test passes regardless of CI environment configuration.
+        """
+        # Access Field defaults directly to test hardcoded defaults,
+        # bypassing pydantic-settings environment variable loading
+        fields = ConfigSessionStorage.model_fields
+        assert fields["postgres_host"].default == "localhost"
+        assert fields["postgres_port"].default == 5436
+        assert fields["postgres_database"].default == "omninode_bridge"
+        assert fields["postgres_user"].default == "postgres"
+        assert fields["pool_min_size"].default == 2
+        assert fields["pool_max_size"].default == 10
+        assert fields["query_timeout_seconds"].default == 30
 
     def test_config_dsn_property(self) -> None:
         """Config DSN should be properly formatted."""
