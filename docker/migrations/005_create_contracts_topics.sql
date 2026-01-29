@@ -71,8 +71,8 @@ CREATE INDEX IF NOT EXISTS idx_contracts_node_version
 -- Stores SUFFIXES only - environment prefix ({env}.) applied at runtime.
 
 CREATE TABLE IF NOT EXISTS topics (
-    -- Identity
-    topic_suffix TEXT PRIMARY KEY,
+    -- Identity (composite key: same topic can have both publish and subscribe directions)
+    topic_suffix TEXT NOT NULL,
     direction TEXT NOT NULL,
 
     -- Which contracts reference this topic (JSON array of contract_id strings)
@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS topics (
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 
     -- Constraints
+    PRIMARY KEY (topic_suffix, direction),
     CONSTRAINT valid_direction CHECK (direction IN ('publish', 'subscribe'))
 );
 
@@ -160,7 +161,7 @@ COMMENT ON COLUMN contracts.last_event_topic IS 'Kafka topic of last processed e
 COMMENT ON COLUMN contracts.last_event_partition IS 'Kafka partition of last processed event (for dedupe)';
 COMMENT ON COLUMN contracts.last_event_offset IS 'Kafka offset of last processed event (for dedupe)';
 
-COMMENT ON TABLE topics IS 'Topic suffixes referenced by contracts for routing discovery (OMN-1653). Uses 5-segment naming.';
+COMMENT ON TABLE topics IS 'Topic suffixes referenced by contracts for routing discovery (OMN-1653). Uses 5-segment naming. Composite key (topic_suffix, direction) allows same topic with both publish and subscribe directions.';
 COMMENT ON COLUMN topics.topic_suffix IS 'Topic suffix without environment prefix, e.g., onex.evt.platform.contract-registered.v1';
 COMMENT ON COLUMN topics.direction IS 'Whether contract publishes to or subscribes from this topic';
 COMMENT ON COLUMN topics.contract_ids IS 'JSON array of contract_id strings that reference this topic';

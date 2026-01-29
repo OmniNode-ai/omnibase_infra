@@ -51,7 +51,7 @@ consumed_events:
     event_type: "ModelNodeHeartbeatEvent"
     description: "Heartbeat for liveness tracking and last_seen_at updates"
   - topic: "{env}.onex.int.platform.runtime-tick.v1"
-    event_type: "ModelRuntimeTickEvent"
+    event_type: "ModelRuntimeTick"
     internal: true
     description: "Periodic tick for staleness computation - marks contracts as stale/inactive"
 # Input/Output Model Configuration

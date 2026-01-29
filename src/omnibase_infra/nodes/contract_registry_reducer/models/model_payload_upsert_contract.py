@@ -14,6 +14,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.types import JsonType
+
 
 class ModelPayloadUpsertContract(BaseModel):
     """Payload for PostgreSQL upsert contract intents.
@@ -72,7 +74,7 @@ class ModelPayloadUpsertContract(BaseModel):
 
     contract_hash: str = Field(..., description="Hash of contract YAML.")
 
-    contract_yaml: dict | str = Field(
+    contract_yaml: JsonType = Field(
         ..., description="Full contract YAML (dict or raw string)."
     )
 

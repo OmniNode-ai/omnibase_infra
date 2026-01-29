@@ -232,7 +232,12 @@ class ContractRegistryReducer:
                 items_processed=0,
             )
 
-        # Route to handler based on event type (using isinstance for type safety)
+        # NOTE: isinstance dispatch is intentional here for omnibase_core event models.
+        # These are external typed models from omnibase_core where we cannot add protocol
+        # discriminators without modifying the external package. For internal events,
+        # prefer protocol-based dispatch. This pattern is acceptable for typed event
+        # model routing where the union type is exhaustive and statically checked.
+        # See: CLAUDE.md (Protocol Resolution - external type exceptions)
         if isinstance(event, ModelContractRegisteredEvent):
             return self._on_contract_registered(state, event, topic, partition, offset)
         elif isinstance(event, ModelContractDeregisteredEvent):

@@ -173,15 +173,13 @@ class ModelContractRegistryState(BaseModel):
         Returns:
             New ModelContractRegistryState with updated offset tracking.
         """
-        return ModelContractRegistryState(
-            last_event_id=event_id,
-            last_event_topic=topic,
-            last_event_partition=partition,
-            last_event_offset=offset,
-            last_staleness_check_at=self.last_staleness_check_at,
-            contracts_processed=self.contracts_processed,
-            heartbeats_processed=self.heartbeats_processed,
-            deregistrations_processed=self.deregistrations_processed,
+        return self.model_copy(
+            update={
+                "last_event_id": event_id,
+                "last_event_topic": topic,
+                "last_event_partition": partition,
+                "last_event_offset": offset,
+            }
         )
 
     def with_contract_registered(self) -> ModelContractRegistryState:
@@ -190,15 +188,8 @@ class ModelContractRegistryState(BaseModel):
         Returns:
             New ModelContractRegistryState with contracts_processed + 1.
         """
-        return ModelContractRegistryState(
-            last_event_id=self.last_event_id,
-            last_event_topic=self.last_event_topic,
-            last_event_partition=self.last_event_partition,
-            last_event_offset=self.last_event_offset,
-            last_staleness_check_at=self.last_staleness_check_at,
-            contracts_processed=self.contracts_processed + 1,
-            heartbeats_processed=self.heartbeats_processed,
-            deregistrations_processed=self.deregistrations_processed,
+        return self.model_copy(
+            update={"contracts_processed": self.contracts_processed + 1}
         )
 
     def with_heartbeat_processed(self) -> ModelContractRegistryState:
@@ -207,15 +198,8 @@ class ModelContractRegistryState(BaseModel):
         Returns:
             New ModelContractRegistryState with heartbeats_processed + 1.
         """
-        return ModelContractRegistryState(
-            last_event_id=self.last_event_id,
-            last_event_topic=self.last_event_topic,
-            last_event_partition=self.last_event_partition,
-            last_event_offset=self.last_event_offset,
-            last_staleness_check_at=self.last_staleness_check_at,
-            contracts_processed=self.contracts_processed,
-            heartbeats_processed=self.heartbeats_processed + 1,
-            deregistrations_processed=self.deregistrations_processed,
+        return self.model_copy(
+            update={"heartbeats_processed": self.heartbeats_processed + 1}
         )
 
     def with_deregistration_processed(self) -> ModelContractRegistryState:
@@ -224,15 +208,8 @@ class ModelContractRegistryState(BaseModel):
         Returns:
             New ModelContractRegistryState with deregistrations_processed + 1.
         """
-        return ModelContractRegistryState(
-            last_event_id=self.last_event_id,
-            last_event_topic=self.last_event_topic,
-            last_event_partition=self.last_event_partition,
-            last_event_offset=self.last_event_offset,
-            last_staleness_check_at=self.last_staleness_check_at,
-            contracts_processed=self.contracts_processed,
-            heartbeats_processed=self.heartbeats_processed,
-            deregistrations_processed=self.deregistrations_processed + 1,
+        return self.model_copy(
+            update={"deregistrations_processed": self.deregistrations_processed + 1}
         )
 
     def with_staleness_check(self, check_time: datetime) -> ModelContractRegistryState:
@@ -244,16 +221,7 @@ class ModelContractRegistryState(BaseModel):
         Returns:
             New ModelContractRegistryState with updated staleness check time.
         """
-        return ModelContractRegistryState(
-            last_event_id=self.last_event_id,
-            last_event_topic=self.last_event_topic,
-            last_event_partition=self.last_event_partition,
-            last_event_offset=self.last_event_offset,
-            last_staleness_check_at=check_time,
-            contracts_processed=self.contracts_processed,
-            heartbeats_processed=self.heartbeats_processed,
-            deregistrations_processed=self.deregistrations_processed,
-        )
+        return self.model_copy(update={"last_staleness_check_at": check_time})
 
 
 __all__ = ["ModelContractRegistryState"]

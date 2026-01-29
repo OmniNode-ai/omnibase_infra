@@ -24,6 +24,7 @@ from uuid import uuid4
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from omnibase_core.enums import EnumDeregistrationReason
 from omnibase_core.models.events import (
@@ -421,7 +422,7 @@ class TestContractRegistryState:
         self, initial_state: ModelContractRegistryState
     ) -> None:
         """State model should be frozen (immutable)."""
-        with pytest.raises(Exception):  # Pydantic raises ValidationError
+        with pytest.raises(ValidationError):
             initial_state.contracts_processed = 10  # type: ignore[misc]
 
     def test_state_transition_returns_new_instance(
