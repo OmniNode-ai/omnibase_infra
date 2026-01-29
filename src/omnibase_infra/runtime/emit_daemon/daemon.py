@@ -514,13 +514,13 @@ class EmitDaemon:
         # Validate event type is registered
         try:
             topic = self._registry.resolve_topic(event_type)
-        except ValueError as e:
+        except OnexError as e:
             return json.dumps({"status": "error", "reason": str(e)})
 
         # Validate payload has required fields
         try:
             self._registry.validate_payload(event_type, payload)
-        except ValueError as e:
+        except OnexError as e:
             return json.dumps({"status": "error", "reason": str(e)})
 
         # Extract correlation_id from payload if present

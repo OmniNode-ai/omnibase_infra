@@ -15,7 +15,7 @@ class ConfigSessionStorage(BaseSettings):
     """Configuration for session snapshot PostgreSQL storage.
 
     Environment variables use the OMNIBASE_INFRA_SESSION_STORAGE_ prefix.
-    Example: OMNIBASE_INFRA_SESSION_STORAGE_POSTGRES_HOST=192.168.86.200
+    Example: OMNIBASE_INFRA_SESSION_STORAGE_POSTGRES_HOST=db.example.com
     """
 
     model_config = SettingsConfigDict(
@@ -28,7 +28,7 @@ class ConfigSessionStorage(BaseSettings):
 
     # PostgreSQL connection
     postgres_host: str = Field(
-        default="192.168.86.200",
+        default="localhost",
         description="PostgreSQL host",
     )
     postgres_port: int = Field(

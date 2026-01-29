@@ -277,6 +277,12 @@ class BoundedEventQueue:
         Note:
             Caller must hold self._lock.
         """
+        # Defensive check: if spooling is disabled, don't attempt to spool
+        # (This should be checked by caller, but verify here for safety)
+        if self._max_spool_messages == 0 or self._max_spool_bytes == 0:
+            logger.debug(f"Spooling disabled, cannot spool event {event.event_id}")
+            return False
+
         # Serialize event
         try:
             event_json = event.model_dump_json()

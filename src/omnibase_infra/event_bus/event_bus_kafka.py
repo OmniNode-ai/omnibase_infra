@@ -167,6 +167,10 @@ Usage:
 Protocol Compatibility:
     This class implements ProtocolEventBus from omnibase_core using duck typing
     (no explicit inheritance required per ONEX patterns).
+
+    TODO: Consider formalizing the EventBusKafka interface as a Protocol
+    (ProtocolEventBusKafka) in the future to enable better static type checking
+    and IDE support for consumers that depend on Kafka-specific features.
 """
 
 from __future__ import annotations

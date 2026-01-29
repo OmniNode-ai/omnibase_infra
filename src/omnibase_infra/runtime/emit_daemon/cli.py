@@ -50,6 +50,7 @@ from pathlib import Path
 
 import yaml
 
+from omnibase_core.errors import OnexError
 from omnibase_infra import __version__
 from omnibase_infra.runtime.emit_daemon.config import ModelEmitDaemonConfig
 from omnibase_infra.runtime.emit_daemon.daemon import EmitDaemon
@@ -75,14 +76,15 @@ def _setup_logging(verbose: bool = False) -> None:
     )
 
 
-def _load_config_file(config_path: Path) -> dict[str, str | int | float]:
+def _load_config_file(config_path: Path) -> dict[str, object]:
     """Load configuration from YAML file.
 
     Args:
         config_path: Path to the YAML configuration file.
 
     Returns:
-        Dictionary of configuration values.
+        Dictionary of configuration values. Values are str, int, float, or bool
+        as parsed from YAML. Pydantic handles final type validation.
 
     Raises:
         SystemExit: If file cannot be read or parsed.
@@ -97,17 +99,12 @@ def _load_config_file(config_path: Path) -> dict[str, str | int | float]:
             if not isinstance(data, dict):
                 print("Error: Config file must be a YAML mapping", file=sys.stderr)
                 sys.exit(1)
-            # Convert path strings to actual values (validation happens in Pydantic)
-            result: dict[str, str | int | float] = {}
+            # Filter out None values, keep all YAML-parsed types (str, int, float, bool)
+            # Pydantic handles final type validation and conversion
+            result: dict[str, object] = {}
             for key, value in data.items():
-                if isinstance(value, (str, int, float)):
+                if value is not None:
                     result[key] = value
-                elif value is None:
-                    # Skip None values
-                    pass
-                else:
-                    # Convert other types to string for Pydantic to handle
-                    result[key] = str(value)
             return result
     except yaml.YAMLError as e:
         print(f"Error: Invalid YAML in config file: {e}", file=sys.stderr)
@@ -129,8 +126,8 @@ def _build_config(args: argparse.Namespace) -> ModelEmitDaemonConfig:
     Raises:
         SystemExit: If configuration is invalid.
     """
-    # Start with empty config dict
-    config_dict: dict[str, str | int | float | Path] = {}
+    # Start with empty config dict (object allows all config value types)
+    config_dict: dict[str, object] = {}
 
     # Load from config file if specified
     config_file = getattr(args, "config", None)
@@ -176,7 +173,7 @@ def _send_socket_message(
     Raises:
         ConnectionError: If cannot connect to daemon.
         TimeoutError: If operation times out.
-        ValueError: If response is invalid JSON.
+        OnexError: If response is invalid JSON.
     """
     if not socket_path.exists():
         raise ConnectionError(f"Socket not found: {socket_path}")
@@ -208,13 +205,13 @@ def _send_socket_message(
         response_str = response_data.decode("utf-8").strip()
         result = json.loads(response_str)
         if not isinstance(result, dict):
-            raise ValueError("Response must be a JSON object")
+            raise OnexError("Response must be a JSON object")
         return result
 
     except TimeoutError as e:
         raise TimeoutError(f"Socket operation timed out: {e}") from e
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON response: {e}") from e
+        raise OnexError(f"Invalid JSON response: {e}") from e
     except OSError as e:
         raise ConnectionError(f"Socket error: {e}") from e
     finally:
@@ -365,7 +362,7 @@ def cmd_start(args: argparse.Namespace) -> None:
                 print(f"  Kafka: {config.kafka_bootstrap_servers}")
                 print("Press Ctrl+C to stop...")
             await daemon.run_until_shutdown()
-        except RuntimeError as e:
+        except OnexError as e:
             if not args.daemonize:
                 print(f"Error: {e}", file=sys.stderr)
             logging.getLogger(__name__).exception("Daemon error")
@@ -488,7 +485,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     except TimeoutError as e:
         print(f"Daemon not responding: {e}", file=sys.stderr)
         sys.exit(1)
-    except ValueError as e:
+    except OnexError as e:
         print(f"Invalid response from daemon: {e}", file=sys.stderr)
         sys.exit(1)
 
@@ -555,7 +552,7 @@ def cmd_emit(args: argparse.Namespace) -> None:
     except TimeoutError as e:
         print(f"Daemon not responding: {e}", file=sys.stderr)
         sys.exit(1)
-    except ValueError as e:
+    except OnexError as e:
         print(f"Invalid response from daemon: {e}", file=sys.stderr)
         sys.exit(1)
 
