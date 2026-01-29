@@ -386,16 +386,9 @@ class BoundedEventQueue:
             content = filepath.read_text(encoding="utf-8")
             event = ModelQueuedEvent.model_validate_json(content)
 
-            # Update byte tracking and delete file
+            # Update byte tracking
             file_size = len(content.encode("utf-8"))
             self._spool_bytes -= file_size
-            filepath.unlink()
-
-            logger.debug(
-                f"Dequeued event {event.event_id} from spool "
-                f"(remaining spool: {len(self._spool_files)})"
-            )
-            return event
         except OSError:
             logger.exception("Failed to read spool file %s", filepath)
             return None
@@ -407,6 +400,24 @@ class BoundedEventQueue:
             except OSError:
                 pass
             return None
+
+        # Delete file separately - event is already successfully parsed
+        # If unlink fails, the event is still returned (not lost)
+        try:
+            filepath.unlink()
+        except OSError:
+            logger.warning(
+                "Failed to delete spool file %s after successful dequeue - "
+                "orphan file remains on disk",
+                filepath,
+            )
+            # Event is still returned - not lost
+
+        logger.debug(
+            f"Dequeued event {event.event_id} from spool "
+            f"(remaining spool: {len(self._spool_files)})"
+        )
+        return event
 
     async def peek(self) -> ModelQueuedEvent | None:
         """Peek at next event without removing it.

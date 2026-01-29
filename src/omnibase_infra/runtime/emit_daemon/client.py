@@ -224,6 +224,56 @@ class EmitClient:
         """
         await self._disconnect()
 
+    async def _connect_unlocked(self) -> None:
+        """Establish connection to daemon socket (without lock).
+
+        Internal method - caller must hold self._lock.
+
+        Raises:
+            EmitClientError: If connection fails (daemon not running, permission denied, etc.)
+        """
+        if self._writer is not None:
+            return  # Already connected
+
+        try:
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_unix_connection(str(self._socket_path)),
+                timeout=self._timeout,
+            )
+            logger.debug(f"Connected to emit daemon at {self._socket_path}")
+        except FileNotFoundError as e:
+            raise EmitClientError(
+                f"Emit daemon socket not found at {self._socket_path}. "
+                "Is the daemon running?",
+                reason="socket_not_found",
+                error_code=EnumCoreErrorCode.RESOURCE_NOT_FOUND,
+            ) from e
+        except PermissionError as e:
+            raise EmitClientError(
+                f"Permission denied accessing emit daemon socket at {self._socket_path}",
+                reason="permission_denied",
+                error_code=EnumCoreErrorCode.PERMISSION_DENIED,
+            ) from e
+        except ConnectionRefusedError as e:
+            raise EmitClientError(
+                f"Connection refused to emit daemon at {self._socket_path}. "
+                "Is the daemon running?",
+                reason="connection_refused",
+                error_code=EnumCoreErrorCode.SERVICE_UNAVAILABLE,
+            ) from e
+        except TimeoutError as e:
+            raise EmitClientError(
+                f"Timeout connecting to emit daemon at {self._socket_path}",
+                reason="connection_timeout",
+                error_code=EnumCoreErrorCode.TIMEOUT_ERROR,
+            ) from e
+        except OSError as e:
+            raise EmitClientError(
+                f"Failed to connect to emit daemon: {e}",
+                reason="os_error",
+                error_code=EnumCoreErrorCode.NETWORK_ERROR,
+            ) from e
+
     async def _connect(self) -> None:
         """Establish connection to daemon socket.
 
@@ -233,47 +283,24 @@ class EmitClient:
             EmitClientError: If connection fails (daemon not running, permission denied, etc.)
         """
         async with self._lock:
-            if self._writer is not None:
-                return  # Already connected
+            await self._connect_unlocked()
 
+    async def _disconnect_unlocked(self) -> None:
+        """Close connection to daemon socket (without lock).
+
+        Internal method - caller must hold self._lock.
+        Safe to call multiple times.
+        """
+        if self._writer is not None:
             try:
-                self._reader, self._writer = await asyncio.wait_for(
-                    asyncio.open_unix_connection(str(self._socket_path)),
-                    timeout=self._timeout,
-                )
-                logger.debug(f"Connected to emit daemon at {self._socket_path}")
-            except FileNotFoundError as e:
-                raise EmitClientError(
-                    f"Emit daemon socket not found at {self._socket_path}. "
-                    "Is the daemon running?",
-                    reason="socket_not_found",
-                    error_code=EnumCoreErrorCode.RESOURCE_NOT_FOUND,
-                ) from e
-            except PermissionError as e:
-                raise EmitClientError(
-                    f"Permission denied accessing emit daemon socket at {self._socket_path}",
-                    reason="permission_denied",
-                    error_code=EnumCoreErrorCode.PERMISSION_DENIED,
-                ) from e
-            except ConnectionRefusedError as e:
-                raise EmitClientError(
-                    f"Connection refused to emit daemon at {self._socket_path}. "
-                    "Is the daemon running?",
-                    reason="connection_refused",
-                    error_code=EnumCoreErrorCode.SERVICE_UNAVAILABLE,
-                ) from e
-            except TimeoutError as e:
-                raise EmitClientError(
-                    f"Timeout connecting to emit daemon at {self._socket_path}",
-                    reason="connection_timeout",
-                    error_code=EnumCoreErrorCode.TIMEOUT_ERROR,
-                ) from e
-            except OSError as e:
-                raise EmitClientError(
-                    f"Failed to connect to emit daemon: {e}",
-                    reason="os_error",
-                    error_code=EnumCoreErrorCode.NETWORK_ERROR,
-                ) from e
+                self._writer.close()
+                await self._writer.wait_closed()
+            except Exception as e:
+                logger.debug(f"Error during disconnect cleanup: {e}")
+            finally:
+                self._writer = None
+                self._reader = None
+                logger.debug("Disconnected from emit daemon")
 
     async def _disconnect(self) -> None:
         """Close connection to daemon socket.
@@ -282,21 +309,14 @@ class EmitClient:
         Safe to call multiple times.
         """
         async with self._lock:
-            if self._writer is not None:
-                try:
-                    self._writer.close()
-                    await self._writer.wait_closed()
-                except Exception as e:
-                    logger.debug(f"Error during disconnect cleanup: {e}")
-                finally:
-                    self._writer = None
-                    self._reader = None
-                    logger.debug("Disconnected from emit daemon")
+            await self._disconnect_unlocked()
 
     async def _send_request(self, request: JsonType) -> dict[str, object]:
         """Send a request and receive response.
 
-        Internal method for protocol communication.
+        Internal method for protocol communication. Acquires lock to ensure
+        the write-then-read sequence is atomic, preventing response mixing
+        when multiple coroutines call emit() concurrently.
 
         Args:
             request: Request dict to send (will be JSON-encoded)
@@ -307,73 +327,74 @@ class EmitClient:
         Raises:
             EmitClientError: If communication fails
         """
-        # Ensure we're connected
-        if self._writer is None or self._reader is None:
-            await self._connect()
+        async with self._lock:
+            # Ensure we're connected (use unlocked variant since we hold the lock)
+            if self._writer is None or self._reader is None:
+                await self._connect_unlocked()
 
-        # Type guard - we just connected, so these should be set
-        if self._writer is None or self._reader is None:
-            raise EmitClientError(
-                "Failed to establish connection", reason="no_connection"
-            )
-
-        try:
-            # Send request
-            request_json = json.dumps(request) + "\n"
-            self._writer.write(request_json.encode("utf-8"))
-            await self._writer.drain()
-
-            # Receive response with timeout
-            response_line = await asyncio.wait_for(
-                self._reader.readline(),
-                timeout=self._timeout,
-            )
-
-            if not response_line:
-                # Connection closed by daemon
-                await self._disconnect()
+            # Type guard - we just connected, so these should be set
+            if self._writer is None or self._reader is None:
                 raise EmitClientError(
-                    "Connection closed by emit daemon",
-                    reason="connection_closed",
+                    "Failed to establish connection", reason="no_connection"
                 )
 
-            # Parse response
-            response = json.loads(response_line.decode("utf-8").strip())
-            if not isinstance(response, dict):
-                raise EmitClientError(
-                    "Invalid response from daemon: expected JSON object",
-                    reason="invalid_response",
-                )
-            return response
+            try:
+                # Send request
+                request_json = json.dumps(request) + "\n"
+                self._writer.write(request_json.encode("utf-8"))
+                await self._writer.drain()
 
-        except TimeoutError as e:
-            await self._disconnect()
-            raise EmitClientError(
-                f"Timeout waiting for daemon response (timeout={self._timeout}s)",
-                reason="response_timeout",
-                error_code=EnumCoreErrorCode.TIMEOUT_ERROR,
-            ) from e
-        except json.JSONDecodeError as e:
-            await self._disconnect()
-            raise EmitClientError(
-                f"Invalid JSON response from daemon: {e}",
-                reason="invalid_json",
-                error_code=EnumCoreErrorCode.VALIDATION_ERROR,
-            ) from e
-        except ConnectionResetError as e:
-            await self._disconnect()
-            raise EmitClientError(
-                "Connection reset by emit daemon",
-                reason="connection_reset",
-                error_code=EnumCoreErrorCode.NETWORK_ERROR,
-            ) from e
-        except BrokenPipeError as e:
-            await self._disconnect()
-            raise EmitClientError(
-                "Broken pipe to emit daemon",
-                reason="broken_pipe",
-                error_code=EnumCoreErrorCode.NETWORK_ERROR,
-            ) from e
+                # Receive response with timeout
+                response_line = await asyncio.wait_for(
+                    self._reader.readline(),
+                    timeout=self._timeout,
+                )
+
+                if not response_line:
+                    # Connection closed by daemon
+                    await self._disconnect_unlocked()
+                    raise EmitClientError(
+                        "Connection closed by emit daemon",
+                        reason="connection_closed",
+                    )
+
+                # Parse response
+                response = json.loads(response_line.decode("utf-8").strip())
+                if not isinstance(response, dict):
+                    raise EmitClientError(
+                        "Invalid response from daemon: expected JSON object",
+                        reason="invalid_response",
+                    )
+                return response
+
+            except TimeoutError as e:
+                await self._disconnect_unlocked()
+                raise EmitClientError(
+                    f"Timeout waiting for daemon response (timeout={self._timeout}s)",
+                    reason="response_timeout",
+                    error_code=EnumCoreErrorCode.TIMEOUT_ERROR,
+                ) from e
+            except json.JSONDecodeError as e:
+                await self._disconnect_unlocked()
+                raise EmitClientError(
+                    f"Invalid JSON response from daemon: {e}",
+                    reason="invalid_json",
+                    error_code=EnumCoreErrorCode.VALIDATION_ERROR,
+                ) from e
+            except ConnectionResetError as e:
+                await self._disconnect_unlocked()
+                raise EmitClientError(
+                    "Connection reset by emit daemon",
+                    reason="connection_reset",
+                    error_code=EnumCoreErrorCode.NETWORK_ERROR,
+                ) from e
+            except BrokenPipeError as e:
+                await self._disconnect_unlocked()
+                raise EmitClientError(
+                    "Broken pipe to emit daemon",
+                    reason="broken_pipe",
+                    error_code=EnumCoreErrorCode.NETWORK_ERROR,
+                ) from e
 
     async def emit(
         self,
