@@ -31,6 +31,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from omnibase_infra.errors.error_infra import ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.runtime.handler_bootstrap_source import (
     SOURCE_TYPE_BOOTSTRAP,
@@ -427,11 +428,19 @@ class TestBootstrapSourceErrorHandling:
                     await process.stop()
 
     @pytest.mark.asyncio
-    async def test_bootstrap_with_empty_descriptors_continues(self) -> None:
-        """Runtime continues if bootstrap source returns empty descriptors.
+    async def test_bootstrap_with_empty_descriptors_fails_fast(self) -> None:
+        """Runtime fails fast if no handlers are registered.
 
-        Verifies that if HandlerBootstrapSource somehow returns no descriptors,
-        the runtime still starts (graceful degradation).
+        Verifies that if HandlerBootstrapSource returns no descriptors and no
+        other handler source provides handlers, the runtime raises
+        ProtocolConfigurationError (fail-fast validation).
+
+        This is intentional: a runtime without handlers cannot process any
+        events and is considered misconfigured. Failing fast catches
+        configuration issues early rather than starting a useless runtime.
+
+        Related:
+            - RuntimeHostProcess.start() step 4.1: fail-fast handler validation
         """
         event_bus = EventBusInmemory()
 
@@ -457,14 +466,12 @@ class TestBootstrapSourceErrorHandling:
                 },
             )
 
-            try:
+            # Runtime should fail fast with no handlers registered
+            with pytest.raises(ProtocolConfigurationError) as exc_info:
                 await process.start()
 
-                # Process should still start (graceful degradation)
-                assert process.is_running
-
-            finally:
-                await process.stop()
+            # Verify error indicates no handlers
+            assert "No handlers registered" in str(exc_info.value)
 
 
 class TestBootstrapSourcePerformance:
