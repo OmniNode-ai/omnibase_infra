@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.types import JsonType
+
 
 class ModelLedgerEntry(BaseModel):
     """Represents a single event ledger entry (one row in event_ledger table).
@@ -56,7 +58,7 @@ class ModelLedgerEntry(BaseModel):
         ...,
         description="Base64-encoded Kafka message value (the event payload)",
     )
-    onex_headers: dict[str, object] = Field(
+    onex_headers: dict[str, JsonType] = Field(
         default_factory=dict,
         description="ONEX-specific headers extracted from Kafka headers",
     )

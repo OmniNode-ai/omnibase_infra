@@ -30,6 +30,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.types import JsonType
+
 # NOTE: ModelIntentPayloadBase was removed in omnibase_core 0.6.2
 # Using pydantic.BaseModel directly as the base class
 
@@ -94,7 +96,7 @@ class ModelPayloadLedgerAppend(BaseModel):
         description="Base64-encoded event value bytes (required - the raw event).",
     )
 
-    onex_headers: dict[str, object] = Field(
+    onex_headers: dict[str, JsonType] = Field(
         default_factory=dict,
         description="Extracted ONEX headers from Kafka message headers.",
     )
