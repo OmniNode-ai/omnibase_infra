@@ -87,11 +87,15 @@ class TestInfraValidatorConstants:
         - 105 (2026-01-27): OMN-1518 simplify to always-dict envelope format (-3 unions)
           - Removed hybrid union types by always materializing to dict format
           - Dispatchers now receive consistent dict[str, object] with __bindings
+        - 112 (2026-01-27): OMN-1610 emit daemon implementation (+7 unions)
+          - Typed protocol models for daemon request/response types
+          - Event registry with partition key extraction
+        - 113 (2026-01-29): OMN-1610 daemon config validation refinements (+1 union)
 
         Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 106, (
-            "INFRA_MAX_UNIONS should be 106 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 113, (
+            "INFRA_MAX_UNIONS should be 113 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

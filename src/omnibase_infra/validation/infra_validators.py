@@ -435,7 +435,15 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 105 (2026-01-27): OMN-1518 simplify to always-dict envelope format (-3 unions)
 #                     Removed hybrid union types by always materializing to dict format
 #                     Dispatchers now receive consistent dict[str, object] with __bindings
-INFRA_MAX_UNIONS = 106
+# - 112 (2026-01-27): OMN-1610 emit daemon for persistent Kafka connections (+7 unions)
+#                     BoundedEventQueue, EmitClient, EventRegistry return types
+# - 112 (2026-01-29): OMN-1610 emit daemon + refactor to strongly typed input model
+#                     BoundedEventQueue, EmitClient, EventRegistry, socket_permissions
+#                     Replaced dict unions with ModelEmitDaemonConfigInput
+# - 113 (2026-01-29): OMN-1610 properly typed daemon protocol models (+1 union)
+#                     Added ModelDaemonRequest, ModelDaemonResponse discriminated unions
+#                     Replaced dict[str, object] soup with strongly typed Pydantic models
+INFRA_MAX_UNIONS = 113
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
