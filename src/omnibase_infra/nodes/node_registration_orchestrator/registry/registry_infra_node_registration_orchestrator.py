@@ -94,20 +94,22 @@ from omnibase_core.services.service_handler_registry import ServiceHandlerRegist
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.protocols import ProtocolContainerAware
+from omnibase_infra.runtime.constants_security import (
+    TRUSTED_HANDLER_NAMESPACE_PREFIXES,
+)
 from omnibase_infra.runtime.contract_loaders import (
     load_handler_class_info_from_contract,
 )
 
 logger = logging.getLogger(__name__)
 
-# Security: Namespace allowlist for dynamic handler imports
+# Security: Use centralized namespace allowlist for dynamic handler imports
 # Per CLAUDE.md Handler Plugin Loader security patterns, only trusted namespaces
 # are allowed for dynamic imports to prevent arbitrary code execution.
 # Error code: NAMESPACE_NOT_ALLOWED (HANDLER_LOADER_013)
-ALLOWED_NAMESPACES: tuple[str, ...] = (
-    "omnibase_infra.",
-    "omnibase_core.",
-)
+# NOTE: Aliased for backwards compatibility - prefer importing directly from
+# constants_security for new code.
+ALLOWED_NAMESPACES: tuple[str, ...] = TRUSTED_HANDLER_NAMESPACE_PREFIXES
 
 
 def _validate_handler_protocol(handler: object) -> tuple[bool, list[str]]:

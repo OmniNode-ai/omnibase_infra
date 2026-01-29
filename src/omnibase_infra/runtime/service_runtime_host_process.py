@@ -77,8 +77,14 @@ from omnibase_infra.runtime.envelope_validator import (
     validate_envelope,
 )
 from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
-from omnibase_infra.runtime.models import ModelDuplicateResponse
+from omnibase_infra.runtime.models import (
+    ModelDuplicateResponse,
+    ModelRuntimeContractConfig,
+)
 from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycleExecutor
+from omnibase_infra.runtime.runtime_contract_config_loader import (
+    RuntimeContractConfigLoader,
+)
 from omnibase_infra.runtime.util_wiring import wire_default_handlers
 from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
 from omnibase_infra.utils.util_env_parsing import parse_env_float
@@ -728,6 +734,11 @@ class RuntimeHostProcess:
         # None = not configured, wiring will be skipped
         self._dispatch_engine: MessageDispatchEngine | None = None
 
+        # Contract configuration loaded at startup (OMN-1519)
+        # Contains consolidated handler_routing and operation_bindings from all contracts.
+        # None until loaded during start() via _load_contract_configs()
+        self._contract_config: ModelRuntimeContractConfig | None = None
+
         logger.debug(
             "RuntimeHostProcess initialized",
             extra={
@@ -751,6 +762,31 @@ class RuntimeHostProcess:
             The container if provided during initialization, None otherwise.
         """
         return self._container
+
+    @property
+    def contract_config(self) -> ModelRuntimeContractConfig | None:
+        """Return the loaded contract configuration.
+
+        Contains consolidated handler_routing and operation_bindings from all
+        contracts discovered during startup. Returns None if contracts have
+        not been loaded yet (before start() is called).
+
+        The contract config provides access to:
+            - handler_routing_configs: All loaded handler routing configurations
+            - operation_bindings_configs: All loaded operation bindings
+            - success_rate: Ratio of successfully loaded contracts
+            - error_messages: Any errors encountered during loading
+
+        Returns:
+            ModelRuntimeContractConfig if loaded, None if not yet loaded.
+
+        Example:
+            >>> process = RuntimeHostProcess(...)
+            >>> await process.start()
+            >>> if process.contract_config:
+            ...     print(f"Loaded {process.contract_config.total_contracts_loaded} contracts")
+        """
+        return self._contract_config
 
     @property
     def event_bus(self) -> EventBusInmemory | EventBusKafka:
@@ -1047,6 +1083,13 @@ class RuntimeHostProcess:
                 contract_paths=[str(p) for p in self._contract_paths],
                 registry_protocol_count=registry_protocol_count,
             )
+
+        # Step 4.15: Load contract configurations (OMN-1519)
+        # Loads handler_routing and operation_bindings from all discovered contracts.
+        # Uses the same contract_paths configured for handler discovery.
+        # The loaded config is accessible via self.contract_config property.
+        startup_correlation_id = uuid4()
+        await self._load_contract_configs(correlation_id=startup_correlation_id)
 
         # Step 4.2: Wire event bus subscriptions from contracts (OMN-1621)
         # This bridges contract-declared topics to Kafka subscriptions.
@@ -1744,6 +1787,77 @@ class RuntimeHostProcess:
                 "total_count": len(self._handlers),
             },
         )
+
+    async def _load_contract_configs(self, correlation_id: UUID) -> None:
+        """Load contract configurations from all discovered contracts.
+
+        Uses RuntimeContractConfigLoader to scan for contract.yaml files and
+        load handler_routing and operation_bindings subcontracts into a
+        consolidated configuration.
+
+        This method is called during start() after handler discovery but before
+        event bus subscriptions are wired. The loaded config is stored in
+        self._contract_config and accessible via the contract_config property.
+
+        Error Handling:
+            Individual contract load failures are logged but do not stop the
+            overall loading process. This enables graceful degradation where
+            some contracts can be loaded even if others fail. Errors are
+            collected in the ModelRuntimeContractConfig for introspection.
+
+        Args:
+            correlation_id: Correlation ID for tracing this load operation.
+
+        Part of OMN-1519: Runtime contract config loader integration.
+        """
+        # Skip if no contract paths configured
+        if not self._contract_paths:
+            logger.debug(
+                "No contract paths configured, skipping contract config loading",
+                extra={"correlation_id": str(correlation_id)},
+            )
+            return
+
+        # Create loader - no namespace restrictions by default
+        # (namespace allowlisting can be added via constructor parameter if needed)
+        loader = RuntimeContractConfigLoader()
+
+        # Load all contracts from configured paths
+        self._contract_config = loader.load_all_contracts(
+            search_paths=self._contract_paths,
+            correlation_id=correlation_id,
+        )
+
+        # Log summary at INFO level
+        if self._contract_config.total_errors > 0:
+            logger.warning(
+                "Contract config loading completed with errors",
+                extra={
+                    "total_contracts_found": self._contract_config.total_contracts_found,
+                    "total_contracts_loaded": self._contract_config.total_contracts_loaded,
+                    "total_errors": self._contract_config.total_errors,
+                    "success_rate": f"{self._contract_config.success_rate:.1%}",
+                    "correlation_id": str(correlation_id),
+                    "error_paths": [
+                        str(p) for p in self._contract_config.error_messages
+                    ],
+                },
+            )
+        else:
+            logger.info(
+                "Contract config loading completed successfully",
+                extra={
+                    "total_contracts_found": self._contract_config.total_contracts_found,
+                    "total_contracts_loaded": self._contract_config.total_contracts_loaded,
+                    "handler_routing_count": len(
+                        self._contract_config.handler_routing_configs
+                    ),
+                    "operation_bindings_count": len(
+                        self._contract_config.operation_bindings_configs
+                    ),
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
     async def _get_handler_registry(self) -> RegistryProtocolBinding:
         """Get handler registry (pre-resolved, container, or singleton).

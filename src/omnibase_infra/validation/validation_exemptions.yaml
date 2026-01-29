@@ -89,6 +89,23 @@ skip_directories:
 # These handle method count, parameter count, naming, and style violations
 pattern_exemptions:
   # ==========================================================================
+  # ModelRuntimeContractConfig Exemptions (OMN-1519)
+  # ==========================================================================
+  # Data model with cohesive accessor properties for querying loaded contracts.
+  # All methods serve same purpose: querying contract_results collection.
+  # Properties: all_successful, success_rate, successful_results, failed_results,
+  #             handler_routing_configs, operation_bindings_configs, error_messages
+  # Methods: get_routing_for_contract, get_bindings_for_contract, __bool__, __str__
+  - file_pattern: 'model_runtime_contract_config\.py'
+    class_pattern: "Class 'ModelRuntimeContractConfig'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Cohesive data model with accessor properties that all query the same contract_results collection. Properties provide convenient typed access to loaded configs, success metrics, and error details. Breaking into smaller classes would reduce cohesion without meaningful benefit.
+
+    documentation:
+      - OMN-1519 PR description
+    ticket: OMN-1519
+  # ==========================================================================
   # EventBusKafka Exemptions (OMN-934, OMN-1305)
   # ==========================================================================
   # Event bus pattern requires many methods for lifecycle (start/stop/health),
