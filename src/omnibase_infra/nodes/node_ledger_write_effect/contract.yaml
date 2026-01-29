@@ -1,0 +1,189 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeLedgerWriteEffect
+#
+# Capability-oriented effect node for event ledger write operations.
+# Provides append-only audit ledger storage with idempotent writes.
+#
+# This contract defines the interface for storing events to the audit ledger
+# and querying events by various criteria. The ledger uses PostgreSQL with
+# a (topic, partition, kafka_offset) unique constraint for idempotency.
+#
+# Related Tickets:
+#   - OMN-1646: Event Ledger Schema and Models
+#   - OMN-1647: Ledger Write Effect Node
+# Contract identifiers
+name: "node_ledger_write_effect"
+contract_name: "node_ledger_write_effect"
+node_name: "node_ledger_write_effect"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Description
+description: >
+  Capability-oriented effect node for event ledger write operations. Handles appending events to the PostgreSQL audit ledger with idempotent write support via unique constraint on (topic, partition, kafka_offset). Supports querying events by correlation ID, event type, topic, or time range.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelPayloadLedgerAppend"
+  module: "omnibase_infra.nodes.reducers.models"
+  description: "Input model for ledger append operations (event payload with Kafka position)."
+output_model:
+  name: "ModelLedgerAppendResult"
+  module: "omnibase_infra.nodes.node_ledger_write_effect.models"
+  description: "Output model for ledger append results (success, entry ID, duplicate flag)."
+# Capability declaration (capability-oriented naming)
+capabilities:
+  - name: "ledger.write"
+    description: "Append events to the audit ledger with idempotent write support"
+    version: "0.1.0"
+  - name: "ledger.write.append"
+    description: "Append a single event to the ledger"
+  - name: "ledger.query"
+    description: "Query events from the audit ledger"
+  - name: "ledger.query.by_correlation"
+    description: "Query events by correlation ID"
+  - name: "ledger.query.by_topic"
+    description: "Query events by Kafka topic"
+  - name: "ledger.query.by_time_range"
+    description: "Query events within a time range"
+# Event-driven topic configuration
+# Uses {env}.{namespace} placeholders for environment-aware topics
+consumed_events:
+  - topic: "{env}.{namespace}.onex.cmd.ledger-append.v1"
+    event_type: "LedgerAppendCommand"
+    message_category: "COMMAND"
+    description: "Command to append an event to the audit ledger"
+  - topic: "{env}.{namespace}.onex.cmd.ledger-query.v1"
+    event_type: "LedgerQueryCommand"
+    message_category: "COMMAND"
+    description: "Command to query events from the audit ledger"
+published_events:
+  - topic: "{env}.{namespace}.onex.evt.ledger-appended.v1"
+    event_type: "LedgerAppendedEvent"
+    description: "Confirmation that event was appended to the ledger"
+  - topic: "{env}.{namespace}.onex.evt.ledger-query-result.v1"
+    event_type: "LedgerQueryResultEvent"
+    description: "Result of a ledger query operation"
+# IO operations (EFFECT node specific)
+# Note: correlation_id is optional (UUID | None) - audit ledger must never drop events.
+# Provide correlation_id for distributed tracing when available.
+io_operations:
+  - operation: "ledger.append"
+    description: "Append an event to the audit ledger with idempotent write support"
+    input_fields:
+      - topic: "str"
+      - partition: "int"
+      - kafka_offset: "int"
+      - event_key: "str | None"
+      - event_value: "str"
+      - onex_headers: "dict[str, object]"
+      - correlation_id: "UUID | None"
+      - envelope_id: "UUID | None"
+      - event_type: "str | None"
+      - source: "str | None"
+      - event_timestamp: "datetime | None"
+    output_fields:
+      - success: "bool"
+      - ledger_entry_id: "UUID | None"
+      - duplicate: "bool"
+      - topic: "str"
+      - partition: "int"
+      - kafka_offset: "int"
+    # Idempotent: Uses ON CONFLICT DO NOTHING with (topic, partition, kafka_offset).
+    # Duplicate calls return duplicate=True without creating new entries.
+    idempotent: true
+  - operation: "ledger.query"
+    description: "Query events from the audit ledger by various criteria"
+    input_fields:
+      - correlation_id: "UUID | None"
+      - event_type: "str | None"
+      - topic: "str | None"
+      - start_time: "datetime | None"
+      - end_time: "datetime | None"
+      - limit: "int"
+      - offset: "int"
+    output_fields:
+      - entries: "list[ModelLedgerEntry]"
+      - total_count: "int"
+      - has_more: "bool"
+    idempotent: true
+# Handler routing (wraps database handler for PostgreSQL operations)
+handler_routing:
+  routing_strategy: "operation_match"
+  default_handler: "postgres"
+  handlers:
+    - handler_type: "postgres"
+      handler:
+        name: "HandlerDb"
+        module: "omnibase_infra.handlers.handler_db"
+      description: "PostgreSQL database handler for ledger storage"
+      supported_operations:
+        - "ledger.append"
+        - "ledger.query"
+# Dependencies (protocols this node requires)
+dependencies:
+  - name: "handler_db"
+    type: "handler"
+    class_name: "HandlerDb"
+    module: "omnibase_infra.handlers.handler_db"
+    description: "Database handler for PostgreSQL operations"
+# Error handling configuration
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+  error_types:
+    - name: "DatabaseConnectionError"
+      description: "Unable to connect to PostgreSQL"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "DatabaseTimeoutError"
+      description: "Database operation timed out"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "ValidationError"
+      description: "Input validation failed"
+      recoverable: false
+      retry_strategy: "none"
+# Health check configuration
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  timeout_ms: 5000
+  checks:
+    - name: "database_backend"
+      type: "connection"
+      critical: true
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-01-29"
+  tags:
+    - effect
+    - ledger
+    - audit
+    - storage
+    - postgresql
+    - capability-oriented
+    - idempotent
