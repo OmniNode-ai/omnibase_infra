@@ -46,6 +46,10 @@ Related Modules:
     - registry: Dependency injection registration
 """
 
+from omnibase_infra.nodes.node_ledger_write_effect.handlers import (
+    HandlerLedgerAppend,
+    HandlerLedgerQuery,
+)
 from omnibase_infra.nodes.node_ledger_write_effect.models import (
     ModelLedgerAppendResult,
     ModelLedgerEntry,
@@ -53,9 +57,24 @@ from omnibase_infra.nodes.node_ledger_write_effect.models import (
     ModelLedgerQueryResult,
 )
 from omnibase_infra.nodes.node_ledger_write_effect.node import NodeLedgerWriteEffect
+from omnibase_infra.nodes.node_ledger_write_effect.protocols import (
+    ProtocolLedgerPersistence,
+)
+from omnibase_infra.nodes.node_ledger_write_effect.registry import (
+    RegistryInfraLedgerWrite,
+)
 
 __all__ = [
+    # Node
     "NodeLedgerWriteEffect",
+    # Handlers
+    "HandlerLedgerAppend",
+    "HandlerLedgerQuery",
+    # Protocol
+    "ProtocolLedgerPersistence",
+    # Registry
+    "RegistryInfraLedgerWrite",
+    # Models
     "ModelLedgerAppendResult",
     "ModelLedgerEntry",
     "ModelLedgerQuery",
