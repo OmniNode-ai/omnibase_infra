@@ -33,6 +33,7 @@ class ModelLedgerEntry(BaseModel):
     # Kafka position - uniquely identifies the event in the stream
     topic: str = Field(
         ...,
+        min_length=1,
         description="Kafka topic from which the event was consumed",
     )
     partition: int = Field(

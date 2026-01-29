@@ -75,8 +75,8 @@ published_events:
     event_type: "LedgerQueryResultEvent"
     description: "Result of a ledger query operation"
 # IO operations (EFFECT node specific)
-# Note: correlation_id is required (UUID) for all operations.
-# Callers must provide a correlation_id for tracing.
+# Note: correlation_id is optional (UUID | None) - audit ledger must never drop events.
+# Provide correlation_id for distributed tracing when available.
 io_operations:
   - operation: "ledger.append"
     description: "Append an event to the audit ledger with idempotent write support"

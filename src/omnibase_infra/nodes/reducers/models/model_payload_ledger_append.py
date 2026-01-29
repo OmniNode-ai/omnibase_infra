@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 OmniNode Team
+# Copyright (c) 2026 OmniNode Team
 """Ledger append payload model for audit ledger reducer.
 
 This payload implements ProtocolIntentPayload for use with ModelIntent.

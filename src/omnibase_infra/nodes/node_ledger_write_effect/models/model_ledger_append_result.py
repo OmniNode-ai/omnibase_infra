@@ -39,6 +39,7 @@ class ModelLedgerAppendResult(BaseModel):
     # Kafka position that was attempted
     topic: str = Field(
         ...,
+        min_length=1,
         description="Kafka topic of the event",
     )
     partition: int = Field(
