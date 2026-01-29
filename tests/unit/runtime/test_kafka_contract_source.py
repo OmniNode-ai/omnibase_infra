@@ -47,6 +47,60 @@ from omnibase_infra.runtime.kafka_contract_source import (
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 
 # =============================================================================
+# Test Helpers
+# =============================================================================
+
+
+def make_contract_yaml(
+    handler_id: str,
+    name: str,
+    *,
+    archetype: str = "compute",
+    version: tuple[int, int, int] = (1, 0, 0),
+    handler_class: str | None = None,
+    description: str | None = None,
+    input_model: str = "test.models.Input",
+    output_model: str = "test.models.Output",
+) -> str:
+    """Generate valid handler contract YAML for testing.
+
+    Args:
+        handler_id: Unique handler identifier
+        name: Human-readable handler name
+        archetype: Node archetype (compute, effect, reducer, orchestrator)
+        version: Semantic version tuple (major, minor, patch)
+        handler_class: Optional handler class path
+        description: Optional handler description
+        input_model: Input model class path
+        output_model: Output model class path
+
+    Returns:
+        Valid YAML string for a handler contract
+    """
+    major, minor, patch = version
+    yaml_content = f'''handler_id: "{handler_id}"
+name: "{name}"
+contract_version:
+  major: {major}
+  minor: {minor}
+  patch: {patch}
+descriptor:
+  node_archetype: "{archetype}"
+input_model: "{input_model}"
+output_model: "{output_model}"'''
+
+    if description:
+        yaml_content += f'\ndescription: "{description}"'
+
+    if handler_class:
+        yaml_content += f'''
+metadata:
+  handler_class: "{handler_class}"'''
+
+    return yaml_content
+
+
+# =============================================================================
 # Test Constants
 # =============================================================================
 
@@ -80,19 +134,6 @@ input_model: "test.models.ValidationInput"
 output_model: "test.models.ValidationOutput"
 metadata:
   handler_class: "test.handlers.ValidationHandler"
-"""
-
-MINIMAL_HANDLER_CONTRACT_YAML = """
-handler_id: "{handler_id}"
-name: "{name}"
-contract_version:
-  major: 1
-  minor: 0
-  patch: 0
-descriptor:
-  node_archetype: "compute"
-input_model: "test.models.Input"
-output_model: "test.models.Output"
 """
 
 
@@ -287,7 +328,7 @@ class TestKafkaContractSourceRegistration:
         # Register initial contract
         source.on_contract_registered(
             node_name="test.node",
-            contract_yaml=MINIMAL_HANDLER_CONTRACT_YAML.format(
+            contract_yaml=make_contract_yaml(
                 handler_id="handler.v1",
                 name="Handler V1",
             ),
@@ -297,7 +338,7 @@ class TestKafkaContractSourceRegistration:
         # Register updated contract with same node_name
         source.on_contract_registered(
             node_name="test.node",
-            contract_yaml=MINIMAL_HANDLER_CONTRACT_YAML.format(
+            contract_yaml=make_contract_yaml(
                 handler_id="handler.v2",
                 name="Handler V2",
             ),
@@ -448,14 +489,14 @@ class TestKafkaContractSourceDeregistration:
         # Register two contracts
         source.on_contract_registered(
             node_name="handler.one",
-            contract_yaml=MINIMAL_HANDLER_CONTRACT_YAML.format(
+            contract_yaml=make_contract_yaml(
                 handler_id="handler.one",
                 name="Handler One",
             ),
         )
         source.on_contract_registered(
             node_name="handler.two",
-            contract_yaml=MINIMAL_HANDLER_CONTRACT_YAML.format(
+            contract_yaml=make_contract_yaml(
                 handler_id="handler.two",
                 name="Handler Two",
             ),
@@ -604,14 +645,14 @@ class TestKafkaContractSourceClearCache:
         # Register some contracts
         source.on_contract_registered(
             node_name="handler.one",
-            contract_yaml=MINIMAL_HANDLER_CONTRACT_YAML.format(
+            contract_yaml=make_contract_yaml(
                 handler_id="handler.one",
                 name="Handler One",
             ),
         )
         source.on_contract_registered(
             node_name="handler.two",
-            contract_yaml=MINIMAL_HANDLER_CONTRACT_YAML.format(
+            contract_yaml=make_contract_yaml(
                 handler_id="handler.two",
                 name="Handler Two",
             ),
@@ -663,31 +704,31 @@ class TestKafkaContractSourceConfiguration:
         """Default environment should be 'dev'."""
         source = KafkaContractSource()
 
-        assert source._environment == "dev"
+        assert source.environment == "dev"
 
     def test_custom_environment(self) -> None:
         """Custom environment should be stored."""
         source = KafkaContractSource(environment="staging")
 
-        assert source._environment == "staging"
+        assert source.environment == "staging"
 
     def test_default_graceful_mode(self) -> None:
         """Default graceful_mode should be True."""
         source = KafkaContractSource()
 
-        assert source._graceful_mode is True
+        assert source.graceful_mode is True
 
     def test_correlation_id_generated(self) -> None:
         """A unique correlation_id should be generated on initialization."""
         source1 = KafkaContractSource()
         source2 = KafkaContractSource()
 
-        assert source1._correlation_id is not None
-        assert source2._correlation_id is not None
-        assert isinstance(source1._correlation_id, UUID)
-        assert isinstance(source2._correlation_id, UUID)
+        assert source1.correlation_id is not None
+        assert source2.correlation_id is not None
+        assert isinstance(source1.correlation_id, UUID)
+        assert isinstance(source2.correlation_id, UUID)
         # Each instance should have unique correlation ID
-        assert source1._correlation_id != source2._correlation_id
+        assert source1.correlation_id != source2.correlation_id
 
 
 # =============================================================================
@@ -739,7 +780,7 @@ class TestKafkaContractSourceHandlerClass:
 
         source.on_contract_registered(
             node_name="handler.one",
-            contract_yaml=MINIMAL_HANDLER_CONTRACT_YAML.format(
+            contract_yaml=make_contract_yaml(
                 handler_id="handler.one",
                 name="Handler One",
             ),
@@ -913,7 +954,7 @@ class TestKafkaContractSourceThreadSafety:
         def register_contracts(thread_id: int) -> list[bool]:
             results = []
             for i in range(contracts_per_thread):
-                yaml_content = MINIMAL_HANDLER_CONTRACT_YAML.format(
+                yaml_content = make_contract_yaml(
                     handler_id=f"handler.thread{thread_id}.contract{i}",
                     name=f"Handler Thread {thread_id} Contract {i}",
                 )
@@ -943,7 +984,7 @@ class TestKafkaContractSourceThreadSafety:
 
         # Pre-register contracts
         for i in range(num_contracts):
-            yaml_content = MINIMAL_HANDLER_CONTRACT_YAML.format(
+            yaml_content = make_contract_yaml(
                 handler_id=f"handler.item{i}",
                 name=f"Handler {i}",
             )
@@ -990,7 +1031,7 @@ class TestKafkaContractSourceThreadSafety:
         def register_worker() -> None:
             try:
                 for i in range(num_iterations):
-                    yaml_content = MINIMAL_HANDLER_CONTRACT_YAML.format(
+                    yaml_content = make_contract_yaml(
                         handler_id=f"handler.reg.item{i}",
                         name=f"Handler Reg {i}",
                     )

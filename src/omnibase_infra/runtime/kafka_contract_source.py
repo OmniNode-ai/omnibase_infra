@@ -74,337 +74,56 @@ ModelContractDiscoveryResult.model_rebuild()
 MAX_CONTRACT_SIZE = 10 * 1024 * 1024  # 10MB
 
 
-class KafkaContractSource(ProtocolContractSource):
-    """Kafka-based contract source - cache + discovery only.
+class ContractYamlParser:
+    """Parse contract YAML into ModelHandlerDescriptor.
 
-    Subscribes to platform-reserved contract topics (baseline-wired).
-    Maintains in-memory cache of descriptors derived from contract YAML.
-
-    Does NOT wire business subscriptions dynamically.
-    For beta: discover + next restart applies.
-
-    This source maintains an in-memory cache of handler descriptors that is
-    populated by contract registration events received via Kafka. The cache
-    is read-only from the discover_handlers() perspective - it simply returns
-    whatever has been cached from events.
-
-    Thread Safety:
-        This class is thread-safe. All access to the internal cache
-        (``_cached_descriptors``) and error list (``_pending_errors``) is
-        protected by a ``threading.Lock``. Multiple Kafka consumer threads
-        may safely call ``on_contract_registered()`` and
-        ``on_contract_deregistered()`` concurrently.
+    This class handles YAML parsing, validation, and error creation
+    for contract documents received via Kafka events. It encapsulates
+    all YAML-to-descriptor conversion logic in a single responsibility
+    class.
 
     Attributes:
-        source_type: Returns "KAFKA_EVENTS" as the source type identifier.
+        environment: The environment name used for constructing contract paths.
 
     Example:
-        >>> source = KafkaContractSource(environment="dev")
-        >>>
-        >>> # Event handler wiring (done by runtime)
-        >>> source.on_contract_registered(event)
-        >>>
-        >>> # Discovery returns cached descriptors
-        >>> result = await source.discover_handlers()
-        >>> for desc in result.descriptors:
-        ...     print(f"Cached: {desc.handler_id}")
-
-    Note:
-        This class does NOT handle Kafka subscription setup. The runtime is
-        responsible for wiring the platform-reserved contract topics to the
-        on_contract_registered/on_contract_deregistered methods.
+        >>> parser = ContractYamlParser(environment="dev")
+        >>> descriptor = parser.parse("my.node", yaml_content, correlation_id)
+        >>> print(descriptor.handler_id)
 
     .. versionadded:: 0.8.0
-        Created as part of OMN-1654 Kafka-based contract discovery.
+        Extracted from KafkaContractSource for single-responsibility.
     """
 
-    def __init__(
-        self,
-        environment: str = "dev",
-        graceful_mode: bool = True,
-    ) -> None:
-        """Initialize the Kafka contract source.
+    __slots__ = ("_environment",)
+
+    def __init__(self, environment: str = "dev") -> None:
+        """Initialize the parser.
 
         Args:
             environment: Environment name for topic prefix (e.g., "dev", "prod").
-                Used for observability logging only - actual topic wiring is
-                done by the runtime.
-            graceful_mode: If True (default), collect errors instead of raising.
-                For cache-based sources, graceful mode is typically preferred
-                since individual event failures should not crash the runtime.
+                Used for constructing contract_path URIs.
         """
         self._environment = environment
-        self._graceful_mode = graceful_mode
-        self._correlation_id = uuid4()
-
-        # In-memory cache of discovered descriptors
-        # Key: node_name (from contract event)
-        # Value: ModelHandlerDescriptor parsed from contract YAML
-        self._cached_descriptors: dict[str, ModelHandlerDescriptor] = {}
-
-        # Track validation errors from event processing
-        # These are cleared on each discover_handlers() call
-        self._pending_errors: list[ModelHandlerValidationError] = []
-
-        # Lock for thread-safe access to _cached_descriptors and _pending_errors
-        # Required because Kafka consumer callbacks may run on multiple threads
-        self._lock = threading.Lock()
-
-        logger.info(
-            "KafkaContractSource initialized",
-            extra={
-                "environment": environment,
-                "graceful_mode": graceful_mode,
-                "correlation_id": str(self._correlation_id),
-            },
-        )
 
     @property
-    def source_type(self) -> str:
-        """Return source type identifier.
+    def environment(self) -> str:
+        """Return the environment name.
 
         Returns:
-            "KAFKA_EVENTS" as the source type.
+            The environment name (e.g., "dev", "prod").
         """
-        return "KAFKA_EVENTS"
+        return self._environment
 
-    @property
-    def cached_count(self) -> int:
-        """Return the number of cached descriptors.
-
-        Returns:
-            Number of handler descriptors currently cached.
-        """
-        with self._lock:
-            return len(self._cached_descriptors)
-
-    async def discover_handlers(self) -> ModelContractDiscoveryResult:
-        """Return cached descriptors from contract events.
-
-        This method returns whatever descriptors have been cached from
-        contract registration events. It does not perform any I/O or
-        network operations - it simply returns the current cache state.
-
-        Returns:
-            ModelContractDiscoveryResult with cached descriptors and any
-            validation errors encountered during event processing.
-        """
-        # Atomically collect and clear pending state
-        with self._lock:
-            errors = list(self._pending_errors)
-            self._pending_errors.clear()
-            descriptors = list(self._cached_descriptors.values())
-
-        logger.info(
-            "Handler discovery completed (KAFKA_EVENTS mode)",
-            extra={
-                "cached_descriptor_count": len(descriptors),
-                "validation_error_count": len(errors),
-                "environment": self._environment,
-                "correlation_id": str(self._correlation_id),
-            },
-        )
-
-        return ModelContractDiscoveryResult(
-            descriptors=descriptors,
-            validation_errors=errors,
-        )
-
-    def on_contract_registered(
-        self,
-        node_name: str,
-        contract_yaml: str,
-        correlation_id: UUID | None = None,
-    ) -> bool:
-        """Cache descriptor from contract registration event.
-
-        Called by the runtime when a contract registration event is received
-        on the platform-reserved contract topic.
-
-        Args:
-            node_name: Unique identifier for the node (used as cache key).
-            contract_yaml: Full YAML content of the handler contract.
-            correlation_id: Optional correlation ID from the event for tracing.
-
-        Returns:
-            True if the contract was successfully cached, False if parsing failed.
-
-        Note:
-            In graceful mode, parsing errors are collected in pending_errors
-            and returned on the next discover_handlers() call. In strict mode,
-            errors are raised immediately.
-        """
-        event_correlation = correlation_id or uuid4()
-
-        logger.debug(
-            "Processing contract registration event",
-            extra={
-                "node_name": node_name,
-                "contract_size": len(contract_yaml),
-                "correlation_id": str(event_correlation),
-                "source_correlation_id": str(self._correlation_id),
-            },
-        )
-
-        try:
-            descriptor = self._yaml_to_descriptor(
-                node_name=node_name,
-                contract_yaml=contract_yaml,
-                correlation_id=event_correlation,
-            )
-            with self._lock:
-                self._cached_descriptors[node_name] = descriptor
-
-            logger.info(
-                "Contract registered and cached",
-                extra={
-                    "node_name": node_name,
-                    "handler_id": descriptor.handler_id,
-                    "handler_version": str(descriptor.version),
-                    "correlation_id": str(event_correlation),
-                },
-            )
-            return True
-
-        except (yaml.YAMLError, ValidationError, ModelOnexError, ValueError) as e:
-            error = self._create_parse_error(
-                node_name=node_name,
-                error=e,
-                correlation_id=event_correlation,
-            )
-
-            if self._graceful_mode:
-                with self._lock:
-                    self._pending_errors.append(error)
-                logger.warning(
-                    "Contract registration failed (graceful mode)",
-                    extra={
-                        "node_name": node_name,
-                        "error": str(e),
-                        "error_type": type(e).__name__,
-                        "correlation_id": str(event_correlation),
-                    },
-                )
-                return False
-            else:
-                raise ModelOnexError(
-                    f"Failed to parse contract for node '{node_name}': {e}",
-                    error_code="KAFKA_CONTRACT_001",
-                ) from e
-
-    def on_contract_deregistered(
-        self,
-        node_name: str,
-        correlation_id: UUID | None = None,
-    ) -> bool:
-        """Remove descriptor from cache on deregistration event.
-
-        Called by the runtime when a contract deregistration event is received
-        on the platform-reserved contract topic.
-
-        Args:
-            node_name: Unique identifier for the node to remove.
-            correlation_id: Optional correlation ID from the event for tracing.
-
-        Returns:
-            True if a descriptor was removed, False if not found in cache.
-        """
-        event_correlation = correlation_id or uuid4()
-
-        with self._lock:
-            removed = self._cached_descriptors.pop(node_name, None)
-
-        if removed:
-            logger.info(
-                "Contract deregistered and removed from cache",
-                extra={
-                    "node_name": node_name,
-                    "handler_id": removed.handler_id,
-                    "correlation_id": str(event_correlation),
-                },
-            )
-            return True
-        else:
-            logger.debug(
-                "Contract deregistration for unknown node (no-op)",
-                extra={
-                    "node_name": node_name,
-                    "correlation_id": str(event_correlation),
-                },
-            )
-            return False
-
-    def handle_registered_event(
-        self,
-        event: ModelContractRegisteredEvent,
-    ) -> bool:
-        """Handle a typed contract registration event.
-
-        This is the preferred method for processing registration events when
-        using the typed event models from omnibase_core. It extracts the
-        relevant fields and delegates to on_contract_registered().
-
-        Args:
-            event: The typed contract registration event from Kafka.
-
-        Returns:
-            True if the contract was successfully cached, False if parsing failed.
-
-        Example:
-            >>> source = KafkaContractSource()
-            >>> event = ModelContractRegisteredEvent(
-            ...     node_name="my.handler",
-            ...     contract_yaml="...",
-            ...     # ... other fields
-            ... )
-            >>> success = source.handle_registered_event(event)
-        """
-        return self.on_contract_registered(
-            node_name=event.node_name,
-            contract_yaml=event.contract_yaml,
-            correlation_id=event.correlation_id,
-        )
-
-    def handle_deregistered_event(
-        self,
-        event: ModelContractDeregisteredEvent,
-    ) -> bool:
-        """Handle a typed contract deregistration event.
-
-        This is the preferred method for processing deregistration events when
-        using the typed event models from omnibase_core. It extracts the
-        relevant fields and delegates to on_contract_deregistered().
-
-        Args:
-            event: The typed contract deregistration event from Kafka.
-
-        Returns:
-            True if a descriptor was removed, False if not found in cache.
-
-        Example:
-            >>> source = KafkaContractSource()
-            >>> event = ModelContractDeregisteredEvent(
-            ...     node_name="my.handler",
-            ...     reason=EnumDeregistrationReason.SHUTDOWN,
-            ...     # ... other fields
-            ... )
-            >>> removed = source.handle_deregistered_event(event)
-        """
-        return self.on_contract_deregistered(
-            node_name=event.node_name,
-            correlation_id=event.correlation_id,
-        )
-
-    def _yaml_to_descriptor(
+    def parse(
         self,
         node_name: str,
         contract_yaml: str,
         correlation_id: UUID,
     ) -> ModelHandlerDescriptor:
-        """Convert contract YAML to ModelHandlerDescriptor.
+        """Parse contract YAML into ModelHandlerDescriptor.
 
         Args:
-            node_name: Node identifier (used for error context).
+            node_name: Node identifier (used for error context and path).
             contract_yaml: Full YAML content of the handler contract.
             correlation_id: Correlation ID for tracing.
 
@@ -472,7 +191,7 @@ class KafkaContractSource(ProtocolContractSource):
             contract_config=contract_data,
         )
 
-    def _create_parse_error(
+    def create_parse_error(
         self,
         node_name: str,
         error: Exception,
@@ -502,6 +221,591 @@ class KafkaContractSource(ProtocolContractSource):
             correlation_id=correlation_id,
         )
 
+
+class KafkaContractCache:
+    """Thread-safe cache for contract descriptors and validation errors.
+
+    This class manages the in-memory storage of handler descriptors discovered
+    from Kafka contract registration events. All operations are thread-safe
+    and can be called concurrently from multiple Kafka consumer threads.
+
+    The cache provides atomic operations for:
+    - Adding/removing handler descriptors by node name
+    - Collecting validation errors during event processing
+    - Retrieving all cached data with proper thread synchronization
+
+    Attributes:
+        count: Number of cached descriptors (thread-safe read).
+        error_count: Number of pending validation errors (thread-safe read).
+
+    Example:
+        >>> cache = KafkaContractCache()
+        >>> cache.add("my.node", descriptor)
+        >>> assert cache.count == 1
+        >>> removed = cache.remove("my.node")
+        >>> assert removed is not None
+
+    .. versionadded:: 0.8.0
+        Extracted from KafkaContractSource for single-responsibility.
+    """
+
+    __slots__ = ("_descriptors", "_errors", "_lock")
+
+    def __init__(self) -> None:
+        """Initialize an empty cache with thread-safe locking."""
+        self._descriptors: dict[str, ModelHandlerDescriptor] = {}
+        self._errors: list[ModelHandlerValidationError] = []
+        self._lock = threading.Lock()
+
+    @property
+    def count(self) -> int:
+        """Return the number of cached descriptors.
+
+        Returns:
+            Number of handler descriptors currently in the cache.
+        """
+        with self._lock:
+            return len(self._descriptors)
+
+    @property
+    def error_count(self) -> int:
+        """Return the number of pending validation errors.
+
+        Returns:
+            Number of validation errors awaiting retrieval.
+        """
+        with self._lock:
+            return len(self._errors)
+
+    def add(self, node_name: str, descriptor: ModelHandlerDescriptor) -> None:
+        """Add or update a descriptor in the cache.
+
+        If a descriptor with the same node_name exists, it is replaced.
+
+        Args:
+            node_name: Unique identifier for the node (cache key).
+            descriptor: The handler descriptor to cache.
+        """
+        with self._lock:
+            self._descriptors[node_name] = descriptor
+
+    def remove(self, node_name: str) -> ModelHandlerDescriptor | None:
+        """Remove a descriptor from the cache.
+
+        Args:
+            node_name: Unique identifier for the node to remove.
+
+        Returns:
+            The removed descriptor if found, None otherwise.
+        """
+        with self._lock:
+            return self._descriptors.pop(node_name, None)
+
+    def get_all(self) -> list[ModelHandlerDescriptor]:
+        """Return all cached descriptors.
+
+        Returns:
+            A copy of all cached descriptors. Modifying the returned
+            list does not affect the cache.
+        """
+        with self._lock:
+            return list(self._descriptors.values())
+
+    def add_error(self, error: ModelHandlerValidationError) -> None:
+        """Add a validation error to the pending errors list.
+
+        Args:
+            error: The validation error to add.
+        """
+        with self._lock:
+            self._errors.append(error)
+
+    def get_errors(self) -> list[ModelHandlerValidationError]:
+        """Return pending errors WITHOUT clearing them.
+
+        This method provides read-only access to pending errors for
+        inspection without consuming them.
+
+        Returns:
+            A copy of the pending validation errors.
+        """
+        with self._lock:
+            return list(self._errors)
+
+    def get_and_clear_errors(self) -> list[ModelHandlerValidationError]:
+        """Atomically get and clear all pending errors.
+
+        This method returns the current errors and clears the internal
+        list in a single atomic operation, ensuring no errors are lost
+        in concurrent access scenarios.
+
+        Returns:
+            The list of pending errors that were cleared.
+        """
+        with self._lock:
+            errors = list(self._errors)
+            self._errors.clear()
+            return errors
+
+    def clear(self) -> int:
+        """Clear all cached descriptors and pending errors.
+
+        Returns:
+            Number of descriptors that were cleared.
+        """
+        with self._lock:
+            count = len(self._descriptors)
+            self._descriptors.clear()
+            self._errors.clear()
+            return count
+
+
+class MixinTypedContractEvents:
+    """Mixin providing typed event handler and error inspection methods.
+
+    This mixin provides convenience methods for handling typed contract
+    events from omnibase_core and inspecting pending validation errors.
+    It delegates to the primitive methods (on_contract_registered,
+    on_contract_deregistered) and the cache which must be available
+    in the class using this mixin.
+
+    This mixin reduces method count in KafkaContractSource by extracting
+    the typed event handling and error inspection into a separate concern.
+
+    .. versionadded:: 0.8.0
+        Extracted from KafkaContractSource for single-responsibility.
+    """
+
+    # Type hints for mixin - these must be provided by the using class
+    _cache: KafkaContractCache
+
+    def get_pending_errors(self) -> list[ModelHandlerValidationError]:
+        """Return pending validation errors WITHOUT clearing them.
+
+        This method provides read-only access to pending errors for inspection
+        purposes. Unlike ``discover_handlers()`` which clears errors after
+        returning them (one-shot behavior), this method allows repeated
+        inspection of the same errors.
+
+        Use this method when you need to:
+        - Check error state without consuming errors
+        - Log or display errors before a discover_handlers() call
+        - Implement custom error handling before the next discovery cycle
+
+        Returns:
+            A copy of the pending validation errors list. Modifying the
+            returned list does not affect the internal state.
+
+        Thread Safety:
+            This method is thread-safe. The returned list is a copy created
+            while holding the internal lock.
+
+        Example:
+            >>> source = KafkaContractSource()
+            >>> # Inspect errors without consuming
+            >>> errors = source.get_pending_errors()
+            >>> print(f"Found {len(errors)} pending errors")
+            >>>
+            >>> # Errors are still available for discover_handlers()
+            >>> result = await source.discover_handlers()
+            >>> assert len(result.validation_errors) == len(errors)
+            >>>
+            >>> # Now errors are cleared (one-shot)
+            >>> assert source.pending_error_count == 0
+
+        See Also:
+            - ``pending_error_count``: Quick count check without list copy.
+            - ``discover_handlers()``: Consumes errors (one-shot retrieval).
+        """
+        return self._cache.get_errors()
+
+    def handle_registered_event(
+        self,
+        event: ModelContractRegisteredEvent,
+    ) -> bool:
+        """Handle a typed contract registration event.
+
+        This is the preferred method for processing registration events when
+        using the typed event models from omnibase_core. It extracts the
+        relevant fields and delegates to on_contract_registered().
+
+        Args:
+            event: The typed contract registration event from Kafka.
+
+        Returns:
+            True if the contract was successfully cached, False if parsing failed.
+
+        Example:
+            >>> source = KafkaContractSource()
+            >>> event = ModelContractRegisteredEvent(
+            ...     node_name="my.handler",
+            ...     contract_yaml="...",
+            ...     # ... other fields
+            ... )
+            >>> success = source.handle_registered_event(event)
+        """
+        # Type hint for self to satisfy mypy (duck typing)
+        self_typed: KafkaContractSource = self  # type: ignore[assignment]
+        return self_typed.on_contract_registered(
+            node_name=event.node_name,
+            contract_yaml=event.contract_yaml,
+            correlation_id=event.correlation_id,
+        )
+
+    def handle_deregistered_event(
+        self,
+        event: ModelContractDeregisteredEvent,
+    ) -> bool:
+        """Handle a typed contract deregistration event.
+
+        This is the preferred method for processing deregistration events when
+        using the typed event models from omnibase_core. It extracts the
+        relevant fields and delegates to on_contract_deregistered().
+
+        Args:
+            event: The typed contract deregistration event from Kafka.
+
+        Returns:
+            True if a descriptor was removed, False if not found in cache.
+
+        Example:
+            >>> source = KafkaContractSource()
+            >>> event = ModelContractDeregisteredEvent(
+            ...     node_name="my.handler",
+            ...     reason=EnumDeregistrationReason.SHUTDOWN,
+            ...     # ... other fields
+            ... )
+            >>> removed = source.handle_deregistered_event(event)
+        """
+        # Type hint for self to satisfy mypy (duck typing)
+        self_typed: KafkaContractSource = self  # type: ignore[assignment]
+        return self_typed.on_contract_deregistered(
+            node_name=event.node_name,
+            correlation_id=event.correlation_id,
+        )
+
+
+class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
+    """Kafka-based contract source - cache + discovery only.
+
+    Subscribes to platform-reserved contract topics (baseline-wired).
+    Maintains in-memory cache of descriptors derived from contract YAML.
+
+    Does NOT wire business subscriptions dynamically.
+    For beta: discover + next restart applies.
+
+    This source maintains an in-memory cache of handler descriptors that is
+    populated by contract registration events received via Kafka. The cache
+    is read-only from the discover_handlers() perspective - it simply returns
+    whatever has been cached from events.
+
+    Thread Safety:
+        This class is thread-safe. All access to the internal cache
+        (``_cached_descriptors``) and error list (``_pending_errors``) is
+        protected by a ``threading.Lock``. Multiple Kafka consumer threads
+        may safely call ``on_contract_registered()`` and
+        ``on_contract_deregistered()`` concurrently.
+
+    Attributes:
+        source_type: Returns "KAFKA_EVENTS" as the source type identifier.
+
+    Example:
+        >>> source = KafkaContractSource(environment="dev")
+        >>>
+        >>> # Event handler wiring (done by runtime)
+        >>> source.on_contract_registered(event)
+        >>>
+        >>> # Discovery returns cached descriptors
+        >>> result = await source.discover_handlers()
+        >>> for desc in result.descriptors:
+        ...     print(f"Cached: {desc.handler_id}")
+
+    Note:
+        This class does NOT handle Kafka subscription setup. The runtime is
+        responsible for wiring the platform-reserved contract topics to the
+        on_contract_registered/on_contract_deregistered methods.
+
+    .. versionadded:: 0.8.0
+        Created as part of OMN-1654 Kafka-based contract discovery.
+    """
+
+    __slots__ = (
+        "_cache",
+        "_correlation_id",
+        "_environment",
+        "_graceful_mode",
+        "_parser",
+    )
+
+    def __init__(
+        self,
+        environment: str = "dev",
+        graceful_mode: bool = True,
+    ) -> None:
+        """Initialize the Kafka contract source.
+
+        Args:
+            environment: Environment name for topic prefix (e.g., "dev", "prod").
+                Used for observability logging only - actual topic wiring is
+                done by the runtime.
+            graceful_mode: If True (default), collect errors instead of raising.
+                For cache-based sources, graceful mode is typically preferred
+                since individual event failures should not crash the runtime.
+        """
+        self._environment = environment
+        self._graceful_mode = graceful_mode
+        self._correlation_id = uuid4()
+        self._cache = KafkaContractCache()
+        self._parser = ContractYamlParser(environment=environment)
+
+        logger.info(
+            "KafkaContractSource initialized",
+            extra={
+                "environment": environment,
+                "graceful_mode": graceful_mode,
+                "correlation_id": str(self._correlation_id),
+            },
+        )
+
+    @property
+    def source_type(self) -> str:
+        """Return source type identifier.
+
+        Returns:
+            "KAFKA_EVENTS" as the source type.
+        """
+        return "KAFKA_EVENTS"
+
+    @property
+    def cached_count(self) -> int:
+        """Return the number of cached descriptors.
+
+        Returns:
+            Number of handler descriptors currently cached.
+        """
+        return self._cache.count
+
+    @property
+    def environment(self) -> str:
+        """Return the environment name.
+
+        Returns:
+            The environment name (e.g., "dev", "prod").
+        """
+        return self._environment
+
+    @property
+    def graceful_mode(self) -> bool:
+        """Return whether graceful mode is enabled.
+
+        Returns:
+            True if graceful mode is enabled, False otherwise.
+        """
+        return self._graceful_mode
+
+    @property
+    def correlation_id(self) -> UUID:
+        """Return the source correlation ID.
+
+        Returns:
+            The unique correlation ID for this source instance.
+        """
+        return self._correlation_id
+
+    @property
+    def pending_error_count(self) -> int:
+        """Return the number of pending validation errors.
+
+        This property provides a quick way to check if there are pending
+        errors without consuming them. Use ``get_pending_errors()`` to
+        inspect errors without clearing, or ``discover_handlers()`` to
+        consume errors (one-shot retrieval).
+
+        Returns:
+            Number of validation errors currently pending.
+
+        Example:
+            >>> source = KafkaContractSource()
+            >>> if source.pending_error_count > 0:
+            ...     errors = source.get_pending_errors()
+            ...     for err in errors:
+            ...         print(f"Pending error: {err.message}")
+        """
+        return self._cache.error_count
+
+    async def discover_handlers(self) -> ModelContractDiscoveryResult:
+        """Return cached descriptors from contract events.
+
+        This method returns whatever descriptors have been cached from
+        contract registration events. It does not perform any I/O or
+        network operations - it simply returns the current cache state.
+
+        Warning:
+            **One-Shot Error Retrieval**: Validation errors are cleared after
+            being returned. Calling this method twice will return an empty
+            error list on the second call (unless new errors occurred between
+            calls). Use ``get_pending_errors()`` to inspect errors without
+            consuming them, or ``pending_error_count`` for a quick count check.
+
+        Returns:
+            ModelContractDiscoveryResult with cached descriptors and any
+            validation errors encountered during event processing. Errors
+            are cleared from internal state after this call returns.
+
+        Example:
+            >>> source = KafkaContractSource()
+            >>> # First call returns accumulated errors
+            >>> result1 = await source.discover_handlers()
+            >>> print(f"Errors: {len(result1.validation_errors)}")
+            >>>
+            >>> # Second call has empty errors (already consumed)
+            >>> result2 = await source.discover_handlers()
+            >>> assert len(result2.validation_errors) == 0
+
+        See Also:
+            - ``get_pending_errors()``: Inspect errors without clearing.
+            - ``pending_error_count``: Quick count check.
+        """
+        # Get errors atomically (clears them) and get all descriptors
+        errors = self._cache.get_and_clear_errors()
+        descriptors = self._cache.get_all()
+
+        logger.info(
+            "Handler discovery completed (KAFKA_EVENTS mode)",
+            extra={
+                "cached_descriptor_count": len(descriptors),
+                "validation_error_count": len(errors),
+                "environment": self._environment,
+                "correlation_id": str(self._correlation_id),
+            },
+        )
+
+        return ModelContractDiscoveryResult(
+            descriptors=descriptors,
+            validation_errors=errors,
+        )
+
+    def on_contract_registered(
+        self,
+        node_name: str,
+        contract_yaml: str,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Cache descriptor from contract registration event.
+
+        Called by the runtime when a contract registration event is received
+        on the platform-reserved contract topic.
+
+        Args:
+            node_name: Unique identifier for the node (used as cache key).
+            contract_yaml: Full YAML content of the handler contract.
+            correlation_id: Optional correlation ID from the event for tracing.
+
+        Returns:
+            True if the contract was successfully cached, False if parsing failed.
+
+        Note:
+            In graceful mode, parsing errors are collected in pending_errors
+            and returned on the next discover_handlers() call. In strict mode,
+            errors are raised immediately.
+        """
+        event_correlation = correlation_id or uuid4()
+
+        logger.debug(
+            "Processing contract registration event",
+            extra={
+                "node_name": node_name,
+                "contract_size": len(contract_yaml),
+                "correlation_id": str(event_correlation),
+                "source_correlation_id": str(self._correlation_id),
+            },
+        )
+
+        try:
+            descriptor = self._parser.parse(
+                node_name=node_name,
+                contract_yaml=contract_yaml,
+                correlation_id=event_correlation,
+            )
+            self._cache.add(node_name, descriptor)
+
+            logger.info(
+                "Contract registered and cached",
+                extra={
+                    "node_name": node_name,
+                    "handler_id": descriptor.handler_id,
+                    "handler_version": str(descriptor.version),
+                    "correlation_id": str(event_correlation),
+                },
+            )
+            return True
+
+        except (yaml.YAMLError, ValidationError, ModelOnexError, ValueError) as e:
+            error = self._parser.create_parse_error(
+                node_name=node_name,
+                error=e,
+                correlation_id=event_correlation,
+            )
+
+            if self._graceful_mode:
+                self._cache.add_error(error)
+                logger.warning(
+                    "Contract registration failed (graceful mode)",
+                    extra={
+                        "node_name": node_name,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "correlation_id": str(event_correlation),
+                    },
+                )
+                return False
+            else:
+                raise ModelOnexError(
+                    f"Failed to parse contract for node '{node_name}': {e}",
+                    error_code="KAFKA_CONTRACT_001",
+                ) from e
+
+    def on_contract_deregistered(
+        self,
+        node_name: str,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Remove descriptor from cache on deregistration event.
+
+        Called by the runtime when a contract deregistration event is received
+        on the platform-reserved contract topic.
+
+        Args:
+            node_name: Unique identifier for the node to remove.
+            correlation_id: Optional correlation ID from the event for tracing.
+
+        Returns:
+            True if a descriptor was removed, False if not found in cache.
+        """
+        event_correlation = correlation_id or uuid4()
+
+        removed = self._cache.remove(node_name)
+
+        if removed is not None:
+            logger.info(
+                "Contract deregistered and removed from cache",
+                extra={
+                    "node_name": node_name,
+                    "handler_id": removed.handler_id,
+                    "correlation_id": str(event_correlation),
+                },
+            )
+            return True
+        else:
+            logger.debug(
+                "Contract deregistration for unknown node (no-op)",
+                extra={
+                    "node_name": node_name,
+                    "correlation_id": str(event_correlation),
+                },
+            )
+            return False
+
     def clear_cache(self) -> int:
         """Clear all cached descriptors.
 
@@ -510,10 +814,7 @@ class KafkaContractSource(ProtocolContractSource):
         Returns:
             Number of descriptors that were cleared.
         """
-        with self._lock:
-            count = len(self._cached_descriptors)
-            self._cached_descriptors.clear()
-            self._pending_errors.clear()
+        count = self._cache.clear()
 
         logger.info(
             "Contract cache cleared",
@@ -526,8 +827,11 @@ class KafkaContractSource(ProtocolContractSource):
 
 
 __all__ = [
+    "ContractYamlParser",
+    "KafkaContractCache",
     "KafkaContractSource",
     "MAX_CONTRACT_SIZE",
+    "MixinTypedContractEvents",
     # Re-exported from omnibase_core for convenience
     "ModelContractDeregisteredEvent",
     "ModelContractRegisteredEvent",
