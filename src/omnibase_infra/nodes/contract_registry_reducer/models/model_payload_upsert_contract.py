@@ -24,6 +24,11 @@ class ModelPayloadUpsertContract(BaseModel):
     Note: contract_id is a derived natural key (node_name:major.minor.patch),
     not a UUID. This is intentional per the contract registry design.
 
+    Serialization Note:
+        The contract_yaml field accepts both dict (parsed) and str (raw YAML).
+        The Effect layer (PostgresAdapter) is responsible for serializing dict
+        to YAML string before INSERT, as the PostgreSQL column is TEXT type.
+
     Attributes:
         intent_type: Routing discriminator. Always "postgres.upsert_contract".
         correlation_id: Correlation ID for distributed tracing.
@@ -33,7 +38,9 @@ class ModelPayloadUpsertContract(BaseModel):
         version_minor: Semantic version minor component.
         version_patch: Semantic version patch component.
         contract_hash: Hash of the contract YAML for change detection.
-        contract_yaml: Full contract YAML for storage and replay.
+        contract_yaml: Full contract YAML for storage and replay. Accepts dict
+            (parsed) or str (raw). Effect layer serializes dict to YAML string
+            before INSERT.
         source_node_id: UUID of the node that emitted the event (optional).
         is_active: Whether the contract is currently active.
         registered_at: Timestamp when contract was registered.

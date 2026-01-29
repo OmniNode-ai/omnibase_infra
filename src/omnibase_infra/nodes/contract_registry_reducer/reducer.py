@@ -206,13 +206,13 @@ class ContractRegistryReducer:
 
         # Extract Kafka metadata for idempotency
         topic = str(event_metadata.get("topic", ""))
-        partition_raw = event_metadata.get("partition", 0)
-        offset_raw = event_metadata.get("offset", 0)
+        partition_raw = event_metadata.get("partition")
+        offset_raw = event_metadata.get("offset")
         partition = int(partition_raw) if isinstance(partition_raw, (int, str)) else 0
         offset = int(offset_raw) if isinstance(offset_raw, (int, str)) else 0
 
         # Warn if metadata is incomplete (could cause idempotency issues)
-        if not topic or partition_raw == 0 or offset_raw == 0:
+        if not topic or partition_raw is None or offset_raw is None:
             _logger.warning(
                 "Event metadata incomplete - idempotency may be compromised",
                 extra={

@@ -460,3 +460,164 @@ class TestContractRegistryState:
 
         # Different partition should NOT be duplicate
         assert not new_state.is_duplicate_event("topic", 1, 50)
+
+
+# =============================================================================
+# Test: Malformed YAML Handling
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestContractRegistryReducerMalformedYaml:
+    """Test graceful handling of malformed contract_yaml.
+
+    The reducer should skip topic extraction when contract_yaml cannot be parsed,
+    but should still emit the upsert_contract intent and process the event.
+
+    Related:
+        - OMN-1653: Contract Registry Reducer implementation
+        - reducer.py _build_topic_update_intents() YAML parse error handling
+    """
+
+    def test_malformed_yaml_skips_topic_extraction(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        sample_version: ModelSemVer,
+    ) -> None:
+        """Malformed YAML should skip topic extraction but still process event."""
+        # Create event with malformed YAML (unclosed bracket)
+        event = ModelContractRegisteredEvent(
+            event_id=uuid4(),
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            source_node_id=uuid4(),
+            event_type="onex.evt.platform.contract-registered.v1",
+            node_name="test-reducer",
+            node_version=sample_version,
+            contract_hash="abc123",
+            contract_yaml="invalid: yaml: [unclosed",  # Malformed YAML
+        )
+
+        result = reducer.reduce(initial_state, event, make_event_metadata())
+
+        # Should still process event
+        assert result.items_processed == 1
+        assert result.result.contracts_processed == 1
+
+        # Should have only upsert intent (no topic intents due to parse failure)
+        assert len(result.intents) == 1
+        assert result.intents[0].payload.intent_type == "postgres.upsert_contract"
+
+    def test_malformed_yaml_colon_in_value(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        sample_version: ModelSemVer,
+    ) -> None:
+        """YAML with unquoted colon in value should skip topic extraction."""
+        event = ModelContractRegisteredEvent(
+            event_id=uuid4(),
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            source_node_id=uuid4(),
+            event_type="onex.evt.platform.contract-registered.v1",
+            node_name="test-reducer",
+            node_version=sample_version,
+            contract_hash="abc123",
+            contract_yaml="key: value: with: extra: colons:",  # Invalid YAML
+        )
+
+        result = reducer.reduce(initial_state, event, make_event_metadata())
+
+        assert result.items_processed == 1
+        assert result.result.contracts_processed == 1
+        assert len(result.intents) == 1
+        assert result.intents[0].payload.intent_type == "postgres.upsert_contract"
+
+    def test_non_dict_yaml_skips_topic_extraction(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        sample_version: ModelSemVer,
+    ) -> None:
+        """Valid YAML that parses to non-dict should skip topic extraction."""
+        event = ModelContractRegisteredEvent(
+            event_id=uuid4(),
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            source_node_id=uuid4(),
+            event_type="onex.evt.platform.contract-registered.v1",
+            node_name="test-reducer",
+            node_version=sample_version,
+            contract_hash="abc123",
+            contract_yaml="- item1\n- item2\n- item3",  # Valid YAML but a list
+        )
+
+        result = reducer.reduce(initial_state, event, make_event_metadata())
+
+        # Should still process event
+        assert result.items_processed == 1
+        assert result.result.contracts_processed == 1
+
+        # Should have only upsert intent (topic extraction skipped for non-dict)
+        assert len(result.intents) == 1
+        assert result.intents[0].payload.intent_type == "postgres.upsert_contract"
+
+    def test_empty_yaml_skips_topic_extraction(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        sample_version: ModelSemVer,
+    ) -> None:
+        """Empty string YAML should skip topic extraction."""
+        event = ModelContractRegisteredEvent(
+            event_id=uuid4(),
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            source_node_id=uuid4(),
+            event_type="onex.evt.platform.contract-registered.v1",
+            node_name="test-reducer",
+            node_version=sample_version,
+            contract_hash="abc123",
+            contract_yaml="",  # Empty string
+        )
+
+        result = reducer.reduce(initial_state, event, make_event_metadata())
+
+        # Should still process event
+        assert result.items_processed == 1
+        assert result.result.contracts_processed == 1
+
+        # Empty string parses to None which is not a dict
+        assert len(result.intents) == 1
+        assert result.intents[0].payload.intent_type == "postgres.upsert_contract"
+
+    def test_yaml_without_topics_no_topic_intents(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        sample_version: ModelSemVer,
+    ) -> None:
+        """Valid YAML without consumed_events/published_events has no topic intents."""
+        event = ModelContractRegisteredEvent(
+            event_id=uuid4(),
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            source_node_id=uuid4(),
+            event_type="onex.evt.platform.contract-registered.v1",
+            node_name="test-reducer",
+            node_version=sample_version,
+            contract_hash="abc123",
+            contract_yaml="name: test\nversion: 1.0.0",  # Valid but no topics
+        )
+
+        result = reducer.reduce(initial_state, event, make_event_metadata())
+
+        # Should still process event
+        assert result.items_processed == 1
+        assert result.result.contracts_processed == 1
+
+        # Should have only upsert intent (no topics defined in contract)
+        assert len(result.intents) == 1
+        assert result.intents[0].payload.intent_type == "postgres.upsert_contract"
