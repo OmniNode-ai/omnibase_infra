@@ -60,6 +60,7 @@ from omnibase_core.errors import OnexError
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.emit_daemon.config import ModelEmitDaemonConfig
 from omnibase_infra.runtime.emit_daemon.event_registry import EventRegistry
 from omnibase_infra.runtime.emit_daemon.model_daemon_request import (
@@ -118,7 +119,7 @@ class EmitDaemon:
     def __init__(
         self,
         config: ModelEmitDaemonConfig,
-        event_bus: EventBusKafka | None = None,
+        event_bus: ProtocolEventBusLike | None = None,
     ) -> None:
         """Initialize daemon with config.
 
@@ -142,7 +143,7 @@ class EmitDaemon:
             ```
         """
         self._config = config
-        self._event_bus: EventBusKafka | None = event_bus
+        self._event_bus: ProtocolEventBusLike | None = event_bus
 
         # Event registry for topic resolution and payload enrichment
         self._registry = EventRegistry(environment=config.environment)
@@ -702,7 +703,10 @@ class EmitDaemon:
             )
 
             # Publish to Kafka
-            await self._event_bus.publish(
+            # NOTE: headers parameter is Kafka-specific, not in minimal protocol.
+            # When _event_bus is None, we create EventBusKafka which supports headers.
+            # For testing mocks, they can accept **kwargs or ignore extra params.
+            await self._event_bus.publish(  # type: ignore[call-arg]
                 topic=event.topic,
                 key=key,
                 value=value,
