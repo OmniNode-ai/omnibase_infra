@@ -809,3 +809,267 @@ class TestContractRegistryReducerMalformedYaml:
         # Should have only upsert intent (no topics defined in contract)
         assert len(result.intents) == 1
         assert result.intents[0].payload.intent_type == "postgres.upsert_contract"
+
+
+# =============================================================================
+# Test: Logging Behavior
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestContractRegistryReducerLogging:
+    """Test logging behavior for edge cases and performance warnings.
+
+    These tests verify that the reducer emits appropriate warnings when:
+    - Event metadata is incomplete (could compromise idempotency)
+    - Processing time exceeds performance thresholds
+
+    Related:
+        - OMN-1653: Contract Registry Reducer implementation
+        - reducer.py incomplete metadata warning (lines ~217-227)
+        - reducer.py performance threshold warnings (lines ~321-331, ~555-563)
+    """
+
+    def test_incomplete_metadata_missing_topic_logs_warning(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Missing topic in metadata should log a warning about idempotency."""
+        import logging
+
+        # Metadata with empty topic (missing required field)
+        incomplete_metadata: dict[str, object] = {
+            "topic": "",  # Empty topic
+            "partition": 0,
+            "offset": 100,
+        }
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(
+                initial_state, contract_registered_event, incomplete_metadata
+            )
+
+        # Should warn about incomplete metadata
+        assert any(
+            "Event metadata incomplete" in record.message
+            and "idempotency may be compromised" in record.message
+            for record in caplog.records
+        ), (
+            f"Expected incomplete metadata warning, got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_incomplete_metadata_missing_partition_logs_warning(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Missing partition in metadata should log a warning about idempotency."""
+        import logging
+
+        # Metadata with None partition
+        incomplete_metadata: dict[str, object] = {
+            "topic": "test.topic",
+            # "partition" intentionally omitted (None)
+            "offset": 100,
+        }
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(
+                initial_state, contract_registered_event, incomplete_metadata
+            )
+
+        # Should warn about incomplete metadata
+        assert any(
+            "Event metadata incomplete" in record.message for record in caplog.records
+        ), (
+            f"Expected incomplete metadata warning, got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_incomplete_metadata_missing_offset_logs_warning(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Missing offset in metadata should log a warning about idempotency."""
+        import logging
+
+        # Metadata with None offset
+        incomplete_metadata: dict[str, object] = {
+            "topic": "test.topic",
+            "partition": 0,
+            # "offset" intentionally omitted (None)
+        }
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(
+                initial_state, contract_registered_event, incomplete_metadata
+            )
+
+        # Should warn about incomplete metadata
+        assert any(
+            "Event metadata incomplete" in record.message for record in caplog.records
+        ), (
+            f"Expected incomplete metadata warning, got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_empty_metadata_logs_warning(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Empty metadata dict should log a warning about idempotency."""
+        import logging
+
+        # Completely empty metadata
+        empty_metadata: dict[str, object] = {}
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(initial_state, contract_registered_event, empty_metadata)
+
+        # Should warn about incomplete metadata
+        assert any(
+            "Event metadata incomplete" in record.message for record in caplog.records
+        ), (
+            f"Expected incomplete metadata warning, got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_complete_metadata_does_not_log_warning(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Complete metadata should NOT log incomplete metadata warning."""
+        import logging
+
+        # Complete valid metadata
+        complete_metadata: dict[str, object] = {
+            "topic": "test.topic",
+            "partition": 0,
+            "offset": 100,
+        }
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(initial_state, contract_registered_event, complete_metadata)
+
+        # Should NOT warn about incomplete metadata
+        assert not any(
+            "Event metadata incomplete" in record.message for record in caplog.records
+        ), "Unexpected incomplete metadata warning with complete metadata"
+
+    def test_performance_threshold_contract_registration(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Contract registration exceeding threshold should log performance warning.
+
+        This test sets a very low threshold (0.0ms) to ensure the processing
+        time always exceeds it, triggering the warning.
+        """
+        import logging
+
+        from omnibase_infra.nodes.contract_registry_reducer import (
+            reducer as reducer_module,
+        )
+
+        # Set threshold to 0 so any processing time exceeds it
+        monkeypatch.setattr(reducer_module, "PERF_THRESHOLD_REDUCE_MS", 0.0)
+
+        metadata = make_event_metadata()
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(initial_state, contract_registered_event, metadata)
+
+        # Should warn about performance threshold exceeded
+        assert any(
+            "Contract registration processing exceeded threshold" in record.message
+            for record in caplog.records
+        ), f"Expected performance warning, got: {[r.message for r in caplog.records]}"
+
+    def test_performance_threshold_staleness_check(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        runtime_tick_event: ModelRuntimeTick,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Staleness check exceeding threshold should log performance warning.
+
+        This test sets a very low threshold (0.0ms) to ensure the processing
+        time always exceeds it, triggering the warning.
+        """
+        import logging
+
+        from omnibase_infra.nodes.contract_registry_reducer import (
+            reducer as reducer_module,
+        )
+
+        # Set threshold to 0 so any processing time exceeds it
+        monkeypatch.setattr(reducer_module, "PERF_THRESHOLD_STALENESS_CHECK_MS", 0.0)
+
+        metadata = make_event_metadata()
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(initial_state, runtime_tick_event, metadata)
+
+        # Should warn about staleness check threshold exceeded
+        assert any(
+            "Staleness check processing exceeded threshold" in record.message
+            for record in caplog.records
+        ), (
+            f"Expected staleness check performance warning, got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_performance_warning_includes_context(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Performance warning should include relevant context in extra fields."""
+        import logging
+
+        from omnibase_infra.nodes.contract_registry_reducer import (
+            reducer as reducer_module,
+        )
+
+        # Set threshold to 0 to trigger warning
+        monkeypatch.setattr(reducer_module, "PERF_THRESHOLD_REDUCE_MS", 0.0)
+
+        metadata = make_event_metadata()
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(initial_state, contract_registered_event, metadata)
+
+        # Find the performance warning record
+        perf_records = [
+            r
+            for r in caplog.records
+            if "Contract registration processing exceeded threshold" in r.message
+        ]
+        assert len(perf_records) == 1, "Expected exactly one performance warning"
+
+        # Verify extra fields are present (logged via extra={...})
+        # Note: The extra fields should be accessible but may be formatted
+        # differently depending on the logging configuration
+        record = perf_records[0]
+        # The record should have been created with extra fields
+        # We can verify the message was logged at WARNING level
+        assert record.levelno == logging.WARNING

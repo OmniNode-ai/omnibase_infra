@@ -81,6 +81,7 @@ from omnibase_core.models.events import (
     ModelContractRegisteredEvent,
     ModelNodeHeartbeatEvent,
 )
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
 from omnibase_core.types import JsonType
@@ -285,19 +286,10 @@ class ContractRegistryReducer:
 
         # Extract fields from typed event
         event_id = event.event_id
-        correlation_id = event.correlation_id
-        if correlation_id is None:
-            correlation_id = event_id
-            _logger.debug(
-                "Using event_id as correlation_id (none provided)",
-                extra={"event_id": str(event_id)},
-            )
+        correlation_id = self._resolve_correlation_id(event_id, event.correlation_id)
 
         # Derive contract identity from node_name + version (natural key)
-        version = event.node_version
-        contract_id = (
-            f"{event.node_name}:{version.major}.{version.minor}.{version.patch}"
-        )
+        contract_id = self._derive_contract_id(event.node_name, event.node_version)
 
         intents: list[ModelIntent] = []
 
@@ -366,19 +358,10 @@ class ContractRegistryReducer:
 
         # Extract fields from typed event
         event_id = event.event_id
-        correlation_id = event.correlation_id
-        if correlation_id is None:
-            correlation_id = event_id
-            _logger.debug(
-                "Using event_id as correlation_id (none provided)",
-                extra={"event_id": str(event_id)},
-            )
+        correlation_id = self._resolve_correlation_id(event_id, event.correlation_id)
 
         # Derive contract identity from node_name + version
-        version = event.node_version
-        contract_id = (
-            f"{event.node_name}:{version.major}.{version.minor}.{version.patch}"
-        )
+        contract_id = self._derive_contract_id(event.node_name, event.node_version)
 
         # Intent 1: Deactivate contract record
         deactivate_payload = ModelPayloadDeactivateContract(
@@ -452,19 +435,10 @@ class ContractRegistryReducer:
 
         # Extract fields from typed event
         event_id = event.event_id
-        correlation_id = event.correlation_id
-        if correlation_id is None:
-            correlation_id = event_id
-            _logger.debug(
-                "Using event_id as correlation_id (none provided)",
-                extra={"event_id": str(event_id)},
-            )
+        correlation_id = self._resolve_correlation_id(event_id, event.correlation_id)
 
         # Derive contract identity from node_name + version
-        version = event.node_version
-        contract_id = (
-            f"{event.node_name}:{version.major}.{version.minor}.{version.patch}"
-        )
+        contract_id = self._derive_contract_id(event.node_name, event.node_version)
 
         payload = ModelPayloadUpdateHeartbeat(
             correlation_id=correlation_id,
@@ -573,6 +547,43 @@ class ContractRegistryReducer:
     # Helper Methods
     # =========================================================================
 
+    def _resolve_correlation_id(
+        self,
+        event_id: UUID,
+        correlation_id: UUID | None,
+    ) -> UUID:
+        """Resolve correlation ID, falling back to event_id if not provided.
+
+        Args:
+            event_id: The event's unique identifier.
+            correlation_id: Optional correlation ID from the event.
+
+        Returns:
+            The correlation_id if provided, otherwise the event_id.
+        """
+        if correlation_id is None:
+            _logger.debug(
+                "Using event_id as correlation_id (none provided)",
+                extra={"event_id": str(event_id)},
+            )
+            return event_id
+        return correlation_id
+
+    @staticmethod
+    def _derive_contract_id(node_name: str, version: ModelSemVer) -> str:
+        """Derive contract identity from node name and version.
+
+        Contract ID is a natural key in format: node_name:major.minor.patch
+
+        Args:
+            node_name: ONEX node name from contract.
+            version: Semantic version of the contract.
+
+        Returns:
+            Contract ID string (e.g., "my-node:1.0.0").
+        """
+        return f"{node_name}:{version.major}.{version.minor}.{version.patch}"
+
     def _build_upsert_contract_intent(
         self,
         event: ModelContractRegisteredEvent,
@@ -588,9 +599,7 @@ class ContractRegistryReducer:
             ModelIntent for postgres.upsert_contract.
         """
         version = event.node_version
-        contract_id = (
-            f"{event.node_name}:{version.major}.{version.minor}.{version.patch}"
-        )
+        contract_id = self._derive_contract_id(event.node_name, version)
 
         payload = ModelPayloadUpsertContract(
             correlation_id=correlation_id,
@@ -681,10 +690,7 @@ class ContractRegistryReducer:
         else:
             return intents
 
-        version = event.node_version
-        contract_id = (
-            f"{event.node_name}:{version.major}.{version.minor}.{version.patch}"
-        )
+        contract_id = self._derive_contract_id(event.node_name, event.node_version)
 
         # Extract consumed_events (subscribe topics)
         consumed_events = contract_yaml.get("consumed_events", [])
