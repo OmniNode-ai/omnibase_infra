@@ -15,6 +15,7 @@ Usage:
     python scripts/validate.py unions
     python scripts/validate.py any_types
     python scripts/validate.py localhandler
+    python scripts/validate.py declarative_nodes
     python scripts/validate.py io_audit
     python scripts/validate.py imports
     python scripts/validate.py markdown_links
@@ -402,6 +403,56 @@ def run_localhandler(verbose: bool = False) -> bool:
         return True
 
 
+def run_declarative_nodes(verbose: bool = False) -> bool:
+    """Run declarative node validation.
+
+    Ensures all node.py files follow the ONEX declarative pattern:
+    - Node classes only extend base classes without custom logic
+    - Only __init__ with super().__init__(container) is allowed
+    - No custom methods, properties, or instance variables
+
+    All behavior should be defined in contract.yaml and implemented by handlers.
+    """
+    nodes_path = Path("src/omnibase_infra/nodes")
+    if not nodes_path.exists():
+        if verbose:
+            print("Declarative Nodes: SKIP (no src/omnibase_infra/nodes directory)")
+        return True
+
+    try:
+        from omnibase_infra.validation.validator_declarative_node import (
+            validate_declarative_nodes_ci,
+        )
+
+        result = validate_declarative_nodes_ci(nodes_path)
+
+        if verbose or not result.passed:
+            print(f"Declarative Nodes: {'PASS' if result.passed else 'FAIL'}")
+            print(
+                f"  Files checked: {result.files_checked}, "
+                f"blocking violations: {result.blocking_count}, "
+                f"total violations: {result.total_violations}"
+            )
+            if result.imperative_nodes:
+                print(f"  Imperative nodes: {', '.join(result.imperative_nodes)}")
+            # Show violations
+            for v in result.violations:
+                print(
+                    f"  - {v.file_path}:{v.line_number}: "
+                    f"{v.violation_type.value} in {v.node_class_name}"
+                )
+                if verbose and v.method_name:
+                    print(f"      Method: {v.method_name}")
+                    print(f"      Code: {v.code_snippet}")
+                    print(f"      Suggestion: {v.suggestion}")
+
+        return result.passed
+
+    except ImportError as e:
+        print(f"Skipping declarative node validation: {e}")
+        return True
+
+
 def run_io_audit(verbose: bool = False) -> bool:
     """Run I/O purity audit for REDUCER and COMPUTE nodes.
 
@@ -745,6 +796,7 @@ def run_all(verbose: bool = False, quick: bool = False) -> bool:
                 ("Unions", run_unions),
                 ("Any Types", run_any_types),
                 ("LocalHandler", run_localhandler),
+                ("Declarative Nodes", run_declarative_nodes),
                 ("I/O Audit", run_io_audit),
                 ("Imports", run_imports),
                 ("Markdown Links", run_markdown_links),
@@ -788,6 +840,7 @@ def main() -> int:
             "unions",
             "any_types",
             "localhandler",
+            "declarative_nodes",
             "io_audit",
             "imports",
             "markdown_links",
@@ -815,6 +868,7 @@ def main() -> int:
         "unions": run_unions,
         "any_types": run_any_types,
         "localhandler": run_localhandler,
+        "declarative_nodes": run_declarative_nodes,
         "io_audit": run_io_audit,
         "imports": run_imports,
         "markdown_links": run_markdown_links,

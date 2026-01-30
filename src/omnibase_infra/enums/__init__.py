@@ -57,6 +57,9 @@ from omnibase_infra.enums.enum_circuit_state import EnumCircuitState
 from omnibase_infra.enums.enum_confirmation_event_type import EnumConfirmationEventType
 from omnibase_infra.enums.enum_consumer_group_purpose import EnumConsumerGroupPurpose
 from omnibase_infra.enums.enum_contract_type import EnumContractType
+from omnibase_infra.enums.enum_declarative_node_violation import (
+    EnumDeclarativeNodeViolation,
+)
 from omnibase_infra.enums.enum_dedupe_strategy import EnumDedupeStrategy
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_environment import EnumEnvironment
@@ -93,6 +96,7 @@ from omnibase_infra.enums.enum_validation_severity import EnumValidationSeverity
 
 __all__: list[str] = [
     "EnumAnyTypeViolation",
+    "EnumDeclarativeNodeViolation",
     "EnumBackendType",
     "EnumCaptureOutcome",
     "EnumCaptureState",

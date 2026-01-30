@@ -1919,6 +1919,27 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Contract-Driven - node_name conventions)
     ticket: OMN-1653
+  # ==========================================================================
+  # ModelDeclarativeNodeViolation Field Exemptions (OMN-1725)
+  # ==========================================================================
+  # node_class_name and method_name are descriptive strings providing context
+  # about where a violation occurred, not entity references requiring ID + display_name.
+  - file_pattern: 'model_declarative_node_violation\.py'
+    violation_pattern: "Field 'node_class_name' might reference an entity"
+    reason: >
+      node_class_name is a descriptive string showing which node class contains the violation (e.g., "NodeRegistrationOrchestrator"). It provides human-readable context for error messages and CI output, not an entity reference requiring ID + display_name pattern.
+
+    documentation:
+      - CLAUDE.md (Declarative Nodes)
+    ticket: OMN-1725
+  - file_pattern: 'model_declarative_node_violation\.py'
+    violation_pattern: "Field 'method_name' might reference an entity"
+    reason: >
+      method_name is a descriptive string showing which method/property triggered the violation (e.g., "compute", "__bool__"). It provides human-readable context for debugging and does not require ID + display_name pattern.
+
+    documentation:
+      - CLAUDE.md (Declarative Nodes)
+    ticket: OMN-1725
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
