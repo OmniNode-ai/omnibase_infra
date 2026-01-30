@@ -3,7 +3,7 @@
 """Handler Source Resolver for Multi-Source Handler Discovery.
 
 This module provides the HandlerSourceResolver class, which resolves handlers
-from multiple sources (bootstrap, contract) based on the configured mode.
+from multiple sources (bootstrap, contract, Kafka events) based on the configured mode.
 
 Part of OMN-1095: Handler Source Mode Hybrid Resolution.
 
@@ -11,6 +11,7 @@ Resolution Modes:
     - BOOTSTRAP: Only use hardcoded bootstrap handlers.
     - CONTRACT: Only use YAML contract-discovered handlers.
     - HYBRID: Per-handler resolution with configurable precedence.
+    - KAFKA_EVENTS: Use Kafka-based contract source for cache-based discovery.
 
 In HYBRID mode, the resolver performs per-handler identity resolution:
     1. Discovers handlers from both bootstrap and contract sources
@@ -20,10 +21,16 @@ In HYBRID mode, the resolver performs per-handler identity resolution:
        - True: Bootstrap handlers override contract handlers
     4. Non-conflicting handlers are included from both sources
 
+In KAFKA_EVENTS mode, the resolver delegates to a KafkaContractSource instance
+that returns cached descriptors from contract registration events. This is a
+beta cache-only implementation where discovered contracts take effect on the
+next runtime restart.
+
 See Also:
     - EnumHandlerSourceMode: Defines the resolution modes
     - HandlerBootstrapSource: Provides bootstrap handlers
     - HandlerContractSource: Provides contract-discovered handlers
+    - KafkaContractSource: Provides Kafka cache-based handler discovery
     - ProtocolContractSource: Protocol for handler sources
 
 .. versionadded:: 0.7.0
@@ -60,7 +67,7 @@ class HandlerSourceResolver:
     """Resolver for multi-source handler discovery with configurable modes.
 
     This class resolves handlers from bootstrap and contract sources based on
-    the configured mode. It supports three resolution strategies:
+    the configured mode. It supports four resolution strategies:
 
     - BOOTSTRAP: Use only bootstrap handlers, ignore contracts.
     - CONTRACT: Use only contract handlers, ignore bootstrap.
@@ -70,6 +77,9 @@ class HandlerSourceResolver:
         - allow_bootstrap_override=True: Bootstrap handlers take precedence
           over contract handlers with the same handler_id.
       In both cases, handlers without conflicts are included from both sources.
+    - KAFKA_EVENTS: Use Kafka-based contract source for cache-based discovery.
+      Delegates to a KafkaContractSource that returns cached descriptors from
+      contract registration events. This is a beta cache-only implementation.
 
     Attributes:
         mode: The configured resolution mode.
@@ -142,6 +152,7 @@ class HandlerSourceResolver:
         - BOOTSTRAP: Only queries bootstrap source
         - CONTRACT: Only queries contract source
         - HYBRID: Queries both sources and merges with contract precedence
+        - KAFKA_EVENTS: Queries Kafka-based contract cache
 
         Returns:
             ModelContractDiscoveryResult: Container with discovered descriptors
@@ -151,6 +162,8 @@ class HandlerSourceResolver:
             return await self._resolve_bootstrap()
         elif self._mode == EnumHandlerSourceMode.CONTRACT:
             return await self._resolve_contract()
+        elif self._mode == EnumHandlerSourceMode.KAFKA_EVENTS:
+            return await self._resolve_kafka_events()
         else:
             # HYBRID mode
             return await self._resolve_hybrid()
@@ -187,6 +200,34 @@ class HandlerSourceResolver:
             extra={
                 "mode": self._mode.value,
                 "contract_handler_count": len(result.descriptors),
+                "resolved_handler_count": len(result.descriptors),
+            },
+        )
+
+        return result
+
+    async def _resolve_kafka_events(self) -> ModelContractDiscoveryResult:
+        """Resolve handlers using Kafka-based contract source.
+
+        For KAFKA_EVENTS mode, the contract_source is expected to be a
+        KafkaContractSource instance that returns cached descriptors from
+        contract registration events.
+
+        Note:
+            This is a beta cache-only implementation. Discovered contracts
+            take effect on the next runtime restart.
+
+        Returns:
+            ModelContractDiscoveryResult: Discovery result from the Kafka
+            contract cache.
+        """
+        result = await self._contract_source.discover_handlers()
+
+        logger.info(
+            "Handler resolution completed (KAFKA_EVENTS mode)",
+            extra={
+                "mode": self._mode.value,
+                "kafka_handler_count": len(result.descriptors),
                 "resolved_handler_count": len(result.descriptors),
             },
         )

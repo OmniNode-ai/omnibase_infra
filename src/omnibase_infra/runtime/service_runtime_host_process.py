@@ -46,6 +46,7 @@ import asyncio
 import importlib
 import json
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -126,6 +127,11 @@ from omnibase_infra.runtime.handler_identity import (
     handler_identity,
 )
 from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
+from omnibase_infra.runtime.kafka_contract_source import (
+    TOPIC_SUFFIX_CONTRACT_DEREGISTERED,
+    TOPIC_SUFFIX_CONTRACT_REGISTERED,
+    KafkaContractSource,
+)
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
@@ -179,6 +185,51 @@ DEFAULT_DRAIN_TIMEOUT_SECONDS: float = parse_env_float(
     transport_type=EnumInfraTransportType.RUNTIME,
     service_name="runtime_host_process",
 )
+
+
+def _parse_contract_event_payload(
+    msg: ModelEventMessage,
+) -> tuple[dict[str, object], UUID] | None:
+    """Parse contract event message payload and extract correlation ID.
+
+    This helper extracts common JSON parsing and correlation ID extraction logic
+    used by contract registration and deregistration handlers.
+
+    Args:
+        msg: The event message to parse.
+
+    Returns:
+        A tuple of (payload_dict, correlation_id) if message has a value,
+        None if message value is empty.
+
+    Raises:
+        json.JSONDecodeError: If the message value is not valid JSON.
+        UnicodeDecodeError: If the message value cannot be decoded as UTF-8.
+
+    Note:
+        This function is intentionally a module-level utility rather than a
+        class method because it performs pure data transformation without
+        requiring any class state.
+
+    .. versionadded:: 0.8.0
+        Created for OMN-1654 to reduce duplication in contract event handlers.
+    """
+    if not msg.value:
+        return None
+
+    payload: dict[str, object] = json.loads(msg.value.decode("utf-8"))
+
+    # Extract correlation ID from headers if available, or generate new
+    correlation_id: UUID
+    if msg.headers and msg.headers.correlation_id:
+        try:
+            correlation_id = UUID(str(msg.headers.correlation_id))
+        except (ValueError, TypeError):
+            correlation_id = uuid4()
+    else:
+        correlation_id = uuid4()
+
+    return (payload, correlation_id)
 
 
 class PluginLoaderContractSource(ProtocolContractSource):
@@ -548,6 +599,9 @@ class RuntimeHostProcess:
         # Handler discovery service (lazy-created if contract_paths provided)
         self._handler_discovery: ContractHandlerDiscovery | None = None
 
+        # Kafka contract source (created if KAFKA_EVENTS mode, wired separately)
+        self._kafka_contract_source: KafkaContractSource | None = None
+
         # Create or use provided event bus
         self._event_bus: EventBusInmemory | EventBusKafka = (
             event_bus or EventBusInmemory()
@@ -733,6 +787,11 @@ class RuntimeHostProcess:
         # Used by event_bus_wiring to dispatch messages to handlers.
         # None = not configured, wiring will be skipped
         self._dispatch_engine: MessageDispatchEngine | None = None
+
+        # Baseline subscriptions for platform-reserved topics (OMN-1654)
+        # Stores unsubscribe callbacks for contract registration/deregistration topics.
+        # Wired when KAFKA_EVENTS mode is active with a KafkaContractSource.
+        self._baseline_subscriptions: list[Callable[[], Awaitable[None]]] = []
 
         # Contract configuration loaded at startup (OMN-1519)
         # Contains consolidated handler_routing and operation_bindings from all contracts.
@@ -1096,6 +1155,11 @@ class RuntimeHostProcess:
         # Requires dispatch_engine to be available for message routing.
         await self._wire_event_bus_subscriptions()
 
+        # Step 4.3: Wire baseline subscriptions for contract discovery (OMN-1654)
+        # When KAFKA_EVENTS mode is active, subscribe to platform-reserved
+        # contract topics to receive registration/deregistration events.
+        await self._wire_baseline_subscriptions()
+
         # Step 4.5: Initialize idempotency store if configured (OMN-945)
         await self._initialize_idempotency_store()
 
@@ -1269,6 +1333,22 @@ class RuntimeHostProcess:
         if self._event_bus_wiring:
             await self._event_bus_wiring.cleanup()
 
+        # Step 2.7: Cleanup baseline subscriptions for contract discovery (OMN-1654)
+        if self._baseline_subscriptions:
+            for unsubscribe in self._baseline_subscriptions:
+                try:
+                    await unsubscribe()
+                except Exception as e:
+                    logger.warning(
+                        "Failed to unsubscribe baseline subscription",
+                        extra={"error": str(e)},
+                    )
+            self._baseline_subscriptions.clear()
+            logger.debug("Baseline contract subscriptions cleaned up")
+
+        # Step 2.8: Nullify KafkaContractSource reference for proper cleanup (OMN-1654)
+        self._kafka_contract_source = None
+
         # Step 3: Close event bus
         await self._event_bus.close()
 
@@ -1416,12 +1496,34 @@ class RuntimeHostProcess:
         # Create bootstrap source
         bootstrap_source = HandlerBootstrapSource()
 
+        # Check for KAFKA_EVENTS mode first
+        if source_config.effective_mode == EnumHandlerSourceMode.KAFKA_EVENTS:
+            # Create Kafka-based contract source (cache-only beta)
+            # Note: Kafka subscriptions are wired separately in _wire_baseline_subscriptions()
+            environment = self._get_environment_from_config()
+            kafka_source = KafkaContractSource(
+                environment=environment,
+                graceful_mode=True,
+            )
+            contract_source: ProtocolContractSource = kafka_source
+
+            # Store reference for subscription wiring
+            self._kafka_contract_source = kafka_source
+
+            logger.info(
+                "Using KafkaContractSource for contract discovery",
+                extra={
+                    "environment": environment,
+                    "mode": "KAFKA_EVENTS",
+                    "correlation_id": str(kafka_source.correlation_id),
+                },
+            )
         # Contract source needs paths - use configured paths or default
         # If no contract_paths provided, reuse bootstrap_source as placeholder
-        if self._contract_paths:
+        elif self._contract_paths:
             # Use PluginLoaderContractSource which uses the simpler contract schema
             # compatible with test contracts (handler_name, handler_class, handler_type)
-            contract_source: ProtocolContractSource = PluginLoaderContractSource(
+            contract_source = PluginLoaderContractSource(
                 contract_paths=self._contract_paths,
             )
         else:
@@ -2740,6 +2842,31 @@ class RuntimeHostProcess:
         self._container = ModelONEXContainer()
         return self._container
 
+    def _get_environment_from_config(self) -> str:
+        """Extract environment setting from config with consistent fallback.
+
+        Handles both dict-based config and object-based config (e.g., Pydantic models)
+        with a unified access pattern.
+
+        Resolution order:
+            1. config["event_bus"]["environment"] (if config is dict-like)
+            2. config.event_bus.environment (if config is object-like)
+            3. ONEX_ENVIRONMENT environment variable
+            4. "dev" (hardcoded default)
+
+        Returns:
+            Environment string (e.g., "dev", "staging", "prod").
+        """
+        default_env = os.getenv("ONEX_ENVIRONMENT", "dev")
+        config = self._config or {}
+
+        event_bus_config = config.get("event_bus", {})
+        if isinstance(event_bus_config, dict):
+            return str(event_bus_config.get("environment", default_env))
+
+        # Object-based config (e.g., ModelEventBusConfig)
+        return str(getattr(event_bus_config, "environment", default_env))
+
     # =========================================================================
     # Event Bus Subcontract Wiring Methods (OMN-1621)
     # =========================================================================
@@ -2788,14 +2915,7 @@ class RuntimeHostProcess:
             )
             return
 
-        # Get environment from config, defaulting to "local"
-        config = self._config or {}
-        event_bus_config = config.get("event_bus", {})
-        if isinstance(event_bus_config, dict):
-            environment = str(event_bus_config.get("environment", "local"))
-        else:
-            # Could be a ModelEventBusConfig or similar
-            environment = getattr(event_bus_config, "environment", "local")
+        environment = self._get_environment_from_config()
 
         # Create wiring instance
         # Cast to protocol type - both EventBusKafka and EventBusInmemory implement
@@ -2842,6 +2962,175 @@ class RuntimeHostProcess:
             logger.debug(
                 "No handlers with event_bus subscriptions found",
                 extra={"handler_count": len(self._handler_descriptors)},
+            )
+
+    async def _wire_baseline_subscriptions(self) -> None:
+        """Wire platform-baseline topic subscriptions for contract discovery.
+
+        These subscriptions are wired at runtime startup to receive contract
+        registration and deregistration events from Kafka. This enables
+        dynamic contract discovery without polling.
+
+        The subscriptions route events to KafkaContractSource callbacks:
+        - on_contract_registered(): Parses contract YAML and caches descriptor
+        - on_contract_deregistered(): Removes descriptor from cache
+
+        Preconditions:
+            - KAFKA_EVENTS mode must be active (self._kafka_contract_source set)
+            - Event bus must be available and started
+
+        Topic Format:
+            - Registration: {env}.{TOPIC_SUFFIX_CONTRACT_REGISTERED}
+            - Deregistration: {env}.{TOPIC_SUFFIX_CONTRACT_DEREGISTERED}
+
+        Note:
+            Unsubscribe callbacks are stored in self._baseline_subscriptions
+            for cleanup during stop().
+
+        Part of OMN-1654: KafkaContractSource cache discovery.
+
+        .. versionadded:: 0.8.0
+            Created for event-driven contract discovery.
+        """
+        # Guard: only wire if KafkaContractSource is active
+        if self._kafka_contract_source is None:
+            logger.debug(
+                "KafkaContractSource not active, skipping baseline subscriptions"
+            )
+            return
+
+        # Guard: event bus must be available
+        if self._event_bus is None:
+            logger.warning(
+                "Event bus not available, cannot wire baseline contract subscriptions",
+                extra={"mode": "KAFKA_EVENTS"},
+            )
+            return
+
+        source = self._kafka_contract_source
+        environment = source.environment
+
+        # Compose topic names using platform-reserved suffixes
+        registration_topic = f"{environment}.{TOPIC_SUFFIX_CONTRACT_REGISTERED}"
+        deregistration_topic = f"{environment}.{TOPIC_SUFFIX_CONTRACT_DEREGISTERED}"
+
+        # Import ModelEventMessage type for handler signature
+        from omnibase_infra.event_bus.models.model_event_message import (
+            ModelEventMessage,
+        )
+
+        async def handle_registration(msg: ModelEventMessage) -> None:
+            """Handle contract registration event from Kafka."""
+            try:
+                parsed = _parse_contract_event_payload(msg)
+                if parsed is None:
+                    return
+
+                payload, correlation_id = parsed
+
+                source.on_contract_registered(
+                    node_name=str(payload.get("node_name", "")),
+                    contract_yaml=str(payload.get("contract_yaml", "")),
+                    correlation_id=correlation_id,
+                )
+
+                logger.debug(
+                    "Processed contract registration event",
+                    extra={
+                        "node_name": payload.get("node_name"),
+                        "topic": registration_topic,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
+            except Exception as e:
+                logger.warning(
+                    "Failed to process contract registration event",
+                    extra={
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "topic": registration_topic,
+                    },
+                )
+
+        async def handle_deregistration(msg: ModelEventMessage) -> None:
+            """Handle contract deregistration event from Kafka."""
+            try:
+                parsed = _parse_contract_event_payload(msg)
+                if parsed is None:
+                    return
+
+                payload, correlation_id = parsed
+
+                source.on_contract_deregistered(
+                    node_name=str(payload.get("node_name", "")),
+                    correlation_id=correlation_id,
+                )
+
+                logger.debug(
+                    "Processed contract deregistration event",
+                    extra={
+                        "node_name": payload.get("node_name"),
+                        "topic": deregistration_topic,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
+            except Exception as e:
+                logger.warning(
+                    "Failed to process contract deregistration event",
+                    extra={
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "topic": deregistration_topic,
+                    },
+                )
+
+        # Subscribe to topics
+        try:
+            # Create node identity for baseline subscriptions
+            baseline_identity = ModelNodeIdentity(
+                env=environment,
+                service=self._node_identity.service,
+                node_name=f"{self._node_identity.node_name}-contract-discovery",
+                version=self._node_identity.version,
+            )
+
+            # Subscribe to registration topic
+            reg_unsub = await self._event_bus.subscribe(
+                topic=registration_topic,
+                node_identity=baseline_identity,
+                on_message=handle_registration,
+                purpose=EnumConsumerGroupPurpose.CONSUME,
+            )
+            self._baseline_subscriptions.append(reg_unsub)
+
+            # Subscribe to deregistration topic
+            dereg_unsub = await self._event_bus.subscribe(
+                topic=deregistration_topic,
+                node_identity=baseline_identity,
+                on_message=handle_deregistration,
+                purpose=EnumConsumerGroupPurpose.CONSUME,
+            )
+            self._baseline_subscriptions.append(dereg_unsub)
+
+            logger.info(
+                "Wired baseline contract subscriptions",
+                extra={
+                    "registration_topic": registration_topic,
+                    "deregistration_topic": deregistration_topic,
+                    "environment": environment,
+                    "subscription_count": len(self._baseline_subscriptions),
+                },
+            )
+
+        except Exception:
+            logger.exception(
+                "Failed to wire baseline subscriptions",
+                extra={
+                    "registration_topic": registration_topic,
+                    "deregistration_topic": deregistration_topic,
+                },
             )
 
     # =========================================================================
