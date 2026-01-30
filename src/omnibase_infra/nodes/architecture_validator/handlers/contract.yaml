@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Handler Contract - Architecture Validation Handler
+#
+# This contract defines the interface for the Architecture Validation handler,
+# which validates ONEX nodes and handlers against architecture rules.
+#
+# =============================================================================
+# HANDLER OVERVIEW
+# =============================================================================
+# This handler processes architecture validation requests and returns structured
+# validation results. It encapsulates the validation logic that was previously
+# in NodeArchitectureValidatorCompute.
+#
+# Supported Operations:
+#   - architecture.validate: Validate nodes and handlers against rules
+#
+# =============================================================================
+# Handler identifier
+name: "handler_architecture_validation"
+handler_id: "compute.architecture_validation.handler"
+# Version (semantic versioning)
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+# Node type context - this handler is used by COMPUTE_GENERIC nodes
+node_type: "COMPUTE_GENERIC"
+# Description
+description: >
+  Handler for architecture validation operations. Validates ONEX nodes and handlers against configurable architecture rules. Supports pluggable rules via the ProtocolArchitectureRule protocol. Returns structured validation results with violations grouped by rule and severity.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelArchitectureValidationRequest"
+  module: "omnibase_infra.nodes.architecture_validator.models"
+  description: >
+    Request containing nodes and handlers to validate, optional rule filters, and validation configuration (fail_fast, correlation_id).
+
+output_model:
+  name: "ModelArchitectureValidationResult"
+  module: "omnibase_infra.nodes.architecture_validator.models"
+  description: >
+    Result containing validation status, violations found, rules checked, and counts of nodes/handlers validated.
+
+# Handler routing configuration
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "architecture_validation"
+      handler:
+        name: "HandlerArchitectureValidation"
+        module: "omnibase_infra.nodes.architecture_validator.handlers.handler_architecture_validation"
+      supported_operations:
+        - "architecture.validate"
+# Supported rules (from contract_architecture_validator.yaml)
+# These are the only rules that this handler is designed to process.
+supported_rules:
+  - rule_id: "NO_HANDLER_PUBLISHING"
+    description: >
+      Handlers MUST NOT have direct event bus access. Only orchestrators may publish events. Handlers return events; orchestrators publish.
+
+  - rule_id: "PURE_REDUCERS"
+    description: >
+      Reducers MUST be pure functions without side effects. They aggregate state and emit intents, but do not perform I/O operations.
+
+  - rule_id: "NO_FSM_IN_ORCHESTRATORS"
+    description: >
+      Orchestrators MUST NOT contain FSM (Finite State Machine) definitions. FSMs belong exclusively to reducer nodes.
+
+  - rule_id: "NO_WORKFLOW_IN_REDUCERS"
+    description: >
+      Reducers MUST NOT contain workflow logic. Workflow coordination belongs exclusively to orchestrator nodes.
+
+  - rule_id: "NO_DIRECT_HANDLER_DISPATCH"
+    description: >
+      Handlers MUST NOT be invoked directly bypassing the RuntimeHost. All event routing MUST go through the MessageDispatchEngine.
+
+  - rule_id: "NO_LOCAL_ONLY_PATHS"
+    description: >
+      Paths MUST NOT use local-only conventions that break portability. All paths should be relative or use environment variables.
+
+# Handler descriptor
+descriptor:
+  node_archetype: compute
+  purity: pure
+  idempotent: true
+  timeout_ms: 30000
+  retry_policy:
+    enabled: false
+  circuit_breaker:
+    enabled: false
+  concurrency_policy: concurrent
+  isolation_policy: none
+  observability_level: standard
+# Capabilities provided by this handler
+capabilities:
+  - name: "architecture_validation"
+    description: "Validate architecture patterns across nodes and handlers"
+  - name: "rule_based_validation"
+    description: "Extensible rule-based validation engine"
+  - name: "violation_reporting"
+    description: "Structured violation reporting with severity levels"
+# Tags
+tags:
+  - compute
+  - validation
+  - architecture
+  - handler
+  - onex-compliance
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2025-01-30"
+  ticket: "OMN-1726"
+  related_tickets:
+    - "OMN-1138"
+    - "OMN-1099"

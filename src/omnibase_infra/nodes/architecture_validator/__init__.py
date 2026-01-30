@@ -13,8 +13,12 @@ Available Validators:
         - ARCH-003: No Workflow FSM in Orchestrators
 
     NodeArchitectureValidatorCompute (OMN-1138):
-        Generic architecture validator supporting pluggable rules via
-        ProtocolArchitectureRule implementations.
+        Declarative compute node for architecture validation. Delegates all
+        validation logic to HandlerArchitectureValidation.
+
+    HandlerArchitectureValidation (OMN-1726):
+        Handler implementing validation logic for NodeArchitectureValidatorCompute.
+        Supports pluggable rules via ProtocolArchitectureRule implementations.
 
 Example:
     >>> from omnibase_core.models.container import ModelONEXContainer
@@ -22,13 +26,17 @@ Example:
     ...     NodeArchitectureValidatorCompute,
     ...     ModelArchitectureValidationRequest,
     ... )
+    >>> from omnibase_infra.nodes.architecture_validator.handlers import (
+    ...     HandlerArchitectureValidation,
+    ... )
     >>>
-    >>> # Create validator with rules
+    >>> # Create declarative node
     >>> container = ModelONEXContainer()
-    >>> validator = NodeArchitectureValidatorCompute(container, rules=my_rules)
+    >>> node = NodeArchitectureValidatorCompute(container)
     >>>
-    >>> # Validate architecture
-    >>> result = validator.compute(ModelArchitectureValidationRequest(
+    >>> # Use handler for validation
+    >>> handler = HandlerArchitectureValidation(rules=my_rules)
+    >>> result = handler.handle(ModelArchitectureValidationRequest(
     ...     nodes=my_nodes,
     ...     handlers=my_handlers,
     ... ))
@@ -38,10 +46,22 @@ Example:
 .. versionadded:: 0.8.0
     Added NodeArchitectureValidatorCompute as part of OMN-1138.
     Added NodeArchitectureValidator as part of OMN-1099.
+
+.. versionchanged:: 0.9.0
+    Refactored to declarative pattern as part of OMN-1726. Validation logic
+    moved to HandlerArchitectureValidation.
 """
 
 # Canonical severity enum
 from omnibase_infra.enums import EnumValidationSeverity
+
+# Constants
+from omnibase_infra.nodes.architecture_validator.constants import SUPPORTED_RULE_IDS
+
+# Handlers
+from omnibase_infra.nodes.architecture_validator.handlers import (
+    HandlerArchitectureValidation,
+)
 
 # Models
 from omnibase_infra.nodes.architecture_validator.models import (
@@ -52,7 +72,6 @@ from omnibase_infra.nodes.architecture_validator.models import (
 )
 from omnibase_infra.nodes.architecture_validator.node import NodeArchitectureValidator
 from omnibase_infra.nodes.architecture_validator.node_architecture_validator import (
-    SUPPORTED_RULE_IDS,
     NodeArchitectureValidatorCompute,
 )
 from omnibase_infra.nodes.architecture_validator.protocols import (
@@ -63,6 +82,8 @@ from omnibase_infra.nodes.architecture_validator.registry import (
 )
 
 __all__ = [
+    # OMN-1726: HandlerArchitectureValidation
+    "HandlerArchitectureValidation",
     # OMN-1138: NodeArchitectureValidatorCompute
     "NodeArchitectureValidatorCompute",
     "SUPPORTED_RULE_IDS",

@@ -424,6 +424,10 @@ error_handling:
 ```python
 from omnibase_core.models.container import ModelONEXContainer
 from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
+from omnibase_infra.nodes.node_registry_effect.handlers import (
+    HandlerConsulRegister,
+    HandlerPostgresUpsert,
+)
 from omnibase_infra.nodes.node_registry_effect.models import ModelRegistryRequest
 from datetime import datetime, UTC
 from uuid import uuid4
@@ -432,9 +436,13 @@ from uuid import uuid4
 container = ModelONEXContainer()
 effect = NodeRegistryEffect(container)
 
-# Set backend adapters (or configure in container)
-effect.set_consul_client(consul_client)
-effect.set_postgres_adapter(postgres_adapter)
+# Resolve backend adapters from container
+consul_client = container.resolve(ProtocolConsulClient)
+postgres_adapter = container.resolve(ProtocolPostgresAdapter)
+
+# Create handlers with direct constructor injection
+consul_handler = HandlerConsulRegister(consul_client)
+postgres_handler = HandlerPostgresUpsert(postgres_adapter)
 
 # Create request
 request = ModelRegistryRequest(
@@ -448,47 +456,43 @@ request = ModelRegistryRequest(
     timestamp=datetime.now(UTC),
 )
 
-# Execute registration
-response = await effect.execute_operation(request, "register_node")
+# Execute via handlers directly
+consul_result = await consul_handler.handle(request, request.correlation_id)
+postgres_result = await postgres_handler.handle(request, request.correlation_id)
+
+# Check results
+if consul_result.success and postgres_result.success:
+    print("Both backends registered successfully")
+else:
+    # Handle partial failure
+    if not consul_result.success:
+        print(f"Consul failed: {consul_result.error_code}")
+    if not postgres_result.success:
+        print(f"PostgreSQL failed: {postgres_result.error_code}")
+```
+
+### Using the Orchestrator for Coordinated Execution
+
+```python
+from omnibase_infra.nodes.node_registration_orchestrator import (
+    NodeRegistrationOrchestrator,
+)
+
+# Create orchestrator with container injection
+container = ModelONEXContainer()
+orchestrator = NodeRegistrationOrchestrator(container)
+
+# Execute coordinated registration (handles parallel execution, aggregation)
+response = await orchestrator.execute_registration(request)
 
 # Check result
 if response.status == "success":
     print("Both backends registered successfully")
 elif response.status == "partial":
-    # Handle partial failure
-    for backend in ["consul", "postgres"]:
-        result = getattr(response, f"{backend}_result")
-        if not result.success:
-            print(f"{backend} failed: {result.error_code}")
-```
-
-### Handling Partial Failures
-
-```python
-# Initial registration
-response = await effect.execute_operation(request, "register_node")
-
-if response.status == "partial":
-    # Identify failed backends
-    failed_backends = []
-    if not response.consul_result.success:
-        failed_backends.append("consul")
-    if not response.postgres_result.success:
-        failed_backends.append("postgres")
-
-    # Retry each failed backend
+    # Identify failed backends using helper methods
+    failed_backends = response.get_failed_backends()
     for backend in failed_backends:
-        retry_response = await effect.execute_operation(
-            request,
-            "retry_partial_failure",
-            target_backend=backend,
-        )
-
-        if retry_response.status == "success":
-            print(f"Retry succeeded for {backend}")
-        else:
-            result = getattr(retry_response, f"{backend}_result")
-            print(f"Retry failed for {backend}: {result.error_code}")
+        print(f"{backend} failed")
 ```
 
 ## Testing
@@ -497,39 +501,44 @@ if response.status == "partial":
 
 ```python
 import pytest
-from unittest.mock import AsyncMock, MagicMock
-from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
+from unittest.mock import AsyncMock
+from omnibase_infra.nodes.node_registry_effect.handlers import (
+    HandlerConsulRegister,
+    HandlerPostgresUpsert,
+)
 
 @pytest.mark.asyncio
-async def test_parallel_execution_both_succeed():
-    """Test that both backends succeed in parallel execution."""
-    container = MagicMock()
-    effect = NodeRegistryEffect(container)
-
-    # Mock successful handlers
+async def test_consul_handler_success():
+    """Test Consul handler succeeds with valid request."""
+    # Create mock consul client
     mock_consul = AsyncMock()
-    mock_postgres = AsyncMock()
-    effect.set_consul_client(mock_consul)
-    effect.set_postgres_adapter(mock_postgres)
+    mock_consul.register_service.return_value = AsyncMock(success=True)
 
-    response = await effect.execute_operation(request, "register_node")
+    # Create handler with direct constructor injection
+    handler = HandlerConsulRegister(mock_consul)
 
-    assert response.status == "success"
-    assert response.consul_result.success
-    assert response.postgres_result.success
+    result = await handler.handle(request, correlation_id)
+
+    assert result.success is True
+    assert result.backend_id == "consul"
 
 
 @pytest.mark.asyncio
-async def test_partial_failure_consul_fails():
-    """Test partial failure when Consul fails but PostgreSQL succeeds."""
-    # ... setup with failing consul mock ...
+async def test_postgres_handler_failure():
+    """Test PostgreSQL handler handles failure gracefully."""
+    # Create mock adapter that fails
+    mock_adapter = AsyncMock()
+    mock_adapter.upsert.return_value = AsyncMock(
+        success=False, error="Connection refused"
+    )
 
-    response = await effect.execute_operation(request, "register_node")
+    # Create handler with direct constructor injection
+    handler = HandlerPostgresUpsert(mock_adapter)
 
-    assert response.status == "partial"
-    assert not response.consul_result.success
-    assert response.postgres_result.success
-    assert response.consul_result.error_code == "CONSUL_CONNECTION_ERROR"
+    result = await handler.handle(request, correlation_id)
+
+    assert result.success is False
+    assert result.error_code == "POSTGRES_UPSERT_ERROR"
 ```
 
 ## Related Patterns

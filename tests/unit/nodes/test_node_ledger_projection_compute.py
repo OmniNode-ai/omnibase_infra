@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Unit tests for NodeLedgerProjectionCompute.
+"""Unit tests for NodeLedgerProjectionCompute and HandlerLedgerProjection.
 
-This module validates the COMPUTE node that projects platform events into
-the audit ledger. Tests cover:
+This module validates the COMPUTE node and handler that project platform events
+into the audit ledger. Tests cover:
     - Base64 encoding/decoding of event bytes
     - Header normalization to JSON-safe dictionaries
     - Kafka offset parsing
@@ -23,6 +23,7 @@ Related:
     - OMN-1646: Event Ledger Schema and Models
     - OMN-1647: Ledger Write Effect Node
     - OMN-1648: Ledger Projection Compute Node
+    - OMN-1726: Refactor to declarative pattern
 """
 
 from __future__ import annotations
@@ -40,7 +41,8 @@ import yaml
 from omnibase_core.errors import OnexError
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
-from omnibase_infra.nodes.node_ledger_projection_compute.node import (
+from omnibase_infra.nodes.node_ledger_projection_compute import (
+    HandlerLedgerProjection,
     NodeLedgerProjectionCompute,
 )
 from omnibase_infra.nodes.reducers.models.model_payload_ledger_append import (
@@ -82,6 +84,12 @@ def mock_container() -> MagicMock:
     container = MagicMock()
     container.config = MagicMock()
     return container
+
+
+@pytest.fixture
+def handler(mock_container: MagicMock) -> HandlerLedgerProjection:
+    """Create a HandlerLedgerProjection instance for testing."""
+    return HandlerLedgerProjection(mock_container)
 
 
 @pytest.fixture
@@ -137,58 +145,58 @@ class TestBase64Encoding:
     """Test base64 encoding helper method."""
 
     def test_b64_encodes_bytes_correctly(
-        self, node: NodeLedgerProjectionCompute
+        self, handler: HandlerLedgerProjection
     ) -> None:
         """Verify bytes are base64 encoded correctly."""
         test_bytes = b"Hello World"
         expected = base64.b64encode(test_bytes).decode("ascii")
 
-        result = node._b64(test_bytes)
+        result = handler._b64(test_bytes)
 
         assert result == expected
         assert result == "SGVsbG8gV29ybGQ="
 
     def test_b64_returns_none_for_none_input(
-        self, node: NodeLedgerProjectionCompute
+        self, handler: HandlerLedgerProjection
     ) -> None:
         """Verify None input returns None output."""
-        result = node._b64(None)
+        result = handler._b64(None)
 
         assert result is None
 
     def test_b64_roundtrip_preserves_data(
-        self, node: NodeLedgerProjectionCompute
+        self, handler: HandlerLedgerProjection
     ) -> None:
         """Verify base64 encode/decode roundtrip preserves original data."""
         original = b'{"event": "test", "data": [1, 2, 3]}'
 
-        encoded = node._b64(original)
+        encoded = handler._b64(original)
         assert encoded is not None
         decoded = base64.b64decode(encoded)
 
         assert decoded == original
 
     def test_b64_roundtrip_binary_payload(
-        self, node: NodeLedgerProjectionCompute, sample_binary_payload: bytes
+        self, handler: HandlerLedgerProjection, sample_binary_payload: bytes
     ) -> None:
         """Verify binary (non-JSON) payloads survive base64 roundtrip."""
-        encoded = node._b64(sample_binary_payload)
+        encoded = handler._b64(sample_binary_payload)
         assert encoded is not None
         decoded = base64.b64decode(encoded)
 
         assert decoded == sample_binary_payload
 
-    def test_b64_handles_empty_bytes(self, node: NodeLedgerProjectionCompute) -> None:
+    def test_b64_handles_empty_bytes(self, handler: HandlerLedgerProjection) -> None:
         """Verify empty bytes encode correctly."""
-        result = node._b64(b"")
+        result = handler._b64(b"")
 
         assert result == ""  # base64 of empty bytes is empty string
 
-    def test_b64_handles_large_payload(self, node: NodeLedgerProjectionCompute) -> None:
+    def test_b64_handles_large_payload(self, handler: HandlerLedgerProjection) -> None:
         """Verify large payloads encode correctly."""
         large_payload = b"A" * 100_000
 
-        encoded = node._b64(large_payload)
+        encoded = handler._b64(large_payload)
         assert encoded is not None
         decoded = base64.b64decode(encoded)
 
@@ -204,19 +212,19 @@ class TestHeaderNormalization:
     """Test header normalization to JSON-safe dict."""
 
     def test_normalize_none_headers_returns_empty_dict(
-        self, node: NodeLedgerProjectionCompute
+        self, handler: HandlerLedgerProjection
     ) -> None:
         """Missing headers return empty dict, not None."""
-        result = node._normalize_headers(None)
+        result = handler._normalize_headers(None)
 
         assert result == {}
         assert isinstance(result, dict)
 
     def test_normalize_headers_returns_json_safe_dict(
-        self, node: NodeLedgerProjectionCompute, sample_headers: ModelEventHeaders
+        self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
         """Headers are converted to JSON-serializable dict."""
-        result = node._normalize_headers(sample_headers)
+        result = handler._normalize_headers(sample_headers)
 
         assert isinstance(result, dict)
         # Verify key fields are present
@@ -227,17 +235,17 @@ class TestHeaderNormalization:
         assert result["event_type"] == sample_headers.event_type
 
     def test_normalize_headers_preserves_correlation_id(
-        self, node: NodeLedgerProjectionCompute, sample_headers: ModelEventHeaders
+        self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
         """Correlation ID is preserved in normalized headers."""
-        result = node._normalize_headers(sample_headers)
+        result = handler._normalize_headers(sample_headers)
 
         # UUID should be serialized as string
         assert "correlation_id" in result
         assert result["correlation_id"] == str(sample_headers.correlation_id)
 
     def test_normalize_headers_handles_all_optional_fields(
-        self, node: NodeLedgerProjectionCompute
+        self, handler: HandlerLedgerProjection
     ) -> None:
         """Headers with optional fields normalize correctly."""
         headers = ModelEventHeaders(
@@ -249,7 +257,7 @@ class TestHeaderNormalization:
             routing_key="my.routing.key",
         )
 
-        result = node._normalize_headers(headers)
+        result = handler._normalize_headers(headers)
 
         assert result["trace_id"] == "trace-123"
         assert result["span_id"] == "span-456"
@@ -264,48 +272,48 @@ class TestHeaderNormalization:
 class TestOffsetParsing:
     """Test Kafka offset string parsing."""
 
-    def test_parse_valid_offset(self, node: NodeLedgerProjectionCompute) -> None:
+    def test_parse_valid_offset(self, handler: HandlerLedgerProjection) -> None:
         """Valid offset string parses to integer."""
-        result = node._parse_offset("12345")
+        result = handler._parse_offset("12345")
 
         assert result == 12345
         assert isinstance(result, int)
 
     def test_parse_none_offset_returns_zero(
-        self, node: NodeLedgerProjectionCompute
+        self, handler: HandlerLedgerProjection
     ) -> None:
         """None offset returns 0 default."""
-        result = node._parse_offset(None)
+        result = handler._parse_offset(None)
 
         assert result == 0
 
     def test_parse_invalid_offset_returns_zero(
-        self, node: NodeLedgerProjectionCompute
+        self, handler: HandlerLedgerProjection
     ) -> None:
         """Invalid offset string returns 0 default."""
-        result = node._parse_offset("not-a-number")
+        result = handler._parse_offset("not-a-number")
 
         assert result == 0
 
     def test_parse_empty_string_offset_returns_zero(
-        self, node: NodeLedgerProjectionCompute
+        self, handler: HandlerLedgerProjection
     ) -> None:
         """Empty string offset returns 0 default."""
-        result = node._parse_offset("")
+        result = handler._parse_offset("")
 
         assert result == 0
 
-    def test_parse_large_offset(self, node: NodeLedgerProjectionCompute) -> None:
+    def test_parse_large_offset(self, handler: HandlerLedgerProjection) -> None:
         """Large offset values parse correctly."""
         large_offset = "9999999999999"
 
-        result = node._parse_offset(large_offset)
+        result = handler._parse_offset(large_offset)
 
         assert result == 9999999999999
 
-    def test_parse_zero_offset(self, node: NodeLedgerProjectionCompute) -> None:
+    def test_parse_zero_offset(self, handler: HandlerLedgerProjection) -> None:
         """Zero offset parses correctly."""
-        result = node._parse_offset("0")
+        result = handler._parse_offset("0")
 
         assert result == 0
 
@@ -319,22 +327,22 @@ class TestExtractLedgerMetadata:
     """Test the main extraction algorithm."""
 
     def test_extracts_kafka_position_fields(
-        self, node: NodeLedgerProjectionCompute, sample_message: ModelEventMessage
+        self, handler: HandlerLedgerProjection, sample_message: ModelEventMessage
     ) -> None:
         """Topic, partition, offset are always extracted."""
-        result = node._extract_ledger_metadata(sample_message)
+        result = handler._extract_ledger_metadata(sample_message)
 
         assert result.topic == sample_message.topic
         assert result.partition == sample_message.partition
         assert result.kafka_offset == int(sample_message.offset)  # type: ignore[arg-type]
 
     def test_raises_error_for_none_event_value(
-        self, node: NodeLedgerProjectionCompute, sample_headers: ModelEventHeaders
+        self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
         """INVARIANT: event_value is REQUIRED - must raise OnexError.
 
         This test uses model_construct to bypass Pydantic validation and create
-        a message with None value, testing the node's defensive handling.
+        a message with None value, testing the handler's defensive handling.
         """
         # Use model_construct to bypass Pydantic validation
         message = ModelEventMessage.model_construct(
@@ -347,12 +355,12 @@ class TestExtractLedgerMetadata:
         )
 
         with pytest.raises(OnexError) as exc_info:
-            node._extract_ledger_metadata(message)
+            handler._extract_ledger_metadata(message)
 
         assert "message.value is None" in str(exc_info.value)
 
     def test_handles_missing_partition_gracefully(
-        self, node: NodeLedgerProjectionCompute, sample_headers: ModelEventHeaders
+        self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
         """Missing partition defaults to 0."""
         message = ModelEventMessage.model_construct(
@@ -364,12 +372,12 @@ class TestExtractLedgerMetadata:
             offset="100",
         )
 
-        result = node._extract_ledger_metadata(message)
+        result = handler._extract_ledger_metadata(message)
 
         assert result.partition == 0
 
     def test_handles_missing_offset_gracefully(
-        self, node: NodeLedgerProjectionCompute, sample_headers: ModelEventHeaders
+        self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
         """Missing offset defaults to 0."""
         message = ModelEventMessage.model_construct(
@@ -381,19 +389,19 @@ class TestExtractLedgerMetadata:
             offset=None,
         )
 
-        result = node._extract_ledger_metadata(message)
+        result = handler._extract_ledger_metadata(message)
 
         assert result.kafka_offset == 0
 
     def test_handles_non_json_binary_payload(
         self,
-        node: NodeLedgerProjectionCompute,
+        handler: HandlerLedgerProjection,
         sample_headers: ModelEventHeaders,
         sample_binary_payload: bytes,
     ) -> None:
         """Binary (non-JSON) payload is base64 encoded, not parsed.
 
-        This validates that the node captures events without attempting
+        This validates that the handler captures events without attempting
         to parse the payload as JSON.
         """
         message = ModelEventMessage(
@@ -405,7 +413,7 @@ class TestExtractLedgerMetadata:
             offset="0",
         )
 
-        result = node._extract_ledger_metadata(message)
+        result = handler._extract_ledger_metadata(message)
 
         # Verify binary payload is base64 encoded
         assert result.event_value is not None
@@ -413,7 +421,7 @@ class TestExtractLedgerMetadata:
         assert decoded == sample_binary_payload
 
     def test_extracts_optional_header_fields(
-        self, node: NodeLedgerProjectionCompute, sample_headers: ModelEventHeaders
+        self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
         """correlation_id, event_type, source, etc. extracted from headers."""
         message = ModelEventMessage(
@@ -425,7 +433,7 @@ class TestExtractLedgerMetadata:
             offset="0",
         )
 
-        result = node._extract_ledger_metadata(message)
+        result = handler._extract_ledger_metadata(message)
 
         assert result.correlation_id == sample_headers.correlation_id
         assert result.event_type == sample_headers.event_type
@@ -434,17 +442,17 @@ class TestExtractLedgerMetadata:
         assert result.event_timestamp == sample_headers.timestamp
 
     def test_handles_event_key_encoding(
-        self, node: NodeLedgerProjectionCompute, sample_message: ModelEventMessage
+        self, handler: HandlerLedgerProjection, sample_message: ModelEventMessage
     ) -> None:
         """Event key is base64 encoded when present."""
-        result = node._extract_ledger_metadata(sample_message)
+        result = handler._extract_ledger_metadata(sample_message)
 
         assert result.event_key is not None
         decoded_key = base64.b64decode(result.event_key)
         assert decoded_key == sample_message.key
 
     def test_handles_missing_event_key(
-        self, node: NodeLedgerProjectionCompute, sample_headers: ModelEventHeaders
+        self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
         """Missing event key results in None event_key."""
         message = ModelEventMessage(
@@ -456,7 +464,7 @@ class TestExtractLedgerMetadata:
             offset="0",
         )
 
-        result = node._extract_ledger_metadata(message)
+        result = handler._extract_ledger_metadata(message)
 
         assert result.event_key is None
 
@@ -470,11 +478,11 @@ class TestMissingHeaders:
     """Test behavior when headers are missing or None.
 
     The model_construct method is used to bypass Pydantic validation
-    and test the node's defensive handling of edge cases.
+    and test the handler's defensive handling of edge cases.
     """
 
     def test_none_headers_returns_empty_onex_headers(
-        self, node: NodeLedgerProjectionCompute
+        self, handler: HandlerLedgerProjection
     ) -> None:
         """Event still captured when headers are None, onex_headers is empty dict."""
         message = ModelEventMessage.model_construct(
@@ -486,7 +494,7 @@ class TestMissingHeaders:
             offset="0",
         )
 
-        result = node._extract_ledger_metadata(message)
+        result = handler._extract_ledger_metadata(message)
 
         assert result.onex_headers == {}
         assert result.correlation_id is None
@@ -496,7 +504,7 @@ class TestMissingHeaders:
         assert result.event_timestamp is None
 
     def test_none_headers_event_still_captured(
-        self, node: NodeLedgerProjectionCompute
+        self, handler: HandlerLedgerProjection
     ) -> None:
         """Event body is still captured even with missing headers."""
         test_value = b'{"important": "data"}'
@@ -509,7 +517,7 @@ class TestMissingHeaders:
             offset="999",
         )
 
-        result = node._extract_ledger_metadata(message)
+        result = handler._extract_ledger_metadata(message)
 
         # Event value should be captured
         decoded = base64.b64decode(result.event_value)
@@ -531,7 +539,7 @@ class TestBase64Roundtrip:
 
     def test_base64_roundtrip_json_payload(
         self,
-        node: NodeLedgerProjectionCompute,
+        handler: HandlerLedgerProjection,
         sample_headers: ModelEventHeaders,
         sample_json_payload: bytes,
     ) -> None:
@@ -545,14 +553,14 @@ class TestBase64Roundtrip:
             offset="0",
         )
 
-        result = node._extract_ledger_metadata(message)
+        result = handler._extract_ledger_metadata(message)
         decoded = base64.b64decode(result.event_value)
 
         assert decoded == sample_json_payload
 
     def test_base64_roundtrip_binary_payload(
         self,
-        node: NodeLedgerProjectionCompute,
+        handler: HandlerLedgerProjection,
         sample_headers: ModelEventHeaders,
         sample_binary_payload: bytes,
     ) -> None:
@@ -566,14 +574,14 @@ class TestBase64Roundtrip:
             offset="0",
         )
 
-        result = node._extract_ledger_metadata(message)
+        result = handler._extract_ledger_metadata(message)
         decoded = base64.b64decode(result.event_value)
 
         assert decoded == sample_binary_payload
 
     def test_base64_roundtrip_key_and_value(
         self,
-        node: NodeLedgerProjectionCompute,
+        handler: HandlerLedgerProjection,
         sample_headers: ModelEventHeaders,
     ) -> None:
         """Both key and value survive base64 roundtrip."""
@@ -589,7 +597,7 @@ class TestBase64Roundtrip:
             offset="0",
         )
 
-        result = node._extract_ledger_metadata(message)
+        result = handler._extract_ledger_metadata(message)
 
         # Verify key roundtrip
         assert result.event_key is not None
@@ -602,45 +610,45 @@ class TestBase64Roundtrip:
 
 
 # =============================================================================
-# TestNodeLedgerProjectionCompute - End-to-end compute method tests
+# TestHandlerLedgerProjection - Handler project method tests
 # =============================================================================
 
 
-class TestNodeLedgerProjectionCompute:
-    """Test the compute node end-to-end."""
+class TestHandlerLedgerProjection:
+    """Test the handler project method end-to-end."""
 
-    def test_compute_returns_model_intent(
-        self, node: NodeLedgerProjectionCompute, sample_message: ModelEventMessage
+    def test_project_returns_model_intent(
+        self, handler: HandlerLedgerProjection, sample_message: ModelEventMessage
     ) -> None:
-        """compute() returns ModelIntent with correct structure."""
+        """project() returns ModelIntent with correct structure."""
         from omnibase_core.models.reducer.model_intent import ModelIntent
 
-        result = node.compute(sample_message)
+        result = handler.project(sample_message)
 
         assert isinstance(result, ModelIntent)
 
     def test_intent_has_extension_type(
-        self, node: NodeLedgerProjectionCompute, sample_message: ModelEventMessage
+        self, handler: HandlerLedgerProjection, sample_message: ModelEventMessage
     ) -> None:
         """ModelIntent.intent_type == 'extension'."""
-        result = node.compute(sample_message)
+        result = handler.project(sample_message)
 
         assert result.intent_type == "extension"
 
     def test_payload_has_ledger_append_type(
-        self, node: NodeLedgerProjectionCompute, sample_message: ModelEventMessage
+        self, handler: HandlerLedgerProjection, sample_message: ModelEventMessage
     ) -> None:
         """payload.intent_type == 'ledger.append'."""
-        result = node.compute(sample_message)
+        result = handler.project(sample_message)
 
         assert isinstance(result.payload, ModelPayloadLedgerAppend)
         assert result.payload.intent_type == "ledger.append"
 
     def test_target_uri_format(
-        self, node: NodeLedgerProjectionCompute, sample_message: ModelEventMessage
+        self, handler: HandlerLedgerProjection, sample_message: ModelEventMessage
     ) -> None:
         """Target follows postgres://event_ledger/{topic}/{partition}/{offset}."""
-        result = node.compute(sample_message)
+        result = handler.project(sample_message)
 
         expected_target = (
             f"postgres://event_ledger/{sample_message.topic}/"
@@ -648,11 +656,11 @@ class TestNodeLedgerProjectionCompute:
         )
         assert result.target == expected_target
 
-    def test_compute_preserves_all_metadata(
-        self, node: NodeLedgerProjectionCompute, sample_message: ModelEventMessage
+    def test_project_preserves_all_metadata(
+        self, handler: HandlerLedgerProjection, sample_message: ModelEventMessage
     ) -> None:
         """All metadata is preserved in the returned intent payload."""
-        result = node.compute(sample_message)
+        result = handler.project(sample_message)
         payload = result.payload
 
         assert isinstance(payload, ModelPayloadLedgerAppend)
@@ -663,10 +671,10 @@ class TestNodeLedgerProjectionCompute:
         assert payload.event_type == sample_message.headers.event_type
         assert payload.source == sample_message.headers.source
 
-    def test_compute_with_none_value_raises_error(
-        self, node: NodeLedgerProjectionCompute, sample_headers: ModelEventHeaders
+    def test_project_with_none_value_raises_error(
+        self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
-        """compute() raises OnexError for None event value."""
+        """project() raises OnexError for None event value."""
         message = ModelEventMessage.model_construct(
             topic="test.topic",
             key=None,
@@ -677,7 +685,44 @@ class TestNodeLedgerProjectionCompute:
         )
 
         with pytest.raises(OnexError):
-            node.compute(message)
+            handler.project(message)
+
+
+# =============================================================================
+# TestNodeDeclarativePattern - Verify node is declarative
+# =============================================================================
+
+
+class TestNodeDeclarativePattern:
+    """Test that the node follows the declarative pattern."""
+
+    def test_node_has_no_compute_method(
+        self, node: NodeLedgerProjectionCompute
+    ) -> None:
+        """Node should not have a custom compute method."""
+        # The node should just be a pass-through shell
+        # It should not have custom methods like _b64, _normalize_headers, etc.
+        assert (
+            not hasattr(node, "_b64") or callable(getattr(node, "_b64", None)) is False
+        )
+        assert (
+            not hasattr(node, "_normalize_headers")
+            or callable(getattr(node, "_normalize_headers", None)) is False
+        )
+        assert (
+            not hasattr(node, "_parse_offset")
+            or callable(getattr(node, "_parse_offset", None)) is False
+        )
+        assert (
+            not hasattr(node, "_extract_ledger_metadata")
+            or callable(getattr(node, "_extract_ledger_metadata", None)) is False
+        )
+
+    def test_node_extends_node_compute(self) -> None:
+        """Node should extend NodeCompute base class."""
+        from omnibase_core.nodes.node_compute import NodeCompute
+
+        assert issubclass(NodeLedgerProjectionCompute, NodeCompute)
 
 
 # =============================================================================
@@ -778,14 +823,29 @@ class TestContractValidation:
         assert consumer_group is not None, "consumer_group must be specified"
         assert len(consumer_group) > 0, "consumer_group must not be empty"
 
-    def test_output_model_is_ledger_append(self, contract_data: dict) -> None:
-        """Output model is ModelPayloadLedgerAppend."""
+    def test_output_model_is_model_intent(self, contract_data: dict) -> None:
+        """Output model is ModelIntent (wrapping ModelPayloadLedgerAppend)."""
         output_model = contract_data.get("output_model", {})
         model_name = output_model.get("name")
 
-        assert model_name == "ModelPayloadLedgerAppend", (
-            f"Expected output model 'ModelPayloadLedgerAppend', got '{model_name}'"
+        assert model_name == "ModelIntent", (
+            f"Expected output model 'ModelIntent', got '{model_name}'"
         )
+
+    def test_handler_routing_configured(self, contract_data: dict) -> None:
+        """Handler routing is configured for declarative pattern."""
+        handler_routing = contract_data.get("handler_routing", {})
+
+        assert handler_routing, "handler_routing must be configured"
+        assert "handlers" in handler_routing, "handler_routing must have handlers"
+
+        handlers = handler_routing["handlers"]
+        assert len(handlers) > 0, "At least one handler must be configured"
+
+        # Verify the handler is for ledger projection
+        handler = handlers[0]
+        assert handler.get("handler_type") == "ledger_projection"
+        assert "ledger.project" in handler.get("supported_operations", [])
 
 
 # =============================================================================
@@ -848,7 +908,7 @@ class TestEdgeCases:
     """Edge case and boundary tests."""
 
     def test_empty_value_raises_validation_error(
-        self, node: NodeLedgerProjectionCompute, sample_headers: ModelEventHeaders
+        self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
         """Empty bytes value fails validation (min_length=1 on event_value).
 
@@ -868,14 +928,14 @@ class TestEdgeCases:
         )
 
         with pytest.raises(ValidationError) as exc_info:
-            node._extract_ledger_metadata(message)
+            handler._extract_ledger_metadata(message)
 
         # Verify it's the event_value field that failed validation
         errors = exc_info.value.errors()
         assert any("event_value" in str(e) for e in errors)
 
     def test_unicode_in_json_payload(
-        self, node: NodeLedgerProjectionCompute, sample_headers: ModelEventHeaders
+        self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
         """Unicode characters in JSON payload are preserved."""
         unicode_payload = b'{"message": "Hello"}'
@@ -889,13 +949,13 @@ class TestEdgeCases:
             offset="0",
         )
 
-        result = node._extract_ledger_metadata(message)
+        result = handler._extract_ledger_metadata(message)
         decoded = base64.b64decode(result.event_value)
 
         assert decoded == unicode_payload
 
     def test_very_long_topic_name(
-        self, node: NodeLedgerProjectionCompute, sample_headers: ModelEventHeaders
+        self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
         """Long topic names are handled correctly."""
         long_topic = "org.domain.subdomain.service.event.namespace.version.v1"
@@ -909,12 +969,12 @@ class TestEdgeCases:
             offset="0",
         )
 
-        result = node._extract_ledger_metadata(message)
+        result = handler._extract_ledger_metadata(message)
 
         assert result.topic == long_topic
 
     def test_high_partition_number(
-        self, node: NodeLedgerProjectionCompute, sample_headers: ModelEventHeaders
+        self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
         """High partition numbers are handled correctly."""
         message = ModelEventMessage(
@@ -926,12 +986,12 @@ class TestEdgeCases:
             offset="0",
         )
 
-        result = node._extract_ledger_metadata(message)
+        result = handler._extract_ledger_metadata(message)
 
         assert result.partition == 999
 
     def test_high_offset_value(
-        self, node: NodeLedgerProjectionCompute, sample_headers: ModelEventHeaders
+        self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
         """High offset values are handled correctly."""
         message = ModelEventMessage(
@@ -943,7 +1003,7 @@ class TestEdgeCases:
             offset="9999999999999",
         )
 
-        result = node._extract_ledger_metadata(message)
+        result = handler._extract_ledger_metadata(message)
 
         assert result.kafka_offset == 9999999999999
 
@@ -958,9 +1018,10 @@ __all__: list[str] = [
     "TestContractValidation",
     "TestEdgeCases",
     "TestExtractLedgerMetadata",
+    "TestHandlerLedgerProjection",
     "TestHeaderNormalization",
     "TestMissingHeaders",
-    "TestNodeLedgerProjectionCompute",
+    "TestNodeDeclarativePattern",
     "TestOffsetParsing",
     "TestPayloadModelInvariants",
 ]
