@@ -66,6 +66,7 @@ import logging
 import os
 import time
 from datetime import UTC, datetime, timedelta
+from typing import assert_never
 from uuid import UUID, uuid4
 
 import yaml
@@ -252,22 +253,8 @@ class ContractRegistryReducer:
         elif isinstance(event, ModelRuntimeTick):
             return self._on_runtime_tick(state, event, topic, partition, offset)
         else:
-            # Unknown event type - skip (should not happen with proper typing)
-            _logger.warning(
-                "Unknown event type received",
-                extra={
-                    "event_type": type(event).__name__,
-                    "topic": topic,
-                    "partition": partition,
-                    "offset": offset,
-                },
-            )
-            return self._build_output(
-                state=state,
-                intents=(),
-                processing_time_ms=(time.perf_counter() - start_time) * 1000,
-                items_processed=0,
-            )
+            # Exhaustiveness check - type checker will catch missing cases
+            assert_never(event)
 
     def _on_contract_registered(
         self,
@@ -299,7 +286,13 @@ class ContractRegistryReducer:
 
         # Extract fields from typed event
         event_id = event.event_id
-        correlation_id = event.correlation_id or event_id
+        correlation_id = event.correlation_id
+        if correlation_id is None:
+            correlation_id = event_id
+            _logger.debug(
+                "Using event_id as correlation_id (none provided)",
+                extra={"event_id": str(event_id)},
+            )
 
         # Derive contract identity from node_name + version (natural key)
         version = event.node_version
@@ -374,7 +367,13 @@ class ContractRegistryReducer:
 
         # Extract fields from typed event
         event_id = event.event_id
-        correlation_id = event.correlation_id or event_id
+        correlation_id = event.correlation_id
+        if correlation_id is None:
+            correlation_id = event_id
+            _logger.debug(
+                "Using event_id as correlation_id (none provided)",
+                extra={"event_id": str(event_id)},
+            )
 
         # Derive contract identity from node_name + version
         version = event.node_version
@@ -454,7 +453,13 @@ class ContractRegistryReducer:
 
         # Extract fields from typed event
         event_id = event.event_id
-        correlation_id = event.correlation_id or event_id
+        correlation_id = event.correlation_id
+        if correlation_id is None:
+            correlation_id = event_id
+            _logger.debug(
+                "Using event_id as correlation_id (none provided)",
+                extra={"event_id": str(event_id)},
+            )
 
         # Derive contract identity from node_name + version
         version = event.node_version
@@ -663,7 +668,7 @@ class ContractRegistryReducer:
             for consumed in consumed_events:
                 if isinstance(consumed, dict):
                     topic_suffix = consumed.get("topic")
-                    if topic_suffix:
+                    if topic_suffix and isinstance(topic_suffix, str):
                         payload = ModelPayloadUpdateTopic(
                             correlation_id=correlation_id,
                             topic_suffix=topic_suffix,
@@ -687,7 +692,7 @@ class ContractRegistryReducer:
             for published in published_events:
                 if isinstance(published, dict):
                     topic_suffix = published.get("topic")
-                    if topic_suffix:
+                    if topic_suffix and isinstance(topic_suffix, str):
                         payload = ModelPayloadUpdateTopic(
                             correlation_id=correlation_id,
                             topic_suffix=topic_suffix,

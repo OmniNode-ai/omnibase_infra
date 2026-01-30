@@ -422,7 +422,7 @@ class TestContractRegistryReducerStaleness:
 # =============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestContractRegistryState:
     """Test state model behavior."""
 
