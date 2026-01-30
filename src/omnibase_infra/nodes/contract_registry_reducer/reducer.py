@@ -207,8 +207,6 @@ class ContractRegistryReducer:
         Returns:
             ModelReducerOutput containing new_state and intents tuple.
         """
-        start_time = time.perf_counter()
-
         # Extract Kafka metadata for idempotency
         topic = str(event_metadata.get("topic", ""))
         partition_raw = event_metadata.get("partition")
@@ -625,6 +623,31 @@ class ContractRegistryReducer:
         Parses the contract_yaml for consumed_events and published_events,
         then creates postgres.update_topic intents for each topic suffix.
 
+        Environment Placeholder Handling:
+            Topic suffixes from contract_yaml may contain ``{env}.`` placeholders
+            (e.g., ``{env}.onex.evt.platform.contract-registered.v1``). This reducer
+            stores these values **as-is** without stripping the placeholder.
+
+            This is intentional for several reasons:
+
+            1. **Reducer Purity**: The reducer remains environment-agnostic and
+               deterministic - it doesn't need to know about deployment environments.
+
+            2. **Effect Layer Responsibility**: The PostgresAdapter (Effect layer)
+               is responsible for resolving or stripping the ``{env}.`` placeholder
+               at write time, when the actual environment context is available.
+
+            3. **Auditing**: Storing the raw contract value preserves the original
+               contract specification for debugging and auditing purposes.
+
+            4. **Query Flexibility**: Downstream consumers can query topics with
+               or without the placeholder depending on their needs.
+
+            The Effect layer should handle ``{env}.`` resolution via one of:
+            - Stripping the prefix before storage (simple)
+            - Replacing with actual environment (e.g., ``dev.``, ``prod.``)
+            - Storing as-is with environment-aware queries
+
         Args:
             event: Contract registered event with contract_yaml.
             correlation_id: Correlation ID for tracing.
@@ -668,6 +691,9 @@ class ContractRegistryReducer:
         if isinstance(consumed_events, list):
             for consumed in consumed_events:
                 if isinstance(consumed, dict):
+                    # NOTE: topic_suffix may contain {env}. placeholder (e.g.,
+                    # "{env}.onex.evt.platform.contract-registered.v1").
+                    # We store it as-is; the Effect layer handles resolution.
                     topic_suffix = consumed.get("topic")
                     if topic_suffix and isinstance(topic_suffix, str):
                         payload = ModelPayloadUpdateTopic(
@@ -692,6 +718,8 @@ class ContractRegistryReducer:
         if isinstance(published_events, list):
             for published in published_events:
                 if isinstance(published, dict):
+                    # NOTE: topic_suffix may contain {env}. placeholder - stored as-is,
+                    # Effect layer handles resolution (see docstring above).
                     topic_suffix = published.get("topic")
                     if topic_suffix and isinstance(topic_suffix, str):
                         payload = ModelPayloadUpdateTopic(

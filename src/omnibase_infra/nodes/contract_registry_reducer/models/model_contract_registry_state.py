@@ -11,7 +11,8 @@ Architecture:
     processes contract registration events and emits intents for persistence. The state
     tracks:
 
-    - Last processed event (Kafka offset-based idempotency)
+    - Processed positions per (topic, partition) for multi-topic idempotency
+    - Last processed event ID (for correlation/debugging)
     - Staleness tracking (for TTL-based garbage collection)
     - Processing statistics (for observability)
 
@@ -23,8 +24,14 @@ Idempotency:
     event ID-based idempotency. This is more robust for replay scenarios since
     Kafka guarantees ordering within a partition.
 
+    **Multi-Topic Support**: The reducer consumes from 4 different Kafka topics
+    (contract-registered, contract-deregistered, heartbeat, runtime-tick). The state
+    tracks the last processed offset **per (topic, partition)** to correctly detect
+    duplicates even when events arrive interleaved from different topics.
+
     The `is_duplicate_event` method checks if an event was already processed by
-    comparing topic, partition, and offset against the last processed values.
+    looking up the (topic, partition) key in `processed_positions` and comparing
+    offsets.
 
 Related:
     - NodeContractRegistryReducer: Declarative reducer that uses this state model
@@ -42,12 +49,24 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelContractRegistryState(BaseModel):
     """Immutable state for contract registry projection.
 
-    This state tracks the last processed event for idempotency and provides
-    statistics for observability. The actual registry data lives in PostgreSQL
-    (this reducer projects to it).
+    This state tracks processed positions per (topic, partition) for multi-topic
+    idempotency and provides statistics for observability. The actual registry
+    data lives in PostgreSQL (this reducer projects to it).
 
     The state is immutable (frozen=True) to enforce the pure reducer pattern.
     All state transitions create new instances via `with_*` methods.
+
+    Multi-Topic Idempotency:
+        The reducer consumes from 4 different Kafka topics. A naive single-position
+        tracker would fail when events arrive interleaved:
+
+        1. Process topic A, partition 0, offset 100 -> track (A, 0, 100)
+        2. Process topic B, partition 0, offset 50 -> track (B, 0, 50)
+        3. Replay topic A, partition 0, offset 100 -> NOT detected as duplicate!
+
+        This model uses `processed_positions` to track the last offset per
+        (topic, partition) combination, ensuring correct duplicate detection
+        across all consumed topics.
 
     Persistence Integration:
         This model is persisted to PostgreSQL by the Projector component:
@@ -68,10 +87,8 @@ class ModelContractRegistryState(BaseModel):
         - Safe for concurrent access and comparison
 
     Attributes:
-        last_event_id: UUID of last processed event (for correlation).
-        last_event_topic: Kafka topic of last processed event.
-        last_event_partition: Kafka partition of last processed event.
-        last_event_offset: Kafka offset of last processed event.
+        last_event_id: UUID of last processed event (for correlation/debugging).
+        processed_positions: Dict mapping "topic:partition" to last processed offset.
         last_staleness_check_at: Timestamp of last staleness check run.
         contracts_processed: Count of contract registration events processed.
         heartbeats_processed: Count of heartbeat events processed.
@@ -87,26 +104,25 @@ class ModelContractRegistryState(BaseModel):
         ... ).with_contract_registered()
         >>> state.contracts_processed
         1
+        >>> # Multi-topic: positions are tracked independently
+        >>> state = state.with_event_processed(uuid4(), "heartbeats", 0, 50)
+        >>> state.is_duplicate_event("contracts", 0, 1)  # Still detected
+        True
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    # Last processed event (for idempotency/dedupe via Kafka offsets)
+    # Last processed event ID (for correlation/debugging only, not idempotency)
     last_event_id: UUID | None = Field(
         default=None,
         description="UUID of the last processed event for correlation",
     )
-    last_event_topic: str | None = Field(
-        default=None,
-        description="Kafka topic of the last processed event",
-    )
-    last_event_partition: int | None = Field(
-        default=None,
-        description="Kafka partition of the last processed event",
-    )
-    last_event_offset: int | None = Field(
-        default=None,
-        description="Kafka offset of the last processed event",
+
+    # Multi-topic idempotency: track last offset per (topic, partition)
+    # Key format: "topic:partition" -> last processed offset
+    processed_positions: dict[str, int] = Field(
+        default_factory=dict,
+        description="Last processed offset per (topic:partition) for multi-topic idempotency",
     )
 
     # Staleness tracking
@@ -129,13 +145,29 @@ class ModelContractRegistryState(BaseModel):
         description="Count of deregistration events processed",
     )
 
+    @staticmethod
+    def _position_key(topic: str, partition: int) -> str:
+        """Generate dict key for (topic, partition) combination.
+
+        Args:
+            topic: Kafka topic name.
+            partition: Kafka partition number.
+
+        Returns:
+            String key in format "topic:partition".
+        """
+        return f"{topic}:{partition}"
+
     def is_duplicate_event(self, topic: str, partition: int, offset: int) -> bool:
         """Check if event was already processed (Kafka-based idempotency).
 
-        Uses Kafka offset comparison for duplicate detection. An event is
-        considered a duplicate if:
-        - It's from the same topic and partition
-        - Its offset is less than or equal to the last processed offset
+        Uses per-(topic, partition) offset tracking for duplicate detection.
+        An event is considered a duplicate if:
+        - The (topic, partition) has been processed before
+        - The event's offset is <= the last processed offset for that combination
+
+        This correctly handles multi-topic consumption where events from different
+        topics arrive interleaved.
 
         Args:
             topic: Kafka topic of the event.
@@ -145,11 +177,11 @@ class ModelContractRegistryState(BaseModel):
         Returns:
             True if this event was already processed (is a duplicate).
         """
-        if self.last_event_topic != topic:
+        key = self._position_key(topic, partition)
+        last_offset = self.processed_positions.get(key)
+        if last_offset is None:
             return False
-        if self.last_event_partition != partition:
-            return False
-        return self.last_event_offset is not None and offset <= self.last_event_offset
+        return offset <= last_offset
 
     def with_event_processed(
         self,
@@ -161,8 +193,14 @@ class ModelContractRegistryState(BaseModel):
         """Return new state with event marked as processed.
 
         Creates a new immutable state instance with the Kafka offset tracking
-        updated. Statistics are preserved; use the specific `with_*` methods
-        to increment them.
+        updated for the specific (topic, partition) combination. Statistics are
+        preserved; use the specific `with_*` methods to increment them.
+
+        Multi-Topic Support:
+            Each (topic, partition) combination has its own tracked offset.
+            This ensures correct idempotency when the reducer consumes from
+            multiple topics (contract-registered, contract-deregistered,
+            heartbeat, runtime-tick).
 
         Args:
             event_id: UUID of the processed event.
@@ -173,12 +211,13 @@ class ModelContractRegistryState(BaseModel):
         Returns:
             New ModelContractRegistryState with updated offset tracking.
         """
+        key = self._position_key(topic, partition)
+        # Create new dict with updated position (immutable pattern)
+        new_positions = {**self.processed_positions, key: offset}
         return self.model_copy(
             update={
                 "last_event_id": event_id,
-                "last_event_topic": topic,
-                "last_event_partition": partition,
-                "last_event_offset": offset,
+                "processed_positions": new_positions,
             }
         )
 

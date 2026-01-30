@@ -207,6 +207,107 @@ class TestContractRegistryReducerIdempotency:
         assert result2.items_processed == 1
         assert result2.result.contracts_processed == 2
 
+    def test_multi_topic_idempotency_at_reducer_level(
+        self,
+        reducer: ContractRegistryReducer,
+        contract_registered_event: ModelContractRegisteredEvent,
+        heartbeat_event: ModelNodeHeartbeatEvent,
+    ) -> None:
+        """Reducer should correctly detect duplicates across topic switches.
+
+        This test verifies the fix for the multi-topic idempotency bug:
+        1. Process contract-registered from topic A at offset 100
+        2. Process heartbeat from topic B at offset 50
+        3. Replay contract-registered from topic A at offset 100 -> NOOP
+
+        The old single-position implementation would process step 3 as new
+        because the last_event_topic would be topic B after step 2.
+        """
+        state = ModelContractRegistryState()
+
+        # Step 1: Process contract registration from topic A
+        topic_a = "onex.evt.platform.contract-registered.v1"
+        metadata_a = make_event_metadata(topic=topic_a, partition=0, offset=100)
+        result1 = reducer.reduce(state, contract_registered_event, metadata_a)
+        assert result1.items_processed == 1
+        assert result1.result.contracts_processed == 1
+
+        # Step 2: Process heartbeat from topic B (different topic, lower offset)
+        topic_b = "onex.evt.platform.node-heartbeat.v1"
+        metadata_b = make_event_metadata(topic=topic_b, partition=0, offset=50)
+        result2 = reducer.reduce(result1.result, heartbeat_event, metadata_b)
+        assert result2.items_processed == 1
+        assert result2.result.heartbeats_processed == 1
+
+        # Step 3: CRITICAL - Replay same event from topic A at same offset
+        # This MUST be detected as duplicate (NOOP)
+        result3 = reducer.reduce(result2.result, contract_registered_event, metadata_a)
+        assert result3.items_processed == 0, (
+            "Replayed event from topic A should be detected as duplicate "
+            "even after processing an event from topic B"
+        )
+        assert len(result3.intents) == 0
+        # Counts should NOT be incremented
+        assert result3.result.contracts_processed == 1
+        assert result3.result.heartbeats_processed == 1
+
+    def test_four_topic_interleaved_idempotency(
+        self,
+        reducer: ContractRegistryReducer,
+        contract_registered_event: ModelContractRegisteredEvent,
+        contract_deregistered_event: ModelContractDeregisteredEvent,
+        heartbeat_event: ModelNodeHeartbeatEvent,
+        runtime_tick_event: ModelRuntimeTick,
+    ) -> None:
+        """Reducer should track all 4 topic types independently.
+
+        The reducer consumes:
+        - contract-registered
+        - contract-deregistered
+        - node-heartbeat
+        - runtime-tick
+
+        Each should be tracked independently for idempotency.
+        """
+        state = ModelContractRegistryState()
+
+        # Process one event from each topic
+        topics = [
+            (
+                "onex.evt.platform.contract-registered.v1",
+                contract_registered_event,
+                100,
+            ),
+            (
+                "onex.evt.platform.contract-deregistered.v1",
+                contract_deregistered_event,
+                200,
+            ),
+            ("onex.evt.platform.node-heartbeat.v1", heartbeat_event, 300),
+            ("onex.evt.platform.runtime-tick.v1", runtime_tick_event, 400),
+        ]
+
+        current_state = state
+        for topic, event, offset in topics:
+            metadata = make_event_metadata(topic=topic, partition=0, offset=offset)
+            result = reducer.reduce(current_state, event, metadata)
+            assert result.items_processed == 1
+            current_state = result.result
+
+        # Verify all 4 topics are tracked in processed_positions
+        positions = current_state.processed_positions
+        assert len(positions) == 4
+        assert positions["onex.evt.platform.contract-registered.v1:0"] == 100
+        assert positions["onex.evt.platform.contract-deregistered.v1:0"] == 200
+        assert positions["onex.evt.platform.node-heartbeat.v1:0"] == 300
+        assert positions["onex.evt.platform.runtime-tick.v1:0"] == 400
+
+        # Replay all 4 - all should be NOOP
+        for topic, event, offset in topics:
+            metadata = make_event_metadata(topic=topic, partition=0, offset=offset)
+            result = reducer.reduce(current_state, event, metadata)
+            assert result.items_processed == 0, f"Replay of {topic} should be NOOP"
+
 
 # =============================================================================
 # Test: Contract Registration Event Handling
@@ -469,6 +570,84 @@ class TestContractRegistryState:
 
         # Different partition should NOT be duplicate
         assert not new_state.is_duplicate_event("topic", 1, 50)
+
+    def test_multi_topic_idempotency(
+        self, initial_state: ModelContractRegistryState
+    ) -> None:
+        """State should correctly track positions across multiple topics.
+
+        This test verifies the fix for the multi-topic idempotency bug where
+        the reducer consumes from 4 different Kafka topics but the old
+        single-position tracker would lose track when switching topics.
+
+        Scenario:
+            1. Process topic A at offset 100
+            2. Process topic B at offset 50
+            3. Replay topic A at offset 100 -> MUST be detected as duplicate
+        """
+        # Process event from topic A
+        state1 = initial_state.with_event_processed(
+            event_id=uuid4(),
+            topic="contracts.registered",
+            partition=0,
+            offset=100,
+        )
+        assert state1.is_duplicate_event("contracts.registered", 0, 100)
+        assert state1.is_duplicate_event("contracts.registered", 0, 99)
+
+        # Process event from topic B (different topic, lower offset)
+        state2 = state1.with_event_processed(
+            event_id=uuid4(),
+            topic="heartbeats",
+            partition=0,
+            offset=50,
+        )
+
+        # Verify topic B tracking works
+        assert state2.is_duplicate_event("heartbeats", 0, 50)
+        assert state2.is_duplicate_event("heartbeats", 0, 49)
+        assert not state2.is_duplicate_event("heartbeats", 0, 51)
+
+        # CRITICAL: Topic A should STILL be tracked after processing topic B
+        # This is the bug fix - old implementation would fail here
+        assert state2.is_duplicate_event("contracts.registered", 0, 100)
+        assert state2.is_duplicate_event("contracts.registered", 0, 99)
+        assert not state2.is_duplicate_event("contracts.registered", 0, 101)
+
+        # Verify both topics are tracked in processed_positions
+        assert "contracts.registered:0" in state2.processed_positions
+        assert "heartbeats:0" in state2.processed_positions
+        assert state2.processed_positions["contracts.registered:0"] == 100
+        assert state2.processed_positions["heartbeats:0"] == 50
+
+    def test_multi_partition_idempotency(
+        self, initial_state: ModelContractRegistryState
+    ) -> None:
+        """State should correctly track positions across multiple partitions."""
+        # Process partition 0
+        state1 = initial_state.with_event_processed(
+            event_id=uuid4(),
+            topic="contracts",
+            partition=0,
+            offset=100,
+        )
+
+        # Process partition 1
+        state2 = state1.with_event_processed(
+            event_id=uuid4(),
+            topic="contracts",
+            partition=1,
+            offset=200,
+        )
+
+        # Both partitions should be tracked independently
+        assert state2.is_duplicate_event("contracts", 0, 100)
+        assert state2.is_duplicate_event("contracts", 1, 200)
+        assert not state2.is_duplicate_event("contracts", 0, 101)
+        assert not state2.is_duplicate_event("contracts", 1, 201)
+
+        # New partition should not be tracked yet
+        assert not state2.is_duplicate_event("contracts", 2, 50)
 
 
 # =============================================================================

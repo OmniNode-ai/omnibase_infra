@@ -121,6 +121,12 @@ state_machine:
 # in the ModelReducerOutput for the Runtime to publish.
 intent_emission:
   enabled: true
+  # Intent Type Clarification:
+  # These intent_type values (e.g., "postgres.upsert_contract") are PAYLOAD intent types,
+  # stored in `payload.intent_type` on typed payload models like ModelPayloadUpsertContract.
+  # The outer ModelIntent.intent_type is always "extension" for extension-based intents.
+  # Effect layer routing uses payload.intent_type to dispatch to the correct handler.
+  # See: CLAUDE.md "Intent Model Architecture" for the two-layer intent pattern.
   intents:
     - intent_type: "postgres.upsert_contract"
       target_pattern: "postgres://contracts/{contract_id}"
