@@ -457,6 +457,10 @@ class TestBootstrapSourceErrorHandling:
             )
             MockBootstrapSource.return_value = mock_source
 
+            # Use an isolated empty registry to avoid singleton contamination
+            # from handlers registered by previous tests
+            isolated_registry = RegistryProtocolBinding()
+
             process = RuntimeHostProcess(
                 event_bus=event_bus,
                 input_topic="test.input",
@@ -464,6 +468,7 @@ class TestBootstrapSourceErrorHandling:
                     "service_name": "test-bootstrap-service",
                     "node_name": "test-bootstrap-node",
                 },
+                handler_registry=isolated_registry,
             )
 
             # Runtime should fail fast with no handlers registered
