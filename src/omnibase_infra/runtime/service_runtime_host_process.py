@@ -187,6 +187,51 @@ DEFAULT_DRAIN_TIMEOUT_SECONDS: float = parse_env_float(
 )
 
 
+def _parse_contract_event_payload(
+    msg: ModelEventMessage,
+) -> tuple[dict[str, object], UUID] | None:
+    """Parse contract event message payload and extract correlation ID.
+
+    This helper extracts common JSON parsing and correlation ID extraction logic
+    used by contract registration and deregistration handlers.
+
+    Args:
+        msg: The event message to parse.
+
+    Returns:
+        A tuple of (payload_dict, correlation_id) if message has a value,
+        None if message value is empty.
+
+    Raises:
+        json.JSONDecodeError: If the message value is not valid JSON.
+        UnicodeDecodeError: If the message value cannot be decoded as UTF-8.
+
+    Note:
+        This function is intentionally a module-level utility rather than a
+        class method because it performs pure data transformation without
+        requiring any class state.
+
+    .. versionadded:: 0.8.0
+        Created for OMN-1654 to reduce duplication in contract event handlers.
+    """
+    if not msg.value:
+        return None
+
+    payload: dict[str, object] = json.loads(msg.value.decode("utf-8"))
+
+    # Extract correlation ID from headers if available, or generate new
+    correlation_id: UUID
+    if msg.headers and msg.headers.correlation_id:
+        try:
+            correlation_id = UUID(str(msg.headers.correlation_id))
+        except (ValueError, TypeError):
+            correlation_id = uuid4()
+    else:
+        correlation_id = uuid4()
+
+    return (payload, correlation_id)
+
+
 class PluginLoaderContractSource(ProtocolContractSource):
     """Adapter that uses HandlerPluginLoader for contract discovery.
 
@@ -1455,21 +1500,7 @@ class RuntimeHostProcess:
         if source_config.effective_mode == EnumHandlerSourceMode.KAFKA_EVENTS:
             # Create Kafka-based contract source (cache-only beta)
             # Note: Kafka subscriptions are wired separately in _wire_baseline_subscriptions()
-            # Use runtime-configured environment, falling back to ONEX_ENVIRONMENT env var
-            config = self._config or {}
-            event_bus_config = config.get("event_bus", {})
-            if isinstance(event_bus_config, dict):
-                environment = str(
-                    event_bus_config.get(
-                        "environment", os.getenv("ONEX_ENVIRONMENT", "dev")
-                    )
-                )
-            else:
-                environment = getattr(
-                    event_bus_config,
-                    "environment",
-                    os.getenv("ONEX_ENVIRONMENT", "dev"),
-                )
+            environment = self._get_environment_from_config()
             kafka_source = KafkaContractSource(
                 environment=environment,
                 graceful_mode=True,
@@ -2811,6 +2842,31 @@ class RuntimeHostProcess:
         self._container = ModelONEXContainer()
         return self._container
 
+    def _get_environment_from_config(self) -> str:
+        """Extract environment setting from config with consistent fallback.
+
+        Handles both dict-based config and object-based config (e.g., Pydantic models)
+        with a unified access pattern.
+
+        Resolution order:
+            1. config["event_bus"]["environment"] (if config is dict-like)
+            2. config.event_bus.environment (if config is object-like)
+            3. ONEX_ENVIRONMENT environment variable
+            4. "dev" (hardcoded default)
+
+        Returns:
+            Environment string (e.g., "dev", "staging", "prod").
+        """
+        default_env = os.getenv("ONEX_ENVIRONMENT", "dev")
+        config = self._config or {}
+
+        event_bus_config = config.get("event_bus", {})
+        if isinstance(event_bus_config, dict):
+            return str(event_bus_config.get("environment", default_env))
+
+        # Object-based config (e.g., ModelEventBusConfig)
+        return str(getattr(event_bus_config, "environment", default_env))
+
     # =========================================================================
     # Event Bus Subcontract Wiring Methods (OMN-1621)
     # =========================================================================
@@ -2859,14 +2915,7 @@ class RuntimeHostProcess:
             )
             return
 
-        # Get environment from config, defaulting to "local"
-        config = self._config or {}
-        event_bus_config = config.get("event_bus", {})
-        if isinstance(event_bus_config, dict):
-            environment = str(event_bus_config.get("environment", "local"))
-        else:
-            # Could be a ModelEventBusConfig or similar
-            environment = getattr(event_bus_config, "environment", "local")
+        environment = self._get_environment_from_config()
 
         # Create wiring instance
         # Cast to protocol type - both EventBusKafka and EventBusInmemory implement
@@ -2973,36 +3022,26 @@ class RuntimeHostProcess:
         async def handle_registration(msg: ModelEventMessage) -> None:
             """Handle contract registration event from Kafka."""
             try:
-                # Parse message value as JSON
-                if msg.value:
-                    payload = json.loads(msg.value.decode("utf-8"))
+                parsed = _parse_contract_event_payload(msg)
+                if parsed is None:
+                    return
 
-                    # Extract correlation ID from headers if available, or generate new
-                    correlation_id: UUID
-                    if msg.headers and msg.headers.correlation_id:
-                        try:
-                            correlation_id = UUID(str(msg.headers.correlation_id))
-                        except (ValueError, TypeError):
-                            correlation_id = uuid4()
-                    else:
-                        correlation_id = uuid4()
+                payload, correlation_id = parsed
 
-                    source.on_contract_registered(
-                        node_name=payload.get("node_name", ""),
-                        contract_yaml=payload.get("contract_yaml", ""),
-                        correlation_id=correlation_id,
-                    )
+                source.on_contract_registered(
+                    node_name=str(payload.get("node_name", "")),
+                    contract_yaml=str(payload.get("contract_yaml", "")),
+                    correlation_id=correlation_id,
+                )
 
-                    logger.debug(
-                        "Processed contract registration event",
-                        extra={
-                            "node_name": payload.get("node_name"),
-                            "topic": registration_topic,
-                            "correlation_id": str(correlation_id)
-                            if correlation_id
-                            else None,
-                        },
-                    )
+                logger.debug(
+                    "Processed contract registration event",
+                    extra={
+                        "node_name": payload.get("node_name"),
+                        "topic": registration_topic,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
 
             except Exception as e:
                 logger.warning(
@@ -3017,34 +3056,25 @@ class RuntimeHostProcess:
         async def handle_deregistration(msg: ModelEventMessage) -> None:
             """Handle contract deregistration event from Kafka."""
             try:
-                if msg.value:
-                    payload = json.loads(msg.value.decode("utf-8"))
+                parsed = _parse_contract_event_payload(msg)
+                if parsed is None:
+                    return
 
-                    # Extract correlation ID from headers if available, or generate new
-                    correlation_id: UUID
-                    if msg.headers and msg.headers.correlation_id:
-                        try:
-                            correlation_id = UUID(str(msg.headers.correlation_id))
-                        except (ValueError, TypeError):
-                            correlation_id = uuid4()
-                    else:
-                        correlation_id = uuid4()
+                payload, correlation_id = parsed
 
-                    source.on_contract_deregistered(
-                        node_name=payload.get("node_name", ""),
-                        correlation_id=correlation_id,
-                    )
+                source.on_contract_deregistered(
+                    node_name=str(payload.get("node_name", "")),
+                    correlation_id=correlation_id,
+                )
 
-                    logger.debug(
-                        "Processed contract deregistration event",
-                        extra={
-                            "node_name": payload.get("node_name"),
-                            "topic": deregistration_topic,
-                            "correlation_id": str(correlation_id)
-                            if correlation_id
-                            else None,
-                        },
-                    )
+                logger.debug(
+                    "Processed contract deregistration event",
+                    extra={
+                        "node_name": payload.get("node_name"),
+                        "topic": deregistration_topic,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
 
             except Exception as e:
                 logger.warning(

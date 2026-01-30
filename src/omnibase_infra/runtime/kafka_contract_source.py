@@ -905,6 +905,7 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
                 raise ModelOnexError(
                     f"Failed to parse contract for node '{node_name}': {e}",
                     error_code="KAFKA_CONTRACT_001",
+                    correlation_id=event_correlation,
                 ) from e
 
     def on_contract_deregistered(
