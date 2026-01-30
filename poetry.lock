@@ -2824,18 +2824,18 @@ metrics = ["prometheus-client (>=0.21.0,<1.0.0)"]
 
 [[package]]
 name = "omnibase-spi"
-version = "0.6.2"
+version = "0.6.3"
 description = "ONEX Service Provider Interface - Protocol definitions"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_spi-0.6.2-py3-none-any.whl", hash = "sha256:58635b2288001034368620865ace38b24a2bd56235721d4fcd9e2f1099c20150"},
-    {file = "omnibase_spi-0.6.2.tar.gz", hash = "sha256:6c8daeb51362ab1612b245c2b6804789f4ab4a03df2516aacf562d8650a3411f"},
+    {file = "omnibase_spi-0.6.3-py3-none-any.whl", hash = "sha256:c99cea6ab6147a29414f307bb9125d666e0f9bd493d086815ca02fb85f3e7399"},
+    {file = "omnibase_spi-0.6.3.tar.gz", hash = "sha256:9a3c122777c32d380cb2337599e3939fd0eb9b11cbc03d2ec527d59a47c1f7f9"},
 ]
 
 [package.dependencies]
-omnibase-core = ">=0.9.6"
+omnibase-core = ">=0.9.10"
 pydantic = ">=2.11.7"
 typing-extensions = ">=4.5.0"
 
@@ -5212,4 +5212,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "72437eeb8c72e7355a19dc830a2933b7fe98ded160e40c1f79fe20711492ef94"
+content-hash = "a3784e58ac4eea30727f11e800036df4c7ee51f6a57dc97ca022be75c6db0654"

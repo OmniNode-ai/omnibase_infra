@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "omnibase_infra"
-version = "0.2.5"
+version = "0.2.6"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = ["OmniNode Team <team@omninode.ai>"]
 license = "MIT"
@@ -38,8 +38,8 @@ python = "^3.12"
 #
 # omnibase-core v0.9.9: Adds baseline topic constants export
 omnibase-core = "^0.9.9"
-# omnibase-spi v0.6.2: Version bump
-omnibase-spi = "^0.6.2"
+# omnibase-spi v0.6.3: Version bump
+omnibase-spi = "^0.6.3"
 
 # ============================================================================
 # External Dependency Security Guidance
