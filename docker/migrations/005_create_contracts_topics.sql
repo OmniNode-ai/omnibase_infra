@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS topics (
 
     -- Constraints
     PRIMARY KEY (topic_suffix, direction),
-    CONSTRAINT valid_direction CHECK (direction IN ('publish', 'subscribe'))
+    CONSTRAINT valid_direction CHECK (direction IN ('publish', 'subscribe')),
+    CONSTRAINT contract_ids_is_array CHECK (jsonb_typeof(contract_ids) = 'array')
 );
 
 -- Indexes for topic queries

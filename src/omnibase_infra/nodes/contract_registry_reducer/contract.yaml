@@ -208,16 +208,16 @@ performance:
       description: "Target processing time for staleness computation on tick"
 # Idempotency Configuration
 # =========================
-# The reducer supports idempotent event processing via event_id tracking.
+# The reducer supports idempotent event processing via Kafka offset tracking.
 idempotency:
   enabled: true
-  strategy: "event_id_tracking"
-  derivation: "deterministic_hash"
-  hash_fields:
-    - "contract_id"
-    - "node_id"
-    - "timestamp"
-  description: "Skip duplicate events based on event_id or derived hash"
+  strategy: "kafka_offset_tracking"
+  derivation: "topic_partition_offset"
+  tracking_fields:
+    - "topic"
+    - "partition"
+    - "offset"
+  description: "Skip duplicate events based on Kafka position (topic:partition -> offset). State tracks last processed offset per (topic, partition) for multi-topic idempotency."
 # Staleness Configuration
 # =======================
 # Configuration for staleness computation on runtime-tick events.

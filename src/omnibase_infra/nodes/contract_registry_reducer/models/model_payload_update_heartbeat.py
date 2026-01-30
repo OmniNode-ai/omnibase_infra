@@ -29,7 +29,7 @@ class ModelPayloadUpdateHeartbeat(BaseModel):
         correlation_id: Correlation ID for distributed tracing.
         contract_id: Contract to update.
         node_name: Contract node name.
-        source_node_id: UUID of the heartbeating node (optional).
+        source_node_id: String representation of heartbeating node's UUID (optional).
         last_seen_at: New heartbeat timestamp.
         uptime_seconds: Node uptime in seconds (optional).
         sequence_number: Heartbeat sequence number (optional).
@@ -53,7 +53,8 @@ class ModelPayloadUpdateHeartbeat(BaseModel):
     node_name: str = Field(..., description="Contract node name.")
 
     source_node_id: str | None = Field(
-        default=None, description="Source node UUID (optional)."
+        default=None,
+        description="Source node ID as string (UUID string representation, optional).",
     )
 
     last_seen_at: datetime = Field(..., description="Heartbeat timestamp.")
