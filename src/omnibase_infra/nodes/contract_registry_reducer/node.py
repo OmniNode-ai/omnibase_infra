@@ -52,8 +52,6 @@ from typing import TYPE_CHECKING
 from omnibase_core.nodes.node_reducer import NodeReducer
 
 if TYPE_CHECKING:
-    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-
     # Import needed for string annotation in class definition
     from omnibase_infra.nodes.contract_registry_reducer.models.model_contract_registry_state import (
         ModelContractRegistryState,
@@ -64,6 +62,10 @@ class NodeContractRegistryReducer(
     NodeReducer["ModelContractRegistryState", "ModelContractRegistryState"]
 ):
     """Contract registry reducer - FSM state transitions driven by contract.yaml.
+
+    This is a purely declarative reducer. All behavior is defined in contract.yaml.
+    No custom Python logic is required - the base NodeReducer class handles all
+    FSM-driven state transitions via the contract configuration.
 
     This reducer processes contract registration workflows by:
     1. Receiving contract events (registration, heartbeat, deregistration)
@@ -114,14 +116,6 @@ class NodeContractRegistryReducer(
         result = await reducer.process(input_data)
         ```
     """
-
-    def __init__(self, container: ModelONEXContainer) -> None:
-        """Initialize the reducer.
-
-        Args:
-            container: ONEX dependency injection container
-        """
-        super().__init__(container)
 
 
 __all__ = ["NodeContractRegistryReducer"]

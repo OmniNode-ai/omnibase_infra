@@ -83,6 +83,7 @@ from omnibase_core.models.events import (
 )
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
+from omnibase_core.types import JsonType
 from omnibase_infra.nodes.contract_registry_reducer.models.model_contract_registry_state import (
     ModelContractRegistryState,
 )
@@ -190,7 +191,7 @@ class ContractRegistryReducer:
         self,
         state: ModelContractRegistryState,
         event: ContractRegistryEvent,
-        event_metadata: dict[str, object],
+        event_metadata: dict[str, JsonType],
     ) -> ModelReducerOutput[ModelContractRegistryState]:
         """Pure reduce function: state + event -> new_state + intents.
 

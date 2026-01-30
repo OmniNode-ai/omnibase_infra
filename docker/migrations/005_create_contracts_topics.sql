@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS contracts (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 
-    -- Unique constraint for upsert by node identity
+    -- Unique constraint for upsert by node identity (also creates implicit index for version lookups)
     CONSTRAINT unique_contract_version UNIQUE (node_name, version_major, version_minor, version_patch)
 );
 
@@ -58,10 +58,6 @@ CREATE INDEX IF NOT EXISTS idx_contracts_node_name
 
 CREATE INDEX IF NOT EXISTS idx_contracts_hash
     ON contracts(contract_hash);
-
--- Composite index for version lookups
-CREATE INDEX IF NOT EXISTS idx_contracts_node_version
-    ON contracts(node_name, version_major, version_minor, version_patch);
 
 -- ============================================================================
 -- TOPICS TABLE
