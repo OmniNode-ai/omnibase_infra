@@ -5,6 +5,43 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2026-01-30
+
+### Added
+
+#### Contract Registry System
+- **OMN-1654**: `KafkaContractSource` for cache-based contract discovery from Kafka topics (#213)
+- **OMN-1653**: Contract registry reducer with Postgres projection for persistent contract storage (#212)
+
+#### Event Ledger Persistence
+- **OMN-1648**: `NodeLedgerProjectionCompute` for event ledger persistence with compute node pattern (#211)
+- **OMN-1647**: PostgreSQL handlers for event ledger persistence operations (#209)
+- **OMN-1646**: Event ledger schema and models for tracking event processing state (#208)
+
+#### Declarative Configuration & Routing
+- **OMN-1519**: `RuntimeContractConfigLoader` for declarative operation bindings from contract.yaml (#210)
+- **OMN-1518**: Declarative topic→operation→handler routing with contract-driven dispatch (#198)
+- **OMN-1621**: Contract-driven event bus subscription wiring for automatic topic binding (#200)
+
+#### Emit Daemon
+- **OMN-1610**: Emit daemon for persistent Kafka connections with connection pooling (#207)
+
+#### Kafka & Event Bus Improvements
+- **OMN-1613**: Event bus topic storage in registry for dynamic topic routing (#199)
+- **OMN-1602**: Derived Kafka consumer group IDs with deterministic naming (#197)
+- **OMN-1547**: Replace hardcoded topics with validated suffix constants (#206)
+
+#### Handler & Intent Improvements
+- **OMN-1509**: Intent storage effect node with integration tests (#195)
+- **OMN-1515**: `execute()` dispatcher to `HandlerGraph` for contract discovery (#193)
+- **OMN-1614, OMN-1616**: Canonical publish interface ADR and test adapter (#201)
+
+### Changed
+
+#### Dependencies
+- **omnibase-core**: Updated from ^0.9.6 to ^0.9.9 (baseline topic constants export)
+- **omnibase-spi**: Updated from ^0.6.2 to ^0.6.3
+
 ## [0.2.3] - 2026-01-25
 
 ### Added
