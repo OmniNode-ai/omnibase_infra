@@ -1860,6 +1860,65 @@ pattern_exemptions:
     documentation:
       - Kafka client.id documentation
     ticket: OMN-1610
+  # ==========================================================================
+  # Contract Registry Reducer Handler Exemptions (OMN-1653)
+  # ==========================================================================
+  # Pure reducer handlers follow the pattern: (self, state, event, topic, partition, offset)
+  # This 6-parameter signature is standard for event-sourced reducers that need:
+  # - state: immutable input state
+  # - event: typed domain event
+  # - topic/partition/offset: Kafka position for idempotency tracking
+  - file_pattern: 'nodes/contract_registry_reducer/reducer\.py'
+    method_pattern: '_on_contract_registered'
+    violation_pattern: 'has 6 parameters'
+    reason: >
+      Standard reducer handler signature for event-sourced reducers. The 6 parameters provide: self, state (immutable input), event (typed domain event), and Kafka position (topic/partition/offset) for idempotency tracking. This is the canonical pattern for ONEX reducers.
+
+    documentation:
+      - CLAUDE.md (Node Archetypes - NodeReducer)
+      - docs/patterns/reducer_pattern.md
+    ticket: OMN-1653
+  - file_pattern: 'nodes/contract_registry_reducer/reducer\.py'
+    method_pattern: '_on_contract_deregistered'
+    violation_pattern: 'has 6 parameters'
+    reason: Same as _on_contract_registered - standard reducer handler signature.
+    documentation:
+      - CLAUDE.md (Node Archetypes - NodeReducer)
+    ticket: OMN-1653
+  - file_pattern: 'nodes/contract_registry_reducer/reducer\.py'
+    method_pattern: '_on_heartbeat'
+    violation_pattern: 'has 6 parameters'
+    reason: Same as _on_contract_registered - standard reducer handler signature.
+    documentation:
+      - CLAUDE.md (Node Archetypes - NodeReducer)
+    ticket: OMN-1653
+  - file_pattern: 'nodes/contract_registry_reducer/reducer\.py'
+    method_pattern: '_on_runtime_tick'
+    violation_pattern: 'has 6 parameters'
+    reason: Same as _on_contract_registered - standard reducer handler signature.
+    documentation:
+      - CLAUDE.md (Node Archetypes - NodeReducer)
+    ticket: OMN-1653
+  # Contract ID is a derived natural key (node_name:major.minor.patch), not a UUID.
+  # This is intentional per the contract registry design where contracts are identified
+  # by their name and version, enabling human-readable queries and deduplication.
+  - file_pattern: 'nodes/contract_registry_reducer/models/model_payload_.*\.py'
+    violation_pattern: "Field 'contract_id' should use UUID"
+    reason: >
+      contract_id is a derived natural key (node_name:major.minor.patch), not a UUID. This design enables human-readable queries, version-based deduplication, and matches the contract.yaml identification pattern used throughout ONEX.
+
+    documentation:
+      - CLAUDE.md (Intent Model Architecture - Contract Identity)
+    ticket: OMN-1653
+  # node_name is the contract's semantic name, not an entity reference requiring ID + display_name.
+  - file_pattern: 'nodes/contract_registry_reducer/models/model_payload_.*\.py'
+    violation_pattern: "Field 'node_name' might reference an entity"
+    reason: >
+      node_name is the contract's semantic identifier from contract.yaml, not a reference to a separate entity. Contracts are identified by name, making this a primary attribute not a foreign key.
+
+    documentation:
+      - CLAUDE.md (Contract-Driven - node_name conventions)
+    ticket: OMN-1653
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

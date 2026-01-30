@@ -2796,14 +2796,14 @@ files = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.9.7"
+version = "0.9.8"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_core-0.9.7-py3-none-any.whl", hash = "sha256:091372c360294488a67344549f6a8fe144abd7d8a5907a372a5011fb7473ce8c"},
-    {file = "omnibase_core-0.9.7.tar.gz", hash = "sha256:af19e03f29d4454694a94296e82baffb7773462d4bcc40776872b1cb08f48f6d"},
+    {file = "omnibase_core-0.9.8-py3-none-any.whl", hash = "sha256:61102795acd7496f78e77dafcd1161cf69c025e3eff70d4758f1712763036225"},
+    {file = "omnibase_core-0.9.8.tar.gz", hash = "sha256:4c414645ecd00f3066b72d935dd449492f48c1c9ac1ee631e39e0f5a6586df80"},
 ]
 
 [package.dependencies]

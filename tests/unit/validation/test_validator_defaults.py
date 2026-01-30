@@ -91,11 +91,14 @@ class TestInfraValidatorConstants:
           - Typed protocol models for daemon request/response types
           - Event registry with partition key extraction
         - 113 (2026-01-29): OMN-1610 daemon config validation refinements (+1 union)
+        - 115 (2026-01-29): OMN-1653 contract registry reducer (+2 unions)
+          - ContractRegistryEvent: 4-type union for event routing
+          - contract_yaml: dict | str for flexible YAML handling
 
         Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 113, (
-            "INFRA_MAX_UNIONS should be 113 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 115, (
+            "INFRA_MAX_UNIONS should be 115 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

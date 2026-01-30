@@ -443,7 +443,10 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 113 (2026-01-29): OMN-1610 properly typed daemon protocol models (+1 union)
 #                     Added ModelDaemonRequest, ModelDaemonResponse discriminated unions
 #                     Replaced dict[str, object] soup with strongly typed Pydantic models
-INFRA_MAX_UNIONS = 113
+# - 115 (2026-01-29): OMN-1653 contract registry reducer (+2 unions)
+#                     ContractRegistryEvent: 4-type union for event routing
+#                     contract_yaml: dict | str for flexible YAML handling
+INFRA_MAX_UNIONS = 115
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
