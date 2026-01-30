@@ -28,6 +28,40 @@ See Also:
     - RegistryContractSource: Consul KV-based discovery
     - ProtocolContractSource: Protocol definition
 
+Error Codes:
+    This module uses structured error codes for precise error classification:
+
+    **Parse Errors (KAFKA_CONTRACT_001)**:
+        - ``KAFKA_CONTRACT_001`` (PARSE_FAILURE_STRICT_MODE): Contract parsing failed
+          in strict mode (graceful_mode=False). Raised when YAML parsing, Pydantic
+          validation, or contract schema validation fails.
+
+          **When Raised**: Only in strict mode. In graceful mode, parse errors are
+          logged and cached as ``ModelParseError`` instead of raising.
+
+          **Remediation**:
+            1. Check contract YAML syntax with a YAML linter
+            2. Validate contract against ``ModelHandlerContract`` schema
+            3. Enable ``graceful_mode=True`` if partial failures are acceptable
+            4. Check logs for the underlying error (YAML, validation, etc.)
+
+    **Size Limit Errors (KAFKA_CONTRACT_002)**:
+        - ``KAFKA_CONTRACT_002`` (CONTRACT_SIZE_EXCEEDED): Contract YAML exceeds
+          the 10MB size limit. This is a hard limit applied before YAML parsing
+          to prevent memory exhaustion attacks.
+
+          **When Raised**: During contract parsing when the UTF-8 encoded contract
+          exceeds ``MAX_CONTRACT_SIZE`` (10,485,760 bytes).
+
+          **Remediation**:
+            1. Reduce contract size by removing unnecessary fields
+            2. Split large handler configurations into multiple contracts
+            3. Move large static data (e.g., schemas) to external files
+            4. Verify the contract isn't corrupted or duplicated
+
+    Error codes are accessible via ``error.error_code`` on raised ``ModelOnexError``
+    exceptions. Include the correlation ID from logs when reporting errors.
+
 .. versionadded:: 0.8.0
     Created as part of OMN-1654 Kafka-based contract discovery.
 """
@@ -36,7 +70,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import cast
+from typing import Protocol, cast, get_args, runtime_checkable
 from uuid import UUID, uuid4
 
 import yaml
@@ -173,10 +207,16 @@ class ContractYamlParser:
                 },
             )
 
-        # Build descriptor
-        handler_kind = cast(
-            "LiteralHandlerKind", contract.descriptor.node_archetype.value
-        )
+        # Build descriptor - validate handler_kind before casting
+        archetype_value = contract.descriptor.node_archetype.value
+        valid_handler_kinds = get_args(LiteralHandlerKind)
+        if archetype_value not in valid_handler_kinds:
+            raise ValueError(
+                f"Invalid node_archetype value '{archetype_value}'. "
+                f"Expected one of: {valid_handler_kinds}"
+            )
+        # Value validated above, cast is now safe
+        handler_kind = cast("LiteralHandlerKind", archetype_value)
 
         return ModelHandlerDescriptor(
             handler_id=contract.handler_id,
@@ -360,6 +400,74 @@ class KafkaContractCache:
             return count
 
 
+@runtime_checkable
+class ProtocolContractEventCallbacks(Protocol):
+    """Protocol defining callbacks for contract registration events.
+
+    This protocol defines the interface required by MixinTypedContractEvents
+    for delegating typed event handling to the host class. Any class using
+    MixinTypedContractEvents must implement these methods.
+
+    The protocol enables type-safe cross-mixin method access without
+    inheritance conflicts or type: ignore comments.
+
+    Methods:
+        on_contract_registered: Process a contract registration event.
+        on_contract_deregistered: Process a contract deregistration event.
+
+    Example:
+        >>> class MySource(MixinTypedContractEvents, ProtocolContractSource):
+        ...     def on_contract_registered(
+        ...         self, node_name: str, contract_yaml: str, correlation_id: UUID | None
+        ...     ) -> bool:
+        ...         # Implementation here
+        ...         return True
+        ...
+        ...     def on_contract_deregistered(
+        ...         self, node_name: str, correlation_id: UUID | None
+        ...     ) -> bool:
+        ...         # Implementation here
+        ...         return True
+
+    .. versionadded:: 0.8.0
+        Created for type-safe mixin composition in MixinTypedContractEvents.
+    """
+
+    def on_contract_registered(
+        self,
+        node_name: str,
+        contract_yaml: str,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Cache descriptor from contract registration event.
+
+        Args:
+            node_name: Unique identifier for the node (used as cache key).
+            contract_yaml: Full YAML content of the handler contract.
+            correlation_id: Optional correlation ID from the event for tracing.
+
+        Returns:
+            True if the contract was successfully cached, False if parsing failed.
+        """
+        ...
+
+    def on_contract_deregistered(
+        self,
+        node_name: str,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Remove descriptor from cache on deregistration event.
+
+        Args:
+            node_name: Unique identifier for the node to remove.
+            correlation_id: Optional correlation ID from the event for tracing.
+
+        Returns:
+            True if a descriptor was removed, False if not found in cache.
+        """
+        ...
+
+
 class MixinTypedContractEvents:
     """Mixin providing typed event handler and error inspection methods.
 
@@ -372,12 +480,29 @@ class MixinTypedContractEvents:
     This mixin reduces method count in KafkaContractSource by extracting
     the typed event handling and error inspection into a separate concern.
 
+    Requirements:
+        Classes using this mixin MUST implement ProtocolContractEventCallbacks
+        (i.e., provide on_contract_registered and on_contract_deregistered methods).
+
     .. versionadded:: 0.8.0
         Extracted from KafkaContractSource for single-responsibility.
     """
 
     # Type hints for mixin - these must be provided by the using class
     _cache: KafkaContractCache
+
+    def _as_event_handler(self) -> ProtocolContractEventCallbacks:
+        """Cast self to ProtocolContractEventCallbacks for type-safe method access.
+
+        Returns:
+            Self cast as ProtocolContractEventCallbacks for type checker.
+
+        Note:
+            Only call this method when the host class implements
+            ProtocolContractEventCallbacks (provides on_contract_registered
+            and on_contract_deregistered methods).
+        """
+        return cast("ProtocolContractEventCallbacks", self)
 
     def get_pending_errors(self) -> list[ModelHandlerValidationError]:
         """Return pending validation errors WITHOUT clearing them.
@@ -444,9 +569,7 @@ class MixinTypedContractEvents:
             ... )
             >>> success = source.handle_registered_event(event)
         """
-        # Type hint for self to satisfy mypy (duck typing)
-        self_typed: KafkaContractSource = self  # type: ignore[assignment]
-        return self_typed.on_contract_registered(
+        return self._as_event_handler().on_contract_registered(
             node_name=event.node_name,
             contract_yaml=event.contract_yaml,
             correlation_id=event.correlation_id,
@@ -477,9 +600,7 @@ class MixinTypedContractEvents:
             ... )
             >>> removed = source.handle_deregistered_event(event)
         """
-        # Type hint for self to satisfy mypy (duck typing)
-        self_typed: KafkaContractSource = self  # type: ignore[assignment]
-        return self_typed.on_contract_deregistered(
+        return self._as_event_handler().on_contract_deregistered(
             node_name=event.node_name,
             correlation_id=event.correlation_id,
         )
@@ -662,11 +783,32 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
             >>> result2 = await source.discover_handlers()
             >>> assert len(result2.validation_errors) == 0
 
+        Implementation Detail:
+            This method uses a two-step retrieval pattern: errors are cleared
+            first, then descriptors are fetched. Each step is individually
+            atomic (protected by the cache lock), but there is a brief window
+            between the two operations where new events could arrive.
+
+            If a contract event fails parsing between ``get_and_clear_errors()``
+            and ``get_all()``, the resulting error will NOT be included in this
+            discovery result - it will appear in the next ``discover_handlers()``
+            call. Similarly, a successful registration between the two calls
+            will include the new descriptor but any error from a concurrent
+            failed registration will be deferred.
+
+            This eventual consistency is acceptable for the cache-only beta
+            model where discovered contracts take effect on the next restart
+            anyway. The design prioritizes simplicity over perfect atomicity,
+            avoiding the complexity of a single lock spanning both operations
+            (which would increase lock contention with concurrent Kafka
+            consumer threads).
+
         See Also:
             - ``get_pending_errors()``: Inspect errors without clearing.
             - ``pending_error_count``: Quick count check.
         """
-        # Get errors atomically (clears them) and get all descriptors
+        # Two-step retrieval: errors cleared first, then descriptors fetched.
+        # See "Implementation Detail" in docstring for timing window behavior.
         errors = self._cache.get_and_clear_errors()
         descriptors = self._cache.get_all()
 
@@ -832,6 +974,7 @@ __all__ = [
     "KafkaContractSource",
     "MAX_CONTRACT_SIZE",
     "MixinTypedContractEvents",
+    "ProtocolContractEventCallbacks",
     # Re-exported from omnibase_core for convenience
     "ModelContractDeregisteredEvent",
     "ModelContractRegisteredEvent",
