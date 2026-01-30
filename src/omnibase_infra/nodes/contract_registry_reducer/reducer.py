@@ -85,6 +85,9 @@ from omnibase_core.nodes import ModelReducerOutput
 from omnibase_infra.nodes.contract_registry_reducer.models.model_contract_registry_state import (
     ModelContractRegistryState,
 )
+from omnibase_infra.nodes.contract_registry_reducer.models.model_payload_cleanup_topic_references import (
+    ModelPayloadCleanupTopicReferences,
+)
 from omnibase_infra.nodes.contract_registry_reducer.models.model_payload_deactivate_contract import (
     ModelPayloadDeactivateContract,
 )
@@ -379,7 +382,8 @@ class ContractRegistryReducer:
             f"{event.node_name}:{version.major}.{version.minor}.{version.patch}"
         )
 
-        payload = ModelPayloadDeactivateContract(
+        # Intent 1: Deactivate contract record
+        deactivate_payload = ModelPayloadDeactivateContract(
             correlation_id=correlation_id,
             contract_id=contract_id,
             node_name=event.node_name,
@@ -387,10 +391,24 @@ class ContractRegistryReducer:
             deactivated_at=event.timestamp,
         )
 
-        intent = ModelIntent(
+        deactivate_intent = ModelIntent(
             intent_type="extension",
             target=f"postgres://contracts/{contract_id}",
-            payload=payload,
+            payload=deactivate_payload,
+        )
+
+        # Intent 2: Cleanup topic references (remove contract_id from topics.contract_ids)
+        cleanup_payload = ModelPayloadCleanupTopicReferences(
+            correlation_id=correlation_id,
+            contract_id=contract_id,
+            node_name=event.node_name,
+            cleaned_at=event.timestamp,
+        )
+
+        cleanup_intent = ModelIntent(
+            intent_type="extension",
+            target=f"postgres://topics/cleanup/{contract_id}",
+            payload=cleanup_payload,
         )
 
         new_state = state.with_event_processed(
@@ -404,7 +422,7 @@ class ContractRegistryReducer:
 
         return self._build_output(
             state=new_state,
-            intents=(intent,),
+            intents=(deactivate_intent, cleanup_intent),
             processing_time_ms=processing_time_ms,
             items_processed=1,
         )
@@ -723,9 +741,4 @@ class ContractRegistryReducer:
 __all__ = [
     "ContractRegistryReducer",
     "ContractRegistryEvent",
-    "PERF_THRESHOLD_INTENT_BUILD_MS",
-    "PERF_THRESHOLD_REDUCE_MS",
-    "PERF_THRESHOLD_STALENESS_CHECK_MS",
-    "STALENESS_THRESHOLD",
-    "STALENESS_THRESHOLD_SECONDS",
 ]

@@ -297,17 +297,25 @@ class TestContractRegistryReducerDeregistration:
         initial_state: ModelContractRegistryState,
         contract_deregistered_event: ModelContractDeregisteredEvent,
     ) -> None:
-        """Deregistration event should emit postgres.deactivate_contract intent."""
+        """Deregistration event should emit deactivate and cleanup intents."""
         result = reducer.reduce(
             initial_state, contract_deregistered_event, make_event_metadata()
         )
 
-        assert len(result.intents) == 1
+        # Should emit 2 intents: deactivate + cleanup
+        assert len(result.intents) == 2
 
-        payload = result.intents[0].payload
-        assert payload.intent_type == "postgres.deactivate_contract"
-        assert payload.node_name == "test-reducer"
-        assert payload.reason == "shutdown"
+        # Intent 1: Deactivate contract
+        deactivate_payload = result.intents[0].payload
+        assert deactivate_payload.intent_type == "postgres.deactivate_contract"
+        assert deactivate_payload.node_name == "test-reducer"
+        assert deactivate_payload.reason == "shutdown"
+
+        # Intent 2: Cleanup topic references
+        cleanup_payload = result.intents[1].payload
+        assert cleanup_payload.intent_type == "postgres.cleanup_topic_references"
+        assert cleanup_payload.node_name == "test-reducer"
+        assert cleanup_payload.contract_id == "test-reducer:1.0.0"
 
     def test_contract_deregistered_increments_counter(
         self,

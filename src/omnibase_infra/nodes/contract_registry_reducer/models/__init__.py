@@ -8,6 +8,9 @@ This module exports the state model and intent payloads used by NodeContractRegi
 from omnibase_infra.nodes.contract_registry_reducer.models.model_contract_registry_state import (
     ModelContractRegistryState,
 )
+from omnibase_infra.nodes.contract_registry_reducer.models.model_payload_cleanup_topic_references import (
+    ModelPayloadCleanupTopicReferences,
+)
 from omnibase_infra.nodes.contract_registry_reducer.models.model_payload_deactivate_contract import (
     ModelPayloadDeactivateContract,
 )
@@ -26,6 +29,7 @@ from omnibase_infra.nodes.contract_registry_reducer.models.model_payload_upsert_
 
 __all__ = [
     "ModelContractRegistryState",
+    "ModelPayloadCleanupTopicReferences",
     "ModelPayloadDeactivateContract",
     "ModelPayloadMarkStale",
     "ModelPayloadUpdateHeartbeat",
