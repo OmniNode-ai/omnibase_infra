@@ -56,6 +56,7 @@ Exports:
     ModelBindingConfigCacheStats: Cache statistics for BindingConfigResolver
     ModelBindingConfigResolverConfig: Configuration for BindingConfigResolver
     ModelConfigCacheEntry: Internal cache entry for BindingConfigResolver
+    ModelSecurityConfig: Security configuration for handler namespace allowlisting
 """
 
 # Re-export from omnibase_core for convenience
@@ -80,6 +81,9 @@ from omnibase_infra.runtime.models.model_config_cache_entry import ModelConfigCa
 from omnibase_infra.runtime.models.model_config_ref import ModelConfigRef
 from omnibase_infra.runtime.models.model_config_ref_parse_result import (
     ModelConfigRefParseResult,
+)
+from omnibase_infra.runtime.models.model_contract_load_result import (
+    ModelContractLoadResult,
 )
 from omnibase_infra.runtime.models.model_domain_plugin_config import (
     ModelDomainPluginConfig,
@@ -128,6 +132,9 @@ from omnibase_infra.runtime.models.model_protocol_registration_config import (
 )
 from omnibase_infra.runtime.models.model_retry_policy import ModelRetryPolicy
 from omnibase_infra.runtime.models.model_runtime_config import ModelRuntimeConfig
+from omnibase_infra.runtime.models.model_runtime_contract_config import (
+    ModelRuntimeContractConfig,
+)
 from omnibase_infra.runtime.models.model_runtime_scheduler_config import (
     ModelRuntimeSchedulerConfig,
 )
@@ -148,6 +155,7 @@ from omnibase_infra.runtime.models.model_secret_source_spec import (
     ModelSecretSourceSpec,
     SecretSourceType,
 )
+from omnibase_infra.runtime.models.model_security_config import ModelSecurityConfig
 from omnibase_infra.runtime.models.model_shutdown_batch_result import (
     ModelShutdownBatchResult,
 )
@@ -213,4 +221,9 @@ __all__: list[str] = [
     "ModelTransitionNotificationOutboxMetrics",
     "ModelTransitionNotificationPublisherMetrics",
     "SecretSourceType",
+    # Contract loading models (OMN-1519)
+    "ModelContractLoadResult",
+    "ModelRuntimeContractConfig",
+    # Security configuration (OMN-1519)
+    "ModelSecurityConfig",
 ]

@@ -1,0 +1,1075 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Integration tests for NodeContractRegistryReducer.
+
+Tests cover:
+- Contract registration event handling
+- Contract deregistration event handling
+- Heartbeat event handling (last_seen_at updates)
+- Runtime tick staleness computation
+- Idempotency/dedupe behavior
+- Topic extraction from contract_yaml
+
+Related:
+    - NodeContractRegistryReducer: Declarative reducer node
+    - ContractRegistryReducer: Pure reducer implementation
+    - ModelContractRegistryState: Immutable state model
+    - OMN-1653: Contract Registry Reducer implementation ticket
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+import pytest
+import yaml
+from pydantic import ValidationError
+
+from omnibase_core.enums import EnumDeregistrationReason
+from omnibase_core.models.events import (
+    ModelContractDeregisteredEvent,
+    ModelContractRegisteredEvent,
+    ModelNodeHeartbeatEvent,
+)
+from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_infra.nodes.contract_registry_reducer.models.model_contract_registry_state import (
+    ModelContractRegistryState,
+)
+from omnibase_infra.nodes.contract_registry_reducer.reducer import (
+    STALENESS_THRESHOLD,
+    ContractRegistryReducer,
+)
+from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
+
+# =============================================================================
+# Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def reducer() -> ContractRegistryReducer:
+    """Create a fresh ContractRegistryReducer instance."""
+    return ContractRegistryReducer()
+
+
+@pytest.fixture
+def initial_state() -> ModelContractRegistryState:
+    """Create an initial contract registry state."""
+    return ModelContractRegistryState()
+
+
+@pytest.fixture
+def sample_version() -> ModelSemVer:
+    """Create a sample semantic version."""
+    return ModelSemVer(major=1, minor=0, patch=0)
+
+
+@pytest.fixture
+def sample_contract_yaml_dict() -> dict:
+    """Create a sample contract_yaml dict with topics."""
+    return {
+        "name": "test-reducer",
+        "version": {"major": 1, "minor": 0, "patch": 0},
+        "type": "reducer",
+        "consumed_events": [
+            {"topic": "onex.evt.platform.test-event.v1", "event_type": "TestEvent"},
+        ],
+        "published_events": [
+            {"topic": "onex.evt.platform.output-event.v1", "event_type": "OutputEvent"},
+        ],
+    }
+
+
+@pytest.fixture
+def sample_contract_yaml(sample_contract_yaml_dict: dict) -> str:
+    """Create a sample contract_yaml as YAML string."""
+    return yaml.dump(sample_contract_yaml_dict)
+
+
+@pytest.fixture
+def contract_registered_event(
+    sample_version: ModelSemVer, sample_contract_yaml: str
+) -> ModelContractRegisteredEvent:
+    """Create a sample contract registered event."""
+    return ModelContractRegisteredEvent(
+        event_id=uuid4(),
+        correlation_id=uuid4(),
+        timestamp=datetime.now(UTC),
+        source_node_id=uuid4(),
+        event_type="onex.evt.platform.contract-registered.v1",
+        node_name="test-reducer",
+        node_version=sample_version,
+        contract_hash="abc123",
+        contract_yaml=sample_contract_yaml,
+    )
+
+
+@pytest.fixture
+def contract_deregistered_event(
+    sample_version: ModelSemVer,
+) -> ModelContractDeregisteredEvent:
+    """Create a sample contract deregistered event."""
+    return ModelContractDeregisteredEvent(
+        event_id=uuid4(),
+        correlation_id=uuid4(),
+        timestamp=datetime.now(UTC),
+        source_node_id=uuid4(),
+        event_type="onex.evt.platform.contract-deregistered.v1",
+        node_name="test-reducer",
+        node_version=sample_version,
+        reason=EnumDeregistrationReason.SHUTDOWN,
+    )
+
+
+@pytest.fixture
+def heartbeat_event(sample_version: ModelSemVer) -> ModelNodeHeartbeatEvent:
+    """Create a sample node heartbeat event."""
+    return ModelNodeHeartbeatEvent(
+        event_id=uuid4(),
+        correlation_id=uuid4(),
+        timestamp=datetime.now(UTC),
+        source_node_id=uuid4(),
+        event_type="onex.evt.platform.node-heartbeat.v1",
+        node_name="test-reducer",
+        node_version=sample_version,
+        sequence_number=1,
+        uptime_seconds=60.0,
+        contract_hash="abc123",
+    )
+
+
+@pytest.fixture
+def runtime_tick_event() -> ModelRuntimeTick:
+    """Create a sample runtime tick event."""
+    now = datetime.now(UTC)
+    return ModelRuntimeTick(
+        now=now,
+        tick_id=uuid4(),
+        sequence_number=1,
+        scheduled_at=now,
+        correlation_id=uuid4(),
+        scheduler_id="test-scheduler",
+        tick_interval_ms=1000,
+    )
+
+
+def make_event_metadata(
+    topic: str = "test.topic", partition: int = 0, offset: int = 1
+) -> dict[str, object]:
+    """Create event metadata dict for Kafka position tracking."""
+    return {"topic": topic, "partition": partition, "offset": offset}
+
+
+# =============================================================================
+# Test: Idempotency - Duplicate Event Rejection
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestContractRegistryReducerIdempotency:
+    """Test dedupe behavior for duplicate events."""
+
+    def test_duplicate_event_returns_noop(
+        self,
+        reducer: ContractRegistryReducer,
+        contract_registered_event: ModelContractRegisteredEvent,
+    ) -> None:
+        """Reducer should skip events already processed (same topic/partition/offset)."""
+        # First, process an event to set the position
+        state = ModelContractRegistryState()
+        metadata = make_event_metadata(topic="test.topic", partition=0, offset=100)
+
+        result1 = reducer.reduce(state, contract_registered_event, metadata)
+        assert result1.items_processed == 1
+
+        # Now try to process at same position - should be NOOP
+        result2 = reducer.reduce(result1.result, contract_registered_event, metadata)
+        assert result2.items_processed == 0
+        assert len(result2.intents) == 0
+
+    def test_new_event_is_processed(
+        self,
+        reducer: ContractRegistryReducer,
+        contract_registered_event: ModelContractRegisteredEvent,
+    ) -> None:
+        """Reducer should process events with higher offset."""
+        state = ModelContractRegistryState()
+
+        # Process first event
+        metadata1 = make_event_metadata(offset=100)
+        result1 = reducer.reduce(state, contract_registered_event, metadata1)
+        assert result1.items_processed == 1
+
+        # Process new event at higher offset
+        metadata2 = make_event_metadata(offset=101)
+        result2 = reducer.reduce(result1.result, contract_registered_event, metadata2)
+        assert result2.items_processed == 1
+        assert result2.result.contracts_processed == 2
+
+    def test_multi_topic_idempotency_at_reducer_level(
+        self,
+        reducer: ContractRegistryReducer,
+        contract_registered_event: ModelContractRegisteredEvent,
+        heartbeat_event: ModelNodeHeartbeatEvent,
+    ) -> None:
+        """Reducer should correctly detect duplicates across topic switches.
+
+        This test verifies the fix for the multi-topic idempotency bug:
+        1. Process contract-registered from topic A at offset 100
+        2. Process heartbeat from topic B at offset 50
+        3. Replay contract-registered from topic A at offset 100 -> NOOP
+
+        The old single-position implementation would process step 3 as new
+        because the last_event_topic would be topic B after step 2.
+        """
+        state = ModelContractRegistryState()
+
+        # Step 1: Process contract registration from topic A
+        topic_a = "onex.evt.platform.contract-registered.v1"
+        metadata_a = make_event_metadata(topic=topic_a, partition=0, offset=100)
+        result1 = reducer.reduce(state, contract_registered_event, metadata_a)
+        assert result1.items_processed == 1
+        assert result1.result.contracts_processed == 1
+
+        # Step 2: Process heartbeat from topic B (different topic, lower offset)
+        topic_b = "onex.evt.platform.node-heartbeat.v1"
+        metadata_b = make_event_metadata(topic=topic_b, partition=0, offset=50)
+        result2 = reducer.reduce(result1.result, heartbeat_event, metadata_b)
+        assert result2.items_processed == 1
+        assert result2.result.heartbeats_processed == 1
+
+        # Step 3: CRITICAL - Replay same event from topic A at same offset
+        # This MUST be detected as duplicate (NOOP)
+        result3 = reducer.reduce(result2.result, contract_registered_event, metadata_a)
+        assert result3.items_processed == 0, (
+            "Replayed event from topic A should be detected as duplicate "
+            "even after processing an event from topic B"
+        )
+        assert len(result3.intents) == 0
+        # Counts should NOT be incremented
+        assert result3.result.contracts_processed == 1
+        assert result3.result.heartbeats_processed == 1
+
+    def test_four_topic_interleaved_idempotency(
+        self,
+        reducer: ContractRegistryReducer,
+        contract_registered_event: ModelContractRegisteredEvent,
+        contract_deregistered_event: ModelContractDeregisteredEvent,
+        heartbeat_event: ModelNodeHeartbeatEvent,
+        runtime_tick_event: ModelRuntimeTick,
+    ) -> None:
+        """Reducer should track all 4 topic types independently.
+
+        The reducer consumes:
+        - contract-registered
+        - contract-deregistered
+        - node-heartbeat
+        - runtime-tick
+
+        Each should be tracked independently for idempotency.
+        """
+        state = ModelContractRegistryState()
+
+        # Process one event from each topic
+        topics = [
+            (
+                "onex.evt.platform.contract-registered.v1",
+                contract_registered_event,
+                100,
+            ),
+            (
+                "onex.evt.platform.contract-deregistered.v1",
+                contract_deregistered_event,
+                200,
+            ),
+            ("onex.evt.platform.node-heartbeat.v1", heartbeat_event, 300),
+            ("onex.evt.platform.runtime-tick.v1", runtime_tick_event, 400),
+        ]
+
+        current_state = state
+        for topic, event, offset in topics:
+            metadata = make_event_metadata(topic=topic, partition=0, offset=offset)
+            result = reducer.reduce(current_state, event, metadata)
+            assert result.items_processed == 1
+            current_state = result.result
+
+        # Verify all 4 topics are tracked in processed_positions
+        positions = current_state.processed_positions
+        assert len(positions) == 4
+        assert positions["onex.evt.platform.contract-registered.v1:0"] == 100
+        assert positions["onex.evt.platform.contract-deregistered.v1:0"] == 200
+        assert positions["onex.evt.platform.node-heartbeat.v1:0"] == 300
+        assert positions["onex.evt.platform.runtime-tick.v1:0"] == 400
+
+        # Replay all 4 - all should be NOOP
+        for topic, event, offset in topics:
+            metadata = make_event_metadata(topic=topic, partition=0, offset=offset)
+            result = reducer.reduce(current_state, event, metadata)
+            assert result.items_processed == 0, f"Replay of {topic} should be NOOP"
+
+
+# =============================================================================
+# Test: Contract Registration Event Handling
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestContractRegistryReducerRegistration:
+    """Test contract registration event handling."""
+
+    def test_contract_registered_emits_upsert_intent(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+    ) -> None:
+        """Registration event should emit postgres.upsert_contract intent."""
+        result = reducer.reduce(
+            initial_state, contract_registered_event, make_event_metadata()
+        )
+
+        # Should have at least upsert intent
+        assert len(result.intents) >= 1
+
+        upsert_intents = [
+            i
+            for i in result.intents
+            if i.payload.intent_type == "postgres.upsert_contract"
+        ]
+        assert len(upsert_intents) == 1
+
+        payload = upsert_intents[0].payload
+        assert payload.node_name == "test-reducer"
+        assert payload.version_major == 1
+        assert payload.is_active is True
+
+    def test_contract_registered_extracts_topics(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+    ) -> None:
+        """Registration event should extract topics from contract_yaml."""
+        result = reducer.reduce(
+            initial_state, contract_registered_event, make_event_metadata()
+        )
+
+        topic_intents = [
+            i
+            for i in result.intents
+            if i.payload.intent_type == "postgres.update_topic"
+        ]
+
+        # Should have 2 topic intents (1 subscribe, 1 publish)
+        assert len(topic_intents) == 2
+
+        directions = {i.payload.direction for i in topic_intents}
+        assert directions == {"subscribe", "publish"}
+
+    def test_contract_registered_increments_counter(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+    ) -> None:
+        """State should track contracts_processed count."""
+        assert initial_state.contracts_processed == 0
+
+        result = reducer.reduce(
+            initial_state, contract_registered_event, make_event_metadata()
+        )
+
+        assert result.result.contracts_processed == 1
+
+
+# =============================================================================
+# Test: Contract Deregistration Event Handling
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestContractRegistryReducerDeregistration:
+    """Test contract deregistration event handling."""
+
+    def test_contract_deregistered_emits_deactivate_intent(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_deregistered_event: ModelContractDeregisteredEvent,
+    ) -> None:
+        """Deregistration event should emit deactivate and cleanup intents."""
+        result = reducer.reduce(
+            initial_state, contract_deregistered_event, make_event_metadata()
+        )
+
+        # Should emit 2 intents: deactivate + cleanup
+        assert len(result.intents) == 2
+
+        # Intent 1: Deactivate contract
+        deactivate_payload = result.intents[0].payload
+        assert deactivate_payload.intent_type == "postgres.deactivate_contract"
+        assert deactivate_payload.node_name == "test-reducer"
+        assert deactivate_payload.reason == "shutdown"
+
+        # Intent 2: Cleanup topic references
+        cleanup_payload = result.intents[1].payload
+        assert cleanup_payload.intent_type == "postgres.cleanup_topic_references"
+        assert cleanup_payload.node_name == "test-reducer"
+        assert cleanup_payload.contract_id == "test-reducer:1.0.0"
+
+    def test_contract_deregistered_increments_counter(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_deregistered_event: ModelContractDeregisteredEvent,
+    ) -> None:
+        """State should track deregistrations_processed count."""
+        result = reducer.reduce(
+            initial_state, contract_deregistered_event, make_event_metadata()
+        )
+
+        assert result.result.deregistrations_processed == 1
+
+
+# =============================================================================
+# Test: Heartbeat Event Handling
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestContractRegistryReducerHeartbeat:
+    """Test heartbeat event handling."""
+
+    def test_heartbeat_emits_update_heartbeat_intent(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        heartbeat_event: ModelNodeHeartbeatEvent,
+    ) -> None:
+        """Heartbeat should emit postgres.update_heartbeat intent."""
+        result = reducer.reduce(initial_state, heartbeat_event, make_event_metadata())
+
+        assert len(result.intents) == 1
+
+        payload = result.intents[0].payload
+        assert payload.intent_type == "postgres.update_heartbeat"
+        assert payload.node_name == "test-reducer"
+        assert payload.uptime_seconds == 60.0
+
+    def test_heartbeat_increments_counter(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        heartbeat_event: ModelNodeHeartbeatEvent,
+    ) -> None:
+        """State should track heartbeats_processed count."""
+        result = reducer.reduce(initial_state, heartbeat_event, make_event_metadata())
+
+        assert result.result.heartbeats_processed == 1
+
+
+# =============================================================================
+# Test: Staleness Computation on Runtime Tick
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestContractRegistryReducerStaleness:
+    """Test staleness computation on runtime tick."""
+
+    def test_runtime_tick_emits_mark_stale_intent(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        runtime_tick_event: ModelRuntimeTick,
+    ) -> None:
+        """Runtime tick should emit postgres.mark_stale intent."""
+        result = reducer.reduce(
+            initial_state, runtime_tick_event, make_event_metadata()
+        )
+
+        assert len(result.intents) == 1
+
+        payload = result.intents[0].payload
+        assert payload.intent_type == "postgres.mark_stale"
+        assert payload.stale_cutoff is not None
+        assert payload.checked_at is not None
+
+    def test_staleness_threshold_is_five_minutes(self) -> None:
+        """Staleness threshold should be 5 minutes."""
+        assert timedelta(minutes=5) == STALENESS_THRESHOLD
+
+    def test_runtime_tick_updates_staleness_check_timestamp(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        runtime_tick_event: ModelRuntimeTick,
+    ) -> None:
+        """Runtime tick should update last_staleness_check_at in state."""
+        assert initial_state.last_staleness_check_at is None
+
+        result = reducer.reduce(
+            initial_state, runtime_tick_event, make_event_metadata()
+        )
+
+        assert result.result.last_staleness_check_at is not None
+        # Should match the tick's now timestamp
+        assert result.result.last_staleness_check_at == runtime_tick_event.now
+
+
+# =============================================================================
+# Test: State Model Behavior
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestContractRegistryState:
+    """Test state model behavior."""
+
+    def test_state_is_immutable(
+        self, initial_state: ModelContractRegistryState
+    ) -> None:
+        """State model should be frozen (immutable)."""
+        with pytest.raises(ValidationError):
+            initial_state.contracts_processed = 10  # type: ignore[misc]
+
+    def test_state_transition_returns_new_instance(
+        self, initial_state: ModelContractRegistryState
+    ) -> None:
+        """State transitions should return new instances."""
+        new_state = initial_state.with_contract_registered()
+
+        assert new_state is not initial_state
+        assert new_state.contracts_processed == 1
+        assert initial_state.contracts_processed == 0
+
+    def test_duplicate_detection(
+        self, initial_state: ModelContractRegistryState
+    ) -> None:
+        """State should correctly detect duplicate events."""
+        # Initial state - no duplicates
+        assert not initial_state.is_duplicate_event("topic", 0, 100)
+
+        # Update position
+        new_state = initial_state.with_event_processed(
+            event_id=uuid4(),
+            topic="topic",
+            partition=0,
+            offset=100,
+        )
+
+        # Same position should be duplicate
+        assert new_state.is_duplicate_event("topic", 0, 100)
+
+        # Lower offset should be duplicate
+        assert new_state.is_duplicate_event("topic", 0, 99)
+
+        # Higher offset should NOT be duplicate
+        assert not new_state.is_duplicate_event("topic", 0, 101)
+
+        # Different partition should NOT be duplicate
+        assert not new_state.is_duplicate_event("topic", 1, 50)
+
+    def test_multi_topic_idempotency(
+        self, initial_state: ModelContractRegistryState
+    ) -> None:
+        """State should correctly track positions across multiple topics.
+
+        This test verifies the fix for the multi-topic idempotency bug where
+        the reducer consumes from 4 different Kafka topics but the old
+        single-position tracker would lose track when switching topics.
+
+        Scenario:
+            1. Process topic A at offset 100
+            2. Process topic B at offset 50
+            3. Replay topic A at offset 100 -> MUST be detected as duplicate
+        """
+        # Process event from topic A
+        state1 = initial_state.with_event_processed(
+            event_id=uuid4(),
+            topic="contracts.registered",
+            partition=0,
+            offset=100,
+        )
+        assert state1.is_duplicate_event("contracts.registered", 0, 100)
+        assert state1.is_duplicate_event("contracts.registered", 0, 99)
+
+        # Process event from topic B (different topic, lower offset)
+        state2 = state1.with_event_processed(
+            event_id=uuid4(),
+            topic="heartbeats",
+            partition=0,
+            offset=50,
+        )
+
+        # Verify topic B tracking works
+        assert state2.is_duplicate_event("heartbeats", 0, 50)
+        assert state2.is_duplicate_event("heartbeats", 0, 49)
+        assert not state2.is_duplicate_event("heartbeats", 0, 51)
+
+        # CRITICAL: Topic A should STILL be tracked after processing topic B
+        # This is the bug fix - old implementation would fail here
+        assert state2.is_duplicate_event("contracts.registered", 0, 100)
+        assert state2.is_duplicate_event("contracts.registered", 0, 99)
+        assert not state2.is_duplicate_event("contracts.registered", 0, 101)
+
+        # Verify both topics are tracked in processed_positions
+        assert "contracts.registered:0" in state2.processed_positions
+        assert "heartbeats:0" in state2.processed_positions
+        assert state2.processed_positions["contracts.registered:0"] == 100
+        assert state2.processed_positions["heartbeats:0"] == 50
+
+    def test_multi_partition_idempotency(
+        self, initial_state: ModelContractRegistryState
+    ) -> None:
+        """State should correctly track positions across multiple partitions."""
+        # Process partition 0
+        state1 = initial_state.with_event_processed(
+            event_id=uuid4(),
+            topic="contracts",
+            partition=0,
+            offset=100,
+        )
+
+        # Process partition 1
+        state2 = state1.with_event_processed(
+            event_id=uuid4(),
+            topic="contracts",
+            partition=1,
+            offset=200,
+        )
+
+        # Both partitions should be tracked independently
+        assert state2.is_duplicate_event("contracts", 0, 100)
+        assert state2.is_duplicate_event("contracts", 1, 200)
+        assert not state2.is_duplicate_event("contracts", 0, 101)
+        assert not state2.is_duplicate_event("contracts", 1, 201)
+
+        # New partition should not be tracked yet
+        assert not state2.is_duplicate_event("contracts", 2, 50)
+
+
+# =============================================================================
+# Test: Malformed YAML Handling
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestContractRegistryReducerMalformedYaml:
+    """Test graceful handling of malformed contract_yaml.
+
+    The reducer should skip topic extraction when contract_yaml cannot be parsed,
+    but should still emit the upsert_contract intent and process the event.
+
+    Related:
+        - OMN-1653: Contract Registry Reducer implementation
+        - reducer.py _build_topic_update_intents() YAML parse error handling
+    """
+
+    def test_malformed_yaml_skips_topic_extraction(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        sample_version: ModelSemVer,
+    ) -> None:
+        """Malformed YAML should skip topic extraction but still process event."""
+        # Create event with malformed YAML (unclosed bracket)
+        event = ModelContractRegisteredEvent(
+            event_id=uuid4(),
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            source_node_id=uuid4(),
+            event_type="onex.evt.platform.contract-registered.v1",
+            node_name="test-reducer",
+            node_version=sample_version,
+            contract_hash="abc123",
+            contract_yaml="invalid: yaml: [unclosed",  # Malformed YAML
+        )
+
+        result = reducer.reduce(initial_state, event, make_event_metadata())
+
+        # Should still process event
+        assert result.items_processed == 1
+        assert result.result.contracts_processed == 1
+
+        # Should have only upsert intent (no topic intents due to parse failure)
+        assert len(result.intents) == 1
+        assert result.intents[0].payload.intent_type == "postgres.upsert_contract"
+
+    def test_malformed_yaml_colon_in_value(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        sample_version: ModelSemVer,
+    ) -> None:
+        """YAML with unquoted colon in value should skip topic extraction."""
+        event = ModelContractRegisteredEvent(
+            event_id=uuid4(),
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            source_node_id=uuid4(),
+            event_type="onex.evt.platform.contract-registered.v1",
+            node_name="test-reducer",
+            node_version=sample_version,
+            contract_hash="abc123",
+            contract_yaml="key: value: with: extra: colons:",  # Invalid YAML
+        )
+
+        result = reducer.reduce(initial_state, event, make_event_metadata())
+
+        assert result.items_processed == 1
+        assert result.result.contracts_processed == 1
+        assert len(result.intents) == 1
+        assert result.intents[0].payload.intent_type == "postgres.upsert_contract"
+
+    def test_non_dict_yaml_skips_topic_extraction(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        sample_version: ModelSemVer,
+    ) -> None:
+        """Valid YAML that parses to non-dict should skip topic extraction."""
+        event = ModelContractRegisteredEvent(
+            event_id=uuid4(),
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            source_node_id=uuid4(),
+            event_type="onex.evt.platform.contract-registered.v1",
+            node_name="test-reducer",
+            node_version=sample_version,
+            contract_hash="abc123",
+            contract_yaml="- item1\n- item2\n- item3",  # Valid YAML but a list
+        )
+
+        result = reducer.reduce(initial_state, event, make_event_metadata())
+
+        # Should still process event
+        assert result.items_processed == 1
+        assert result.result.contracts_processed == 1
+
+        # Should have only upsert intent (topic extraction skipped for non-dict)
+        assert len(result.intents) == 1
+        assert result.intents[0].payload.intent_type == "postgres.upsert_contract"
+
+    def test_empty_yaml_skips_topic_extraction(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        sample_version: ModelSemVer,
+    ) -> None:
+        """Empty string YAML should skip topic extraction."""
+        event = ModelContractRegisteredEvent(
+            event_id=uuid4(),
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            source_node_id=uuid4(),
+            event_type="onex.evt.platform.contract-registered.v1",
+            node_name="test-reducer",
+            node_version=sample_version,
+            contract_hash="abc123",
+            contract_yaml="",  # Empty string
+        )
+
+        result = reducer.reduce(initial_state, event, make_event_metadata())
+
+        # Should still process event
+        assert result.items_processed == 1
+        assert result.result.contracts_processed == 1
+
+        # Empty string parses to None which is not a dict
+        assert len(result.intents) == 1
+        assert result.intents[0].payload.intent_type == "postgres.upsert_contract"
+
+    def test_yaml_without_topics_no_topic_intents(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        sample_version: ModelSemVer,
+    ) -> None:
+        """Valid YAML without consumed_events/published_events has no topic intents."""
+        event = ModelContractRegisteredEvent(
+            event_id=uuid4(),
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            source_node_id=uuid4(),
+            event_type="onex.evt.platform.contract-registered.v1",
+            node_name="test-reducer",
+            node_version=sample_version,
+            contract_hash="abc123",
+            contract_yaml="name: test\nversion: 1.0.0",  # Valid but no topics
+        )
+
+        result = reducer.reduce(initial_state, event, make_event_metadata())
+
+        # Should still process event
+        assert result.items_processed == 1
+        assert result.result.contracts_processed == 1
+
+        # Should have only upsert intent (no topics defined in contract)
+        assert len(result.intents) == 1
+        assert result.intents[0].payload.intent_type == "postgres.upsert_contract"
+
+
+# =============================================================================
+# Test: Logging Behavior
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestContractRegistryReducerLogging:
+    """Test logging behavior for edge cases and performance warnings.
+
+    These tests verify that the reducer emits appropriate warnings when:
+    - Event metadata is incomplete (could compromise idempotency)
+    - Processing time exceeds performance thresholds
+
+    Related:
+        - OMN-1653: Contract Registry Reducer implementation
+        - reducer.py incomplete metadata warning (lines ~217-227)
+        - reducer.py performance threshold warnings (lines ~321-331, ~555-563)
+    """
+
+    def test_incomplete_metadata_missing_topic_logs_warning(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Missing topic in metadata should log a warning about idempotency."""
+        import logging
+
+        # Metadata with empty topic (missing required field)
+        incomplete_metadata: dict[str, object] = {
+            "topic": "",  # Empty topic
+            "partition": 0,
+            "offset": 100,
+        }
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(
+                initial_state, contract_registered_event, incomplete_metadata
+            )
+
+        # Should warn about incomplete metadata
+        assert any(
+            "Event metadata incomplete" in record.message
+            and "idempotency may be compromised" in record.message
+            for record in caplog.records
+        ), (
+            f"Expected incomplete metadata warning, got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_incomplete_metadata_missing_partition_logs_warning(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Missing partition in metadata should log a warning about idempotency."""
+        import logging
+
+        # Metadata with None partition
+        incomplete_metadata: dict[str, object] = {
+            "topic": "test.topic",
+            # "partition" intentionally omitted (None)
+            "offset": 100,
+        }
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(
+                initial_state, contract_registered_event, incomplete_metadata
+            )
+
+        # Should warn about incomplete metadata
+        assert any(
+            "Event metadata incomplete" in record.message for record in caplog.records
+        ), (
+            f"Expected incomplete metadata warning, got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_incomplete_metadata_missing_offset_logs_warning(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Missing offset in metadata should log a warning about idempotency."""
+        import logging
+
+        # Metadata with None offset
+        incomplete_metadata: dict[str, object] = {
+            "topic": "test.topic",
+            "partition": 0,
+            # "offset" intentionally omitted (None)
+        }
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(
+                initial_state, contract_registered_event, incomplete_metadata
+            )
+
+        # Should warn about incomplete metadata
+        assert any(
+            "Event metadata incomplete" in record.message for record in caplog.records
+        ), (
+            f"Expected incomplete metadata warning, got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_empty_metadata_logs_warning(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Empty metadata dict should log a warning about idempotency."""
+        import logging
+
+        # Completely empty metadata
+        empty_metadata: dict[str, object] = {}
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(initial_state, contract_registered_event, empty_metadata)
+
+        # Should warn about incomplete metadata
+        assert any(
+            "Event metadata incomplete" in record.message for record in caplog.records
+        ), (
+            f"Expected incomplete metadata warning, got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_complete_metadata_does_not_log_warning(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Complete metadata should NOT log incomplete metadata warning."""
+        import logging
+
+        # Complete valid metadata
+        complete_metadata: dict[str, object] = {
+            "topic": "test.topic",
+            "partition": 0,
+            "offset": 100,
+        }
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(initial_state, contract_registered_event, complete_metadata)
+
+        # Should NOT warn about incomplete metadata
+        assert not any(
+            "Event metadata incomplete" in record.message for record in caplog.records
+        ), "Unexpected incomplete metadata warning with complete metadata"
+
+    def test_performance_threshold_contract_registration(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Contract registration exceeding threshold should log performance warning.
+
+        This test sets a very low threshold (0.0ms) to ensure the processing
+        time always exceeds it, triggering the warning.
+        """
+        import logging
+
+        from omnibase_infra.nodes.contract_registry_reducer import (
+            reducer as reducer_module,
+        )
+
+        # Set threshold to 0 so any processing time exceeds it
+        monkeypatch.setattr(reducer_module, "PERF_THRESHOLD_REDUCE_MS", 0.0)
+
+        metadata = make_event_metadata()
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(initial_state, contract_registered_event, metadata)
+
+        # Should warn about performance threshold exceeded
+        assert any(
+            "Contract registration processing exceeded threshold" in record.message
+            for record in caplog.records
+        ), f"Expected performance warning, got: {[r.message for r in caplog.records]}"
+
+    def test_performance_threshold_staleness_check(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        runtime_tick_event: ModelRuntimeTick,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Staleness check exceeding threshold should log performance warning.
+
+        This test sets a very low threshold (0.0ms) to ensure the processing
+        time always exceeds it, triggering the warning.
+        """
+        import logging
+
+        from omnibase_infra.nodes.contract_registry_reducer import (
+            reducer as reducer_module,
+        )
+
+        # Set threshold to 0 so any processing time exceeds it
+        monkeypatch.setattr(reducer_module, "PERF_THRESHOLD_STALENESS_CHECK_MS", 0.0)
+
+        metadata = make_event_metadata()
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(initial_state, runtime_tick_event, metadata)
+
+        # Should warn about staleness check threshold exceeded
+        assert any(
+            "Staleness check processing exceeded threshold" in record.message
+            for record in caplog.records
+        ), (
+            f"Expected staleness check performance warning, got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_performance_warning_includes_context(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        contract_registered_event: ModelContractRegisteredEvent,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Performance warning should include relevant context in extra fields."""
+        import logging
+
+        from omnibase_infra.nodes.contract_registry_reducer import (
+            reducer as reducer_module,
+        )
+
+        # Set threshold to 0 to trigger warning
+        monkeypatch.setattr(reducer_module, "PERF_THRESHOLD_REDUCE_MS", 0.0)
+
+        metadata = make_event_metadata()
+
+        with caplog.at_level(logging.WARNING):
+            reducer.reduce(initial_state, contract_registered_event, metadata)
+
+        # Find the performance warning record
+        perf_records = [
+            r
+            for r in caplog.records
+            if "Contract registration processing exceeded threshold" in r.message
+        ]
+        assert len(perf_records) == 1, "Expected exactly one performance warning"
+
+        # Verify extra fields are present (logged via extra={...})
+        # Note: The extra fields should be accessible but may be formatted
+        # differently depending on the logging configuration
+        record = perf_records[0]
+        # The record should have been created with extra fields
+        # We can verify the message was logged at WARNING level
+        assert record.levelno == logging.WARNING

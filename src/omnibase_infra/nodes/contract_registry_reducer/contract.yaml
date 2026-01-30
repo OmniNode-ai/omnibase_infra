@@ -1,0 +1,255 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+# ONEX Node Contract - Contract Registry Reducer Node
+#
+# This reducer follows the pure function pattern for contract registry workflows:
+#   reduce(state, event) -> ModelReducerOutput[state + intents]
+#
+# The FSM defines state transitions for the contract registry lifecycle:
+#   ready -> processing -> ready (simple cycle for event processing)
+#
+# All state transition logic is driven by this contract.
+# =============================================================================
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+name: "contract_registry_reducer"
+node_type: "REDUCER_GENERIC"
+# Enum Usage (CLAUDE.md reference):
+#   - node_type uses EnumNodeOutputType.REDUCER for validation
+#   - Reducer outputs are PROJECTION type (state + intents) via EnumNodeOutputType
+#   - Incoming messages are routed via EnumMessageCategory (EVENT/COMMAND)
+#   - PROJECTION exists only in EnumNodeOutputType and is only valid for REDUCER nodes
+#   - See: docs/decisions/adr-enum-message-category-vs-node-output-type.md
+description: |
+  Reducer node that consumes contract registration events from Kafka
+  and materializes them to Postgres for discovery and observability.
+
+  This reducer tracks:
+  - Contract registrations from nodes on startup
+  - Contract deregistrations for graceful shutdown
+  - Node heartbeats for liveness tracking and last_seen_at updates
+  - Runtime ticks for staleness computation (marking stale contracts inactive)
+
+  The reducer emits intents for PostgreSQL writes via the Effect layer,
+  following the pure reducer pattern where state changes and side effects
+  are separated.
+# Event Consumption Configuration
+# ================================
+# Topics follow 5-segment naming: {env}.onex.{category}.{domain}.{event-name}.v{version}
+# Categories: evt (external events), int (internal events), cmd (commands)
+consumed_events:
+  - topic: "{env}.onex.evt.platform.contract-registered.v1"
+    event_type: "ModelContractRegisteredEvent"
+    description: "Contract registration from nodes on startup"
+  - topic: "{env}.onex.evt.platform.contract-deregistered.v1"
+    event_type: "ModelContractDeregisteredEvent"
+    description: "Explicit contract deregistration on graceful shutdown"
+  - topic: "{env}.onex.evt.platform.node-heartbeat.v1"
+    event_type: "ModelNodeHeartbeatEvent"
+    description: "Heartbeat for liveness tracking and last_seen_at updates"
+  - topic: "{env}.onex.int.platform.runtime-tick.v1"
+    event_type: "ModelRuntimeTick"
+    internal: true
+    description: "Periodic tick for staleness computation - marks contracts as stale/inactive"
+# Input/Output Model Configuration
+# =================================
+input_model:
+  name: "ModelReducerInput"
+  module: "omnibase_core.models.reducer.model_reducer_input"
+  description: "Reducer input containing contract event and trigger."
+output_model:
+  name: "ModelReducerOutput"
+  module: "omnibase_core.models.reducer.model_reducer_output"
+  description: "Reducer output containing new state and PostgreSQL intents."
+# FSM State Machine Definition
+# ============================
+# The contract registry reducer uses a simple FSM for event processing.
+# Unlike the registration reducer which tracks a multi-step workflow,
+# this reducer processes individual events and returns to ready state.
+#
+# State Diagram:
+#   +-------+   event received   +------------+
+#   | ready | -----------------> | processing |
+#   +-------+                    +------------+
+#      ^                              |
+#      |        event processed       |
+#      +------------------------------+
+#
+state_machine:
+  state_machine_name: "contract_registry_fsm"
+  initial_state: "ready"
+  states:
+    - state_name: "ready"
+      description: "Ready to process contract events"
+      entry_actions: []
+      exit_actions: []
+      required_data: []
+    - state_name: "processing"
+      description: "Currently processing a contract event"
+      entry_actions: []
+      exit_actions: []
+      required_data:
+        - "event_id"
+        - "correlation_id"
+  transitions:
+    # ready -> processing: On any contract event
+    - from_state: "ready"
+      to_state: "processing"
+      trigger: "contract_event_received"
+      description: "Start processing contract registration event"
+      conditions:
+        - expression: "event_id is_present"
+          required: true
+      actions:
+        - action_name: "process_contract_event"
+          action_type: "intent_emission"
+    # processing -> ready: After event processed
+    - from_state: "processing"
+      to_state: "ready"
+      trigger: "event_processed"
+      description: "Return to ready state after processing"
+      actions: []
+  persistence_enabled: true
+  terminal_states: []
+# Intent Emission Configuration
+# ============================
+# The reducer emits intents for Effect layer execution.
+# These intents are NOT executed by the reducer - they are returned
+# in the ModelReducerOutput for the Runtime to publish.
+intent_emission:
+  enabled: true
+  # Intent Type Clarification:
+  # These intent_type values (e.g., "postgres.upsert_contract") are PAYLOAD intent types,
+  # stored in `payload.intent_type` on typed payload models like ModelPayloadUpsertContract.
+  # The outer ModelIntent.intent_type is always "extension" for extension-based intents.
+  # Effect layer routing uses payload.intent_type to dispatch to the correct handler.
+  # See: CLAUDE.md "Intent Model Architecture" for the two-layer intent pattern.
+  intents:
+    - intent_type: "postgres.upsert_contract"
+      target_pattern: "postgres://contracts/{contract_id}"
+      payload_model: "ModelPayloadUpsertContract"
+      payload_module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_upsert_contract"
+      description: "Upsert contract record in PostgreSQL"
+    - intent_type: "postgres.update_topic"
+      target_pattern: "postgres://topics/{topic_suffix}"
+      payload_model: "ModelPayloadUpdateTopic"
+      payload_module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_update_topic"
+      description: "Update topic record in PostgreSQL"
+    - intent_type: "postgres.mark_stale"
+      target_pattern: "postgres://contracts/stale"
+      payload_model: "ModelPayloadMarkStale"
+      payload_module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_mark_stale"
+      description: "Mark stale contracts as inactive"
+    - intent_type: "postgres.update_heartbeat"
+      target_pattern: "postgres://contracts/{contract_id}/heartbeat"
+      payload_model: "ModelPayloadUpdateHeartbeat"
+      payload_module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_update_heartbeat"
+      description: "Update last_seen_at timestamp from heartbeat"
+    - intent_type: "postgres.deactivate_contract"
+      target_pattern: "postgres://contracts/{contract_id}"
+      payload_model: "ModelPayloadDeactivateContract"
+      payload_module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_deactivate_contract"
+      description: "Mark contract as inactive on deregistration"
+    - intent_type: "postgres.cleanup_topic_references"
+      target_pattern: "postgres://topics/cleanup/{contract_id}"
+      payload_model: "ModelPayloadCleanupTopicReferences"
+      payload_module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_cleanup_topic_references"
+      description: "Remove contract references from topics on deregistration"
+# State Model Configuration
+# =========================
+# The reducer uses ModelContractRegistryState for immutable state management.
+state_model:
+  name: "ModelContractRegistryState"
+  module: "omnibase_infra.nodes.contract_registry_reducer.models.model_contract_registry_state"
+  description: "Immutable state model for contract registry reducer"
+# Validation Configuration
+# ========================
+# Event validation rules applied before state transitions.
+validation:
+  enabled: true
+  rules:
+    - field: "contract_id"
+      required: true
+      error_code: "missing_contract_id"
+      error_message: "contract_id is required for contract identity"
+    - field: "node_id"
+      required: true
+      error_code: "missing_node_id"
+      error_message: "node_id is required to associate contract with source node"
+    - field: "node_type"
+      required: false
+      valid_values:
+        - "effect"
+        - "compute"
+        - "reducer"
+        - "orchestrator"
+      invalid_error_code: "invalid_node_type"
+      error_message: "node_type must be a valid ONEX node archetype"
+# Performance Configuration
+# =========================
+# Performance thresholds for monitoring.
+# Values can be overridden via environment variables.
+performance:
+  thresholds:
+    reduce_ms:
+      default: 300.0
+      env_var: "ONEX_PERF_THRESHOLD_CONTRACT_REDUCE_MS"
+      description: "Target processing time for reduce() method"
+    intent_build_ms:
+      default: 50.0
+      env_var: "ONEX_PERF_THRESHOLD_CONTRACT_INTENT_BUILD_MS"
+      description: "Target processing time for intent building"
+    staleness_check_ms:
+      default: 100.0
+      env_var: "ONEX_PERF_THRESHOLD_STALENESS_CHECK_MS"
+      description: "Target processing time for staleness computation on tick"
+# Idempotency Configuration
+# =========================
+# The reducer supports idempotent event processing via Kafka offset tracking.
+idempotency:
+  enabled: true
+  strategy: "kafka_offset_tracking"
+  derivation: "topic_partition_offset"
+  tracking_fields:
+    - "topic"
+    - "partition"
+    - "offset"
+  description: "Skip duplicate events based on Kafka position (topic:partition -> offset). State tracks last processed offset per (topic, partition) for multi-topic idempotency."
+# Staleness Configuration
+# =======================
+# Configuration for staleness computation on runtime-tick events.
+staleness:
+  threshold_seconds: 300 # 5 minutes without heartbeat = stale
+  env_var: "ONEX_CONTRACT_STALENESS_THRESHOLD_SECONDS"
+  description: "Contracts without heartbeat for this duration are marked stale"
+# Dependencies
+# ============
+dependencies:
+  - name: "container"
+    type: "ModelONEXContainer"
+    module: "omnibase_core.models.container.model_onex_container"
+    description: "ONEX dependency injection container"
+# Health Check
+# ============
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+# Metadata
+# ========
+metadata:
+  author: "OmniNode Team"
+  created: "2026-01-29"
+  updated: "2026-01-29"
+  tags:
+    - "reducer"
+    - "contract-registry"
+    - "fsm"
+    - "pure-function"
+    - "kafka-consumer"
+    - "postgres-projector"
+  related_tickets:
+    - "OMN-1653"

@@ -90,10 +90,13 @@ from omnibase_infra.runtime.service_kernel import load_runtime_config
 from omnibase_infra.runtime.service_kernel import main as kernel_main
 from omnibase_infra.runtime.service_message_dispatch_engine import MessageDispatchEngine
 from omnibase_infra.runtime.models import (
+    ModelContractLoadResult,
     ModelProjectorNotificationConfig,
+    ModelRuntimeContractConfig,
     ModelRuntimeSchedulerConfig,
     ModelRuntimeSchedulerMetrics,
     ModelRuntimeTick,
+    ModelSecurityConfig,
     ModelStateTransitionNotification,
     ModelTransitionNotificationPublisherMetrics,
 )
@@ -240,6 +243,18 @@ from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     load_event_bus_subcontract,
 )
 
+# Runtime contract config loader (OMN-1519)
+from omnibase_infra.runtime.runtime_contract_config_loader import (
+    RuntimeContractConfigLoader,
+)
+
+# Security constants (OMN-1519)
+from omnibase_infra.runtime.constants_security import (
+    ALLOW_NAMESPACE_OVERRIDE_ENV_VAR,
+    SECURITY_CONFIG_PATH_ENV_VAR,
+    TRUSTED_HANDLER_NAMESPACE_PREFIXES,
+)
+
 # Registry contract source (OMN-1100)
 from omnibase_infra.runtime.registry_contract_source import (
     DEFAULT_CONSUL_HOST,
@@ -288,9 +303,11 @@ __all__: list[str] = [
     "MessageDispatchEngine",
     # Message type registry (OMN-937)
     "MessageTypeRegistryError",
+    "ModelContractLoadResult",
     "ModelDomainConstraint",
     "ModelMessageTypeEntry",
     "ModelProjectorNotificationConfig",
+    "ModelRuntimeContractConfig",
     "ModelRuntimeSchedulerConfig",
     "ModelRuntimeSchedulerMetrics",
     "ModelRuntimeTick",
@@ -405,6 +422,13 @@ __all__: list[str] = [
     # Event bus subcontract wiring (OMN-1621)
     "EventBusSubcontractWiring",
     "load_event_bus_subcontract",
+    # Runtime contract config loader (OMN-1519)
+    "RuntimeContractConfigLoader",
+    # Security constants and configuration (OMN-1519)
+    "ALLOW_NAMESPACE_OVERRIDE_ENV_VAR",
+    "ModelSecurityConfig",
+    "SECURITY_CONFIG_PATH_ENV_VAR",
+    "TRUSTED_HANDLER_NAMESPACE_PREFIXES",
     # Registry contract source (OMN-1100)
     "DEFAULT_CONSUL_HOST",
     "DEFAULT_CONSUL_PORT",

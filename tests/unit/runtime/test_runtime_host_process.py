@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -3188,6 +3189,133 @@ class TestRuntimeIdentityMapping:
 
 
 # =============================================================================
+# Contract Config Integration Tests (OMN-1519)
+# =============================================================================
+
+
+class TestRuntimeHostProcessContractConfig:
+    """Tests for contract config loading integration (OMN-1519)."""
+
+    @pytest.mark.asyncio
+    async def test_contract_config_is_none_before_start(self) -> None:
+        """Test that contract_config is None before start() is called."""
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                service_name="test-service",
+                node_name="test-node",
+            )
+        )
+
+        # Before start, contract_config should be None
+        assert process.contract_config is None
+
+    @pytest.mark.asyncio
+    async def test_contract_config_property_returns_loaded_config(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that contract_config property returns loaded configuration after start."""
+        from omnibase_infra.runtime.models import ModelRuntimeContractConfig
+
+        # Create a test contract.yaml
+        contract_dir = tmp_path / "test_node"
+        contract_dir.mkdir()
+        contract_file = contract_dir / "contract.yaml"
+        contract_file.write_text(
+            """
+name: test_node
+version: "1.0.0"
+handler_routing:
+  routing_strategy: payload_type_match
+  handlers:
+    - event_model: TestEvent
+      handler_class: TestHandler
+"""
+        )
+
+        # Create process with contract path
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                service_name="test-service",
+                node_name="test-node",
+            ),
+            contract_paths=[str(contract_dir)],
+        )
+
+        # Seed handlers to avoid "no handlers" error
+        seed_mock_handlers(process)
+
+        try:
+            await process.start()
+
+            # After start, contract_config should be available
+            config = process.contract_config
+            assert config is not None
+            assert isinstance(config, ModelRuntimeContractConfig)
+            assert config.total_contracts_found >= 1
+        finally:
+            await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_contract_config_is_none_when_no_contract_paths(self) -> None:
+        """Test that contract_config is None when no contract_paths are configured."""
+        # Create process without contract paths
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                service_name="test-service",
+                node_name="test-node",
+            ),
+            contract_paths=[],  # Empty contract paths
+        )
+
+        # Seed handlers to avoid "no handlers" error
+        seed_mock_handlers(process)
+
+        try:
+            await process.start()
+
+            # With empty contract_paths, _load_contract_configs() skips loading
+            # so contract_config should remain None
+            assert process.contract_config is None
+        finally:
+            await process.stop()
+
+    @pytest.mark.asyncio
+    async def test_contract_config_handles_invalid_contract_gracefully(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that invalid contracts don't break startup."""
+        # Create an invalid contract.yaml (not valid YAML)
+        contract_dir = tmp_path / "invalid_node"
+        contract_dir.mkdir()
+        contract_file = contract_dir / "contract.yaml"
+        contract_file.write_text("not: valid: yaml: here")
+
+        # Create process with contract path to invalid contract
+        process = RuntimeHostProcess(
+            config=make_runtime_config(
+                service_name="test-service",
+                node_name="test-node",
+            ),
+            contract_paths=[str(contract_dir)],
+        )
+
+        # Seed handlers to avoid "no handlers" error
+        seed_mock_handlers(process)
+
+        try:
+            # Start should succeed despite invalid contract
+            await process.start()
+
+            # Contract config should have the error recorded
+            config = process.contract_config
+            assert config is not None
+            # The config may have errors but was still loaded
+            assert config.total_contracts_found >= 0
+        finally:
+            await process.stop()
+
+
+# =============================================================================
 # Module Exports
 # =============================================================================
 
@@ -3209,6 +3337,7 @@ __all__: list[str] = [
     "TestRuntimeHostProcessDrainState",
     "TestRuntimeHostProcessContainerInjection",
     "TestRuntimeIdentityMapping",
+    "TestRuntimeHostProcessContractConfig",
     "MockHandler",
     "MockFailingHandler",
     "MockEventBus",

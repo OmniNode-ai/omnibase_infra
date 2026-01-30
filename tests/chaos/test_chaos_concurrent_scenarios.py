@@ -45,11 +45,13 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
 )
 from omnibase_infra.idempotency import StoreIdempotencyInmemory
 from tests.chaos.conftest import (
@@ -767,19 +769,26 @@ class TestMixedFailureModes:
         - All errors should be captured
         """
         # Arrange
+        # Use a lock to ensure atomic increment of call_count during concurrent execution
         call_count = 0
+        count_lock = asyncio.Lock()
 
         async def mixed_failure_backend(operation: str, intent_id: UUID) -> None:
             nonlocal call_count
-            call_count += 1
+            async with count_lock:
+                call_count += 1
+                current_count = call_count
 
-            # Alternate between error types
-            if call_count % 3 == 1:
+            # Alternate between error types based on atomically-captured count
+            if current_count % 3 == 1:
                 raise InfraTimeoutError(
                     "Timeout error",
-                    context=ModelInfraErrorContext(operation=operation),
+                    context=ModelTimeoutErrorContext(
+                        transport_type=EnumInfraTransportType.HTTP,
+                        operation=operation,
+                    ),
                 )
-            if call_count % 3 == 2:
+            if current_count % 3 == 2:
                 raise InfraConnectionError(
                     "Connection error",
                     context=ModelInfraErrorContext(operation=operation),
@@ -2338,7 +2347,10 @@ class TestSimultaneousMultipleFailureModes:
                 call_sequence.append("timeout")
                 raise InfraTimeoutError(
                     f"Sequenced timeout at position {call_count}",
-                    context=ModelInfraErrorContext(operation=operation),
+                    context=ModelTimeoutErrorContext(
+                        transport_type=EnumInfraTransportType.HTTP,
+                        operation=operation,
+                    ),
                 )
             else:  # sequence_pos == 0
                 # Success
