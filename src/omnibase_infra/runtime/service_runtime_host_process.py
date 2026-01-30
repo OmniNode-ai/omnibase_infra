@@ -3093,7 +3093,7 @@ class RuntimeHostProcess:
                 env=environment,
                 service=self._node_identity.service,
                 node_name=f"{self._node_identity.node_name}-contract-discovery",
-                version="v1",
+                version=self._node_identity.version,
             )
 
             # Subscribe to registration topic

@@ -701,13 +701,3 @@ class TestKafkaEventsModeIdempotency:
         ids1 = {d.handler_id for d in result1.descriptors}
         ids2 = {d.handler_id for d in result2.descriptors}
         assert ids1 == ids2, "Handler IDs should be consistent across calls"
-
-
-__all__ = [
-    "TestKafkaEventsModeEmptyCache",
-    "TestKafkaEventsModeIdempotency",
-    "TestKafkaEventsModeResolution",
-    "TestKafkaEventsModeReturnType",
-    "TestKafkaEventsModeStructuredLogging",
-    "TestKafkaEventsModeValidationErrors",
-]
