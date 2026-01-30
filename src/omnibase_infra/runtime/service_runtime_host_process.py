@@ -1258,6 +1258,9 @@ class RuntimeHostProcess:
             self._baseline_subscriptions.clear()
             logger.debug("Baseline contract subscriptions cleaned up")
 
+        # Step 2.8: Nullify KafkaContractSource reference for proper cleanup (OMN-1654)
+        self._kafka_contract_source = None
+
         # Step 3: Close event bus
         await self._event_bus.close()
 
@@ -2844,8 +2847,6 @@ class RuntimeHostProcess:
             try:
                 # Parse message value as JSON
                 if msg.value:
-                    import json
-
                     payload = json.loads(msg.value.decode("utf-8"))
 
                     # Extract correlation ID from headers if available
@@ -2887,8 +2888,6 @@ class RuntimeHostProcess:
             """Handle contract deregistration event from Kafka."""
             try:
                 if msg.value:
-                    import json
-
                     payload = json.loads(msg.value.decode("utf-8"))
 
                     # Extract correlation ID from headers if available
