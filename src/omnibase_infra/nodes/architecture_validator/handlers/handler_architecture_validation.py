@@ -69,7 +69,9 @@ if TYPE_CHECKING:
         ProtocolArchitectureRule,
     )
 
-__all__ = ["HandlerArchitectureValidation"]
+HANDLER_ID_ARCHITECTURE_VALIDATION: str = "handler-architecture-validation"
+
+__all__ = ["HandlerArchitectureValidation", "HANDLER_ID_ARCHITECTURE_VALIDATION"]
 
 
 class HandlerArchitectureValidation:
@@ -154,7 +156,7 @@ class HandlerArchitectureValidation:
 
         .. versionadded:: 0.9.0
         """
-        return "handler-architecture-validation"
+        return HANDLER_ID_ARCHITECTURE_VALIDATION
 
     @property
     def supported_operations(self) -> frozenset[str]:
