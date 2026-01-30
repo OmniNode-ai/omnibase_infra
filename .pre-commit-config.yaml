@@ -173,7 +173,7 @@ repos:
       # Ensures node.py files follow the ONEX declarative pattern:
       # - Only extend base classes, no custom methods/properties
       # - All behavior defined in contract.yaml, implemented by handlers
-      # NOTE: pre-push stage because existing nodes need refactoring (OMN-XXXX)
+      # NOTE: pre-push stage because existing nodes need refactoring (OMN-1725)
       # Exempt nodes via: # ONEX_EXCLUDE: declarative_node
       - id: onex-validate-declarative-nodes
         name: ONEX Declarative Node Validation

@@ -96,7 +96,6 @@ from omnibase_infra.enums.enum_validation_severity import EnumValidationSeverity
 
 __all__: list[str] = [
     "EnumAnyTypeViolation",
-    "EnumDeclarativeNodeViolation",
     "EnumBackendType",
     "EnumCaptureOutcome",
     "EnumCaptureState",
@@ -105,6 +104,7 @@ __all__: list[str] = [
     "EnumConfirmationEventType",
     "EnumConsumerGroupPurpose",
     "EnumContractType",
+    "EnumDeclarativeNodeViolation",
     "EnumDedupeStrategy",
     "EnumDispatchStatus",
     "EnumEnvironment",

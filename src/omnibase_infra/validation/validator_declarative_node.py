@@ -411,261 +411,32 @@ _VIOLATION_TO_RULE_ID: dict[EnumDeclarativeNodeViolation, str] = {
 }
 
 
-class ValidatorDeclarativeNode(ValidatorBase):
-    """Contract-driven declarative node validator for ONEX.
-
-    This validator uses AST analysis to detect imperative patterns in node.py files:
-    - Custom methods beyond __init__ (should be in contract/handlers)
-    - @property decorators (state should be in models)
-    - Custom logic in __init__ beyond super().__init__(container)
-    - Instance variable assignments (state belongs in container/models)
-    - Class-level variable assignments (configuration belongs in contract)
-
-    The validator is contract-driven via declarative_node.validation.yaml, supporting:
-    - Configurable rules with enable/disable per rule
-    - Per-rule severity overrides
-    - Suppression comments for intentional exceptions
-    - Glob-based file targeting and exclusion
-
-    Thread Safety:
-        ValidatorDeclarativeNode instances are NOT thread-safe due to internal mutable
-        state inherited from ValidatorBase. When using parallel execution
-        (e.g., pytest-xdist), create separate validator instances per worker.
-
-    Attributes:
-        validator_id: Unique identifier for this validator ("declarative_node").
-
-    Usage Example:
-        >>> from pathlib import Path
-        >>> from omnibase_infra.validation.validator_declarative_node import (
-        ...     ValidatorDeclarativeNode,
-        ... )
-        >>> validator = ValidatorDeclarativeNode()
-        >>> result = validator.validate(Path("src/nodes"))
-        >>> print(f"Valid: {result.is_valid}, Issues: {len(result.issues)}")
-
-    CLI Usage:
-        python -m omnibase_infra.validation.validator_declarative_node src/nodes
-    """
-
-    # ONEX_EXCLUDE: string_id - human-readable validator identifier
-    validator_id: ClassVar[str] = "declarative_node"
-
-    def _validate_file(
-        self,
-        path: Path,
-        contract: ModelValidatorSubcontract,
-    ) -> tuple[ModelValidationIssue, ...]:
-        """Validate a single node.py file for declarative compliance.
-
-        Uses AST analysis to detect imperative patterns:
-        - Custom methods (not __init__)
-        - Properties
-        - Custom init logic
-        - Instance variables
-        - Class variables
-
-        Args:
-            path: Path to the node.py file to validate.
-            contract: Validator contract with rule configurations.
-
-        Returns:
-            Tuple of ModelValidationIssue instances for violations found.
-        """
-        # Check file size
-        try:
-            file_size = path.stat().st_size
-            if file_size > _MAX_FILE_SIZE_BYTES:
-                logger.warning(
-                    "Skipping file %s: size %d exceeds limit %d",
-                    path,
-                    file_size,
-                    _MAX_FILE_SIZE_BYTES,
-                )
-                return ()
-        except OSError as e:
-            # fallback-ok: log warning and skip file on stat errors
-            logger.warning("Cannot stat file %s: %s", path, e)
-            return ()
-
-        # Read file
-        try:
-            source = path.read_text(encoding="utf-8")
-        except OSError as e:
-            # fallback-ok: log warning and skip file on read errors
-            logger.warning("Cannot read file %s: %s", path, e)
-            return ()
-
-        source_lines = source.splitlines()
-
-        # Parse AST
-        try:
-            tree = ast.parse(source, filename=str(path))
-        except SyntaxError as e:
-            # Return syntax error as issue
-            rule_id = _VIOLATION_TO_RULE_ID[EnumDeclarativeNodeViolation.SYNTAX_ERROR]
-            enabled, severity = self._get_rule_config(rule_id, contract)
-            if not enabled:
-                return ()
-            return (
-                ModelValidationIssue(
-                    severity=severity,
-                    message=f"Syntax error in {path}: {e.msg or 'Unknown error'}",
-                    code=rule_id,
-                    file_path=path,
-                    line_number=e.lineno or 1,
-                    rule_name="syntax_error",
-                    suggestion=EnumDeclarativeNodeViolation.SYNTAX_ERROR.suggestion,
-                    context={
-                        "violation_type": "syntax_error",
-                    },
-                ),
-            )
-
-        issues: list[ModelValidationIssue] = []
-
-        # Find and validate node classes
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                if _is_node_class(node):
-                    # Check for exemption via suppression comments
-                    # Note: Base class handles line-level suppression, but we also
-                    # check class-level exemption for backwards compatibility
-                    if _is_class_exempted(source_lines, node.lineno):
-                        logger.debug(
-                            "Skipping exempted class %s in %s",
-                            node.name,
-                            path,
-                        )
-                        continue
-
-                    # Validate class and convert to ModelValidationIssue
-                    class_issues = self._validate_node_class_to_issues(
-                        node, path, source_lines, contract
-                    )
-                    issues.extend(class_issues)
-
-        return tuple(issues)
-
-    def _validate_node_class_to_issues(
-        self,
-        class_node: ast.ClassDef,
-        file_path: Path,
-        source_lines: list[str],
-        contract: ModelValidatorSubcontract,
-    ) -> list[ModelValidationIssue]:
-        """Validate a node class and return ModelValidationIssue instances.
-
-        This is an adapter method that uses the existing _validate_node_class
-        helper and converts the results to ModelValidationIssue format.
-
-        Args:
-            class_node: AST ClassDef node.
-            file_path: Path to the source file.
-            source_lines: Source lines for context.
-            contract: Validator contract with rule configurations.
-
-        Returns:
-            List of ModelValidationIssue instances for violations found.
-        """
-        # Get raw violations using existing helper
-        raw_violations = _validate_node_class(class_node, file_path, source_lines)
-
-        issues: list[ModelValidationIssue] = []
-        for violation in raw_violations:
-            # Map violation type to rule ID
-            rule_id = _VIOLATION_TO_RULE_ID.get(violation.violation_type)
-            if rule_id is None:
-                # Unknown violation type, skip
-                logger.warning(
-                    "Unknown violation type %s, skipping",
-                    violation.violation_type,
-                )
-                continue
-
-            # Check if rule is enabled and get severity
-            enabled, severity = self._get_rule_config(rule_id, contract)
-            if not enabled:
-                logger.debug(
-                    "Rule %s is disabled, skipping violation",
-                    rule_id,
-                )
-                continue
-
-            # Convert to ModelValidationIssue
-            context: dict[str, str] = {
-                "violation_type": violation.violation_type.value,
-            }
-            if violation.node_class_name:
-                context["class_name"] = violation.node_class_name
-            if violation.method_name:
-                context["method_name"] = violation.method_name
-
-            issues.append(
-                ModelValidationIssue(
-                    severity=severity,
-                    message=self._format_message(violation),
-                    code=rule_id,
-                    file_path=file_path,
-                    line_number=violation.line_number,
-                    rule_name=violation.violation_type.value,
-                    suggestion=violation.suggestion,
-                    context=context,
-                )
-            )
-
-        return issues
-
-    def _format_message(self, violation: ModelDeclarativeNodeViolation) -> str:
-        """Format a human-readable message for a violation.
-
-        Args:
-            violation: The violation to format.
-
-        Returns:
-            Human-readable message describing the violation.
-        """
-        vtype = violation.violation_type
-        class_name = violation.node_class_name or "Unknown"
-
-        if vtype == EnumDeclarativeNodeViolation.CUSTOM_METHOD:
-            method = violation.method_name or "unknown"
-            return f"Class '{class_name}' has custom method '{method}' - declarative nodes must not have custom methods"
-        elif vtype == EnumDeclarativeNodeViolation.CUSTOM_PROPERTY:
-            prop = violation.method_name or "unknown"
-            return f"Class '{class_name}' has property '{prop}' - declarative nodes must not have properties"
-        elif vtype == EnumDeclarativeNodeViolation.INIT_CUSTOM_LOGIC:
-            return f"Class '{class_name}' has custom logic in __init__ - only super().__init__(container) is allowed"
-        elif vtype == EnumDeclarativeNodeViolation.INSTANCE_VARIABLE:
-            var = violation.method_name or "unknown"
-            return f"Class '{class_name}' creates instance variable '{var}' - declarative nodes must not store state"
-        elif vtype == EnumDeclarativeNodeViolation.CLASS_VARIABLE:
-            return f"Class '{class_name}' has class variable - configuration should be in contract.yaml"
-        elif vtype == EnumDeclarativeNodeViolation.SYNTAX_ERROR:
-            return f"File has syntax error: {violation.code_snippet}"
-        else:
-            return f"Class '{class_name}' violates declarative node policy: {violation.code_snippet}"
-
-
 # =============================================================================
-# BACKWARDS COMPATIBLE MODULE-LEVEL FUNCTIONS
+# SHARED CORE VALIDATION FUNCTIONS
 # =============================================================================
-# These functions maintain backwards compatibility with existing code that
-# imports validate_declarative_nodes, validate_declarative_nodes_ci, etc.
-# They use the original implementation that returns ModelDeclarativeNodeViolation.
+# These internal functions contain the core validation logic that is shared
+# between the ValidatorDeclarativeNode class and the legacy module functions.
+# This eliminates duplication while maintaining backwards compatibility.
 # =============================================================================
 
 
-def validate_declarative_node_in_file(
+def _validate_file_core(
     file_path: Path,
 ) -> list[ModelDeclarativeNodeViolation]:
-    """Validate a single node.py file for declarative compliance.
+    """Core file validation logic shared by class and legacy functions.
+
+    Performs the following validation steps:
+    1. Check file size against limit
+    2. Read file content
+    3. Parse AST
+    4. Find node classes and validate for declarative compliance
 
     Args:
-        file_path: Path to the node.py file.
+        file_path: Path to the node.py file to validate.
 
     Returns:
-        List of violations found (empty if compliant or not a node file).
+        List of ModelDeclarativeNodeViolation instances for violations found.
+        Returns empty list if file cannot be read/parsed or is too large.
     """
     # Check file size
     try:
@@ -727,7 +498,7 @@ def validate_declarative_node_in_file(
                 class_violations = _validate_node_class(node, file_path, source_lines)
                 violations.extend(class_violations)
 
-    # Only warn about missing node class if it's a node.py file in a nodes directory
+    # Debug log for node.py files that don't contain node classes
     if not found_node_class and "nodes" in str(file_path):
         logger.debug(
             "File %s is named node.py but contains no Node class",
@@ -737,11 +508,212 @@ def validate_declarative_node_in_file(
     return violations
 
 
+def _validate_directory_with_count(
+    directory: Path,
+    recursive: bool = True,
+) -> tuple[list[ModelDeclarativeNodeViolation], int]:
+    """Validate all node.py files in a directory with single-pass traversal.
+
+    This function performs a single directory traversal, collecting both
+    violations and file count simultaneously for efficiency.
+
+    Args:
+        directory: Directory to scan for node.py files.
+        recursive: If True, scan subdirectories.
+
+    Returns:
+        Tuple of (list of all violations found, count of files checked).
+    """
+    violations: list[ModelDeclarativeNodeViolation] = []
+    files_checked = 0
+    pattern = "**/node.py" if recursive else "node.py"
+
+    for file_path in directory.glob(pattern):
+        if file_path.is_file():
+            files_checked += 1
+            file_violations = _validate_file_core(file_path)
+            violations.extend(file_violations)
+
+    return violations, files_checked
+
+
+class ValidatorDeclarativeNode(ValidatorBase):
+    """Contract-driven declarative node validator for ONEX.
+
+    This validator uses AST analysis to detect imperative patterns in node.py files:
+    - Custom methods beyond __init__ (should be in contract/handlers)
+    - @property decorators (state should be in models)
+    - Custom logic in __init__ beyond super().__init__(container)
+    - Instance variable assignments (state belongs in container/models)
+    - Class-level variable assignments (configuration belongs in contract)
+
+    The validator is contract-driven via declarative_node.validation.yaml, supporting:
+    - Configurable rules with enable/disable per rule
+    - Per-rule severity overrides
+    - Suppression comments for intentional exceptions
+    - Glob-based file targeting and exclusion
+
+    Thread Safety:
+        ValidatorDeclarativeNode instances are NOT thread-safe due to internal mutable
+        state inherited from ValidatorBase. When using parallel execution
+        (e.g., pytest-xdist), create separate validator instances per worker.
+
+    Attributes:
+        validator_id: Unique identifier for this validator ("declarative_node").
+
+    Usage Example:
+        >>> from pathlib import Path
+        >>> from omnibase_infra.validation.validator_declarative_node import (
+        ...     ValidatorDeclarativeNode,
+        ... )
+        >>> validator = ValidatorDeclarativeNode()
+        >>> result = validator.validate(Path("src/nodes"))
+        >>> print(f"Valid: {result.is_valid}, Issues: {len(result.issues)}")
+
+    CLI Usage:
+        python -m omnibase_infra.validation.validator_declarative_node src/nodes
+    """
+
+    # ONEX_EXCLUDE: string_id - human-readable validator identifier
+    validator_id: ClassVar[str] = "declarative_node"
+
+    def _validate_file(
+        self,
+        path: Path,
+        contract: ModelValidatorSubcontract,
+    ) -> tuple[ModelValidationIssue, ...]:
+        """Validate a single node.py file for declarative compliance.
+
+        Uses AST analysis to detect imperative patterns:
+        - Custom methods (not __init__)
+        - Properties
+        - Custom init logic
+        - Instance variables
+        - Class variables
+
+        This method delegates to _validate_file_core for the actual validation,
+        then converts ModelDeclarativeNodeViolation to ModelValidationIssue
+        with contract-based rule filtering.
+
+        Args:
+            path: Path to the node.py file to validate.
+            contract: Validator contract with rule configurations.
+
+        Returns:
+            Tuple of ModelValidationIssue instances for violations found.
+        """
+        # Use shared core validation logic
+        violations = _validate_file_core(path)
+
+        # Convert violations to ModelValidationIssue with contract filtering
+        issues: list[ModelValidationIssue] = []
+        for violation in violations:
+            # Map violation type to rule ID
+            rule_id = _VIOLATION_TO_RULE_ID.get(violation.violation_type)
+            if rule_id is None:
+                logger.warning(
+                    "Unknown violation type %s, skipping",
+                    violation.violation_type,
+                )
+                continue
+
+            # Check if rule is enabled and get severity
+            enabled, severity = self._get_rule_config(rule_id, contract)
+            if not enabled:
+                logger.debug(
+                    "Rule %s is disabled, skipping violation",
+                    rule_id,
+                )
+                continue
+
+            # Convert to ModelValidationIssue
+            context: dict[str, str] = {
+                "violation_type": violation.violation_type.value,
+            }
+            if violation.node_class_name:
+                context["class_name"] = violation.node_class_name
+            if violation.method_name:
+                context["method_name"] = violation.method_name
+
+            issues.append(
+                ModelValidationIssue(
+                    severity=severity,
+                    message=self._format_message(violation),
+                    code=rule_id,
+                    file_path=path,
+                    line_number=violation.line_number,
+                    rule_name=violation.violation_type.value,
+                    suggestion=violation.suggestion,
+                    context=context,
+                )
+            )
+
+        return tuple(issues)
+
+    def _format_message(self, violation: ModelDeclarativeNodeViolation) -> str:
+        """Format a human-readable message for a violation.
+
+        Args:
+            violation: The violation to format.
+
+        Returns:
+            Human-readable message describing the violation.
+        """
+        vtype = violation.violation_type
+        class_name = violation.node_class_name or "Unknown"
+
+        if vtype == EnumDeclarativeNodeViolation.CUSTOM_METHOD:
+            method = violation.method_name or "unknown"
+            return f"Class '{class_name}' has custom method '{method}' - declarative nodes must not have custom methods"
+        elif vtype == EnumDeclarativeNodeViolation.CUSTOM_PROPERTY:
+            prop = violation.method_name or "unknown"
+            return f"Class '{class_name}' has property '{prop}' - declarative nodes must not have properties"
+        elif vtype == EnumDeclarativeNodeViolation.INIT_CUSTOM_LOGIC:
+            return f"Class '{class_name}' has custom logic in __init__ - only super().__init__(container) is allowed"
+        elif vtype == EnumDeclarativeNodeViolation.INSTANCE_VARIABLE:
+            var = violation.method_name or "unknown"
+            return f"Class '{class_name}' creates instance variable '{var}' - declarative nodes must not store state"
+        elif vtype == EnumDeclarativeNodeViolation.CLASS_VARIABLE:
+            return f"Class '{class_name}' has class variable - configuration should be in contract.yaml"
+        elif vtype == EnumDeclarativeNodeViolation.SYNTAX_ERROR:
+            return f"File has syntax error: {violation.code_snippet}"
+        else:
+            return f"Class '{class_name}' violates declarative node policy: {violation.code_snippet}"
+
+
+# =============================================================================
+# BACKWARDS COMPATIBLE MODULE-LEVEL FUNCTIONS
+# =============================================================================
+# These functions maintain backwards compatibility with existing code that
+# imports validate_declarative_nodes, validate_declarative_nodes_ci, etc.
+# They delegate to the shared core functions defined above.
+# =============================================================================
+
+
+def validate_declarative_node_in_file(
+    file_path: Path,
+) -> list[ModelDeclarativeNodeViolation]:
+    """Validate a single node.py file for declarative compliance.
+
+    This is a backwards-compatible wrapper that delegates to _validate_file_core.
+
+    Args:
+        file_path: Path to the node.py file.
+
+    Returns:
+        List of violations found (empty if compliant or not a node file).
+    """
+    return _validate_file_core(file_path)
+
+
 def validate_declarative_nodes(
     directory: Path,
     recursive: bool = True,
 ) -> list[ModelDeclarativeNodeViolation]:
     """Validate all node.py files in a directory.
+
+    This is a backwards-compatible wrapper that delegates to
+    _validate_directory_with_count, discarding the file count.
 
     Args:
         directory: Directory to scan for node.py files.
@@ -750,14 +722,7 @@ def validate_declarative_nodes(
     Returns:
         List of all violations found.
     """
-    violations: list[ModelDeclarativeNodeViolation] = []
-    pattern = "**/node.py" if recursive else "node.py"
-
-    for file_path in directory.glob(pattern):
-        if file_path.is_file():
-            file_violations = validate_declarative_node_in_file(file_path)
-            violations.extend(file_violations)
-
+    violations, _ = _validate_directory_with_count(directory, recursive)
     return violations
 
 
@@ -767,6 +732,9 @@ def validate_declarative_nodes_ci(
 ) -> ModelDeclarativeNodeValidationResult:
     """CI gate entry point for declarative node validation.
 
+    Uses single-pass directory traversal for efficiency, collecting both
+    violations and file count simultaneously.
+
     Args:
         directory: Directory to validate.
         recursive: If True, scan subdirectories.
@@ -774,11 +742,7 @@ def validate_declarative_nodes_ci(
     Returns:
         Result model with pass/fail status suitable for CI integration.
     """
-    violations = validate_declarative_nodes(directory, recursive=recursive)
-
-    pattern = "**/node.py" if recursive else "node.py"
-    files_checked = sum(1 for f in directory.glob(pattern) if f.is_file())
-
+    violations, files_checked = _validate_directory_with_count(directory, recursive)
     return ModelDeclarativeNodeValidationResult.from_violations(
         violations, files_checked
     )
