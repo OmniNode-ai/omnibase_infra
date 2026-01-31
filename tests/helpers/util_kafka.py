@@ -1051,10 +1051,15 @@ async def wait_for_topic_metadata(
                 # Dict format - topic name is the key
                 topic_info = description.get(topic_name)
             else:
-                raise TypeError(
+                err = TypeError(
                     f"Unexpected describe_topics response type: {type(description).__name__}. "
                     f"Expected list or dict. Got: {description!r}"
                 )
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="describe_topics",
+                )
+                raise InfraUnavailableError(str(err), context=context) from err
 
             if topic_info is not None:
                 # TopicDescription may be an object with attributes or dict-like
@@ -1104,9 +1109,8 @@ async def wait_for_topic_metadata(
                     keys_info,
                 )
 
-        except TypeError:
-            # Re-raise TypeErrors - they indicate programming errors
-            # (e.g., unexpected response format), not transient Kafka issues
+        except InfraUnavailableError:
+            # Re-raise InfraUnavailableError - they indicate unexpected response format
             raise
         except (KafkaError, OSError) as e:
             # KafkaError: Base class for all aiokafka exceptions (connection,

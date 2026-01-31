@@ -8,11 +8,11 @@ This document provides API reference for the ONEX event bus subsystem, including
 
 The ONEX event bus provides asynchronous event publishing and subscription capabilities. The architecture follows a layered approach:
 
-| Layer | Component | Purpose |
-|-------|-----------|---------|
-| Protocol | `ProtocolEventPublisher` | SPI-defined interface for publishing |
-| Adapter | `AdapterProtocolEventPublisherKafka` | Production Kafka implementation |
-| Implementation | `EventBusKafka` | Low-level Kafka producer/consumer |
+| Layer          | Component                            | Purpose                              |
+| -------------- | ------------------------------------ | ------------------------------------ |
+| Protocol       | `ProtocolEventPublisher`             | SPI-defined interface for publishing |
+| Adapter        | `AdapterProtocolEventPublisherKafka` | Production Kafka implementation      |
+| Implementation | `EventBusKafka`                      | Low-level Kafka producer/consumer    |
 
 ---
 
@@ -32,11 +32,11 @@ This adapter provides a standard interface for event publishing while delegating
 
 The adapter implements all methods required by `ProtocolEventPublisher`:
 
-| Protocol Method | Adapter Implementation |
-|-----------------|------------------------|
-| `publish()` | Builds `ModelEventEnvelope`, serializes to JSON, delegates to `EventBusKafka.publish()` |
-| `get_metrics()` | Returns `ModelPublisherMetrics` with circuit breaker state from underlying bus |
-| `close()` | Marks adapter closed, stops underlying `EventBusKafka` |
+| Protocol Method  | Adapter Implementation                                                                   |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| `publish()`      | Builds `ModelEventEnvelope`, serializes to JSON, delegates to `EventBusKafka.publish()` |
+| `get_metrics()`  | Returns `ModelPublisherMetrics` with circuit breaker state from underlying bus          |
+| `close()`        | Marks adapter closed, stops underlying `EventBusKafka`                                  |
 
 ### Constructor
 
@@ -49,11 +49,11 @@ def __init__(
 ) -> None
 ```
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `bus` | `EventBusKafka` | (required) | The EventBusKafka instance to bridge to. Must be started before publishing. |
-| `service_name` | `str` | `"kafka-publisher"` | Service name included in envelope metadata for tracing. |
-| `instance_id` | `str \| None` | `None` | Instance identifier. Defaults to a generated UUID if not provided. |
+| Parameter      | Type            | Default             | Description                                                                  |
+| -------------- | --------------- | ------------------- | ---------------------------------------------------------------------------- |
+| `bus`          | `EventBusKafka` | (required)          | The EventBusKafka instance to bridge to. Must be started before publishing.  |
+| `service_name` | `str`           | `"kafka-publisher"` | Service name included in envelope metadata for tracing.                      |
+| `instance_id`  | `str \| None`   | `None`              | Instance identifier. Defaults to a generated UUID if not provided.           |
 
 ### Methods
 
@@ -74,15 +74,15 @@ async def publish(
 
 Publish an event with canonical `ModelEventEnvelope` serialization.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `event_type` | `str` | (required) | Fully-qualified event type (e.g., `"omninode.user.event.created.v1"`). |
-| `payload` | `JsonType` | (required) | Event payload data (dict, list, or primitive JSON types). |
-| `correlation_id` | `str \| None` | `None` | Correlation ID for request tracing. Converted to UUID. |
-| `causation_id` | `str \| None` | `None` | Causation ID for event sourcing chains. Stored in metadata tags. |
-| `metadata` | `dict[str, ContextValue] \| None` | `None` | Additional metadata as context values. |
-| `topic` | `str \| None` | `None` | Explicit topic override. When `None`, uses `event_type` as topic. |
-| `partition_key` | `str \| None` | `None` | Partition key for message ordering. Encoded to UTF-8 bytes. |
+| Parameter        | Type                              | Default      | Description                                                            |
+| ---------------- | --------------------------------- | ------------ | ---------------------------------------------------------------------- |
+| `event_type`     | `str`                             | (required)   | Fully-qualified event type (e.g., `"omninode.user.event.created.v1"`). |
+| `payload`        | `JsonType`                        | (required)   | Event payload data (dict, list, or primitive JSON types).              |
+| `correlation_id` | `str \| None`                     | `None`       | Correlation ID for request tracing. Converted to UUID.                 |
+| `causation_id`   | `str \| None`                     | `None`       | Causation ID for event sourcing chains. Stored in metadata tags.       |
+| `metadata`       | `dict[str, ContextValue] \| None` | `None`       | Additional metadata as context values.                                 |
+| `topic`          | `str \| None`                     | `None`       | Explicit topic override. When `None`, uses `event_type` as topic.      |
+| `partition_key`  | `str \| None`                     | `None`       | Partition key for message ordering. Encoded to UTF-8 bytes.            |
 
 **Returns**: `bool` - `True` if published successfully, `False` otherwise.
 
@@ -116,9 +116,9 @@ async def close(self, timeout_seconds: float = 30.0) -> None
 
 Close the publisher and release resources.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `timeout_seconds` | `float` | `30.0` | Timeout for cleanup operations. |
+| Parameter         | Type    | Default | Description                     |
+| ----------------- | ------- | ------- | ------------------------------- |
+| `timeout_seconds` | `float` | `30.0`  | Timeout for cleanup operations. |
 
 After closing, any calls to `publish()` will raise `InfraUnavailableError`.
 
@@ -175,17 +175,17 @@ success = await adapter.publish(
 
 The adapter tracks publishing statistics via `ModelPublisherMetrics`:
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `events_published` | `int` | Total count of successfully published events. |
-| `events_failed` | `int` | Total count of failed publish attempts. |
-| `events_sent_to_dlq` | `int` | Always 0 - publish path does not use DLQ. |
-| `total_publish_time_ms` | `float` | Cumulative publish time in milliseconds. |
-| `avg_publish_time_ms` | `float` | Average publish latency (computed from total/count). |
-| `circuit_breaker_opens` | `int` | Count of circuit breaker open events from underlying bus. |
-| `retries_attempted` | `int` | Total retry attempts from underlying bus (if available). |
-| `circuit_breaker_status` | `str` | Current circuit breaker state from underlying bus (`"closed"`, `"open"`, `"half_open"`). |
-| `current_failures` | `int` | Current consecutive failure count. |
+| Metric                   | Type    | Description                                                                              |
+| ------------------------ | ------- | ---------------------------------------------------------------------------------------- |
+| `events_published`       | `int`   | Total count of successfully published events.                                            |
+| `events_failed`          | `int`   | Total count of failed publish attempts.                                                  |
+| `events_sent_to_dlq`     | `int`   | Always 0 - publish path does not use DLQ.                                                |
+| `total_publish_time_ms`  | `float` | Cumulative publish time in milliseconds.                                                 |
+| `avg_publish_time_ms`    | `float` | Average publish latency (computed from total/count).                                     |
+| `circuit_breaker_opens`  | `int`   | Count of circuit breaker open events from underlying bus.                                |
+| `retries_attempted`      | `int`   | Total retry attempts from underlying bus (if available).                                 |
+| `circuit_breaker_status` | `str`   | Current circuit breaker state from underlying bus (`"closed"`, `"open"`, `"half_open"`). |
+| `current_failures`       | `int`   | Current consecutive failure count.                                                       |
 
 ---
 
@@ -227,13 +227,13 @@ The `partition_key` is encoded to UTF-8 bytes as per the SPI specification. This
 
 ### Error Handling
 
-| Scenario | Behavior |
-|----------|----------|
-| Publish succeeds | Returns `True`, increments `events_published` |
-| Publish fails (any exception) | Returns `False`, increments `events_failed`, logs exception |
-| Adapter closed | Raises `InfraUnavailableError("Publisher has been closed")` |
-| Invalid correlation_id format | Generates new UUID, logs warning with original value |
-| Close fails | Logs warning, continues (best-effort cleanup) |
+| Scenario                       | Behavior                                                     |
+| ------------------------------ | ------------------------------------------------------------ |
+| Publish succeeds               | Returns `True`, increments `events_published`                |
+| Publish fails (any exception)  | Returns `False`, increments `events_failed`, logs exception  |
+| Adapter closed                 | Raises `InfraUnavailableError("Publisher has been closed")`  |
+| Invalid correlation_id format  | Generates new UUID, logs warning with original value         |
+| Close fails                    | Logs warning, continues (best-effort cleanup)                |
 
 ---
 

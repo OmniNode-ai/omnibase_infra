@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import uuid4
 
 if TYPE_CHECKING:
+    from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.event_bus.adapters import AdapterProtocolEventPublisherKafka
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 
@@ -145,7 +146,19 @@ async def started_kafka_bus(
 
 
 @pytest.fixture
+def test_container() -> ModelONEXContainer:
+    """Create a ModelONEXContainer for adapter tests.
+
+    Returns a fresh container instance for dependency injection.
+    """
+    from omnibase_core.container import ModelONEXContainer
+
+    return ModelONEXContainer()
+
+
+@pytest.fixture
 async def adapter(
+    test_container: ModelONEXContainer,
     started_kafka_bus: EventBusKafka,
 ) -> AdapterProtocolEventPublisherKafka:
     """Create AdapterProtocolEventPublisherKafka wrapping the started bus.
@@ -159,6 +172,7 @@ async def adapter(
     assert isinstance(bus, EventBusKafka)
 
     adapter_instance = AdapterProtocolEventPublisherKafka(
+        container=test_container,
         bus=bus,
         service_name="test-kafka-adapter",
         instance_id="test-instance-001",
@@ -681,6 +695,7 @@ class TestMetrics:
     @pytest.mark.asyncio
     async def test_metrics_initial_state(
         self,
+        test_container: ModelONEXContainer,
         started_kafka_bus: object,
     ) -> None:
         """Verify metrics start at zero for a fresh adapter."""
@@ -691,6 +706,7 @@ class TestMetrics:
         assert isinstance(bus, EventBusKafka)
 
         fresh_adapter = AdapterProtocolEventPublisherKafka(
+            container=test_container,
             bus=bus,
             service_name="fresh-adapter",
         )
@@ -807,6 +823,7 @@ class TestLifecycle:
     @pytest.mark.asyncio
     async def test_close_marks_adapter_as_closed(
         self,
+        test_container: ModelONEXContainer,
         started_kafka_bus: object,
     ) -> None:
         """Verify close() marks the adapter as closed."""
@@ -818,6 +835,7 @@ class TestLifecycle:
 
         # Create a separate adapter for this test (don't use shared fixture)
         test_adapter = AdapterProtocolEventPublisherKafka(
+            container=test_container,
             bus=bus,
             service_name="lifecycle-test-adapter",
         )
@@ -835,6 +853,7 @@ class TestLifecycle:
     @pytest.mark.asyncio
     async def test_publish_after_close_raises_infra_unavailable_error(
         self,
+        test_container: ModelONEXContainer,
         started_kafka_bus: object,
     ) -> None:
         """Verify publish after close raises InfraUnavailableError."""
@@ -845,6 +864,7 @@ class TestLifecycle:
         assert isinstance(bus, EventBusKafka)
 
         test_adapter = AdapterProtocolEventPublisherKafka(
+            container=test_container,
             bus=bus,
             service_name="publish-after-close-test",
         )
@@ -862,6 +882,7 @@ class TestLifecycle:
     @pytest.mark.asyncio
     async def test_get_metrics_accessible_after_close(
         self,
+        test_container: ModelONEXContainer,
         started_kafka_bus: object,
         ensure_test_topic: Callable[[str, int], Coroutine[None, None, str]],
     ) -> None:
@@ -873,6 +894,7 @@ class TestLifecycle:
         assert isinstance(bus, EventBusKafka)
 
         test_adapter = AdapterProtocolEventPublisherKafka(
+            container=test_container,
             bus=bus,
             service_name="metrics-after-close-test",
         )
@@ -903,6 +925,7 @@ class TestLifecycle:
     @pytest.mark.asyncio
     async def test_reset_metrics_does_not_affect_closed_state(
         self,
+        test_container: ModelONEXContainer,
         started_kafka_bus: object,
         ensure_test_topic: Callable[[str, int], Coroutine[None, None, str]],
     ) -> None:
@@ -914,6 +937,7 @@ class TestLifecycle:
         assert isinstance(bus, EventBusKafka)
 
         test_adapter = AdapterProtocolEventPublisherKafka(
+            container=test_container,
             bus=bus,
             service_name="reset-closed-test",
         )
@@ -979,6 +1003,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_metrics_track_failures(
         self,
+        test_container: ModelONEXContainer,
         started_kafka_bus: object,
     ) -> None:
         """Verify events_failed increments on publish failure."""
@@ -991,6 +1016,7 @@ class TestErrorHandling:
         assert isinstance(bus, EventBusKafka)
 
         test_adapter = AdapterProtocolEventPublisherKafka(
+            container=test_container,
             bus=bus,
             service_name="failure-test-adapter",
         )

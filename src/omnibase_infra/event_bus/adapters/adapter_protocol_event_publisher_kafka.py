@@ -15,13 +15,16 @@ Key Design Decisions:
 
 Usage:
     ```python
+    from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.event_bus import EventBusKafka
     from omnibase_infra.event_bus.adapters import AdapterProtocolEventPublisherKafka
 
+    container = ModelONEXContainer()
     bus = EventBusKafka.default()
     await bus.start()
 
     adapter = AdapterProtocolEventPublisherKafka(
+        container=container,
         bus=bus,
         service_name="my-service",
     )
@@ -51,6 +54,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
+from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.types import JsonType
@@ -89,17 +93,28 @@ class AdapterProtocolEventPublisherKafka:
         - partition_key is encoded to UTF-8 bytes as per SPI specification
         - All exceptions during publish are caught and return False
 
+    Circuit Breaker Exemption:
+        This adapter intentionally does NOT inherit MixinAsyncCircuitBreaker.
+        Resilience (circuit breaker, retry with exponential backoff) is delegated
+        to the underlying EventBusKafka instance to avoid the "double circuit breaker"
+        anti-pattern. See docs/patterns/dispatcher_resilience.md for details on
+        dispatcher-owned resilience patterns.
+
     Attributes:
-        bus: The underlying EventBusKafka instance.
+        container: The ONEX container for dependency injection.
         service_name: Service identifier included in envelope metadata.
         instance_id: Instance identifier for envelope source tracking.
 
     Example:
         ```python
+        from omnibase_core.container import ModelONEXContainer
+
+        container = ModelONEXContainer()
         bus = EventBusKafka.default()
         await bus.start()
 
         adapter = AdapterProtocolEventPublisherKafka(
+            container=container,
             bus=bus,
             service_name="my-service",
             instance_id="instance-001",
@@ -116,20 +131,28 @@ class AdapterProtocolEventPublisherKafka:
 
     def __init__(
         self,
-        bus: EventBusKafka,
+        container: ModelONEXContainer,
+        bus: EventBusKafka | None = None,
         service_name: str = "kafka-publisher",
         instance_id: str | None = None,
     ) -> None:
-        """Initialize the adapter with an EventBusKafka instance.
+        """Initialize the adapter with a container for dependency injection.
 
         Args:
-            bus: The EventBusKafka instance to bridge to. Must be started before
-                publishing events.
+            container: The ONEX container for dependency injection.
+            bus: Optional EventBusKafka instance. If not provided, must be
+                resolved from container or set via set_bus() before publishing.
             service_name: Service name for envelope metadata. Defaults to
                 "kafka-publisher".
             instance_id: Optional instance identifier. Defaults to a generated UUID.
+
+        Note:
+            Either provide `bus` directly or ensure EventBusKafka is registered
+            in the container's service registry. If neither is available at
+            publish time, InfraUnavailableError will be raised.
         """
-        self._bus = bus
+        self._container = container
+        self._bus: EventBusKafka | None = bus
         self._service_name = service_name
         self._instance_id = instance_id or str(uuid4())
         self._metrics = ModelPublisherMetrics()
@@ -143,6 +166,28 @@ class AdapterProtocolEventPublisherKafka:
         Allows callers to check adapter state without attempting a publish.
         """
         return self._closed
+
+    def _get_bus(self) -> EventBusKafka:
+        """Get the underlying EventBusKafka instance.
+
+        Returns the bus if it was provided at construction time.
+
+        Returns:
+            The EventBusKafka instance.
+
+        Raises:
+            InfraUnavailableError: If no bus is available.
+        """
+        if self._bus is None:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="get_bus",
+            )
+            raise InfraUnavailableError(
+                "No EventBusKafka available. Provide bus at construction time.",
+                context=context,
+            )
+        return self._bus
 
     async def publish(
         self,
@@ -222,7 +267,8 @@ class AdapterProtocolEventPublisherKafka:
             value_bytes = json.dumps(envelope_dict).encode("utf-8")
 
             # Publish to underlying bus
-            await self._bus.publish(
+            bus = self._get_bus()
+            await bus.publish(
                 topic=target_topic,
                 key=key_bytes,
                 value=value_bytes,
@@ -371,7 +417,10 @@ class AdapterProtocolEventPublisherKafka:
         # Read circuit breaker state from underlying bus with defensive error handling
         # EventBusKafka inherits MixinAsyncCircuitBreaker which provides get_circuit_breaker_state()
         try:
-            cb_state = self._bus.get_circuit_breaker_state()
+            if self._bus is not None:
+                cb_state = self._bus.get_circuit_breaker_state()
+            else:
+                cb_state = {"state": "unknown", "failures": 0}
         except Exception:
             # If bus is closed or unavailable, return safe defaults
             cb_state = {"state": "unknown", "failures": 0}
@@ -401,7 +450,7 @@ class AdapterProtocolEventPublisherKafka:
 
         Example:
             ```python
-            adapter = AdapterProtocolEventPublisherKafka(bus)
+            adapter = AdapterProtocolEventPublisherKafka(container=container, bus=bus)
             await adapter.publish(...)  # metrics.events_published = 1
 
             await adapter.reset_metrics()  # metrics.events_published = 0
@@ -433,18 +482,19 @@ class AdapterProtocolEventPublisherKafka:
         """
         self._closed = True
 
-        # Close the underlying bus
-        try:
-            await self._bus.close()
-        except Exception as e:
-            logger.warning(
-                "Error closing underlying EventBusKafka",
-                extra={
-                    "service_name": self._service_name,
-                    "instance_id": self._instance_id,
-                    "error": str(e),
-                },
-            )
+        # Close the underlying bus if available
+        if self._bus is not None:
+            try:
+                await self._bus.close()
+            except Exception as e:
+                logger.warning(
+                    "Error closing underlying EventBusKafka",
+                    extra={
+                        "service_name": self._service_name,
+                        "instance_id": self._instance_id,
+                        "error": str(e),
+                    },
+                )
 
         logger.info(
             "AdapterProtocolEventPublisherKafka closed",
