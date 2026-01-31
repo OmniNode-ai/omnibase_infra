@@ -36,8 +36,8 @@ python = "^3.12"
 #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
 # Remember to switch back to PyPI versions before merging to main.
 #
-# omnibase-core v0.9.11: Version bump
-omnibase-core = "^0.9.11"
+# omnibase-core v0.10.1: Adds Kafka import lint guard validator
+omnibase-core = "^0.10.1"
 # omnibase-spi v0.6.4: Version bump
 omnibase-spi = "^0.6.4"
 

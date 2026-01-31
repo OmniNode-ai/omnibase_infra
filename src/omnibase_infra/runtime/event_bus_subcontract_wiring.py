@@ -13,10 +13,41 @@ Architecture:
     3. Creating Kafka subscriptions with appropriate consumer groups
     4. Bridging received messages to the MessageDispatchEngine
     5. Managing subscription lifecycle (creation and cleanup)
+    6. Classifying errors as content vs infrastructure for proper handling
 
     This follows the ARCH-002 principle: "Runtime owns all Kafka plumbing."
     Nodes and handlers declare their topic requirements in contracts, but
     never directly interact with Kafka consumers or producers.
+
+Error Classification:
+    The wiring distinguishes between two error categories:
+
+    Content Errors (non-retryable):
+        Schema validation failures, malformed payloads, missing required fields,
+        type conversion errors. These will NOT fix themselves with retry.
+        Default behavior: Send to DLQ and commit offset (dlq_and_commit).
+        Identified by: ProtocolConfigurationError, json.JSONDecodeError,
+        pydantic.ValidationError
+
+    Infrastructure Errors (potentially retryable):
+        Database timeouts, network failures, service unavailability.
+        These errors MAY fix themselves after retry.
+        Default behavior: Fail fast (fail_fast) to avoid hiding infrastructure
+        fires in the DLQ.
+        Identified by: RuntimeHostError and subclasses (InfraConnectionError,
+        InfraTimeoutError, InfraUnavailableError, etc.)
+
+DLQ Consumer Group Alignment:
+    IMPORTANT: The consumer_group used for DLQ publishing MUST match the
+    consumer_group used when subscribing to topics. This is critical for:
+    - Traceability: DLQ messages can be correlated back to their source consumer
+    - Replay operations: DLQ replay tools can identify which consumer group failed
+    - Debugging: Operations teams can trace failures to specific consumer groups
+
+    The wiring ensures this alignment by:
+    1. Computing consumer_group as "{environment}.{node_name}" in wire_subscriptions
+    2. Passing this same consumer_group to _create_dispatch_callback
+    3. Using it in all _publish_to_dlq calls within the callback closure
 
 Topic Resolution:
     Topic suffixes from contracts follow the ONEX naming convention:
@@ -32,11 +63,14 @@ Topic Resolution:
 
 Related:
     - OMN-1621: Runtime consumes event_bus subcontract for contract-driven wiring
+    - OMN-1740: Error classification (content vs infra) in wiring
     - ModelEventBusSubcontract: Contract model defining subscribe/publish topics
     - MessageDispatchEngine: Dispatch engine that processes received messages
     - EventBusKafka: Kafka event bus implementation
 
 .. versionadded:: 0.2.5
+.. versionchanged:: 0.2.9
+    Added error classification (content vs infrastructure) with DLQ integration.
 """
 
 from __future__ import annotations
@@ -46,6 +80,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
 
 import yaml
 from pydantic import ValidationError
@@ -59,8 +94,18 @@ from omnibase_core.protocols.event_bus.protocol_event_message import (
     ProtocolEventMessage,
 )
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
-from omnibase_infra.protocols import ProtocolDispatchEngine
+from omnibase_infra.errors import (
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+    RuntimeHostError,
+)
+from omnibase_infra.models.event_bus import (
+    ModelConsumerRetryConfig,
+    ModelDlqConfig,
+    ModelIdempotencyConfig,
+    ModelOffsetPolicyConfig,
+)
+from omnibase_infra.protocols import ProtocolDispatchEngine, ProtocolIdempotencyStore
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
@@ -82,8 +127,27 @@ class EventBusSubcontractWiring:
         - Resolve topic suffixes to full topic names with environment prefix
         - Create Kafka subscriptions with appropriate consumer groups
         - Deserialize incoming messages to ModelEventEnvelope
+        - Check idempotency and skip duplicate messages (if enabled)
+        - Classify errors as content (DLQ) vs infrastructure (fail-fast)
         - Dispatch envelopes to MessageDispatchEngine
         - Manage subscription lifecycle (cleanup on shutdown)
+
+    Error Classification:
+        Content Errors (non-retryable): ProtocolConfigurationError, ValidationError,
+        json.JSONDecodeError. Default: DLQ and commit offset.
+
+        Infrastructure Errors (retryable): RuntimeHostError and subclasses.
+        Default: Fail-fast (no DLQ, no commit).
+
+    Idempotency:
+        When configured with an idempotency store and enabled config, the wiring
+        deduplicates messages based on the `envelope_id` field from the envelope.
+        Messages with the same envelope_id (within a topic domain) are processed
+        only once - duplicates are logged and skipped.
+
+        Requirements when idempotency is enabled:
+        - All envelopes MUST have a non-None envelope_id field
+        - Missing envelope_id raises ProtocolConfigurationError
 
     Thread Safety:
         This class is designed for single-threaded async use. All subscription
@@ -94,13 +158,26 @@ class EventBusSubcontractWiring:
     Example:
         ```python
         from omnibase_infra.runtime import EventBusSubcontractWiring
+        from omnibase_infra.models.event_bus import (
+            ModelIdempotencyConfig,
+            ModelDlqConfig,
+            ModelConsumerRetryConfig,
+            ModelOffsetPolicyConfig,
+        )
+        from omnibase_infra.idempotency import StoreIdempotencyInmemory
         from omnibase_core.models.contracts.subcontracts import ModelEventBusSubcontract
 
-        # Create wiring with event bus and dispatch engine
+        # Create wiring with full error handling configuration
         wiring = EventBusSubcontractWiring(
             event_bus=event_bus,
             dispatch_engine=dispatch_engine,
             environment="dev",
+            node_name="my-handler",
+            idempotency_store=StoreIdempotencyInmemory(),
+            idempotency_config=ModelIdempotencyConfig(enabled=True),
+            dlq_config=ModelDlqConfig(enabled=True),
+            retry_config=ModelConsumerRetryConfig.create_standard(),
+            offset_policy=ModelOffsetPolicyConfig(),
         )
 
         # Wire subscriptions from subcontract
@@ -118,10 +195,20 @@ class EventBusSubcontractWiring:
         _event_bus: The event bus implementation (Kafka or in-memory)
         _dispatch_engine: Engine to dispatch received messages to handlers
         _environment: Environment prefix for topics (e.g., 'dev', 'prod')
+        _node_name: Name of the node/handler for consumer group and logging
+        _idempotency_store: Optional store for tracking processed messages
+        _idempotency_config: Configuration for idempotency behavior
+        _dlq_config: Configuration for Dead Letter Queue behavior
+        _retry_config: Configuration for consumer-side retry behavior
+        _offset_policy: Configuration for offset commit strategy
         _unsubscribe_callables: List of callables to unsubscribe from topics
         _logger: Logger for debug and error messages
+        _retry_counts: Tracks retry attempts per message (by correlation_id)
 
     .. versionadded:: 0.2.5
+    .. versionchanged:: 0.2.9
+        Added idempotency gate support via idempotency_store and idempotency_config.
+        Added error classification (content vs infrastructure) with DLQ integration.
     """
 
     def __init__(
@@ -129,6 +216,12 @@ class EventBusSubcontractWiring:
         event_bus: ProtocolEventBusSubscriber,
         dispatch_engine: ProtocolDispatchEngine,
         environment: str,
+        node_name: str,
+        idempotency_store: ProtocolIdempotencyStore | None = None,
+        idempotency_config: ModelIdempotencyConfig | None = None,
+        dlq_config: ModelDlqConfig | None = None,
+        retry_config: ModelConsumerRetryConfig | None = None,
+        offset_policy: ModelOffsetPolicyConfig | None = None,
     ) -> None:
         """Initialize event bus wiring.
 
@@ -141,6 +234,20 @@ class EventBusSubcontractWiring:
                 Must be frozen (registrations complete) before wiring subscriptions.
             environment: Environment prefix for topics (e.g., 'dev', 'prod').
                 Used to resolve topic suffixes to full topic names.
+            node_name: Name of the node/handler for consumer group identification and logging.
+            idempotency_store: Optional idempotency store for message deduplication.
+                If provided with enabled config, messages are deduplicated by envelope_id.
+            idempotency_config: Optional configuration for idempotency behavior.
+                If None, idempotency checking is disabled.
+            dlq_config: Optional configuration for Dead Letter Queue behavior.
+                Controls how content vs infrastructure errors are handled.
+                If None, uses defaults (content -> DLQ, infra -> fail-fast).
+            retry_config: Optional configuration for consumer-side retry behavior.
+                Controls retry attempts and backoff for infrastructure errors.
+                If None, uses standard defaults (3 attempts, exponential backoff).
+            offset_policy: Optional configuration for offset commit strategy.
+                Controls when offsets are committed relative to handler execution.
+                If None, uses commit_after_handler (at-least-once delivery).
 
         Note:
             The dispatch_engine should be frozen before wiring subscriptions.
@@ -155,8 +262,16 @@ class EventBusSubcontractWiring:
         self._event_bus = event_bus
         self._dispatch_engine = dispatch_engine
         self._environment = environment
+        self._node_name = node_name
+        self._idempotency_store = idempotency_store
+        self._idempotency_config = idempotency_config or ModelIdempotencyConfig()
+        self._dlq_config = dlq_config or ModelDlqConfig()
+        self._retry_config = retry_config or ModelConsumerRetryConfig.create_standard()
+        self._offset_policy = offset_policy or ModelOffsetPolicyConfig()
         self._unsubscribe_callables: list[Callable[[], Awaitable[None]]] = []
         self._logger = logging.getLogger(__name__)
+        # Track retry attempts per correlation_id for infrastructure errors
+        self._retry_counts: dict[UUID, int] = {}
 
     def resolve_topic(self, topic_suffix: str) -> str:
         """Resolve topic suffix to full topic name with environment prefix.
@@ -202,6 +317,11 @@ class EventBusSubcontractWiring:
             - Multiple instances of the same node load-balance message processing
             - Different environments are completely isolated
 
+            IMPORTANT: The same consumer_group is used for both subscriptions and
+            DLQ publishing to maintain traceability. DLQ messages include the
+            consumer_group that originally processed the message, enabling
+            correlation during replay and debugging.
+
         Args:
             subcontract: The event_bus subcontract from a handler's contract.
                 Contains subscribe_topics list with topic suffixes.
@@ -228,43 +348,218 @@ class EventBusSubcontractWiring:
 
         for topic_suffix in subcontract.subscribe_topics:
             full_topic = self.resolve_topic(topic_suffix)
-            group_id = f"{self._environment}.{node_name}"
+            # Consumer group ID derived from environment and node_name
+            # This same group_id is passed to DLQ publishing for traceability
+            consumer_group = f"{self._environment}.{node_name}"
 
-            # Create dispatch callback for this topic
-            callback = self._create_dispatch_callback(full_topic)
+            # Create dispatch callback for this topic, capturing the consumer_group
+            # used for this subscription to ensure DLQ messages have consistent
+            # consumer_group metadata
+            callback = self._create_dispatch_callback(full_topic, consumer_group)
 
             # Subscribe and store unsubscribe callable
             unsubscribe = await self._event_bus.subscribe(
                 topic=full_topic,
-                group_id=group_id,
+                group_id=consumer_group,
                 on_message=callback,
             )
             self._unsubscribe_callables.append(unsubscribe)
 
             self._logger.info(
-                "Wired subscription: topic=%s, group_id=%s, node=%s",
+                "Wired subscription: topic=%s, consumer_group=%s, node=%s",
                 full_topic,
-                group_id,
+                consumer_group,
                 node_name,
             )
+
+    def _should_commit_after_handler(self) -> bool:
+        """Check if offset should be committed after handler execution.
+
+        Returns:
+            True if offset_policy is commit_after_handler (at-least-once).
+        """
+        return self._offset_policy.commit_strategy == "commit_after_handler"
+
+    async def _commit_offset(
+        self,
+        message: ProtocolEventMessage,
+        correlation_id: UUID | None,
+    ) -> None:
+        """Commit Kafka offset for the processed message.
+
+        Delegates to the event bus if it supports offset commits.
+        This is a no-op for event buses that don't support explicit commits.
+
+        Args:
+            message: The message whose offset should be committed.
+            correlation_id: Optional correlation ID for logging.
+        """
+        # Duck-type check for commit_offset method
+        commit_fn = getattr(self._event_bus, "commit_offset", None)
+        if commit_fn is not None and callable(commit_fn):
+            try:
+                await commit_fn(message)
+                self._logger.debug(
+                    "offset_committed topic=%s offset=%s correlation_id=%s",
+                    getattr(message, "topic", "unknown"),
+                    getattr(message, "offset", "unknown"),
+                    str(correlation_id) if correlation_id else "none",
+                )
+            except Exception as e:
+                self._logger.warning(
+                    "offset_commit_failed topic=%s error=%s correlation_id=%s",
+                    getattr(message, "topic", "unknown"),
+                    str(e),
+                    str(correlation_id) if correlation_id else "none",
+                )
+
+    async def _publish_to_dlq(
+        self,
+        topic: str,
+        message: ProtocolEventMessage,
+        error: Exception,
+        correlation_id: UUID,
+        error_category: str,
+        consumer_group: str,
+    ) -> None:
+        """Publish failed message to Dead Letter Queue.
+
+        Delegates to the event bus if it supports DLQ publishing.
+        Falls back to logging if DLQ is not available.
+
+        Args:
+            topic: The original topic the message was consumed from.
+            message: The message that failed processing.
+            error: The exception that caused the failure.
+            correlation_id: Correlation ID for tracing.
+            error_category: Either "content" or "infra" for classification.
+            consumer_group: The consumer group ID that was subscribed to this topic.
+                This should match the group_id used in wire_subscriptions() for
+                consistent traceability in DLQ messages.
+        """
+        if not self._dlq_config.enabled:
+            self._logger.debug(
+                "dlq_disabled topic=%s correlation_id=%s error_category=%s",
+                topic,
+                str(correlation_id),
+                error_category,
+            )
+            return
+
+        # Duck-type check for DLQ publish method
+        publish_dlq_fn = getattr(self._event_bus, "_publish_raw_to_dlq", None)
+        if publish_dlq_fn is not None and callable(publish_dlq_fn):
+            try:
+                await publish_dlq_fn(
+                    original_topic=topic,
+                    raw_msg=message,
+                    error=error,
+                    correlation_id=correlation_id,
+                    failure_type=f"{error_category}_error",
+                    consumer_group=consumer_group,
+                )
+                self._logger.warning(
+                    "dlq_published topic=%s error_category=%s error_type=%s "
+                    "correlation_id=%s",
+                    topic,
+                    error_category,
+                    type(error).__name__,
+                    str(correlation_id),
+                )
+            except Exception as dlq_error:
+                self._logger.exception(
+                    "dlq_publish_failed topic=%s error=%s correlation_id=%s",
+                    topic,
+                    str(dlq_error),
+                    str(correlation_id),
+                )
+        else:
+            # Fallback: log at ERROR level if DLQ not available
+            self._logger.error(
+                "dlq_not_available topic=%s error_category=%s error_type=%s "
+                "error_message=%s correlation_id=%s",
+                topic,
+                error_category,
+                type(error).__name__,
+                str(error),
+                str(correlation_id),
+            )
+
+    def _get_retry_count(self, correlation_id: UUID) -> int:
+        """Get current retry count for a correlation ID.
+
+        Args:
+            correlation_id: The correlation ID to check.
+
+        Returns:
+            Current retry count (0 if not tracked).
+        """
+        return self._retry_counts.get(correlation_id, 0)
+
+    def _increment_retry_count(self, correlation_id: UUID) -> int:
+        """Increment retry count for a correlation ID.
+
+        Args:
+            correlation_id: The correlation ID to increment.
+
+        Returns:
+            New retry count after increment.
+        """
+        current = self._retry_counts.get(correlation_id, 0)
+        self._retry_counts[correlation_id] = current + 1
+        return current + 1
+
+    def _clear_retry_count(self, correlation_id: UUID) -> None:
+        """Clear retry count for a correlation ID after successful processing.
+
+        Args:
+            correlation_id: The correlation ID to clear.
+        """
+        self._retry_counts.pop(correlation_id, None)
+
+    def _is_retry_exhausted(self, correlation_id: UUID) -> bool:
+        """Check if retry budget is exhausted for a correlation ID.
+
+        Args:
+            correlation_id: The correlation ID to check.
+
+        Returns:
+            True if retry attempts exceed max_attempts from config.
+        """
+        return self._get_retry_count(correlation_id) >= self._retry_config.max_attempts
 
     def _create_dispatch_callback(
         self,
         topic: str,
+        consumer_group: str,
     ) -> Callable[[ProtocolEventMessage], Awaitable[None]]:
         """Create callback that bridges Kafka consumer to dispatch engine.
 
         Creates an async callback function that:
         1. Receives ProtocolEventMessage from the Kafka consumer
         2. Deserializes the message value to ModelEventEnvelope
-        3. Dispatches the envelope to the MessageDispatchEngine
+        3. Checks idempotency (if enabled) to skip duplicate messages
+        4. Dispatches the envelope to the MessageDispatchEngine
+        5. Classifies errors as content (DLQ) vs infrastructure (fail-fast)
+        6. Manages offset commits based on policy
 
-        Error Handling:
-            - Deserialization errors are logged and the message is skipped
-            - Dispatch errors are propagated (handled by the event bus DLQ logic)
+        Error Classification:
+            Content Errors (ProtocolConfigurationError, ValidationError, JSONDecodeError):
+                - Non-retryable (will never succeed with retry)
+                - Default: DLQ and commit offset
+                - Policy override via dlq_config.on_content_error
+
+            Infrastructure Errors (RuntimeHostError and subclasses):
+                - Potentially retryable (may succeed after service recovery)
+                - Default: Fail-fast (no DLQ, no commit, re-raise)
+                - If retry exhausted and policy allows: DLQ and commit
+                - Policy override via dlq_config.on_infra_exhausted
 
         Args:
             topic: The full topic name for routing context in logs.
+            consumer_group: The consumer group ID used for this topic subscription.
+                This is passed to DLQ publishing to ensure consistent traceability
+                between subscriptions and their associated DLQ messages.
 
         Returns:
             Async callback function compatible with event bus subscribe().
@@ -272,34 +567,169 @@ class EventBusSubcontractWiring:
 
         async def callback(message: ProtocolEventMessage) -> None:
             """Process incoming Kafka message and dispatch to engine."""
+            envelope: ModelEventEnvelope[object] | None = None
+            correlation_id: UUID = uuid4()  # Default if not in envelope
+
             try:
                 envelope = self._deserialize_to_envelope(message)
+                correlation_id = envelope.correlation_id or uuid4()
+
+                # Idempotency gate: check for duplicate messages
+                if self._idempotency_store and self._idempotency_config.enabled:
+                    envelope_id = envelope.envelope_id
+                    if envelope_id is None:
+                        # Missing envelope_id is a content error when idempotency is enabled
+                        raise ProtocolConfigurationError(
+                            "Envelope missing envelope_id for idempotency",
+                            context=ModelInfraErrorContext.with_correlation(
+                                correlation_id=correlation_id,
+                                transport_type=EnumInfraTransportType.KAFKA,
+                                operation="idempotency_check",
+                            ),
+                        )
+
+                    is_new = await self._idempotency_store.check_and_record(
+                        message_id=envelope_id,
+                        domain=topic,  # Use topic as domain for namespace isolation
+                        correlation_id=correlation_id,
+                    )
+                    if not is_new:
+                        # Duplicate - skip processing but commit offset to prevent
+                        # infinite redelivery. This is critical: even though we don't
+                        # reprocess the message, we must advance the consumer offset.
+                        self._logger.info(
+                            "idempotency_skip envelope_id=%s topic=%s "
+                            "correlation_id=%s node=%s reason=duplicate_message",
+                            str(envelope_id),
+                            topic,
+                            str(correlation_id),
+                            self._node_name,
+                        )
+                        # Commit offset for duplicate to prevent infinite redelivery
+                        if self._should_commit_after_handler():
+                            await self._commit_offset(message, correlation_id)
+                        return  # Skip dispatch
+
                 # Dispatch via ProtocolDispatchEngine interface
                 await self._dispatch_engine.dispatch(topic, envelope)
-            except json.JSONDecodeError as e:
-                self._logger.exception(
-                    "Failed to deserialize message from topic '%s': %s",
+
+                # Success - commit offset if policy requires and clear retry count
+                if self._should_commit_after_handler():
+                    await self._commit_offset(message, correlation_id)
+                self._clear_retry_count(correlation_id)
+
+            except (json.JSONDecodeError, ValidationError) as e:
+                # Content error: malformed JSON or schema validation failure
+                # These are non-retryable - the message will never parse correctly
+                self._logger.warning(
+                    "content_error_deserialization topic=%s error_type=%s "
+                    "error=%s correlation_id=%s",
                     topic,
-                    e,
+                    type(e).__name__,
+                    str(e),
+                    str(correlation_id),
                 )
-                # Wrap in OnexError per CLAUDE.md: "OnexError Only"
-                raise RuntimeHostError(
-                    f"Failed to deserialize message from topic '{topic}'",
+
+                if self._dlq_config.on_content_error == "dlq_and_commit":
+                    await self._publish_to_dlq(
+                        topic, message, e, correlation_id, "content", consumer_group
+                    )
+                    await self._commit_offset(message, correlation_id)
+                    return  # Handled - don't re-raise
+
+                # fail_fast - wrap and re-raise
+                raise ProtocolConfigurationError(
+                    f"Content error: failed to deserialize message from topic '{topic}'",
                     context=ModelInfraErrorContext.with_correlation(
+                        correlation_id=correlation_id,
                         transport_type=EnumInfraTransportType.KAFKA,
                         operation="event_bus_deserialize",
                     ),
                 ) from e
-            except Exception as e:
-                self._logger.exception(
-                    "Failed to dispatch message from topic '%s': %s",
+
+            except ProtocolConfigurationError as e:
+                # Content error: already classified as non-retryable
+                self._logger.warning(
+                    "content_error_configuration topic=%s error=%s correlation_id=%s",
                     topic,
-                    e,
+                    str(e),
+                    str(correlation_id),
                 )
-                # Wrap in OnexError per CLAUDE.md: "OnexError Only"
+
+                if self._dlq_config.on_content_error == "dlq_and_commit":
+                    await self._publish_to_dlq(
+                        topic, message, e, correlation_id, "content", consumer_group
+                    )
+                    await self._commit_offset(message, correlation_id)
+                    return  # Handled - don't re-raise
+
+                # fail_fast - re-raise without wrapping (already proper OnexError)
+                raise
+
+            except RuntimeHostError as e:
+                # Infrastructure error: potentially retryable
+                # Track retry attempts and check exhaustion
+                retry_count = self._increment_retry_count(correlation_id)
+                is_exhausted = self._is_retry_exhausted(correlation_id)
+
+                # TRY400 disabled: logger.error intentional to avoid leaking stack traces
+                self._logger.error(  # noqa: TRY400
+                    "infra_error topic=%s error_type=%s error=%s "
+                    "retry_count=%d max_attempts=%d exhausted=%s correlation_id=%s",
+                    topic,
+                    type(e).__name__,
+                    str(e),
+                    retry_count,
+                    self._retry_config.max_attempts,
+                    is_exhausted,
+                    str(correlation_id),
+                )
+
+                if is_exhausted:
+                    # Retry budget exhausted - check policy
+                    if self._dlq_config.on_infra_exhausted == "dlq_and_commit":
+                        await self._publish_to_dlq(
+                            topic, message, e, correlation_id, "infra", consumer_group
+                        )
+                        await self._commit_offset(message, correlation_id)
+                        self._clear_retry_count(correlation_id)
+                        return  # Handled - don't re-raise
+
+                # fail_fast (default) - re-raise without committing
+                # Kafka will redeliver the message
+                raise
+
+            except Exception as e:
+                # Unexpected error - classify as infrastructure error
+                # This catches errors from handlers that aren't properly wrapped
+                retry_count = self._increment_retry_count(correlation_id)
+                is_exhausted = self._is_retry_exhausted(correlation_id)
+
+                self._logger.exception(
+                    "unexpected_error topic=%s error_type=%s error=%s "
+                    "retry_count=%d exhausted=%s correlation_id=%s",
+                    topic,
+                    type(e).__name__,
+                    str(e),
+                    retry_count,
+                    is_exhausted,
+                    str(correlation_id),
+                )
+
+                if is_exhausted:
+                    if self._dlq_config.on_infra_exhausted == "dlq_and_commit":
+                        await self._publish_to_dlq(
+                            topic, message, e, correlation_id, "infra", consumer_group
+                        )
+                        await self._commit_offset(message, correlation_id)
+                        self._clear_retry_count(correlation_id)
+                        return
+
+                # Wrap in RuntimeHostError and re-raise
                 raise RuntimeHostError(
                     f"Failed to dispatch message from topic '{topic}'",
                     context=ModelInfraErrorContext.with_correlation(
+                        correlation_id=correlation_id,
                         transport_type=EnumInfraTransportType.KAFKA,
                         operation="event_bus_dispatch",
                     ),
@@ -368,6 +798,7 @@ class EventBusSubcontractWiring:
                 )
 
         self._unsubscribe_callables.clear()
+        self._retry_counts.clear()
 
         if cleanup_count > 0:
             self._logger.info(

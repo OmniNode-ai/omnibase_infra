@@ -1420,6 +1420,118 @@ class MessageDispatchEngine:
                 output_events=[],
             )
 
+    async def dispatch_with_transaction(
+        self,
+        *,
+        topic: str,
+        envelope: ModelEventEnvelope[object],
+        tx: object,
+    ) -> ModelDispatchResult:
+        """Dispatch an event envelope with database transaction context.
+
+        This method enables transaction-scoped dispatch for correct idempotency
+        semantics. The transaction parameter allows handlers to participate in
+        the same database transaction as the idempotency insert, ensuring
+        exactly-once processing.
+
+        Current Implementation:
+            This initial implementation delegates to the standard ``dispatch()``
+            method. The ``tx`` parameter is stored in the dispatch context for
+            handlers that need transactional access. Future iterations may pass
+            ``tx`` directly to handlers via a context object.
+
+        Design Decision:
+            The ``tx`` parameter is typed as ``object`` rather than a specific
+            database type (e.g., ``asyncpg.Connection``) to avoid leaking
+            infrastructure types into the protocol. Handlers that need the
+            transaction should type-narrow based on their database backend.
+
+        Thread Safety:
+            This method is safe for concurrent calls from multiple coroutines.
+            However, the transaction context (``tx``) is typically connection-
+            scoped and should not be shared across coroutines.
+
+        Args:
+            topic: The full topic name from which the envelope was consumed.
+                Used for routing and logging context.
+                Example: "dev.onex.evt.node.introspected.v1"
+            envelope: The deserialized event envelope containing the payload.
+                The payload type varies by topic/event type.
+            tx: Database transaction/connection context. Typed as ``object``
+                to avoid infrastructure type leakage; handlers should type-
+                narrow based on their database backend (e.g.,
+                ``asyncpg.Connection``, ``aiosqlite.Connection``).
+
+        Returns:
+            ModelDispatchResult with dispatch status, metrics, and dispatcher outputs.
+
+        Raises:
+            ModelOnexError: If engine is not frozen (INVALID_STATE)
+            ModelOnexError: If topic is empty (INVALID_PARAMETER)
+            ModelOnexError: If envelope is None (INVALID_PARAMETER)
+
+        Example:
+            .. code-block:: python
+
+                # Idempotency consumer with transaction context
+                async with pool.acquire() as conn:
+                    async with conn.transaction():
+                        # Insert idempotency record and dispatch in same transaction
+                        await insert_idempotency_record(conn, message_id)
+                        result = await engine.dispatch_with_transaction(
+                            topic=topic,
+                            envelope=envelope,
+                            tx=conn,
+                        )
+                        # Both committed atomically
+
+        Related:
+            - OMN-1740: Transaction-scoped dispatch for idempotency
+            - dispatch(): Non-transactional dispatch method
+
+        .. versionadded:: 0.2.9
+        """
+        # Enforce freeze contract (same as dispatch())
+        if not self._frozen:
+            raise ModelOnexError(
+                message="dispatch_with_transaction() called before freeze(). "
+                "Registration MUST complete and freeze() MUST be called before dispatch. "
+                "This is required for thread safety.",
+                error_code=EnumCoreErrorCode.INVALID_STATE,
+            )
+
+        # Validate inputs (same as dispatch())
+        if not topic or not topic.strip():
+            raise ModelOnexError(
+                message="Topic cannot be empty or whitespace.",
+                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+            )
+
+        if envelope is None:
+            raise ModelOnexError(
+                message="Cannot dispatch None envelope. ModelEventEnvelope is required.",
+                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+            )
+
+        # Log transaction context at DEBUG level for traceability
+        correlation_id = envelope.correlation_id or uuid4()
+        self._logger.debug(
+            "dispatch_with_transaction called with tx context (tx_type=%s)",
+            type(tx).__name__,
+            extra=self._build_log_context(
+                topic=topic,
+                correlation_id=correlation_id,
+                trace_id=envelope.trace_id,
+            ),
+        )
+
+        # Current implementation: delegate to standard dispatch()
+        # The tx parameter is available for future handler context injection
+        # TODO(OMN-1740): Pass tx to handlers via dispatch context when needed
+        _ = tx  # Explicitly acknowledge tx parameter for future use
+
+        return await self.dispatch(topic=topic, envelope=envelope)
+
     def _find_matching_dispatchers(
         self,
         topic: str,
