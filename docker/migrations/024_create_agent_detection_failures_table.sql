@@ -22,26 +22,16 @@ CREATE TABLE IF NOT EXISTS agent_detection_failures (
     -- Identity (correlation_id is the unique key)
     correlation_id UUID PRIMARY KEY,
 
-    -- User prompt context
-    user_prompt TEXT,
-    prompt_length INTEGER,
-    prompt_hash VARCHAR(64),
+    -- Failure details
+    failure_reason TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    -- Detection outcome
-    detection_status VARCHAR(50),
-    failure_reason TEXT,
-    detection_metadata JSONB,
-    attempted_methods TEXT[],
-
-    -- Project context
-    project_path TEXT,
-    project_name VARCHAR(255),
-
-    -- Session context
-    claude_session_id VARCHAR(255),
-
-    -- Audit (TTL keys off created_at)
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    -- Request context
+    request_summary TEXT,
+    attempted_patterns JSONB,
+    fallback_used VARCHAR(255),
+    error_code VARCHAR(100),
+    metadata JSONB
 );
 
 -- ============================================================================
@@ -58,14 +48,10 @@ CREATE INDEX IF NOT EXISTS idx_agent_detection_failures_created_at
 
 COMMENT ON TABLE agent_detection_failures IS 'Agent detection failures for accuracy improvement (OMN-1743). Append-only observability table.';
 COMMENT ON COLUMN agent_detection_failures.correlation_id IS 'Request correlation ID - PRIMARY KEY for idempotent inserts';
-COMMENT ON COLUMN agent_detection_failures.user_prompt IS 'User prompt that failed detection';
-COMMENT ON COLUMN agent_detection_failures.prompt_length IS 'Length of user prompt in characters';
-COMMENT ON COLUMN agent_detection_failures.prompt_hash IS 'SHA-256 hash of prompt for deduplication analysis';
-COMMENT ON COLUMN agent_detection_failures.detection_status IS 'Status of detection attempt (e.g., no_match, ambiguous, timeout)';
 COMMENT ON COLUMN agent_detection_failures.failure_reason IS 'Human-readable explanation of detection failure';
-COMMENT ON COLUMN agent_detection_failures.detection_metadata IS 'JSON metadata about detection attempt';
-COMMENT ON COLUMN agent_detection_failures.attempted_methods IS 'Array of detection methods attempted';
-COMMENT ON COLUMN agent_detection_failures.project_path IS 'Full filesystem path to the project';
-COMMENT ON COLUMN agent_detection_failures.project_name IS 'Human-readable project name';
-COMMENT ON COLUMN agent_detection_failures.claude_session_id IS 'Claude Code session identifier';
 COMMENT ON COLUMN agent_detection_failures.created_at IS 'Timestamp when failure was recorded (TTL cleanup key)';
+COMMENT ON COLUMN agent_detection_failures.request_summary IS 'Summary of the request that failed routing';
+COMMENT ON COLUMN agent_detection_failures.attempted_patterns IS 'JSON array of patterns attempted during detection';
+COMMENT ON COLUMN agent_detection_failures.fallback_used IS 'Name of fallback agent if one was used';
+COMMENT ON COLUMN agent_detection_failures.error_code IS 'Error code for categorization';
+COMMENT ON COLUMN agent_detection_failures.metadata IS 'Additional JSON metadata about the failure';

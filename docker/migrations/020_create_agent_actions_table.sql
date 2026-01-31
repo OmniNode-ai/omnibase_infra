@@ -26,19 +26,16 @@ CREATE TABLE IF NOT EXISTS agent_actions (
     agent_name VARCHAR(255),
     action_type VARCHAR(50),
     action_name VARCHAR(255),
-    action_details JSONB,
-    debug_mode BOOLEAN DEFAULT FALSE,
-
-    -- Performance
-    duration_ms INTEGER,
-
-    -- Project context
-    project_path TEXT,
-    project_name VARCHAR(255),
-    working_directory TEXT,
 
     -- Audit (TTL keys off created_at)
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Execution state
+    status VARCHAR(50),
+    duration_ms INTEGER,
+    result TEXT,
+    error_message TEXT,
+    metadata JSONB
 );
 
 -- ============================================================================
@@ -59,10 +56,9 @@ COMMENT ON COLUMN agent_actions.correlation_id IS 'Request correlation ID for tr
 COMMENT ON COLUMN agent_actions.agent_name IS 'Name of the agent that performed the action';
 COMMENT ON COLUMN agent_actions.action_type IS 'Type of action: tool_call, decision, error, success';
 COMMENT ON COLUMN agent_actions.action_name IS 'Specific action name within the type';
-COMMENT ON COLUMN agent_actions.action_details IS 'JSON payload with action-specific details';
-COMMENT ON COLUMN agent_actions.debug_mode IS 'Whether action was performed in debug mode';
-COMMENT ON COLUMN agent_actions.duration_ms IS 'Action execution duration in milliseconds';
-COMMENT ON COLUMN agent_actions.project_path IS 'Full filesystem path to the project';
-COMMENT ON COLUMN agent_actions.project_name IS 'Human-readable project name';
-COMMENT ON COLUMN agent_actions.working_directory IS 'Working directory when action was performed';
 COMMENT ON COLUMN agent_actions.created_at IS 'Timestamp when action was recorded (TTL cleanup key)';
+COMMENT ON COLUMN agent_actions.status IS 'Execution status of the action';
+COMMENT ON COLUMN agent_actions.duration_ms IS 'Action execution duration in milliseconds';
+COMMENT ON COLUMN agent_actions.result IS 'Action result or output (text)';
+COMMENT ON COLUMN agent_actions.error_message IS 'Error message if action failed';
+COMMENT ON COLUMN agent_actions.metadata IS 'JSON payload with action-specific details';
