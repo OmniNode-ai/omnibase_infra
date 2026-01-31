@@ -356,7 +356,13 @@ class TestEffectCircuitBreakerTransitions:
         consul_effect: MockConsulEffect,
         mock_consul_backend: MockConsulBackend,
     ) -> None:
-        """Test HALF_OPEN -> OPEN transition when recovery fails."""
+        """Test HALF_OPEN -> OPEN transition when recovery fails.
+
+        Per standard circuit breaker pattern, a SINGLE failure in HALF_OPEN
+        state immediately re-opens the circuit. This is more conservative
+        than requiring threshold failures again, protecting the system from
+        repeated failures during recovery attempts.
+        """
         # Open the circuit
         mock_consul_backend.should_fail = True
         for _ in range(3):
@@ -368,14 +374,17 @@ class TestEffectCircuitBreakerTransitions:
         # Wait for reset timeout to transition to HALF_OPEN
         await asyncio.sleep(0.15)
 
-        # Backend still failing - should reopen circuit
-        # With threshold=3, we need 3 failures to reopen
-        for i in range(3):
-            with pytest.raises(InfraConnectionError):
-                await consul_effect.register_service(f"still-failing-{i}")
+        # Backend still failing - single failure in HALF_OPEN immediately reopens circuit
+        # This is the standard circuit breaker pattern for conservative recovery
+        with pytest.raises(InfraConnectionError):
+            await consul_effect.register_service("still-failing-0")
 
-        # Circuit should be OPEN again
+        # Circuit should be OPEN again after single failure in HALF_OPEN
         assert consul_effect.get_circuit_state() == EnumCircuitState.OPEN
+
+        # Subsequent requests should be blocked immediately (circuit is OPEN)
+        with pytest.raises(InfraUnavailableError):
+            await consul_effect.register_service("blocked-by-open-circuit")
 
 
 @pytest.mark.unit
@@ -507,7 +516,12 @@ class TestEffectCircuitBreakerIsolation:
         mock_consul_backend: MockConsulBackend,
         mock_postgres_backend: MockPostgresBackend,
     ) -> None:
-        """Test effects recover independently after failures."""
+        """Test effects recover independently after failures.
+
+        Per standard circuit breaker pattern, a single failure in HALF_OPEN
+        state immediately re-opens the circuit. This test verifies that
+        independent effects can recover at different times.
+        """
         # Open both circuits
         mock_consul_backend.should_fail = True
         mock_postgres_backend.should_fail = True
@@ -521,7 +535,7 @@ class TestEffectCircuitBreakerIsolation:
         assert consul_effect.get_circuit_state() == EnumCircuitState.OPEN
         assert postgres_effect.get_circuit_state() == EnumCircuitState.OPEN
 
-        # Wait for reset timeout
+        # Wait for reset timeout - both circuits transition to HALF_OPEN
         await asyncio.sleep(0.15)
 
         # Only Consul recovers
@@ -532,11 +546,16 @@ class TestEffectCircuitBreakerIsolation:
         assert result["status"] == "registered"
         assert consul_effect.get_circuit_state() == EnumCircuitState.CLOSED
 
-        # PostgreSQL still failing
-        for _ in range(3):
-            with pytest.raises(InfraConnectionError):
-                await postgres_effect.execute_query("SELECT 1")
+        # PostgreSQL still failing - single failure in HALF_OPEN reopens circuit
+        with pytest.raises(InfraConnectionError):
+            await postgres_effect.execute_query("SELECT 1")
+
+        # Circuit should be OPEN again after single failure in HALF_OPEN
         assert postgres_effect.get_circuit_state() == EnumCircuitState.OPEN
+
+        # Subsequent requests are blocked (circuit is OPEN)
+        with pytest.raises(InfraUnavailableError):
+            await postgres_effect.execute_query("SELECT 1")
 
 
 @pytest.mark.unit

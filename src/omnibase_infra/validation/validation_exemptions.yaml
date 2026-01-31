@@ -982,6 +982,23 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Circuit Breaker Pattern section)
     ticket: OMN-1004
+  # ==========================================================================
+  # MixinAsyncCircuitBreaker - _init_circuit_breaker parameter count (OMN-1743)
+  # ==========================================================================
+  # Circuit breaker initialization requires multiple configuration parameters
+  # for proper resilience behavior: threshold, reset_timeout, service_name,
+  # transport_type, and half_open_successes. These are standard circuit breaker
+  # configuration parameters that belong together for proper initialization.
+  - file_pattern: 'mixin_async_circuit_breaker\.py'
+    method_pattern: "Function '_init_circuit_breaker'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Circuit breaker initialization requires cohesive configuration parameters: threshold (failures before open), reset_timeout (seconds before half-open), service_name (for error context), transport_type (for error codes), and half_open_successes (for close validation). These parameters define the complete circuit breaker behavior and cannot be split without losing cohesion. Alternative is ModelCircuitBreakerConfig but direct parameters preferred for mixin flexibility.
+
+    documentation:
+      - docs/patterns/circuit_breaker_implementation.md
+      - CLAUDE.md (Circuit Breaker Pattern section)
+    ticket: OMN-1743
   # ModelOperationContext - operation_name is an operation identifier string
   - file_pattern: 'model_operation_context\.py'
     violation_pattern: "Field 'operation_name' might reference an entity"
@@ -1940,6 +1957,61 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Declarative Nodes)
     ticket: OMN-1725
+  # ==========================================================================
+  # Observability Consumer Model Exemptions (OMN-1743)
+  # ==========================================================================
+  # These models consume EXTERNAL Kafka events from omniclaude producers.
+  # The field types are dictated by the producer schema, not our internal design.
+  # Using entity references (_id + _name) or enums would break compatibility
+  # with the existing event producers.
+  - file_pattern: 'services/observability/agent_actions/models/model_agent_action\.py'
+    violation_pattern: "Field 'agent_name' might reference an entity"
+    reason: >
+      External observability event payload. The agent_name field comes from Kafka events produced by omniclaude. Using ID + display_name pattern would break compatibility with existing producers.
+
+    documentation:
+      - docs/plans/OMN-1743-migration-plan.md
+    ticket: OMN-1743
+  - file_pattern: 'services/observability/agent_actions/models/model_agent_action\.py'
+    violation_pattern: "Field 'action_name' might reference an entity"
+    reason: >
+      External observability event payload. The action_name field comes from Kafka events produced by omniclaude. Using ID + display_name pattern would break compatibility with existing producers.
+
+    documentation:
+      - docs/plans/OMN-1743-migration-plan.md
+    ticket: OMN-1743
+  - file_pattern: 'services/observability/agent_actions/models/model_execution_log\.py'
+    violation_pattern: "Field 'agent_name' might reference an entity"
+    reason: >
+      External observability event payload. The agent_name field comes from Kafka events produced by omniclaude. Using ID + display_name pattern would break compatibility with existing producers.
+
+    documentation:
+      - docs/plans/OMN-1743-migration-plan.md
+    ticket: OMN-1743
+  - file_pattern: 'services/observability/agent_actions/models/model_execution_log\.py'
+    violation_pattern: "Field 'status' should use Enum"
+    reason: >
+      External observability event payload. The status field values (started, running, completed, failed) are defined by omniclaude producer. Converting to enum would break compatibility.
+
+    documentation:
+      - docs/plans/OMN-1743-migration-plan.md
+    ticket: OMN-1743
+  - file_pattern: 'services/observability/agent_actions/models/model_envelope\.py'
+    violation_pattern: "Field 'producer_id' should use UUID"
+    reason: >
+      External service identifier string (e.g., 'omniclaude', 'archon-intelligence'). It is NOT an internal entity UUID but a producer service name.
+
+    documentation:
+      - docs/plans/OMN-1743-migration-plan.md
+    ticket: OMN-1743
+  - file_pattern: 'services/observability/agent_actions/models/model_performance_metric\.py'
+    violation_pattern: "Field 'metric_name' might reference an entity"
+    reason: >
+      External observability event payload. The metric_name field comes from Kafka events produced by omniclaude. Using ID + display_name pattern would break compatibility.
+
+    documentation:
+      - docs/plans/OMN-1743-migration-plan.md
+    ticket: OMN-1743
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

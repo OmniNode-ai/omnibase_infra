@@ -58,6 +58,9 @@ class ModelCircuitBreakerConfig(BaseModel):
         transport_type: Transport type for error context classification.
             Determines which error code is used when the circuit opens.
             Default: HTTP.
+        half_open_successes: Number of successful requests required to close
+            the circuit from half-open state. Higher values provide more
+            confidence before closing. Must be >= 1 and <= 10. Default: 1.
 
     Example:
         ```python
@@ -114,6 +117,16 @@ class ModelCircuitBreakerConfig(BaseModel):
         description="Transport type for error context classification",
     )
 
+    half_open_successes: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        description=(
+            "Number of successful requests required to close the circuit from "
+            "half-open state. Higher values provide more confidence before closing."
+        ),
+    )
+
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
@@ -124,12 +137,14 @@ class ModelCircuitBreakerConfig(BaseModel):
                     "reset_timeout_seconds": 60.0,
                     "service_name": "kafka.production",
                     "transport_type": "kafka",
+                    "half_open_successes": 1,
                 },
                 {
                     "threshold": 3,
                     "reset_timeout_seconds": 120.0,
                     "service_name": "postgresql-primary",
                     "transport_type": "db",
+                    "half_open_successes": 2,
                 },
             ]
         },

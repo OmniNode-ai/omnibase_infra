@@ -191,6 +191,7 @@ class MixinAsyncCircuitBreaker:
         reset_timeout: float = 60.0,
         service_name: str = "unknown",
         transport_type: EnumInfraTransportType = EnumInfraTransportType.HTTP,
+        half_open_successes: int = 1,
     ) -> None:
         """Initialize circuit breaker state and configuration.
 
@@ -202,9 +203,11 @@ class MixinAsyncCircuitBreaker:
             reset_timeout: Seconds before automatic reset (default: 60.0)
             service_name: Service identifier for error context (e.g., "kafka.dev")
             transport_type: Transport type for error context (default: HTTP)
+            half_open_successes: Successful requests required to close circuit
+                from half-open state (default: 1)
 
         Raises:
-            ValueError: If threshold < 1 or reset_timeout < 0
+            ValueError: If threshold < 1 or reset_timeout < 0 or half_open_successes < 1
 
         Example:
             ```python
@@ -215,6 +218,7 @@ class MixinAsyncCircuitBreaker:
                         reset_timeout=config.circuit_breaker_reset_timeout,
                         service_name=f"my-service.{config.environment}",
                         transport_type=EnumInfraTransportType.HTTP,
+                        half_open_successes=config.circuit_breaker_half_open_successes,
                     )
             ```
         """
@@ -243,15 +247,30 @@ class MixinAsyncCircuitBreaker:
                 parameter="reset_timeout",
                 value=reset_timeout,
             )
+        if half_open_successes < 1:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=transport_type,
+                operation="init_circuit_breaker",
+                target_name=service_name,
+            )
+            raise ProtocolConfigurationError(
+                f"Circuit breaker half_open_successes must be >= 1, got {half_open_successes}",
+                context=context,
+                parameter="half_open_successes",
+                value=half_open_successes,
+            )
 
         # State variables
         self._circuit_breaker_failures = 0
         self._circuit_breaker_open = False
         self._circuit_breaker_open_until: float = 0.0
+        self._circuit_breaker_half_open = False
+        self._circuit_breaker_half_open_success_count = 0
 
         # Configuration
         self.circuit_breaker_threshold = threshold
         self.circuit_breaker_reset_timeout = reset_timeout
+        self.circuit_breaker_half_open_successes = half_open_successes
         self.service_name = service_name
         self._cb_transport_type = (
             transport_type  # Use private name to avoid property conflicts
@@ -265,6 +284,7 @@ class MixinAsyncCircuitBreaker:
             extra={
                 "threshold": threshold,
                 "reset_timeout": reset_timeout,
+                "half_open_successes": half_open_successes,
                 "transport_type": transport_type.value,
             },
         )
@@ -298,6 +318,7 @@ class MixinAsyncCircuitBreaker:
                         reset_timeout_seconds=60.0,
                         service_name=f"kafka.{environment}",
                         transport_type=EnumInfraTransportType.KAFKA,
+                        half_open_successes=2,
                     )
                     self._init_circuit_breaker_from_config(config)
             ```
@@ -311,6 +332,7 @@ class MixinAsyncCircuitBreaker:
             reset_timeout=config.reset_timeout_seconds,
             service_name=config.service_name,
             transport_type=config.transport_type,
+            half_open_successes=config.half_open_successes,
         )
 
     async def _check_circuit_breaker(
@@ -388,12 +410,15 @@ class MixinAsyncCircuitBreaker:
             if current_time >= self._circuit_breaker_open_until:
                 # Transition to HALF_OPEN (atomic write protected by caller's lock)
                 self._circuit_breaker_open = False
+                self._circuit_breaker_half_open = True
+                self._circuit_breaker_half_open_success_count = 0
                 self._circuit_breaker_failures = 0
                 logger.info(
                     f"Circuit breaker transitioning to half-open for {self.service_name}",
                     extra={
                         "service": self.service_name,
                         "operation": operation,
+                        "required_successes": self.circuit_breaker_half_open_successes,
                     },
                 )
             else:
@@ -484,6 +509,26 @@ class MixinAsyncCircuitBreaker:
         # Increment failure counter (atomic write protected by caller's lock)
         self._circuit_breaker_failures += 1
 
+        # If in half-open state, any failure immediately re-opens the circuit
+        if self._circuit_breaker_half_open:
+            self._circuit_breaker_open = True
+            self._circuit_breaker_half_open = False
+            self._circuit_breaker_half_open_success_count = 0
+            self._circuit_breaker_open_until = (
+                time.time() + self.circuit_breaker_reset_timeout
+            )
+
+            logger.warning(
+                f"Circuit breaker re-opened for {self.service_name} after failure in half-open state",
+                extra={
+                    "service": self.service_name,
+                    "operation": operation,
+                    "reset_timeout": self.circuit_breaker_reset_timeout,
+                    "correlation_id": str(correlation_id) if correlation_id else None,
+                },
+            )
+            return
+
         # Check if threshold reached
         if self._circuit_breaker_failures >= self.circuit_breaker_threshold:
             # Transition to OPEN state (atomic write protected by caller's lock)
@@ -564,6 +609,39 @@ class MixinAsyncCircuitBreaker:
             )
             # Still proceed but log the violation for debugging
 
+        # If in half-open state, track successes
+        if self._circuit_breaker_half_open:
+            self._circuit_breaker_half_open_success_count += 1
+
+            if (
+                self._circuit_breaker_half_open_success_count
+                >= self.circuit_breaker_half_open_successes
+            ):
+                # Enough successes - transition to CLOSED
+                logger.info(
+                    f"Circuit breaker closed for {self.service_name} after {self._circuit_breaker_half_open_success_count} successful requests in half-open state",
+                    extra={
+                        "service": self.service_name,
+                        "half_open_successes": self._circuit_breaker_half_open_success_count,
+                        "required_successes": self.circuit_breaker_half_open_successes,
+                    },
+                )
+                self._circuit_breaker_half_open = False
+                self._circuit_breaker_half_open_success_count = 0
+                self._circuit_breaker_failures = 0
+                self._circuit_breaker_open_until = 0.0
+            else:
+                # Still in half-open, waiting for more successes
+                logger.debug(
+                    f"Circuit breaker half-open success {self._circuit_breaker_half_open_success_count}/{self.circuit_breaker_half_open_successes} for {self.service_name}",
+                    extra={
+                        "service": self.service_name,
+                        "half_open_successes": self._circuit_breaker_half_open_success_count,
+                        "required_successes": self.circuit_breaker_half_open_successes,
+                    },
+                )
+            return
+
         # Log state transition if circuit was open or had failures
         if self._circuit_breaker_open or self._circuit_breaker_failures > 0:
             previous_state = "open" if self._circuit_breaker_open else "closed"
@@ -578,6 +656,8 @@ class MixinAsyncCircuitBreaker:
 
         # Reset state (atomic write protected by caller's lock)
         self._circuit_breaker_open = False
+        self._circuit_breaker_half_open = False
+        self._circuit_breaker_half_open_success_count = 0
         self._circuit_breaker_failures = 0
         self._circuit_breaker_open_until = 0.0
 
@@ -621,10 +701,15 @@ class MixinAsyncCircuitBreaker:
 
         # Read state variables with safe defaults for uninitialized state
         cb_open = getattr(self, "_circuit_breaker_open", False)
+        cb_half_open = getattr(self, "_circuit_breaker_half_open", False)
         cb_open_until = getattr(self, "_circuit_breaker_open_until", 0.0)
         cb_failures = getattr(self, "_circuit_breaker_failures", 0)
         cb_threshold = getattr(self, "circuit_breaker_threshold", 5)
         cb_reset_timeout = getattr(self, "circuit_breaker_reset_timeout", 60.0)
+        cb_half_open_successes = getattr(self, "circuit_breaker_half_open_successes", 1)
+        cb_half_open_success_count = getattr(
+            self, "_circuit_breaker_half_open_success_count", 0
+        )
 
         # Calculate state: closed, open, or half_open
         current_time = time.time()
@@ -635,6 +720,9 @@ class MixinAsyncCircuitBreaker:
             else:
                 cb_state = "open"
                 seconds_until_half_open = round(cb_open_until - current_time, 2)
+        elif cb_half_open:
+            cb_state = "half_open"
+            seconds_until_half_open = None
         else:
             cb_state = "closed"
             seconds_until_half_open = None
@@ -645,10 +733,14 @@ class MixinAsyncCircuitBreaker:
             "failures": cb_failures,
             "threshold": cb_threshold,
             "reset_timeout_seconds": cb_reset_timeout,
+            "half_open_successes_required": cb_half_open_successes,
         }
 
         if seconds_until_half_open is not None:
             result["seconds_until_half_open"] = seconds_until_half_open
+
+        if cb_state == "half_open":
+            result["half_open_success_count"] = cb_half_open_success_count
 
         return result
 
