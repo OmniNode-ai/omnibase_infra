@@ -225,6 +225,35 @@ class TestConsumerMetrics:
         assert metrics.batches_processed == 2
 
     @pytest.mark.asyncio
+    async def test_record_polled_updates_last_poll_at(self) -> None:
+        """record_polled should update last_poll_at timestamp.
+
+        This ensures empty polls still update the timestamp, preventing
+        false DEGRADED health status on low-traffic topics.
+        """
+        metrics = ConsumerMetrics()
+
+        assert metrics.last_poll_at is None
+
+        await metrics.record_polled()
+
+        assert metrics.last_poll_at is not None
+
+    @pytest.mark.asyncio
+    async def test_record_polled_does_not_increment_received(self) -> None:
+        """record_polled should NOT increment messages_received counter.
+
+        This distinguishes it from record_received() which increments
+        the counter AND updates the timestamp.
+        """
+        metrics = ConsumerMetrics()
+
+        await metrics.record_polled()
+
+        assert metrics.messages_received == 0
+        assert metrics.last_poll_at is not None
+
+    @pytest.mark.asyncio
     async def test_snapshot_returns_dict(self) -> None:
         """snapshot should return dictionary with all metrics."""
         metrics = ConsumerMetrics()

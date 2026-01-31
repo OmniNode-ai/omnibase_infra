@@ -198,6 +198,19 @@ class ConsumerMetrics:
         async with self._lock:
             self.batches_processed += 1
 
+    async def record_polled(self) -> None:
+        """Record a poll attempt (updates last_poll_at regardless of message count).
+
+        This method should be called after every successful Kafka poll, even when
+        the poll returns no messages. This prevents false DEGRADED health status
+        on low-traffic topics where empty polls are normal.
+
+        See: CodeRabbit PR #220 feedback - last_poll_at was only updated via
+        record_received(), causing stale timestamps on empty polls.
+        """
+        async with self._lock:
+            self.last_poll_at = datetime.now(UTC)
+
     async def snapshot(self) -> dict[str, object]:
         """Get a snapshot of current metrics.
 
@@ -643,6 +656,10 @@ class AgentActionsConsumer:
                 except TimeoutError:
                     # Poll timeout is normal, continue loop
                     continue
+
+                # Record poll time even if no messages - prevents false DEGRADED
+                # health status on low-traffic topics (CodeRabbit PR #220 feedback)
+                await self.metrics.record_polled()
 
                 if not records:
                     continue
