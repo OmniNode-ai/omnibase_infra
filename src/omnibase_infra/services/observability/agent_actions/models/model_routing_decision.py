@@ -122,5 +122,17 @@ class ModelRoutingDecision(BaseModel):
         description="Complete raw payload for Phase 2 schema tightening.",
     )
 
+    def __str__(self) -> str:
+        """Return concise string representation for logging.
+
+        Includes key identifying fields but excludes metadata and raw_payload.
+        """
+        id_short = str(self.id)[:8]
+        domain_part = f", domain={self.domain}" if self.domain else ""
+        return (
+            f"RoutingDecision(id={id_short}, agent={self.selected_agent}, "
+            f"confidence={self.confidence_score:.2f}{domain_part})"
+        )
+
 
 __all__ = ["ModelRoutingDecision"]

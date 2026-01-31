@@ -91,6 +91,17 @@ class ConfigAgentActionsConsumer(BaseSettings):
         le=60000,
         description="Timeout for batch accumulation in milliseconds",
     )
+    poll_timeout_buffer_seconds: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=30.0,
+        description=(
+            "Additional buffer time in seconds added to batch_timeout_ms for "
+            "the asyncio.wait_for timeout when polling Kafka. This buffer accounts "
+            "for Kafka client internal processing overhead beyond the poll timeout. "
+            "Configure via OMNIBASE_INFRA_AGENT_ACTIONS_POLL_TIMEOUT_BUFFER_SECONDS env var."
+        ),
+    )
 
     # Circuit breaker
     circuit_breaker_threshold: int = Field(

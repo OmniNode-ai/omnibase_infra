@@ -60,6 +60,7 @@ from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse, urlunparse
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -89,6 +90,69 @@ if TYPE_CHECKING:
     from aiokafka.structs import ConsumerRecord
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Utility Functions
+# =============================================================================
+
+
+def mask_dsn_password(dsn: str) -> str:
+    """Mask password in a PostgreSQL DSN for safe logging.
+
+    Parses the DSN and replaces any password component with '***'.
+    Handles standard PostgreSQL connection string formats.
+
+    Args:
+        dsn: PostgreSQL connection string, e.g.,
+            'postgresql://user:password@host:port/db'
+
+    Returns:
+        DSN with password replaced by '***'. If parsing fails or no password
+        is present, returns the original DSN (safe - no password to mask).
+
+    Examples:
+        >>> mask_dsn_password("postgresql://user:secret@localhost:5432/db")
+        'postgresql://user:***@localhost:5432/db'
+
+        >>> mask_dsn_password("postgresql://user@localhost/db")
+        'postgresql://user@localhost/db'
+
+        >>> mask_dsn_password("invalid-dsn")
+        'invalid-dsn'
+    """
+    try:
+        parsed = urlparse(dsn)
+
+        # No password present - safe to return as-is
+        if not parsed.password:
+            return dsn
+
+        # Reconstruct netloc with masked password
+        # Format: user:***@host:port or user:***@host
+        if parsed.port:
+            masked_netloc = f"{parsed.username}:***@{parsed.hostname}:{parsed.port}"
+        else:
+            masked_netloc = f"{parsed.username}:***@{parsed.hostname}"
+
+        # Reconstruct the full DSN with masked password
+        masked = urlunparse(
+            (
+                parsed.scheme,
+                masked_netloc,
+                parsed.path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+        return masked
+
+    except Exception:
+        # If parsing fails, return original (likely no password to mask)
+        # Log at debug level to avoid noise
+        logger.debug("Failed to parse DSN for masking, returning as-is")
+        return dsn
 
 
 # =============================================================================
@@ -324,6 +388,7 @@ class AgentActionsConsumer:
                 "topics": self._config.topics,
                 "group_id": self._config.kafka_group_id,
                 "bootstrap_servers": self._config.kafka_bootstrap_servers,
+                "postgres_dsn": mask_dsn_password(self._config.postgres_dsn),
                 "batch_size": self._config.batch_size,
                 "batch_timeout_ms": self._config.batch_timeout_ms,
             },
@@ -400,6 +465,7 @@ class AgentActionsConsumer:
                 extra={
                     "consumer_id": self._consumer_id,
                     "correlation_id": str(correlation_id),
+                    "postgres_dsn": mask_dsn_password(self._config.postgres_dsn),
                 },
             )
 
@@ -651,7 +717,8 @@ class AgentActionsConsumer:
                             timeout_ms=self._config.batch_timeout_ms,
                             max_records=self._config.batch_size,
                         ),
-                        timeout=batch_timeout_seconds + 5.0,  # Buffer for poll timeout
+                        timeout=batch_timeout_seconds
+                        + self._config.poll_timeout_buffer_seconds,
                     )
                 except TimeoutError:
                     # Poll timeout is normal, continue loop
@@ -1195,6 +1262,7 @@ async def _main() -> None:
         extra={
             "topics": config.topics,
             "bootstrap_servers": config.kafka_bootstrap_servers,
+            "postgres_dsn": mask_dsn_password(config.postgres_dsn),
             "group_id": config.kafka_group_id,
             "health_port": config.health_check_port,
         },
@@ -1248,4 +1316,5 @@ __all__ = [
     "EnumHealthStatus",
     "TOPIC_TO_MODEL",
     "TOPIC_TO_WRITER_METHOD",
+    "mask_dsn_password",
 ]

@@ -35,6 +35,7 @@ from omnibase_infra.services.observability.agent_actions.consumer import (
     AgentActionsConsumer,
     ConsumerMetrics,
     EnumHealthStatus,
+    mask_dsn_password,
 )
 
 if TYPE_CHECKING:
@@ -153,6 +154,62 @@ class TestTopicModelMapping:
         assert TOPIC_TO_MODEL["router-performance-metrics"] is ModelPerformanceMetric
         assert TOPIC_TO_MODEL["agent-detection-failures"] is ModelDetectionFailure
         assert TOPIC_TO_MODEL["agent-execution-logs"] is ModelExecutionLog
+
+
+# =============================================================================
+# DSN Password Masking Tests
+# =============================================================================
+
+
+class TestMaskDsnPassword:
+    """Test DSN password masking utility function."""
+
+    def test_mask_standard_dsn_with_password(self) -> None:
+        """Standard DSN with password should have password masked."""
+        dsn = "postgresql://user:secret@localhost:5432/db"
+        result = mask_dsn_password(dsn)
+        assert result == "postgresql://user:***@localhost:5432/db"
+
+    def test_mask_dsn_without_port(self) -> None:
+        """DSN without explicit port should be handled correctly."""
+        dsn = "postgresql://user:password@localhost/db"
+        result = mask_dsn_password(dsn)
+        assert result == "postgresql://user:***@localhost/db"
+
+    def test_mask_dsn_without_password(self) -> None:
+        """DSN without password should be returned unchanged."""
+        dsn = "postgresql://user@localhost:5432/db"
+        result = mask_dsn_password(dsn)
+        assert result == dsn
+
+    def test_mask_dsn_with_complex_password(self) -> None:
+        """DSN with special characters in password should be masked."""
+        dsn = "postgresql://user:p%40ss%2Fword@localhost:5432/db"
+        result = mask_dsn_password(dsn)
+        assert result == "postgresql://user:***@localhost:5432/db"
+
+    def test_mask_dsn_with_query_params(self) -> None:
+        """DSN with query parameters should preserve them."""
+        dsn = "postgresql://user:secret@localhost:5432/db?sslmode=require"
+        result = mask_dsn_password(dsn)
+        assert result == "postgresql://user:***@localhost:5432/db?sslmode=require"
+
+    def test_mask_invalid_dsn_returns_original(self) -> None:
+        """Invalid DSN should be returned unchanged."""
+        dsn = "not-a-valid-dsn"
+        result = mask_dsn_password(dsn)
+        assert result == dsn
+
+    def test_mask_empty_string(self) -> None:
+        """Empty string should be returned unchanged."""
+        result = mask_dsn_password("")
+        assert result == ""
+
+    def test_mask_dsn_ipv4_host(self) -> None:
+        """DSN with IPv4 host should be handled correctly."""
+        dsn = "postgresql://postgres:mysecret@192.168.1.100:5436/omninode_bridge"
+        result = mask_dsn_password(dsn)
+        assert result == "postgresql://postgres:***@192.168.1.100:5436/omninode_bridge"
 
 
 # =============================================================================
@@ -1083,6 +1140,7 @@ class TestRunMethod:
 
 
 __all__ = [
+    "TestMaskDsnPassword",
     "TestTopicModelMapping",
     "TestConsumerMetrics",
     "TestEnumHealthStatus",

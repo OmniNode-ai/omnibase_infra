@@ -113,5 +113,18 @@ class ModelPerformanceMetric(BaseModel):
         description="Complete raw payload for Phase 2 schema tightening.",
     )
 
+    def __str__(self) -> str:
+        """Return concise string representation for logging.
+
+        Includes key identifying fields but excludes metadata and raw_payload.
+        """
+        id_short = str(self.id)[:8]
+        unit_part = f" {self.unit}" if self.unit else ""
+        agent_part = f", agent={self.agent_name}" if self.agent_name else ""
+        return (
+            f"PerformanceMetric(id={id_short}, "
+            f"{self.metric_name}={self.metric_value}{unit_part}{agent_part})"
+        )
+
 
 __all__ = ["ModelPerformanceMetric"]

@@ -142,5 +142,18 @@ class ModelExecutionLog(BaseModel):
         description="Complete raw payload for Phase 2 schema tightening.",
     )
 
+    def __str__(self) -> str:
+        """Return concise string representation for logging.
+
+        Includes key identifying fields but excludes metadata and raw_payload.
+        """
+        exec_short = str(self.execution_id)[:8]
+        duration_part = f", duration={self.duration_ms}ms" if self.duration_ms else ""
+        exit_part = f", exit={self.exit_code}" if self.exit_code is not None else ""
+        return (
+            f"ExecutionLog(id={exec_short}, agent={self.agent_name}, "
+            f"status={self.status}{duration_part}{exit_part})"
+        )
+
 
 __all__ = ["ModelExecutionLog"]

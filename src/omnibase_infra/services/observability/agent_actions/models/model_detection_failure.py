@@ -106,5 +106,20 @@ class ModelDetectionFailure(BaseModel):
         description="Complete raw payload for Phase 2 schema tightening.",
     )
 
+    def __str__(self) -> str:
+        """Return concise string representation for logging.
+
+        Includes key identifying fields but excludes metadata and raw_payload.
+        """
+        corr_short = str(self.correlation_id)[:8]
+        fallback_part = f", fallback={self.fallback_used}" if self.fallback_used else ""
+        # Truncate failure_reason to 50 chars for log readability
+        reason = (
+            self.failure_reason[:47] + "..."
+            if len(self.failure_reason) > 50
+            else self.failure_reason
+        )
+        return f"DetectionFailure(corr={corr_short}, reason={reason!r}{fallback_part})"
+
 
 __all__ = ["ModelDetectionFailure"]

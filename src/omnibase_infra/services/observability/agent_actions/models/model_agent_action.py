@@ -126,5 +126,17 @@ class ModelAgentAction(BaseModel):
         description="Complete raw payload for Phase 2 schema tightening.",
     )
 
+    def __str__(self) -> str:
+        """Return concise string representation for logging.
+
+        Includes key identifying fields but excludes metadata and raw_payload.
+        """
+        id_short = str(self.id)[:8]
+        status_part = f", status={self.status}" if self.status else ""
+        return (
+            f"AgentAction(id={id_short}, agent={self.agent_name}, "
+            f"type={self.action_type}, action={self.action_name}{status_part})"
+        )
+
 
 __all__ = ["ModelAgentAction"]

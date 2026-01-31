@@ -48,6 +48,7 @@ from omnibase_infra.services.observability.agent_actions.consumer import (
     AgentActionsConsumer,
     ConsumerMetrics,
     EnumHealthStatus,
+    mask_dsn_password,
 )
 from omnibase_infra.services.observability.agent_actions.writer_postgres import (
     WriterAgentActionsPostgres,
@@ -59,4 +60,5 @@ __all__ = [
     "ConsumerMetrics",
     "EnumHealthStatus",
     "WriterAgentActionsPostgres",
+    "mask_dsn_password",
 ]

@@ -109,5 +109,16 @@ class ModelTransformationEvent(BaseModel):
         description="Complete raw payload for Phase 2 schema tightening.",
     )
 
+    def __str__(self) -> str:
+        """Return concise string representation for logging.
+
+        Includes key identifying fields but excludes metadata and raw_payload.
+        """
+        id_short = str(self.id)[:8]
+        return (
+            f"TransformationEvent(id={id_short}, "
+            f"source={self.source_agent}, target={self.target_agent})"
+        )
+
 
 __all__ = ["ModelTransformationEvent"]
