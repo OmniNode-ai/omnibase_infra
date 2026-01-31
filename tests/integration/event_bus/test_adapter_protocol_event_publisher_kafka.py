@@ -33,6 +33,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_infra.errors import InfraUnavailableError
 from omnibase_spi.protocols.event_bus import ProtocolEventPublisher
 
 # =============================================================================
@@ -425,8 +426,8 @@ class TestPublishOperations:
     ) -> None:
         """Verify Unicode partition keys are correctly encoded to UTF-8."""
         topic = await ensure_test_topic(f"test.unicode.key.{uuid4().hex[:8]}", 1)
-        # Unicode partition key with Japanese, emoji, and accented characters
-        partition_key = "user-cafe-123"  # Simplified for Kafka topic name compatibility
+        # Unicode partition key with accented characters
+        partition_key = "user-caf\u00e9-123"
 
         success = await adapter.publish(
             event_type="test.event",
@@ -820,19 +821,19 @@ class TestLifecycle:
         # Close the adapter
         await test_adapter.close()
 
-        # Attempting to publish after close should raise RuntimeError
-        with pytest.raises(RuntimeError, match="Publisher has been closed"):
+        # Attempting to publish after close should raise InfraUnavailableError
+        with pytest.raises(InfraUnavailableError, match="Publisher has been closed"):
             await test_adapter.publish(
                 event_type="after.close",
                 payload={"data": "should-fail"},
             )
 
     @pytest.mark.asyncio
-    async def test_publish_after_close_raises_runtime_error(
+    async def test_publish_after_close_raises_infra_unavailable_error(
         self,
         started_kafka_bus: object,
     ) -> None:
-        """Verify publish after close raises RuntimeError."""
+        """Verify publish after close raises InfraUnavailableError."""
         from omnibase_infra.event_bus.adapters import AdapterProtocolEventPublisherKafka
         from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 
@@ -847,8 +848,8 @@ class TestLifecycle:
         # Close the adapter
         await test_adapter.close()
 
-        # Should raise RuntimeError with specific message
-        with pytest.raises(RuntimeError, match="Publisher has been closed"):
+        # Should raise InfraUnavailableError with specific message
+        with pytest.raises(InfraUnavailableError, match="Publisher has been closed"):
             await test_adapter.publish(
                 event_type="after.close.event",
                 payload={"should": "fail"},
@@ -928,7 +929,7 @@ class TestLifecycle:
         await test_adapter.reset_metrics()
 
         # Verify adapter is still closed after reset
-        with pytest.raises(RuntimeError, match="Publisher has been closed"):
+        with pytest.raises(InfraUnavailableError, match="Publisher has been closed"):
             await test_adapter.publish(
                 event_type="after.reset",
                 payload={"should": "still-fail"},

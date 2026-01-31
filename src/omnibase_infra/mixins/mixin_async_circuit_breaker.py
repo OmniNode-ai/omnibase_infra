@@ -652,5 +652,25 @@ class MixinAsyncCircuitBreaker:
 
         return result
 
+    def get_circuit_breaker_state(self) -> dict[str, JsonType]:
+        """Return current circuit breaker state for external introspection.
+
+        This is the public API for accessing circuit breaker state. Adapters and
+        other external consumers should use this method rather than accessing
+        private attributes.
+
+        See `_get_circuit_breaker_state()` for implementation details.
+
+        Returns:
+            dict containing:
+                - initialized: Whether circuit breaker has been initialized
+                - state: Current state ("closed", "open", or "half_open")
+                - failures: Current failure count
+                - threshold: Configured failure threshold
+                - reset_timeout_seconds: Configured reset timeout
+                - seconds_until_half_open: Seconds until half_open (only when open)
+        """
+        return self._get_circuit_breaker_state()
+
 
 __all__ = ["EnumCircuitState", "MixinAsyncCircuitBreaker", "ModelCircuitBreakerConfig"]

@@ -86,7 +86,7 @@ Publish an event with canonical `ModelEventEnvelope` serialization.
 
 **Returns**: `bool` - `True` if published successfully, `False` otherwise.
 
-**Raises**: `RuntimeError` if adapter has been closed.
+**Raises**: `InfraUnavailableError` if adapter has been closed.
 
 #### get_metrics()
 
@@ -120,7 +120,7 @@ Close the publisher and release resources.
 |-----------|------|---------|-------------|
 | `timeout_seconds` | `float` | `30.0` | Timeout for cleanup operations. |
 
-After closing, any calls to `publish()` will raise `RuntimeError`.
+After closing, any calls to `publish()` will raise `InfraUnavailableError`.
 
 ---
 
@@ -199,7 +199,7 @@ The adapter does NOT implement its own circuit breaker. Resilience (circuit brea
 
 #### 2. Publish Returns bool - Exceptions Are Caught, Not Propagated
 
-All exceptions during publish are caught, logged, and result in `False` being returned. No exceptions propagate to the caller (except `RuntimeError` for closed adapter).
+All exceptions during publish are caught, logged, and result in `False` being returned. No exceptions propagate to the caller (except `InfraUnavailableError` for closed adapter).
 
 **Rationale**: Allows callers to implement their own retry/fallback logic without needing to handle infrastructure-specific exception types. The metrics track failure counts for observability.
 
@@ -231,7 +231,7 @@ The `partition_key` is encoded to UTF-8 bytes as per the SPI specification. This
 |----------|----------|
 | Publish succeeds | Returns `True`, increments `events_published` |
 | Publish fails (any exception) | Returns `False`, increments `events_failed`, logs exception |
-| Adapter closed | Raises `RuntimeError("Publisher has been closed")` |
+| Adapter closed | Raises `InfraUnavailableError("Publisher has been closed")` |
 | Invalid correlation_id format | Generates new UUID, logs warning with original value |
 | Close fails | Logs warning, continues (best-effort cleanup) |
 

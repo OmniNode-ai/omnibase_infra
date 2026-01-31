@@ -54,9 +54,12 @@ from uuid import UUID, uuid4
 from omnibase_core.models.core.model_envelope_metadata import ModelEnvelopeMetadata
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.types import JsonType
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.event_bus.testing.model_publisher_metrics import (
     ModelPublisherMetrics,
 )
+from omnibase_infra.models.errors import ModelInfraErrorContext
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -171,10 +174,14 @@ class AdapterProtocolEventPublisherKafka:
             True if published successfully, False otherwise.
 
         Raises:
-            RuntimeError: If adapter has been closed.
+            InfraUnavailableError: If adapter has been closed.
         """
         if self._closed:
-            raise RuntimeError("Publisher has been closed")
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="publish",
+            )
+            raise InfraUnavailableError("Publisher has been closed", context=context)
 
         start_time = datetime.now(UTC)
 
@@ -306,7 +313,7 @@ class AdapterProtocolEventPublisherKafka:
             tags["causation_id"] = str(causation_id)
 
         # Merge additional metadata context values into tags
-        if metadata is not None and isinstance(metadata, dict):
+        if metadata is not None:
             for key, value in metadata.items():
                 # Context values may have a serialize_for_context method or be simple types
                 if hasattr(value, "serialize_for_context"):
@@ -350,8 +357,8 @@ class AdapterProtocolEventPublisherKafka:
             - current_failures: Current consecutive failure count
         """
         # Read circuit breaker state from underlying bus
-        # EventBusKafka inherits MixinAsyncCircuitBreaker which provides _get_circuit_breaker_state()
-        cb_state = self._bus._get_circuit_breaker_state()
+        # EventBusKafka inherits MixinAsyncCircuitBreaker which provides get_circuit_breaker_state()
+        cb_state = self._bus.get_circuit_breaker_state()
 
         # Extract values with safe type handling for JsonType
         state_value = cb_state.get("state", "unknown")
@@ -399,7 +406,7 @@ class AdapterProtocolEventPublisherKafka:
         """Close the publisher and release resources.
 
         Marks the adapter as closed and stops the underlying EventBusKafka.
-        After closing, any calls to publish() will raise RuntimeError.
+        After closing, any calls to publish() will raise InfraUnavailableError.
 
         Args:
             timeout_seconds: Timeout for cleanup operations. Currently unused
