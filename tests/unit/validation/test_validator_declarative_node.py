@@ -141,6 +141,40 @@ class TestDeclarativeNodePass:
 
         assert len(violations) == 0
 
+    def test_pass_generic_node_reducer(self, tmp_path: Path) -> None:
+        """Generic NodeReducer with type parameters should be recognized as a node."""
+        code = """
+        from omnibase_core.nodes.node_reducer import NodeReducer
+
+        class MyReducer(NodeReducer["StateType", "OutputType"]):
+            '''Declarative reducer with generic type parameters.'''
+            pass
+        """
+        filepath = _create_test_file(tmp_path, code)
+
+        violations = validate_declarative_node_in_file(filepath)
+
+        # Should pass - generic NodeReducer is recognized as a node class
+        assert len(violations) == 0
+
+    def test_pass_generic_node_reducer_with_init(self, tmp_path: Path) -> None:
+        """Generic NodeReducer with valid __init__ should pass."""
+        code = """
+        from omnibase_core.nodes.node_reducer import NodeReducer
+
+        class MyReducer(NodeReducer["StateType", "OutputType"]):
+            '''Declarative reducer with generic type parameters.'''
+
+            def __init__(self, container):
+                '''Initialize the reducer.'''
+                super().__init__(container)
+        """
+        filepath = _create_test_file(tmp_path, code)
+
+        violations = validate_declarative_node_in_file(filepath)
+
+        assert len(violations) == 0
+
 
 class TestDeclarativeNodeViolations:
     """Tests for detecting declarative node violations."""
@@ -634,6 +668,11 @@ class TestValidatorDeclarativeNodeClass:
                 description="Syntax errors",
                 enabled=True,
             ),
+            ModelValidatorRule(
+                rule_id="DECL-007",
+                description="No node class",
+                enabled=True,
+            ),
         ]
         contract = _create_custom_contract(rules=rules)
         validator = ValidatorDeclarativeNode(contract=contract)
@@ -846,6 +885,11 @@ class TestContractRuleConfiguration:
                 description="Syntax errors",
                 enabled=True,
             ),
+            ModelValidatorRule(
+                rule_id="DECL-007",
+                description="No node class",
+                enabled=True,
+            ),
         ]
         contract = _create_custom_contract(rules=rules)
         validator = ValidatorDeclarativeNode(contract=contract)
@@ -898,6 +942,11 @@ class TestContractRuleConfiguration:
             ModelValidatorRule(
                 rule_id="DECL-006",
                 description="Syntax errors",
+                enabled=True,
+            ),
+            ModelValidatorRule(
+                rule_id="DECL-007",
+                description="No node class",
                 enabled=True,
             ),
         ]
@@ -965,6 +1014,11 @@ class TestContractRuleConfiguration:
                 description="Syntax errors",
                 enabled=False,
             ),
+            ModelValidatorRule(
+                rule_id="DECL-007",
+                description="No node class",
+                enabled=False,
+            ),
         ]
         contract = _create_custom_contract(rules=rules)
         validator = ValidatorDeclarativeNode(contract=contract)
@@ -975,6 +1029,126 @@ class TestContractRuleConfiguration:
         assert len(result.issues) == 0
 
 
+class TestIsExemptableProperty:
+    """Tests for is_exemptable property on violation enum and model."""
+
+    def test_syntax_error_is_not_exemptable(self) -> None:
+        """SYNTAX_ERROR violations cannot be exempted."""
+        assert EnumDeclarativeNodeViolation.SYNTAX_ERROR.is_exemptable is False
+
+    def test_no_node_class_is_not_exemptable(self) -> None:
+        """NO_NODE_CLASS violations cannot be exempted."""
+        assert EnumDeclarativeNodeViolation.NO_NODE_CLASS.is_exemptable is False
+
+    def test_custom_method_is_exemptable(self) -> None:
+        """CUSTOM_METHOD violations can be exempted."""
+        assert EnumDeclarativeNodeViolation.CUSTOM_METHOD.is_exemptable is True
+
+    def test_custom_property_is_exemptable(self) -> None:
+        """CUSTOM_PROPERTY violations can be exempted."""
+        assert EnumDeclarativeNodeViolation.CUSTOM_PROPERTY.is_exemptable is True
+
+    def test_init_custom_logic_is_exemptable(self) -> None:
+        """INIT_CUSTOM_LOGIC violations can be exempted."""
+        assert EnumDeclarativeNodeViolation.INIT_CUSTOM_LOGIC.is_exemptable is True
+
+    def test_instance_variable_is_exemptable(self) -> None:
+        """INSTANCE_VARIABLE violations can be exempted."""
+        assert EnumDeclarativeNodeViolation.INSTANCE_VARIABLE.is_exemptable is True
+
+    def test_class_variable_is_exemptable(self) -> None:
+        """CLASS_VARIABLE violations can be exempted."""
+        assert EnumDeclarativeNodeViolation.CLASS_VARIABLE.is_exemptable is True
+
+    def test_model_delegates_is_exemptable(self) -> None:
+        """ModelDeclarativeNodeViolation.is_exemptable delegates to enum."""
+        from omnibase_infra.models.validation.model_declarative_node_violation import (
+            ModelDeclarativeNodeViolation,
+        )
+
+        # Exemptable violation
+        exemptable_violation = ModelDeclarativeNodeViolation(
+            file_path=Path("/test/node.py"),
+            line_number=10,
+            violation_type=EnumDeclarativeNodeViolation.CUSTOM_METHOD,
+            code_snippet="def custom(): ...",
+            suggestion="Move to handler",
+            node_class_name="TestNode",
+        )
+        assert exemptable_violation.is_exemptable is True
+
+        # Non-exemptable violation
+        non_exemptable_violation = ModelDeclarativeNodeViolation(
+            file_path=Path("/test/node.py"),
+            line_number=1,
+            violation_type=EnumDeclarativeNodeViolation.SYNTAX_ERROR,
+            code_snippet="Syntax error",
+            suggestion="Fix syntax",
+        )
+        assert non_exemptable_violation.is_exemptable is False
+
+    def test_format_human_readable_includes_exemption_hint(self) -> None:
+        """format_human_readable includes exemption hint for exemptable violations."""
+        from omnibase_infra.models.validation.model_declarative_node_violation import (
+            ModelDeclarativeNodeViolation,
+        )
+
+        violation = ModelDeclarativeNodeViolation(
+            file_path=Path("/test/node.py"),
+            line_number=10,
+            violation_type=EnumDeclarativeNodeViolation.CUSTOM_METHOD,
+            code_snippet="def custom(): ...",
+            suggestion="Move to handler",
+            node_class_name="TestNode",
+            method_name="custom",
+        )
+
+        output = violation.format_human_readable()
+
+        assert "ONEX_EXCLUDE: declarative_node" in output
+        assert "Exemption:" in output
+
+    def test_format_human_readable_no_exemption_for_syntax_error(self) -> None:
+        """format_human_readable does NOT include exemption hint for SYNTAX_ERROR."""
+        from omnibase_infra.models.validation.model_declarative_node_violation import (
+            ModelDeclarativeNodeViolation,
+        )
+
+        violation = ModelDeclarativeNodeViolation(
+            file_path=Path("/test/node.py"),
+            line_number=1,
+            violation_type=EnumDeclarativeNodeViolation.SYNTAX_ERROR,
+            code_snippet="Syntax error",
+            suggestion="Fix syntax",
+        )
+
+        output = violation.format_human_readable()
+
+        assert "ONEX_EXCLUDE" not in output
+        assert "Exemption:" not in output
+
+    def test_format_human_readable_no_exemption_for_no_node_class(self) -> None:
+        """format_human_readable does NOT include exemption hint for NO_NODE_CLASS."""
+        from omnibase_infra.enums import EnumValidationSeverity
+        from omnibase_infra.models.validation.model_declarative_node_violation import (
+            ModelDeclarativeNodeViolation,
+        )
+
+        violation = ModelDeclarativeNodeViolation(
+            file_path=Path("/test/nodes/my/node.py"),
+            line_number=1,
+            violation_type=EnumDeclarativeNodeViolation.NO_NODE_CLASS,
+            code_snippet="# No Node class found",
+            suggestion="Add a Node class or rename file",
+            severity=EnumValidationSeverity.WARNING,
+        )
+
+        output = violation.format_human_readable()
+
+        assert "ONEX_EXCLUDE" not in output
+        assert "Exemption:" not in output
+
+
 __all__ = [
     "TestDeclarativeNodePass",
     "TestDeclarativeNodeViolations",
@@ -983,4 +1157,5 @@ __all__ = [
     "TestValidatorDeclarativeNodeClass",
     "TestMultipleNodeClasses",
     "TestContractRuleConfiguration",
+    "TestIsExemptableProperty",
 ]

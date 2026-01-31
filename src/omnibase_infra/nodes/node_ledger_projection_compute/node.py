@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ONEX_EXCLUDE: declarative_node - legacy compute node with projection logic (OMN-1725)
 class NodeLedgerProjectionCompute(NodeCompute):
     """COMPUTE node that extracts metadata from platform events for ledger persistence.
 

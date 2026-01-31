@@ -102,6 +102,19 @@ class ModelDeclarativeNodeViolation(BaseModel):
         """
         return self.severity == EnumValidationSeverity.ERROR
 
+    @property
+    def is_exemptable(self) -> bool:
+        """Check if this violation can be exempted via ONEX_EXCLUDE comment.
+
+        Delegates to the violation type's is_exemptable property.
+        Some violations like SYNTAX_ERROR and NO_NODE_CLASS cannot be
+        exempted because they indicate fundamental issues with the source file.
+
+        Returns:
+            True if the violation can be exempted via inline comment.
+        """
+        return self.violation_type.is_exemptable
+
     def format_for_ci(self) -> str:
         """Format violation for CI output (GitHub Actions compatible).
 
@@ -121,6 +134,8 @@ class ModelDeclarativeNodeViolation(BaseModel):
     def format_human_readable(self) -> str:
         """Format violation for human-readable console output.
 
+        Includes exemption hint for exemptable violation types.
+
         Returns:
             Formatted string with file location and suggestion.
 
@@ -130,6 +145,7 @@ class ModelDeclarativeNodeViolation(BaseModel):
             Method: compute
             Code: def compute(self, data): ...
             Suggestion: Move business logic to a Handler class...
+            Exemption: Add '# ONEX_EXCLUDE: declarative_node' above the class
         """
         lines = [
             f"{self.file_path}:{self.line_number} - {self.violation_type.value}",
@@ -140,6 +156,10 @@ class ModelDeclarativeNodeViolation(BaseModel):
             lines.append(f"  Method: {self.method_name}")
         lines.append(f"  Code: {self.code_snippet}")
         lines.append(f"  Suggestion: {self.suggestion}")
+        if self.is_exemptable:
+            lines.append(
+                "  Exemption: Add '# ONEX_EXCLUDE: declarative_node' above the class"
+            )
         return "\n".join(lines)
 
 

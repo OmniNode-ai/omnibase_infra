@@ -27,7 +27,7 @@ Usage:
         ...     for issue in result.issues:
         ...         print(f"{issue.file_path}:{issue.line_number}: {issue.message}")
 
-    Legacy module functions (backwards compatible)::
+    Module-level convenience functions::
 
         >>> from omnibase_infra.validation.validator_declarative_node import (
         ...     validate_declarative_nodes,
@@ -152,7 +152,11 @@ def _get_base_class_names(class_node: ast.ClassDef) -> set[str]:
         class_node: AST ClassDef node.
 
     Returns:
-        Set of base class names (handles both Name and Attribute nodes).
+        Set of base class names (handles Name, Attribute, and Subscript nodes).
+
+    Note:
+        Subscript nodes represent generic types like NodeReducer["State", "Output"].
+        We extract the base class name from the subscript value.
     """
     base_names: set[str] = set()
     for base in class_node.bases:
@@ -160,6 +164,13 @@ def _get_base_class_names(class_node: ast.ClassDef) -> set[str]:
             base_names.add(base.id)
         elif isinstance(base, ast.Attribute):
             base_names.add(base.attr)
+        elif isinstance(base, ast.Subscript):
+            # Handle generic types like NodeReducer["State", "Output"]
+            subscript_value = base.value
+            if isinstance(subscript_value, ast.Name):
+                base_names.add(subscript_value.id)
+            elif isinstance(subscript_value, ast.Attribute):
+                base_names.add(subscript_value.attr)
     return base_names
 
 
@@ -440,8 +451,8 @@ _VIOLATION_TO_RULE_ID: dict[EnumDeclarativeNodeViolation, str] = {
 # SHARED CORE VALIDATION FUNCTIONS
 # =============================================================================
 # These internal functions contain the core validation logic that is shared
-# between the ValidatorDeclarativeNode class and the legacy module functions.
-# This eliminates duplication while maintaining backwards compatibility.
+# between the ValidatorDeclarativeNode class and the module-level functions.
+# This eliminates duplication while providing multiple API styles.
 # =============================================================================
 
 
@@ -716,10 +727,9 @@ class ValidatorDeclarativeNode(ValidatorBase):
 
 
 # =============================================================================
-# BACKWARDS COMPATIBLE MODULE-LEVEL FUNCTIONS
+# MODULE-LEVEL CONVENIENCE FUNCTIONS
 # =============================================================================
-# These functions maintain backwards compatibility with existing code that
-# imports validate_declarative_nodes, validate_declarative_nodes_ci, etc.
+# These functions provide a simpler API for common use cases.
 # They delegate to the shared core functions defined above.
 # =============================================================================
 
@@ -729,7 +739,7 @@ def validate_declarative_node_in_file(
 ) -> list[ModelDeclarativeNodeViolation]:
     """Validate a single node.py file for declarative compliance.
 
-    This is a backwards-compatible wrapper that delegates to _validate_file_core.
+    Convenience function that delegates to the core validation logic.
 
     Args:
         file_path: Path to the node.py file.
@@ -746,8 +756,8 @@ def validate_declarative_nodes(
 ) -> list[ModelDeclarativeNodeViolation]:
     """Validate all node.py files in a directory.
 
-    This is a backwards-compatible wrapper that delegates to
-    _validate_directory_with_count, discarding the file count.
+    Convenience function that validates all node.py files, returning only violations.
+    For CI integration with file counts, use validate_declarative_nodes_ci instead.
 
     Args:
         directory: Directory to scan for node.py files.

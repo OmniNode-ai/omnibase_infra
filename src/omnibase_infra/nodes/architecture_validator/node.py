@@ -69,6 +69,7 @@ if TYPE_CHECKING:
 _ValidatorFunc = Callable[[str], ModelFileValidationResult]
 
 
+# ONEX_EXCLUDE: declarative_node - legacy validator with embedded validation logic (OMN-1725)
 class NodeArchitectureValidator(NodeCompute):
     """Architecture Validator - COMPUTE_GENERIC node for architecture pattern validation.
 
