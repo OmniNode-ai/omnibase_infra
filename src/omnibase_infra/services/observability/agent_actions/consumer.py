@@ -742,17 +742,55 @@ class AgentActionsConsumer:
             return {}
 
         successful_offsets: dict[TopicPartition, int] = {}
+        # Track skipped message offsets separately to preserve them on write failures
+        skipped_offsets: dict[TopicPartition, int] = {}
         parsed_skipped: int = 0
 
         # Group messages by topic with their ConsumerRecord for offset tracking
         by_topic: dict[str, list[tuple[ConsumerRecord, BaseModel]]] = {}
 
         for msg in messages:
+            # Guard against tombstones (compacted topic deletions)
+            if msg.value is None:
+                logger.warning(
+                    "Skipping tombstone message",
+                    extra={
+                        "consumer_id": self._consumer_id,
+                        "correlation_id": str(correlation_id),
+                        "topic": msg.topic,
+                        "partition": msg.partition,
+                        "offset": msg.offset,
+                    },
+                )
+                parsed_skipped += 1
+                tp = TopicPartition(msg.topic, msg.partition)
+                current = skipped_offsets.get(tp, -1)
+                skipped_offsets[tp] = max(current, msg.offset)
+                continue
+
             try:
-                # Decode message value
+                # Decode message value with UTF-8 guard
                 value = msg.value
                 if isinstance(value, bytes):
-                    value = value.decode("utf-8")
+                    try:
+                        value = value.decode("utf-8")
+                    except UnicodeDecodeError as e:
+                        logger.warning(
+                            "Skipping message with invalid UTF-8 encoding",
+                            extra={
+                                "consumer_id": self._consumer_id,
+                                "correlation_id": str(correlation_id),
+                                "topic": msg.topic,
+                                "partition": msg.partition,
+                                "offset": msg.offset,
+                                "error": str(e),
+                            },
+                        )
+                        parsed_skipped += 1
+                        tp = TopicPartition(msg.topic, msg.partition)
+                        current = skipped_offsets.get(tp, -1)
+                        skipped_offsets[tp] = max(current, msg.offset)
+                        continue
 
                 payload = json.loads(value)
 
@@ -768,10 +806,10 @@ class AgentActionsConsumer:
                         },
                     )
                     parsed_skipped += 1
-                    # Still track offset for unknown topics (don't block)
+                    # Track offset separately to preserve on write failures
                     tp = TopicPartition(msg.topic, msg.partition)
-                    current = successful_offsets.get(tp, -1)
-                    successful_offsets[tp] = max(current, msg.offset)
+                    current = skipped_offsets.get(tp, -1)
+                    skipped_offsets[tp] = max(current, msg.offset)
                     continue
 
                 # Validate with Pydantic model
@@ -791,10 +829,10 @@ class AgentActionsConsumer:
                     },
                 )
                 parsed_skipped += 1
-                # Skip malformed messages but track offset to avoid reprocessing
+                # Skip malformed messages but track offset separately to preserve on write failures
                 tp = TopicPartition(msg.topic, msg.partition)
-                current = successful_offsets.get(tp, -1)
-                successful_offsets[tp] = max(current, msg.offset)
+                current = skipped_offsets.get(tp, -1)
+                skipped_offsets[tp] = max(current, msg.offset)
 
             except ValidationError as e:
                 logger.warning(
@@ -809,10 +847,10 @@ class AgentActionsConsumer:
                     },
                 )
                 parsed_skipped += 1
-                # Skip invalid messages but track offset
+                # Skip invalid messages but track offset separately to preserve on write failures
                 tp = TopicPartition(msg.topic, msg.partition)
-                current = successful_offsets.get(tp, -1)
-                successful_offsets[tp] = max(current, msg.offset)
+                current = skipped_offsets.get(tp, -1)
+                skipped_offsets[tp] = max(current, msg.offset)
 
         if parsed_skipped > 0:
             await self.metrics.record_skipped(parsed_skipped)
@@ -875,6 +913,13 @@ class AgentActionsConsumer:
                     # Only remove if this batch was the only contributor
                     # In practice, we don't add until success, so this is safe
                     successful_offsets.pop(tp, None)
+
+        # Merge skipped message offsets into successful_offsets
+        # Skipped messages (tombstones, invalid UTF-8, JSON errors, validation errors)
+        # must always have their offsets committed to avoid reprocessing
+        for tp, offset in skipped_offsets.items():
+            current = successful_offsets.get(tp, -1)
+            successful_offsets[tp] = max(current, offset)
 
         return successful_offsets
 
@@ -961,36 +1006,52 @@ class AgentActionsConsumer:
 
         Health status determination rules (in priority order):
         1. UNHEALTHY: Consumer is not running (stopped or crashed)
-        2. DEGRADED: Circuit breaker is open (database issues, retrying)
-        3. DEGRADED: No writes yet AND consumer running > 60s (startup grace period exceeded)
-        4. DEGRADED: Last successful write exceeds staleness threshold
-        5. HEALTHY: All other cases (running, circuit closed, recent writes or in grace period)
+        2. DEGRADED: Circuit breaker is open or half-open (database issues, retrying)
+        3. DEGRADED: Last poll exceeds poll staleness threshold (consumer not polling)
+        4. DEGRADED: No writes yet AND consumer running > 60s (startup grace period exceeded)
+        5. DEGRADED: Last successful write exceeds staleness threshold (with messages received)
+        6. HEALTHY: All other cases (running, circuit closed, recent activity or in grace period)
 
         The 60-second startup grace period allows the consumer to be considered
         healthy immediately after starting, before any messages have been consumed.
 
         Args:
             metrics_snapshot: Snapshot of current consumer metrics including
-                timestamps for started_at and last_successful_write_at.
+                timestamps for started_at, last_poll_at, and last_successful_write_at.
             circuit_state: Current circuit breaker state from the writer,
                 containing at minimum a "state" key.
 
         Returns:
             EnumHealthStatus indicating current health:
                 - HEALTHY: Fully operational
-                - DEGRADED: Running but with issues (circuit open, stale writes)
+                - DEGRADED: Running but with issues (circuit open/half-open, stale polls/writes)
                 - UNHEALTHY: Not running
         """
         # Rule 1: Consumer not running -> UNHEALTHY
         if not self._running:
             return EnumHealthStatus.UNHEALTHY
 
-        # Rule 2: Circuit breaker open -> DEGRADED
-        if circuit_state.get("state") == "open":
+        # Rule 2: Circuit breaker open or half-open -> DEGRADED
+        circuit_breaker_state = circuit_state.get("state")
+        if circuit_breaker_state in ("open", "half_open"):
             return EnumHealthStatus.DEGRADED
+
+        # Rule 3: Check poll staleness (consumer not polling Kafka)
+        last_poll = metrics_snapshot.get("last_poll_at")
+        if last_poll is not None:
+            try:
+                last_poll_dt = datetime.fromisoformat(str(last_poll))
+                poll_age_seconds = (datetime.now(UTC) - last_poll_dt).total_seconds()
+                if poll_age_seconds > self._config.health_check_poll_staleness_seconds:
+                    # Poll exceeds staleness threshold -> DEGRADED
+                    return EnumHealthStatus.DEGRADED
+            except (ValueError, TypeError):
+                # Parse error - continue to other checks
+                pass
 
         # Check for recent successful write (within staleness threshold)
         last_write = metrics_snapshot.get("last_successful_write_at")
+        messages_received = metrics_snapshot.get("messages_received", 0)
 
         if last_write is None:
             # No writes yet - check startup grace period (60 seconds)
@@ -1000,10 +1061,10 @@ class AgentActionsConsumer:
                     started_at_dt = datetime.fromisoformat(str(started_at_str))
                     age_seconds = (datetime.now(UTC) - started_at_dt).total_seconds()
                     if age_seconds <= 60.0:
-                        # Rule 5: Consumer just started, healthy even without writes
+                        # Rule 6: Consumer just started, healthy even without writes
                         return EnumHealthStatus.HEALTHY
                     else:
-                        # Rule 3: Consumer running > 60s with no writes -> DEGRADED
+                        # Rule 4: Consumer running > 60s with no writes -> DEGRADED
                         return EnumHealthStatus.DEGRADED
                 except (ValueError, TypeError):
                     # Parse error - fallback to healthy
@@ -1013,14 +1074,19 @@ class AgentActionsConsumer:
                 return EnumHealthStatus.HEALTHY
         else:
             # Check if last write was recent (within staleness threshold)
+            # Only consider stale if we have received messages (active traffic)
             try:
                 last_write_dt = datetime.fromisoformat(str(last_write))
-                age_seconds = (datetime.now(UTC) - last_write_dt).total_seconds()
-                if age_seconds > self._config.health_check_staleness_seconds:
-                    # Rule 4: Last write exceeds staleness threshold -> DEGRADED
+                write_age_seconds = (datetime.now(UTC) - last_write_dt).total_seconds()
+                if (
+                    write_age_seconds > self._config.health_check_staleness_seconds
+                    and isinstance(messages_received, int)
+                    and messages_received > 0
+                ):
+                    # Rule 5: Last write exceeds staleness threshold with traffic -> DEGRADED
                     return EnumHealthStatus.DEGRADED
                 else:
-                    # Rule 5: Recent write -> HEALTHY
+                    # Rule 6: Recent write or no traffic -> HEALTHY
                     return EnumHealthStatus.HEALTHY
             except (ValueError, TypeError):
                 # Parse error - fallback to healthy

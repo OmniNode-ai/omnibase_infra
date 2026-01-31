@@ -25,6 +25,7 @@ from uuid import uuid4
 import pytest
 from aiohttp.test_utils import TestClient
 
+from omnibase_core.errors import OnexError
 from omnibase_infra.services.observability.agent_actions.config import (
     ConfigAgentActionsConsumer,
 )
@@ -436,6 +437,103 @@ class TestBatchProcessing:
         assert tp in result
         assert result[tp] == 100
 
+    @pytest.mark.asyncio
+    async def test_process_batch_skips_tombstone_messages(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Tombstone messages (value=None) should be skipped but offset tracked."""
+        mock_writer = AsyncMock()
+        consumer._writer = mock_writer
+        consumer._running = True
+
+        # Create tombstone message (value is None)
+        message = MagicMock()
+        message.topic = "agent-actions"
+        message.partition = 0
+        message.offset = 100
+        message.value = None  # Tombstone
+
+        result = await consumer._process_batch([message], uuid4())
+
+        from aiokafka import TopicPartition
+
+        tp = TopicPartition("agent-actions", 0)
+        assert tp in result
+        assert result[tp] == 100
+
+    @pytest.mark.asyncio
+    async def test_process_batch_skips_invalid_utf8_messages(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Messages with invalid UTF-8 encoding should be skipped but offset tracked."""
+        mock_writer = AsyncMock()
+        consumer._writer = mock_writer
+        consumer._running = True
+
+        # Create message with invalid UTF-8 bytes
+        message = MagicMock()
+        message.topic = "agent-actions"
+        message.partition = 0
+        message.offset = 100
+        message.value = b"\xff\xfe invalid utf-8"  # Invalid UTF-8 sequence
+
+        result = await consumer._process_batch([message], uuid4())
+
+        from aiokafka import TopicPartition
+
+        tp = TopicPartition("agent-actions", 0)
+        assert tp in result
+        assert result[tp] == 100
+
+    @pytest.mark.asyncio
+    async def test_skipped_offsets_preserved_on_write_failure(
+        self,
+        consumer: AgentActionsConsumer,
+        sample_agent_action_payload: dict[str, object],
+    ) -> None:
+        """Skipped message offsets should be preserved even when write fails.
+
+        Scenario:
+        - Message A (offset 100): Invalid JSON -> skipped, offset tracked
+        - Message B (offset 101): Valid -> write attempt fails
+        - Expected: offset 100 should still be in result (not lost)
+        """
+        mock_writer = AsyncMock()
+        mock_writer.write_agent_actions = AsyncMock(
+            side_effect=Exception("Database error")
+        )
+        consumer._writer = mock_writer
+        consumer._running = True
+
+        # Skipped message (invalid JSON) at offset 100
+        skipped_message = MagicMock()
+        skipped_message.topic = "agent-actions"
+        skipped_message.partition = 0
+        skipped_message.offset = 100
+        skipped_message.value = b"not valid json"
+
+        # Valid message at offset 101 (will fail write)
+        valid_message = make_mock_consumer_record(
+            topic="agent-actions",
+            partition=0,
+            offset=101,
+            value=sample_agent_action_payload,
+        )
+
+        result = await consumer._process_batch(
+            [skipped_message, valid_message], uuid4()
+        )
+
+        from aiokafka import TopicPartition
+
+        tp = TopicPartition("agent-actions", 0)
+        # Skipped offset should be preserved even though write failed
+        assert tp in result
+        # The highest skipped offset (100) should be there, not 101 (which failed)
+        assert result[tp] == 100
+
 
 # =============================================================================
 # Offset Tracking Tests
@@ -665,6 +763,147 @@ class TestHealthCheck:
         assert "circuit_breaker_state" in health
         assert "metrics" in health
 
+    @pytest.mark.asyncio
+    async def test_health_check_degraded_when_circuit_half_open(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check should return DEGRADED when circuit breaker is half-open."""
+        consumer._running = True
+
+        # Mock writer with half-open circuit
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "half_open", "failure_count": 3}
+        )
+        consumer._writer = mock_writer
+
+        health = await consumer.health_check()
+
+        assert health["status"] == EnumHealthStatus.DEGRADED.value
+
+    @pytest.mark.asyncio
+    async def test_health_check_degraded_when_poll_stale(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check should return DEGRADED when last poll exceeds threshold."""
+        from datetime import timedelta
+
+        consumer._running = True
+
+        # Mock writer with closed circuit
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed", "failure_count": 0}
+        )
+        consumer._writer = mock_writer
+
+        # Set last poll to be stale (older than poll_staleness_seconds threshold)
+        stale_time = datetime.now(UTC) - timedelta(
+            seconds=consumer._config.health_check_poll_staleness_seconds + 10
+        )
+        consumer.metrics.last_poll_at = stale_time
+
+        health = await consumer.health_check()
+
+        assert health["status"] == EnumHealthStatus.DEGRADED.value
+
+    @pytest.mark.asyncio
+    async def test_health_check_healthy_when_poll_recent(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check should return HEALTHY when last poll is recent."""
+        from datetime import timedelta
+
+        consumer._running = True
+
+        # Mock writer with closed circuit
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed", "failure_count": 0}
+        )
+        consumer._writer = mock_writer
+
+        # Set last poll to be recent (within poll_staleness_seconds threshold)
+        recent_time = datetime.now(UTC) - timedelta(seconds=5)
+        consumer.metrics.last_poll_at = recent_time
+        consumer.metrics.last_successful_write_at = recent_time
+
+        health = await consumer.health_check()
+
+        assert health["status"] == EnumHealthStatus.HEALTHY.value
+
+    @pytest.mark.asyncio
+    async def test_health_check_degraded_when_write_stale_with_traffic(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check should return DEGRADED when write is stale AND messages received."""
+        from datetime import timedelta
+
+        consumer._running = True
+
+        # Mock writer with closed circuit
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed", "failure_count": 0}
+        )
+        consumer._writer = mock_writer
+
+        # Set last poll to be recent
+        recent_time = datetime.now(UTC) - timedelta(seconds=5)
+        consumer.metrics.last_poll_at = recent_time
+
+        # Set last write to be stale (older than staleness_seconds threshold)
+        stale_time = datetime.now(UTC) - timedelta(
+            seconds=consumer._config.health_check_staleness_seconds + 10
+        )
+        consumer.metrics.last_successful_write_at = stale_time
+
+        # Set messages received > 0 (traffic has been received)
+        consumer.metrics.messages_received = 100
+
+        health = await consumer.health_check()
+
+        assert health["status"] == EnumHealthStatus.DEGRADED.value
+
+    @pytest.mark.asyncio
+    async def test_health_check_healthy_when_write_stale_but_no_traffic(
+        self,
+        consumer: AgentActionsConsumer,
+    ) -> None:
+        """Health check should return HEALTHY when write stale but no messages received."""
+        from datetime import timedelta
+
+        consumer._running = True
+
+        # Mock writer with closed circuit
+        mock_writer = MagicMock()
+        mock_writer.get_circuit_breaker_state = MagicMock(
+            return_value={"state": "closed", "failure_count": 0}
+        )
+        consumer._writer = mock_writer
+
+        # Set last poll to be recent
+        recent_time = datetime.now(UTC) - timedelta(seconds=5)
+        consumer.metrics.last_poll_at = recent_time
+
+        # Set last write to be stale (older than staleness_seconds threshold)
+        stale_time = datetime.now(UTC) - timedelta(
+            seconds=consumer._config.health_check_staleness_seconds + 10
+        )
+        consumer.metrics.last_successful_write_at = stale_time
+
+        # No messages received (no traffic)
+        consumer.metrics.messages_received = 0
+
+        health = await consumer.health_check()
+
+        # Should be HEALTHY because no traffic means stale write is expected
+        assert health["status"] == EnumHealthStatus.HEALTHY.value
+
 
 # =============================================================================
 # Consumer Lifecycle Tests
@@ -809,8 +1048,8 @@ class TestRunMethod:
         self,
         consumer: AgentActionsConsumer,
     ) -> None:
-        """run() should raise RuntimeError if not started."""
-        with pytest.raises(RuntimeError, match="Consumer not started"):
+        """run() should raise OnexError if not started."""
+        with pytest.raises(OnexError, match="Consumer not started"):
             await consumer.run()
 
 

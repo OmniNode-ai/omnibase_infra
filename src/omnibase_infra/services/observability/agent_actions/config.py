@@ -140,6 +140,17 @@ class ConfigAgentActionsConsumer(BaseSettings):
             "Configure via OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_STALENESS_SECONDS env var."
         ),
     )
+    health_check_poll_staleness_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=300,
+        description=(
+            "Maximum age in seconds for the last poll before the health check "
+            "reports DEGRADED status. This detects consumers that have stopped "
+            "polling Kafka even if they appear to be running. Default is 60 seconds. "
+            "Configure via OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_POLL_STALENESS_SECONDS env var."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_topic_configuration(self) -> Self:

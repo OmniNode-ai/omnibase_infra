@@ -503,6 +503,58 @@ class TestModelRoutingDecisionSpecific:
         )
         assert decision.alternatives == ["testing", "debug", "code-reviewer"]
 
+    def test_routing_decision_rejects_confidence_score_above_one(self) -> None:
+        """Confidence score above 1.0 should be rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelRoutingDecision(
+                id=uuid4(),
+                correlation_id=uuid4(),
+                selected_agent="test-agent",
+                confidence_score=1.5,  # Invalid - above 1.0
+                created_at=datetime.now(UTC),
+            )
+
+        errors = exc_info.value.errors()
+        assert any(e["loc"] == ("confidence_score",) for e in errors)
+        assert any(e["type"] == "less_than_equal" for e in errors)
+
+    def test_routing_decision_rejects_confidence_score_below_zero(self) -> None:
+        """Confidence score below 0.0 should be rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelRoutingDecision(
+                id=uuid4(),
+                correlation_id=uuid4(),
+                selected_agent="test-agent",
+                confidence_score=-0.1,  # Invalid - below 0.0
+                created_at=datetime.now(UTC),
+            )
+
+        errors = exc_info.value.errors()
+        assert any(e["loc"] == ("confidence_score",) for e in errors)
+        assert any(e["type"] == "greater_than_equal" for e in errors)
+
+    def test_routing_decision_accepts_boundary_confidence_scores(self) -> None:
+        """Confidence score at boundaries (0.0 and 1.0) should be accepted."""
+        # Test lower boundary
+        decision_zero = ModelRoutingDecision(
+            id=uuid4(),
+            correlation_id=uuid4(),
+            selected_agent="test-agent",
+            confidence_score=0.0,  # Valid - exactly 0.0
+            created_at=datetime.now(UTC),
+        )
+        assert decision_zero.confidence_score == 0.0
+
+        # Test upper boundary
+        decision_one = ModelRoutingDecision(
+            id=uuid4(),
+            correlation_id=uuid4(),
+            selected_agent="test-agent",
+            confidence_score=1.0,  # Valid - exactly 1.0
+            created_at=datetime.now(UTC),
+        )
+        assert decision_one.confidence_score == 1.0
+
 
 class TestModelExecutionLogSpecific:
     """Model-specific tests for ModelExecutionLog."""

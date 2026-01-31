@@ -87,7 +87,9 @@ class ModelRoutingDecision(BaseModel):
     )
     confidence_score: float = Field(
         ...,
-        description="Confidence score (0.0-1.0) for the selection.",
+        ge=0.0,
+        le=1.0,
+        description="Confidence score for the selection. Must be between 0.0 (no confidence) and 1.0 (full confidence).",
     )
     created_at: datetime = Field(
         ...,
