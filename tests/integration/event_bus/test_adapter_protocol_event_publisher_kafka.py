@@ -27,6 +27,7 @@ import inspect
 import json
 import os
 from collections.abc import AsyncGenerator, Callable, Coroutine
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 from uuid import UUID, uuid4
 
@@ -70,11 +71,11 @@ class MockContextValue(Protocol):
     value: str
 
 
+@dataclass
 class SimpleContextValue:
     """Simple mock context value for testing."""
 
-    def __init__(self, value: str) -> None:
-        self.value = value
+    value: str
 
 
 # =============================================================================
@@ -738,8 +739,8 @@ class TestResetMetrics:
         assert metrics_before["events_published"] == 5
         assert metrics_before["total_publish_time_ms"] > 0
 
-        # Reset metrics (synchronous method)
-        adapter.reset_metrics()
+        # Reset metrics
+        await adapter.reset_metrics()
 
         # Verify all metrics are back to initial state
         metrics_after = await adapter.get_metrics()
@@ -770,8 +771,8 @@ class TestResetMetrics:
         metrics_batch_one = await adapter.get_metrics()
         assert metrics_batch_one["events_published"] == 3
 
-        # Reset metrics (synchronous method)
-        adapter.reset_metrics()
+        # Reset metrics
+        await adapter.reset_metrics()
 
         # Publish 2 more events
         for i in range(2):
@@ -923,8 +924,8 @@ class TestLifecycle:
         # Close the adapter
         await test_adapter.close()
 
-        # Reset metrics while closed (synchronous method)
-        test_adapter.reset_metrics()
+        # Reset metrics while closed
+        await test_adapter.reset_metrics()
 
         # Verify adapter is still closed after reset
         with pytest.raises(RuntimeError, match="Publisher has been closed"):

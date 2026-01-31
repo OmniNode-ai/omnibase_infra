@@ -44,6 +44,7 @@ References:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import UTC, datetime
@@ -125,6 +126,7 @@ class AdapterProtocolEventPublisherKafka:
         self._service_name = service_name
         self._instance_id = instance_id or str(uuid4())
         self._metrics = ModelPublisherMetrics()
+        self._metrics_lock = asyncio.Lock()
         self._closed = False
 
     async def publish(
@@ -207,14 +209,15 @@ class AdapterProtocolEventPublisherKafka:
                 value=value_bytes,
             )
 
-            # Update success metrics
+            # Update success metrics (thread-safe)
             elapsed_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000
-            self._metrics.events_published += 1
-            self._metrics.total_publish_time_ms += elapsed_ms
-            self._metrics.avg_publish_time_ms = (
-                self._metrics.total_publish_time_ms / self._metrics.events_published
-            )
-            self._metrics.current_failures = 0
+            async with self._metrics_lock:
+                self._metrics.events_published += 1
+                self._metrics.total_publish_time_ms += elapsed_ms
+                self._metrics.avg_publish_time_ms = (
+                    self._metrics.total_publish_time_ms / self._metrics.events_published
+                )
+                self._metrics.current_failures = 0
 
             logger.debug(
                 "Event published successfully",
@@ -234,9 +237,10 @@ class AdapterProtocolEventPublisherKafka:
             # EventBusKafka) and returns False rather than propagating. This design
             # allows callers to implement their own retry/fallback logic without
             # needing to handle infrastructure-specific exception types.
-            # Update failure metrics
-            self._metrics.events_failed += 1
-            self._metrics.current_failures += 1
+            # Update failure metrics (thread-safe)
+            async with self._metrics_lock:
+                self._metrics.events_failed += 1
+                self._metrics.current_failures += 1
 
             logger.exception(
                 "Failed to publish event",
@@ -362,7 +366,7 @@ class AdapterProtocolEventPublisherKafka:
 
         return self._metrics.to_dict()
 
-    def reset_metrics(self) -> None:
+    async def reset_metrics(self) -> None:
         """Reset all publisher metrics to initial values.
 
         Useful for test isolation when reusing an adapter across multiple
@@ -377,11 +381,12 @@ class AdapterProtocolEventPublisherKafka:
             adapter = AdapterProtocolEventPublisherKafka(bus)
             await adapter.publish(...)  # metrics.events_published = 1
 
-            adapter.reset_metrics()  # metrics.events_published = 0
+            await adapter.reset_metrics()  # metrics.events_published = 0
             await adapter.publish(...)  # metrics.events_published = 1
             ```
         """
-        self._metrics = ModelPublisherMetrics()
+        async with self._metrics_lock:
+            self._metrics = ModelPublisherMetrics()
         logger.debug(
             "Publisher metrics reset",
             extra={
