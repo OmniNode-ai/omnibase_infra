@@ -19,7 +19,7 @@
 # =============================================================================
 # Handler identifier
 name: "handler_architecture_validation"
-handler_id: "compute.architecture_validation.handler"
+handler_id: "handler-architecture-validation"
 # Version (semantic versioning)
 contract_version:
   major: 1
