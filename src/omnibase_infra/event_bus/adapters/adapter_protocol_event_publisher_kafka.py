@@ -209,7 +209,7 @@ class AdapterProtocolEventPublisherKafka:
                 value=value_bytes,
             )
 
-            # Update success metrics (thread-safe)
+            # Update success metrics (coroutine-safe)
             elapsed_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000
             async with self._metrics_lock:
                 self._metrics.events_published += 1
@@ -237,7 +237,7 @@ class AdapterProtocolEventPublisherKafka:
             # EventBusKafka) and returns False rather than propagating. This design
             # allows callers to implement their own retry/fallback logic without
             # needing to handle infrastructure-specific exception types.
-            # Update failure metrics (thread-safe)
+            # Update failure metrics (coroutine-safe)
             async with self._metrics_lock:
                 self._metrics.events_failed += 1
                 self._metrics.current_failures += 1
@@ -353,18 +353,18 @@ class AdapterProtocolEventPublisherKafka:
         # EventBusKafka inherits MixinAsyncCircuitBreaker which provides _get_circuit_breaker_state()
         cb_state = self._bus._get_circuit_breaker_state()
 
-        # Update metrics with circuit breaker info from bus
-        # Note: failures represents current consecutive failures, not cumulative opens
         # Extract values with safe type handling for JsonType
         state_value = cb_state.get("state", "unknown")
         failures_value = cb_state.get("failures", 0)
 
-        self._metrics.circuit_breaker_status = str(state_value)
-        self._metrics.circuit_breaker_opens = (
-            int(failures_value) if isinstance(failures_value, (int, float)) else 0
-        )
-
-        return self._metrics.to_dict()
+        # Update and return metrics (coroutine-safe)
+        # Note: failures represents current consecutive failures, not cumulative opens
+        async with self._metrics_lock:
+            self._metrics.circuit_breaker_status = str(state_value)
+            self._metrics.circuit_breaker_opens = (
+                int(failures_value) if isinstance(failures_value, (int, float)) else 0
+            )
+            return self._metrics.to_dict()
 
     async def reset_metrics(self) -> None:
         """Reset all publisher metrics to initial values.

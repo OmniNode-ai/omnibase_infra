@@ -142,10 +142,10 @@ async def started_kafka_bus(
 @pytest.fixture
 async def adapter(
     started_kafka_bus: object,
-) -> AsyncGenerator[object, None]:
+) -> object:
     """Create AdapterProtocolEventPublisherKafka wrapping the started bus.
 
-    Yields the adapter instance and ensures cleanup after test.
+    Returns the adapter instance. Cleanup is handled by the started_kafka_bus fixture.
     """
     from omnibase_infra.event_bus.adapters import AdapterProtocolEventPublisherKafka
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
