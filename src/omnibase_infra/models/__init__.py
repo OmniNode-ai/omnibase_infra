@@ -22,6 +22,11 @@ from omnibase_infra.models.dispatch import (
     ModelTopicParser,
 )
 from omnibase_infra.models.errors import ModelHandlerValidationError
+from omnibase_infra.models.event_bus import (
+    ModelConsumerRetryConfig,
+    ModelIdempotencyConfig,
+    ModelOffsetPolicyConfig,
+)
 from omnibase_infra.models.handlers import ModelHandlerIdentifier
 from omnibase_infra.models.health import ModelHealthCheckResult
 from omnibase_infra.models.logging import ModelLogContext
@@ -84,6 +89,10 @@ __all__: list[str] = [
     # Dispatch models
     "EnumDispatchStatus",
     "EnumTopicStandard",
+    # Event bus models
+    "ModelConsumerRetryConfig",
+    "ModelIdempotencyConfig",
+    "ModelOffsetPolicyConfig",
     # Resilience models
     "ModelCircuitBreakerConfig",
     # Validation models

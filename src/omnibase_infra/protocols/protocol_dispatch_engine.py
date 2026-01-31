@@ -150,3 +150,88 @@ class ProtocolDispatchEngine(Protocol):
                     await dispatch_engine.dispatch(topic, envelope)
         """
         ...
+
+    async def dispatch_with_transaction(
+        self,
+        *,
+        topic: str,
+        envelope: ModelEventEnvelope[object],
+        tx: object,
+    ) -> ModelDispatchResult | None:
+        """Dispatch an event envelope with database transaction context.
+
+        This method enables transaction-scoped dispatch for correct idempotency
+        semantics. The transaction parameter allows handlers to participate in
+        the same database transaction as the idempotency insert, ensuring
+        exactly-once processing.
+
+        Design Decision:
+            The ``tx`` parameter is typed as ``object`` rather than a specific
+            database type (e.g., ``asyncpg.Connection``) to avoid leaking
+            infrastructure types into the protocol. This keeps the protocol
+            generic and allows future flexibility for different database backends.
+
+            Implementers should type-narrow ``tx`` in their implementations:
+
+            .. code-block:: python
+
+                async def dispatch_with_transaction(
+                    self,
+                    *,
+                    topic: str,
+                    envelope: ModelEventEnvelope[object],
+                    tx: object,
+                ) -> ModelDispatchResult | None:
+                    # Type-narrow for specific backend
+                    if not isinstance(tx, asyncpg.Connection):
+                        raise TypeError("Expected asyncpg.Connection")
+                    # Use tx with proper type...
+
+        Thread Safety:
+            This method MUST be safe for concurrent calls from multiple
+            coroutines. The transaction context (``tx``) is typically
+            connection-scoped and should not be shared across coroutines.
+
+        Args:
+            topic: The full topic name from which the envelope was consumed.
+                Used for routing and logging context.
+                Example: "dev.onex.evt.node.introspected.v1"
+            envelope: The deserialized event envelope containing the payload.
+                The payload type varies by topic/event type.
+            tx: Database transaction/connection context. Typed as ``object``
+                to avoid infrastructure type leakage; implementations should
+                type-narrow based on their database backend (e.g.,
+                ``asyncpg.Connection``, ``aiosqlite.Connection``).
+
+        Returns:
+            ModelDispatchResult if the implementation returns dispatch metrics/results,
+            None if the implementation does not track results. Callers should not
+            depend on the return value for correctness.
+
+        Raises:
+            InfraDispatchError: If no handler is registered for the topic/message type.
+            OnexError: For handler execution failures (implementation-specific).
+            TypeError: If ``tx`` is not the expected transaction type.
+
+        Example:
+            .. code-block:: python
+
+                # Idempotency consumer with transaction context
+                async with pool.acquire() as conn:
+                    async with conn.transaction():
+                        # Insert idempotency record and dispatch in same transaction
+                        await insert_idempotency_record(conn, message_id)
+                        await dispatch_engine.dispatch_with_transaction(
+                            topic=topic,
+                            envelope=envelope,
+                            tx=conn,
+                        )
+                        # Both committed atomically
+
+        Related:
+            - OMN-1740: Transaction-scoped dispatch for idempotency
+            - dispatch(): Non-transactional dispatch method
+
+        .. versionadded:: 0.2.9
+        """
+        ...

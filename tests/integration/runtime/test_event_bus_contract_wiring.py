@@ -15,6 +15,8 @@ Test Coverage:
 - TestHandlerNoBusAccess: ARCH-002 compliance verification
 - TestContractLoadingFromYAML: YAML parsing and subcontract extraction
 - TestSubscriptionCleanup: Proper cleanup on shutdown
+- TestIdempotencyIntegration: Duplicate message deduplication (AC#7)
+- TestOffsetCommitOnFailure: Offset commit behavior on failure (AC#8)
 
 Architecture Context:
     The EventBusSubcontractWiring class bridges contract-declared topics to actual
@@ -23,6 +25,7 @@ Architecture Context:
 
 Related Tickets:
     - OMN-1621: Runtime consumes event_bus subcontract for contract-driven wiring
+    - OMN-1740: Idempotency and offset commit semantics
     - ARCH-002: Runtime owns all Kafka plumbing
 
 See Also:
@@ -110,6 +113,7 @@ class TestContractDrivenSubscription:
             event_bus=mock_event_bus,
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
+            node_name="test-handler",
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -148,6 +152,7 @@ class TestContractDrivenSubscription:
             event_bus=mock_event_bus,
             dispatch_engine=mock_dispatch_engine,
             environment="staging",
+            node_name="test-handler",
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -178,6 +183,7 @@ class TestContractDrivenSubscription:
             event_bus=mock_event_bus,
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
+            node_name="test-handler",
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -250,6 +256,7 @@ class TestMessageDispatchFlow:
             event_bus=mock_event_bus_with_callback_capture,
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
+            node_name="test-handler",
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -281,23 +288,33 @@ class TestMessageDispatchFlow:
         assert call_args[0][0] == topic_key  # topic
 
     @pytest.mark.asyncio
-    async def test_malformed_message_raises_json_decode_error(
+    async def test_malformed_message_raises_error_with_fail_fast_policy(
         self,
         mock_event_bus_with_callback_capture: AsyncMock,
         mock_dispatch_engine: AsyncMock,
         subcontract_version: ModelSemVer,
     ) -> None:
-        """Malformed JSON messages should raise RuntimeHostError.
+        """Malformed JSON messages should raise ProtocolConfigurationError with fail_fast.
 
         Verifies:
         1. Invalid JSON causes exception
-        2. Exception is wrapped as RuntimeHostError (OnexError only)
-        3. Exception is propagated for DLQ handling
+        2. Exception is wrapped as ProtocolConfigurationError (OnexError)
+        3. Exception is propagated when fail_fast policy is configured
+
+        Note: Default behavior sends content errors to DLQ. This test
+        explicitly uses fail_fast to verify error propagation path.
         """
+        from omnibase_infra.models.event_bus import ModelDlqConfig
+
         wiring = EventBusSubcontractWiring(
             event_bus=mock_event_bus_with_callback_capture,
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
+            node_name="test-handler",
+            dlq_config=ModelDlqConfig(
+                enabled=False,
+                on_content_error="fail_fast",
+            ),
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -312,10 +329,10 @@ class TestMessageDispatchFlow:
         mock_message = MagicMock()
         mock_message.value = b"not valid json"
 
-        # Get the callback and verify it raises RuntimeHostError
+        # Get the callback and verify it raises ProtocolConfigurationError
         topic_key = "dev.onex.evt.test-producer.test-event.v1"
         callback = mock_event_bus_with_callback_capture.callbacks[topic_key]
-        with pytest.raises(RuntimeHostError):
+        with pytest.raises(ProtocolConfigurationError):
             await callback(mock_message)
 
 
@@ -463,6 +480,7 @@ class TestHandlerNoBusAccess:
             event_bus=mock_event_bus,
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
+            node_name="test-handler",
         )
 
         # The deserialization happens in _deserialize_to_envelope
@@ -501,6 +519,7 @@ class TestHandlerNoBusAccess:
             event_bus=mock_event_bus,
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
+            node_name="test-handler",
         )
 
         # Create a valid envelope JSON with proper UUID
@@ -656,6 +675,7 @@ class TestSubscriptionCleanup:
             event_bus=mock_event_bus,
             dispatch_engine=AsyncMock(),
             environment="dev",
+            node_name="test-handler",
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -695,6 +715,7 @@ class TestSubscriptionCleanup:
             event_bus=mock_event_bus,
             dispatch_engine=AsyncMock(),
             environment="dev",
+            node_name="test-handler",
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -736,6 +757,7 @@ class TestSubscriptionCleanup:
             event_bus=mock_event_bus,
             dispatch_engine=AsyncMock(),
             environment="dev",
+            node_name="test-handler",
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -777,6 +799,7 @@ class TestTopicResolution:
             event_bus=mock_event_bus,
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
+            node_name="test-handler",
         )
 
         resolved = wiring.resolve_topic("onex.evt.user.created.v1")
@@ -804,6 +827,7 @@ class TestTopicResolution:
                 event_bus=mock_event_bus,
                 dispatch_engine=mock_dispatch_engine,
                 environment=env,
+                node_name="test-handler",
             )
             assert wiring.resolve_topic(topic_suffix) == expected
 
@@ -846,3 +870,535 @@ class TestPublisherTopicScopedProperties:
         )
 
         assert publisher.environment == "staging"
+
+
+class TestIdempotencyIntegration:
+    """Integration tests for idempotency behavior (AC#7).
+
+    These tests verify that the event bus wiring correctly deduplicates
+    messages based on event_id when idempotency is enabled. This ensures
+    at-least-once delivery semantics don't result in duplicate processing.
+
+    Related Tickets:
+        - OMN-1740 AC#7: Duplicate messages are deduplicated
+    """
+
+    @pytest.fixture
+    def subcontract_version(self) -> ModelSemVer:
+        """Create default version for subcontracts."""
+        return ModelSemVer(major=1, minor=0, patch=0)
+
+    @pytest.mark.asyncio
+    async def test_duplicate_message_deduplicated(
+        self,
+        subcontract_version: ModelSemVer,
+    ) -> None:
+        """Given the same message delivered twice, handler runs only once.
+
+        This test verifies the complete idempotency flow:
+        1. First message with envelope_id is processed normally
+        2. Second message with same envelope_id is detected as duplicate
+        3. Handler (dispatch engine) is only invoked once
+        4. Idempotency store correctly records the envelope_id
+
+        The test uses StoreIdempotencyInmemory for isolation - no database
+        dependency required.
+
+        Related: OMN-1740 AC#7
+        """
+        from uuid import uuid4
+
+        from omnibase_infra.idempotency import StoreIdempotencyInmemory
+        from omnibase_infra.models.event_bus import ModelIdempotencyConfig
+
+        # Setup: Create wiring with in-memory idempotency store
+        idempotency_store = StoreIdempotencyInmemory()
+        mock_dispatch_engine = AsyncMock()
+        mock_dispatch_engine.dispatch = AsyncMock()
+        mock_event_bus = AsyncMock()
+
+        # Track callbacks for message simulation
+        callbacks: dict[str, object] = {}
+
+        async def capture_subscribe(
+            topic: str,
+            group_id: str,
+            on_message: object,
+        ) -> AsyncMock:
+            callbacks[topic] = on_message
+            return AsyncMock()
+
+        mock_event_bus.subscribe = AsyncMock(side_effect=capture_subscribe)
+
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="test",
+            node_name="test-handler",
+            idempotency_store=idempotency_store,
+            idempotency_config=ModelIdempotencyConfig(enabled=True),
+        )
+
+        # Wire subscription
+        subcontract = ModelEventBusSubcontract(
+            version=subcontract_version,
+            subscribe_topics=["onex.evt.test.dedup.v1"],
+        )
+        await wiring.wire_subscriptions(subcontract, node_name="test-handler")
+
+        # Create message with specific envelope_id (used for deduplication)
+        envelope_id = uuid4()
+        correlation_id = uuid4()
+        message_json = json.dumps(
+            {
+                "event_type": "test.dedup",
+                "envelope_id": str(envelope_id),
+                "correlation_id": str(correlation_id),
+                "payload": {"data": "test"},
+                "source": "test-source",
+            }
+        )
+        mock_message = MagicMock()
+        mock_message.value = message_json.encode()
+
+        # Get callback and deliver message TWICE
+        topic_key = "test.onex.evt.test.dedup.v1"
+        callback = callbacks[topic_key]
+        await callback(mock_message)  # First delivery
+        await callback(mock_message)  # Duplicate delivery
+
+        # Verify: dispatch called only ONCE
+        assert mock_dispatch_engine.dispatch.call_count == 1
+
+        # Verify: first call received the correct topic and envelope
+        call_args = mock_dispatch_engine.dispatch.call_args
+        assert call_args[0][0] == topic_key  # topic
+
+        # Verify: idempotency store has the envelope_id recorded
+        is_processed = await idempotency_store.is_processed(
+            message_id=envelope_id,
+            domain=topic_key,
+        )
+        assert is_processed is True
+
+        # Verify: calling check_and_record again returns False (duplicate)
+        is_new = await idempotency_store.check_and_record(
+            message_id=envelope_id,
+            domain=topic_key,
+            correlation_id=uuid4(),
+        )
+        assert is_new is False  # Already recorded
+
+    @pytest.mark.asyncio
+    async def test_different_event_ids_both_processed(
+        self,
+        subcontract_version: ModelSemVer,
+    ) -> None:
+        """Messages with different envelope_ids are both processed.
+
+        Verifies that idempotency correctly distinguishes between different
+        messages - only duplicates are skipped.
+
+        Related: OMN-1740 AC#7
+        """
+        from uuid import uuid4
+
+        from omnibase_infra.idempotency import StoreIdempotencyInmemory
+        from omnibase_infra.models.event_bus import ModelIdempotencyConfig
+
+        # Setup
+        idempotency_store = StoreIdempotencyInmemory()
+        mock_dispatch_engine = AsyncMock()
+        mock_dispatch_engine.dispatch = AsyncMock()
+        mock_event_bus = AsyncMock()
+
+        callbacks: dict[str, object] = {}
+
+        async def capture_subscribe(
+            topic: str,
+            group_id: str,
+            on_message: object,
+        ) -> AsyncMock:
+            callbacks[topic] = on_message
+            return AsyncMock()
+
+        mock_event_bus.subscribe = AsyncMock(side_effect=capture_subscribe)
+
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="test",
+            node_name="test-handler",
+            idempotency_store=idempotency_store,
+            idempotency_config=ModelIdempotencyConfig(enabled=True),
+        )
+
+        # Wire subscription
+        subcontract = ModelEventBusSubcontract(
+            version=subcontract_version,
+            subscribe_topics=["onex.evt.test.dedup.v1"],
+        )
+        await wiring.wire_subscriptions(subcontract, node_name="test-handler")
+
+        # Create TWO messages with DIFFERENT envelope_ids
+        envelope_id_1 = uuid4()
+        envelope_id_2 = uuid4()
+
+        message_1 = MagicMock()
+        message_1.value = json.dumps(
+            {
+                "event_type": "test.dedup",
+                "envelope_id": str(envelope_id_1),
+                "correlation_id": str(uuid4()),
+                "payload": {"data": "message1"},
+                "source": "test-source",
+            }
+        ).encode()
+
+        message_2 = MagicMock()
+        message_2.value = json.dumps(
+            {
+                "event_type": "test.dedup",
+                "envelope_id": str(envelope_id_2),
+                "correlation_id": str(uuid4()),
+                "payload": {"data": "message2"},
+                "source": "test-source",
+            }
+        ).encode()
+
+        # Get callback and deliver both messages
+        topic_key = "test.onex.evt.test.dedup.v1"
+        callback = callbacks[topic_key]
+        await callback(message_1)
+        await callback(message_2)
+
+        # Verify: dispatch called TWICE (once for each unique message)
+        assert mock_dispatch_engine.dispatch.call_count == 2
+
+        # Verify: both envelope_ids are recorded
+        assert await idempotency_store.is_processed(envelope_id_1, domain=topic_key)
+        assert await idempotency_store.is_processed(envelope_id_2, domain=topic_key)
+
+    @pytest.mark.asyncio
+    async def test_idempotency_disabled_processes_all_messages(
+        self,
+        subcontract_version: ModelSemVer,
+    ) -> None:
+        """When idempotency is disabled, all messages are processed.
+
+        Verifies that disabling idempotency bypasses the deduplication check,
+        allowing duplicate messages to be processed multiple times.
+
+        Related: OMN-1740 AC#7
+        """
+        from uuid import uuid4
+
+        from omnibase_infra.idempotency import StoreIdempotencyInmemory
+        from omnibase_infra.models.event_bus import ModelIdempotencyConfig
+
+        # Setup with idempotency DISABLED
+        idempotency_store = StoreIdempotencyInmemory()
+        mock_dispatch_engine = AsyncMock()
+        mock_dispatch_engine.dispatch = AsyncMock()
+        mock_event_bus = AsyncMock()
+
+        callbacks: dict[str, object] = {}
+
+        async def capture_subscribe(
+            topic: str,
+            group_id: str,
+            on_message: object,
+        ) -> AsyncMock:
+            callbacks[topic] = on_message
+            return AsyncMock()
+
+        mock_event_bus.subscribe = AsyncMock(side_effect=capture_subscribe)
+
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="test",
+            node_name="test-handler",
+            idempotency_store=idempotency_store,
+            idempotency_config=ModelIdempotencyConfig(enabled=False),  # DISABLED
+        )
+
+        # Wire subscription
+        subcontract = ModelEventBusSubcontract(
+            version=subcontract_version,
+            subscribe_topics=["onex.evt.test.dedup.v1"],
+        )
+        await wiring.wire_subscriptions(subcontract, node_name="test-handler")
+
+        # Create message with specific envelope_id
+        envelope_id = uuid4()
+        message_json = json.dumps(
+            {
+                "event_type": "test.dedup",
+                "envelope_id": str(envelope_id),
+                "correlation_id": str(uuid4()),
+                "payload": {"data": "test"},
+                "source": "test-source",
+            }
+        )
+        mock_message = MagicMock()
+        mock_message.value = message_json.encode()
+
+        # Get callback and deliver message TWICE
+        topic_key = "test.onex.evt.test.dedup.v1"
+        callback = callbacks[topic_key]
+        await callback(mock_message)
+        await callback(mock_message)
+
+        # Verify: dispatch called TWICE (idempotency disabled)
+        assert mock_dispatch_engine.dispatch.call_count == 2
+
+        # Verify: idempotency store was NOT used (no records)
+        assert await idempotency_store.get_record_count() == 0
+
+
+class TestOffsetCommitOnFailure:
+    """Integration tests for offset commit behavior on failure (AC#8).
+
+    These tests verify that:
+    - Offsets are NOT committed when handler raises infrastructure errors
+    - Offsets ARE committed on successful handler execution
+    - This ensures at-least-once delivery semantics
+
+    Related Tickets:
+        - OMN-1740 AC#8: Offset not committed on handler failure
+    """
+
+    @pytest.fixture
+    def subcontract_version(self) -> ModelSemVer:
+        """Create default version for subcontracts."""
+        return ModelSemVer(major=1, minor=0, patch=0)
+
+    @pytest.mark.asyncio
+    async def test_offset_not_committed_on_infra_error(
+        self,
+        subcontract_version: ModelSemVer,
+    ) -> None:
+        """Given infrastructure error, offset should NOT be committed.
+
+        This test verifies:
+        1. Handler raises RuntimeHostError
+        2. Offset is NOT committed
+        3. Error is re-raised (fail-fast default)
+        4. Kafka will redeliver the message
+
+        Related: OMN-1740 AC#8
+        """
+        from uuid import uuid4
+
+        from omnibase_infra.models.event_bus import ModelOffsetPolicyConfig
+
+        # Setup: dispatch engine that raises infrastructure error
+        mock_dispatch_engine = AsyncMock()
+        mock_dispatch_engine.dispatch = AsyncMock(
+            side_effect=RuntimeHostError("Database unavailable")
+        )
+
+        # Setup: event bus with commit_offset tracking
+        mock_event_bus = AsyncMock()
+        mock_event_bus.commit_offset = AsyncMock()
+
+        # Capture the callback registered with subscribe
+        callbacks: dict[str, object] = {}
+
+        async def capture_subscribe(
+            topic: str,
+            group_id: str,
+            on_message: object,
+        ) -> AsyncMock:
+            callbacks[topic] = on_message
+            return AsyncMock()
+
+        mock_event_bus.subscribe = AsyncMock(side_effect=capture_subscribe)
+
+        # Create wiring with commit_after_handler policy (default)
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="test",
+            node_name="test-handler",
+            offset_policy=ModelOffsetPolicyConfig(
+                commit_strategy="commit_after_handler"
+            ),
+        )
+
+        # Wire subscription
+        subcontract = ModelEventBusSubcontract(
+            version=subcontract_version,
+            subscribe_topics=["onex.evt.test.failure.v1"],
+        )
+        await wiring.wire_subscriptions(subcontract, node_name="test-handler")
+
+        # Create valid message with proper envelope format
+        message_json = json.dumps(
+            {
+                "event_type": "test.failure",
+                "correlation_id": str(uuid4()),
+                "payload": {"data": "test"},
+                "source": "test-source",
+            }
+        )
+        mock_message = MagicMock()
+        mock_message.value = message_json.encode()
+
+        # Deliver message - should raise RuntimeHostError
+        callback = callbacks["test.onex.evt.test.failure.v1"]
+        with pytest.raises(RuntimeHostError):
+            await callback(mock_message)
+
+        # Verify: commit_offset was NOT called (fail-fast behavior)
+        mock_event_bus.commit_offset.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_offset_committed_on_success(
+        self,
+        subcontract_version: ModelSemVer,
+    ) -> None:
+        """Given successful handler execution, offset should be committed.
+
+        This test verifies:
+        1. Handler completes successfully
+        2. Offset is committed
+        3. Message is acknowledged
+
+        Related: OMN-1740 AC#8
+        """
+        from uuid import uuid4
+
+        from omnibase_infra.models.event_bus import ModelOffsetPolicyConfig
+
+        # Setup: dispatch engine that succeeds
+        mock_dispatch_engine = AsyncMock()
+        mock_dispatch_engine.dispatch = AsyncMock(return_value=None)
+
+        # Setup: event bus with commit_offset tracking
+        mock_event_bus = AsyncMock()
+        mock_event_bus.commit_offset = AsyncMock()
+
+        # Capture the callback registered with subscribe
+        callbacks: dict[str, object] = {}
+
+        async def capture_subscribe(
+            topic: str,
+            group_id: str,
+            on_message: object,
+        ) -> AsyncMock:
+            callbacks[topic] = on_message
+            return AsyncMock()
+
+        mock_event_bus.subscribe = AsyncMock(side_effect=capture_subscribe)
+
+        # Create wiring with commit_after_handler policy (default)
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="test",
+            node_name="test-handler",
+            offset_policy=ModelOffsetPolicyConfig(
+                commit_strategy="commit_after_handler"
+            ),
+        )
+
+        # Wire subscription
+        subcontract = ModelEventBusSubcontract(
+            version=subcontract_version,
+            subscribe_topics=["onex.evt.test.success.v1"],
+        )
+        await wiring.wire_subscriptions(subcontract, node_name="test-handler")
+
+        # Create valid message with proper envelope format
+        message_json = json.dumps(
+            {
+                "event_type": "test.success",
+                "correlation_id": str(uuid4()),
+                "payload": {"data": "test"},
+                "source": "test-source",
+            }
+        )
+        mock_message = MagicMock()
+        mock_message.value = message_json.encode()
+
+        # Deliver message - should succeed
+        callback = callbacks["test.onex.evt.test.success.v1"]
+        await callback(mock_message)
+
+        # Verify: commit_offset WAS called
+        mock_event_bus.commit_offset.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_offset_not_committed_on_content_error_with_fail_fast(
+        self,
+        subcontract_version: ModelSemVer,
+    ) -> None:
+        """Given content error with fail_fast policy, offset should NOT be committed.
+
+        This test verifies:
+        1. Malformed message causes content error
+        2. With fail_fast policy, offset is NOT committed
+        3. Error is re-raised
+
+        Related: OMN-1740 AC#8
+        """
+        from omnibase_infra.models.event_bus import (
+            ModelDlqConfig,
+            ModelOffsetPolicyConfig,
+        )
+
+        # Setup: dispatch engine (won't be called due to deserialization failure)
+        mock_dispatch_engine = AsyncMock()
+
+        # Setup: event bus with commit_offset tracking
+        mock_event_bus = AsyncMock()
+        mock_event_bus.commit_offset = AsyncMock()
+
+        # Capture the callback registered with subscribe
+        callbacks: dict[str, object] = {}
+
+        async def capture_subscribe(
+            topic: str,
+            group_id: str,
+            on_message: object,
+        ) -> AsyncMock:
+            callbacks[topic] = on_message
+            return AsyncMock()
+
+        mock_event_bus.subscribe = AsyncMock(side_effect=capture_subscribe)
+
+        # Create wiring with fail_fast for content errors
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="test",
+            node_name="test-handler",
+            offset_policy=ModelOffsetPolicyConfig(
+                commit_strategy="commit_after_handler"
+            ),
+            dlq_config=ModelDlqConfig(
+                enabled=False,
+                on_content_error="fail_fast",
+            ),
+        )
+
+        # Wire subscription
+        subcontract = ModelEventBusSubcontract(
+            version=subcontract_version,
+            subscribe_topics=["onex.evt.test.malformed.v1"],
+        )
+        await wiring.wire_subscriptions(subcontract, node_name="test-handler")
+
+        # Create malformed message (invalid JSON)
+        mock_message = MagicMock()
+        mock_message.value = b"not valid json"
+
+        # Deliver message - should raise ProtocolConfigurationError
+        callback = callbacks["test.onex.evt.test.malformed.v1"]
+        with pytest.raises(ProtocolConfigurationError):
+            await callback(mock_message)
+
+        # Verify: commit_offset was NOT called
+        mock_event_bus.commit_offset.assert_not_called()
