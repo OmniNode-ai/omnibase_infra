@@ -242,13 +242,12 @@ class ServiceContractPublisher:
         published: list[str] = []
         contract_errors: list[ModelContractError] = []
         infra_errors: list[ModelInfraError] = []
-        dedup_count = 0
         filesystem_count = 0
         package_count = 0
 
         # Phase 1: Discover
         discover_start = time.perf_counter()
-        contracts, source_errors = await self._discover()
+        contracts, source_errors, dedup_count = await self._discover()
         discover_ms = (time.perf_counter() - discover_start) * 1000
 
         # Add any source errors (from composite conflict detection)
@@ -275,13 +274,10 @@ class ServiceContractPublisher:
         valid_contracts: list[tuple[ModelDiscoveredContract, ModelHandlerContract]] = []
 
         for contract in contracts:
-            parsed = self._validate_contract(contract)
-            if parsed is None:
-                # Validation failed - error already added
-                error = self._create_validation_error(contract)
-                if error:
-                    contract_errors.append(error)
-            else:
+            parsed, error = self._validate_contract(contract)
+            if error:
+                contract_errors.append(error)
+            elif parsed:
                 valid_contracts.append((contract, parsed))
 
         validate_ms = (time.perf_counter() - validate_start) * 1000
@@ -313,7 +309,7 @@ class ServiceContractPublisher:
             try:
                 event = ModelContractRegisteredEvent(
                     node_name=handler_id,
-                    node_version=str(parsed.contract_version),
+                    node_version=parsed.contract_version,
                     contract_hash=contract.content_hash or "",
                     contract_yaml=contract.text,
                     correlation_id=correlation_id,
@@ -399,99 +395,76 @@ class ServiceContractPublisher:
 
     async def _discover(
         self,
-    ) -> tuple[list[ModelDiscoveredContract], list[ModelContractError]]:
+    ) -> tuple[list[ModelDiscoveredContract], list[ModelContractError], int]:
         """Discover contracts from source.
 
         Returns:
-            Tuple of (contracts, errors from composite merge)
+            Tuple of (contracts, errors from composite merge, dedup_count)
         """
         # All sources now return list[ModelDiscoveredContract]
         contracts = await self._source.discover_contracts()
 
-        # Add content hash to all contracts
+        # Add content hash to all contracts (composite already does this, but others may not)
         contracts = [c.with_content_hash() for c in contracts]
 
         # Sort for determinism
         contracts.sort(key=lambda c: c.sort_key())
 
-        # Get merge errors from composite source
+        # Get merge errors and dedup count from composite source
         errors: list[ModelContractError] = []
+        dedup_count = 0
         if isinstance(self._source, SourceContractComposite):
             errors = self._source.get_merge_errors()
+            dedup_count = self._source.get_dedup_count()
 
-        return contracts, errors
+        return contracts, errors, dedup_count
 
     def _validate_contract(
         self,
         contract: ModelDiscoveredContract,
-    ) -> ModelHandlerContract | None:
+    ) -> tuple[ModelHandlerContract | None, ModelContractError | None]:
         """Validate contract YAML and extract handler_id.
+
+        Parses YAML exactly once and returns both the parsed contract (on success)
+        or the error details (on failure). This avoids double-parsing when
+        validation fails.
 
         Args:
             contract: Discovered contract to validate
 
         Returns:
-            Parsed ModelHandlerContract if valid, None if invalid
+            Tuple of (parsed_contract, error). Exactly one will be non-None:
+            - (ModelHandlerContract, None) on success
+            - (None, ModelContractError) on failure
         """
         try:
-            # Parse YAML
+            # Parse YAML (only once)
             data = yaml.safe_load(contract.text)
             if not isinstance(data, dict):
-                return None
-
-            # Validate against ModelHandlerContract
-            parsed = ModelHandlerContract.model_validate(data)
-
-            # Update contract with handler_id
-            # Note: We can't update frozen model, but we have the parsed data
-
-            return parsed
-
-        except yaml.YAMLError:
-            return None
-        except ValidationError:
-            return None
-
-    def _create_validation_error(
-        self,
-        contract: ModelDiscoveredContract,
-    ) -> ModelContractError | None:
-        """Create validation error for a contract.
-
-        Args:
-            contract: Contract that failed validation
-
-        Returns:
-            ModelContractError describing the failure
-        """
-        try:
-            # Try to determine specific error
-            data = yaml.safe_load(contract.text)
-            if not isinstance(data, dict):
-                return ModelContractError(
+                return None, ModelContractError(
                     contract_path=str(contract.ref),
                     handler_id=None,
                     error_type="yaml_parse",
                     message="Contract YAML must be a dictionary",
                 )
 
-            # Try Pydantic validation to get specific error
+            # Validate against ModelHandlerContract
             try:
-                ModelHandlerContract.model_validate(data)
-                return None  # Should not reach here
+                parsed = ModelHandlerContract.model_validate(data)
+                return parsed, None
             except ValidationError as e:
-                # Extract first error
+                # Extract first error for detailed message
                 first_error = e.errors()[0] if e.errors() else None
                 if first_error:
                     field = ".".join(str(loc) for loc in first_error.get("loc", []))
                     msg = first_error.get("msg", "Validation failed")
-                    return ModelContractError(
+                    return None, ModelContractError(
                         contract_path=str(contract.ref),
                         handler_id=data.get("handler_id"),
                         error_type="schema_validation",
                         message=f"Validation error in '{field}': {msg}",
                     )
-                return ModelContractError(
+                return None, ModelContractError(
                     contract_path=str(contract.ref),
                     handler_id=data.get("handler_id"),
                     error_type="schema_validation",
@@ -499,7 +472,7 @@ class ServiceContractPublisher:
                 )
 
         except yaml.YAMLError as e:
-            return ModelContractError(
+            return None, ModelContractError(
                 contract_path=str(contract.ref),
                 handler_id=None,
                 error_type="yaml_parse",

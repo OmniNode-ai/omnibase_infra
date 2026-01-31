@@ -26,6 +26,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+import yaml
+
 from omnibase_infra.services.contract_publisher.models import ModelContractError
 from omnibase_infra.services.contract_publisher.sources.model_discovered import (
     ModelDiscoveredContract,
@@ -73,7 +75,12 @@ class SourceContractComposite:
     .. versionadded:: 0.3.0
     """
 
-    __slots__ = ("_filesystem_source", "_last_merge_errors", "_package_source")
+    __slots__ = (
+        "_filesystem_source",
+        "_last_dedup_count",
+        "_last_merge_errors",
+        "_package_source",
+    )
 
     def __init__(
         self,
@@ -98,6 +105,7 @@ class SourceContractComposite:
         self._filesystem_source = filesystem_source
         self._package_source = package_source
         self._last_merge_errors: list[ModelContractError] = []
+        self._last_dedup_count: int = 0
 
     @property
     def source_type(self) -> str:
@@ -132,6 +140,37 @@ class SourceContractComposite:
         """Return the package source if configured."""
         return self._package_source
 
+    def _extract_handler_id(
+        self, contract: ModelDiscoveredContract
+    ) -> ModelDiscoveredContract:
+        """Extract handler_id from contract YAML before merging.
+
+        Parses the YAML to extract handler_id early, enabling proper
+        deduplication and conflict detection in _merge_contracts().
+
+        Args:
+            contract: Discovered contract with text content
+
+        Returns:
+            Contract with handler_id populated if extraction succeeded,
+            original contract unchanged if parsing failed (will fail
+            validation later with proper error).
+        """
+        try:
+            data = yaml.safe_load(contract.text)
+            if isinstance(data, dict) and "handler_id" in data:
+                handler_id = data["handler_id"]
+                if isinstance(handler_id, str) and handler_id:
+                    return contract.with_parsed_data(handler_id=handler_id)
+        except yaml.YAMLError:
+            # YAML parse errors will be caught during validation
+            logger.debug(
+                "Failed to extract handler_id from %s:%s (YAML parse error)",
+                contract.origin,
+                contract.ref,
+            )
+        return contract
+
     async def discover_contracts(self) -> list[ModelDiscoveredContract]:
         """Discover contracts from all configured sources and merge.
 
@@ -143,13 +182,15 @@ class SourceContractComposite:
             Deduplicated and sorted contracts (excludes conflicts)
 
         Note:
-            The returned contracts have content_hash populated.
+            The returned contracts have handler_id and content_hash populated.
             Call get_merge_errors() after discovery to get conflict errors.
+            Call get_dedup_count() after discovery to get deduplication count.
         """
         all_contracts: list[ModelDiscoveredContract] = []
 
-        # Clear previous errors
+        # Clear previous state
         self._last_merge_errors = []
+        self._last_dedup_count = 0
 
         # Discover from filesystem source
         if self._filesystem_source:
@@ -169,22 +210,27 @@ class SourceContractComposite:
                 len(package_contracts),
             )
 
+        # Extract handler_ids BEFORE merging (enables proper dedup/conflict detection)
+        all_contracts = [self._extract_handler_id(c) for c in all_contracts]
+
         # Compute content hashes for all contracts
         all_contracts = [c.with_content_hash() for c in all_contracts]
 
-        # Merge with conflict detection
-        merged, conflicts = self._merge_contracts(all_contracts)
+        # Merge with conflict detection (now handler_id is populated)
+        merged, conflicts, dedup_count = self._merge_contracts(all_contracts)
 
-        # Store errors for later retrieval
+        # Store results for later retrieval
         self._last_merge_errors = conflicts
+        self._last_dedup_count = dedup_count
 
         # Sort merged contracts for deterministic ordering
         merged.sort(key=lambda c: c.sort_key())
 
         logger.info(
-            "Composite discovery complete: %d merged, %d conflicts, %d total",
+            "Composite discovery complete: %d merged, %d conflicts, %d deduped, %d total",
             len(merged),
             len(conflicts),
+            dedup_count,
             len(all_contracts),
         )
 
@@ -199,28 +245,42 @@ class SourceContractComposite:
         """
         return self._last_merge_errors.copy()
 
+    def get_dedup_count(self) -> int:
+        """Get deduplication count from last discover_contracts call.
+
+        Returns the count of contracts that were deduplicated (same handler_id
+        and same content hash). This does NOT include conflicts (same handler_id
+        but different content hash) - those are tracked via get_merge_errors().
+
+        Returns:
+            Number of deduplicated contracts (0 if discover_contracts hasn't
+            been called or no duplicates found).
+        """
+        return self._last_dedup_count
+
     def _merge_contracts(
         self,
         contracts: list[ModelDiscoveredContract],
-    ) -> tuple[list[ModelDiscoveredContract], list[ModelContractError]]:
+    ) -> tuple[list[ModelDiscoveredContract], list[ModelContractError], int]:
         """Merge contracts with conflict detection.
 
         Groups contracts by handler_id (extracted from YAML), then:
         - Single occurrence: Keep as-is
-        - Multiple with same hash: Deduplicate (keep first)
+        - Multiple with same hash: Deduplicate (keep first), increment dedup_count
         - Multiple with different hash: Generate conflict error
 
         Note: Contracts without handler_id (failed parsing) are kept
         as-is and will generate validation errors later.
 
         Args:
-            contracts: List of contracts with content_hash computed
+            contracts: List of contracts with handler_id and content_hash computed
 
         Returns:
-            Tuple of (merged_contracts, conflict_errors)
+            Tuple of (merged_contracts, conflict_errors, dedup_count)
         """
         merged: list[ModelDiscoveredContract] = []
         conflicts: list[ModelContractError] = []
+        dedup_count = 0
 
         # Track seen handler_ids with their hash
         seen: dict[
@@ -245,7 +305,8 @@ class SourceContractComposite:
                 existing_contract, existing_hash = seen[handler_id]
 
                 if content_hash == existing_hash:
-                    # Same hash - dedup silently
+                    # Same hash - dedup silently, increment counter
+                    dedup_count += 1
                     logger.debug(
                         "Deduplicating contract %s (same hash): %s vs %s",
                         handler_id,
@@ -275,7 +336,7 @@ class SourceContractComposite:
                         existing_contract.ref,
                     )
 
-        return merged, conflicts
+        return merged, conflicts, dedup_count
 
 
 __all__ = ["SourceContractComposite"]
