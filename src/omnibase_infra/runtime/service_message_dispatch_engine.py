@@ -1491,6 +1491,28 @@ class MessageDispatchEngine:
 
         .. versionadded:: 0.2.9
         """
+        # Enforce freeze contract (same as dispatch())
+        if not self._frozen:
+            raise ModelOnexError(
+                message="dispatch_with_transaction() called before freeze(). "
+                "Registration MUST complete and freeze() MUST be called before dispatch. "
+                "This is required for thread safety.",
+                error_code=EnumCoreErrorCode.INVALID_STATE,
+            )
+
+        # Validate inputs (same as dispatch())
+        if not topic or not topic.strip():
+            raise ModelOnexError(
+                message="Topic cannot be empty or whitespace.",
+                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+            )
+
+        if envelope is None:
+            raise ModelOnexError(
+                message="Cannot dispatch None envelope. ModelEventEnvelope is required.",
+                error_code=EnumCoreErrorCode.INVALID_PARAMETER,
+            )
+
         # Log transaction context at DEBUG level for traceability
         correlation_id = envelope.correlation_id or uuid4()
         self._logger.debug(

@@ -7,9 +7,11 @@ Tests the contract-driven Kafka subscription wiring functionality including:
 - Subscription creation from subcontract
 - Callback creation and dispatch bridging
 - Cleanup and lifecycle management
+- DLQ consumer_group alignment with subscription consumer_group
 
 Related:
     - OMN-1621: Runtime consumes event_bus subcontract for contract-driven wiring
+    - OMN-1740: DLQ consumer_group alignment (PR #219 review feedback)
     - src/omnibase_infra/runtime/event_bus_subcontract_wiring.py
 """
 
@@ -264,7 +266,9 @@ class TestDispatchCallback:
         sample_event_message: ModelEventMessage,
     ) -> None:
         """Test callback dispatches to engine."""
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
 
         await callback(sample_event_message)
 
@@ -279,7 +283,7 @@ class TestDispatchCallback:
     ) -> None:
         """Test callback passes correct topic to dispatch engine."""
         topic = "dev.onex.evt.test.v1"
-        callback = wiring._create_dispatch_callback(topic)
+        callback = wiring._create_dispatch_callback(topic, "dev.test-handler")
 
         await callback(sample_event_message)
 
@@ -294,7 +298,9 @@ class TestDispatchCallback:
         sample_event_message: ModelEventMessage,
     ) -> None:
         """Test callback passes deserialized envelope to dispatch engine."""
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
 
         await callback(sample_event_message)
 
@@ -327,7 +333,9 @@ class TestDispatchCallback:
             dlq_config=ModelDlqConfig(enabled=True, on_content_error="dlq_and_commit"),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
 
         invalid_message = ModelEventMessage(
             topic="dev.onex.evt.test.v1",
@@ -357,7 +365,9 @@ class TestDispatchCallback:
     ) -> None:
         """Test callback wraps dispatch engine errors in RuntimeHostError."""
         mock_dispatch_engine.dispatch.side_effect = RuntimeError("Dispatch failed")
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
 
         with pytest.raises(RuntimeHostError, match="Failed to dispatch"):
             await callback(sample_event_message)
@@ -701,7 +711,9 @@ class TestIdempotencyGate:
             idempotency_config=ModelIdempotencyConfig(enabled=True),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
         await callback(sample_event_message_with_envelope_id)
 
         # Verify: dispatch_engine.dispatch NOT called (duplicate skipped)
@@ -732,7 +744,9 @@ class TestIdempotencyGate:
             idempotency_config=ModelIdempotencyConfig(enabled=True),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
         await callback(sample_event_message_with_envelope_id)
 
         # Verify: dispatch_engine.dispatch called
@@ -768,7 +782,9 @@ class TestIdempotencyGate:
             idempotency_config=ModelIdempotencyConfig(enabled=True),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
         await callback(sample_event_message_without_envelope_id)
 
         # Verify: idempotency check was called with auto-generated envelope_id
@@ -800,7 +816,9 @@ class TestIdempotencyGate:
             idempotency_config=ModelIdempotencyConfig(enabled=False),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
         await callback(sample_event_message_with_envelope_id)
 
         # Verify: dispatch called without idempotency check
@@ -828,11 +846,67 @@ class TestIdempotencyGate:
             idempotency_config=ModelIdempotencyConfig(enabled=True),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
         await callback(sample_event_message_with_envelope_id)
 
         # Verify: dispatch called (no store = no idempotency check)
         mock_dispatch_engine.dispatch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_duplicate_message_commits_offset_to_prevent_redelivery(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+        mock_idempotency_store: AsyncMock,
+        sample_event_message_with_envelope_id: ModelEventMessage,
+    ) -> None:
+        """Duplicate messages must commit offset to prevent infinite redelivery.
+
+        This is a critical test: when a message is identified as a duplicate
+        (already processed), we must still commit the offset. Otherwise Kafka
+        will redeliver the same message forever, causing an infinite loop.
+
+        Related: PR #219 review - deduped messages should still commit offsets.
+        """
+        from omnibase_infra.models.event_bus import (
+            ModelIdempotencyConfig,
+            ModelOffsetPolicyConfig,
+        )
+
+        # Setup: mock idempotency store that returns False (duplicate)
+        mock_idempotency_store.check_and_record.return_value = False
+        mock_event_bus.commit_offset = AsyncMock()
+
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="dev",
+            node_name="test-handler",
+            idempotency_store=mock_idempotency_store,
+            idempotency_config=ModelIdempotencyConfig(enabled=True),
+            offset_policy=ModelOffsetPolicyConfig(
+                commit_strategy="commit_after_handler"
+            ),
+        )
+
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
+        await callback(sample_event_message_with_envelope_id)
+
+        # Verify: dispatch_engine.dispatch NOT called (duplicate skipped)
+        mock_dispatch_engine.dispatch.assert_not_called()
+
+        # Verify: idempotency store was checked
+        mock_idempotency_store.check_and_record.assert_called_once()
+
+        # CRITICAL: Offset MUST be committed even for duplicates
+        # This prevents infinite redelivery loop
+        mock_event_bus.commit_offset.assert_called_once_with(
+            sample_event_message_with_envelope_id
+        )
 
 
 # =============================================================================
@@ -878,7 +952,9 @@ class TestErrorClassification:
             ),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
         await callback(invalid_message)  # Should not raise
 
         # Verify: DLQ published (content error handling)
@@ -920,7 +996,9 @@ class TestErrorClassification:
             ),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
         await callback(invalid_schema_message)  # Should not raise
 
         # Verify: DLQ published
@@ -965,7 +1043,9 @@ class TestErrorClassification:
             dlq_config=ModelDlqConfig(on_infra_exhausted="fail_fast"),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
 
         # Verify: raises RuntimeHostError (fail-fast default)
         with pytest.raises(RuntimeHostError):
@@ -1017,7 +1097,9 @@ class TestErrorClassification:
             retry_config=ModelConsumerRetryConfig(max_attempts=2),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
 
         # First attempt - should fail but not go to DLQ (retry budget not exhausted)
         with pytest.raises(RuntimeHostError):
@@ -1059,7 +1141,9 @@ class TestErrorClassification:
             dlq_config=ModelDlqConfig(on_content_error="fail_fast"),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
 
         with pytest.raises(ProtocolConfigurationError, match="Content error"):
             await callback(invalid_message)
@@ -1098,11 +1182,68 @@ class TestErrorClassification:
             node_name="test-handler",
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
 
         # Verify: wrapped in RuntimeHostError
         with pytest.raises(RuntimeHostError, match="Failed to dispatch"):
             await callback(valid_message)
+
+    @pytest.mark.asyncio
+    async def test_dlq_consumer_group_matches_subscription_consumer_group(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+    ) -> None:
+        """DLQ consumer_group must match the subscription consumer_group.
+
+        This test verifies the fix for OMN-1740 PR review feedback:
+        DLQ messages must include the same consumer_group that was used
+        for the subscription, enabling correlation during replay and debugging.
+        """
+        from omnibase_infra.models.event_bus import ModelDlqConfig
+
+        # Setup: invalid JSON to trigger DLQ
+        invalid_message = ModelEventMessage(
+            topic="dev.onex.evt.test.v1",
+            key=b"key",
+            value=b"not valid json",
+            headers=ModelEventHeaders(
+                source="test",
+                event_type="test",
+                timestamp=datetime.now(UTC),
+            ),
+        )
+
+        mock_event_bus._publish_raw_to_dlq = AsyncMock()
+
+        # Use different node_name in __init__ vs callback to verify alignment
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="prod",  # Different environment
+            node_name="init-handler",  # Different node_name than callback
+            dlq_config=ModelDlqConfig(
+                enabled=True,
+                on_content_error="dlq_and_commit",
+            ),
+        )
+
+        # The consumer_group passed to _create_dispatch_callback should be
+        # the one used in DLQ publishing, NOT self._node_name from __init__
+        callback_consumer_group = "prod.my-special-handler"
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", callback_consumer_group
+        )
+        await callback(invalid_message)
+
+        # Verify: DLQ consumer_group matches the callback consumer_group
+        mock_event_bus._publish_raw_to_dlq.assert_called_once()
+        call_kwargs = mock_event_bus._publish_raw_to_dlq.call_args.kwargs
+        assert call_kwargs["consumer_group"] == callback_consumer_group
+        # Verify it's NOT using the __init__ node_name
+        assert call_kwargs["consumer_group"] != "prod.init-handler"
 
 
 # =============================================================================
@@ -1155,7 +1296,9 @@ class TestOffsetCommitPolicy:
             ),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
         await callback(sample_valid_message)
 
         # Verify: _commit_offset called after dispatch success
@@ -1186,7 +1329,9 @@ class TestOffsetCommitPolicy:
             ),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
 
         with pytest.raises(RuntimeHostError):
             await callback(sample_valid_message)
@@ -1231,7 +1376,9 @@ class TestOffsetCommitPolicy:
             dlq_config=ModelDlqConfig(on_content_error="dlq_and_commit"),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
         await callback(invalid_message)  # Should not raise
 
         # Verify: offset committed after DLQ publish
@@ -1262,7 +1409,9 @@ class TestOffsetCommitPolicy:
             ),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
         # Should not raise even without commit_offset method
         await callback(sample_valid_message)
 
@@ -1318,7 +1467,9 @@ class TestRetryTracking:
         correlation_id = uuid4()
         wiring._retry_counts[correlation_id] = 2
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
         await callback(sample_valid_message)
 
         # Note: The retry count is cleared based on the correlation_id from the
@@ -1354,7 +1505,9 @@ class TestRetryTracking:
             dlq_config=ModelDlqConfig(on_infra_exhausted="dlq_and_commit"),
         )
 
-        callback = wiring._create_dispatch_callback("dev.onex.evt.test.v1")
+        callback = wiring._create_dispatch_callback(
+            "dev.onex.evt.test.v1", "dev.test-handler"
+        )
         await callback(sample_valid_message)  # Should not raise
 
         # Verify DLQ was called and retry counts are empty after cleanup

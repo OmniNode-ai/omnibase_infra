@@ -5,7 +5,7 @@
 
 This module provides the configuration model for idempotency behavior in
 event bus consumers. When enabled, consumers deduplicate messages based on
-the `event_id` field from the event envelope using an INSERT ON CONFLICT
+the `envelope_id` field from the event envelope using an INSERT ON CONFLICT
 DO NOTHING pattern.
 
 Idempotency Overview:
@@ -13,8 +13,8 @@ Idempotency Overview:
     produces the same result as processing it once. This is critical in
     distributed systems where message delivery can be at-least-once.
 
-    The idempotency store tracks processed `event_id` values:
-    - On first encounter: Record event_id, process message
+    The idempotency store tracks processed `envelope_id` values:
+    - On first encounter: Record envelope_id, process message
     - On duplicate: Skip processing (already recorded)
     - After retention period: Prune old records to limit storage
 
@@ -37,19 +37,19 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelIdempotencyConfig(BaseModel):
     """Idempotency configuration for message consumption.
 
-    When enabled, the consumer deduplicates messages based on the `event_id`
-    field from the event envelope. The deduplication key is always `event_id`
+    When enabled, the consumer deduplicates messages based on the `envelope_id`
+    field from the event envelope. The deduplication key is always `envelope_id`
     (not configurable) to ensure consistent behavior across all consumers.
 
     Attributes:
         enabled: Whether to enable idempotency checking. When False, all
             messages are processed regardless of prior processing.
             Default: False.
-        store_type: Backend for storing processed event IDs.
+        store_type: Backend for storing processed envelope IDs.
             - "postgres": Production-grade, uses INSERT ON CONFLICT DO NOTHING
             - "memory": In-memory store for testing only
             Default: "postgres".
-        retention_days: Number of days to retain processed event IDs before
+        retention_days: Number of days to retain processed envelope IDs before
             cleanup. Longer retention uses more storage but provides stronger
             deduplication guarantees for delayed retries.
             Must be between 1 and 90 days. Default: 7.
@@ -83,7 +83,7 @@ class ModelIdempotencyConfig(BaseModel):
         - For high-throughput topics, consider shorter retention to reduce storage
 
     Note:
-        The deduplication key is always the `event_id` field from the event
+        The deduplication key is always the `envelope_id` field from the event
         envelope. This is intentionally not configurable to ensure consistent
         behavior and prevent misconfiguration.
 
@@ -124,7 +124,7 @@ class ModelIdempotencyConfig(BaseModel):
         default=7,
         ge=1,
         le=90,
-        description="Days to retain processed event IDs before cleanup",
+        description="Days to retain processed envelope IDs before cleanup",
     )
 
 

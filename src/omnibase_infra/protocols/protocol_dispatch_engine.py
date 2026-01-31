@@ -171,9 +171,12 @@ class ProtocolDispatchEngine(Protocol):
             infrastructure types into the protocol. This keeps the protocol
             generic and allows future flexibility for different database backends.
 
-            Implementers should type-narrow ``tx`` in their implementations:
+            Implementers should type-narrow ``tx`` via duck-typing (checking for
+            required methods) rather than isinstance checks, per ONEX conventions:
 
             .. code-block:: python
+
+                from omnibase_core.errors import OnexError
 
                 async def dispatch_with_transaction(
                     self,
@@ -182,10 +185,12 @@ class ProtocolDispatchEngine(Protocol):
                     envelope: ModelEventEnvelope[object],
                     tx: object,
                 ) -> ModelDispatchResult | None:
-                    # Type-narrow for specific backend
-                    if not isinstance(tx, asyncpg.Connection):
-                        raise TypeError("Expected asyncpg.Connection")
-                    # Use tx with proper type...
+                    # Duck-type check for required database connection methods
+                    if not (hasattr(tx, 'execute') and callable(tx.execute)):
+                        raise OnexError(
+                            "Transaction object must implement execute() method"
+                        )
+                    # Use tx with duck-typed interface...
 
         Thread Safety:
             This method MUST be safe for concurrent calls from multiple
@@ -210,8 +215,8 @@ class ProtocolDispatchEngine(Protocol):
 
         Raises:
             InfraDispatchError: If no handler is registered for the topic/message type.
-            OnexError: For handler execution failures (implementation-specific).
-            TypeError: If ``tx`` is not the expected transaction type.
+            OnexError: For handler execution failures or if ``tx`` does not implement
+                the required database connection interface (duck-type validation).
 
         Example:
             .. code-block:: python

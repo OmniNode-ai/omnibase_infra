@@ -35,6 +35,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_core.errors import OnexError
+
 
 class ModelConsumerRetryConfig(BaseModel):
     """Consumer-side retry configuration.
@@ -188,21 +190,22 @@ class ModelConsumerRetryConfig(BaseModel):
             Delay in milliseconds for the specified attempt, capped at max_backoff_ms.
 
         Raises:
-            ValueError: If attempt is less than 1 or greater than max_attempts.
+            OnexError: If attempt is less than 1 or exceeds allowed retries.
 
         Example:
             >>> config = ModelConsumerRetryConfig(backoff_ms=1000, backoff_multiplier=2.0)
             >>> config.calculate_delay_ms(1)  # ~1000ms
-            >>> config.calculate_delay_ms(2)  # ~2000ms
-            >>> config.calculate_delay_ms(3)  # ~4000ms
+            >>> config.calculate_delay_ms(2)  # ~2000ms (max_attempts=3 allows 2 retries)
         """
         if attempt < 1:
             msg = f"Attempt must be >= 1, got {attempt}"
-            raise ValueError(msg)
+            raise OnexError(msg)
 
-        if attempt > self.max_attempts:
-            msg = f"Attempt {attempt} exceeds max_attempts {self.max_attempts}"
-            raise ValueError(msg)
+        # max_attempts includes the initial attempt, so valid retries are 1 to max_attempts-1
+        max_retry = self.max_attempts - 1
+        if attempt > max_retry:
+            msg = f"Attempt {attempt} exceeds max retries {max_retry} (max_attempts={self.max_attempts} includes initial attempt)"
+            raise OnexError(msg)
 
         if self.backoff_strategy == "exponential":
             # Exponential: backoff_ms * (multiplier ^ (attempt - 1))
@@ -234,15 +237,18 @@ class ModelConsumerRetryConfig(BaseModel):
 
         Returns:
             List of delays in milliseconds for each retry attempt.
+            Since max_attempts includes the initial attempt, there are
+            max_attempts - 1 retries, and thus max_attempts - 1 delays.
 
         Example:
             >>> config = ModelConsumerRetryConfig(max_attempts=3, backoff_ms=1000)
             >>> config.get_all_delays_ms()
-            [1000, 2000, 4000]
+            [1000, 2000]  # 2 retries (max_attempts=3 includes initial)
         """
+        # max_attempts includes initial attempt, so we have max_attempts - 1 retries
         return [
             self.calculate_delay_ms(i, include_jitter=include_jitter)
-            for i in range(1, self.max_attempts + 1)
+            for i in range(1, self.max_attempts)
         ]
 
     def get_total_retry_time_ms(self) -> int:
@@ -250,11 +256,13 @@ class ModelConsumerRetryConfig(BaseModel):
 
         Returns:
             Total time in milliseconds for all retry attempts (without jitter).
+            Since max_attempts includes the initial attempt, this sums delays
+            for max_attempts - 1 retries.
 
         Example:
             >>> config = ModelConsumerRetryConfig(max_attempts=3, backoff_ms=1000)
             >>> config.get_total_retry_time_ms()
-            7000  # 1000 + 2000 + 4000
+            3000  # 1000 + 2000 (2 retries for max_attempts=3)
         """
         return sum(self.get_all_delays_ms(include_jitter=False))
 

@@ -37,6 +37,18 @@ Error Classification:
         Identified by: RuntimeHostError and subclasses (InfraConnectionError,
         InfraTimeoutError, InfraUnavailableError, etc.)
 
+DLQ Consumer Group Alignment:
+    IMPORTANT: The consumer_group used for DLQ publishing MUST match the
+    consumer_group used when subscribing to topics. This is critical for:
+    - Traceability: DLQ messages can be correlated back to their source consumer
+    - Replay operations: DLQ replay tools can identify which consumer group failed
+    - Debugging: Operations teams can trace failures to specific consumer groups
+
+    The wiring ensures this alignment by:
+    1. Computing consumer_group as "{environment}.{node_name}" in wire_subscriptions
+    2. Passing this same consumer_group to _create_dispatch_callback
+    3. Using it in all _publish_to_dlq calls within the callback closure
+
 Topic Resolution:
     Topic suffixes from contracts follow the ONEX naming convention:
         onex.{kind}.{producer}.{event-name}.v{n}
@@ -305,6 +317,11 @@ class EventBusSubcontractWiring:
             - Multiple instances of the same node load-balance message processing
             - Different environments are completely isolated
 
+            IMPORTANT: The same consumer_group is used for both subscriptions and
+            DLQ publishing to maintain traceability. DLQ messages include the
+            consumer_group that originally processed the message, enabling
+            correlation during replay and debugging.
+
         Args:
             subcontract: The event_bus subcontract from a handler's contract.
                 Contains subscribe_topics list with topic suffixes.
@@ -331,23 +348,27 @@ class EventBusSubcontractWiring:
 
         for topic_suffix in subcontract.subscribe_topics:
             full_topic = self.resolve_topic(topic_suffix)
-            group_id = f"{self._environment}.{node_name}"
+            # Consumer group ID derived from environment and node_name
+            # This same group_id is passed to DLQ publishing for traceability
+            consumer_group = f"{self._environment}.{node_name}"
 
-            # Create dispatch callback for this topic
-            callback = self._create_dispatch_callback(full_topic)
+            # Create dispatch callback for this topic, capturing the consumer_group
+            # used for this subscription to ensure DLQ messages have consistent
+            # consumer_group metadata
+            callback = self._create_dispatch_callback(full_topic, consumer_group)
 
             # Subscribe and store unsubscribe callable
             unsubscribe = await self._event_bus.subscribe(
                 topic=full_topic,
-                group_id=group_id,
+                group_id=consumer_group,
                 on_message=callback,
             )
             self._unsubscribe_callables.append(unsubscribe)
 
             self._logger.info(
-                "Wired subscription: topic=%s, group_id=%s, node=%s",
+                "Wired subscription: topic=%s, consumer_group=%s, node=%s",
                 full_topic,
-                group_id,
+                consumer_group,
                 node_name,
             )
 
@@ -399,6 +420,7 @@ class EventBusSubcontractWiring:
         error: Exception,
         correlation_id: UUID,
         error_category: str,
+        consumer_group: str,
     ) -> None:
         """Publish failed message to Dead Letter Queue.
 
@@ -411,6 +433,9 @@ class EventBusSubcontractWiring:
             error: The exception that caused the failure.
             correlation_id: Correlation ID for tracing.
             error_category: Either "content" or "infra" for classification.
+            consumer_group: The consumer group ID that was subscribed to this topic.
+                This should match the group_id used in wire_subscriptions() for
+                consistent traceability in DLQ messages.
         """
         if not self._dlq_config.enabled:
             self._logger.debug(
@@ -431,7 +456,7 @@ class EventBusSubcontractWiring:
                     error=error,
                     correlation_id=correlation_id,
                     failure_type=f"{error_category}_error",
-                    consumer_group=f"{self._environment}.{self._node_name}",
+                    consumer_group=consumer_group,
                 )
                 self._logger.warning(
                     "dlq_published topic=%s error_category=%s error_type=%s "
@@ -506,6 +531,7 @@ class EventBusSubcontractWiring:
     def _create_dispatch_callback(
         self,
         topic: str,
+        consumer_group: str,
     ) -> Callable[[ProtocolEventMessage], Awaitable[None]]:
         """Create callback that bridges Kafka consumer to dispatch engine.
 
@@ -531,6 +557,9 @@ class EventBusSubcontractWiring:
 
         Args:
             topic: The full topic name for routing context in logs.
+            consumer_group: The consumer group ID used for this topic subscription.
+                This is passed to DLQ publishing to ensure consistent traceability
+                between subscriptions and their associated DLQ messages.
 
         Returns:
             Async callback function compatible with event bus subscribe().
@@ -565,15 +594,20 @@ class EventBusSubcontractWiring:
                         correlation_id=correlation_id,
                     )
                     if not is_new:
-                        # Duplicate - skip processing, log INFO
+                        # Duplicate - skip processing but commit offset to prevent
+                        # infinite redelivery. This is critical: even though we don't
+                        # reprocess the message, we must advance the consumer offset.
                         self._logger.info(
                             "idempotency_skip envelope_id=%s topic=%s "
-                            "correlation_id=%s node=%s",
+                            "correlation_id=%s node=%s reason=duplicate_message",
                             str(envelope_id),
                             topic,
                             str(correlation_id),
                             self._node_name,
                         )
+                        # Commit offset for duplicate to prevent infinite redelivery
+                        if self._should_commit_after_handler():
+                            await self._commit_offset(message, correlation_id)
                         return  # Skip dispatch
 
                 # Dispatch via ProtocolDispatchEngine interface
@@ -598,7 +632,7 @@ class EventBusSubcontractWiring:
 
                 if self._dlq_config.on_content_error == "dlq_and_commit":
                     await self._publish_to_dlq(
-                        topic, message, e, correlation_id, "content"
+                        topic, message, e, correlation_id, "content", consumer_group
                     )
                     await self._commit_offset(message, correlation_id)
                     return  # Handled - don't re-raise
@@ -624,7 +658,7 @@ class EventBusSubcontractWiring:
 
                 if self._dlq_config.on_content_error == "dlq_and_commit":
                     await self._publish_to_dlq(
-                        topic, message, e, correlation_id, "content"
+                        topic, message, e, correlation_id, "content", consumer_group
                     )
                     await self._commit_offset(message, correlation_id)
                     return  # Handled - don't re-raise
@@ -655,7 +689,7 @@ class EventBusSubcontractWiring:
                     # Retry budget exhausted - check policy
                     if self._dlq_config.on_infra_exhausted == "dlq_and_commit":
                         await self._publish_to_dlq(
-                            topic, message, e, correlation_id, "infra"
+                            topic, message, e, correlation_id, "infra", consumer_group
                         )
                         await self._commit_offset(message, correlation_id)
                         self._clear_retry_count(correlation_id)
@@ -685,7 +719,7 @@ class EventBusSubcontractWiring:
                 if is_exhausted:
                     if self._dlq_config.on_infra_exhausted == "dlq_and_commit":
                         await self._publish_to_dlq(
-                            topic, message, e, correlation_id, "infra"
+                            topic, message, e, correlation_id, "infra", consumer_group
                         )
                         await self._commit_offset(message, correlation_id)
                         self._clear_retry_count(correlation_id)
