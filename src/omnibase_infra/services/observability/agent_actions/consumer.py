@@ -68,6 +68,7 @@ from aiokafka import AIOKafkaConsumer, TopicPartition
 from aiokafka.errors import KafkaError
 from pydantic import BaseModel, ValidationError
 
+from omnibase_core.types import JsonType
 from omnibase_infra.services.observability.agent_actions.config import (
     ConfigAgentActionsConsumer,
 )
@@ -950,6 +951,80 @@ class AgentActionsConsumer:
             },
         )
 
+    def _determine_health_status(
+        self,
+        metrics_snapshot: dict[str, object],
+        circuit_state: dict[str, JsonType],
+    ) -> EnumHealthStatus:
+        """Determine consumer health status based on current state.
+
+        Health status determination rules (in priority order):
+        1. UNHEALTHY: Consumer is not running (stopped or crashed)
+        2. DEGRADED: Circuit breaker is open (database issues, retrying)
+        3. DEGRADED: No writes yet AND consumer running > 60s (startup grace period exceeded)
+        4. DEGRADED: Last successful write exceeds staleness threshold
+        5. HEALTHY: All other cases (running, circuit closed, recent writes or in grace period)
+
+        The 60-second startup grace period allows the consumer to be considered
+        healthy immediately after starting, before any messages have been consumed.
+
+        Args:
+            metrics_snapshot: Snapshot of current consumer metrics including
+                timestamps for started_at and last_successful_write_at.
+            circuit_state: Current circuit breaker state from the writer,
+                containing at minimum a "state" key.
+
+        Returns:
+            EnumHealthStatus indicating current health:
+                - HEALTHY: Fully operational
+                - DEGRADED: Running but with issues (circuit open, stale writes)
+                - UNHEALTHY: Not running
+        """
+        # Rule 1: Consumer not running -> UNHEALTHY
+        if not self._running:
+            return EnumHealthStatus.UNHEALTHY
+
+        # Rule 2: Circuit breaker open -> DEGRADED
+        if circuit_state.get("state") == "open":
+            return EnumHealthStatus.DEGRADED
+
+        # Check for recent successful write (within staleness threshold)
+        last_write = metrics_snapshot.get("last_successful_write_at")
+
+        if last_write is None:
+            # No writes yet - check startup grace period (60 seconds)
+            started_at_str = metrics_snapshot.get("started_at")
+            if started_at_str is not None:
+                try:
+                    started_at_dt = datetime.fromisoformat(str(started_at_str))
+                    age_seconds = (datetime.now(UTC) - started_at_dt).total_seconds()
+                    if age_seconds <= 60.0:
+                        # Rule 5: Consumer just started, healthy even without writes
+                        return EnumHealthStatus.HEALTHY
+                    else:
+                        # Rule 3: Consumer running > 60s with no writes -> DEGRADED
+                        return EnumHealthStatus.DEGRADED
+                except (ValueError, TypeError):
+                    # Parse error - fallback to healthy
+                    return EnumHealthStatus.HEALTHY
+            else:
+                # No started_at timestamp (shouldn't happen) - assume healthy
+                return EnumHealthStatus.HEALTHY
+        else:
+            # Check if last write was recent (within staleness threshold)
+            try:
+                last_write_dt = datetime.fromisoformat(str(last_write))
+                age_seconds = (datetime.now(UTC) - last_write_dt).total_seconds()
+                if age_seconds > self._config.health_check_staleness_seconds:
+                    # Rule 4: Last write exceeds staleness threshold -> DEGRADED
+                    return EnumHealthStatus.DEGRADED
+                else:
+                    # Rule 5: Recent write -> HEALTHY
+                    return EnumHealthStatus.HEALTHY
+            except (ValueError, TypeError):
+                # Parse error - fallback to healthy
+                return EnumHealthStatus.HEALTHY
+
     async def _health_handler(self, request: web.Request) -> web.Response:
         """Handle health check requests.
 
@@ -967,45 +1042,8 @@ class AgentActionsConsumer:
         metrics_snapshot = await self.metrics.snapshot()
         circuit_state = self._writer.get_circuit_breaker_state() if self._writer else {}
 
-        # Determine health status
-        if not self._running:
-            status = EnumHealthStatus.UNHEALTHY
-        elif circuit_state.get("state") == "open":
-            status = EnumHealthStatus.DEGRADED
-        else:
-            # Check for recent successful write (within staleness threshold)
-            last_write = metrics_snapshot.get("last_successful_write_at")
-            if last_write is None:
-                # No writes yet - consider healthy if just started (within first 60 seconds)
-                started_at_str = metrics_snapshot.get("started_at")
-                if started_at_str is not None:
-                    try:
-                        started_at_dt = datetime.fromisoformat(str(started_at_str))
-                        age_seconds = (
-                            datetime.now(UTC) - started_at_dt
-                        ).total_seconds()
-                        if age_seconds <= 60.0:
-                            # Consumer just started, healthy even without writes
-                            status = EnumHealthStatus.HEALTHY
-                        else:
-                            # Consumer running > 60s with no writes, degraded
-                            status = EnumHealthStatus.DEGRADED
-                    except (ValueError, TypeError):
-                        status = EnumHealthStatus.HEALTHY
-                else:
-                    # No started_at timestamp (shouldn't happen), assume healthy
-                    status = EnumHealthStatus.HEALTHY
-            else:
-                # Check if last write was recent (within staleness threshold)
-                try:
-                    last_write_dt = datetime.fromisoformat(str(last_write))
-                    age_seconds = (datetime.now(UTC) - last_write_dt).total_seconds()
-                    if age_seconds > self._config.health_check_staleness_seconds:
-                        status = EnumHealthStatus.DEGRADED
-                    else:
-                        status = EnumHealthStatus.HEALTHY
-                except (ValueError, TypeError):
-                    status = EnumHealthStatus.HEALTHY
+        # Determine health status using shared logic
+        status = self._determine_health_status(metrics_snapshot, circuit_state)
 
         response_body = {
             "status": status.value,
@@ -1044,13 +1082,8 @@ class AgentActionsConsumer:
         metrics_snapshot = await self.metrics.snapshot()
         circuit_state = self._writer.get_circuit_breaker_state() if self._writer else {}
 
-        # Determine health status
-        if not self._running:
-            status = EnumHealthStatus.UNHEALTHY
-        elif circuit_state.get("state") == "open":
-            status = EnumHealthStatus.DEGRADED
-        else:
-            status = EnumHealthStatus.HEALTHY
+        # Determine health status using shared logic
+        status = self._determine_health_status(metrics_snapshot, circuit_state)
 
         return {
             "status": status.value,
