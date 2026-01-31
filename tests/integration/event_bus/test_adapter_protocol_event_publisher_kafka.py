@@ -108,7 +108,6 @@ async def kafka_event_bus(
     config = ModelKafkaEventBusConfig(
         bootstrap_servers=kafka_bootstrap_servers,
         environment="integration-test",
-        group="adapter-test-default",
         timeout_seconds=TEST_TIMEOUT_SECONDS,
         max_retry_attempts=2,
         retry_backoff_base=0.5,
@@ -159,11 +158,10 @@ async def adapter(
         instance_id="test-instance-001",
     )
 
-    return adapter_instance
-
     # Note: adapter.close() will close the underlying bus, which is handled
     # by the started_kafka_bus fixture cleanup. We don't call adapter.close()
     # here to avoid double-closing.
+    return adapter_instance
 
 
 # =============================================================================
