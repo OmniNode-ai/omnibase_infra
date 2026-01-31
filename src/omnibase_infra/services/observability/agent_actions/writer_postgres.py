@@ -93,6 +93,7 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
         ...     pool,
         ...     circuit_breaker_threshold=5,
         ...     circuit_breaker_reset_timeout=60.0,
+        ...     circuit_breaker_half_open_successes=2,
         ... )
         >>>
         >>> # Write batch of routing decisions
@@ -104,6 +105,7 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
         pool: asyncpg.Pool,
         circuit_breaker_threshold: int = 5,
         circuit_breaker_reset_timeout: float = 60.0,
+        circuit_breaker_half_open_successes: int = 1,
     ) -> None:
         """Initialize the PostgreSQL writer with an injected pool.
 
@@ -111,6 +113,8 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
             pool: asyncpg connection pool (lifecycle managed externally).
             circuit_breaker_threshold: Failures before opening circuit (default: 5).
             circuit_breaker_reset_timeout: Seconds before auto-reset (default: 60.0).
+            circuit_breaker_half_open_successes: Successful requests required to close
+                circuit from half-open state (default: 1).
 
         Raises:
             ProtocolConfigurationError: If circuit breaker parameters are invalid.
@@ -123,6 +127,7 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
             reset_timeout=circuit_breaker_reset_timeout,
             service_name="agent-actions-postgres-writer",
             transport_type=EnumInfraTransportType.DATABASE,
+            half_open_successes=circuit_breaker_half_open_successes,
         )
 
         logger.info(
@@ -130,6 +135,7 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
             extra={
                 "circuit_breaker_threshold": circuit_breaker_threshold,
                 "circuit_breaker_reset_timeout": circuit_breaker_reset_timeout,
+                "circuit_breaker_half_open_successes": circuit_breaker_half_open_successes,
             },
         )
 

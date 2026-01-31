@@ -126,11 +126,14 @@ class CircuitBreakerTestService(MixinAsyncCircuitBreaker):
         """Get current circuit state for assertions.
 
         Returns:
-            EnumCircuitState.OPEN if circuit is open, else EnumCircuitState.CLOSED.
-            Note: HALF_OPEN is implicit and appears as CLOSED with reset failures.
+            EnumCircuitState.OPEN if circuit is open.
+            EnumCircuitState.HALF_OPEN if circuit is in half-open state.
+            EnumCircuitState.CLOSED otherwise.
         """
         if self._circuit_breaker_open:
             return EnumCircuitState.OPEN
+        if self._circuit_breaker_half_open:
+            return EnumCircuitState.HALF_OPEN
         return EnumCircuitState.CLOSED
 
     def get_failure_count(self) -> int:
@@ -339,8 +342,8 @@ class TestTransitionOpenToHalfOpen:
         # Next check should transition to HALF_OPEN (no error raised)
         await fast_service.check_circuit()
 
-        # Verify state: circuit is no longer open, failures reset
-        assert fast_service.get_state() == EnumCircuitState.CLOSED  # Implicit HALF_OPEN
+        # Verify state: circuit is in HALF_OPEN, failures reset
+        assert fast_service.get_state() == EnumCircuitState.HALF_OPEN
         assert fast_service.get_failure_count() == 0
 
     async def test_transition_does_not_occur_before_timeout(
@@ -375,8 +378,8 @@ class TestTransitionOpenToHalfOpen:
         # Immediate check should transition (timeout already elapsed)
         await service.check_circuit()
 
-        # Should be in HALF_OPEN (implicit CLOSED with reset failures)
-        assert service.get_state() == EnumCircuitState.CLOSED
+        # Should be in HALF_OPEN with failures reset
+        assert service.get_state() == EnumCircuitState.HALF_OPEN
         assert service.get_failure_count() == 0
 
     async def test_transition_allows_test_request(
@@ -517,15 +520,15 @@ class TestTransitionHalfOpenToOpen:
         # Circuit should be OPEN again
         assert single_failure_service.get_state() == EnumCircuitState.OPEN
 
-    async def test_transition_requires_threshold_failures(
+    async def test_transition_on_single_failure_in_half_open(
         self, fast_service: CircuitBreakerTestService
     ) -> None:
-        """Test that HALF_OPEN → OPEN requires threshold failures.
+        """Test that HALF_OPEN → OPEN on single failure (standard pattern).
 
-        With threshold=3:
-        - First failure in HALF_OPEN: failures=1, still CLOSED (HALF_OPEN)
-        - Second failure: failures=2, still CLOSED (HALF_OPEN)
-        - Third failure: failures=3, transitions to OPEN
+        In the standard circuit breaker pattern, a single failure in half-open
+        state immediately re-opens the circuit. This is because the circuit
+        is testing if the service is healthy, and a single failure indicates
+        it's still unhealthy.
         """
         # Open the circuit
         for _ in range(fast_service.circuit_breaker_threshold):
@@ -538,15 +541,7 @@ class TestTransitionHalfOpenToOpen:
         await fast_service.check_circuit()
         assert fast_service.get_failure_count() == 0
 
-        # Record failures below threshold - should stay in HALF_OPEN (implicit CLOSED)
-        for i in range(fast_service.circuit_breaker_threshold - 1):
-            await fast_service.record_failure()
-            assert (
-                fast_service.get_state() == EnumCircuitState.CLOSED
-            )  # Still HALF_OPEN
-            assert fast_service.get_failure_count() == i + 1
-
-        # One more failure should reopen
+        # A single failure in half-open should immediately re-open
         await fast_service.record_failure()
         assert fast_service.get_state() == EnumCircuitState.OPEN
 
@@ -811,7 +806,7 @@ class TestTimingPrecision:
 
         # Should now allow (HALF_OPEN)
         await service.check_circuit()
-        assert service.get_state() == EnumCircuitState.CLOSED
+        assert service.get_state() == EnumCircuitState.HALF_OPEN
 
     async def test_very_long_timeout_value(self) -> None:
         """Test circuit breaker with very long reset timeout."""

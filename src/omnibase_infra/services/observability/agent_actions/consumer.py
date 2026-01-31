@@ -390,6 +390,7 @@ class AgentActionsConsumer:
                 pool=self._pool,
                 circuit_breaker_threshold=self._config.circuit_breaker_threshold,
                 circuit_breaker_reset_timeout=self._config.circuit_breaker_reset_timeout,
+                circuit_breaker_half_open_successes=self._config.circuit_breaker_half_open_successes,
             )
 
             # Create Kafka consumer
@@ -930,7 +931,7 @@ class AgentActionsConsumer:
 
         self._health_site = web.TCPSite(
             self._health_runner,
-            host="0.0.0.0",  # noqa: S104 - Health check needs to bind to all interfaces
+            host=self._config.health_check_host,  # Configurable - see config.py for security notes
             port=self._config.health_check_port,
         )
         await self._health_site.start()
@@ -939,6 +940,7 @@ class AgentActionsConsumer:
             "Health check server started",
             extra={
                 "consumer_id": self._consumer_id,
+                "host": self._config.health_check_host,
                 "port": self._config.health_check_port,
             },
         )
@@ -966,7 +968,7 @@ class AgentActionsConsumer:
         elif circuit_state.get("state") == "open":
             status = EnumHealthStatus.DEGRADED
         else:
-            # Check for recent successful write (within 5 minutes)
+            # Check for recent successful write (within staleness threshold)
             last_write = metrics_snapshot.get("last_successful_write_at")
             if last_write is None:
                 # No writes yet - consider healthy if just started
@@ -976,11 +978,11 @@ class AgentActionsConsumer:
                 else:
                     status = EnumHealthStatus.DEGRADED  # Polling but no writes
             else:
-                # Check if last write was recent (within 5 minutes)
+                # Check if last write was recent (within staleness threshold)
                 try:
                     last_write_dt = datetime.fromisoformat(str(last_write))
                     age_seconds = (datetime.now(UTC) - last_write_dt).total_seconds()
-                    if age_seconds > 300:  # 5 minutes
+                    if age_seconds > self._config.health_check_staleness_seconds:
                         status = EnumHealthStatus.DEGRADED
                     else:
                         status = EnumHealthStatus.HEALTHY
@@ -1072,7 +1074,9 @@ async def _main() -> None:
     def signal_handler() -> None:
         nonlocal shutdown_task
         logger.info("Received shutdown signal")
-        shutdown_task = asyncio.create_task(consumer.stop())
+        # Only create shutdown task once to avoid race conditions
+        if shutdown_task is None:
+            shutdown_task = asyncio.create_task(consumer.stop())
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, signal_handler)
@@ -1083,7 +1087,14 @@ async def _main() -> None:
     except asyncio.CancelledError:
         logger.info("Consumer cancelled")
     finally:
-        await consumer.stop()
+        # Ensure shutdown task completes if it was started by signal handler
+        if shutdown_task is not None:
+            if not shutdown_task.done():
+                await shutdown_task
+            # Task already completed, no action needed
+        else:
+            # No signal received, perform clean shutdown
+            await consumer.stop()
 
 
 if __name__ == "__main__":

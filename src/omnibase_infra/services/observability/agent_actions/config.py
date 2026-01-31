@@ -119,6 +119,27 @@ class ConfigAgentActionsConsumer(BaseSettings):
         le=65535,
         description="Port for HTTP health check endpoint",
     )
+    health_check_host: str = Field(
+        default="0.0.0.0",  # noqa: S104 - Configurable, see security note below
+        description=(
+            "Host/IP for health check server binding. Default '0.0.0.0' binds to all "
+            "interfaces for container/Kubernetes probe access. For security-sensitive "
+            "deployments, set to '127.0.0.1' to restrict to localhost-only access. "
+            "Configure via OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_HOST env var."
+        ),
+    )
+    health_check_staleness_seconds: int = Field(
+        default=300,
+        ge=60,
+        le=3600,
+        description=(
+            "Maximum age in seconds for the last successful write before "
+            "the health check reports DEGRADED status. Lower values detect "
+            "stalled consumers faster but may cause false positives in "
+            "low-traffic environments. Default is 300 (5 minutes). "
+            "Configure via OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_STALENESS_SECONDS env var."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_topic_configuration(self) -> Self:

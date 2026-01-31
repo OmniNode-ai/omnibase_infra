@@ -982,6 +982,23 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Circuit Breaker Pattern section)
     ticket: OMN-1004
+  # ==========================================================================
+  # MixinAsyncCircuitBreaker - _init_circuit_breaker parameter count (OMN-1743)
+  # ==========================================================================
+  # Circuit breaker initialization requires multiple configuration parameters
+  # for proper resilience behavior: threshold, reset_timeout, service_name,
+  # transport_type, and half_open_successes. These are standard circuit breaker
+  # configuration parameters that belong together for proper initialization.
+  - file_pattern: 'mixin_async_circuit_breaker\.py'
+    method_pattern: "Function '_init_circuit_breaker'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Circuit breaker initialization requires cohesive configuration parameters: threshold (failures before open), reset_timeout (seconds before half-open), service_name (for error context), transport_type (for error codes), and half_open_successes (for close validation). These parameters define the complete circuit breaker behavior and cannot be split without losing cohesion. Alternative is ModelCircuitBreakerConfig but direct parameters preferred for mixin flexibility.
+
+    documentation:
+      - docs/patterns/circuit_breaker_implementation.md
+      - CLAUDE.md (Circuit Breaker Pattern section)
+    ticket: OMN-1743
   # ModelOperationContext - operation_name is an operation identifier string
   - file_pattern: 'model_operation_context\.py'
     violation_pattern: "Field 'operation_name' might reference an entity"

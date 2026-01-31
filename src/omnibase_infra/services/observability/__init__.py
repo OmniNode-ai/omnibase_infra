@@ -10,20 +10,31 @@ Submodules:
     - agent_actions: Consumer and writer for agent action events
 
 Example:
-    >>> from omnibase_infra.services.observability.agent_actions import (
+    >>> from omnibase_infra.services.observability import (
+    ...     AgentActionsConsumer,
     ...     ConfigAgentActionsConsumer,
+    ...     WriterAgentActionsPostgres,
     ... )
     >>>
     >>> config = ConfigAgentActionsConsumer(
     ...     kafka_bootstrap_servers="localhost:9092",
     ...     postgres_dsn="postgresql://postgres:secret@localhost:5432/omninode_bridge",
     ... )
+    >>> consumer = AgentActionsConsumer(config)
+    >>>
+    >>> # Run consumer
+    >>> await consumer.start()
+    >>> await consumer.run()
 """
 
 from omnibase_infra.services.observability.agent_actions import (
+    AgentActionsConsumer,
     ConfigAgentActionsConsumer,
+    WriterAgentActionsPostgres,
 )
 
 __all__ = [
+    "AgentActionsConsumer",
     "ConfigAgentActionsConsumer",
+    "WriterAgentActionsPostgres",
 ]
