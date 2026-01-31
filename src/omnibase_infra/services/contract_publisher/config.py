@@ -133,13 +133,17 @@ class ModelContractPublisherConfig(BaseModel):
         """Resolve environment with precedence: config > env var > 'dev'.
 
         Resolution Order:
-            1. self.environment (if provided and non-empty)
-            2. ONEX_ENV environment variable (if set and non-empty)
+            1. self.environment (if provided and non-empty after normalization)
+            2. ONEX_ENV environment variable (if set and non-empty after normalization)
             3. Default "dev"
 
         Normalization:
             - Whitespace is stripped
             - Trailing dots are removed (to prevent "dev..topic" issues)
+
+        Note:
+            Whitespace-only strings (e.g., "   ") are treated as empty and
+            fall through to the next priority level.
 
         Returns:
             Resolved environment string, normalized
@@ -160,14 +164,18 @@ class ModelContractPublisherConfig(BaseModel):
             ... )
             >>> # Returns "staging" if ONEX_ENV is set, else "dev"
         """
-        # Priority 1: Explicit config
+        # Priority 1: Explicit config (if non-empty after normalization)
         if self.environment:
-            return self._normalize_environment(self.environment)
+            normalized = self._normalize_environment(self.environment)
+            if normalized:
+                return normalized
 
-        # Priority 2: Environment variable
+        # Priority 2: Environment variable (if non-empty after normalization)
         env_var = os.getenv("ONEX_ENV", "")
         if env_var:
-            return self._normalize_environment(env_var)
+            normalized = self._normalize_environment(env_var)
+            if normalized:
+                return normalized
 
         # Priority 3: Default
         return "dev"

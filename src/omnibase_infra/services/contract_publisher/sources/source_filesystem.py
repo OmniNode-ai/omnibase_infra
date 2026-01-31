@@ -154,7 +154,7 @@ class SourceContractFilesystem:
                     contract_path,
                 )
 
-            except OSError as e:
+            except (OSError, UnicodeDecodeError) as e:
                 logger.warning(
                     "Failed to read contract file %s: %s",
                     contract_path,

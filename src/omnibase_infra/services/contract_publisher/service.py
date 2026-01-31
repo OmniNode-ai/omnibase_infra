@@ -354,7 +354,7 @@ class ServiceContractPublisher:
                 )
 
                 if self._config.fail_fast:
-                    raise ContractPublishingInfraError(infra_errors)
+                    raise ContractPublishingInfraError(infra_errors) from e
 
             except (TypeError, ValueError, UnicodeEncodeError) as e:
                 # Serialization or encoding error
@@ -373,7 +373,7 @@ class ServiceContractPublisher:
                 )
 
                 if self._config.fail_fast:
-                    raise ContractPublishingInfraError(infra_errors)
+                    raise ContractPublishingInfraError(infra_errors) from e
 
             except InfraTimeoutError as e:
                 # Kafka timeout during publish
@@ -391,7 +391,7 @@ class ServiceContractPublisher:
                 )
 
                 if self._config.fail_fast:
-                    raise ContractPublishingInfraError(infra_errors)
+                    raise ContractPublishingInfraError(infra_errors) from e
 
             except InfraUnavailableError as e:
                 # Publisher not available
@@ -409,7 +409,7 @@ class ServiceContractPublisher:
                 )
 
                 if self._config.fail_fast:
-                    raise ContractPublishingInfraError(infra_errors)
+                    raise ContractPublishingInfraError(infra_errors) from e
 
             except InfraConnectionError as e:
                 # Kafka connection or broker error
@@ -427,7 +427,7 @@ class ServiceContractPublisher:
                 )
 
                 if self._config.fail_fast:
-                    raise ContractPublishingInfraError(infra_errors)
+                    raise ContractPublishingInfraError(infra_errors) from e
 
             except Exception as e:
                 # Unexpected error - log as warning since this catch-all is unexpected
@@ -451,7 +451,7 @@ class ServiceContractPublisher:
                 )
 
                 if self._config.fail_fast:
-                    raise ContractPublishingInfraError(infra_errors)
+                    raise ContractPublishingInfraError(infra_errors) from e
 
         publish_ms = (time.perf_counter() - publish_start) * 1000
         duration_ms = (time.perf_counter() - start_time) * 1000
@@ -539,12 +539,17 @@ class ServiceContractPublisher:
         # Sort for determinism - now sorts by (handler_id, origin, ref) correctly
         contracts.sort(key=lambda c: c.sort_key())
 
-        # Get merge errors and dedup count from composite source
+        # Get merge errors and dedup count from composite source (duck typing)
         errors: list[ModelContractError] = []
         dedup_count = 0
-        if isinstance(self._source, SourceContractComposite):
-            errors = self._source.get_merge_errors()
-            dedup_count = self._source.get_dedup_count()
+
+        get_merge_errors = getattr(self._source, "get_merge_errors", None)
+        if callable(get_merge_errors):
+            errors = get_merge_errors()
+
+        get_dedup_count = getattr(self._source, "get_dedup_count", None)
+        if callable(get_dedup_count):
+            dedup_count = get_dedup_count()
 
         return contracts, errors, dedup_count
 

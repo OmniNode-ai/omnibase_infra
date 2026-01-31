@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.services.contract_publisher import (
     ModelContractError,
@@ -129,7 +130,7 @@ class TestModelPublishStats:
 
     def test_non_negative_constraints(self) -> None:
         """Test stats enforce non-negative values."""
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError):
             ModelPublishStats(
                 discovered_count=-1,
                 valid_count=0,
