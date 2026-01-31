@@ -2918,6 +2918,7 @@ class RuntimeHostProcess:
             event_bus=cast("ProtocolEventBusSubscriber", self._event_bus),
             dispatch_engine=self._dispatch_engine,
             environment=environment,
+            node_name="runtime-host",
         )
 
         # Wire subscriptions for each handler with a contract
