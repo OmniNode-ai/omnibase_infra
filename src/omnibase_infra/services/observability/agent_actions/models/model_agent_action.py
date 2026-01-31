@@ -34,6 +34,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.types import JsonType
+
 
 class ModelAgentAction(BaseModel):
     """Agent action event model.
@@ -115,11 +117,11 @@ class ModelAgentAction(BaseModel):
         default=None,
         description="Error message if the action failed.",
     )
-    metadata: dict[str, object] | None = Field(
+    metadata: dict[str, JsonType] | None = Field(
         default=None,
         description="Additional metadata about the action.",
     )
-    raw_payload: dict[str, object] | None = Field(
+    raw_payload: dict[str, JsonType] | None = Field(
         default=None,
         description="Complete raw payload for Phase 2 schema tightening.",
     )

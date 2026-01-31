@@ -68,6 +68,7 @@ from aiokafka import AIOKafkaConsumer, TopicPartition
 from aiokafka.errors import KafkaError
 from pydantic import BaseModel, ValidationError
 
+from omnibase_core.errors import OnexError
 from omnibase_core.types import JsonType
 from omnibase_infra.services.observability.agent_actions.config import (
     ConfigAgentActionsConsumer,
@@ -560,7 +561,7 @@ class AgentActionsConsumer:
             ...     await consumer.stop()
         """
         if not self._running or self._consumer is None:
-            raise RuntimeError(
+            raise OnexError(
                 "Consumer not started. Call start() before run().",
             )
 

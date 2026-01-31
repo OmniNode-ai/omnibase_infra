@@ -33,6 +33,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.types import JsonType
+
 
 class ModelTransformationEvent(BaseModel):
     """Agent transformation event model.
@@ -98,11 +100,11 @@ class ModelTransformationEvent(BaseModel):
         default=None,
         description="Context information about the transformation.",
     )
-    metadata: dict[str, object] | None = Field(
+    metadata: dict[str, JsonType] | None = Field(
         default=None,
         description="Additional metadata about the transformation.",
     )
-    raw_payload: dict[str, object] | None = Field(
+    raw_payload: dict[str, JsonType] | None = Field(
         default=None,
         description="Complete raw payload for Phase 2 schema tightening.",
     )

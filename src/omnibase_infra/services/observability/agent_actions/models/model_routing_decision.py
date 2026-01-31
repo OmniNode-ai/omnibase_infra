@@ -33,6 +33,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_core.types import JsonType
+
 
 class ModelRoutingDecision(BaseModel):
     """Agent routing decision event model.
@@ -109,11 +111,11 @@ class ModelRoutingDecision(BaseModel):
         default=None,
         description="Domain classification for the request.",
     )
-    metadata: dict[str, object] | None = Field(
+    metadata: dict[str, JsonType] | None = Field(
         default=None,
         description="Additional metadata about the decision.",
     )
-    raw_payload: dict[str, object] | None = Field(
+    raw_payload: dict[str, JsonType] | None = Field(
         default=None,
         description="Complete raw payload for Phase 2 schema tightening.",
     )
