@@ -339,7 +339,8 @@ class AdapterProtocolEventPublisherKafka:
             - events_sent_to_dlq: Always 0 (publish path doesn't use DLQ)
             - total_publish_time_ms: Cumulative publish time
             - avg_publish_time_ms: Average publish latency
-            - circuit_breaker_opens: Count from underlying bus
+            - circuit_breaker_opens: Current failure count from underlying bus circuit breaker
+              (Note: reflects current failures, not cumulative open events)
             - retries_attempted: Count from underlying bus (if available)
             - circuit_breaker_status: Current state from underlying bus
             - current_failures: Current consecutive failure count
@@ -349,6 +350,7 @@ class AdapterProtocolEventPublisherKafka:
         cb_state = self._bus._get_circuit_breaker_state()
 
         # Update metrics with circuit breaker info from bus
+        # Note: failures represents current consecutive failures, not cumulative opens
         # Extract values with safe type handling for JsonType
         state_value = cb_state.get("state", "unknown")
         failures_value = cb_state.get("failures", 0)
@@ -395,8 +397,9 @@ class AdapterProtocolEventPublisherKafka:
         After closing, any calls to publish() will raise RuntimeError.
 
         Args:
-            timeout_seconds: Timeout for cleanup operations (passed to bus.close()
-                if supported, otherwise unused).
+            timeout_seconds: Timeout for cleanup operations. Currently unused
+                (EventBusKafka.close() manages its own timeout). Included for
+                ProtocolEventPublisher interface compliance.
         """
         self._closed = True
 
