@@ -21,9 +21,12 @@ Event Topics (Platform Reserved):
     - Registration: {env}.{TOPIC_SUFFIX_CONTRACT_REGISTERED}
     - Deregistration: {env}.{TOPIC_SUFFIX_CONTRACT_DEREGISTERED}
 
-    Topic suffixes are imported from omnibase_core.constants for single source of truth.
+    Topic suffixes are imported from omnibase_core.constants. For runtime subscription
+    wiring, use baseline_subscriptions.BASELINE_CONTRACT_TOPICS which aggregates the
+    platform-reserved contract topics.
 
 See Also:
+    - baseline_subscriptions: Baseline topic assembly for runtime wiring
     - HandlerContractSource: Filesystem-based discovery
     - RegistryContractSource: Consul KV-based discovery
     - ProtocolContractSource: Protocol definition
@@ -76,10 +79,6 @@ from uuid import UUID, uuid4
 import yaml
 from pydantic import ValidationError
 
-from omnibase_core.constants import (
-    TOPIC_SUFFIX_CONTRACT_DEREGISTERED,
-    TOPIC_SUFFIX_CONTRACT_REGISTERED,
-)
 from omnibase_core.models.contracts.model_handler_contract import ModelHandlerContract
 from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.events import (
@@ -93,6 +92,12 @@ from omnibase_infra.models.handlers import (
     ModelContractDiscoveryResult,
     ModelHandlerDescriptor,
     ModelHandlerIdentifier,
+)
+from omnibase_infra.runtime.baseline_subscriptions import (
+    BASELINE_CONTRACT_TOPICS,
+    BASELINE_PLATFORM_TOPICS,
+    TOPIC_SUFFIX_CONTRACT_DEREGISTERED,
+    TOPIC_SUFFIX_CONTRACT_REGISTERED,
 )
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 
@@ -979,6 +984,9 @@ __all__ = [
     # Re-exported from omnibase_core for convenience
     "ModelContractDeregisteredEvent",
     "ModelContractRegisteredEvent",
+    # Re-exported from baseline_subscriptions for runtime wiring (OMN-1696)
+    "BASELINE_CONTRACT_TOPICS",
+    "BASELINE_PLATFORM_TOPICS",
     "TOPIC_SUFFIX_CONTRACT_DEREGISTERED",
     "TOPIC_SUFFIX_CONTRACT_REGISTERED",
 ]

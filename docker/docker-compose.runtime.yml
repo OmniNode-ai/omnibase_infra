@@ -12,6 +12,9 @@
 #   # Start with effects profile
 #   docker compose -f docker-compose.runtime.yml --profile effects up -d
 #
+#   # Start with observability services (agent actions consumer)
+#   docker compose -f docker-compose.runtime.yml --profile observability up -d
+#
 #   # Start all services
 #   docker compose -f docker-compose.runtime.yml --profile all up -d
 #
@@ -25,7 +28,8 @@
 #   - main: Core runtime kernel (default, always started)
 #   - effects: Effect nodes for external service interactions
 #   - workers: Scalable compute workers for parallel processing
-#   - all: All services including workers
+#   - observability: Observability services (agent actions consumer, metrics)
+#   - all: All services including workers and observability
 #
 # Network:
 #   Uses internal omnibase-infra-network (created automatically by this compose file).
@@ -273,6 +277,62 @@ services:
       - "com.omninode.service=runtime-worker"
       - "com.omninode.profile=workers"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+  # ==========================================================================
+  # Agent Actions Consumer - Observability service for agent action logging
+  # ==========================================================================
+  # Consumes agent action events from Kafka and persists them to PostgreSQL.
+  # This service is part of the observability profile and provides traceability
+  # for agent executions, tool calls, decisions, and errors.
+  #
+  # Features:
+  #   - Batched inserts for high-throughput performance
+  #   - Health check endpoint for container orchestration
+  #   - Graceful shutdown with batch flushing
+  #   - Correlation ID tracking across agent sessions
+  agent-actions-consumer:
+    !!merge <<: *runtime-base
+    container_name: omnibase-infra-agent-actions-consumer
+    profiles: ["observability", "all"]
+    command: ["python", "-m", "omnibase_infra.services.observability.agent_actions.consumer"]
+    environment:
+      # Override runtime-env with agent-actions-specific configuration
+      # The consumer uses OMNIBASE_INFRA_AGENT_ACTIONS_ prefix for isolation
+      OMNIBASE_INFRA_AGENT_ACTIONS_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-omninode-bridge-redpanda:9092}
+      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-omninode-bridge-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DATABASE:-omninode_bridge}
+      OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_SIZE: ${AGENT_ACTIONS_BATCH_SIZE:-100}
+      OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_TIMEOUT_MS: ${AGENT_ACTIONS_BATCH_TIMEOUT_MS:-1000}
+      OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_PORT: "8087"
+      # Standard ONEX environment variables for logging
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-development}
+    # SECURITY: See runtime-main service for port binding security notes.
+    # Consider binding to localhost: "127.0.0.1:${AGENT_ACTIONS_CONSUMER_PORT:-8087}:8087"
+    ports:
+      - "${AGENT_ACTIONS_CONSUMER_PORT:-8087}:8087"
+    # Graceful shutdown configuration - allow 60s for batch flushing
+    # Consumer needs time to flush pending batches before shutdown
+    stop_grace_period: 60s
+    volumes:
+      # Persistent logs directory
+      - agent_actions_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8087/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    labels:
+      - "com.omninode.service=agent-actions-consumer"
+      - "com.omninode.profile=observability"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
 # ==========================================================================
 # Secrets Configuration
 # ==========================================================================
@@ -308,3 +368,6 @@ volumes:
   # Worker runtime logs (shared across worker instances)
   worker_logs:
     name: omnibase-infra-worker-logs
+  # Agent actions consumer logs
+  agent_actions_logs:
+    name: omnibase-infra-agent-actions-logs

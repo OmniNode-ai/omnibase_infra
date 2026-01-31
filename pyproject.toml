@@ -36,7 +36,7 @@ python = "^3.12"
 #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
 # Remember to switch back to PyPI versions before merging to main.
 #
-# omnibase-core v0.10.2: Adds request_response schema to ModelEventBusSubcontract (OMN-1760)
+# omnibase-core v0.10.2: Adds TOPIC_SUFFIX_CONTRACT_* constants and request_response schema (OMN-1760)
 omnibase-core = "^0.10.2"
 # omnibase-spi v0.6.4: Version bump
 omnibase-spi = "^0.6.4"
