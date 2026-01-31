@@ -154,6 +154,7 @@ class ConsumerMetrics:
         batches_processed: Number of batches successfully processed.
         last_poll_at: Timestamp of last Kafka poll.
         last_successful_write_at: Timestamp of last successful database write.
+        started_at: Timestamp when metrics were initialized (consumer start time).
     """
 
     def __init__(self) -> None:
@@ -165,6 +166,7 @@ class ConsumerMetrics:
         self.batches_processed: int = 0
         self.last_poll_at: datetime | None = None
         self.last_successful_write_at: datetime | None = None
+        self.started_at: datetime = datetime.now(UTC)
         self._lock = asyncio.Lock()
 
     async def record_received(self, count: int = 1) -> None:
@@ -215,6 +217,7 @@ class ConsumerMetrics:
                     if self.last_successful_write_at
                     else None
                 ),
+                "started_at": self.started_at.isoformat(),
             }
 
 
@@ -890,7 +893,9 @@ class AgentActionsConsumer:
             return
 
         # Build commit offsets (offset + 1 = next offset to consume)
-        commit_offsets = {tp: offset + 1 for tp, offset in offsets.items()}
+        commit_offsets: dict[TopicPartition, int] = {
+            tp: offset + 1 for tp, offset in offsets.items()
+        }
 
         try:
             await self._consumer.commit(commit_offsets)
@@ -971,12 +976,25 @@ class AgentActionsConsumer:
             # Check for recent successful write (within staleness threshold)
             last_write = metrics_snapshot.get("last_successful_write_at")
             if last_write is None:
-                # No writes yet - consider healthy if just started
-                last_poll = metrics_snapshot.get("last_poll_at")
-                if last_poll is None:
-                    status = EnumHealthStatus.HEALTHY  # Just started
+                # No writes yet - consider healthy if just started (within first 60 seconds)
+                started_at_str = metrics_snapshot.get("started_at")
+                if started_at_str is not None:
+                    try:
+                        started_at_dt = datetime.fromisoformat(str(started_at_str))
+                        age_seconds = (
+                            datetime.now(UTC) - started_at_dt
+                        ).total_seconds()
+                        if age_seconds <= 60.0:
+                            # Consumer just started, healthy even without writes
+                            status = EnumHealthStatus.HEALTHY
+                        else:
+                            # Consumer running > 60s with no writes, degraded
+                            status = EnumHealthStatus.DEGRADED
+                    except (ValueError, TypeError):
+                        status = EnumHealthStatus.HEALTHY
                 else:
-                    status = EnumHealthStatus.DEGRADED  # Polling but no writes
+                    # No started_at timestamp (shouldn't happen), assume healthy
+                    status = EnumHealthStatus.HEALTHY
             else:
                 # Check if last write was recent (within staleness threshold)
                 try:
