@@ -125,17 +125,17 @@ validation:
   # ============================================================================
   # LINE-BASED SUPPRESSION
   # ============================================================================
-  # If ANY pattern below appears on a source line, ALL declarative violations
-  # on that line are suppressed.
+  # Use ONEX_EXCLUDE to exempt imperative nodes that are intentionally non-declarative.
+  # Place the comment on the line before or same line as the class definition.
   #
   # Usage example:
-  #   def custom_method(self):  # ONEX_EXCLUDE: declarative - required for protocol
-  #   CONFIG = {...}  # declarative-ok: compile-time constant
+  #   # ONEX_EXCLUDE: declarative_node - legacy node with embedded logic (OMN-XXXX)
+  #   class MyLegacyNode(NodeEffect):
+  #       def custom_method(self): ...
   # ============================================================================
   suppression_comments:
     - "# ONEX_EXCLUDE: declarative_node"
     - "# ONEX_EXCLUDE: declarative"
-    - "# declarative-ok:"
   severity_default: error
   fail_on_error: true
   fail_on_warning: false
