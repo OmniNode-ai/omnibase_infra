@@ -1036,15 +1036,32 @@ async def wait_for_topic_metadata(
                 await asyncio.sleep(0.5)
                 continue
 
-            # Dict format (aiokafka 0.11.0+): {'topic_name': TopicDescription}
-            if not isinstance(description, dict):
-                raise TypeError(
-                    f"Unexpected describe_topics response type: {type(description).__name__}. "
-                    f"Expected dict (aiokafka 0.11.0+ format). Got: {description!r}"
-                )
+            # Handle both response formats:
+            # - List format: [{'error_code': 0, 'topic': 'name', 'partitions': [...]}]
+            # - Dict format (aiokafka 0.11.0+): {'topic_name': TopicDescription}
+            topic_info: object | None = None
 
-            if topic_name in description:
-                topic_info: object = description[topic_name]
+            if isinstance(description, list):
+                # List format - find the topic by 'topic' key
+                for item in description:
+                    if isinstance(item, dict) and item.get("topic") == topic_name:
+                        topic_info = item
+                        break
+            elif isinstance(description, dict):
+                # Dict format - topic name is the key
+                topic_info = description.get(topic_name)
+            else:
+                err = TypeError(
+                    f"Unexpected describe_topics response type: {type(description).__name__}. "
+                    f"Expected list or dict. Got: {description!r}"
+                )
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="describe_topics",
+                )
+                raise InfraUnavailableError(str(err), context=context) from err
+
+            if topic_info is not None:
                 # TopicDescription may be an object with attributes or dict-like
                 error_code: int | None = (
                     getattr(topic_info, "error_code", None)
@@ -1077,16 +1094,23 @@ async def wait_for_topic_metadata(
                     len(partitions),
                 )
             else:
-                # Dict response but topic not found - may still be propagating
+                # Topic not found in response - may still be propagating
+                if isinstance(description, dict):
+                    keys_info = list(description.keys())
+                else:
+                    keys_info = [
+                        item.get("topic")
+                        for item in description
+                        if isinstance(item, dict)
+                    ]
                 logger.debug(
-                    "Topic %s not in response keys: %s",
+                    "Topic %s not in response: %s",
                     topic_name,
-                    list(description.keys()),
+                    keys_info,
                 )
 
-        except TypeError:
-            # Re-raise TypeErrors - they indicate programming errors
-            # (e.g., unexpected response format), not transient Kafka issues
+        except InfraUnavailableError:
+            # Re-raise InfraUnavailableError - they indicate unexpected response format
             raise
         except (KafkaError, OSError) as e:
             # KafkaError: Base class for all aiokafka exceptions (connection,

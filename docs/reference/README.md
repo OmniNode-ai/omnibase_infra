@@ -11,6 +11,12 @@ Comprehensive reference documentation for ONEX infrastructure.
 | [Node Archetypes](node-archetypes.md) | EFFECT, COMPUTE, REDUCER, ORCHESTRATOR - complete documentation |
 | [Contract.yaml Reference](contracts.md) | Complete contract format specification |
 
+## API References
+
+| Document | Description |
+|----------|-------------|
+| [Event Bus API](../api-reference/EVENT-BUS.md) | Event bus adapters, protocols, and implementation details |
+
 ## Authoritative Source
 
 For coding rules and standards, see [CLAUDE.md](../../CLAUDE.md) - the authoritative source for all development guidelines. Reference documentation here provides detailed explanations and examples.
