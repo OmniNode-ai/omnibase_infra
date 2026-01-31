@@ -18,7 +18,6 @@ Related:
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from typing import TYPE_CHECKING
@@ -30,8 +29,12 @@ from pydantic import ValidationError
 from omnibase_core.constants import TOPIC_SUFFIX_CONTRACT_REGISTERED
 from omnibase_core.models.contracts.model_handler_contract import ModelHandlerContract
 from omnibase_core.models.events import ModelContractRegisteredEvent
-from omnibase_core.models.primitives import ModelSemVer
 from omnibase_core.protocols.event_bus import ProtocolEventBusPublisher
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraTimeoutError,
+    InfraUnavailableError,
+)
 from omnibase_infra.services.contract_publisher.config import (
     ModelContractPublisherConfig,
 )
@@ -335,17 +338,114 @@ class ServiceContractPublisher:
                     extra={"correlation_id": str(correlation_id)},
                 )
 
-            except Exception as e:
-                # Infrastructure error
+            except ValidationError as e:
+                # Pydantic model validation error during event creation
                 infra_error = ModelInfraError(
-                    error_type="publish_failed",
-                    message=f"Failed to publish {handler_id}: {e}",
-                    retriable=True,
+                    error_type="serialization_failed",
+                    message=f"Contract event validation failed for {handler_id}: {e}",
+                    retriable=False,  # Validation errors won't fix on retry
                 )
                 infra_errors.append(infra_error)
 
                 logger.exception(
-                    "Failed to publish contract %s",
+                    "Contract event validation failed for %s",
+                    handler_id,
+                    extra={"correlation_id": str(correlation_id)},
+                )
+
+                if self._config.fail_fast:
+                    raise ContractPublishingInfraError(infra_errors)
+
+            except (TypeError, ValueError, UnicodeEncodeError) as e:
+                # Serialization or encoding error
+                infra_error = ModelInfraError(
+                    error_type="serialization_failed",
+                    message=f"Failed to serialize contract for {handler_id}: {e}",
+                    retriable=False,  # Serialization errors won't fix on retry
+                )
+                infra_errors.append(infra_error)
+
+                logger.exception(
+                    "Contract serialization failed for %s: %s",
+                    handler_id,
+                    type(e).__name__,
+                    extra={"correlation_id": str(correlation_id)},
+                )
+
+                if self._config.fail_fast:
+                    raise ContractPublishingInfraError(infra_errors)
+
+            except InfraTimeoutError as e:
+                # Kafka timeout during publish
+                infra_error = ModelInfraError(
+                    error_type="kafka_timeout",
+                    message=f"Timeout publishing contract {handler_id}: {e}",
+                    retriable=True,
+                )
+                infra_errors.append(infra_error)
+
+                logger.warning(
+                    "Timeout publishing contract %s",
+                    handler_id,
+                    extra={"correlation_id": str(correlation_id)},
+                )
+
+                if self._config.fail_fast:
+                    raise ContractPublishingInfraError(infra_errors)
+
+            except InfraUnavailableError as e:
+                # Publisher not available
+                infra_error = ModelInfraError(
+                    error_type="publisher_unavailable",
+                    message=f"Publisher unavailable for {handler_id}: {e}",
+                    retriable=True,
+                )
+                infra_errors.append(infra_error)
+
+                logger.warning(
+                    "Publisher unavailable for contract %s",
+                    handler_id,
+                    extra={"correlation_id": str(correlation_id)},
+                )
+
+                if self._config.fail_fast:
+                    raise ContractPublishingInfraError(infra_errors)
+
+            except InfraConnectionError as e:
+                # Kafka connection or broker error
+                infra_error = ModelInfraError(
+                    error_type="broker_down",
+                    message=f"Kafka connection failed for {handler_id}: {e}",
+                    retriable=True,
+                )
+                infra_errors.append(infra_error)
+
+                logger.warning(
+                    "Kafka connection failed for contract %s",
+                    handler_id,
+                    extra={"correlation_id": str(correlation_id)},
+                )
+
+                if self._config.fail_fast:
+                    raise ContractPublishingInfraError(infra_errors)
+
+            except Exception as e:
+                # Unexpected error - log as warning since this catch-all is unexpected
+                infra_error = ModelInfraError(
+                    error_type="publish_failed",
+                    message=f"Unexpected error publishing {handler_id}: {type(e).__name__}: {e}",
+                    retriable=True,
+                )
+                infra_errors.append(infra_error)
+
+                logger.warning(
+                    "Unexpected error type during contract publish for %s: %s",
+                    handler_id,
+                    type(e).__name__,
+                    extra={"correlation_id": str(correlation_id)},
+                )
+                logger.exception(
+                    "Full exception details for contract %s",
                     handler_id,
                     extra={"correlation_id": str(correlation_id)},
                 )

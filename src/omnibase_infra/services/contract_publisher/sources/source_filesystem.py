@@ -99,6 +99,12 @@ class SourceContractFilesystem:
         Note:
             Returns empty list if root doesn't exist (not an error).
             Individual file read failures are logged and skipped.
+
+        Note:
+            This method is ``async`` for protocol consistency with
+            :class:`ProtocolContractPublisherSource`. The underlying file I/O
+            is synchronous, which is acceptable for this use case as contract
+            discovery is an infrequent startup operation.
         """
         if not self._root.exists():
             logger.debug(

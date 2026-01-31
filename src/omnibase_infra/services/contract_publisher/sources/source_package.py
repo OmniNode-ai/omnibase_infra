@@ -100,6 +100,12 @@ class SourceContractPackage:
         Note:
             Returns empty list if package is not installed or has no resources.
             Individual resource read failures are logged and skipped.
+
+        Note:
+            This method is ``async`` for protocol consistency with
+            :class:`ProtocolContractPublisherSource`. The underlying package
+            resource traversal is synchronous, which is acceptable for this
+            use case as contract discovery is an infrequent startup operation.
         """
         contracts: list[ModelDiscoveredContract] = []
 
