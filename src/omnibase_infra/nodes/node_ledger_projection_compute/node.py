@@ -29,6 +29,7 @@ from __future__ import annotations
 from omnibase_core.nodes.node_compute import NodeCompute
 
 
+# ONEX_EXCLUDE: declarative_node - legacy compute node with projection logic (OMN-1725)
 class NodeLedgerProjectionCompute(NodeCompute):
     """Declarative COMPUTE node for ledger projection.
 

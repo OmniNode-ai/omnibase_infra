@@ -160,6 +160,14 @@ from omnibase_infra.validation.validator_chain_propagation import (
     validate_message_chain,
 )
 
+# Declarative node validation for ONEX architecture (OMN-1725)
+from omnibase_infra.validation.validator_declarative_node import (
+    ValidatorDeclarativeNode,
+    validate_declarative_node_in_file,
+    validate_declarative_nodes,
+    validate_declarative_nodes_ci,
+)
+
 # AST-based execution shape validation for CI gate (OMN-958)
 # NOTE: EXECUTION_SHAPE_RULES is defined ONLY in validator_execution_shape.py
 # (the canonical single source of truth). This import re-exports it for public API
@@ -255,6 +263,7 @@ __all__: list[str] = [
     "ModelModuleImportResult",  # Module import result (from omnibase_core)
     # Validators
     "AnyTypeDetector",  # Any type AST detector (OMN-1276)
+    "ValidatorDeclarativeNode",  # Declarative node validator (OMN-1725)
     "ChainPropagationValidator",  # Chain propagation validator (OMN-951)
     "CircularImportValidator",  # Circular import validator
     "ContractLinter",  # Contract linter (PR #57)
@@ -285,6 +294,9 @@ __all__: list[str] = [
     "validate_any_types_in_file",  # Any type file validation (OMN-1276)
     "validate_architecture",  # Re-export from omnibase_core
     "validate_contracts",  # Re-export from omnibase_core
+    "validate_declarative_node_in_file",  # Declarative node file validation (OMN-1725)
+    "validate_declarative_nodes",  # Declarative node validation (OMN-1725)
+    "validate_declarative_nodes_ci",  # Declarative node CI validation (OMN-1725)
     "validate_execution_shapes",  # Execution shape validation
     "validate_execution_shapes_ci",  # CI shape validation
     "validate_handler_registration",  # Handler registration validation (OMN-1098)

@@ -39,6 +39,12 @@ from omnibase_infra.models.validation.model_chain_violation import ModelChainVio
 from omnibase_infra.models.validation.model_coverage_metrics import (
     ModelCoverageMetrics,
 )
+from omnibase_infra.models.validation.model_declarative_node_validation_result import (
+    ModelDeclarativeNodeValidationResult,
+)
+from omnibase_infra.models.validation.model_declarative_node_violation import (
+    ModelDeclarativeNodeViolation,
+)
 from omnibase_infra.models.validation.model_execution_shape_rule import (
     ModelExecutionShapeRule,
 )
@@ -74,6 +80,8 @@ __all__ = [
     "ModelAnyTypeValidationResult",
     "ModelAnyTypeViolation",
     "ModelCategoryMatchResult",
+    "ModelDeclarativeNodeValidationResult",
+    "ModelDeclarativeNodeViolation",
     "ModelChainViolation",
     "ModelCoverageMetrics",
     "ModelExecutionShapeRule",

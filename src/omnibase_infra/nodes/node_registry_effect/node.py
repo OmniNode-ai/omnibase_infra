@@ -58,6 +58,7 @@ from __future__ import annotations
 from omnibase_core.nodes.node_effect import NodeEffect
 
 
+# ONEX_EXCLUDE: declarative_node - legacy effect node with direct adapter access (OMN-1725)
 class NodeRegistryEffect(NodeEffect):
     """Declarative effect node for dual-backend node registration.
 

@@ -1,0 +1,143 @@
+contract_kind: validation_subcontract
+validation:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  validator_id: declarative_node
+  validator_name: ONEX Declarative Node Validator
+  validator_description: |
+    Validates node.py files follow the ONEX declarative pattern where all behavior
+    is defined in contract.yaml rather than custom Python logic.
+
+    This validator performs static AST analysis to detect imperative patterns:
+    - Custom methods beyond __init__ (behavior should be in contract)
+    - @property decorators (state should be in models)
+    - Custom logic in __init__ beyond super().__init__(container)
+    - Instance variable assignments (state belongs in container/models)
+    - Class-level variable assignments (configuration belongs in contract)
+
+    Declarative nodes extend base classes from omnibase_core.nodes and delegate
+    all behavior to handler routing defined in contract.yaml.
+
+    Part of ONEX architecture: Declarative nodes, contract-driven behavior.
+  target_patterns:
+    - "**/node.py"
+    - "node.py"
+  exclude_patterns:
+    - "**/node_modules/**"
+    - "**/.git/**"
+    - "**/venv/**"
+    - "**/.venv/**"
+    - "**/__pycache__/**"
+    - "**/archived/**"
+    - "**/tests/**"
+    - "**/*_test.py"
+    - "**/test_*.py"
+    - "**/conftest.py"
+  rules:
+    - rule_id: DECL-001
+      name: no_custom_methods
+      description: |
+        Node classes must not have custom methods (except __init__).
+        All behavior should be defined in contract.yaml via handler_routing.
+        Custom methods indicate imperative logic that belongs in handlers.
+      severity: error
+      enabled: true
+      parameters:
+        allowed_methods:
+          - "__init__"
+        base_class_patterns:
+          - "^Node.*Effect$"
+          - "^Node.*Compute$"
+          - "^Node.*Reducer$"
+          - "^Node.*Orchestrator$"
+          - "^NodeEffect$"
+          - "^NodeCompute$"
+          - "^NodeReducer$"
+          - "^NodeOrchestrator$"
+    - rule_id: DECL-002
+      name: no_custom_properties
+      description: |
+        Node classes must not have @property decorators.
+        State access should be through container injection or models.
+        Properties indicate node-level state that should be in the container.
+      severity: error
+      enabled: true
+      parameters:
+        forbidden_decorators:
+          - "property"
+          - "cached_property"
+    - rule_id: DECL-003
+      name: no_init_custom_logic
+      description: |
+        __init__ must only call super().__init__(container).
+        No additional logic, assignments, or method calls allowed.
+        All initialization should happen through container dependency injection.
+      severity: error
+      enabled: true
+      parameters:
+        required_pattern: "super().__init__(container)"
+        max_statements: 1
+        allowed_statements:
+          - "super().__init__"
+    - rule_id: DECL-004
+      name: no_instance_variables
+      description: |
+        Node classes must not create instance variables (self.x = ...).
+        State should be managed through the container, not node-level attributes.
+        Instance variables indicate imperative state management.
+      severity: error
+      enabled: true
+      parameters:
+        allow_in_init: false
+        forbidden_patterns:
+          - "^self\\.[a-z_][a-z0-9_]*\\s*="
+    - rule_id: DECL-005
+      name: no_class_variables
+      description: |
+        Node classes must not have class-level variable assignments.
+        Configuration should be in contract.yaml, not hardcoded in Python.
+        Class variables indicate configuration that belongs in contracts.
+      severity: error
+      enabled: true
+      parameters:
+        allowed_class_attributes:
+          - "__slots__"
+          - "__doc__"
+        forbidden_patterns:
+          - "^[A-Z_][A-Z0-9_]*\\s*="
+          - "^[a-z_][a-z0-9_]*\\s*="
+    - rule_id: DECL-006
+      name: syntax_error
+      description: |
+        File has Python syntax error and cannot be validated.
+        Fix the syntax error before validation can proceed.
+      severity: error
+      enabled: true
+    - rule_id: DECL-007
+      name: no_node_class
+      description: |
+        File is named node.py but does not contain a Node class.
+        Either add a Node class or rename the file.
+      severity: warning
+      enabled: true
+  # ============================================================================
+  # LINE-BASED SUPPRESSION
+  # ============================================================================
+  # Use ONEX_EXCLUDE to exempt imperative nodes that are intentionally non-declarative.
+  # Place the comment on the line before or same line as the class definition.
+  #
+  # Usage example:
+  #   # ONEX_EXCLUDE: declarative_node - legacy node with embedded logic (OMN-XXXX)
+  #   class MyLegacyNode(NodeEffect):
+  #       def custom_method(self): ...
+  # ============================================================================
+  suppression_comments:
+    - "# ONEX_EXCLUDE: declarative_node"
+    - "# ONEX_EXCLUDE: declarative"
+  severity_default: error
+  fail_on_error: true
+  fail_on_warning: false
+  max_violations: 0
+  parallel_execution: true
