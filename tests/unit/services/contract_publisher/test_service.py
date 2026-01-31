@@ -324,9 +324,9 @@ class TestServiceContractPublisherPublishAll:
 
         mock_publisher.publish = AsyncMock(side_effect=fail_first)
 
-        # Note: Contracts are sorted by (handler_id, origin, ref) before validation,
-        # so handler_id is None at sort time. Sorting is by ref path:
-        # "aaa/contract.yaml" comes before "zzz/contract.yaml"
+        # Contracts are sorted by (handler_id, origin, ref) before publishing.
+        # handler_id is extracted in _discover() before sorting, so:
+        # "test.handler" (aaa) comes before "test.handler.v2" (zzz)
         source = MagicMock()
         source.source_type = "test"
         source.source_description = "test source"
@@ -642,3 +642,171 @@ class TestServiceContractPublisherStats:
         result = await service.publish_all()
 
         assert result.stats.environment == "production"
+
+
+class TestServiceContractPublisherHandlerIdExtraction:
+    """Tests for handler_id extraction before sorting."""
+
+    @pytest.mark.asyncio
+    async def test_handler_id_extracted_before_sorting_for_filesystem_source(
+        self,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """Test that handler_id is extracted before sorting for filesystem source.
+
+        This verifies the fix for consistent sorting across all source types.
+        Before the fix, filesystem/package sources would sort by ref path since
+        handler_id was None. Now handler_id is extracted first, ensuring proper
+        deterministic sorting by (handler_id, origin, ref).
+        """
+        config = ModelContractPublisherConfig(
+            mode="filesystem",
+            filesystem_root=Path("/test"),
+        )
+
+        # Create contracts where handler_id sorting differs from path sorting:
+        # - Path order: /test/aaa < /test/zzz
+        # - Handler ID order: beta < alpha (reversed!)
+        contract_alpha = """handler_id: alpha.handler
+name: Alpha Handler
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+descriptor:
+  node_archetype: compute
+input_model: str
+output_model: str
+"""
+        contract_beta = """handler_id: beta.handler
+name: Beta Handler
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+descriptor:
+  node_archetype: compute
+input_model: str
+output_model: str
+"""
+
+        source = MagicMock()
+        source.source_type = "filesystem"
+        source.source_description = "test source"
+        source.discover_contracts = AsyncMock(
+            return_value=[
+                # Path "zzz" has handler_id "alpha" (should come first after sorting)
+                ModelDiscoveredContract(
+                    origin="filesystem",
+                    ref=Path("/test/handlers/zzz/contract.yaml"),
+                    text=contract_alpha,
+                ),
+                # Path "aaa" has handler_id "beta" (should come second after sorting)
+                ModelDiscoveredContract(
+                    origin="filesystem",
+                    ref=Path("/test/handlers/aaa/contract.yaml"),
+                    text=contract_beta,
+                ),
+            ]
+        )
+
+        service = ServiceContractPublisher(mock_publisher, source, config)
+        result = await service.publish_all()
+
+        # Verify both contracts published
+        assert len(result.published) == 2
+
+        # Verify sort order is by handler_id, NOT by path
+        # alpha.handler should be published first (comes before beta alphabetically)
+        assert result.published[0] == "alpha.handler"
+        assert result.published[1] == "beta.handler"
+
+    @pytest.mark.asyncio
+    async def test_handler_id_extraction_skips_already_extracted(
+        self,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """Test that handler_id extraction is skipped if already present.
+
+        This ensures we don't double-parse YAML for composite sources that
+        already extract handler_id internally.
+        """
+        config = ModelContractPublisherConfig(
+            mode="filesystem",
+            filesystem_root=Path("/test"),
+        )
+
+        contract_yaml = """handler_id: pre.extracted.handler
+name: Pre-extracted Handler
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+descriptor:
+  node_archetype: compute
+input_model: str
+output_model: str
+"""
+
+        source = MagicMock()
+        source.source_type = "filesystem"
+        source.source_description = "test source"
+        source.discover_contracts = AsyncMock(
+            return_value=[
+                # Contract with handler_id already extracted (simulating composite source)
+                ModelDiscoveredContract(
+                    origin="filesystem",
+                    ref=Path("/test/handlers/foo/contract.yaml"),
+                    text=contract_yaml,
+                    handler_id="pre.extracted.handler",  # Already set
+                ),
+            ]
+        )
+
+        service = ServiceContractPublisher(mock_publisher, source, config)
+        result = await service.publish_all()
+
+        # Should use the pre-extracted handler_id
+        assert len(result.published) == 1
+        assert result.published[0] == "pre.extracted.handler"
+
+    @pytest.mark.asyncio
+    async def test_handler_id_extraction_handles_yaml_error(
+        self,
+        mock_publisher: AsyncMock,
+    ) -> None:
+        """Test that YAML errors during extraction don't break the flow.
+
+        Invalid YAML should be passed through and fail during validation
+        with a proper error, not during handler_id extraction.
+        """
+        config = ModelContractPublisherConfig(
+            mode="filesystem",
+            filesystem_root=Path("/test"),
+            allow_zero_contracts=True,  # Allow zero valid contracts for this test
+        )
+
+        invalid_yaml = """handler_id: [unclosed bracket
+name: This YAML is broken
+"""
+
+        source = MagicMock()
+        source.source_type = "filesystem"
+        source.source_description = "test source"
+        source.discover_contracts = AsyncMock(
+            return_value=[
+                ModelDiscoveredContract(
+                    origin="filesystem",
+                    ref=Path("/test/handlers/bad/contract.yaml"),
+                    text=invalid_yaml,
+                ),
+            ]
+        )
+
+        service = ServiceContractPublisher(mock_publisher, source, config)
+        result = await service.publish_all()
+
+        # No contracts published, but one error recorded
+        assert len(result.published) == 0
+        assert len(result.contract_errors) == 1
+        assert result.contract_errors[0].error_type == "yaml_parse"

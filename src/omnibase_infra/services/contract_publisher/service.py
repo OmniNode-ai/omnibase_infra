@@ -393,6 +393,45 @@ class ServiceContractPublisher:
 
         return result
 
+    def _extract_handler_id(
+        self, contract: ModelDiscoveredContract
+    ) -> ModelDiscoveredContract:
+        """Extract handler_id from contract YAML for sorting.
+
+        Parses the YAML to extract handler_id early, enabling proper
+        deterministic sorting by handler_id before validation.
+
+        This is applied to ALL contracts regardless of source type to ensure
+        consistent sorting behavior. Composite source does this internally,
+        but filesystem/package sources do not.
+
+        Args:
+            contract: Discovered contract with text content
+
+        Returns:
+            Contract with handler_id populated if extraction succeeded,
+            original contract unchanged if parsing failed (will fail
+            validation later with proper error).
+        """
+        # Skip if handler_id already extracted (e.g., from composite source)
+        if contract.handler_id is not None:
+            return contract
+
+        try:
+            data = yaml.safe_load(contract.text)
+            if isinstance(data, dict) and "handler_id" in data:
+                handler_id = data["handler_id"]
+                if isinstance(handler_id, str) and handler_id:
+                    return contract.with_parsed_data(handler_id=handler_id)
+        except yaml.YAMLError:
+            # YAML parse errors will be caught during validation
+            logger.debug(
+                "Failed to extract handler_id from %s:%s (YAML parse error)",
+                contract.origin,
+                contract.ref,
+            )
+        return contract
+
     async def _discover(
         self,
     ) -> tuple[list[ModelDiscoveredContract], list[ModelContractError], int]:
@@ -400,14 +439,43 @@ class ServiceContractPublisher:
 
         Returns:
             Tuple of (contracts, errors from composite merge, dedup_count)
+
+        Note:
+            **Deduplication Tracking**
+
+            The ``dedup_count`` return value is only meaningful for composite sources
+            (``SourceContractComposite``). For single sources (filesystem-only or
+            package-only), ``dedup_count`` is always 0.
+
+            This is correct behavior, not a bug:
+
+            - **Single sources cannot have duplicates**: A filesystem source reads
+              from one directory tree; a package source reads from one module.
+              Duplicate handler_ids within a single source indicate a configuration
+              error, not a merge scenario.
+
+            - **Deduplication is a merge operation**: When ``SourceContractComposite``
+              merges filesystem and package sources, it may encounter the same
+              ``handler_id`` from both. The composite source tracks how many such
+              duplicates were resolved (filesystem wins by default).
+
+            - **Semantic clarity**: Reporting dedup_count=0 for single sources
+              accurately reflects that no deduplication occurred, rather than
+              hiding the metric entirely.
         """
         # All sources now return list[ModelDiscoveredContract]
         contracts = await self._source.discover_contracts()
 
-        # Add content hash to all contracts (composite already does this, but others may not)
-        contracts = [c.with_content_hash() for c in contracts]
+        # Extract handler_id BEFORE sorting for ALL contracts
+        # (composite source does this internally, but filesystem/package do not)
+        # This ensures consistent sorting by (handler_id, origin, ref) regardless of source
+        contracts = [self._extract_handler_id(c) for c in contracts]
 
-        # Sort for determinism
+        # Add content hash only to contracts that don't already have one
+        # (composite source already computes hashes, avoid double-hashing)
+        contracts = [c if c.content_hash else c.with_content_hash() for c in contracts]
+
+        # Sort for determinism - now sorts by (handler_id, origin, ref) correctly
         contracts.sort(key=lambda c: c.sort_key())
 
         # Get merge errors and dedup count from composite source
