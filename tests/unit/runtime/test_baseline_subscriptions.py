@@ -336,6 +336,34 @@ class TestBaselineSubscriptionsExports:
         assert "TOPIC_SUFFIX_CONTRACT_DEREGISTERED" in baseline_subscriptions.__all__
         assert "TOPIC_SUFFIX_NODE_HEARTBEAT" in baseline_subscriptions.__all__
 
+    def test_platform_baseline_topic_suffixes_reexported(self) -> None:
+        """PLATFORM_BASELINE_TOPIC_SUFFIXES should be re-exported from omnibase_core.
+
+        This constant is the canonical source of all platform baseline topic
+        suffixes and is re-exported for convenience. It should contain all
+        three baseline topic suffixes.
+        """
+        from omnibase_infra.runtime import baseline_subscriptions
+        from omnibase_infra.runtime.baseline_subscriptions import (
+            PLATFORM_BASELINE_TOPIC_SUFFIXES,
+        )
+
+        # Verify it's listed in __all__
+        assert "PLATFORM_BASELINE_TOPIC_SUFFIXES" in baseline_subscriptions.__all__
+
+        # Verify it's a collection type (tuple, frozenset, or list)
+        assert isinstance(PLATFORM_BASELINE_TOPIC_SUFFIXES, (tuple, frozenset, list)), (
+            f"Expected collection type, got {type(PLATFORM_BASELINE_TOPIC_SUFFIXES)}"
+        )
+
+        # Verify it contains exactly 3 topic suffixes
+        assert len(PLATFORM_BASELINE_TOPIC_SUFFIXES) == 3
+
+        # Verify it contains the expected topic suffixes
+        assert TOPIC_SUFFIX_CONTRACT_REGISTERED in PLATFORM_BASELINE_TOPIC_SUFFIXES
+        assert TOPIC_SUFFIX_CONTRACT_DEREGISTERED in PLATFORM_BASELINE_TOPIC_SUFFIXES
+        assert TOPIC_SUFFIX_NODE_HEARTBEAT in PLATFORM_BASELINE_TOPIC_SUFFIXES
+
 
 # =============================================================================
 # Integration with omnibase_core Constants Tests

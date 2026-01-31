@@ -36,7 +36,7 @@ Usage:
 
 Related:
     - KafkaContractSource: Consumes contract registration events
-    - ServiceRuntimeHostProcess: Wires baseline subscriptions on startup
+    - RuntimeHostProcess: Wires baseline subscriptions on startup
     - omnibase_core.constants: Source of truth for topic suffix constants
 
 Related Tickets:
