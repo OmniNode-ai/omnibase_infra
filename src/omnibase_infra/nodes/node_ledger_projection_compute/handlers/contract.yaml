@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+# Contract for Ledger Projection Handler - transforms platform events to ledger intents
+name: "handler_ledger_projection"
+node_type: "COMPUTE_GENERIC"
+description: "Ledger projection handler that transforms ModelEventMessage to ModelIntent with ModelPayloadLedgerAppend for audit ledger persistence"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+input_model:
+  name: "ModelEventMessage"
+  module: "omnibase_infra.event_bus.models.model_event_message"
+output_model:
+  name: "ModelIntent"
+  module: "omnibase_core.models.reducer.model_intent"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "ledger_projection"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
+operation_bindings:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  global_bindings:
+    - parameter_name: "correlation_id"
+      expression: "${envelope.correlation_id}"
+      required: false
+  bindings:
+    "ledger.project":
+      - parameter_name: "message"
+        expression: "${payload}"
+        required: true
+metadata:
+  handler_id: "ledger-projection-handler"
+  handler_type: "compute_handler"
+  handler_category: "compute"
+  ticket: "OMN-1648"
+  features:
+    - "Best-effort metadata extraction"
+    - "Base64 encoding for bytes serialization"
+    - "Multi-topic subscription support"
+    - "Audit-purpose event consumption"

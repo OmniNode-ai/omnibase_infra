@@ -64,11 +64,21 @@ input_model:
     Kafka event message containing raw bytes payload and headers. The compute node processes events from all 7 subscribed topics.
 
 output_model:
-  name: "ModelPayloadLedgerAppend"
-  module: "omnibase_infra.nodes.reducers.models.model_payload_ledger_append"
+  name: "ModelIntent"
+  module: "omnibase_core.models.reducer.model_intent"
   description: >
-    Ledger append payload to be passed to NodeLedgerWriteEffect. Contains the event data with Kafka position for idempotent writes.
+    ModelIntent wrapping ModelPayloadLedgerAppend to be passed to NodeLedgerWriteEffect. Contains the event data with Kafka position for idempotent writes.
 
+# Handler routing - delegates compute logic to handler
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "ledger_projection"
+      handler:
+        name: "HandlerLedgerProjection"
+        module: "omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection"
+      supported_operations:
+        - "ledger.project"
 # Capabilities provided by this node
 capabilities:
   - name: "ledger.projection"
@@ -94,7 +104,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-01-29"
-  ticket: "OMN-1648"
+  ticket: "OMN-1648, OMN-1726"
   tags:
     - compute
     - ledger

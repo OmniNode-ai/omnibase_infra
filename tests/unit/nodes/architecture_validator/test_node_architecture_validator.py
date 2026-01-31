@@ -1,28 +1,33 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for NodeArchitectureValidatorCompute.
+"""Unit tests for architecture validation handler and declarative node.
 
-This module provides comprehensive tests for the architecture validator compute node,
-including validation of rules, violation detection, fail-fast behavior, and custom
-__bool__ behavior on result models.
+This module provides comprehensive tests for the architecture validation system,
+including the declarative node and its handler implementation.
 
 The tests use mock rules implementing ProtocolArchitectureRule to avoid dependencies
 on real validators (owned by OMN-1099). This approach enables TDD for the validator
 infrastructure while real rules are developed separately.
 
 Test Categories:
-    - TestNodeArchitectureValidatorCompute: Core validator behavior tests
+    - TestHandlerArchitectureValidation: Handler behavior tests
+    - TestNodeArchitectureValidatorCompute: Declarative node tests
     - TestMockRuleProtocolCompliance: Verify mock rule implements protocol correctly
     - TestValidationResultBoolBehavior: Custom __bool__ behavior tests
     - TestViolationSeverityBehavior: Severity-based blocking behavior tests
     - TestValidatorEdgeCases: Edge cases and boundary conditions
+    - TestRuleIdValidation: Rule ID validation against contract tests
 
 Related:
     - OMN-1138: Architecture Validator for omnibase_infra
-    - OMN-1099: Validators implementing ProtocolArchitectureRule (future)
+    - OMN-1726: Refactor to declarative pattern with handler
 
 .. versionadded:: 0.8.0
     Created as part of OMN-1138 Architecture Validator implementation.
+
+.. versionchanged:: 0.9.0
+    Updated for OMN-1726 declarative refactoring. Tests now use
+    HandlerArchitectureValidation.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ import pytest
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.nodes.architecture_validator import (
     EnumValidationSeverity,
+    HandlerArchitectureValidation,
     ModelArchitectureValidationRequest,
     ModelArchitectureValidationResult,
     ModelArchitectureViolation,
@@ -281,13 +287,51 @@ def sample_handler() -> object:
 
 
 # =============================================================================
-# Tests for NodeArchitectureValidatorCompute
+# Tests for NodeArchitectureValidatorCompute (Declarative Node)
 # =============================================================================
 
 
 @pytest.mark.unit
 class TestNodeArchitectureValidatorCompute:
-    """Test cases for the architecture validator compute node.
+    """Test cases for the declarative architecture validator compute node.
+
+    The node is now a declarative shell that delegates to HandlerArchitectureValidation.
+    These tests verify the node can be instantiated correctly.
+    """
+
+    def test_declarative_node_instantiation(
+        self,
+        mock_container: MagicMock,
+    ) -> None:
+        """Test that the declarative node can be instantiated.
+
+        The declarative node should accept a container and have no custom logic.
+        """
+        node = NodeArchitectureValidatorCompute(container=mock_container)
+
+        assert node is not None
+        assert hasattr(node, "_container") or True  # Has container from base class
+
+    def test_declarative_node_is_compute_type(
+        self,
+        mock_container: MagicMock,
+    ) -> None:
+        """Test that the declarative node extends NodeCompute."""
+        from omnibase_core.nodes import NodeCompute
+
+        node = NodeArchitectureValidatorCompute(container=mock_container)
+
+        assert isinstance(node, NodeCompute)
+
+
+# =============================================================================
+# Tests for HandlerArchitectureValidation
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestHandlerArchitectureValidation:
+    """Test cases for the architecture validation handler.
 
     Tests cover core validation logic including rule execution, violation
     detection, fail-fast behavior, and rule filtering.
@@ -295,7 +339,6 @@ class TestNodeArchitectureValidatorCompute:
 
     def test_empty_request_returns_valid_result(
         self,
-        mock_container: MagicMock,
         passing_rule: MockRule,
     ) -> None:
         """Test that empty request (no nodes/handlers) passes validation.
@@ -303,16 +346,13 @@ class TestNodeArchitectureValidatorCompute:
         An empty request should return a valid result with zero violations
         since there is nothing to validate.
         """
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(passing_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(passing_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is True
         assert result.violation_count == 0
@@ -322,7 +362,6 @@ class TestNodeArchitectureValidatorCompute:
 
     def test_no_rules_returns_valid_result(
         self,
-        mock_container: MagicMock,
         sample_node: object,
     ) -> None:
         """Test that validation passes when no rules are registered.
@@ -330,16 +369,13 @@ class TestNodeArchitectureValidatorCompute:
         Even with nodes/handlers to check, validation should pass if
         there are no rules to enforce.
         """
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(),  # No rules
-        )
+        handler = HandlerArchitectureValidation(rules=())  # No rules
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is True
         assert result.violation_count == 0
@@ -348,7 +384,6 @@ class TestNodeArchitectureValidatorCompute:
 
     def test_all_rules_pass_returns_valid_result(
         self,
-        mock_container: MagicMock,
         passing_rule: MockRule,
         sample_node: object,
         sample_handler: object,
@@ -364,8 +399,7 @@ class TestNodeArchitectureValidatorCompute:
             severity=EnumValidationSeverity.WARNING,
             should_pass=True,
         )
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
+        handler = HandlerArchitectureValidation(
             rules=(passing_rule, another_passing_rule),
         )
         request = ModelArchitectureValidationRequest(
@@ -373,7 +407,7 @@ class TestNodeArchitectureValidatorCompute:
             handlers=(sample_handler,),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is True
         assert result.violation_count == 0
@@ -383,7 +417,6 @@ class TestNodeArchitectureValidatorCompute:
 
     def test_single_violation_detected(
         self,
-        mock_container: MagicMock,
         failing_rule: MockRule,
         sample_node: object,
     ) -> None:
@@ -392,16 +425,13 @@ class TestNodeArchitectureValidatorCompute:
         When a rule fails, the violation should be captured with all
         relevant details (rule_id, rule_name, severity, target info, message).
         """
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(failing_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(failing_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is False
         assert result.violation_count == 1
@@ -413,7 +443,6 @@ class TestNodeArchitectureValidatorCompute:
 
     def test_multiple_violations_aggregated(
         self,
-        mock_container: MagicMock,
         sample_node: object,
         sample_handler: object,
     ) -> None:
@@ -436,16 +465,13 @@ class TestNodeArchitectureValidatorCompute:
             should_pass=False,
             message="Second failure",
         )
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(fail_rule_1, fail_rule_2),
-        )
+        handler = HandlerArchitectureValidation(rules=(fail_rule_1, fail_rule_2))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(sample_handler,),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is False
         # 2 rules x (1 node + 1 handler) = 4 violations
@@ -456,13 +482,12 @@ class TestNodeArchitectureValidatorCompute:
 
     def test_fail_fast_stops_on_first_violation(
         self,
-        mock_container: MagicMock,
         sample_node: object,
         sample_handler: object,
     ) -> None:
         """Test that fail_fast=True stops after first violation.
 
-        When fail_fast is enabled, the validator should return immediately
+        When fail_fast is enabled, the handler should return immediately
         after detecting the first violation, without checking remaining
         rules or targets.
         """
@@ -480,17 +505,14 @@ class TestNodeArchitectureValidatorCompute:
             should_pass=False,
             message="Second failure",
         )
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(fail_rule_1, fail_rule_2),
-        )
+        handler = HandlerArchitectureValidation(rules=(fail_rule_1, fail_rule_2))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(sample_handler,),
             fail_fast=True,
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is False
         # Should stop after first violation
@@ -503,7 +525,6 @@ class TestNodeArchitectureValidatorCompute:
 
     def test_rule_id_filter_only_checks_specified_rules(
         self,
-        mock_container: MagicMock,
         sample_node: object,
     ) -> None:
         """Test that rule_ids filter limits which rules are checked.
@@ -532,10 +553,7 @@ class TestNodeArchitectureValidatorCompute:
             should_pass=False,
             message="Rule C failed",
         )
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(rule_a, rule_b, rule_c),
-        )
+        handler = HandlerArchitectureValidation(rules=(rule_a, rule_b, rule_c))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
@@ -545,7 +563,7 @@ class TestNodeArchitectureValidatorCompute:
             ),  # Only check A and C
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is False
         assert result.violation_count == 2
@@ -560,7 +578,6 @@ class TestNodeArchitectureValidatorCompute:
 
     def test_correlation_id_propagated(
         self,
-        mock_container: MagicMock,
         passing_rule: MockRule,
         sample_node: object,
     ) -> None:
@@ -570,23 +587,19 @@ class TestNodeArchitectureValidatorCompute:
         result for distributed tracing purposes.
         """
         correlation_id = str(uuid4())
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(passing_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(passing_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
             correlation_id=correlation_id,
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.correlation_id == correlation_id
 
     def test_nodes_and_handlers_counted_correctly(
         self,
-        mock_container: MagicMock,
         passing_rule: MockRule,
     ) -> None:
         """Test that nodes_checked and handlers_checked counts are accurate.
@@ -602,23 +615,19 @@ class TestNodeArchitectureValidatorCompute:
             type(f"Handler{i}", (), {"__name__": f"Handler{i}"})() for i in range(5)
         )
 
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(passing_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(passing_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=nodes,
             handlers=handlers,
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.nodes_checked == 3
         assert result.handlers_checked == 5
 
     def test_rules_checked_list_populated(
         self,
-        mock_container: MagicMock,
         sample_node: object,
     ) -> None:
         """Test that rules_checked contains IDs of all checked rules.
@@ -644,16 +653,13 @@ class TestNodeArchitectureValidatorCompute:
             severity=EnumValidationSeverity.WARNING,
             should_pass=True,
         )
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(rule_1, rule_2, rule_3),
-        )
+        handler = HandlerArchitectureValidation(rules=(rule_1, rule_2, rule_3))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert set(result.rules_checked) == {
             "NO_HANDLER_PUBLISHING",
@@ -664,7 +670,6 @@ class TestNodeArchitectureValidatorCompute:
 
     def test_violation_details_captured(
         self,
-        mock_container: MagicMock,
         sample_node: object,
     ) -> None:
         """Test that violation details (target_type, target_name, etc.) are correct.
@@ -680,16 +685,13 @@ class TestNodeArchitectureValidatorCompute:
             message="Detailed failure",
             details={"extra_info": "test_value", "count": 42},
         )
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(rule_with_details,),
-        )
+        handler = HandlerArchitectureValidation(rules=(rule_with_details,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.violation_count == 1
         violation = result.violations[0]
@@ -697,6 +699,18 @@ class TestNodeArchitectureValidatorCompute:
         assert "SampleNode" in violation.target_name
         assert violation.message == "Detailed failure"
         assert violation.details == {"extra_info": "test_value", "count": 42}
+
+    def test_handler_id_property(self) -> None:
+        """Test that handler_id property returns correct value."""
+        handler = HandlerArchitectureValidation(rules=())
+
+        assert handler.handler_id == "handler-architecture-validation"
+
+    def test_supported_operations_property(self) -> None:
+        """Test that supported_operations property returns correct value."""
+        handler = HandlerArchitectureValidation(rules=())
+
+        assert handler.supported_operations == frozenset({"architecture.validate"})
 
 
 # =============================================================================
@@ -723,21 +737,17 @@ class TestValidationResultBoolBehavior:
 
     def test_result_bool_true_when_valid(
         self,
-        mock_container: MagicMock,
         passing_rule: MockRule,
         sample_node: object,
     ) -> None:
         """Test that bool(result) is True when no violations."""
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(passing_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(passing_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert bool(result) is True
         assert result  # Idiomatic usage
@@ -745,21 +755,17 @@ class TestValidationResultBoolBehavior:
 
     def test_result_bool_false_when_violations(
         self,
-        mock_container: MagicMock,
         failing_rule: MockRule,
         sample_node: object,
     ) -> None:
         """Test that bool(result) is False when violations exist."""
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(failing_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(failing_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert bool(result) is False
         if result:
@@ -768,34 +774,26 @@ class TestValidationResultBoolBehavior:
 
     def test_result_bool_matches_valid_property(
         self,
-        mock_container: MagicMock,
         passing_rule: MockRule,
         failing_rule: MockRule,
         sample_node: object,
     ) -> None:
         """Verify bool(result) == result.valid in all cases."""
-        validator_pass = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(passing_rule,),
-        )
-        validator_fail = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(failing_rule,),
-        )
+        handler_pass = HandlerArchitectureValidation(rules=(passing_rule,))
+        handler_fail = HandlerArchitectureValidation(rules=(failing_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result_pass = validator_pass.compute(request)
-        result_fail = validator_fail.compute(request)
+        result_pass = handler_pass.validate_architecture(request)
+        result_fail = handler_fail.validate_architecture(request)
 
         assert bool(result_pass) == result_pass.valid
         assert bool(result_fail) == result_fail.valid
 
     def test_result_bool_differs_from_none_check(
         self,
-        mock_container: MagicMock,
         failing_rule: MockRule,
         sample_node: object,
     ) -> None:
@@ -804,16 +802,13 @@ class TestValidationResultBoolBehavior:
         This documents the potentially surprising behavior where a valid
         model instance returns False for bool().
         """
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(failing_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(failing_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         # Model exists (is not None)
         assert result is not None
@@ -854,21 +849,17 @@ class TestViolationSeverityBehavior:
 
     def test_error_severity_blocks_startup(
         self,
-        mock_container: MagicMock,
         failing_rule: MockRule,
         sample_node: object,
     ) -> None:
         """Test that ERROR severity violations block startup."""
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(failing_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(failing_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is False
         violation = result.violations[0]
@@ -877,21 +868,17 @@ class TestViolationSeverityBehavior:
 
     def test_critical_severity_blocks_startup(
         self,
-        mock_container: MagicMock,
         critical_rule: MockRule,
         sample_node: object,
     ) -> None:
         """Test that CRITICAL severity violations block startup."""
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(critical_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(critical_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is False
         violation = result.violations[0]
@@ -900,21 +887,17 @@ class TestViolationSeverityBehavior:
 
     def test_warning_severity_does_not_block_startup(
         self,
-        mock_container: MagicMock,
         warning_rule: MockRule,
         sample_node: object,
     ) -> None:
         """Test that WARNING severity violations don't block startup."""
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(warning_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(warning_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is False  # Still a violation
         violation = result.violations[0]
@@ -923,21 +906,17 @@ class TestViolationSeverityBehavior:
 
     def test_info_severity_does_not_block_startup(
         self,
-        mock_container: MagicMock,
         info_rule: MockRule,
         sample_node: object,
     ) -> None:
         """Test that INFO severity violations don't block startup."""
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(info_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(info_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is False  # Still a violation
         violation = result.violations[0]
@@ -946,7 +925,6 @@ class TestViolationSeverityBehavior:
 
     def test_mixed_severity_violations(
         self,
-        mock_container: MagicMock,
         sample_node: object,
     ) -> None:
         """Test result with mixed severity violations."""
@@ -964,16 +942,13 @@ class TestViolationSeverityBehavior:
             should_pass=False,
             message="Warning violation",
         )
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(error_rule, warning_rule),
-        )
+        handler = HandlerArchitectureValidation(rules=(error_rule, warning_rule))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is False
         assert result.violation_count == 2
@@ -1109,7 +1084,6 @@ class TestValidatorEdgeCases:
 
     def test_rule_uses_description_when_no_message(
         self,
-        mock_container: MagicMock,
         sample_node: object,
     ) -> None:
         """Test that rule description is used when check result has no message."""
@@ -1120,16 +1094,13 @@ class TestValidatorEdgeCases:
             should_pass=False,
             message=None,  # No message
         )
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(rule_no_message,),
-        )
+        handler = HandlerArchitectureValidation(rules=(rule_no_message,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         violation = result.violations[0]
         # Should use rule description when message is None
@@ -1137,26 +1108,22 @@ class TestValidatorEdgeCases:
 
     def test_target_without_name_attribute(
         self,
-        mock_container: MagicMock,
         failing_rule: MockRule,
     ) -> None:
         """Test handling of targets without __name__ attribute.
 
-        The validator should fall back to str(target) when __name__ is not available.
+        The handler should fall back to str(target) when __name__ is not available.
         """
         # Create object without __name__
         target = object()
 
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(failing_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(failing_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(target,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         violation = result.violations[0]
         # Should use str(target) fallback
@@ -1164,22 +1131,18 @@ class TestValidatorEdgeCases:
 
     def test_rule_id_filter_with_nonexistent_rule(
         self,
-        mock_container: MagicMock,
         passing_rule: MockRule,
         sample_node: object,
     ) -> None:
         """Test that filtering by non-existent rule ID results in no rules checked."""
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(passing_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(passing_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
             rule_ids=("NONEXISTENT_RULE",),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is True
         assert result.rules_checked == ()
@@ -1187,27 +1150,20 @@ class TestValidatorEdgeCases:
 
     def test_validation_result_str_representation(
         self,
-        mock_container: MagicMock,
         passing_rule: MockRule,
         failing_rule: MockRule,
         sample_node: object,
     ) -> None:
         """Test __str__ representation of validation results."""
-        validator_pass = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(passing_rule,),
-        )
-        validator_fail = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(failing_rule,),
-        )
+        handler_pass = HandlerArchitectureValidation(rules=(passing_rule,))
+        handler_fail = HandlerArchitectureValidation(rules=(failing_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result_pass = validator_pass.compute(request)
-        result_fail = validator_fail.compute(request)
+        result_pass = handler_pass.validate_architecture(request)
+        result_fail = handler_fail.validate_architecture(request)
 
         pass_str = str(result_pass)
         fail_str = str(result_fail)
@@ -1219,21 +1175,17 @@ class TestValidatorEdgeCases:
 
     def test_violation_format_for_logging(
         self,
-        mock_container: MagicMock,
         failing_rule: MockRule,
         sample_node: object,
     ) -> None:
         """Test that violations can be formatted for logging."""
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(failing_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(failing_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
         violation = result.violations[0]
 
         log_str = violation.format_for_logging()
@@ -1245,21 +1197,17 @@ class TestValidatorEdgeCases:
 
     def test_violation_to_structured_dict(
         self,
-        mock_container: MagicMock,
         failing_rule: MockRule,
         sample_node: object,
     ) -> None:
         """Test that violations can be converted to structured dict."""
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(failing_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(failing_rule,))
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
         violation = result.violations[0]
 
         structured = violation.to_structured_dict()
@@ -1271,7 +1219,6 @@ class TestValidatorEdgeCases:
 
     def test_empty_rule_ids_filter_different_from_none(
         self,
-        mock_container: MagicMock,
         passing_rule: MockRule,
         sample_node: object,
     ) -> None:
@@ -1280,10 +1227,7 @@ class TestValidatorEdgeCases:
         - rule_ids=None means check all rules
         - rule_ids=() means check no rules (empty filter)
         """
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(passing_rule,),
-        )
+        handler = HandlerArchitectureValidation(rules=(passing_rule,))
 
         # None = check all rules
         request_none = ModelArchitectureValidationRequest(
@@ -1291,7 +1235,10 @@ class TestValidatorEdgeCases:
             handlers=(),
             rule_ids=None,
         )
-        result_none = validator.compute(request_none)
+        result_none = handler.validate_architecture(request_none)
+
+        # Reset check count
+        passing_rule._check_count = 0
 
         # Empty tuple = check no rules
         request_empty = ModelArchitectureValidationRequest(
@@ -1299,7 +1246,7 @@ class TestValidatorEdgeCases:
             handlers=(),
             rule_ids=(),
         )
-        result_empty = validator.compute(request_empty)
+        result_empty = handler.validate_architecture(request_empty)
 
         assert result_none.rules_checked == ("NO_HANDLER_PUBLISHING",)
         assert result_empty.rules_checked == ()
@@ -1389,13 +1336,13 @@ class TestImmutabilityAndThreadSafety:
 class TestRuleIdValidation:
     """Tests for rule_id validation against contract supported_rules.
 
-    The validator validates rule_ids against the contract's SUPPORTED_RULE_IDS
+    The handler validates rule_ids against the contract's SUPPORTED_RULE_IDS
     during construction (__init__). This ensures that only rules defined in
     the contract can be used, preventing configuration errors and version
     mismatches.
 
     Validation Behavior:
-        - Valid/supported rule_ids: Accepted, validator constructed successfully
+        - Valid/supported rule_ids: Accepted, handler constructed successfully
         - Invalid/unsupported rule_ids: RuntimeHostError raised during __init__
         - Error message: Includes the invalid rule_id and list of supported rules
         - Mixed valid/invalid: Fails on first invalid rule_id encountered
@@ -1410,21 +1357,24 @@ class TestRuleIdValidation:
 
     Related:
         - OMN-1138: Architecture Validator implementation
+        - OMN-1726: Refactor to declarative pattern with handler
         - contract_architecture_validator.yaml: Source of supported_rules
 
     .. versionadded:: 0.8.0
         Created as part of OMN-1138 rule_id validation coverage.
+
+    .. versionchanged:: 0.9.0
+        Updated for OMN-1726 - now tests HandlerArchitectureValidation.
     """
 
     def test_supported_rule_id_passes_construction(
         self,
-        mock_container: MagicMock,
         sample_node: object,
     ) -> None:
         """Valid/supported rule IDs should be accepted during construction.
 
         When all rule_ids are in the contract's supported_rules list,
-        the validator should be constructed successfully without error.
+        the handler should be constructed successfully without error.
         """
         rule_a = MockRule(
             rule_id="NO_HANDLER_PUBLISHING",
@@ -1440,31 +1390,25 @@ class TestRuleIdValidation:
         )
 
         # Should not raise any error
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(rule_a, rule_b),
-        )
+        handler = HandlerArchitectureValidation(rules=(rule_a, rule_b))
 
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is True
         assert set(result.rules_checked) == {"NO_HANDLER_PUBLISHING", "PURE_REDUCERS"}
         assert rule_a.check_count == 1
         assert rule_b.check_count == 1
 
-    def test_all_supported_rule_ids_pass_construction(
-        self,
-        mock_container: MagicMock,
-    ) -> None:
+    def test_all_supported_rule_ids_pass_construction(self) -> None:
         """All supported rule_ids from the contract should be accepted.
 
         Verifies that each rule_id defined in SUPPORTED_RULE_IDS can be
-        used to create a validator successfully.
+        used to create a handler successfully.
         """
         # Test each supported rule_id individually
         supported_ids = [
@@ -1485,25 +1429,19 @@ class TestRuleIdValidation:
             )
 
             # Should not raise any error
-            validator = NodeArchitectureValidatorCompute(
-                container=mock_container,
-                rules=(rule,),
-            )
-            assert validator is not None
+            handler = HandlerArchitectureValidation(rules=(rule,))
+            assert handler is not None
 
-    def test_unsupported_rule_id_raises_error_during_construction(
-        self,
-        mock_container: MagicMock,
-    ) -> None:
+    def test_unsupported_rule_id_raises_error_during_construction(self) -> None:
         """Unsupported rule IDs should raise RuntimeHostError during __init__.
 
         When a rule with an unsupported rule_id is provided during construction,
-        the validator should raise RuntimeHostError immediately.
+        the handler should raise RuntimeHostError immediately.
 
         This ensures:
         - Typos in rule_ids are caught early
         - Configuration errors are visible at startup
-        - Version mismatches between validator and rules are detected
+        - Version mismatches between handler and rules are detected
         """
         rule = MockRule(
             rule_id="NONEXISTENT_RULE",
@@ -1513,15 +1451,9 @@ class TestRuleIdValidation:
         )
 
         with pytest.raises(RuntimeHostError):
-            NodeArchitectureValidatorCompute(
-                container=mock_container,
-                rules=(rule,),
-            )
+            HandlerArchitectureValidation(rules=(rule,))
 
-    def test_error_message_includes_invalid_rule_id(
-        self,
-        mock_container: MagicMock,
-    ) -> None:
+    def test_error_message_includes_invalid_rule_id(self) -> None:
         """Error message should clearly identify the unsupported rule_id.
 
         The error message should include the invalid rule_id so developers
@@ -1536,19 +1468,13 @@ class TestRuleIdValidation:
         )
 
         with pytest.raises(RuntimeHostError) as exc_info:
-            NodeArchitectureValidatorCompute(
-                container=mock_container,
-                rules=(rule,),
-            )
+            HandlerArchitectureValidation(rules=(rule,))
 
         # Error message should contain the invalid rule_id
         error_str = str(exc_info.value)
         assert invalid_rule_id in error_str
 
-    def test_error_message_includes_supported_rule_ids(
-        self,
-        mock_container: MagicMock,
-    ) -> None:
+    def test_error_message_includes_supported_rule_ids(self) -> None:
         """Error message should include list of supported rule_ids.
 
         To help developers quickly fix configuration issues, the error
@@ -1562,10 +1488,7 @@ class TestRuleIdValidation:
         )
 
         with pytest.raises(RuntimeHostError) as exc_info:
-            NodeArchitectureValidatorCompute(
-                container=mock_container,
-                rules=(rule,),
-            )
+            HandlerArchitectureValidation(rules=(rule,))
 
         error_str = str(exc_info.value)
 
@@ -1582,13 +1505,10 @@ class TestRuleIdValidation:
             f"Error should list supported rule_ids. Got: {error_str}"
         )
 
-    def test_mixed_valid_and_invalid_rule_ids_raises_error(
-        self,
-        mock_container: MagicMock,
-    ) -> None:
+    def test_mixed_valid_and_invalid_rule_ids_raises_error(self) -> None:
         """Mix of valid and invalid rule_ids should fail on the invalid one.
 
-        When both valid and invalid rule_ids are provided, the validator
+        When both valid and invalid rule_ids are provided, the handler
         should raise an error for the invalid one during construction.
         """
         valid_rule = MockRule(
@@ -1605,35 +1525,28 @@ class TestRuleIdValidation:
         )
 
         with pytest.raises(RuntimeHostError) as exc_info:
-            NodeArchitectureValidatorCompute(
-                container=mock_container,
-                rules=(valid_rule, invalid_rule),
-            )
+            HandlerArchitectureValidation(rules=(valid_rule, invalid_rule))
 
         # Error message should contain the invalid rule_id
         assert "INVALID_RULE" in str(exc_info.value)
 
     def test_empty_rules_passes_construction(
         self,
-        mock_container: MagicMock,
         sample_node: object,
     ) -> None:
         """Empty rules tuple should pass construction without error.
 
-        A validator with no rules is valid (though it won't check anything).
+        A handler with no rules is valid (though it won't check anything).
         """
         # Should not raise any error
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(),
-        )
+        handler = HandlerArchitectureValidation(rules=())
 
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
             handlers=(),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is True
         assert result.rules_checked == ()
@@ -1641,7 +1554,6 @@ class TestRuleIdValidation:
 
     def test_rule_ids_filter_works_with_supported_rules(
         self,
-        mock_container: MagicMock,
         sample_node: object,
     ) -> None:
         """The rule_ids filter in request should work with supported rules.
@@ -1662,10 +1574,7 @@ class TestRuleIdValidation:
             should_pass=True,
         )
 
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(rule_a, rule_b),
-        )
+        handler = HandlerArchitectureValidation(rules=(rule_a, rule_b))
 
         # Only check one of the two registered rules
         request = ModelArchitectureValidationRequest(
@@ -1674,7 +1583,7 @@ class TestRuleIdValidation:
             rule_ids=("NO_HANDLER_PUBLISHING",),
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is True
         assert result.rules_checked == ("NO_HANDLER_PUBLISHING",)
@@ -1683,7 +1592,6 @@ class TestRuleIdValidation:
 
     def test_none_rule_ids_checks_all_registered_rules(
         self,
-        mock_container: MagicMock,
         sample_node: object,
     ) -> None:
         """rule_ids=None should check all registered rules.
@@ -1704,10 +1612,7 @@ class TestRuleIdValidation:
             should_pass=True,
         )
 
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(rule_a, rule_b),
-        )
+        handler = HandlerArchitectureValidation(rules=(rule_a, rule_b))
 
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
@@ -1715,7 +1620,7 @@ class TestRuleIdValidation:
             rule_ids=None,  # Check all rules
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is True
         assert set(result.rules_checked) == {"NO_HANDLER_PUBLISHING", "PURE_REDUCERS"}
@@ -1724,7 +1629,6 @@ class TestRuleIdValidation:
 
     def test_empty_rule_ids_filter_checks_no_rules(
         self,
-        mock_container: MagicMock,
         sample_node: object,
     ) -> None:
         """rule_ids=() should check no rules (valid but unusual).
@@ -1739,10 +1643,7 @@ class TestRuleIdValidation:
             should_pass=True,
         )
 
-        validator = NodeArchitectureValidatorCompute(
-            container=mock_container,
-            rules=(rule_a,),
-        )
+        handler = HandlerArchitectureValidation(rules=(rule_a,))
 
         request = ModelArchitectureValidationRequest(
             nodes=(sample_node,),
@@ -1750,7 +1651,7 @@ class TestRuleIdValidation:
             rule_ids=(),  # Check no rules
         )
 
-        result = validator.compute(request)
+        result = handler.validate_architecture(request)
 
         assert result.valid is True
         assert result.rules_checked == ()

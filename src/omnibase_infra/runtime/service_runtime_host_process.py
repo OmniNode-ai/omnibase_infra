@@ -2730,18 +2730,12 @@ class RuntimeHostProcess:
         # Import architecture validator components
         from omnibase_infra.errors import ArchitectureViolationError
         from omnibase_infra.nodes.architecture_validator import (
+            HandlerArchitectureValidation,
             ModelArchitectureValidationRequest,
-            NodeArchitectureValidatorCompute,
         )
 
-        # Create or get container
-        container = self._get_or_create_container()
-
-        # Instantiate validator with rules
-        validator = NodeArchitectureValidatorCompute(
-            container=container,
-            rules=self._architecture_rules,
-        )
+        # Create handler with rules (declarative pattern - handler owns the logic)
+        handler = HandlerArchitectureValidation(rules=self._architecture_rules)
 
         # Build validation request
         # Note: At this point, handlers haven't been instantiated yet (that happens
@@ -2769,8 +2763,8 @@ class RuntimeHostProcess:
             handlers=tuple(handler_classes),
         )
 
-        # Execute validation
-        result = validator.compute(request)
+        # Execute validation via handler
+        result = handler.validate_architecture(request)
 
         # Separate blocking and non-blocking violations
         blocking_violations = tuple(v for v in result.violations if v.blocks_startup())

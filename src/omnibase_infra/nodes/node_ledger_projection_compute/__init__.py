@@ -2,8 +2,14 @@
 # Copyright (c) 2026 OmniNode Team
 """Node Ledger Projection Compute - Platform event ledger projection node.
 
-This package provides the NodeLedgerProjectionCompute, a COMPUTE node that
-subscribes to 7 platform event topics for event ledger persistence.
+This package provides the NodeLedgerProjectionCompute, a declarative COMPUTE node
+that subscribes to 7 platform event topics for event ledger persistence.
+
+Architecture:
+    This node follows the ONEX declarative pattern where:
+    - NodeLedgerProjectionCompute is a declarative shell (no custom logic)
+    - HandlerLedgerProjection contains all compute logic
+    - contract.yaml defines behavior via handler_routing
 
 Core Purpose:
     Projects events from the platform event bus into the audit ledger,
@@ -25,18 +31,25 @@ Consumer Configuration:
 
 Related Tickets:
     - OMN-1648: Ledger Projection Compute Node
+    - OMN-1726: Refactor to declarative pattern
 
 Example:
     >>> from omnibase_core.container import ModelONEXContainer
     >>> from omnibase_infra.nodes.node_ledger_projection_compute import (
     ...     NodeLedgerProjectionCompute,
+    ...     HandlerLedgerProjection,
     ...     RegistryInfraLedgerProjection,
     ... )
     >>>
     >>> container = ModelONEXContainer()
     >>> node = RegistryInfraLedgerProjection.create_node(container)
+    >>> # Handler can be used directly for unit testing
+    >>> handler = HandlerLedgerProjection(container)
 """
 
+from omnibase_infra.nodes.node_ledger_projection_compute.handlers import (
+    HandlerLedgerProjection,
+)
 from omnibase_infra.nodes.node_ledger_projection_compute.node import (
     NodeLedgerProjectionCompute,
 )
@@ -45,6 +58,7 @@ from omnibase_infra.nodes.node_ledger_projection_compute.registry import (
 )
 
 __all__ = [
+    "HandlerLedgerProjection",
     "NodeLedgerProjectionCompute",
     "RegistryInfraLedgerProjection",
 ]

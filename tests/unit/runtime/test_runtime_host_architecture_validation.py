@@ -3,15 +3,15 @@
 """Unit tests for RuntimeHostProcess architecture validation.
 
 Tests for the architecture validation wiring in RuntimeHostProcess,
-specifically the integration with NodeArchitectureValidatorCompute
-at startup (OMN-1138).
+specifically the integration with HandlerArchitectureValidation
+at startup (OMN-1138, refactored in OMN-1726).
 
 Test Categories:
     - Validation skipped when no rules configured
     - ERROR severity violations block startup
     - WARNING severity violations log but don't block
     - Validation runs BEFORE other startup logic
-    - Container injection vs minimal container creation
+    - Handler instantiation with configured rules (OMN-1726)
 
 Handler Semantics - Two Distinct Concepts:
     RuntimeHostProcess has TWO INDEPENDENT handler-related checks that serve
@@ -508,16 +508,24 @@ class TestValidationOrder:
 
 
 # =============================================================================
-# Test: Container Handling
+# Test: Handler Instantiation (OMN-1726 refactoring)
 # =============================================================================
 
 
 class TestContainerHandling:
-    """Tests for container injection and minimal container creation."""
+    """Tests for handler instantiation with architecture rules.
+
+    Note: After OMN-1726 refactoring, architecture validation uses
+    HandlerArchitectureValidation instead of NodeArchitectureValidatorCompute.
+    The handler takes only `rules` parameter (no container injection).
+
+    These tests verify that the handler is correctly instantiated with
+    the configured architecture rules.
+    """
 
     @pytest.mark.asyncio
-    async def test_uses_injected_container(self) -> None:
-        """Uses injected container for validation."""
+    async def test_handler_instantiated_with_configured_rules(self) -> None:
+        """Handler is instantiated with the configured architecture rules."""
         mock_container = MagicMock()
 
         # Rule that passes
@@ -544,34 +552,44 @@ class TestContainerHandling:
             ),
             patch.object(process._event_bus, "subscribe", new_callable=AsyncMock),
             patch(
-                "omnibase_infra.nodes.architecture_validator.NodeArchitectureValidatorCompute"
-            ) as mock_validator_cls,
+                "omnibase_infra.nodes.architecture_validator.HandlerArchitectureValidation"
+            ) as mock_handler_cls,
         ):
             mock_registry = MagicMock()
             mock_registry.list_protocols.return_value = []
             mock_get_registry.return_value = mock_registry
 
-            mock_validator = MagicMock()
-            mock_validator.compute.return_value = ModelArchitectureValidationResult(
-                violations=(),
-                rules_checked=("PASS",),
-                nodes_checked=0,
-                handlers_checked=0,
+            mock_handler = MagicMock()
+            mock_handler.validate_architecture.return_value = (
+                ModelArchitectureValidationResult(
+                    violations=(),
+                    rules_checked=("NO_LOCAL_ONLY_PATHS",),
+                    nodes_checked=0,
+                    handlers_checked=0,
+                )
             )
-            mock_validator_cls.return_value = mock_validator
+            mock_handler_cls.return_value = mock_handler
 
             # Seed handler instances to satisfy fail-fast startup check
             seed_mock_handlers(process)
             await process.start()
 
-            # Verify injected container was used
-            mock_validator_cls.assert_called_once()
-            call_kwargs = mock_validator_cls.call_args[1]
-            assert call_kwargs["container"] is mock_container
+            # Verify handler was instantiated with the configured rules
+            mock_handler_cls.assert_called_once()
+            call_kwargs = mock_handler_cls.call_args[1]
+            assert call_kwargs["rules"] == (passing_rule,)
+
+            # Verify validate_architecture was called
+            mock_handler.validate_architecture.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_creates_container_if_none_provided(self) -> None:
-        """Creates container if none was injected."""
+    async def test_validation_works_without_container(self) -> None:
+        """Validation works when no container is provided to RuntimeHostProcess.
+
+        After OMN-1726, architecture validation uses HandlerArchitectureValidation
+        which does not require a container. This test verifies that validation
+        works correctly regardless of container state.
+        """
         passing_rule = MockArchitectureRule(
             rule_id="NO_LOCAL_ONLY_PATHS",  # Use valid rule from SUPPORTED_RULE_IDS
             should_pass=True,
@@ -594,36 +612,38 @@ class TestContainerHandling:
                 process, "_initialize_idempotency_store", new_callable=AsyncMock
             ),
             patch.object(process._event_bus, "subscribe", new_callable=AsyncMock),
-            # Patch where it's imported inside _get_or_create_container
             patch(
-                "omnibase_core.models.container.model_onex_container.ModelONEXContainer"
-            ) as mock_container_cls,
-            patch(
-                "omnibase_infra.nodes.architecture_validator.NodeArchitectureValidatorCompute"
-            ) as mock_validator_cls,
+                "omnibase_infra.nodes.architecture_validator.HandlerArchitectureValidation"
+            ) as mock_handler_cls,
         ):
             mock_registry = MagicMock()
             mock_registry.list_protocols.return_value = []
             mock_get_registry.return_value = mock_registry
 
-            mock_container = MagicMock()
-            mock_container_cls.return_value = mock_container
-
-            mock_validator = MagicMock()
-            mock_validator.compute.return_value = ModelArchitectureValidationResult(
-                violations=(),
-                rules_checked=("PASS",),
-                nodes_checked=0,
-                handlers_checked=0,
+            mock_handler = MagicMock()
+            mock_handler.validate_architecture.return_value = (
+                ModelArchitectureValidationResult(
+                    violations=(),
+                    rules_checked=("NO_LOCAL_ONLY_PATHS",),
+                    nodes_checked=0,
+                    handlers_checked=0,
+                )
             )
-            mock_validator_cls.return_value = mock_validator
+            mock_handler_cls.return_value = mock_handler
 
             # Seed handler instances to satisfy fail-fast startup check
             seed_mock_handlers(process)
             await process.start()
 
-            # Verify container was created
-            mock_container_cls.assert_called_once()
+            # Verify handler was instantiated with rules (no container dependency)
+            mock_handler_cls.assert_called_once()
+            call_kwargs = mock_handler_cls.call_args[1]
+            assert call_kwargs["rules"] == (passing_rule,)
+            # No container in call_kwargs - handler doesn't use containers
+            assert "container" not in call_kwargs
+
+            # Verify startup completed successfully
+            assert process.is_running
 
 
 # =============================================================================
