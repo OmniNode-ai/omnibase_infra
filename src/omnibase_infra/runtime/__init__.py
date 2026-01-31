@@ -272,6 +272,13 @@ from omnibase_infra.runtime.registry_contract_source import (
 # Kafka contract source (OMN-1654)
 from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
 
+# Baseline subscriptions (OMN-1696)
+from omnibase_infra.runtime.baseline_subscriptions import (
+    BASELINE_CONTRACT_TOPICS,
+    BASELINE_PLATFORM_TOPICS,
+    get_baseline_topics,
+)
+
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
 from omnibase_infra.runtime.chain_aware_dispatch import (
     ChainAwareDispatcher,
@@ -442,4 +449,8 @@ __all__: list[str] = [
     "store_contract_in_consul",
     # Kafka contract source (OMN-1654)
     "KafkaContractSource",
+    # Baseline subscriptions (OMN-1696)
+    "BASELINE_CONTRACT_TOPICS",
+    "BASELINE_PLATFORM_TOPICS",
+    "get_baseline_topics",
 ]
