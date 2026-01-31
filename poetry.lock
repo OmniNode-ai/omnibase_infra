@@ -2796,14 +2796,14 @@ files = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.9.10"
+version = "0.9.11"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_core-0.9.10-py3-none-any.whl", hash = "sha256:3a67a6b1e75674ef33e5cbeaf63fe5c65d7cd5b0e6899d230191e0750002b847"},
-    {file = "omnibase_core-0.9.10.tar.gz", hash = "sha256:5606116f7c0512945db1cbabd605fa3f63317f054f030a7aac3c66606f0b0f1f"},
+    {file = "omnibase_core-0.9.11-py3-none-any.whl", hash = "sha256:501a1e77114b84714b215c7bb47cfd4cb7d658acff2db2453501dcb8cc329341"},
+    {file = "omnibase_core-0.9.11.tar.gz", hash = "sha256:433997be3d0cafdc94b482ea44416c92e49603fd2bdc5ee3edbe35b1a5e17934"},
 ]
 
 [package.dependencies]
@@ -2824,18 +2824,18 @@ metrics = ["prometheus-client (>=0.21.0,<1.0.0)"]
 
 [[package]]
 name = "omnibase-spi"
-version = "0.6.3"
+version = "0.6.4"
 description = "ONEX Service Provider Interface - Protocol definitions"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_spi-0.6.3-py3-none-any.whl", hash = "sha256:c99cea6ab6147a29414f307bb9125d666e0f9bd493d086815ca02fb85f3e7399"},
-    {file = "omnibase_spi-0.6.3.tar.gz", hash = "sha256:9a3c122777c32d380cb2337599e3939fd0eb9b11cbc03d2ec527d59a47c1f7f9"},
+    {file = "omnibase_spi-0.6.4-py3-none-any.whl", hash = "sha256:784e455a9f01c5323437054a9bf13a8f8701e8c1dc27fc2ee92b6052046f01ad"},
+    {file = "omnibase_spi-0.6.4.tar.gz", hash = "sha256:07005ffdef8aead96db9a749708984c8f61f73d37d6775bc1c05aed2e585af4b"},
 ]
 
 [package.dependencies]
-omnibase-core = ">=0.9.10"
+omnibase-core = ">=0.9.11"
 pydantic = ">=2.11.7"
 typing-extensions = ">=4.5.0"
 
@@ -5212,4 +5212,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "5b5c80d44a7dadf4b5b5d36f60de3957d406a8b9a137058d3c08e8e90ad98850"
+content-hash = "2d7efa100710a8236cfee61f33dc3efa38b7794109f7c93c466b2601c6350260"
