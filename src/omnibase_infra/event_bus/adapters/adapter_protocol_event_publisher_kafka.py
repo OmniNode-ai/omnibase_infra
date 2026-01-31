@@ -421,8 +421,17 @@ class AdapterProtocolEventPublisherKafka:
                 cb_state = self._bus.get_circuit_breaker_state()
             else:
                 cb_state = {"state": "unknown", "failures": 0}
-        except Exception:
+        except Exception as e:
             # If bus is closed or unavailable, return safe defaults
+            # Log at debug level for observability without flooding logs
+            logger.debug(
+                "Unable to read circuit breaker state from bus, using defaults",
+                extra={
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "service_name": self._service_name,
+                },
+            )
             cb_state = {"state": "unknown", "failures": 0}
 
         # Extract values with safe type handling for JsonType
