@@ -28,8 +28,12 @@ import json
 import os
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
-from uuid import UUID, uuid4
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from uuid import uuid4
+
+if TYPE_CHECKING:
+    from omnibase_infra.event_bus.adapters import AdapterProtocolEventPublisherKafka
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 
 import pytest
 
@@ -99,7 +103,7 @@ def unique_topic() -> str:
 @pytest.fixture
 async def kafka_event_bus(
     kafka_bootstrap_servers: str,
-) -> AsyncGenerator[object, None]:
+) -> AsyncGenerator[EventBusKafka, None]:
     """Create and configure EventBusKafka for integration testing.
 
     Yields a started EventBusKafka instance and ensures cleanup after test.
@@ -129,8 +133,8 @@ async def kafka_event_bus(
 
 @pytest.fixture
 async def started_kafka_bus(
-    kafka_event_bus: object,
-) -> object:
+    kafka_event_bus: EventBusKafka,
+) -> EventBusKafka:
     """Provide a started EventBusKafka instance."""
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 
@@ -142,8 +146,8 @@ async def started_kafka_bus(
 
 @pytest.fixture
 async def adapter(
-    started_kafka_bus: object,
-) -> object:
+    started_kafka_bus: EventBusKafka,
+) -> AdapterProtocolEventPublisherKafka:
     """Create AdapterProtocolEventPublisherKafka wrapping the started bus.
 
     Returns the adapter instance. Cleanup is handled by the started_kafka_bus fixture.

@@ -101,12 +101,12 @@ Get publisher metrics including circuit breaker status from underlying bus.
 #### reset_metrics()
 
 ```python
-def reset_metrics(self) -> None
+async def reset_metrics(self) -> None
 ```
 
 Reset all publisher metrics to initial values. Useful for test isolation.
 
-**Note**: Does NOT affect the closed state of the adapter.
+**Note**: This is an async method. Does NOT affect the closed state of the adapter.
 
 #### close()
 

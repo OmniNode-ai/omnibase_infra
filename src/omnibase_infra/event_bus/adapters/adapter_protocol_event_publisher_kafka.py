@@ -56,6 +56,8 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraUnavailableError
+
+# TODO: OMN-1767 - Move ModelPublisherMetrics out of testing/ directory
 from omnibase_infra.event_bus.testing.model_publisher_metrics import (
     ModelPublisherMetrics,
 )
@@ -67,6 +69,8 @@ if TYPE_CHECKING:
     from omnibase_spi.protocols.types.protocol_core_types import ContextValue
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_CLOSE_TIMEOUT_SECONDS: float = 30.0
 
 
 class AdapterProtocolEventPublisherKafka:
@@ -131,6 +135,14 @@ class AdapterProtocolEventPublisherKafka:
         self._metrics = ModelPublisherMetrics()
         self._metrics_lock = asyncio.Lock()
         self._closed = False
+
+    @property
+    def is_closed(self) -> bool:
+        """Return whether the adapter has been closed.
+
+        Allows callers to check adapter state without attempting a publish.
+        """
+        return self._closed
 
     async def publish(
         self,
@@ -356,9 +368,13 @@ class AdapterProtocolEventPublisherKafka:
             - circuit_breaker_status: Current state from underlying bus
             - current_failures: Current consecutive failure count
         """
-        # Read circuit breaker state from underlying bus
+        # Read circuit breaker state from underlying bus with defensive error handling
         # EventBusKafka inherits MixinAsyncCircuitBreaker which provides get_circuit_breaker_state()
-        cb_state = self._bus.get_circuit_breaker_state()
+        try:
+            cb_state = self._bus.get_circuit_breaker_state()
+        except Exception:
+            # If bus is closed or unavailable, return safe defaults
+            cb_state = {"state": "unknown", "failures": 0}
 
         # Extract values with safe type handling for JsonType
         state_value = cb_state.get("state", "unknown")
@@ -402,7 +418,9 @@ class AdapterProtocolEventPublisherKafka:
             },
         )
 
-    async def close(self, timeout_seconds: float = 30.0) -> None:
+    async def close(
+        self, timeout_seconds: float = DEFAULT_CLOSE_TIMEOUT_SECONDS
+    ) -> None:
         """Close the publisher and release resources.
 
         Marks the adapter as closed and stops the underlying EventBusKafka.
