@@ -432,8 +432,8 @@ def run_declarative_nodes(
                 validate_declarative_node_in_file,
             )
 
-            # Filter to only node.py files
-            node_files = [f for f in files if f.endswith("node.py")]
+            # Filter to only node.py files (exact match, not files like my_node.py)
+            node_files = [f for f in files if Path(f).name == "node.py"]
             if not node_files:
                 if verbose:
                     print("Declarative Nodes: SKIP (no node.py files in input)")

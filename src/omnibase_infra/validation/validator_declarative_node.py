@@ -250,11 +250,28 @@ def _is_valid_init(func_node: ast.FunctionDef, source_lines: list[str]) -> bool:
     if super_call.func.id != "super":
         return False
 
+    # Validate super() has no args/keywords (must be bare super())
+    if super_call.args or super_call.keywords:
+        return False
+
+    # Validate __init__ call has exactly 1 positional arg named "container"
+    if len(call.args) != 1:
+        return False
+    if call.keywords:
+        return False
+    if not isinstance(call.args[0], ast.Name):
+        return False
+    if call.args[0].id != "container":
+        return False
+
     return True
 
 
 def _find_instance_variables(func_node: ast.FunctionDef) -> list[tuple[int, str]]:
     """Find instance variable assignments in __init__ (excluding docstrings).
+
+    Uses ast.walk() to recursively find all assignments including those nested
+    in if/for/try/while blocks. Handles tuple/list unpacking targets.
 
     Args:
         func_node: AST FunctionDef node for __init__.
@@ -264,25 +281,35 @@ def _find_instance_variables(func_node: ast.FunctionDef) -> list[tuple[int, str]
     """
     instance_vars: list[tuple[int, str]] = []
 
-    for stmt in func_node.body:
-        # Skip docstrings
-        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
-            if isinstance(stmt.value.value, str):
-                continue
+    def _extract_self_attrs(target: ast.AST, lineno: int) -> None:
+        """Extract self.x attributes from a target, handling tuple/list unpacking."""
+        if isinstance(target, ast.Attribute):
+            if isinstance(target.value, ast.Name) and target.value.id == "self":
+                instance_vars.append((lineno, target.attr))
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for elt in target.elts:
+                _extract_self_attrs(elt, lineno)
+
+    for node in ast.walk(func_node):
+        # Skip the docstring at the start of __init__
+        if (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+            and node in func_node.body
+        ):
+            continue
 
         # Check for self.xxx = ... assignments
-        if isinstance(stmt, ast.Assign):
-            for target in stmt.targets:
-                if isinstance(target, ast.Attribute):
-                    if isinstance(target.value, ast.Name) and target.value.id == "self":
-                        instance_vars.append((stmt.lineno, target.attr))
-        elif isinstance(stmt, ast.AnnAssign):
-            if isinstance(stmt.target, ast.Attribute):
-                if (
-                    isinstance(stmt.target.value, ast.Name)
-                    and stmt.target.value.id == "self"
-                ):
-                    instance_vars.append((stmt.lineno, stmt.target.attr))
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                _extract_self_attrs(target, node.lineno)
+        elif isinstance(node, ast.AnnAssign):
+            if node.target is not None:
+                _extract_self_attrs(node.target, node.lineno)
+        elif isinstance(node, ast.AugAssign):
+            # Handle self.x += ... augmented assignments
+            _extract_self_attrs(node.target, node.lineno)
 
     return instance_vars
 
@@ -353,9 +380,27 @@ def _validate_node_class(
         if isinstance(item, ast.FunctionDef):
             method_name = item.name
 
-            # Check for properties
+            # Check for properties (including qualified decorators like functools.cached_property)
             for decorator in item.decorator_list:
-                if isinstance(decorator, ast.Name) and decorator.id == "property":
+                is_property = False
+                if (
+                    isinstance(decorator, ast.Name)
+                    and decorator.id
+                    in {
+                        "property",
+                        "cached_property",
+                    }
+                ) or (
+                    isinstance(decorator, ast.Attribute)
+                    and decorator.attr
+                    in {
+                        "property",
+                        "cached_property",
+                    }
+                ):
+                    is_property = True
+
+                if is_property:
                     snippet = _get_source_line(source_lines, item.lineno)
                     violations.append(
                         ModelDeclarativeNodeViolation(
@@ -535,7 +580,7 @@ def _validate_file_core(
                 violations.extend(class_violations)
 
     # Emit warning for node.py files in nodes/ that don't contain node classes
-    if not found_node_class and "nodes" in str(file_path):
+    if not found_node_class and "nodes" in file_path.parts:
         violations.append(
             ModelDeclarativeNodeViolation(
                 file_path=file_path,

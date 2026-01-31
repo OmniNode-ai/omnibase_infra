@@ -48,7 +48,7 @@ class ModelDeclarativeNodeViolation(BaseModel):
         ... )
 
     Note:
-        Violations with severity='error' should block CI pipelines.
+        Violations with severity='error' or 'critical' should block CI pipelines.
         All declarative node violations are errors by default.
     """
 
@@ -98,9 +98,12 @@ class ModelDeclarativeNodeViolation(BaseModel):
         """Check if this violation should block CI.
 
         Returns:
-            True if severity is 'error', False for 'warning'.
+            True if severity is 'error' or 'critical', False for 'warning'.
         """
-        return self.severity == EnumValidationSeverity.ERROR
+        return self.severity in {
+            EnumValidationSeverity.ERROR,
+            EnumValidationSeverity.CRITICAL,
+        }
 
     @property
     def is_exemptable(self) -> bool:

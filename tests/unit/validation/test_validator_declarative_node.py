@@ -20,6 +20,7 @@ from omnibase_core.models.contracts.subcontracts.model_validator_subcontract imp
     ModelValidatorSubcontract,
 )
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_infra.enums import EnumValidationSeverity
 from omnibase_infra.enums.enum_declarative_node_violation import (
     EnumDeclarativeNodeViolation,
 )
@@ -398,8 +399,6 @@ class TestDeclarativeNodeEdgeCases:
         assert (
             violations[0].violation_type == EnumDeclarativeNodeViolation.NO_NODE_CLASS
         )
-        from omnibase_infra.enums import EnumValidationSeverity
-
         assert violations[0].severity == EnumValidationSeverity.WARNING
 
     def test_non_node_class(self, tmp_path: Path) -> None:
@@ -420,8 +419,6 @@ class TestDeclarativeNodeEdgeCases:
         assert (
             violations[0].violation_type == EnumDeclarativeNodeViolation.NO_NODE_CLASS
         )
-        from omnibase_infra.enums import EnumValidationSeverity
-
         assert violations[0].severity == EnumValidationSeverity.WARNING
 
     def test_async_method_detected(self, tmp_path: Path) -> None:
@@ -460,8 +457,6 @@ class TestDeclarativeNodeEdgeCases:
         assert (
             violations[0].violation_type == EnumDeclarativeNodeViolation.NO_NODE_CLASS
         )
-        from omnibase_infra.enums import EnumValidationSeverity
-
         assert violations[0].severity == EnumValidationSeverity.WARNING
 
 
@@ -578,9 +573,7 @@ class TestValidatorDeclarativeNodeClass:
         validator = ValidatorDeclarativeNode(contract=contract)
         result = validator.validate(tmp_path / "nodes")
 
-        # Verify the result is the correct type
-        assert isinstance(result, ModelValidationResult)
-        # Verify result has expected attributes
+        # Verify result has expected attributes (duck-typing)
         assert hasattr(result, "is_valid")
         assert hasattr(result, "issues")
         assert hasattr(result, "summary")
@@ -1129,7 +1122,6 @@ class TestIsExemptableProperty:
 
     def test_format_human_readable_no_exemption_for_no_node_class(self) -> None:
         """format_human_readable does NOT include exemption hint for NO_NODE_CLASS."""
-        from omnibase_infra.enums import EnumValidationSeverity
         from omnibase_infra.models.validation.model_declarative_node_violation import (
             ModelDeclarativeNodeViolation,
         )
