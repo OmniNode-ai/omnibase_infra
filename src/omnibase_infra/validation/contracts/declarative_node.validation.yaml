@@ -115,6 +115,13 @@ validation:
         Fix the syntax error before validation can proceed.
       severity: error
       enabled: true
+    - rule_id: DECL-007
+      name: no_node_class
+      description: |
+        File is named node.py but does not contain a Node class.
+        Either add a Node class or rename the file.
+      severity: warning
+      enabled: true
   # ============================================================================
   # LINE-BASED SUPPRESSION
   # ============================================================================

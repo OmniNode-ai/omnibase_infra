@@ -354,15 +354,22 @@ class TestDeclarativeNodeEdgeCases:
         assert violations[0].violation_type == EnumDeclarativeNodeViolation.SYNTAX_ERROR
 
     def test_empty_file(self, tmp_path: Path) -> None:
-        """Empty file should have no violations."""
+        """Empty file in nodes/ should emit NO_NODE_CLASS warning."""
         filepath = _create_test_file(tmp_path, "")
 
         violations = validate_declarative_node_in_file(filepath)
 
-        assert len(violations) == 0
+        # Empty files in nodes/ now emit NO_NODE_CLASS warning
+        assert len(violations) == 1
+        assert (
+            violations[0].violation_type == EnumDeclarativeNodeViolation.NO_NODE_CLASS
+        )
+        from omnibase_infra.enums import EnumValidationSeverity
+
+        assert violations[0].severity == EnumValidationSeverity.WARNING
 
     def test_non_node_class(self, tmp_path: Path) -> None:
-        """Classes not inheriting from Node* should be ignored."""
+        """Files with non-Node classes in nodes/ emit NO_NODE_CLASS warning."""
         code = """
         class SomeHelper:
             '''Helper class - not a node.'''
@@ -374,7 +381,14 @@ class TestDeclarativeNodeEdgeCases:
 
         violations = validate_declarative_node_in_file(filepath)
 
-        assert len(violations) == 0
+        # Non-node classes in nodes/ directory now emit NO_NODE_CLASS warning
+        assert len(violations) == 1
+        assert (
+            violations[0].violation_type == EnumDeclarativeNodeViolation.NO_NODE_CLASS
+        )
+        from omnibase_infra.enums import EnumValidationSeverity
+
+        assert violations[0].severity == EnumValidationSeverity.WARNING
 
     def test_async_method_detected(self, tmp_path: Path) -> None:
         """Async methods in node class should be detected."""
@@ -394,6 +408,27 @@ class TestDeclarativeNodeEdgeCases:
             violations[0].violation_type == EnumDeclarativeNodeViolation.CUSTOM_METHOD
         )
         assert violations[0].method_name == "async_method"
+
+    def test_node_py_without_node_class_in_nodes_dir(self, tmp_path: Path) -> None:
+        """node.py in nodes/ without Node class should emit warning."""
+        code = """
+        # This file is named node.py but has no Node class
+        class SomeHelper:
+            '''Not a node class.'''
+            pass
+        """
+        filepath = _create_test_file(tmp_path, code)
+
+        violations = validate_declarative_node_in_file(filepath)
+
+        # Should emit NO_NODE_CLASS warning
+        assert len(violations) == 1
+        assert (
+            violations[0].violation_type == EnumDeclarativeNodeViolation.NO_NODE_CLASS
+        )
+        from omnibase_infra.enums import EnumValidationSeverity
+
+        assert violations[0].severity == EnumValidationSeverity.WARNING
 
 
 def _create_custom_contract(
@@ -444,6 +479,11 @@ def _create_custom_contract(
             ModelValidatorRule(
                 rule_id="DECL-006",
                 description="Syntax errors",
+                enabled=True,
+            ),
+            ModelValidatorRule(
+                rule_id="DECL-007",
+                description="No node class",
                 enabled=True,
             ),
         ]

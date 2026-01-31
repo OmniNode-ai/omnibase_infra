@@ -45,6 +45,14 @@ Usage:
 See Also:
     - CLAUDE.md: MANDATORY: Declarative Nodes section
     - ValidatorBase: Base class for contract-driven validators
+
+Limitations:
+    - **Shallow inheritance detection**: Only direct base classes (NodeEffect,
+      NodeCompute, NodeReducer, NodeOrchestrator) are recognized. Indirect
+      inheritance through custom intermediate classes is not detected.
+    - **Exemption comment window**: The ONEX_EXCLUDE comment must appear within
+      3 lines before the class definition. Classes with many decorators may
+      need the comment placed closer to the class definition.
 """
 
 from __future__ import annotations
@@ -110,6 +118,10 @@ def _is_class_exempted(source_lines: list[str], class_line: int) -> bool:
     """Check if a class is exempted via ONEX_EXCLUDE comment.
 
     Checks the class line and the 3 lines before it for exemption comment.
+    This covers common patterns like:
+    - Comment on same line as class
+    - Comment on line immediately before class
+    - Comment before decorators (up to 2 decorators)
 
     Args:
         source_lines: List of source lines.
@@ -117,6 +129,13 @@ def _is_class_exempted(source_lines: list[str], class_line: int) -> bool:
 
     Returns:
         True if the class is exempted.
+
+    Note:
+        The 3-line lookback window may be insufficient for classes with:
+        - More than 2 decorators above the exemption comment
+        - Long multi-line decorators
+        In such cases, place the exemption comment closer to the class
+        definition or on the same line.
     """
     start_line = max(1, class_line - 3)
     for line_num in range(start_line, class_line + 1):
@@ -152,6 +171,12 @@ def _is_node_class(class_node: ast.ClassDef) -> bool:
 
     Returns:
         True if the class inherits from a known node base class.
+
+    Note:
+        This function only checks direct base class names. Indirect inheritance
+        (e.g., class MyNode(MyCustomBase) where MyCustomBase extends NodeEffect)
+        is NOT detected. This is intentional per ONEX policy which discourages
+        deep inheritance hierarchies in node classes.
     """
     base_names = _get_base_class_names(class_node)
     return bool(base_names & _NODE_BASE_CLASSES)
@@ -407,7 +432,7 @@ _VIOLATION_TO_RULE_ID: dict[EnumDeclarativeNodeViolation, str] = {
     EnumDeclarativeNodeViolation.INSTANCE_VARIABLE: "DECL-004",
     EnumDeclarativeNodeViolation.CLASS_VARIABLE: "DECL-005",
     EnumDeclarativeNodeViolation.SYNTAX_ERROR: "DECL-006",
-    EnumDeclarativeNodeViolation.NO_NODE_CLASS: "DECL-006",  # Reuse syntax error rule
+    EnumDeclarativeNodeViolation.NO_NODE_CLASS: "DECL-007",
 }
 
 
@@ -498,11 +523,17 @@ def _validate_file_core(
                 class_violations = _validate_node_class(node, file_path, source_lines)
                 violations.extend(class_violations)
 
-    # Debug log for node.py files that don't contain node classes
+    # Emit warning for node.py files in nodes/ that don't contain node classes
     if not found_node_class and "nodes" in str(file_path):
-        logger.debug(
-            "File %s is named node.py but contains no Node class",
-            file_path,
+        violations.append(
+            ModelDeclarativeNodeViolation(
+                file_path=file_path,
+                line_number=1,
+                violation_type=EnumDeclarativeNodeViolation.NO_NODE_CLASS,
+                code_snippet="# No Node class found in file",
+                suggestion=EnumDeclarativeNodeViolation.NO_NODE_CLASS.suggestion,
+                severity=EnumValidationSeverity.WARNING,
+            )
         )
 
     return violations
@@ -677,6 +708,9 @@ class ValidatorDeclarativeNode(ValidatorBase):
             return f"Class '{class_name}' has class variable - configuration should be in contract.yaml"
         elif vtype == EnumDeclarativeNodeViolation.SYNTAX_ERROR:
             return f"File has syntax error: {violation.code_snippet}"
+        elif vtype == EnumDeclarativeNodeViolation.NO_NODE_CLASS:
+            path = violation.file_path
+            return f"File '{path.name}' is named node.py but contains no Node class"
         else:
             return f"Class '{class_name}' violates declarative node policy: {violation.code_snippet}"
 
