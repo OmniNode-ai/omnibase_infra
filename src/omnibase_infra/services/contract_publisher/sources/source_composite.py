@@ -26,8 +26,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import yaml
-
 from omnibase_infra.services.contract_publisher.models import ModelContractError
 from omnibase_infra.services.contract_publisher.sources.model_discovered import (
     ModelDiscoveredContract,
@@ -140,37 +138,6 @@ class SourceContractComposite:
         """Return the package source if configured."""
         return self._package_source
 
-    def _extract_handler_id(
-        self, contract: ModelDiscoveredContract
-    ) -> ModelDiscoveredContract:
-        """Extract handler_id from contract YAML before merging.
-
-        Parses the YAML to extract handler_id early, enabling proper
-        deduplication and conflict detection in _merge_contracts().
-
-        Args:
-            contract: Discovered contract with text content
-
-        Returns:
-            Contract with handler_id populated if extraction succeeded,
-            original contract unchanged if parsing failed (will fail
-            validation later with proper error).
-        """
-        try:
-            data = yaml.safe_load(contract.text)
-            if isinstance(data, dict) and "handler_id" in data:
-                handler_id = data["handler_id"]
-                if isinstance(handler_id, str) and handler_id:
-                    return contract.with_parsed_data(handler_id=handler_id)
-        except yaml.YAMLError:
-            # YAML parse errors will be caught during validation
-            logger.debug(
-                "Failed to extract handler_id from %s:%s (YAML parse error)",
-                contract.origin,
-                contract.ref,
-            )
-        return contract
-
     async def discover_contracts(self) -> list[ModelDiscoveredContract]:
         """Discover contracts from all configured sources and merge.
 
@@ -211,7 +178,7 @@ class SourceContractComposite:
             )
 
         # Extract handler_ids BEFORE merging (enables proper dedup/conflict detection)
-        all_contracts = [self._extract_handler_id(c) for c in all_contracts]
+        all_contracts = [c.extract_handler_id() for c in all_contracts]
 
         # Compute content hashes for all contracts
         all_contracts = [c.with_content_hash() for c in all_contracts]

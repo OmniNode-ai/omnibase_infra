@@ -17,6 +17,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from omnibase_infra.services.contract_publisher.errors import (
+    ContractSourceNotConfiguredError,
+)
 from omnibase_infra.services.contract_publisher.sources.model_discovered import (
     ModelDiscoveredContract,
 )
@@ -35,7 +38,8 @@ class SourceContractFilesystem:
         under the root directory.
 
     Error Handling:
-        - If root doesn't exist: Returns empty list (logged as debug)
+        - If root doesn't exist: Raises ContractSourceNotConfiguredError
+        - If root is not a directory: Raises ContractSourceNotConfiguredError
         - If file read fails: Logs warning, skips file, continues
 
     Attributes:
@@ -96,8 +100,12 @@ class SourceContractFilesystem:
         Returns:
             List of discovered contracts with origin="filesystem"
 
+        Raises:
+            ContractSourceNotConfiguredError: If the filesystem root does not
+                exist or is not a directory. This indicates a configuration
+                problem that should be fixed rather than silently ignored.
+
         Note:
-            Returns empty list if root doesn't exist (not an error).
             Individual file read failures are logged and skipped.
 
         Note:
@@ -107,18 +115,26 @@ class SourceContractFilesystem:
             discovery is an infrequent startup operation.
         """
         if not self._root.exists():
-            logger.debug(
+            logger.warning(
                 "Filesystem source root does not exist: %s",
                 self._root,
             )
-            return []
+            raise ContractSourceNotConfiguredError(
+                mode="filesystem",
+                missing_field="filesystem_root",
+                message=f"Filesystem root does not exist: {self._root}",
+            )
 
         if not self._root.is_dir():
             logger.warning(
                 "Filesystem source root is not a directory: %s",
                 self._root,
             )
-            return []
+            raise ContractSourceNotConfiguredError(
+                mode="filesystem",
+                missing_field="filesystem_root",
+                message=f"Filesystem root is not a directory: {self._root}",
+            )
 
         contracts: list[ModelDiscoveredContract] = []
 

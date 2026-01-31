@@ -17,10 +17,14 @@ This model is populated in stages:
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
 from typing import Literal
 
+import yaml
 from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger(__name__)
 
 
 class ModelDiscoveredContract(BaseModel):
@@ -82,6 +86,35 @@ class ModelDiscoveredContract(BaseModel):
             New instance with handler_id set
         """
         return self.model_copy(update={"handler_id": handler_id})
+
+    def extract_handler_id(self) -> ModelDiscoveredContract:
+        """Extract handler_id from YAML and return new instance with it populated.
+
+        Parses the YAML text content to extract handler_id early, enabling
+        proper deterministic sorting and deduplication before validation.
+
+        Returns:
+            New instance with handler_id if extraction succeeded,
+            self unchanged if parsing failed (will fail validation later).
+        """
+        # Skip if handler_id already extracted
+        if self.handler_id is not None:
+            return self
+
+        try:
+            data = yaml.safe_load(self.text)
+            if isinstance(data, dict) and "handler_id" in data:
+                handler_id = data["handler_id"]
+                if isinstance(handler_id, str) and handler_id:
+                    return self.with_parsed_data(handler_id=handler_id)
+        except yaml.YAMLError:
+            # YAML parse errors will be caught during validation
+            logger.debug(
+                "Failed to extract handler_id from %s:%s (YAML parse error)",
+                self.origin,
+                self.ref,
+            )
+        return self
 
     def with_content_hash(self) -> ModelDiscoveredContract:
         """Return new instance with content_hash computed.

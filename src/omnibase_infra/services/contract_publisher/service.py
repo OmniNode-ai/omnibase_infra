@@ -493,45 +493,6 @@ class ServiceContractPublisher:
 
         return result
 
-    def _extract_handler_id(
-        self, contract: ModelDiscoveredContract
-    ) -> ModelDiscoveredContract:
-        """Extract handler_id from contract YAML for sorting.
-
-        Parses the YAML to extract handler_id early, enabling proper
-        deterministic sorting by handler_id before validation.
-
-        This is applied to ALL contracts regardless of source type to ensure
-        consistent sorting behavior. Composite source does this internally,
-        but filesystem/package sources do not.
-
-        Args:
-            contract: Discovered contract with text content
-
-        Returns:
-            Contract with handler_id populated if extraction succeeded,
-            original contract unchanged if parsing failed (will fail
-            validation later with proper error).
-        """
-        # Skip if handler_id already extracted (e.g., from composite source)
-        if contract.handler_id is not None:
-            return contract
-
-        try:
-            data = yaml.safe_load(contract.text)
-            if isinstance(data, dict) and "handler_id" in data:
-                handler_id = data["handler_id"]
-                if isinstance(handler_id, str) and handler_id:
-                    return contract.with_parsed_data(handler_id=handler_id)
-        except yaml.YAMLError:
-            # YAML parse errors will be caught during validation
-            logger.debug(
-                "Failed to extract handler_id from %s:%s (YAML parse error)",
-                contract.origin,
-                contract.ref,
-            )
-        return contract
-
     async def _discover(
         self,
     ) -> tuple[list[ModelDiscoveredContract], list[ModelContractError], int]:
@@ -569,7 +530,7 @@ class ServiceContractPublisher:
         # Extract handler_id BEFORE sorting for ALL contracts
         # (composite source does this internally, but filesystem/package do not)
         # This ensures consistent sorting by (handler_id, origin, ref) regardless of source
-        contracts = [self._extract_handler_id(c) for c in contracts]
+        contracts = [c.extract_handler_id() for c in contracts]
 
         # Add content hash only to contracts that don't already have one
         # (composite source already computes hashes, avoid double-hashing)

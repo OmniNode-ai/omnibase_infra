@@ -19,6 +19,9 @@ import logging
 from importlib import resources
 from importlib.resources.abc import Traversable
 
+from omnibase_infra.services.contract_publisher.errors import (
+    ContractSourceNotConfiguredError,
+)
 from omnibase_infra.services.contract_publisher.sources.model_discovered import (
     ModelDiscoveredContract,
 )
@@ -97,9 +100,13 @@ class SourceContractPackage:
         Returns:
             List of discovered contracts with origin="package"
 
+        Raises:
+            ContractSourceNotConfiguredError: If the package is not found
+                (not installed) or is invalid for resource discovery.
+
         Note:
-            Returns empty list if package is not installed or has no resources.
-            Individual resource read failures are logged and skipped.
+            Individual resource read failures during traversal are logged
+            and skipped, but the discovery continues.
 
         Note:
             This method is ``async`` for protocol consistency with
@@ -117,11 +124,15 @@ class SourceContractPackage:
             self._discover_recursive(package_root, "", contracts)
 
         except ModuleNotFoundError:
-            logger.debug(
+            logger.warning(
                 "Package not found: %s",
                 self._package_module,
             )
-            return []
+            raise ContractSourceNotConfiguredError(
+                mode="package",
+                missing_field="package_module",
+                message=f"Package not found: {self._package_module}",
+            )
 
         except TypeError as e:
             # resources.files() can raise TypeError for invalid packages
@@ -130,7 +141,11 @@ class SourceContractPackage:
                 self._package_module,
                 e,
             )
-            return []
+            raise ContractSourceNotConfiguredError(
+                mode="package",
+                missing_field="package_module",
+                message=f"Invalid package for resource discovery: {self._package_module} - {e}",
+            )
 
         logger.info(
             "Package discovery complete: found %d contracts in %s",

@@ -10,6 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from omnibase_infra.services.contract_publisher.errors import (
+    ContractSourceNotConfiguredError,
+)
 from omnibase_infra.services.contract_publisher.sources import (
     ModelDiscoveredContract,
     SourceContractComposite,
@@ -136,20 +139,28 @@ class TestSourceContractFilesystem:
 
     @pytest.mark.asyncio
     async def test_filesystem_discover_nonexistent_dir(self) -> None:
-        """Test that nonexistent directory returns empty list."""
+        """Test that nonexistent directory raises ContractSourceNotConfiguredError."""
         source = SourceContractFilesystem(Path("/nonexistent/path/to/contracts"))
-        contracts = await source.discover_contracts()
 
-        assert len(contracts) == 0
+        with pytest.raises(ContractSourceNotConfiguredError) as exc_info:
+            await source.discover_contracts()
+
+        assert exc_info.value.mode == "filesystem"
+        assert exc_info.value.missing_field == "filesystem_root"
+        assert "does not exist" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_filesystem_discover_not_directory(self) -> None:
-        """Test that file path returns empty list."""
+        """Test that file path raises ContractSourceNotConfiguredError."""
         with tempfile.NamedTemporaryFile(suffix=".txt") as tmpfile:
             source = SourceContractFilesystem(Path(tmpfile.name))
-            contracts = await source.discover_contracts()
 
-            assert len(contracts) == 0
+            with pytest.raises(ContractSourceNotConfiguredError) as exc_info:
+                await source.discover_contracts()
+
+            assert exc_info.value.mode == "filesystem"
+            assert exc_info.value.missing_field == "filesystem_root"
+            assert "not a directory" in str(exc_info.value)
 
     def test_filesystem_source_properties(self) -> None:
         """Test source_type and source_description properties."""
@@ -198,11 +209,15 @@ class TestSourceContractPackage:
 
     @pytest.mark.asyncio
     async def test_package_discover_module_not_found(self) -> None:
-        """Test that missing module returns empty list."""
+        """Test that missing module raises ContractSourceNotConfiguredError."""
         source = SourceContractPackage("nonexistent.module.that.does.not.exist")
-        contracts = await source.discover_contracts()
 
-        assert len(contracts) == 0
+        with pytest.raises(ContractSourceNotConfiguredError) as exc_info:
+            await source.discover_contracts()
+
+        assert exc_info.value.mode == "package"
+        assert exc_info.value.missing_field == "package_module"
+        assert "not found" in str(exc_info.value).lower()
 
     def test_package_source_properties(self) -> None:
         """Test source_type and source_description properties."""
