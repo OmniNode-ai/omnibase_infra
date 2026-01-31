@@ -16,6 +16,7 @@ Usage:
     python scripts/validate.py any_types
     python scripts/validate.py localhandler
     python scripts/validate.py declarative_nodes
+    python scripts/validate.py declarative_nodes file1/node.py file2/node.py  # validate specific files
     python scripts/validate.py io_audit
     python scripts/validate.py imports
     python scripts/validate.py markdown_links
@@ -403,7 +404,9 @@ def run_localhandler(verbose: bool = False) -> bool:
         return True
 
 
-def run_declarative_nodes(verbose: bool = False) -> bool:
+def run_declarative_nodes(
+    verbose: bool = False, files: list[str] | None = None
+) -> bool:
     """Run declarative node validation.
 
     Ensures all node.py files follow the ONEX declarative pattern:
@@ -412,7 +415,74 @@ def run_declarative_nodes(verbose: bool = False) -> bool:
     - No custom methods, properties, or instance variables
 
     All behavior should be defined in contract.yaml and implemented by handlers.
+
+    Args:
+        verbose: Enable verbose output.
+        files: Optional list of specific files to validate (for pre-commit).
+               If provided, only these files are validated.
+               If None, validates all node.py files in the nodes directory.
     """
+    # If specific files provided (from pre-commit), validate only those
+    if files:
+        try:
+            from omnibase_infra.models.validation.model_declarative_node_validation_result import (
+                ModelDeclarativeNodeValidationResult,
+            )
+            from omnibase_infra.validation.validator_declarative_node import (
+                validate_declarative_node_in_file,
+            )
+
+            # Filter to only node.py files
+            node_files = [f for f in files if f.endswith("node.py")]
+            if not node_files:
+                if verbose:
+                    print("Declarative Nodes: SKIP (no node.py files in input)")
+                return True
+
+            violations = []
+            files_checked = 0
+            for file_str in node_files:
+                file_path = Path(file_str)
+                if file_path.exists():
+                    files_checked += 1
+                    file_violations = validate_declarative_node_in_file(file_path)
+                    violations.extend(file_violations)
+                elif verbose:
+                    print(f"  Warning: File not found: {file_str}")
+
+            result = ModelDeclarativeNodeValidationResult.from_violations(
+                violations, files_checked
+            )
+
+            if verbose or not result.passed:
+                print(f"Declarative Nodes: {'PASS' if result.passed else 'FAIL'}")
+                print(
+                    f"  Files checked: {result.files_checked}, "
+                    f"blocking violations: {result.blocking_count}, "
+                    f"total violations: {result.total_violations}"
+                )
+                if result.imperative_nodes:
+                    print(f"  Imperative nodes: {', '.join(result.imperative_nodes)}")
+                # Show violations
+                for v in result.violations:
+                    print(
+                        f"  - {v.file_path}:{v.line_number}: "
+                        f"{v.violation_type.value} in {v.node_class_name}"
+                    )
+                    if verbose and v.method_name:
+                        print(f"      Method: {v.method_name}")
+                        print(f"      Code: {v.code_snippet}")
+                        print(f"      Suggestion: {v.suggestion}")
+            else:
+                print(f"Declarative Nodes: PASS ({result.files_checked} files checked)")
+
+            return result.passed
+
+        except ImportError as e:
+            print(f"Skipping declarative node validation: {e}")
+            return True
+
+    # Original behavior: scan entire nodes directory
     nodes_path = Path("src/omnibase_infra/nodes")
     if not nodes_path.exists():
         if verbose:
@@ -850,7 +920,7 @@ def main() -> int:
     parser.add_argument(
         "files",
         nargs="*",
-        help="Optional list of files to validate (for markdown_links validator)",
+        help="Optional list of files to validate (for declarative_nodes or markdown_links)",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument(
@@ -880,6 +950,10 @@ def main() -> int:
         # Pass files to markdown_links validator if provided
         files = args.files if args.files else None
         success = run_markdown_links(args.verbose, files=files)
+    elif args.validator == "declarative_nodes":
+        # Pass files to declarative_nodes validator if provided
+        files = args.files if args.files else None
+        success = run_declarative_nodes(args.verbose, files=files)
     else:
         success = validator_map[args.validator](args.verbose)
 

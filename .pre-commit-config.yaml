@@ -173,15 +173,15 @@ repos:
       # Ensures node.py files follow the ONEX declarative pattern:
       # - Only extend base classes, no custom methods/properties
       # - All behavior defined in contract.yaml, implemented by handlers
-      # NOTE: pre-push stage because existing nodes need refactoring (OMN-1725)
+      # Incremental validation: only checks staged node.py files, not entire codebase
       # Exempt nodes via: # ONEX_EXCLUDE: declarative_node
       - id: onex-validate-declarative-nodes
         name: ONEX Declarative Node Validation
         entry: poetry run python scripts/validate.py declarative_nodes
         language: system
         files: nodes/.*/node\.py$
-        pass_filenames: false
-        stages: [pre-push]
+        pass_filenames: true
+        stages: [pre-commit]
       # Reducer purity enforcement (OMN-914)
       # Ensures reducers remain pure functions with no I/O dependencies
       # Timeout: 60s prevents hanging if tests get stuck (normal runtime: <5s)
