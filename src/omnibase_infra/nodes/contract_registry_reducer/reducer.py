@@ -702,13 +702,18 @@ class ContractRegistryReducer:
                     # We store it as-is; the Effect layer handles resolution.
                     topic_suffix = consumed.get("topic")
                     if topic_suffix and isinstance(topic_suffix, str):
+                        # Validate event_type is string (may be missing or wrong type in malformed YAML)
+                        event_type_raw = consumed.get("event_type")
+                        event_type = (
+                            event_type_raw if isinstance(event_type_raw, str) else None
+                        )
                         payload = ModelPayloadUpdateTopic(
                             correlation_id=correlation_id,
                             topic_suffix=topic_suffix,
                             direction="subscribe",
                             contract_id=contract_id,
                             node_name=event.node_name,
-                            event_type=consumed.get("event_type"),
+                            event_type=event_type,
                             last_seen_at=event.timestamp,
                         )
                         intents.append(
@@ -728,13 +733,18 @@ class ContractRegistryReducer:
                     # Effect layer handles resolution (see docstring above).
                     topic_suffix = published.get("topic")
                     if topic_suffix and isinstance(topic_suffix, str):
+                        # Validate event_type is string (may be missing or wrong type in malformed YAML)
+                        event_type_raw = published.get("event_type")
+                        event_type = (
+                            event_type_raw if isinstance(event_type_raw, str) else None
+                        )
                         payload = ModelPayloadUpdateTopic(
                             correlation_id=correlation_id,
                             topic_suffix=topic_suffix,
                             direction="publish",
                             contract_id=contract_id,
                             node_name=event.node_name,
-                            event_type=published.get("event_type"),
+                            event_type=event_type,
                             last_seen_at=event.timestamp,
                         )
                         intents.append(

@@ -65,6 +65,15 @@ CREATE INDEX IF NOT EXISTS idx_contracts_hash
 -- Stores topic suffixes referenced by contracts for routing discovery.
 -- Uses 5-segment naming: onex.evt.platform.contract-registered.v1
 -- Stores SUFFIXES only - environment prefix ({env}.) applied at runtime.
+--
+-- Topic Orphan Handling (OMN-1709):
+--   When all contracts referencing a topic are deregistered, the topic record
+--   remains with an empty contract_ids array. This is intentional:
+--   - Preserves topic routing history for auditing and debugging
+--   - Allows topic reactivation if a new contract references the same topic
+--   - Avoids complex cascading deletes during high-volume deregistration
+--   To clean up orphaned topics, run:
+--     DELETE FROM topics WHERE contract_ids = '[]' AND is_active = FALSE;
 
 CREATE TABLE IF NOT EXISTS topics (
     -- Identity (composite key: same topic can have both publish and subscribe directions)
