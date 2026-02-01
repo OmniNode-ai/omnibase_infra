@@ -1356,7 +1356,7 @@ kafka-acls.sh --add --deny-principal User:* \\
 """
 ```
 
-**Related**: [CLAUDE.md - Node Introspection Security](../../CLAUDE.md#node-introspection-security)
+**Related**: [Handler Plugin Loader](./handler_plugin_loader.md#security-considerations)
 
 ### Structured Security Error Reporting
 
@@ -1807,7 +1807,6 @@ Use this checklist before deploying to production:
 ## See Also
 
 - [CLAUDE.md - Error Sanitization](../../CLAUDE.md#error-sanitization)
-- [CLAUDE.md - Node Introspection Security](../../CLAUDE.md#node-introspection-security)
-- [CLAUDE.md - Handler Plugin Loader Security](../../CLAUDE.md#handler-plugin-loader-patterns) - Security model and error codes
+- [CLAUDE.md - Handler Plugin Loader](../../CLAUDE.md#handler-plugin-loader) - Security model and error codes
 - [ADR: Handler Plugin Loader Security Model](../decisions/adr-handler-plugin-loader-security.md) - Security architecture decisions
 - [MixinNodeIntrospection](../../src/omnibase_infra/mixins/mixin_node_introspection.py) - Security documentation in docstring
