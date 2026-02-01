@@ -379,4 +379,4 @@ Each pattern document should include:
 ## See Also
 
 - [CLAUDE.md](../../CLAUDE.md) - Quick reference rules (references these patterns)
-- [ONEX Principles](../../CLAUDE.md#core-onex-principles) - Architectural principles
+- [Repo Invariants](../../CLAUDE.md#repo-invariants) - Architectural invariants and principles
