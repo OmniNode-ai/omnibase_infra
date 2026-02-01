@@ -167,7 +167,7 @@ class TestHandlerVaultConnection:
         """Test HandlerVault describe() returns handler metadata."""
         description = vault_handler.describe()
 
-        assert description["handler_type"] == "vault"
+        assert description["handler_type"] == "infra_handler"
         assert description["initialized"] is True
         assert "supported_operations" in description
         assert "vault.read_secret" in description["supported_operations"]

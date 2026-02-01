@@ -37,6 +37,7 @@ python = "^3.12"
 # Remember to switch back to PyPI versions before merging to main.
 #
 # omnibase-core v0.12.0: Adds ModelDbRepositoryContract schema + validators (OMN-1782)
+# (v0.11.0 included: ModelTimeoutErrorContext requires transport_type/timeout_seconds; Handler.describe() returns "infra_handler")
 omnibase-core = "^0.12.0"
 # omnibase-spi v0.6.4: Version bump
 omnibase-spi = "^0.6.4"

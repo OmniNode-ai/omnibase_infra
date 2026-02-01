@@ -44,7 +44,8 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.errors import InfraTimeoutError, ModelInfraErrorContext
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraTimeoutError, ModelTimeoutErrorContext
 from omnibase_infra.idempotency import StoreIdempotencyInmemory
 from tests.chaos.conftest import (
     ChaosConfig,
@@ -140,10 +141,14 @@ class TimeoutEffectExecutor:
             async with self._lock:
                 self.timeout_count += 1
 
-            context = ModelInfraErrorContext(
-                operation=operation,
-                correlation_id=correlation_id,
-            )
+            context_kwargs = {
+                "transport_type": EnumInfraTransportType.HTTP,
+                "operation": operation,
+                "timeout_seconds": self.timeout_seconds,
+            }
+            if correlation_id is not None:
+                context_kwargs["correlation_id"] = correlation_id
+            context = ModelTimeoutErrorContext(**context_kwargs)
             raise InfraTimeoutError(
                 f"Operation '{operation}' exceeded timeout of {self.timeout_seconds}s",
                 context=context,

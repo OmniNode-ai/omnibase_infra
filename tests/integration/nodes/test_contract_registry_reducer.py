@@ -810,6 +810,72 @@ class TestContractRegistryReducerMalformedYaml:
         assert len(result.intents) == 1
         assert result.intents[0].payload.intent_type == "postgres.upsert_contract"
 
+    def test_non_string_event_type_handled_gracefully(
+        self,
+        reducer: ContractRegistryReducer,
+        initial_state: ModelContractRegistryState,
+        sample_version: ModelSemVer,
+    ) -> None:
+        """Non-string event_type in topic entries should be handled gracefully.
+
+        If contract_yaml contains an event_type that is not a string (e.g., a list
+        or dict), the reducer should set event_type to None rather than causing
+        a model validation error.
+
+        Related:
+            - OMN-1709: Follow-up improvements from PR #212 review
+        """
+        # Create contract_yaml with non-string event_type values (as YAML string)
+        # Note: YAML parsing converts Python objects to their YAML representations
+        contract_yaml_str = """
+name: test-reducer
+consumed_events:
+  - topic: onex.evt.platform.test-event.v1
+    event_type:
+      - not
+      - a
+      - string
+  - topic: onex.evt.platform.test-event2.v1
+    event_type:
+      nested: dict
+  - topic: onex.evt.platform.test-event3.v1
+    event_type: 12345
+published_events:
+  - topic: onex.evt.platform.output.v1
+    event_type: null
+"""
+
+        event = ModelContractRegisteredEvent(
+            event_id=uuid4(),
+            correlation_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            source_node_id=uuid4(),
+            event_type="onex.evt.platform.contract-registered.v1",
+            node_name="test-reducer",
+            node_version=sample_version,
+            contract_hash="abc123",
+            contract_yaml=contract_yaml_str,
+        )
+
+        result = reducer.reduce(initial_state, event, make_event_metadata())
+
+        # Should process event successfully
+        assert result.items_processed == 1
+        assert result.result.contracts_processed == 1
+
+        # Should have 1 upsert + 4 topic intents (topics extracted despite bad event_type)
+        assert len(result.intents) == 5
+
+        # All topic intents should have event_type=None (gracefully handled)
+        topic_intents = [
+            i
+            for i in result.intents
+            if i.payload.intent_type == "postgres.update_topic"
+        ]
+        assert len(topic_intents) == 4
+        for intent in topic_intents:
+            assert intent.payload.event_type is None
+
 
 # =============================================================================
 # Test: Logging Behavior

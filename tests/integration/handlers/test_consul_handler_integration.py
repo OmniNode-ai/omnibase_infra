@@ -92,7 +92,7 @@ class TestHandlerConsulMetadata:
         """
         description = initialized_consul_handler.describe()
 
-        assert description["handler_type"] == "consul"
+        assert description["handler_type"] == "infra_handler"
         assert description["initialized"] is True
         assert "consul.kv_get" in description["supported_operations"]
         assert "consul.kv_put" in description["supported_operations"]
