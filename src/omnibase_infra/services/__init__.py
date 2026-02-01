@@ -13,6 +13,7 @@ Exports:
     ModelTimeoutEmissionResult: Result model for timeout emission processing
     ModelTimeoutQueryResult: Result model for timeout queries
     ServiceCapabilityQuery: Query nodes by capability, not by name
+    ServiceContractPublisher: Publish contracts to Kafka for dynamic discovery
     ServiceNodeSelector: Select nodes from candidates using various strategies
     ServiceSnapshot: Generic snapshot service for point-in-time state capture
     ServiceTimeoutEmitter: Emitter for timeout events with markers
@@ -24,6 +25,25 @@ Exports:
 """
 
 from omnibase_infra.enums import EnumSelectionStrategy
+
+# Contract publisher service (OMN-1752)
+from omnibase_infra.services.contract_publisher import (
+    ContractPublisherError,
+    ContractPublishingInfraError,
+    ContractSourceNotConfiguredError,
+    ModelContractError,
+    ModelContractPublisherConfig,
+    ModelDiscoveredContract,
+    ModelInfraError,
+    ModelPublishResult,
+    ModelPublishStats,
+    NoContractsFoundError,
+    ProtocolContractPublisherSource,
+    ServiceContractPublisher,
+    SourceContractComposite,
+    SourceContractFilesystem,
+    SourceContractPackage,
+)
 from omnibase_infra.services.corpus_capture import CorpusCapture
 from omnibase_infra.services.service_capability_query import ServiceCapabilityQuery
 from omnibase_infra.services.service_node_selector import (
@@ -86,4 +106,20 @@ __all__ = [
     "SessionEventConsumer",
     "SessionSnapshotStore",
     "SessionStoreNotInitializedError",
+    # Contract publisher service (OMN-1752)
+    "ContractPublisherError",
+    "ContractPublishingInfraError",
+    "ContractSourceNotConfiguredError",
+    "ModelContractError",
+    "ModelContractPublisherConfig",
+    "ModelDiscoveredContract",
+    "ModelInfraError",
+    "ModelPublishResult",
+    "ModelPublishStats",
+    "NoContractsFoundError",
+    "ProtocolContractPublisherSource",
+    "ServiceContractPublisher",
+    "SourceContractComposite",
+    "SourceContractFilesystem",
+    "SourceContractPackage",
 ]
