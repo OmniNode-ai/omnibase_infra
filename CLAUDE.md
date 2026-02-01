@@ -263,7 +263,7 @@ def handler_category(self) -> EnumHandlerTypeCategory:
 
 ```python
 # In nodes/reducers/models/model_payload_consul_register.py
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Literal
 from uuid import UUID
 
@@ -474,7 +474,8 @@ Each dispatcher should:
 | Service | `service_<name>.py` | `Service<Name>` |
 | Store | `store_<name>.py` | `Store<Purpose><Backend>` |
 | Validator | `validator_<name>.py` | `Validator<Name>` |
-| Registry | `registry_infra_<name>.py` | `RegistryInfra<Name>` |
+| Registry (node) | `registry_infra_<name>.py` | `RegistryInfra<Name>` |
+| Registry (standalone) | `registry_<purpose>.py` | `Registry<Purpose>` |
 
 ### ConfigDict Requirements
 
@@ -720,6 +721,7 @@ loader = HandlerPluginLoader(
 
 | Topic | Document |
 |-------|----------|
+| Any Type Enforcement | `docs/decisions/adr-any-type-pydantic-workaround.md` |
 | Container DI | `docs/patterns/container_dependency_injection.md` |
 | Error Handling | `docs/patterns/error_handling_patterns.md` |
 | Error Recovery | `docs/patterns/error_recovery_patterns.md` |
