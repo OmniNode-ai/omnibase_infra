@@ -75,7 +75,55 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Regex patterns for SQL parsing (simple approach, not full SQL parser)
+# =============================================================================
+# SQL Clause Detection Patterns
+# =============================================================================
+#
+# These regex patterns provide simple ORDER BY and LIMIT clause detection
+# for determinism enforcement. They use word boundaries (\b) and case-insensitive
+# matching to identify SQL keywords.
+#
+# KNOWN LIMITATIONS:
+# -----------------
+# These patterns use simple regex matching, NOT a full SQL parser. As such,
+# they can produce false positives in certain edge cases:
+#
+# 1. String Literals: Patterns inside quoted strings will match:
+#    - SELECT description FROM items WHERE note = 'sort ORDER BY priority'
+#    - SELECT * FROM logs WHERE message LIKE '%LIMIT 10 reached%'
+#
+# 2. Subqueries: Patterns in nested queries will match the outer detection:
+#    - SELECT * FROM (SELECT id FROM users ORDER BY created_at LIMIT 5) sub
+#    - The outer query appears to have ORDER BY/LIMIT, but doesn't
+#
+# 3. Comments: Patterns inside SQL comments will match:
+#    - SELECT * FROM users -- ORDER BY id for debugging
+#    - SELECT * FROM users /* LIMIT 100 was here */
+#
+# WHY THIS IS ACCEPTABLE:
+# ----------------------
+# 1. Contract SQL should be simple, predictable queries. Complex queries with
+#    subqueries, dynamic string construction, or embedded SQL in literals
+#    indicate contract design that should be reconsidered.
+#
+# 2. This detection is defense-in-depth, not primary validation. The contract
+#    author has explicit control over the SQL and can always add explicit
+#    ORDER BY and LIMIT clauses to avoid injection entirely.
+#
+# 3. False positives (detecting ORDER BY/LIMIT when not present at outer level)
+#    are safer than false negatives. A false positive skips injection, leaving
+#    the query unchanged. A false negative would inject duplicate clauses.
+#
+# RECOMMENDATION FOR COMPLEX QUERIES:
+# ----------------------------------
+# If your contract requires complex SQL with subqueries or string operations
+# that contain SQL keywords, explicitly include ORDER BY and LIMIT in the
+# outer query. This bypasses regex detection entirely:
+#
+#   GOOD: "SELECT * FROM (SELECT id FROM users ORDER BY id) sub ORDER BY id LIMIT 100"
+#   AVOID: Relying on injection for queries with embedded SQL-like strings
+#
+# =============================================================================
 _ORDER_BY_PATTERN = re.compile(r"\bORDER\s+BY\b", re.IGNORECASE)
 _LIMIT_PATTERN = re.compile(r"\bLIMIT\s+(\d+)\b", re.IGNORECASE)
 

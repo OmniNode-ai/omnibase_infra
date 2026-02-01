@@ -18,6 +18,12 @@ Determinism:
 Metrics:
     - emit_metrics: Controls whether duration_ms and rows_returned are emitted
 
+SQL Identifier Validation:
+    - primary_key_column and default_order_by are validated against safe SQL
+      identifier patterns to prevent SQL injection from misconfiguration.
+    - Pattern: ^[a-zA-Z_][a-zA-Z0-9_]*$ for column names
+    - ORDER BY allows: column [ASC|DESC] [, column [ASC|DESC]]*
+
 Example:
     >>> config = ModelRepositoryRuntimeConfig(
     ...     max_row_limit=100,
@@ -32,9 +38,20 @@ Example:
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# Safe SQL identifier pattern: starts with letter or underscore,
+# followed by letters, digits, or underscores
+_SQL_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+# ORDER BY clause pattern: column [ASC|DESC]
+# Allows whitespace around components
+_ORDER_BY_COMPONENT_PATTERN = re.compile(
+    r"^\s*[a-zA-Z_][a-zA-Z0-9_]*\s*(?:ASC|DESC)?\s*$", re.IGNORECASE
+)
 
 
 class ModelRepositoryRuntimeConfig(BaseModel):
@@ -122,6 +139,73 @@ class ModelRepositoryRuntimeConfig(BaseModel):
         default=True,
         description="Emit duration_ms and rows_returned metrics for observability",
     )
+
+    @field_validator("primary_key_column")
+    @classmethod
+    def validate_primary_key_column(cls, v: str | None) -> str | None:
+        """Validate primary_key_column is a safe SQL identifier.
+
+        Prevents SQL injection from misconfigured column names.
+        Pattern: ^[a-zA-Z_][a-zA-Z0-9_]*$
+
+        Args:
+            v: The column name to validate, or None.
+
+        Returns:
+            The validated column name, or None if not set.
+
+        Raises:
+            ValueError: If the column name contains unsafe characters.
+        """
+        if v is None:
+            return v
+        if not _SQL_IDENTIFIER_PATTERN.match(v):
+            raise ValueError(
+                f"Invalid SQL identifier for primary_key_column: '{v}'. "
+                "Must start with a letter or underscore, followed by letters, "
+                "digits, or underscores only (pattern: ^[a-zA-Z_][a-zA-Z0-9_]*$)."
+            )
+        return v
+
+    @field_validator("default_order_by")
+    @classmethod
+    def validate_default_order_by(cls, v: str | None) -> str | None:
+        """Validate default_order_by contains only safe SQL identifiers.
+
+        Allows format: column [ASC|DESC] [, column [ASC|DESC]]*
+        Prevents SQL injection from misconfigured ORDER BY clauses.
+
+        Args:
+            v: The ORDER BY clause to validate, or None.
+
+        Returns:
+            The validated ORDER BY clause, or None if not set.
+
+        Raises:
+            ValueError: If any column reference contains unsafe characters.
+        """
+        if v is None:
+            return v
+
+        # Split by comma to get individual column specifications
+        components = v.split(",")
+
+        for component in components:
+            component = component.strip()
+            if not component:
+                raise ValueError(
+                    f"Invalid ORDER BY clause: '{v}'. "
+                    "Empty component found after splitting by comma."
+                )
+            if not _ORDER_BY_COMPONENT_PATTERN.match(component):
+                raise ValueError(
+                    f"Invalid ORDER BY component: '{component}' in '{v}'. "
+                    "Each component must be a valid SQL identifier optionally "
+                    "followed by ASC or DESC. Column names must start with a "
+                    "letter or underscore, followed by letters, digits, or "
+                    "underscores only."
+                )
+        return v
 
 
 __all__: list[str] = ["ModelRepositoryRuntimeConfig"]
