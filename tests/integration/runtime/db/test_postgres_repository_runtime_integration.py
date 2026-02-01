@@ -43,13 +43,50 @@ pytestmark = [
 ]
 
 
+def _check_postgres_env_vars() -> tuple[bool, str]:
+    """Check if required PostgreSQL environment variables are set.
+
+    Returns:
+        Tuple of (all_set, missing_vars_message)
+    """
+    required_vars = [
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_DATABASE",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+    ]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        return False, f"Missing required environment variables: {', '.join(missing)}"
+    return True, ""
+
+
 def get_dsn() -> str:
-    """Build PostgreSQL DSN from environment variables."""
-    host = os.getenv("POSTGRES_HOST", "192.168.86.200")
-    port = os.getenv("POSTGRES_PORT", "5436")
-    database = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
-    user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD", "omninode_remote_2024_secure")
+    """Build PostgreSQL DSN from environment variables.
+
+    All environment variables are REQUIRED - no defaults are provided
+    to prevent accidental credential exposure in source code.
+
+    Required env vars:
+        POSTGRES_HOST: Database host
+        POSTGRES_PORT: Database port
+        POSTGRES_DATABASE: Database name
+        POSTGRES_USER: Database user
+        POSTGRES_PASSWORD: Database password
+
+    Raises:
+        ValueError: If any required environment variable is not set.
+    """
+    is_configured, error_msg = _check_postgres_env_vars()
+    if not is_configured:
+        raise ValueError(error_msg)
+
+    host = os.environ["POSTGRES_HOST"]
+    port = os.environ["POSTGRES_PORT"]
+    database = os.environ["POSTGRES_DATABASE"]
+    user = os.environ["POSTGRES_USER"]
+    password = os.environ["POSTGRES_PASSWORD"]
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 
@@ -60,7 +97,14 @@ _TABLE_CREATED = False
 
 @pytest.fixture(scope="module")
 async def db_pool():
-    """Create a connection pool for the test module."""
+    """Create a connection pool for the test module.
+
+    Skips all tests if PostgreSQL environment variables are not configured.
+    """
+    is_configured, error_msg = _check_postgres_env_vars()
+    if not is_configured:
+        pytest.skip(f"PostgreSQL integration tests skipped: {error_msg}")
+
     import asyncpg
 
     dsn = get_dsn()
