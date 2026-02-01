@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "omnibase_infra"
-version = "0.2.8"
+version = "0.2.9"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = ["OmniNode Team <team@omninode.ai>"]
 license = "MIT"
@@ -36,8 +36,8 @@ python = "^3.12"
 #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
 # Remember to switch back to PyPI versions before merging to main.
 #
-# omnibase-core v0.10.2: Adds TOPIC_SUFFIX_CONTRACT_* constants and request_response schema (OMN-1760)
-omnibase-core = "^0.10.2"
+# omnibase-core v0.12.0: Adds ModelDbRepositoryContract schema + validators (OMN-1782)
+omnibase-core = "^0.12.0"
 # omnibase-spi v0.6.4: Version bump
 omnibase-spi = "^0.6.4"
 
@@ -259,6 +259,10 @@ ignore = [
     "ISC001",    # Implicit string concatenation (conflicts with formatter)
     "PLC0415",   # Import not at top-level (intentional lazy imports in tests)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Integration tests with controlled table names - S608 false positives
+"tests/integration/runtime/db/test_postgres_repository_runtime_integration.py" = ["S608"]
 
 [tool.ruff.lint.isort]
 # Ensure consistent import sorting between local and CI

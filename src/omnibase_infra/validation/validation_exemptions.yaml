@@ -132,6 +132,24 @@ pattern_exemptions:
       - CLAUDE.md (Accepted Pattern Exceptions - EventBusKafka Complexity)
     ticket: OMN-1305
   # ==========================================================================
+  # PostgresRepositoryRuntime Exemptions (OMN-1783)
+  # ==========================================================================
+  # Contract-driven database runtime with cohesive methods for query execution.
+  # All methods serve the same purpose: executing repository contract operations.
+  # Public: call(), contract (property), config (property)
+  # Private: _create_error_context, _get_operation, _validate_operation_allowed,
+  #          _validate_arg_count, _build_sql, _inject_order_by, _inject_limit,
+  #          _execute_with_timeout, _get_primary_table, _fingerprint_sql
+  - file_pattern: 'postgres_repository_runtime\.py'
+    class_pattern: "Class 'PostgresRepositoryRuntime'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Cohesive runtime class with single responsibility: executing repository contract operations. Methods are logically grouped: validation (3), SQL building (3), execution (1), and helpers (3). Breaking into smaller classes would reduce cohesion and complicate the simple contract-driven execution flow.
+
+    documentation:
+      - OMN-1783 PR description
+    ticket: OMN-1783
+  # ==========================================================================
   # Protocol Plugin Architecture Exemptions
   # ==========================================================================
   # The 'execute' method name is a standard plugin architecture pattern.
