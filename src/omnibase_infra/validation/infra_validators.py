@@ -446,7 +446,10 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 115 (2026-01-29): OMN-1653 contract registry reducer (+2 unions)
 #                     ContractRegistryEvent: 4-type union for event routing
 #                     contract_yaml: dict | str for flexible YAML handling
-INFRA_MAX_UNIONS = 115
+# - 117 (2026-02-01): OMN-1783 PostgresRepositoryRuntime (+2 unions)
+#                     call() return type: list[dict] | dict | None
+#                     _execute_with_timeout() return type: list[dict] | dict | None
+INFRA_MAX_UNIONS = 117
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

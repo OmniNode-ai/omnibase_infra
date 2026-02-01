@@ -97,7 +97,7 @@ class TestInfraValidatorConstants:
 
         Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 115, (
+        assert INFRA_MAX_UNIONS == 117, (
             "INFRA_MAX_UNIONS should be 115 (non-optional unions only, X | None excluded)"
         )
 

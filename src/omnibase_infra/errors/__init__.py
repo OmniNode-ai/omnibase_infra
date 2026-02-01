@@ -23,6 +23,11 @@ Exports:
     ChainPropagationError: Correlation/causation chain validation errors
     ArchitectureViolationError: Architecture validation errors (blocks startup)
     BindingResolutionError: Binding resolution errors (declarative operation bindings)
+    RepositoryError: Base error for repository operations
+    RepositoryContractError: Contract-level errors (bad op_name, missing params)
+    RepositoryValidationError: Validation errors (type mismatch, constraints)
+    RepositoryExecutionError: Execution errors (asyncpg, connection issues)
+    RepositoryTimeoutError: Query timeout exceeded
 
 Correlation ID Assignment:
     All infrastructure errors support correlation_id for distributed tracing.
@@ -117,6 +122,13 @@ from omnibase_infra.errors.error_infra import (
 from omnibase_infra.errors.error_message_type_registry import MessageTypeRegistryError
 from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
 from omnibase_infra.errors.error_vault import InfraVaultError
+from omnibase_infra.errors.repository import (
+    RepositoryContractError,
+    RepositoryError,
+    RepositoryExecutionError,
+    RepositoryTimeoutError,
+    RepositoryValidationError,
+)
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -150,6 +162,12 @@ __all__: list[str] = [
     "ModelTimeoutErrorContext",
     "PolicyRegistryError",
     "ProtocolConfigurationError",
+    # Repository errors
+    "RepositoryContractError",
+    "RepositoryError",
+    "RepositoryExecutionError",
+    "RepositoryTimeoutError",
+    "RepositoryValidationError",
     # Error classes
     "RuntimeHostError",
     "SecretResolutionError",
