@@ -6,6 +6,27 @@ These tests require a running PostgreSQL instance configured via environment var
     POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DATABASE, POSTGRES_USER, POSTGRES_PASSWORD
 
 Run with: pytest -m postgres tests/integration/runtime/db/
+
+Security Note (S608 Suppression):
+----------------------------------
+This file uses f-strings for SQL table names, which triggers Bandit's S608
+(hardcoded-sql-expression) warning. This is SAFE in this context because:
+
+1. The table name `_TEST_TABLE_NAME` is a MODULE-LEVEL CONSTANT with a random
+   UUID suffix (e.g., "test_runtime_a1b2c3d4"), generated once at module load.
+
+2. The table name is NEVER derived from user input, external configuration,
+   or any runtime data that could be influenced by an attacker.
+
+3. SQL injection requires attacker-controlled input to be interpolated into
+   queries. Since the table name is hardcoded at import time with a random
+   suffix, there is no attack vector.
+
+4. The UUID suffix ensures test isolation across parallel test runs without
+   introducing any security risk.
+
+The S608 suppression for this file is configured in pyproject.toml under
+[tool.ruff.lint.per-file-ignores].
 """
 
 from __future__ import annotations
@@ -90,7 +111,12 @@ def get_dsn() -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 
-# Use a shared table name for all tests in this module
+# Module-constant table name with random UUID suffix for test isolation.
+# SECURITY: This is safe for f-string SQL interpolation because:
+#   - Generated ONCE at module load (not from user/external input)
+#   - UUID suffix is cryptographically random, not attacker-controllable
+#   - No code path allows modification after initialization
+# See module docstring for full S608 suppression rationale.
 _TEST_TABLE_NAME = f"test_runtime_{uuid.uuid4().hex[:8]}"
 _TABLE_CREATED = False
 

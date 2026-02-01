@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, ItemsView, Iterator, KeysView, ValuesView
 from contextlib import asynccontextmanager
 
 import pytest
@@ -74,19 +74,19 @@ class MockAsyncRecord:
     def __getitem__(self, key: str) -> object:
         return self._data[key]
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self._data)
 
     def __len__(self) -> int:
         return len(self._data)
 
-    def keys(self):
+    def keys(self) -> KeysView[str]:
         return self._data.keys()
 
-    def values(self):
+    def values(self) -> ValuesView[object]:
         return self._data.values()
 
-    def items(self):
+    def items(self) -> ItemsView[str, object]:
         return self._data.items()
 
 
