@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "omnibase_infra"
-version = "0.2.9"
+version = "0.3.0"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = ["OmniNode Team <team@omninode.ai>"]
 license = "MIT"
