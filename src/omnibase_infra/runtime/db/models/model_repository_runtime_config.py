@@ -109,11 +109,11 @@ class ModelRepositoryRuntimeConfig(BaseModel):
 
     # Determinism controls
     primary_key_column: str | None = Field(
-        default="pattern_id",
+        default=None,
         description="Primary key column for ORDER BY injection to ensure deterministic results",
     )
     default_order_by: str | None = Field(
-        default="score DESC, pattern_id ASC",
+        default=None,
         description="Default ORDER BY clause when primary_key_column is declared",
     )
 

@@ -58,15 +58,23 @@ _TEST_TABLE_NAME = f"test_runtime_{uuid.uuid4().hex[:8]}"
 _TABLE_CREATED = False
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 async def db_pool():
-    """Create a connection pool for the test."""
+    """Create a connection pool for the test module."""
     import asyncpg
 
     dsn = get_dsn()
     pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5)
     yield pool
     await pool.close()
+
+
+@pytest.fixture(scope="module", autouse=True)
+async def cleanup_test_table(db_pool):
+    """Clean up test table after all tests complete."""
+    yield
+    async with db_pool.acquire() as conn:
+        await conn.execute(f"DROP TABLE IF EXISTS {_TEST_TABLE_NAME}")
 
 
 @pytest.fixture
