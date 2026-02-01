@@ -127,7 +127,7 @@ class TestHandlerDbConnection:
         try:
             description = handler.describe()
 
-            assert description.handler_type == "database"
+            assert description.handler_type == "infra_handler"
             assert "db.query" in description.supported_operations
             assert "db.execute" in description.supported_operations
             assert description.pool_size == DB_HANDLER_DEFAULT_POOL_SIZE

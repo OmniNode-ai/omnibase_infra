@@ -2796,14 +2796,14 @@ files = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.10.2"
+version = "0.11.0"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_core-0.10.2-py3-none-any.whl", hash = "sha256:17c389368e0ad9b79542968b8c75c86fbc61b3aaba44d32873d7dc81556be4ca"},
-    {file = "omnibase_core-0.10.2.tar.gz", hash = "sha256:cf0ac20300915f9fd0c55f6624bbbf2625154d2841247e61a43d911700388a06"},
+    {file = "omnibase_core-0.11.0-py3-none-any.whl", hash = "sha256:a0de9aa7d3b2e1c783cee928ad7dd315351e87bcc574c000dc030231827c88e2"},
+    {file = "omnibase_core-0.11.0.tar.gz", hash = "sha256:1772feb0c6663396be8e61f5190e427abc40fc92cdadd5c2adba2bbab9d76c23"},
 ]
 
 [package.dependencies]
@@ -5212,4 +5212,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "5be15b6720d2b98a4e0b9554db635dfe568f0eb25e0a9d207d40525f4ebbaa11"
+content-hash = "71a892b6211dcb28758f90615b66e17ff39ba416192b60851fe5dfb37431231f"
