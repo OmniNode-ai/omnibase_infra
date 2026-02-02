@@ -14,6 +14,7 @@ Exports (in __all__):
         - MixinDictLikeAccessors: Dictionary-style access helpers
         - MixinEnvelopeExtraction: Event envelope extraction utilities
         - MixinNodeIntrospection: Node capability introspection
+        - MixinPostgresOpExecutor: PostgreSQL operation execution with error handling
         - MixinRetryExecution: Retry logic with exponential backoff
 
     Protocols (co-located with their tightly-coupled mixins):
@@ -48,6 +49,7 @@ from omnibase_infra.mixins.mixin_async_circuit_breaker import MixinAsyncCircuitB
 from omnibase_infra.mixins.mixin_dict_like_accessors import MixinDictLikeAccessors
 from omnibase_infra.mixins.mixin_envelope_extraction import MixinEnvelopeExtraction
 from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
+from omnibase_infra.mixins.mixin_postgres_op_executor import MixinPostgresOpExecutor
 from omnibase_infra.mixins.mixin_retry_execution import MixinRetryExecution
 from omnibase_infra.mixins.protocol_circuit_breaker_aware import (
     ProtocolCircuitBreakerAware,
@@ -63,6 +65,7 @@ __all__: list[str] = [
     "MixinDictLikeAccessors",
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
+    "MixinPostgresOpExecutor",
     "MixinRetryExecution",
     "ModelCircuitBreakerConfig",
     "ModelRetryErrorClassification",

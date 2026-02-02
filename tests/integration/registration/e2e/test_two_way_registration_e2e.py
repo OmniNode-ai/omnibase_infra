@@ -2456,7 +2456,7 @@ class TestSuite7GracefulDegradation:
         Note: This tests the ModelRegistryResponse.from_backend_results() logic
         without actually calling infrastructure services.
         """
-        from omnibase_infra.nodes.effects.models.model_backend_result import (
+        from omnibase_infra.models.model_backend_result import (
             ModelBackendResult,
         )
         from omnibase_infra.nodes.effects.models.model_registry_response import (
@@ -2568,7 +2568,7 @@ class TestSuite7GracefulDegradation:
         - Processing time is sum of backend durations
         - Processing time is correctly reported even for partial failures
         """
-        from omnibase_infra.nodes.effects.models.model_backend_result import (
+        from omnibase_infra.models.model_backend_result import (
             ModelBackendResult,
         )
         from omnibase_infra.nodes.effects.models.model_registry_response import (

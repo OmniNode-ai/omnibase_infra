@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
-from omnibase_infra.nodes.effects.models import ModelBackendResult
+from omnibase_infra.models import ModelBackendResult
 
 
 @dataclass

@@ -41,7 +41,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumBackendType, EnumRegistryResponseStatus
-from omnibase_infra.nodes.effects.models.model_backend_result import (
+from omnibase_infra.models.model_backend_result import (
     ModelBackendResult,
 )
 

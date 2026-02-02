@@ -11,8 +11,8 @@ Available:
     - ModelBackendResult: Individual backend result model
 """
 
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.nodes.effects.models import (
-    ModelBackendResult,
     ModelRegistryRequest,
     ModelRegistryResponse,
 )
