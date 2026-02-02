@@ -53,7 +53,7 @@ from omnibase_infra.mixins.mixin_async_circuit_breaker import MixinAsyncCircuitB
 from omnibase_infra.mixins.mixin_dict_like_accessors import MixinDictLikeAccessors
 from omnibase_infra.mixins.mixin_envelope_extraction import MixinEnvelopeExtraction
 from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
-from omnibase_infra.mixins.mixin_postgres_error_handler import (
+from omnibase_infra.mixins.mixin_postgres_error_response import (
     MixinPostgresErrorResponse,
     PostgresErrorContext,
 )

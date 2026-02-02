@@ -13,7 +13,7 @@ Test Categories:
     - Log Context Merging: Verify log_context is properly merged
 
 Usage:
-    pytest tests/integration/mixins/test_mixin_postgres_error_handler.py -v
+    pytest tests/integration/mixins/test_mixin_postgres_error_response.py -v
 
 Related:
     - MixinPostgresErrorResponse: The mixin under test
