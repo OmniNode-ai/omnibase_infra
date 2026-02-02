@@ -48,9 +48,6 @@ from omnibase_infra.enums import (
     EnumHandlerTypeCategory,
     EnumPostgresErrorCode,
 )
-
-logger = logging.getLogger(__name__)
-
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -58,6 +55,8 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.nodes.effects.models.model_backend_result import ModelBackendResult
 from omnibase_infra.utils import sanitize_error_message
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from omnibase_infra.nodes.contract_registry_reducer.models import (

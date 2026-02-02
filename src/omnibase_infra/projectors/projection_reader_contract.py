@@ -388,20 +388,21 @@ class ProjectionReaderContract(MixinAsyncCircuitBreaker):
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("list_contracts_by_node_name", corr_id)
 
+        # Params are the same for both queries
+        params = [node_name]
+
         if include_inactive:
             query_sql = """
                 SELECT * FROM contracts
                 WHERE node_name = $1
                 ORDER BY version_major DESC, version_minor DESC, version_patch DESC
             """
-            params = [node_name]
         else:
             query_sql = """
                 SELECT * FROM contracts
                 WHERE node_name = $1 AND is_active = TRUE
                 ORDER BY version_major DESC, version_minor DESC, version_patch DESC
             """
-            params = [node_name]
 
         try:
             async with self._pool.acquire() as conn:

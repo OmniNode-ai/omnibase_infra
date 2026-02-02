@@ -136,9 +136,9 @@ handler_routing:
         - topic_suffix
         - direction
         - rows_affected
-    # Mark Stale - Batch mark contracts as stale
+    # Mark Stale - Batch deactivate contracts that stopped heartbeating
     # Triggered by runtime-tick events to detect unresponsive contracts.
-    # Updates is_stale flag for contracts not seen within threshold.
+    # Deactivates (is_active=FALSE) contracts not seen within threshold.
     - payload_type: "postgres.mark_stale"
       handler:
         name: "HandlerPostgresMarkStale"

@@ -43,11 +43,14 @@ Related:
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 import asyncpg
+
+logger = logging.getLogger(__name__)
 
 from omnibase_infra.enums import (
     EnumHandlerType,
@@ -191,6 +194,17 @@ class HandlerPostgresCleanupTopics:
                     topics_updated = int(result.split(" ")[1])
                 except (ValueError, IndexError):
                     pass  # Keep default of 0 if parsing fails
+
+            # Log for observability
+            logger.info(
+                "Topic cleanup operation completed",
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "contract_id": payload.contract_id,
+                    "topics_updated": topics_updated,
+                    "duration_ms": duration_ms,
+                },
+            )
 
             return ModelBackendResult(
                 success=True,
