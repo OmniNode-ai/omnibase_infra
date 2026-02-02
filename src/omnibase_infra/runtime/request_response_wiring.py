@@ -493,7 +493,7 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
         self,
         data: dict[str, object],
         config: ModelCorrelationConfig,
-    ) -> UUID | str | None:
+    ) -> UUID | None:
         """Extract correlation ID from response data based on configuration.
 
         Args:
@@ -501,12 +501,12 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
             config: Correlation configuration specifying location and field.
 
         Returns:
-            Correlation ID if found, None otherwise.
+            Correlation ID as UUID if found, None otherwise.
         """
+        value: object | None = None
+
         if config.location == "body":
             value = data.get(config.field)
-            if value is not None:
-                return str(value)
         elif config.location == "headers":
             # Headers would be in message headers, not body
             # For now, we only support body location
@@ -514,10 +514,19 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
                 "Header-based correlation not implemented, falling back to body"
             )
             value = data.get(config.field)
-            if value is not None:
-                return str(value)
 
-        return None
+        if value is None:
+            return None
+
+        # Parse to UUID - correlation IDs are always UUIDs
+        try:
+            return UUID(str(value))
+        except ValueError:
+            self._logger.warning(
+                "Invalid correlation_id format (not a UUID): %s",
+                value,
+            )
+            return None
 
     async def send_request(
         self,
@@ -588,9 +597,7 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
             async with self._circuit_breaker_lock:
                 await self._check_circuit_breaker(
                     operation="send_request",
-                    correlation_id=correlation_id
-                    if isinstance(correlation_id, UUID)
-                    else None,
+                    correlation_id=correlation_id,
                 )
 
             # Publish request
@@ -615,9 +622,7 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="send_request",
                     target_name=instance.request_topic,
-                    correlation_id=correlation_id
-                    if isinstance(correlation_id, UUID)
-                    else uuid4(),
+                    correlation_id=correlation_id,
                     timeout_seconds=float(timeout),
                 )
                 raise InfraTimeoutError(
@@ -631,14 +636,12 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
             instance.pending.pop(correlation_key, None)
             raise
 
-        except Exception as e:
+        except Exception:
             # Record failure in circuit breaker
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
                     operation="send_request",
-                    correlation_id=correlation_id
-                    if isinstance(correlation_id, UUID)
-                    else None,
+                    correlation_id=correlation_id,
                 )
 
             # Clean up pending future
@@ -649,7 +652,7 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
         self,
         payload: dict[str, object],
         config: ModelCorrelationConfig,
-    ) -> UUID | str:
+    ) -> UUID:
         """Ensure correlation_id exists in payload, injecting if missing.
 
         Args:
@@ -657,48 +660,40 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
             config: Correlation configuration.
 
         Returns:
-            The correlation ID (existing or newly generated).
+            The correlation ID as UUID (existing parsed or newly generated).
         """
-        if config.location == "body":
-            existing = payload.get(config.field)
-            if existing is not None:
-                return str(existing)
-
-            # Inject new correlation_id
-            new_id = uuid4()
-            payload[config.field] = str(new_id)
-            return new_id
-
-        # For header location, we'd need to handle differently
-        # For now, treat as body
         existing = payload.get(config.field)
-        if existing is not None:
-            return str(existing)
 
-        new_id = uuid4()
-        payload[config.field] = str(new_id)
-        return new_id
+        if existing is not None:
+            # Parse existing to UUID - correlation IDs are always UUIDs
+            correlation_id = UUID(str(existing))
+        else:
+            # Generate new UUID
+            correlation_id = uuid4()
+            payload[config.field] = str(correlation_id)
+
+        return correlation_id
 
     async def _publish_request(
         self,
         instance: RequestResponseInstanceState,
         payload: dict[str, object],
-        correlation_id: UUID | str,
+        correlation_id: UUID,
     ) -> None:
         """Publish request to the instance's request topic.
 
         Args:
             instance: Request-response instance.
             payload: Request payload.
-            correlation_id: Correlation ID for logging.
+            correlation_id: Correlation ID for logging and message key.
         """
         # Serialize payload
         value = json.dumps(payload).encode("utf-8")
 
-        # Publish via event bus
+        # Publish via event bus - convert UUID to string at serialization boundary
         await self._event_bus.publish(
             topic=instance.request_topic,
-            key=str(correlation_id).encode("utf-8") if correlation_id else None,
+            key=str(correlation_id).encode("utf-8"),
             value=value,
         )
 

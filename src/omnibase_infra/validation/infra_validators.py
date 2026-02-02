@@ -449,9 +449,8 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 117 (2026-02-01): OMN-1783 PostgresRepositoryRuntime (+2 unions)
 #                     call() return type: list[dict] | dict | None
 #                     _execute_with_timeout() return type: list[dict] | dict | None
-# - 120 (2026-02-02): OMN-1742 RequestResponseWiring (+3 unions)
-#                     correlation_id: UUID | str for flexible ID handling
-INFRA_MAX_UNIONS = 120
+# Note: OMN-1742 RequestResponseWiring uses UUID | None (optional, not counted)
+INFRA_MAX_UNIONS = 117
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.
