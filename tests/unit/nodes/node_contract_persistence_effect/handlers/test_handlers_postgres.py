@@ -74,8 +74,13 @@ TEST_NOW = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 def create_mock_pool_with_acquire() -> MagicMock:
     """Create a mock asyncpg pool that uses acquire() context manager.
 
-    Used by: HandlerPostgresContractUpsert, HandlerPostgresTopicUpdate,
-    HandlerPostgresDeactivate, HandlerPostgresCleanupTopics
+    Used by all PostgreSQL handlers:
+    - HandlerPostgresContractUpsert
+    - HandlerPostgresTopicUpdate
+    - HandlerPostgresDeactivate
+    - HandlerPostgresCleanupTopics
+    - HandlerPostgresMarkStale
+    - HandlerPostgresHeartbeat
     """
     pool = MagicMock()
     mock_conn = AsyncMock()
@@ -89,16 +94,6 @@ def create_mock_pool_with_acquire() -> MagicMock:
     mock_acquire.__aexit__ = AsyncMock(return_value=None)
     pool.acquire = MagicMock(return_value=mock_acquire)
 
-    return pool
-
-
-def create_mock_pool_direct_execute() -> MagicMock:
-    """Create a mock asyncpg pool that uses execute() directly on pool.
-
-    Used by: HandlerPostgresMarkStale, HandlerPostgresHeartbeat
-    """
-    pool = MagicMock()
-    pool.execute = AsyncMock()
     return pool
 
 
@@ -497,8 +492,9 @@ class TestHandlerPostgresMarkStaleSuccess:
     async def test_mark_stale_success(self) -> None:
         """Test successful mark stale returns ModelBackendResult with success=True."""
         # Arrange
-        pool = create_mock_pool_direct_execute()
-        pool.execute.return_value = "UPDATE 5"
+        pool = create_mock_pool_with_acquire()
+        mock_conn = pool.acquire.return_value.__aenter__.return_value
+        mock_conn.execute.return_value = "UPDATE 5"
 
         handler = HandlerPostgresMarkStale(pool)
         payload = create_mark_stale_payload()
@@ -518,8 +514,9 @@ class TestHandlerPostgresMarkStaleSuccess:
     async def test_mark_stale_zero_rows_still_success(self) -> None:
         """Test mark stale with zero affected rows still returns success."""
         # Arrange
-        pool = create_mock_pool_direct_execute()
-        pool.execute.return_value = "UPDATE 0"
+        pool = create_mock_pool_with_acquire()
+        mock_conn = pool.acquire.return_value.__aenter__.return_value
+        mock_conn.execute.return_value = "UPDATE 0"
 
         handler = HandlerPostgresMarkStale(pool)
         payload = create_mark_stale_payload()
@@ -540,8 +537,9 @@ class TestHandlerPostgresMarkStaleErrors:
     async def test_mark_stale_timeout_error(self) -> None:
         """Test TimeoutError returns success=False with TIMEOUT error_code."""
         # Arrange
-        pool = create_mock_pool_direct_execute()
-        pool.execute.side_effect = TimeoutError("Operation timed out")
+        pool = create_mock_pool_with_acquire()
+        mock_conn = pool.acquire.return_value.__aenter__.return_value
+        mock_conn.execute.side_effect = TimeoutError("Operation timed out")
 
         handler = HandlerPostgresMarkStale(pool)
         payload = create_mark_stale_payload()
@@ -560,8 +558,9 @@ class TestHandlerPostgresMarkStaleErrors:
     async def test_mark_stale_connection_error(self) -> None:
         """Test InfraConnectionError returns success=False with CONNECTION error_code."""
         # Arrange
-        pool = create_mock_pool_direct_execute()
-        pool.execute.side_effect = InfraConnectionError("Connection refused")
+        pool = create_mock_pool_with_acquire()
+        mock_conn = pool.acquire.return_value.__aenter__.return_value
+        mock_conn.execute.side_effect = InfraConnectionError("Connection refused")
 
         handler = HandlerPostgresMarkStale(pool)
         payload = create_mark_stale_payload()
@@ -580,8 +579,9 @@ class TestHandlerPostgresMarkStaleErrors:
     async def test_mark_stale_authentication_error(self) -> None:
         """Test InfraAuthenticationError returns success=False with AUTH error_code."""
         # Arrange
-        pool = create_mock_pool_direct_execute()
-        pool.execute.side_effect = InfraAuthenticationError("Auth failed")
+        pool = create_mock_pool_with_acquire()
+        mock_conn = pool.acquire.return_value.__aenter__.return_value
+        mock_conn.execute.side_effect = InfraAuthenticationError("Auth failed")
 
         handler = HandlerPostgresMarkStale(pool)
         payload = create_mark_stale_payload()
@@ -600,8 +600,9 @@ class TestHandlerPostgresMarkStaleErrors:
     async def test_mark_stale_generic_exception(self) -> None:
         """Test generic Exception returns success=False with UNKNOWN error_code."""
         # Arrange
-        pool = create_mock_pool_direct_execute()
-        pool.execute.side_effect = RuntimeError("Unexpected error")
+        pool = create_mock_pool_with_acquire()
+        mock_conn = pool.acquire.return_value.__aenter__.return_value
+        mock_conn.execute.side_effect = RuntimeError("Unexpected error")
 
         handler = HandlerPostgresMarkStale(pool)
         payload = create_mark_stale_payload()
@@ -628,8 +629,9 @@ class TestHandlerPostgresHeartbeatSuccess:
     async def test_heartbeat_success_row_found(self) -> None:
         """Test successful heartbeat returns ModelBackendResult with success=True."""
         # Arrange
-        pool = create_mock_pool_direct_execute()
-        pool.execute.return_value = "UPDATE 1"
+        pool = create_mock_pool_with_acquire()
+        mock_conn = pool.acquire.return_value.__aenter__.return_value
+        mock_conn.execute.return_value = "UPDATE 1"
 
         handler = HandlerPostgresHeartbeat(pool)
         payload = create_update_heartbeat_payload()
@@ -649,8 +651,9 @@ class TestHandlerPostgresHeartbeatSuccess:
     async def test_heartbeat_success_no_row_found(self) -> None:
         """Test heartbeat with no row found still returns success (idempotent)."""
         # Arrange
-        pool = create_mock_pool_direct_execute()
-        pool.execute.return_value = "UPDATE 0"
+        pool = create_mock_pool_with_acquire()
+        mock_conn = pool.acquire.return_value.__aenter__.return_value
+        mock_conn.execute.return_value = "UPDATE 0"
 
         handler = HandlerPostgresHeartbeat(pool)
         payload = create_update_heartbeat_payload()
@@ -671,8 +674,9 @@ class TestHandlerPostgresHeartbeatErrors:
     async def test_heartbeat_timeout_error(self) -> None:
         """Test TimeoutError returns success=False with TIMEOUT error_code."""
         # Arrange
-        pool = create_mock_pool_direct_execute()
-        pool.execute.side_effect = TimeoutError("Operation timed out")
+        pool = create_mock_pool_with_acquire()
+        mock_conn = pool.acquire.return_value.__aenter__.return_value
+        mock_conn.execute.side_effect = TimeoutError("Operation timed out")
 
         handler = HandlerPostgresHeartbeat(pool)
         payload = create_update_heartbeat_payload()
@@ -691,8 +695,9 @@ class TestHandlerPostgresHeartbeatErrors:
     async def test_heartbeat_connection_error(self) -> None:
         """Test InfraConnectionError returns success=False with CONNECTION error_code."""
         # Arrange
-        pool = create_mock_pool_direct_execute()
-        pool.execute.side_effect = InfraConnectionError("Connection refused")
+        pool = create_mock_pool_with_acquire()
+        mock_conn = pool.acquire.return_value.__aenter__.return_value
+        mock_conn.execute.side_effect = InfraConnectionError("Connection refused")
 
         handler = HandlerPostgresHeartbeat(pool)
         payload = create_update_heartbeat_payload()
@@ -711,8 +716,9 @@ class TestHandlerPostgresHeartbeatErrors:
     async def test_heartbeat_authentication_error(self) -> None:
         """Test InfraAuthenticationError returns success=False with AUTH error_code."""
         # Arrange
-        pool = create_mock_pool_direct_execute()
-        pool.execute.side_effect = InfraAuthenticationError("Auth failed")
+        pool = create_mock_pool_with_acquire()
+        mock_conn = pool.acquire.return_value.__aenter__.return_value
+        mock_conn.execute.side_effect = InfraAuthenticationError("Auth failed")
 
         handler = HandlerPostgresHeartbeat(pool)
         payload = create_update_heartbeat_payload()
@@ -731,8 +737,9 @@ class TestHandlerPostgresHeartbeatErrors:
     async def test_heartbeat_generic_exception(self) -> None:
         """Test generic Exception returns success=False with UNKNOWN error_code."""
         # Arrange
-        pool = create_mock_pool_direct_execute()
-        pool.execute.side_effect = RuntimeError("Unexpected error")
+        pool = create_mock_pool_with_acquire()
+        mock_conn = pool.acquire.return_value.__aenter__.return_value
+        mock_conn.execute.side_effect = RuntimeError("Unexpected error")
 
         handler = HandlerPostgresHeartbeat(pool)
         payload = create_update_heartbeat_payload()

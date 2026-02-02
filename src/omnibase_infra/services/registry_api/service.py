@@ -923,7 +923,7 @@ class ServiceRegistryDiscovery:
                         correlation_id=correlation_id,
                     )
 
-                # Get topics for each contract to populate publish/subscribe lists
+                # Calculate total and apply pagination
                 total = len(projections)
 
                 # Apply pagination in-memory for node_name filter
@@ -935,32 +935,42 @@ class ServiceRegistryDiscovery:
                     projections_slice = projections[offset : offset + limit]
                     total = max(total, offset + len(projections_slice))
 
-                # Convert to view models
-                for proj in projections_slice:
-                    # Get topics for this contract
-                    topics_published: list[str] = []
-                    topics_subscribed: list[str] = []
+                # Batch fetch topics for all contracts to avoid N+1 query pattern
+                # This uses a single query instead of O(N) queries
+                contract_ids = [proj.contract_id for proj in projections_slice]
+                topics_by_contract: dict[str, list] = {}
 
+                if contract_ids:
                     try:
-                        topics = await self._contract_reader.get_topics_by_contract(
-                            contract_id=proj.contract_id,
-                            correlation_id=correlation_id,
+                        topics_by_contract = (
+                            await self._contract_reader.get_topics_for_contracts(
+                                contract_ids=contract_ids,
+                                correlation_id=correlation_id,
+                            )
                         )
-                        for topic in topics:
-                            if topic.direction == "publish":
-                                topics_published.append(topic.topic_suffix)
-                            elif topic.direction == "subscribe":
-                                topics_subscribed.append(topic.topic_suffix)
                     except Exception as e:
-                        # Log but continue - partial success
+                        # Log but continue - partial success with empty topics
                         logger.warning(
-                            "Failed to get topics for contract",
+                            "Failed to batch fetch topics for contracts",
                             extra={
-                                "contract_id": proj.contract_id,
+                                "contract_count": len(contract_ids),
                                 "error": str(e),
                                 "correlation_id": str(correlation_id),
                             },
                         )
+
+                # Convert to view models
+                for proj in projections_slice:
+                    # Get topics for this contract from batch result
+                    topics_published: list[str] = []
+                    topics_subscribed: list[str] = []
+
+                    contract_topics = topics_by_contract.get(proj.contract_id, [])
+                    for topic in contract_topics:
+                        if topic.direction == "publish":
+                            topics_published.append(topic.topic_suffix)
+                        elif topic.direction == "subscribe":
+                            topics_subscribed.append(topic.topic_suffix)
 
                     contracts.append(
                         ModelContractView(
@@ -1149,14 +1159,26 @@ class ServiceRegistryDiscovery:
                     correlation_id=correlation_id,
                 )
 
-                # Estimate total (projection reader doesn't provide total count)
-                # We fetch limit+1 to detect has_more
+                # Detect has_more from fetching limit+1
                 has_more = len(projections) > limit
                 projections_slice = projections[:limit]
 
-                # For accurate total, we'd need a count query
-                # For now, estimate based on fetched data
-                total = offset + len(projections)
+                # Get accurate total count for pagination
+                try:
+                    total = await self._contract_reader.count_topics(
+                        direction=direction,
+                        correlation_id=correlation_id,
+                    )
+                except Exception as count_error:
+                    # Fall back to estimate if count query fails
+                    logger.warning(
+                        "Failed to get accurate topic count, using estimate",
+                        extra={
+                            "correlation_id": str(correlation_id),
+                            "error": str(count_error),
+                        },
+                    )
+                    total = offset + len(projections)
 
                 for proj in projections_slice:
                     topics.append(

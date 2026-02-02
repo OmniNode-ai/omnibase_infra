@@ -94,8 +94,10 @@ class HandlerPostgresMarkStale:
 
     Example:
         >>> from unittest.mock import AsyncMock, MagicMock
+        >>> conn = MagicMock()
+        >>> conn.execute = AsyncMock(return_value="UPDATE 5")
         >>> pool = MagicMock()
-        >>> pool.execute = AsyncMock(return_value="UPDATE 5")
+        >>> pool.acquire = MagicMock(return_value=AsyncContextManager(conn))
         >>> handler = HandlerPostgresMarkStale(pool)
         >>> payload = MagicMock(stale_cutoff=datetime.now(), checked_at=datetime.now())
         >>> result = await handler.handle(payload, uuid4())
@@ -165,12 +167,13 @@ class HandlerPostgresMarkStale:
         start_time = time.perf_counter()
 
         try:
-            # Execute batch update - returns status string like "UPDATE 5"
-            status = await self._pool.execute(
-                _MARK_STALE_SQL,
-                payload.checked_at,
-                payload.stale_cutoff,
-            )
+            async with self._pool.acquire() as conn:
+                # Execute batch update - returns status string like "UPDATE 5"
+                status = await conn.execute(
+                    _MARK_STALE_SQL,
+                    payload.checked_at,
+                    payload.stale_cutoff,
+                )
 
             duration_ms = (time.perf_counter() - start_time) * 1000
 

@@ -348,6 +348,117 @@ class ProjectionReaderContract(MixinAsyncCircuitBreaker):
                 context=ctx,
             ) from e
 
+    async def list_all_contracts(
+        self,
+        include_inactive: bool = True,
+        limit: int = 100,
+        offset: int = 0,
+        correlation_id: UUID | None = None,
+    ) -> list[ModelContractProjection]:
+        """List all contracts with pagination and optional inactive filter.
+
+        Retrieves contracts from the registry, optionally including inactive
+        (deregistered) contracts. Useful for administrative views and auditing.
+
+        Args:
+            include_inactive: If True, include deregistered contracts.
+                If False, equivalent to list_active_contracts. Default: True.
+            limit: Maximum results to return (default: 100, max: 1000)
+            offset: Number of results to skip (default: 0)
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            List of contract projections ordered by last_seen_at descending
+
+        Raises:
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If query times out
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> # Get all contracts including inactive
+            >>> all_contracts = await reader.list_all_contracts(
+            ...     include_inactive=True, limit=50, offset=0
+            ... )
+            >>> for c in all_contracts:
+            ...     status = "active" if c.is_active else "inactive"
+            ...     print(f"{c.contract_id}: {status}")
+            >>>
+            >>> # Get only active contracts (same as list_active_contracts)
+            >>> active_only = await reader.list_all_contracts(include_inactive=False)
+        """
+        # Validate pagination parameters
+        offset = max(offset, 0)
+        if limit <= 0:
+            limit = 100
+        elif limit > 1000:
+            limit = 1000
+
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="list_all_contracts",
+            target_name="projection_reader.contract",
+            correlation_id=corr_id,
+        )
+
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("list_all_contracts", corr_id)
+
+        if include_inactive:
+            query_sql = """
+                SELECT * FROM contracts
+                ORDER BY last_seen_at DESC
+                LIMIT $1 OFFSET $2
+            """
+            params = [limit, offset]
+        else:
+            query_sql = """
+                SELECT * FROM contracts
+                WHERE is_active = TRUE
+                ORDER BY last_seen_at DESC
+                LIMIT $1 OFFSET $2
+            """
+            params = [limit, offset]
+
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(query_sql, *params)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            return [self._row_to_contract_projection(row) for row in rows]
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("list_all_contracts", corr_id)
+            raise InfraConnectionError(
+                "Failed to connect to database for all contracts query",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("list_all_contracts", corr_id)
+            raise InfraTimeoutError(
+                "All contracts query timed out",
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                ),
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("list_all_contracts", corr_id)
+            raise RuntimeHostError(
+                f"Failed to list all contracts: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
     async def list_contracts_by_node_name(
         self,
         node_name: str,
@@ -727,6 +838,92 @@ class ProjectionReaderContract(MixinAsyncCircuitBreaker):
                 context=ctx,
             ) from e
 
+    async def count_topics(
+        self,
+        direction: str | None = None,
+        correlation_id: UUID | None = None,
+    ) -> int:
+        """Count total topics with optional direction filter.
+
+        Provides accurate count for pagination in list_topics queries.
+
+        Args:
+            direction: Optional filter by direction ('publish' or 'subscribe')
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            Total number of topics matching the filter
+
+        Raises:
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If query times out
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> total = await reader.count_topics(direction="publish")
+            >>> print(f"Total publish topics: {total}")
+        """
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="count_topics",
+            target_name="projection_reader.contract",
+            correlation_id=corr_id,
+        )
+
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("count_topics", corr_id)
+
+        if direction is not None:
+            query_sql = """
+                SELECT COUNT(*) as count FROM topics
+                WHERE direction = $1
+            """
+            params = [direction]
+        else:
+            query_sql = """
+                SELECT COUNT(*) as count FROM topics
+            """
+            params = []
+
+        try:
+            async with self._pool.acquire() as conn:
+                row = await conn.fetchrow(query_sql, *params)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            return row["count"] if row else 0
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("count_topics", corr_id)
+            raise InfraConnectionError(
+                "Failed to connect to database for topic count",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("count_topics", corr_id)
+            raise InfraTimeoutError(
+                "Topic count query timed out",
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                ),
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("count_topics", corr_id)
+            raise RuntimeHostError(
+                f"Failed to count topics: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
     async def get_topic(
         self,
         topic_suffix: str,
@@ -894,6 +1091,112 @@ class ProjectionReaderContract(MixinAsyncCircuitBreaker):
                 await self._record_circuit_failure("get_topics_by_contract", corr_id)
             raise RuntimeHostError(
                 f"Failed to get topics by contract: {type(e).__name__}",
+                context=ctx,
+            ) from e
+
+    async def get_topics_for_contracts(
+        self,
+        contract_ids: list[str],
+        correlation_id: UUID | None = None,
+    ) -> dict[str, list[ModelTopicProjection]]:
+        """Get all topics for multiple contracts in a single query.
+
+        Batch method to avoid N+1 query pattern when fetching topics for
+        multiple contracts. Uses JSONB ?| operator for efficient lookup
+        with GIN index.
+
+        Args:
+            contract_ids: List of contract IDs to search for
+            correlation_id: Optional correlation ID for tracing
+
+        Returns:
+            Dict mapping contract_id to list of topic projections.
+            Contracts with no topics will have empty lists.
+
+        Raises:
+            InfraConnectionError: If database connection fails
+            InfraTimeoutError: If query times out
+            RuntimeHostError: For other database errors
+
+        Example:
+            >>> topics_map = await reader.get_topics_for_contracts(
+            ...     ["my-node:1.0.0", "other-node:2.0.0"]
+            ... )
+            >>> for contract_id, topics in topics_map.items():
+            ...     print(f"{contract_id}: {len(topics)} topics")
+        """
+        # Handle empty input
+        if not contract_ids:
+            return {}
+
+        corr_id = correlation_id or uuid4()
+        ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="get_topics_for_contracts",
+            target_name="projection_reader.contract",
+            correlation_id=corr_id,
+        )
+
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("get_topics_for_contracts", corr_id)
+
+        # Use ?| operator to check if JSONB array contains ANY of the contract_ids
+        # This performs a single query instead of N queries
+        query_sql = """
+            SELECT * FROM topics
+            WHERE contract_ids ?| $1
+            ORDER BY direction, topic_suffix
+        """
+
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(query_sql, contract_ids)
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            # Initialize result dict with empty lists for all requested contracts
+            result: dict[str, list[ModelTopicProjection]] = {
+                cid: [] for cid in contract_ids
+            }
+
+            # Group topics by contract_id
+            # Each topic may reference multiple contracts, so we add it to
+            # each matching contract's list
+            for row in rows:
+                topic = self._row_to_topic_projection(row)
+                for contract_id in topic.contract_ids:
+                    if contract_id in result:
+                        result[contract_id].append(topic)
+
+            return result
+
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_topics_for_contracts", corr_id)
+            raise InfraConnectionError(
+                "Failed to connect to database for batch topics query",
+                context=ctx,
+            ) from e
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_topics_for_contracts", corr_id)
+            raise InfraTimeoutError(
+                "Batch topics query timed out",
+                context=ModelTimeoutErrorContext(
+                    transport_type=ctx.transport_type,
+                    operation=ctx.operation,
+                    target_name=ctx.target_name,
+                    correlation_id=ctx.correlation_id,
+                ),
+            ) from e
+
+        except Exception as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure("get_topics_for_contracts", corr_id)
+            raise RuntimeHostError(
+                f"Failed to get topics for contracts: {type(e).__name__}",
                 context=ctx,
             ) from e
 

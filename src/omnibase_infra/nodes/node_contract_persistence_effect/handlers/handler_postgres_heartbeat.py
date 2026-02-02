@@ -96,8 +96,10 @@ class HandlerPostgresHeartbeat:
 
     Example:
         >>> from unittest.mock import AsyncMock, MagicMock
+        >>> conn = MagicMock()
+        >>> conn.execute = AsyncMock(return_value="UPDATE 1")
         >>> pool = MagicMock()
-        >>> pool.execute = AsyncMock(return_value="UPDATE 1")
+        >>> pool.acquire = MagicMock(return_value=AsyncContextManager(conn))
         >>> handler = HandlerPostgresHeartbeat(pool)
         >>> payload = MagicMock(
         ...     contract_id="my-node:1.0.0",
@@ -174,12 +176,13 @@ class HandlerPostgresHeartbeat:
         start_time = time.perf_counter()
 
         try:
-            # Execute update - returns status string like "UPDATE 1" or "UPDATE 0"
-            status = await self._pool.execute(
-                _UPDATE_HEARTBEAT_SQL,
-                payload.last_seen_at,
-                payload.contract_id,
-            )
+            async with self._pool.acquire() as conn:
+                # Execute update - returns status string like "UPDATE 1" or "UPDATE 0"
+                status = await conn.execute(
+                    _UPDATE_HEARTBEAT_SQL,
+                    payload.last_seen_at,
+                    payload.contract_id,
+                )
 
             duration_ms = (time.perf_counter() - start_time) * 1000
 
