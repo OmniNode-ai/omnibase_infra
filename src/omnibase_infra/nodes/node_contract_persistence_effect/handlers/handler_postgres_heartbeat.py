@@ -54,13 +54,8 @@ from omnibase_infra.enums import (
     EnumHandlerTypeCategory,
     EnumPostgresErrorCode,
 )
-from omnibase_infra.errors import (
-    InfraAuthenticationError,
-    InfraConnectionError,
-    InfraTimeoutError,
-)
+from omnibase_infra.mixins import MixinPostgresErrorResponse, PostgresErrorContext
 from omnibase_infra.nodes.effects.models.model_backend_result import ModelBackendResult
-from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
     import asyncpg
@@ -79,7 +74,7 @@ WHERE contract_id = $2 AND is_active = TRUE
 """
 
 
-class HandlerPostgresHeartbeat:
+class HandlerPostgresHeartbeat(MixinPostgresErrorResponse):
     """Handler for updating contract heartbeat timestamp.
 
     Encapsulates PostgreSQL-specific heartbeat update logic extracted from
@@ -228,96 +223,16 @@ class HandlerPostgresHeartbeat:
                 correlation_id=correlation_id,
             )
 
-        except (TimeoutError, InfraTimeoutError) as e:
-            # Timeout during update - retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            _logger.warning(
-                "Heartbeat update timed out",
-                extra={
-                    "correlation_id": str(correlation_id),
-                    "contract_id": payload.contract_id,
-                    "duration_ms": duration_ms,
-                    "error": sanitized_error,
-                },
-            )
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.TIMEOUT_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
+        except Exception as e:
+            ctx = PostgresErrorContext(
+                exception=e,
+                operation="heartbeat_update",
                 correlation_id=correlation_id,
+                start_time=start_time,
+                log_context={"contract_id": payload.contract_id},
+                operation_error_code=EnumPostgresErrorCode.HEARTBEAT_ERROR,
             )
-
-        except InfraAuthenticationError as e:
-            # Authentication failure - non-retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            _logger.exception(
-                "Heartbeat update authentication failed",
-                extra={
-                    "correlation_id": str(correlation_id),
-                    "contract_id": payload.contract_id,
-                    "duration_ms": duration_ms,
-                    "error": sanitized_error,
-                },
-            )
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.AUTH_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
-
-        except InfraConnectionError as e:
-            # Connection failure - retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            _logger.warning(
-                "Heartbeat update connection failed",
-                extra={
-                    "correlation_id": str(correlation_id),
-                    "contract_id": payload.contract_id,
-                    "duration_ms": duration_ms,
-                    "error": sanitized_error,
-                },
-            )
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.CONNECTION_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
-
-        except (
-            Exception
-        ) as e:  # ONEX: catch-all - database adapter may raise unexpected exceptions
-            # beyond typed infrastructure errors (e.g., driver errors, encoding errors,
-            # connection pool errors). Required to sanitize errors and prevent credential exposure.
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            _logger.exception(
-                "Heartbeat update failed with unexpected error",
-                extra={
-                    "correlation_id": str(correlation_id),
-                    "contract_id": payload.contract_id,
-                    "duration_ms": duration_ms,
-                    "error": sanitized_error,
-                },
-            )
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.UNKNOWN_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
+            return self._build_error_response(ctx)
 
 
 __all__: list[str] = ["HandlerPostgresHeartbeat"]
