@@ -462,10 +462,12 @@ async def get_contract(
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"Service error: {warnings[0].message}",
+                headers={"X-Correlation-ID": str(correlation_id)},
             )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Contract not found: {contract_id}",
+            headers={"X-Correlation-ID": str(correlation_id)},
         )
 
     return contract
@@ -506,6 +508,7 @@ async def list_topics(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid direction: {direction}. Must be 'publish' or 'subscribe'.",
+            headers={"X-Correlation-ID": str(correlation_id)},
         )
 
     topics, pagination, warnings = await service.list_topics(
@@ -553,10 +556,12 @@ async def get_topic(
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"Service error: {warnings[0].message}",
+                headers={"X-Correlation-ID": str(correlation_id)},
             )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Topic not found: {topic_suffix}",
+            headers={"X-Correlation-ID": str(correlation_id)},
         )
 
     return topic

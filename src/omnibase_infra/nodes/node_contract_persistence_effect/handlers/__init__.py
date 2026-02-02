@@ -39,10 +39,6 @@ Related:
     - ContractRegistryReducer: Source of intents
     - OMN-1845: Implementation ticket
     - OMN-1653: ContractRegistryReducer ticket
-
-Note:
-    Handler implementations are defined in separate tickets. This __init__.py
-    provides the package structure and will export handlers once implemented.
 """
 
 from __future__ import annotations
