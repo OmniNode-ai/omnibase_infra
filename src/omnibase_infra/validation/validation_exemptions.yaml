@@ -2030,6 +2030,60 @@ pattern_exemptions:
     documentation:
       - docs/plans/OMN-1743-migration-plan.md
     ticket: OMN-1743
+  # ==========================================================================
+  # Contract Registry Persistence Exemptions (OMN-1845)
+  # ==========================================================================
+  # contract_id is a derived natural key (node_name:major.minor.patch), not a UUID.
+  # This design enables human-readable queries, version-based deduplication, and
+  # matches the contract.yaml identification pattern used throughout ONEX.
+  - file_pattern: 'models/projection/model_contract_projection\.py'
+    violation_pattern: "Field 'contract_id' should use UUID"
+    reason: >
+      contract_id is a derived natural key (node_name:major.minor.patch), not a UUID.
+
+    documentation:
+      - CLAUDE.md (Intent Model Architecture)
+    ticket: OMN-1845
+  - file_pattern: 'models/projection/model_contract_projection\.py'
+    violation_pattern: "Field 'node_name' might reference an entity"
+    reason: >
+      node_name is the contract's semantic identifier, not a reference to a separate entity.
+
+    documentation:
+      - CLAUDE.md (Contract-Driven)
+    ticket: OMN-1845
+  - file_pattern: 'services/registry_api/models/model_contract_view\.py'
+    violation_pattern: "Field 'contract_id' should use UUID"
+    reason: >
+      contract_id is a derived natural key (node_name:major.minor.patch), not a UUID.
+
+    documentation:
+      - CLAUDE.md (Intent Model Architecture)
+    ticket: OMN-1845
+  - file_pattern: 'services/registry_api/models/model_contract_view\.py'
+    violation_pattern: "Field 'node_name' might reference an entity"
+    reason: >
+      node_name is the contract's semantic identifier, not a reference to a separate entity.
+
+    documentation:
+      - CLAUDE.md (Contract-Driven)
+    ticket: OMN-1845
+  - file_pattern: 'services/registry_api/models/model_contract_ref\.py'
+    violation_pattern: "Field 'contract_id' should use UUID"
+    reason: >
+      contract_id is a derived natural key (node_name:major.minor.patch), not a UUID.
+
+    documentation:
+      - CLAUDE.md (Intent Model Architecture)
+    ticket: OMN-1845
+  - file_pattern: 'services/registry_api/models/model_contract_ref\.py'
+    violation_pattern: "Field 'node_name' might reference an entity"
+    reason: >
+      node_name is the contract's semantic identifier, not a reference to a separate entity.
+
+    documentation:
+      - CLAUDE.md (Contract-Driven)
+    ticket: OMN-1845
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
