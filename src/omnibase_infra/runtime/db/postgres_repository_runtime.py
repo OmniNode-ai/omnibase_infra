@@ -125,7 +125,10 @@ logger = logging.getLogger(__name__)
 #
 # =============================================================================
 _ORDER_BY_PATTERN = re.compile(r"\bORDER\s+BY\b", re.IGNORECASE)
-_LIMIT_PATTERN = re.compile(r"\bLIMIT\s+(\d+)\b", re.IGNORECASE)
+# Pattern to detect numeric LIMIT for validation (e.g., LIMIT 100)
+_LIMIT_NUMERIC_PATTERN = re.compile(r"\bLIMIT\s+(\d+)\b", re.IGNORECASE)
+# Pattern to detect parameterized LIMIT (e.g., LIMIT $1) - cannot validate at build time
+_LIMIT_PARAM_PATTERN = re.compile(r"\bLIMIT\s+\$\d+\b", re.IGNORECASE)
 
 
 class PostgresRepositoryRuntime:
@@ -392,6 +395,11 @@ class PostgresRepositoryRuntime:
             - If no ORDER BY and PK declared: inject ORDER BY {pk}
             - If no ORDER BY and no PK: HARD ERROR
 
+        When injecting ORDER BY, the clause is inserted BEFORE any existing
+        LIMIT clause to produce valid SQL. For example:
+            - Input:  "SELECT * FROM users LIMIT $1"
+            - Output: "SELECT * FROM users ORDER BY id LIMIT $1"
+
         Args:
             sql: The SQL query to potentially modify.
             op_name: Operation name for error context.
@@ -423,7 +431,21 @@ class PostgresRepositoryRuntime:
 
         # Inject ORDER BY using configured order or just PK
         order_by = self._config.default_order_by or pk_column
-        return f"{sql.rstrip().rstrip(';')} ORDER BY {order_by}"
+
+        # Check if LIMIT exists - ORDER BY must be inserted BEFORE LIMIT
+        param_match = _LIMIT_PARAM_PATTERN.search(sql)
+        numeric_match = _LIMIT_NUMERIC_PATTERN.search(sql)
+        limit_match = param_match or numeric_match
+
+        if limit_match:
+            # Insert ORDER BY before LIMIT
+            limit_start = limit_match.start()
+            return (
+                f"{sql[:limit_start].rstrip()} ORDER BY {order_by} {sql[limit_start:]}"
+            )
+        else:
+            # No LIMIT, append at end
+            return f"{sql.rstrip().rstrip(';')} ORDER BY {order_by}"
 
     def _inject_limit(
         self,
@@ -434,9 +456,10 @@ class PostgresRepositoryRuntime:
         """Inject or validate LIMIT clause for multi-row results.
 
         Rules:
-            - If LIMIT > max_row_limit: HARD ERROR
+            - If parameterized LIMIT (e.g., $1): OK (no change, can't validate at build time)
+            - If numeric LIMIT > max_row_limit: HARD ERROR
+            - If numeric LIMIT <= max_row_limit: OK (no change)
             - If no LIMIT: inject LIMIT {max_row_limit}
-            - If LIMIT <= max_row_limit: OK (no change)
 
         Args:
             sql: The SQL query to potentially modify.
@@ -447,13 +470,18 @@ class PostgresRepositoryRuntime:
             SQL with LIMIT clause (injected or original).
 
         Raises:
-            RepositoryContractError: LIMIT exceeds max_row_limit.
+            RepositoryContractError: Numeric LIMIT exceeds max_row_limit.
         """
         max_limit = self._config.max_row_limit
-        limit_match = _LIMIT_PATTERN.search(sql)
 
+        # Check for parameterized LIMIT (e.g., LIMIT $1) - can't validate at build time
+        if _LIMIT_PARAM_PATTERN.search(sql):
+            return sql
+
+        # Check for numeric LIMIT (e.g., LIMIT 100) - can validate
+        limit_match = _LIMIT_NUMERIC_PATTERN.search(sql)
         if limit_match:
-            # Existing LIMIT - validate it
+            # Existing numeric LIMIT - validate it
             existing_limit = int(limit_match.group(1))
             if existing_limit > max_limit:
                 raise RepositoryContractError(

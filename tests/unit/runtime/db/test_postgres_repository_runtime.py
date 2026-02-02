@@ -204,6 +204,15 @@ def sample_contract() -> ModelDbRepositoryContract:
                 returns=ModelDbReturn(model_ref="User", many=True),
                 safety_policy=ModelDbSafetyPolicy(),
             ),
+            "find_with_param_limit": ModelDbOperation(
+                mode="read",
+                sql="SELECT * FROM users ORDER BY id LIMIT $1",
+                params={
+                    "limit": ModelDbParam(name="limit", param_type="integer"),
+                },
+                returns=ModelDbReturn(model_ref="User", many=True),
+                safety_policy=ModelDbSafetyPolicy(),
+            ),
             "create_user": ModelDbOperation(
                 mode="write",
                 sql="INSERT INTO users (name, email) VALUES ($1, $2) RETURNING id",
@@ -732,6 +741,151 @@ class TestDeterminismEnforcement:
         # No ORDER BY injection for single-row
         assert "ORDER BY" not in executed_sql[0]
 
+    @pytest.mark.asyncio
+    async def test_multi_row_limit_without_order_by_injects_order_by_before_limit(
+        self,
+        mock_pool: MockAsyncPool,
+    ) -> None:
+        """Test ORDER BY injection when LIMIT exists but ORDER BY doesn't (OMN-1842).
+
+        Verifies:
+            - ORDER BY is inserted BEFORE existing LIMIT clause
+            - Produces valid SQL: ORDER BY pk LIMIT $n (not LIMIT $n ORDER BY pk)
+        """
+        # Create contract with LIMIT but no ORDER BY
+        contract = ModelDbRepositoryContract(
+            name="test_repo",
+            engine="postgres",
+            database_ref="test_db",
+            tables=["users"],
+            models={"User": "test.models:User"},
+            ops={
+                "find_active_limited": ModelDbOperation(
+                    mode="read",
+                    sql="SELECT * FROM users WHERE status = $1 LIMIT $2",
+                    params={
+                        "status": ModelDbParam(name="status", param_type="string"),
+                        "limit": ModelDbParam(name="limit", param_type="integer"),
+                    },
+                    returns=ModelDbReturn(model_ref="User", many=True),
+                    safety_policy=ModelDbSafetyPolicy(),
+                ),
+            },
+        )
+
+        config = ModelRepositoryRuntimeConfig(
+            max_row_limit=100,
+            timeout_ms=5000,
+            allowed_modes=frozenset({"read"}),
+            allow_write_operations=False,
+            primary_key_column="id",
+            emit_metrics=False,
+        )
+
+        runtime = PostgresRepositoryRuntime(
+            pool=mock_pool,  # type: ignore[arg-type]
+            contract=contract,
+            config=config,
+        )
+
+        executed_sql: list[str] = []
+
+        async def capture_fetch(sql: str, *args: object) -> list[MockAsyncRecord]:
+            executed_sql.append(sql)
+            return []
+
+        mock_pool.connection.fetch = capture_fetch  # type: ignore[method-assign]
+
+        await runtime.call("find_active_limited", "active", 25)
+
+        assert len(executed_sql) == 1
+        sql = executed_sql[0]
+
+        # ORDER BY should be BEFORE LIMIT (not after)
+        order_by_pos = sql.upper().find("ORDER BY")
+        limit_pos = sql.upper().find("LIMIT")
+
+        assert order_by_pos != -1, "ORDER BY should be present"
+        assert limit_pos != -1, "LIMIT should be present"
+        assert order_by_pos < limit_pos, (
+            f"ORDER BY should come BEFORE LIMIT. Got: {sql}"
+        )
+
+        # Should have exactly one ORDER BY and one LIMIT
+        assert sql.upper().count("ORDER BY") == 1
+        assert sql.upper().count("LIMIT") == 1
+
+    @pytest.mark.asyncio
+    async def test_multi_row_numeric_limit_without_order_by_injects_order_by_before_limit(
+        self,
+        mock_pool: MockAsyncPool,
+    ) -> None:
+        """Test ORDER BY injection with numeric LIMIT (OMN-1842).
+
+        Verifies:
+            - ORDER BY is inserted BEFORE existing numeric LIMIT clause
+            - Produces valid SQL: ORDER BY pk LIMIT 50 (not LIMIT 50 ORDER BY pk)
+        """
+        # Create contract with numeric LIMIT but no ORDER BY
+        contract = ModelDbRepositoryContract(
+            name="test_repo",
+            engine="postgres",
+            database_ref="test_db",
+            tables=["users"],
+            models={"User": "test.models:User"},
+            ops={
+                "find_recent": ModelDbOperation(
+                    mode="read",
+                    sql="SELECT * FROM users LIMIT 50",
+                    params={},
+                    returns=ModelDbReturn(model_ref="User", many=True),
+                    safety_policy=ModelDbSafetyPolicy(),
+                ),
+            },
+        )
+
+        config = ModelRepositoryRuntimeConfig(
+            max_row_limit=100,
+            timeout_ms=5000,
+            allowed_modes=frozenset({"read"}),
+            allow_write_operations=False,
+            primary_key_column="id",
+            emit_metrics=False,
+        )
+
+        runtime = PostgresRepositoryRuntime(
+            pool=mock_pool,  # type: ignore[arg-type]
+            contract=contract,
+            config=config,
+        )
+
+        executed_sql: list[str] = []
+
+        async def capture_fetch(sql: str, *args: object) -> list[MockAsyncRecord]:
+            executed_sql.append(sql)
+            return []
+
+        mock_pool.connection.fetch = capture_fetch  # type: ignore[method-assign]
+
+        await runtime.call("find_recent")
+
+        assert len(executed_sql) == 1
+        sql = executed_sql[0]
+
+        # ORDER BY should be BEFORE LIMIT (not after)
+        order_by_pos = sql.upper().find("ORDER BY")
+        limit_pos = sql.upper().find("LIMIT")
+
+        assert order_by_pos != -1, "ORDER BY should be present"
+        assert limit_pos != -1, "LIMIT should be present"
+        assert order_by_pos < limit_pos, (
+            f"ORDER BY should come BEFORE LIMIT. Got: {sql}"
+        )
+
+        # Should have exactly one ORDER BY and one LIMIT
+        assert sql.upper().count("ORDER BY") == 1
+        assert sql.upper().count("LIMIT") == 1
+
 
 # ============================================================================
 # Limit Tests
@@ -859,6 +1013,114 @@ class TestLimitEnforcement:
         # Original LIMIT preserved
         assert "LIMIT 5" in executed_sql[0]
         # No injected LIMIT
+        assert executed_sql[0].count("LIMIT") == 1
+
+    @pytest.mark.asyncio
+    async def test_multi_row_parameterized_limit_no_injection(
+        self,
+        mock_pool: MockAsyncPool,
+        sample_contract: ModelDbRepositoryContract,
+    ) -> None:
+        """Test parameterized LIMIT ($1) is not duplicated (OMN-1842).
+
+        Verifies:
+            - SQL with LIMIT $1 is returned unchanged
+            - No additional LIMIT clause is injected
+            - This prevents SQL syntax errors like 'LIMIT $1 LIMIT 100'
+        """
+        config = ModelRepositoryRuntimeConfig(
+            max_row_limit=100,
+            timeout_ms=5000,
+            allowed_modes=frozenset({"read", "write"}),
+            allow_write_operations=True,
+            primary_key_column="id",
+            emit_metrics=False,
+        )
+
+        runtime = PostgresRepositoryRuntime(
+            pool=mock_pool,  # type: ignore[arg-type]
+            contract=sample_contract,
+            config=config,
+        )
+
+        executed_sql: list[str] = []
+
+        async def capture_fetch(sql: str, *args: object) -> list[MockAsyncRecord]:
+            executed_sql.append(sql)
+            return []
+
+        mock_pool.connection.fetch = capture_fetch  # type: ignore[method-assign]
+
+        # find_with_param_limit has LIMIT $1
+        await runtime.call("find_with_param_limit", 50)
+
+        assert len(executed_sql) == 1
+        # Original parameterized LIMIT preserved
+        assert "LIMIT $1" in executed_sql[0]
+        # No duplicate LIMIT injected
+        assert executed_sql[0].count("LIMIT") == 1
+
+    @pytest.mark.asyncio
+    async def test_parameterized_limit_with_higher_param_number(
+        self,
+        mock_pool: MockAsyncPool,
+    ) -> None:
+        """Test parameterized LIMIT with higher param numbers ($2, $3, etc.).
+
+        Verifies:
+            - SQL with LIMIT $2 or LIMIT $10 is detected correctly
+            - No additional LIMIT clause is injected
+        """
+        # Create a contract with LIMIT $2 (second parameter)
+        contract = ModelDbRepositoryContract(
+            name="test_repo",
+            engine="postgres",
+            database_ref="test_db",
+            tables=["items"],
+            models={"Item": "test.models:Item"},
+            ops={
+                "find_by_status_limited": ModelDbOperation(
+                    mode="read",
+                    sql="SELECT * FROM items WHERE status = $1 ORDER BY id LIMIT $2",
+                    params={
+                        "status": ModelDbParam(name="status", param_type="string"),
+                        "limit": ModelDbParam(name="limit", param_type="integer"),
+                    },
+                    returns=ModelDbReturn(model_ref="Item", many=True),
+                    safety_policy=ModelDbSafetyPolicy(),
+                ),
+            },
+        )
+
+        config = ModelRepositoryRuntimeConfig(
+            max_row_limit=100,
+            timeout_ms=5000,
+            allowed_modes=frozenset({"read"}),
+            allow_write_operations=False,
+            primary_key_column="id",
+            emit_metrics=False,
+        )
+
+        runtime = PostgresRepositoryRuntime(
+            pool=mock_pool,  # type: ignore[arg-type]
+            contract=contract,
+            config=config,
+        )
+
+        executed_sql: list[str] = []
+
+        async def capture_fetch(sql: str, *args: object) -> list[MockAsyncRecord]:
+            executed_sql.append(sql)
+            return []
+
+        mock_pool.connection.fetch = capture_fetch  # type: ignore[method-assign]
+
+        await runtime.call("find_by_status_limited", "active", 25)
+
+        assert len(executed_sql) == 1
+        # Original parameterized LIMIT preserved
+        assert "LIMIT $2" in executed_sql[0]
+        # No duplicate LIMIT injected
         assert executed_sql[0].count("LIMIT") == 1
 
 
