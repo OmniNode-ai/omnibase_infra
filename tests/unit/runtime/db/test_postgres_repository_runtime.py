@@ -886,6 +886,85 @@ class TestDeterminismEnforcement:
         assert sql.upper().count("ORDER BY") == 1
         assert sql.upper().count("LIMIT") == 1
 
+    @pytest.mark.asyncio
+    async def test_multi_row_limit_offset_injects_order_by_before_limit(
+        self,
+        mock_pool: MockAsyncPool,
+    ) -> None:
+        """Test ORDER BY injection with LIMIT and OFFSET (OMN-1842 edge case).
+
+        Verifies:
+            - ORDER BY is inserted BEFORE existing LIMIT + OFFSET clause
+            - Produces valid SQL: ORDER BY pk LIMIT $n OFFSET $m
+        """
+        # Create contract with LIMIT and OFFSET but no ORDER BY
+        contract = ModelDbRepositoryContract(
+            name="test_repo",
+            engine="postgres",
+            database_ref="test_db",
+            tables=["users"],
+            models={"User": "test.models:User"},
+            ops={
+                "find_active_paginated": ModelDbOperation(
+                    mode="read",
+                    sql="SELECT * FROM users WHERE status = $1 LIMIT $2 OFFSET $3",
+                    params={
+                        "status": ModelDbParam(name="status", param_type="string"),
+                        "limit": ModelDbParam(name="limit", param_type="integer"),
+                        "offset": ModelDbParam(name="offset", param_type="integer"),
+                    },
+                    returns=ModelDbReturn(model_ref="User", many=True),
+                    safety_policy=ModelDbSafetyPolicy(),
+                ),
+            },
+        )
+
+        config = ModelRepositoryRuntimeConfig(
+            max_row_limit=100,
+            timeout_ms=5000,
+            allowed_modes=frozenset({"read"}),
+            allow_write_operations=False,
+            primary_key_column="id",
+            emit_metrics=False,
+        )
+
+        runtime = PostgresRepositoryRuntime(
+            pool=mock_pool,  # type: ignore[arg-type]
+            contract=contract,
+            config=config,
+        )
+
+        executed_sql: list[str] = []
+
+        async def capture_fetch(sql: str, *args: object) -> list[MockAsyncRecord]:
+            executed_sql.append(sql)
+            return []
+
+        mock_pool.connection.fetch = capture_fetch  # type: ignore[method-assign]
+
+        await runtime.call("find_active_paginated", "active", 25, 50)
+
+        assert len(executed_sql) == 1
+        sql = executed_sql[0]
+
+        # ORDER BY should be BEFORE LIMIT (not after)
+        order_by_pos = sql.upper().find("ORDER BY")
+        limit_pos = sql.upper().find("LIMIT")
+        offset_pos = sql.upper().find("OFFSET")
+
+        assert order_by_pos != -1, "ORDER BY should be present"
+        assert limit_pos != -1, "LIMIT should be present"
+        assert offset_pos != -1, "OFFSET should be present"
+        assert order_by_pos < limit_pos, (
+            f"ORDER BY should come BEFORE LIMIT. Got: {sql}"
+        )
+        assert limit_pos < offset_pos, f"LIMIT should come BEFORE OFFSET. Got: {sql}"
+
+        # Should have exactly one of each clause
+        assert sql.upper().count("ORDER BY") == 1
+        assert sql.upper().count("LIMIT") == 1
+        assert sql.upper().count("OFFSET") == 1
+
 
 # ============================================================================
 # Limit Tests
