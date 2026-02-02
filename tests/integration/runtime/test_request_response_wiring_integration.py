@@ -248,7 +248,7 @@ class TestRequestResponseWiringIntegration:
         ):
             # EventBusInmemory implements ProtocolEventBusPublisher via duck typing
             wiring = RequestResponseWiring(
-                event_bus=event_bus,  # type: ignore[arg-type]  # type: ignore[arg-type]
+                event_bus=event_bus,  # type: ignore[arg-type]
                 environment=environment,
                 app_name=app_name,
                 bootstrap_servers="localhost:9092",
@@ -350,7 +350,7 @@ class TestRequestResponseWiringIntegration:
         ):
             # EventBusInmemory implements ProtocolEventBusPublisher via duck typing
             wiring = RequestResponseWiring(
-                event_bus=event_bus,  # type: ignore[arg-type]  # type: ignore[arg-type]
+                event_bus=event_bus,  # type: ignore[arg-type]
                 environment=environment,
                 app_name=app_name,
                 bootstrap_servers="localhost:9092",
@@ -424,7 +424,7 @@ class TestRequestResponseWiringIntegration:
         ):
             # EventBusInmemory implements ProtocolEventBusPublisher via duck typing
             wiring = RequestResponseWiring(
-                event_bus=event_bus,  # type: ignore[arg-type]  # type: ignore[arg-type]
+                event_bus=event_bus,  # type: ignore[arg-type]
                 environment=environment,
                 app_name=app_name,
                 bootstrap_servers="localhost:9092",
@@ -533,7 +533,7 @@ class TestRequestResponseWiringIntegration:
         ):
             # EventBusInmemory implements ProtocolEventBusPublisher via duck typing
             wiring = RequestResponseWiring(
-                event_bus=event_bus,  # type: ignore[arg-type]  # type: ignore[arg-type]
+                event_bus=event_bus,  # type: ignore[arg-type]
                 environment=environment,
                 app_name=app_name,
                 bootstrap_servers="localhost:9092",

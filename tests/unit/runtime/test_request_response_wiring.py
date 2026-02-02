@@ -323,7 +323,7 @@ class TestCorrelationIdHandling:
         # Add pending future
         correlation_key = str(uuid4())
         future: asyncio.Future[dict[str, object]] = (
-            asyncio.get_event_loop().create_future()
+            asyncio.get_running_loop().create_future()
         )
         instance.pending[correlation_key] = future
 
@@ -583,7 +583,7 @@ class TestPendingMapHandling:
         # Create pending future
         correlation_key = str(uuid4())
         future: asyncio.Future[dict[str, object]] = (
-            asyncio.get_event_loop().create_future()
+            asyncio.get_running_loop().create_future()
         )
         instance.pending[correlation_key] = future
 
@@ -617,7 +617,7 @@ class TestPendingMapHandling:
         # Create pending future
         correlation_key = str(uuid4())
         future: asyncio.Future[dict[str, object]] = (
-            asyncio.get_event_loop().create_future()
+            asyncio.get_running_loop().create_future()
         )
         instance.pending[correlation_key] = future
 
@@ -762,10 +762,10 @@ class TestCleanup:
 
         # Add pending futures
         future1: asyncio.Future[dict[str, object]] = (
-            asyncio.get_event_loop().create_future()
+            asyncio.get_running_loop().create_future()
         )
         future2: asyncio.Future[dict[str, object]] = (
-            asyncio.get_event_loop().create_future()
+            asyncio.get_running_loop().create_future()
         )
         instance.pending["id1"] = future1
         instance.pending["id2"] = future2
