@@ -589,8 +589,10 @@ class ProjectionReaderContract(MixinAsyncCircuitBreaker):
         """
         # Validate pagination parameters
         if limit <= 0:
+            logger.debug("Invalid limit %d corrected to default 100", limit)
             limit = 100
         elif limit > 1000:
+            logger.debug("Limit %d exceeds maximum, corrected to 1000", limit)
             limit = 1000
 
         corr_id = correlation_id or uuid4()
