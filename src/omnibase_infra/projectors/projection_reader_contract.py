@@ -587,6 +587,12 @@ class ProjectionReaderContract(MixinAsyncCircuitBreaker):
             >>> for c in contracts:
             ...     print(f"{c.node_name}: {c.contract_id}")
         """
+        # Validate pagination parameters
+        if limit <= 0:
+            limit = 100
+        elif limit > 1000:
+            limit = 1000
+
         corr_id = correlation_id or uuid4()
         ctx = ModelInfraErrorContext(
             transport_type=EnumInfraTransportType.DATABASE,
