@@ -8,15 +8,20 @@ outputs to storage (PostgreSQL) and by orchestrators to query current
 entity state.
 
 Exports:
+    ProjectionReaderContract: Contract/topic projection reader for Registry API
     ProjectionReaderRegistration: Registration projection reader implementation
     SnapshotPublisherRegistration: Registration snapshot publisher for Kafka
 
 Related Tickets:
+    - OMN-1845: Create ProjectionReaderContract for contract/topic queries
     - OMN-947 (F2): Snapshot Publishing
     - OMN-944 (F1): Implement Registration Projection Schema
     - OMN-940 (F0): Define Projector Execution Model
 """
 
+from omnibase_infra.projectors.projection_reader_contract import (
+    ProjectionReaderContract,
+)
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
@@ -25,6 +30,7 @@ from omnibase_infra.projectors.snapshot_publisher_registration import (
 )
 
 __all__ = [
+    "ProjectionReaderContract",
     "ProjectionReaderRegistration",
     "SnapshotPublisherRegistration",
 ]

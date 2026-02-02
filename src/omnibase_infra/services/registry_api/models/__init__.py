@@ -13,10 +13,17 @@ Design Principles:
 
 Related Tickets:
     - OMN-1278: Contract-Driven Dashboard - Registry Discovery
+    - OMN-1845: Contract Registry Persistence
 """
 
 from omnibase_infra.services.registry_api.models.model_capability_widget_mapping import (
     ModelCapabilityWidgetMapping,
+)
+from omnibase_infra.services.registry_api.models.model_contract_ref import (
+    ModelContractRef,
+)
+from omnibase_infra.services.registry_api.models.model_contract_view import (
+    ModelContractView,
 )
 from omnibase_infra.services.registry_api.models.model_pagination_info import (
     ModelPaginationInfo,
@@ -36,11 +43,23 @@ from omnibase_infra.services.registry_api.models.model_registry_node_view import
 from omnibase_infra.services.registry_api.models.model_registry_summary import (
     ModelRegistrySummary,
 )
+from omnibase_infra.services.registry_api.models.model_response_contracts import (
+    ModelResponseListContracts,
+)
 from omnibase_infra.services.registry_api.models.model_response_list_instances import (
     ModelResponseListInstances,
 )
 from omnibase_infra.services.registry_api.models.model_response_list_nodes import (
     ModelResponseListNodes,
+)
+from omnibase_infra.services.registry_api.models.model_response_topics import (
+    ModelResponseListTopics,
+)
+from omnibase_infra.services.registry_api.models.model_topic_summary import (
+    ModelTopicSummary,
+)
+from omnibase_infra.services.registry_api.models.model_topic_view import (
+    ModelTopicView,
 )
 from omnibase_infra.services.registry_api.models.model_warning import ModelWarning
 from omnibase_infra.services.registry_api.models.model_widget_defaults import (
@@ -52,14 +71,20 @@ from omnibase_infra.services.registry_api.models.model_widget_mapping import (
 
 __all__ = [
     "ModelCapabilityWidgetMapping",
+    "ModelContractRef",
+    "ModelContractView",
     "ModelPaginationInfo",
     "ModelRegistryDiscoveryResponse",
     "ModelRegistryHealthResponse",
     "ModelRegistryInstanceView",
     "ModelRegistryNodeView",
     "ModelRegistrySummary",
+    "ModelResponseListContracts",
     "ModelResponseListInstances",
     "ModelResponseListNodes",
+    "ModelResponseListTopics",
+    "ModelTopicSummary",
+    "ModelTopicView",
     "ModelWarning",
     "ModelWidgetDefaults",
     "ModelWidgetMapping",

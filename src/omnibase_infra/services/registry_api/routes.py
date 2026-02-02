@@ -6,15 +6,20 @@ FastAPI route handlers for the Registry API. Routes are defined as an
 APIRouter for easy mounting into the main FastAPI application.
 
 Endpoint Summary:
-    GET /registry/discovery     - Full dashboard payload
-    GET /registry/nodes         - Node list with pagination
-    GET /registry/nodes/{id}    - Single node detail
-    GET /registry/instances     - Live Consul instances
-    GET /registry/widgets/mapping - Widget mapping configuration
-    GET /registry/health        - Service health check
+    GET /registry/discovery           - Full dashboard payload
+    GET /registry/nodes               - Node list with pagination
+    GET /registry/nodes/{id}          - Single node detail
+    GET /registry/instances           - Live Consul instances
+    GET /registry/widgets/mapping     - Widget mapping configuration
+    GET /registry/health              - Service health check
+    GET /registry/contracts           - Contract list with pagination
+    GET /registry/contracts/{id}      - Single contract detail
+    GET /registry/topics              - Topic list with pagination
+    GET /registry/topics/{suffix}     - Single topic detail
 
 Related Tickets:
     - OMN-1278: Contract-Driven Dashboard - Registry Discovery
+    - OMN-1845: Contract Registry Persistence
 """
 
 from __future__ import annotations
@@ -26,11 +31,15 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, s
 
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.services.registry_api.models import (
+    ModelContractView,
     ModelRegistryDiscoveryResponse,
     ModelRegistryHealthResponse,
     ModelRegistryNodeView,
+    ModelResponseListContracts,
     ModelResponseListInstances,
     ModelResponseListNodes,
+    ModelResponseListTopics,
+    ModelTopicView,
     ModelWidgetMapping,
 )
 
@@ -366,6 +375,191 @@ async def health_check(
     response = await service.health_check(correlation_id=correlation_id)
 
     return response
+
+
+# ============================================================
+# Contract Registry Endpoints
+# ============================================================
+
+
+@router.get(
+    "/contracts",
+    response_model=ModelResponseListContracts,
+    summary="List Registered Contracts",
+    description=(
+        "Returns a paginated list of registered contracts from the contract registry. "
+        "Supports filtering by node name and active status."
+    ),
+    responses={
+        400: {"description": "Bad request (e.g., invalid correlation ID format)"},
+        200: {"description": "Successful response with contract list"},
+    },
+)
+async def list_contracts(
+    service: Annotated[ServiceRegistryDiscovery, Depends(get_service)],
+    correlation_id: Annotated[UUID, Depends(get_correlation_id)],
+    limit: Annotated[
+        int,
+        Query(ge=1, le=1000, description="Maximum number of contracts to return"),
+    ] = 100,
+    offset: Annotated[
+        int,
+        Query(ge=0, description="Number of contracts to skip for pagination"),
+    ] = 0,
+    active_only: Annotated[
+        bool,
+        Query(description="If true, return only active contracts"),
+    ] = True,
+    node_name: Annotated[
+        str | None,
+        Query(description="Filter by node name"),
+    ] = None,
+) -> ModelResponseListContracts:
+    """List registered contracts with pagination and optional filtering."""
+    contracts, pagination, warnings = await service.list_contracts(
+        limit=limit,
+        offset=offset,
+        active_only=active_only,
+        node_name=node_name,
+        correlation_id=correlation_id,
+    )
+
+    return ModelResponseListContracts(
+        contracts=contracts,
+        pagination=pagination,
+        warnings=warnings,
+    )
+
+
+@router.get(
+    "/contracts/{contract_id:path}",
+    response_model=ModelContractView,
+    summary="Get Contract Details",
+    description=(
+        "Returns detailed information for a single contract by ID. "
+        "Includes lists of topics the contract publishes to and subscribes from."
+    ),
+    responses={
+        400: {"description": "Bad request (e.g., invalid correlation ID format)"},
+        200: {"description": "Successful response with contract details"},
+        404: {"description": "Contract not found"},
+    },
+)
+async def get_contract(
+    contract_id: str,
+    service: Annotated[ServiceRegistryDiscovery, Depends(get_service)],
+    correlation_id: Annotated[UUID, Depends(get_correlation_id)],
+) -> ModelContractView:
+    """Get a single contract by ID."""
+    contract, warnings = await service.get_contract(
+        contract_id=contract_id,
+        correlation_id=correlation_id,
+    )
+
+    if contract is None:
+        # Check if it was a service error or genuinely not found
+        if warnings:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Service error: {warnings[0].message}",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Contract not found: {contract_id}",
+        )
+
+    return contract
+
+
+@router.get(
+    "/topics",
+    response_model=ModelResponseListTopics,
+    summary="List Event Topics",
+    description=(
+        "Returns a paginated list of event topics from the contract registry. "
+        "Supports filtering by direction (publish/subscribe)."
+    ),
+    responses={
+        400: {"description": "Bad request (e.g., invalid correlation ID format)"},
+        200: {"description": "Successful response with topic list"},
+    },
+)
+async def list_topics(
+    service: Annotated[ServiceRegistryDiscovery, Depends(get_service)],
+    correlation_id: Annotated[UUID, Depends(get_correlation_id)],
+    direction: Annotated[
+        str | None,
+        Query(description="Filter by direction ('publish' or 'subscribe')"),
+    ] = None,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=1000, description="Maximum number of topics to return"),
+    ] = 100,
+    offset: Annotated[
+        int,
+        Query(ge=0, description="Number of topics to skip for pagination"),
+    ] = 0,
+) -> ModelResponseListTopics:
+    """List event topics with pagination and optional filtering."""
+    # Validate direction if provided
+    if direction is not None and direction not in ("publish", "subscribe"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid direction: {direction}. Must be 'publish' or 'subscribe'.",
+        )
+
+    topics, pagination, warnings = await service.list_topics(
+        direction=direction,
+        limit=limit,
+        offset=offset,
+        correlation_id=correlation_id,
+    )
+
+    return ModelResponseListTopics(
+        topics=topics,
+        pagination=pagination,
+        warnings=warnings,
+    )
+
+
+@router.get(
+    "/topics/{topic_suffix:path}",
+    response_model=ModelTopicView,
+    summary="Get Topic Details",
+    description=(
+        "Returns detailed information for a single topic by suffix. "
+        "Includes lists of publishers and subscribers with contract references."
+    ),
+    responses={
+        400: {"description": "Bad request (e.g., invalid correlation ID format)"},
+        200: {"description": "Successful response with topic details"},
+        404: {"description": "Topic not found"},
+    },
+)
+async def get_topic(
+    topic_suffix: str,
+    service: Annotated[ServiceRegistryDiscovery, Depends(get_service)],
+    correlation_id: Annotated[UUID, Depends(get_correlation_id)],
+) -> ModelTopicView:
+    """Get a single topic by suffix."""
+    topic, warnings = await service.get_topic_detail(
+        topic_suffix=topic_suffix,
+        correlation_id=correlation_id,
+    )
+
+    if topic is None:
+        # Check if it was a service error or genuinely not found
+        if warnings:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Service error: {warnings[0].message}",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Topic not found: {topic_suffix}",
+        )
+
+    return topic
 
 
 __all__ = ["router", "get_service", "get_correlation_id"]

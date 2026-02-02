@@ -1,0 +1,490 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeContractPersistenceEffect
+#
+# This contract defines the interface for the Contract Persistence Effect node,
+# which handles PostgreSQL persistence for contract registry intents emitted by
+# ContractRegistryReducer (OMN-1653).
+#
+# Related Tickets:
+#   - OMN-1845: NodeContractPersistenceEffect implementation
+#   - OMN-1653: ContractRegistryReducer (source of intents)
+# Contract identifiers
+name: "node_contract_persistence_effect"
+contract_name: "node_contract_persistence_effect"
+node_name: "node_contract_persistence_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Description
+description: >
+  Effect node for contract registry persistence. Routes intents from ContractRegistryReducer to PostgreSQL handlers for contract and topic management. Supports upsert, update, deactivate, and cleanup operations with circuit breaker protection and retry policies.
+
+# Strongly typed I/O models
+# Note: Input is ModelIntent with typed payloads from ContractRegistryReducer
+input_model:
+  name: "ModelIntent"
+  module: "omnibase_core.models.reducer.model_intent"
+  description: "Intent model from ContractRegistryReducer with typed payload."
+output_model:
+  name: "ModelPersistenceResult"
+  module: "omnibase_infra.nodes.node_contract_persistence_effect.models"
+  description: "Output model containing PostgreSQL operation result."
+# =============================================================================
+# HANDLER ROUTING (Declarative Handler Dispatch)
+# =============================================================================
+# This section defines how intents are routed to PostgreSQL handlers.
+# The routing strategy determines handler selection based on payload.intent_type
+# (per ONEX handler routing standards).
+#
+# Design Rationale:
+#   - Single backend (PostgreSQL) with multiple operation types
+#   - Each handler is responsible for a specific PostgreSQL operation
+#   - Handlers are isolated for clear error handling and retry logic
+#
+# Execution Flow:
+#   1. Receive ModelIntent with typed payload from ContractRegistryReducer
+#   2. Extract payload.intent_type for routing
+#   3. Route to matching handler based on intent_type
+#   4. Execute PostgreSQL operation via handler
+#   5. Return ModelPersistenceResult with operation status
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │                    HANDLER ROUTING ARCHITECTURE                         │
+# ├─────────────────────────────────────────────────────────────────────────┤
+# │                                                                         │
+# │  ┌────────────────────────┐                                             │
+# │  │     ModelIntent        │                                             │
+# │  │   payload.intent_type  │                                             │
+# │  └───────────┬────────────┘                                             │
+# │              │                                                          │
+# │              ▼                                                          │
+# │  ┌───────────────────────┐                                              │
+# │  │    Handler Router     │  routing_strategy: "payload_type_match"     │
+# │  │   (Contract-Driven)   │  Matches payload.intent_type to handlers     │
+# │  └───────────┬───────────┘                                              │
+# │              │                                                          │
+# │     ┌────────┼────────┬────────┬────────┬────────┐                     │
+# │     │        │        │        │        │        │                     │
+# │     ▼        ▼        ▼        ▼        ▼        ▼                     │
+# │ ┌────────┐┌────────┐┌────────┐┌────────┐┌────────┐┌────────┐          │
+# │ │Upsert  ││Topic   ││Mark    ││Heartbeat││Deact. ││Cleanup │          │
+# │ │Contract││Update  ││Stale   ││Update   ││Contract││Topics  │          │
+# │ │Handler ││Handler ││Handler ││Handler  ││Handler ││Handler │          │
+# │ └────┬───┘└────┬───┘└────┬───┘└────┬───┘└────┬───┘└────┬───┘          │
+# │      │         │         │         │         │         │               │
+# │      └─────────┴─────────┴────┬────┴─────────┴─────────┘               │
+# │                               │                                        │
+# │                               ▼                                        │
+# │  ┌─────────────────────────────────────────────────────────────┐       │
+# │  │                   PostgreSQL Database                       │       │
+# │  │  ┌────────────────┐  ┌────────────────┐                     │       │
+# │  │  │   contracts    │  │     topics     │                     │       │
+# │  │  └────────────────┘  └────────────────┘                     │       │
+# │  └─────────────────────────────────────────────────────────────┘       │
+# │                                                                        │
+# └────────────────────────────────────────────────────────────────────────┘
+#
+# Handler Responsibility:
+#   Each handler manages its own retry logic using the retry_policy defined
+#   in error_handling. The effect layer dispatches once per handler and
+#   delegates retry behavior to the handlers themselves.
+# =============================================================================
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    # Upsert Contract - Insert or update contract record
+    # Triggered by contract-registered events from ContractRegistryReducer.
+    # Uses upsert semantics (ON CONFLICT DO UPDATE) for idempotency.
+    - payload_type: "postgres.upsert_contract"
+      handler:
+        name: "HandlerPostgresContractUpsert"
+        module: "omnibase_infra.nodes.node_contract_persistence_effect.handlers.handler_postgres_contract_upsert"
+      backend: "postgres"
+      description: "Insert or update contract record in contracts table"
+      input_model:
+        name: "ModelPayloadUpsertContract"
+        module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_upsert_contract"
+      output_fields:
+        - success
+        - contract_id
+        - operation
+        - rows_affected
+    # Update Topic - Update topic routing table
+    # Triggered by contract-registered events with publish/subscribe declarations.
+    # Maintains topic-to-contract mapping for event routing.
+    - payload_type: "postgres.update_topic"
+      handler:
+        name: "HandlerPostgresTopicUpdate"
+        module: "omnibase_infra.nodes.node_contract_persistence_effect.handlers.handler_postgres_topic_update"
+      backend: "postgres"
+      description: "Update topic routing table with producer/consumer info"
+      input_model:
+        name: "ModelPayloadUpdateTopic"
+        module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_update_topic"
+      output_fields:
+        - success
+        - topic_suffix
+        - direction
+        - rows_affected
+    # Mark Stale - Batch mark contracts as stale
+    # Triggered by runtime-tick events to detect unresponsive contracts.
+    # Updates is_stale flag for contracts not seen within threshold.
+    - payload_type: "postgres.mark_stale"
+      handler:
+        name: "HandlerPostgresMarkStale"
+        module: "omnibase_infra.nodes.node_contract_persistence_effect.handlers.handler_postgres_mark_stale"
+      backend: "postgres"
+      description: "Batch mark contracts as stale based on last_seen_at threshold"
+      input_model:
+        name: "ModelPayloadMarkStale"
+        module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_mark_stale"
+      output_fields:
+        - success
+        - contracts_marked
+        - stale_cutoff
+    # Update Heartbeat - Update last_seen_at timestamp
+    # Triggered by node-heartbeat events to track contract liveness.
+    # Lightweight update operation for high-frequency heartbeats.
+    - payload_type: "postgres.update_heartbeat"
+      handler:
+        name: "HandlerPostgresHeartbeat"
+        module: "omnibase_infra.nodes.node_contract_persistence_effect.handlers.handler_postgres_heartbeat"
+      backend: "postgres"
+      description: "Update contract heartbeat timestamp"
+      input_model:
+        name: "ModelPayloadUpdateHeartbeat"
+        module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_update_heartbeat"
+      output_fields:
+        - success
+        - contract_id
+        - last_seen_at
+    # Deactivate Contract - Soft delete contract
+    # Triggered by contract-deregistered events for graceful shutdown.
+    # Marks contract as inactive without deleting the record.
+    - payload_type: "postgres.deactivate_contract"
+      handler:
+        name: "HandlerPostgresDeactivate"
+        module: "omnibase_infra.nodes.node_contract_persistence_effect.handlers.handler_postgres_deactivate"
+      backend: "postgres"
+      description: "Mark contract as inactive (soft delete)"
+      input_model:
+        name: "ModelPayloadDeactivateContract"
+        module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_deactivate_contract"
+      output_fields:
+        - success
+        - contract_id
+        - deactivated_at
+    # Cleanup Topic References - Remove contract from topic arrays
+    # Triggered by contract-deregistered events to clean topic mappings.
+    # Removes contract_id from topics.contract_ids JSONB arrays.
+    - payload_type: "postgres.cleanup_topic_references"
+      handler:
+        name: "HandlerPostgresCleanupTopics"
+        module: "omnibase_infra.nodes.node_contract_persistence_effect.handlers.handler_postgres_cleanup_topics"
+      backend: "postgres"
+      description: "Remove contract from topic references"
+      input_model:
+        name: "ModelPayloadCleanupTopicReferences"
+        module: "omnibase_infra.nodes.contract_registry_reducer.models.model_payload_cleanup_topic_references"
+      output_fields:
+        - success
+        - contract_id
+        - topics_updated
+  # Execution configuration
+  execution_mode: "sequential"
+  partial_failure_handling: false
+  aggregation_strategy: "first_match"
+# =============================================================================
+# ERROR HANDLING (Circuit Breaker + Retry + Sanitization)
+# =============================================================================
+# Error handling configuration following ONEX infrastructure patterns.
+# Uses circuit breakers for PostgreSQL protection and retry policies for
+# transient failure recovery.
+#
+# Error Flow:
+#   1. Operation fails -> Check if error is retriable
+#   2. Retry with exponential backoff if retriable
+#   3. After max retries, check circuit breaker state
+#   4. Open circuit if failure threshold exceeded
+#   5. Sanitize error before logging/returning
+# =============================================================================
+error_handling:
+  # Circuit breaker configuration
+  # Prevents cascading failures by stopping requests to failing PostgreSQL.
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+    half_open_max_requests: 3
+    per_backend: false
+    backends:
+      - name: "postgres"
+        failure_threshold: 5
+        reset_timeout_ms: 60000
+  # Retry policy with exponential backoff
+  # Handles transient PostgreSQL failures.
+  #
+  # ==========================================================================
+  # IMPORTANT: Effect Layer vs Handler Layer Retry Behavior
+  # ==========================================================================
+  #
+  # Effect Layer (NodeContractPersistenceEffect):
+  #   - Dispatches to handlers EXACTLY ONCE per intent
+  #   - Does NOT implement retry loops
+  #   - Returns immediately after handler execution
+  #   - Effective retry count at this layer: ZERO (0)
+  #
+  # Handler Layer (HandlerPostgres*):
+  #   - OWNS retry logic using this retry_policy configuration
+  #   - Implements exponential backoff for retriable errors
+  #   - Returns final result after all retries exhausted
+  #   - Effective retry count: 0 to max_retries
+  #
+  # ==========================================================================
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+      - "InfraUnavailableError"
+      - "RepositoryExecutionError"
+  # Error sanitization
+  # Removes sensitive information from error messages before logging.
+  error_sanitization:
+    enabled: true
+    utility: "omnibase_infra.utils.util_error_sanitization"
+    sanitize_patterns:
+      - "password"
+      - "secret"
+      - "token"
+      - "api_key"
+      - "connection_string"
+  # Error type definitions
+  error_types:
+    - name: "InfraConnectionError"
+      description: "Failed to connect to PostgreSQL"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "InfraTimeoutError"
+      description: "PostgreSQL operation timed out"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "InfraAuthenticationError"
+      description: "Authentication failed with PostgreSQL"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "InfraUnavailableError"
+      description: "PostgreSQL is unavailable (circuit open)"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "RepositoryExecutionError"
+      description: "PostgreSQL query execution failed"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+  # Error codes used in result models
+  error_codes:
+    # Connection errors
+    - code: "POSTGRES_CONNECTION_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Connection to PostgreSQL server failed"
+      retriable: true
+    - code: "POSTGRES_TIMEOUT_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "PostgreSQL operation exceeded timeout"
+      retriable: true
+    - code: "POSTGRES_AUTH_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Authentication with PostgreSQL server failed"
+      retriable: false
+    # Operation-specific errors
+    - code: "POSTGRES_UPSERT_ERROR"
+      backend: "postgres"
+      operation: "upsert_contract"
+      description: "PostgreSQL upsert operation failed"
+      retriable: false
+    - code: "POSTGRES_TOPIC_UPDATE_ERROR"
+      backend: "postgres"
+      operation: "update_topic"
+      description: "PostgreSQL topic update failed"
+      retriable: false
+    - code: "POSTGRES_MARK_STALE_ERROR"
+      backend: "postgres"
+      operation: "mark_stale"
+      description: "PostgreSQL mark stale operation failed"
+      retriable: false
+    - code: "POSTGRES_HEARTBEAT_ERROR"
+      backend: "postgres"
+      operation: "update_heartbeat"
+      description: "PostgreSQL heartbeat update failed"
+      retriable: false
+    - code: "POSTGRES_DEACTIVATE_ERROR"
+      backend: "postgres"
+      operation: "deactivate_contract"
+      description: "PostgreSQL deactivation failed"
+      retriable: false
+    - code: "POSTGRES_CLEANUP_ERROR"
+      backend: "postgres"
+      operation: "cleanup_topic_references"
+      description: "PostgreSQL topic cleanup failed"
+      retriable: false
+    - code: "POSTGRES_UNKNOWN_ERROR"
+      backend: "postgres"
+      operation: "all"
+      description: "Unknown error during PostgreSQL operation"
+      retriable: false
+# IO operations (EFFECT node specific)
+io_operations:
+  - operation: "upsert_contract"
+    description: "Insert or update a contract record"
+    input_fields:
+      - contract_id
+      - node_name
+      - version_major
+      - version_minor
+      - version_patch
+      - contract_hash
+      - contract_yaml
+      - source_node_id
+      - is_active
+      - registered_at
+      - last_seen_at
+    output_fields:
+      - success
+      - contract_id
+      - operation
+      - rows_affected
+      - error
+      - error_code
+  - operation: "update_topic"
+    description: "Update topic routing information"
+    input_fields:
+      - topic_suffix
+      - direction
+      - contract_id
+      - node_name
+      - event_type
+      - last_seen_at
+    output_fields:
+      - success
+      - topic_suffix
+      - direction
+      - rows_affected
+      - error
+      - error_code
+  - operation: "mark_stale"
+    description: "Batch mark contracts as stale"
+    input_fields:
+      - stale_cutoff
+      - checked_at
+    output_fields:
+      - success
+      - contracts_marked
+      - stale_cutoff
+      - error
+      - error_code
+  - operation: "update_heartbeat"
+    description: "Update contract heartbeat timestamp"
+    input_fields:
+      - contract_id
+      - node_name
+      - source_node_id
+      - last_seen_at
+      - uptime_seconds
+      - sequence_number
+    output_fields:
+      - success
+      - contract_id
+      - last_seen_at
+      - error
+      - error_code
+  - operation: "deactivate_contract"
+    description: "Mark contract as inactive"
+    input_fields:
+      - contract_id
+      - node_name
+      - reason
+      - deactivated_at
+    output_fields:
+      - success
+      - contract_id
+      - deactivated_at
+      - error
+      - error_code
+  - operation: "cleanup_topic_references"
+    description: "Remove contract from topic references"
+    input_fields:
+      - contract_id
+      - node_name
+      - cleaned_at
+    output_fields:
+      - success
+      - contract_id
+      - topics_updated
+      - error
+      - error_code
+# Dependencies (protocols this node requires)
+dependencies:
+  - name: "protocol_postgres_adapter"
+    type: "protocol"
+    class_name: "ProtocolPostgresAdapter"
+    module: "omnibase_infra.adapters.protocol_postgres_adapter"
+    description: "PostgreSQL database operations"
+  - name: "protocol_circuit_breaker_aware"
+    type: "protocol"
+    class_name: "ProtocolCircuitBreakerAware"
+    module: "omnibase_infra.mixins.protocol_circuit_breaker_aware"
+    description: "Circuit breaker awareness for backend protection"
+# Capabilities provided by this node
+capabilities:
+  - name: "contract_persistence"
+    description: "Persist contract records to PostgreSQL"
+  - name: "topic_routing"
+    description: "Manage topic-to-contract routing mappings"
+  - name: "staleness_detection"
+    description: "Batch mark stale contracts based on heartbeat"
+  - name: "heartbeat_tracking"
+    description: "Track contract liveness via heartbeat updates"
+  - name: "soft_delete"
+    description: "Deactivate contracts without data loss"
+  - name: "circuit_breaker_protection"
+    description: "Protect PostgreSQL with circuit breaker pattern"
+# Health check configuration
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  backends:
+    - name: "postgres"
+      check_type: "connection"
+      timeout_ms: 5000
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2025-02-02"
+  updated: "2025-02-02"
+  tags:
+    - effect
+    - contract-registry
+    - postgresql
+    - persistence
+    - circuit-breaker
+  related_tickets:
+    - "OMN-1845"
+    - "OMN-1653"

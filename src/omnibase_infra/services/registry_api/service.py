@@ -35,12 +35,16 @@ from omnibase_infra.nodes.node_service_discovery_effect.models.enum_health_statu
 )
 from omnibase_infra.services.registry_api.models import (
     ModelCapabilityWidgetMapping,
+    ModelContractRef,
+    ModelContractView,
     ModelPaginationInfo,
     ModelRegistryDiscoveryResponse,
     ModelRegistryHealthResponse,
     ModelRegistryInstanceView,
     ModelRegistryNodeView,
     ModelRegistrySummary,
+    ModelTopicSummary,
+    ModelTopicView,
     ModelWarning,
     ModelWidgetDefaults,
     ModelWidgetMapping,
@@ -49,7 +53,10 @@ from omnibase_infra.services.registry_api.models import (
 if TYPE_CHECKING:
     from omnibase_infra.handlers.service_discovery import HandlerServiceDiscoveryConsul
     from omnibase_infra.models.projection import ModelRegistrationProjection
-    from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.projectors import (
+        ProjectionReaderContract,
+        ProjectionReaderRegistration,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +119,7 @@ class ServiceRegistryDiscovery:
         container: ModelONEXContainer,
         projection_reader: ProjectionReaderRegistration | None = None,
         consul_handler: HandlerServiceDiscoveryConsul | None = None,
+        contract_reader: ProjectionReaderContract | None = None,
         widget_mapping_path: Path | None = None,
     ) -> None:
         """Initialize the registry discovery service.
@@ -123,6 +131,8 @@ class ServiceRegistryDiscovery:
                 If not provided, node queries will return empty results with warnings.
             consul_handler: Optional Consul handler for live instances.
                 If not provided, instance queries will return empty results with warnings.
+            contract_reader: Optional projection reader for contract registry.
+                If not provided, contract/topic queries will return empty results with warnings.
             widget_mapping_path: Path to widget mapping YAML file.
                 Defaults to configs/widget_mapping.yaml relative to package.
         """
@@ -142,6 +152,9 @@ class ServiceRegistryDiscovery:
         # via the consul_handler parameter instead.
         self._consul_handler = consul_handler
 
+        # Contract reader for contract registry queries
+        self._contract_reader = contract_reader
+
         self._widget_mapping_path = widget_mapping_path or DEFAULT_WIDGET_MAPPING_PATH
         self._widget_mapping_cache: ModelWidgetMapping | None = None
         self._widget_mapping_mtime: float | None = None
@@ -151,6 +164,7 @@ class ServiceRegistryDiscovery:
             extra={
                 "has_projection_reader": self._projection_reader is not None,
                 "has_consul_handler": self._consul_handler is not None,
+                "has_contract_reader": self._contract_reader is not None,
                 "widget_mapping_path": str(self._widget_mapping_path),
             },
         )
@@ -169,6 +183,11 @@ class ServiceRegistryDiscovery:
     def consul_handler(self) -> HandlerServiceDiscoveryConsul | None:
         """Get the Consul handler for lifecycle management."""
         return self._consul_handler
+
+    @property
+    def has_contract_reader(self) -> bool:
+        """Check if contract reader is configured."""
+        return self._contract_reader is not None
 
     def invalidate_widget_mapping_cache(self) -> None:
         """Clear widget mapping cache, forcing reload on next access.
@@ -832,6 +851,492 @@ class ServiceRegistryDiscovery:
             components=components,
             version="1.0.0",
         )
+
+    # ============================================================
+    # Contract Registry Methods
+    # ============================================================
+
+    async def list_contracts(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        active_only: bool = True,
+        node_name: str | None = None,
+        correlation_id: UUID | None = None,
+    ) -> tuple[list[ModelContractView], ModelPaginationInfo, list[ModelWarning]]:
+        """List contracts from projection reader.
+
+        Retrieves registered contracts with optional filtering by node name
+        and active status. Supports pagination.
+
+        Args:
+            limit: Maximum number of contracts to return (1-1000).
+            offset: Number of contracts to skip for pagination.
+            active_only: If True, return only active contracts.
+            node_name: Optional filter by node name.
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            Tuple of (contracts, pagination_info, warnings).
+        """
+        correlation_id = correlation_id or uuid4()
+        warnings: list[ModelWarning] = []
+        contracts: list[ModelContractView] = []
+        total = 0
+
+        if self._contract_reader is None:
+            warnings.append(
+                ModelWarning(
+                    source="postgres",
+                    message="Contract reader not configured",
+                    code="NO_CONTRACT_READER",
+                    timestamp=datetime.now(UTC),
+                )
+            )
+        else:
+            try:
+                # Fetch contracts based on filters
+                if node_name:
+                    # Filter by node name
+                    projections = (
+                        await self._contract_reader.list_contracts_by_node_name(
+                            node_name=node_name,
+                            include_inactive=not active_only,
+                            correlation_id=correlation_id,
+                        )
+                    )
+                elif active_only:
+                    # Active contracts only
+                    projections = await self._contract_reader.list_active_contracts(
+                        limit=limit + offset + 1,  # Fetch extra to detect has_more
+                        offset=0,
+                        correlation_id=correlation_id,
+                    )
+                else:
+                    # All contracts (active + inactive)
+                    # Note: The reader doesn't have a single method for all contracts,
+                    # so we query active and then could extend for inactive if needed.
+                    # For now, we use list_active_contracts as a fallback.
+                    projections = await self._contract_reader.list_active_contracts(
+                        limit=limit + offset + 1,
+                        offset=0,
+                        correlation_id=correlation_id,
+                    )
+
+                # Get topics for each contract to populate publish/subscribe lists
+                total = len(projections)
+
+                # Apply pagination in-memory for node_name filter
+                # (the reader's list_by_node_name doesn't support offset/limit)
+                if node_name:
+                    projections_slice = projections[offset : offset + limit]
+                else:
+                    # Already paginated by the reader
+                    projections_slice = projections[offset : offset + limit]
+                    total = max(total, offset + len(projections_slice))
+
+                # Convert to view models
+                for proj in projections_slice:
+                    # Get topics for this contract
+                    topics_published: list[str] = []
+                    topics_subscribed: list[str] = []
+
+                    try:
+                        topics = await self._contract_reader.get_topics_by_contract(
+                            contract_id=proj.contract_id,
+                            correlation_id=correlation_id,
+                        )
+                        for topic in topics:
+                            if topic.direction == "publish":
+                                topics_published.append(topic.topic_suffix)
+                            elif topic.direction == "subscribe":
+                                topics_subscribed.append(topic.topic_suffix)
+                    except Exception as e:
+                        # Log but continue - partial success
+                        logger.warning(
+                            "Failed to get topics for contract",
+                            extra={
+                                "contract_id": proj.contract_id,
+                                "error": str(e),
+                                "correlation_id": str(correlation_id),
+                            },
+                        )
+
+                    contracts.append(
+                        ModelContractView(
+                            contract_id=proj.contract_id,
+                            node_name=proj.node_name,
+                            version=f"{proj.version_major}.{proj.version_minor}.{proj.version_patch}",
+                            contract_hash=proj.contract_hash,
+                            is_active=proj.is_active,
+                            registered_at=proj.registered_at,
+                            last_seen_at=proj.last_seen_at,
+                            deregistered_at=proj.deregistered_at,
+                            topics_published=topics_published,
+                            topics_subscribed=topics_subscribed,
+                        )
+                    )
+
+            except Exception as e:
+                logger.exception(
+                    "Failed to query contracts",
+                    extra={"correlation_id": str(correlation_id)},
+                )
+                warnings.append(
+                    ModelWarning(
+                        source="postgres",
+                        message=f"Failed to query contracts: {type(e).__name__}",
+                        code="CONTRACT_QUERY_FAILED",
+                        timestamp=datetime.now(UTC),
+                    )
+                )
+
+        pagination = ModelPaginationInfo(
+            total=total,
+            limit=limit,
+            offset=offset,
+            has_more=offset + len(contracts) < total,
+        )
+
+        return contracts, pagination, warnings
+
+    async def get_contract(
+        self,
+        contract_id: str,
+        correlation_id: UUID | None = None,
+    ) -> tuple[ModelContractView | None, list[ModelWarning]]:
+        """Get contract detail with topic references.
+
+        Retrieves a single contract by ID along with its published and
+        subscribed topics.
+
+        Args:
+            contract_id: Contract ID (e.g., "my-node:1.0.0")
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            Tuple of (contract or None, warnings).
+        """
+        correlation_id = correlation_id or uuid4()
+        warnings: list[ModelWarning] = []
+
+        if self._contract_reader is None:
+            warnings.append(
+                ModelWarning(
+                    source="postgres",
+                    message="Contract reader not configured",
+                    code="NO_CONTRACT_READER",
+                    timestamp=datetime.now(UTC),
+                )
+            )
+            return None, warnings
+
+        try:
+            proj = await self._contract_reader.get_contract_by_id(
+                contract_id=contract_id,
+                correlation_id=correlation_id,
+            )
+
+            if proj is None:
+                return None, warnings
+
+            # Get topics for this contract
+            topics_published: list[str] = []
+            topics_subscribed: list[str] = []
+
+            try:
+                topics = await self._contract_reader.get_topics_by_contract(
+                    contract_id=contract_id,
+                    correlation_id=correlation_id,
+                )
+                for topic in topics:
+                    if topic.direction == "publish":
+                        topics_published.append(topic.topic_suffix)
+                    elif topic.direction == "subscribe":
+                        topics_subscribed.append(topic.topic_suffix)
+            except Exception as e:
+                logger.warning(
+                    "Failed to get topics for contract",
+                    extra={
+                        "contract_id": contract_id,
+                        "error": str(e),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                warnings.append(
+                    ModelWarning(
+                        source="postgres",
+                        message=f"Failed to get topics: {type(e).__name__}",
+                        code="TOPIC_QUERY_FAILED",
+                        timestamp=datetime.now(UTC),
+                    )
+                )
+
+            contract = ModelContractView(
+                contract_id=proj.contract_id,
+                node_name=proj.node_name,
+                version=f"{proj.version_major}.{proj.version_minor}.{proj.version_patch}",
+                contract_hash=proj.contract_hash,
+                is_active=proj.is_active,
+                registered_at=proj.registered_at,
+                last_seen_at=proj.last_seen_at,
+                deregistered_at=proj.deregistered_at,
+                topics_published=topics_published,
+                topics_subscribed=topics_subscribed,
+            )
+
+            return contract, warnings
+
+        except Exception as e:
+            logger.exception(
+                "Failed to get contract",
+                extra={
+                    "contract_id": contract_id,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            warnings.append(
+                ModelWarning(
+                    source="postgres",
+                    message=f"Failed to get contract: {type(e).__name__}",
+                    code="CONTRACT_QUERY_FAILED",
+                    timestamp=datetime.now(UTC),
+                )
+            )
+            return None, warnings
+
+    async def list_topics(
+        self,
+        direction: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        correlation_id: UUID | None = None,
+    ) -> tuple[list[ModelTopicSummary], ModelPaginationInfo, list[ModelWarning]]:
+        """List topics from projection reader.
+
+        Retrieves topics with optional filtering by direction (publish/subscribe).
+        Returns summary view with contract counts.
+
+        Args:
+            direction: Optional filter by direction ('publish' or 'subscribe').
+            limit: Maximum number of topics to return (1-1000).
+            offset: Number of topics to skip for pagination.
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            Tuple of (topics, pagination_info, warnings).
+        """
+        correlation_id = correlation_id or uuid4()
+        warnings: list[ModelWarning] = []
+        topics: list[ModelTopicSummary] = []
+        total = 0
+
+        if self._contract_reader is None:
+            warnings.append(
+                ModelWarning(
+                    source="postgres",
+                    message="Contract reader not configured",
+                    code="NO_CONTRACT_READER",
+                    timestamp=datetime.now(UTC),
+                )
+            )
+        else:
+            try:
+                projections = await self._contract_reader.list_topics(
+                    direction=direction,
+                    limit=limit + 1,  # Fetch extra to detect has_more
+                    offset=offset,
+                    correlation_id=correlation_id,
+                )
+
+                # Estimate total (projection reader doesn't provide total count)
+                # We fetch limit+1 to detect has_more
+                has_more = len(projections) > limit
+                projections_slice = projections[:limit]
+
+                # For accurate total, we'd need a count query
+                # For now, estimate based on fetched data
+                total = offset + len(projections)
+
+                for proj in projections_slice:
+                    topics.append(
+                        ModelTopicSummary(
+                            topic_suffix=proj.topic_suffix,
+                            direction=proj.direction,
+                            contract_count=len(proj.contract_ids),
+                            last_seen_at=proj.last_seen_at,
+                            is_active=proj.is_active,
+                        )
+                    )
+
+            except Exception as e:
+                logger.exception(
+                    "Failed to query topics",
+                    extra={"correlation_id": str(correlation_id)},
+                )
+                warnings.append(
+                    ModelWarning(
+                        source="postgres",
+                        message=f"Failed to query topics: {type(e).__name__}",
+                        code="TOPIC_QUERY_FAILED",
+                        timestamp=datetime.now(UTC),
+                    )
+                )
+
+        pagination = ModelPaginationInfo(
+            total=total,
+            limit=limit,
+            offset=offset,
+            has_more=offset + len(topics) < total,
+        )
+
+        return topics, pagination, warnings
+
+    async def get_topic_detail(
+        self,
+        topic_suffix: str,
+        correlation_id: UUID | None = None,
+    ) -> tuple[ModelTopicView | None, list[ModelWarning]]:
+        """Get topic detail with publisher/subscriber contracts.
+
+        Retrieves a topic by suffix, combining both publish and subscribe
+        directions into a unified view with contract references.
+
+        Args:
+            topic_suffix: Topic suffix (without environment prefix)
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            Tuple of (topic or None, warnings).
+        """
+        correlation_id = correlation_id or uuid4()
+        warnings: list[ModelWarning] = []
+
+        if self._contract_reader is None:
+            warnings.append(
+                ModelWarning(
+                    source="postgres",
+                    message="Contract reader not configured",
+                    code="NO_CONTRACT_READER",
+                    timestamp=datetime.now(UTC),
+                )
+            )
+            return None, warnings
+
+        try:
+            # Get both directions for this topic
+            publish_topic = await self._contract_reader.get_topic(
+                topic_suffix=topic_suffix,
+                direction="publish",
+                correlation_id=correlation_id,
+            )
+            subscribe_topic = await self._contract_reader.get_topic(
+                topic_suffix=topic_suffix,
+                direction="subscribe",
+                correlation_id=correlation_id,
+            )
+
+            # If neither direction exists, topic not found
+            if publish_topic is None and subscribe_topic is None:
+                return None, warnings
+
+            # Get contract details for publishers
+            publishers: list[ModelContractRef] = []
+            if publish_topic:
+                for contract_id in publish_topic.contract_ids:
+                    try:
+                        contract = await self._contract_reader.get_contract_by_id(
+                            contract_id=contract_id,
+                            correlation_id=correlation_id,
+                        )
+                        if contract:
+                            publishers.append(
+                                ModelContractRef(
+                                    contract_id=contract.contract_id,
+                                    node_name=contract.node_name,
+                                    version=f"{contract.version_major}.{contract.version_minor}.{contract.version_patch}",
+                                )
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to get publisher contract",
+                            extra={
+                                "contract_id": contract_id,
+                                "error": str(e),
+                                "correlation_id": str(correlation_id),
+                            },
+                        )
+
+            # Get contract details for subscribers
+            subscribers: list[ModelContractRef] = []
+            if subscribe_topic:
+                for contract_id in subscribe_topic.contract_ids:
+                    try:
+                        contract = await self._contract_reader.get_contract_by_id(
+                            contract_id=contract_id,
+                            correlation_id=correlation_id,
+                        )
+                        if contract:
+                            subscribers.append(
+                                ModelContractRef(
+                                    contract_id=contract.contract_id,
+                                    node_name=contract.node_name,
+                                    version=f"{contract.version_major}.{contract.version_minor}.{contract.version_patch}",
+                                )
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to get subscriber contract",
+                            extra={
+                                "contract_id": contract_id,
+                                "error": str(e),
+                                "correlation_id": str(correlation_id),
+                            },
+                        )
+
+            # Combine timestamps from both directions
+            first_seen_at = min(
+                t.first_seen_at
+                for t in [publish_topic, subscribe_topic]
+                if t is not None
+            )
+            last_seen_at = max(
+                t.last_seen_at
+                for t in [publish_topic, subscribe_topic]
+                if t is not None
+            )
+            is_active = any(
+                t.is_active for t in [publish_topic, subscribe_topic] if t is not None
+            )
+
+            topic = ModelTopicView(
+                topic_suffix=topic_suffix,
+                publishers=publishers,
+                subscribers=subscribers,
+                first_seen_at=first_seen_at,
+                last_seen_at=last_seen_at,
+                is_active=is_active,
+            )
+
+            return topic, warnings
+
+        except Exception as e:
+            logger.exception(
+                "Failed to get topic",
+                extra={
+                    "topic_suffix": topic_suffix,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            warnings.append(
+                ModelWarning(
+                    source="postgres",
+                    message=f"Failed to get topic: {type(e).__name__}",
+                    code="TOPIC_QUERY_FAILED",
+                    timestamp=datetime.now(UTC),
+                )
+            )
+            return None, warnings
 
 
 __all__ = ["ServiceRegistryDiscovery"]
