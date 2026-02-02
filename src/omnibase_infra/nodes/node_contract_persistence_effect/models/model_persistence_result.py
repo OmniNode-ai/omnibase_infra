@@ -8,7 +8,7 @@ Related:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,7 +27,7 @@ class ModelPersistenceResult(BaseModel):
         timestamp: When the operation completed.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     success: bool = Field(..., description="Whether the operation succeeded.")
     error: str | None = Field(default=None, description="Sanitized error message.")
@@ -38,7 +38,7 @@ class ModelPersistenceResult(BaseModel):
     )
     rows_affected: int = Field(default=0, description="Database rows affected.")
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(),
+        default_factory=lambda: datetime.now(UTC),
         description="Operation completion time.",
     )
 

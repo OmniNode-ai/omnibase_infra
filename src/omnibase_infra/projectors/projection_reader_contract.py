@@ -479,6 +479,12 @@ class ProjectionReaderContract(MixinAsyncCircuitBreaker):
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("search_contracts", corr_id)
 
+        # Escape ILIKE metacharacters to prevent pattern injection
+        # The backslash escapes % and _ so they match literally
+        escaped_query = (
+            query.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+        )
+
         query_sql = """
             SELECT * FROM contracts
             WHERE node_name ILIKE '%' || $1 || '%'
@@ -488,7 +494,7 @@ class ProjectionReaderContract(MixinAsyncCircuitBreaker):
 
         try:
             async with self._pool.acquire() as conn:
-                rows = await conn.fetch(query_sql, query, limit)
+                rows = await conn.fetch(query_sql, escaped_query, limit)
 
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
