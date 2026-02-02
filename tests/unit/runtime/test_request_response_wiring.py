@@ -306,11 +306,11 @@ class TestCorrelationIdHandling:
     ) -> None:
         """Verify result contains correlation_id for tracing."""
         from omnibase_infra.runtime.request_response_wiring import (
-            _RequestResponseInstance,
+            RequestResponseInstanceState,
         )
 
         # Create a mock instance
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name="test",
             request_topic="test.topic",
             completed_topic="test.completed",
@@ -354,8 +354,8 @@ class TestTimeoutBehavior:
     ) -> None:
         """Verify InfraTimeoutError is raised (not InfraUnavailableError)."""
         from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
             RequestResponseWiring,
-            _RequestResponseInstance,
         )
 
         wiring = RequestResponseWiring(
@@ -367,7 +367,7 @@ class TestTimeoutBehavior:
 
         # Create mock instance with very short timeout
         instance_name = "routing"
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name=instance_name,
             request_topic="test.onex.cmd.routing.request.v1",
             completed_topic="test.onex.evt.routing.completed.v1",
@@ -396,8 +396,8 @@ class TestTimeoutBehavior:
     ) -> None:
         """Verify ModelTimeoutErrorContext fields are correct."""
         from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
             RequestResponseWiring,
-            _RequestResponseInstance,
         )
 
         wiring = RequestResponseWiring(
@@ -409,7 +409,7 @@ class TestTimeoutBehavior:
 
         instance_name = "routing"
         request_topic = "test.onex.cmd.routing.request.v1"
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name=instance_name,
             request_topic=request_topic,
             completed_topic="test.onex.evt.routing.completed.v1",
@@ -441,8 +441,8 @@ class TestTimeoutBehavior:
     ) -> None:
         """Verify pending map doesn't leak on timeout."""
         from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
             RequestResponseWiring,
-            _RequestResponseInstance,
         )
 
         wiring = RequestResponseWiring(
@@ -453,7 +453,7 @@ class TestTimeoutBehavior:
         )
 
         instance_name = "routing"
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name=instance_name,
             request_topic="test.onex.cmd.routing.request.v1",
             completed_topic="test.onex.evt.routing.completed.v1",
@@ -567,10 +567,10 @@ class TestPendingMapHandling:
     async def test_successful_response_resolves_future(self) -> None:
         """Verify completed topic resolves future with result."""
         from omnibase_infra.runtime.request_response_wiring import (
-            _RequestResponseInstance,
+            RequestResponseInstanceState,
         )
 
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name="test",
             request_topic="test.topic",
             completed_topic="test.completed",
@@ -601,10 +601,10 @@ class TestPendingMapHandling:
     async def test_failed_response_rejects_future(self) -> None:
         """Verify failed topic sets exception on future."""
         from omnibase_infra.runtime.request_response_wiring import (
-            _RequestResponseInstance,
+            RequestResponseInstanceState,
         )
 
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name="test",
             request_topic="test.topic",
             completed_topic="test.completed",
@@ -638,8 +638,8 @@ class TestPendingMapHandling:
     ) -> None:
         """Verify missing correlation_id doesn't crash consumer."""
         from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
             RequestResponseWiring,
-            _RequestResponseInstance,
         )
 
         wiring = RequestResponseWiring(
@@ -649,7 +649,7 @@ class TestPendingMapHandling:
             bootstrap_servers="localhost:9092",
         )
 
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name="test",
             request_topic="test.topic",
             completed_topic="test.completed",
@@ -692,8 +692,8 @@ class TestCleanup:
     ) -> None:
         """Verify consumer tasks are cancelled on cleanup."""
         from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
             RequestResponseWiring,
-            _RequestResponseInstance,
         )
 
         wiring = RequestResponseWiring(
@@ -709,7 +709,7 @@ class TestCleanup:
 
         consumer_task = asyncio.create_task(mock_consumer())
 
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name="test",
             request_topic="test.topic",
             completed_topic="test.completed",
@@ -737,8 +737,8 @@ class TestCleanup:
     ) -> None:
         """Verify waiting futures get exceptions on cleanup."""
         from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
             RequestResponseWiring,
-            _RequestResponseInstance,
         )
 
         wiring = RequestResponseWiring(
@@ -748,7 +748,7 @@ class TestCleanup:
             bootstrap_servers="localhost:9092",
         )
 
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name="test",
             request_topic="test.topic",
             completed_topic="test.completed",
@@ -793,8 +793,8 @@ class TestCleanup:
     ) -> None:
         """Verify cleanup can be called multiple times safely."""
         from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
             RequestResponseWiring,
-            _RequestResponseInstance,
         )
 
         wiring = RequestResponseWiring(
@@ -804,7 +804,7 @@ class TestCleanup:
             bootstrap_servers="localhost:9092",
         )
 
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name="test",
             request_topic="test.topic",
             completed_topic="test.completed",
@@ -843,8 +843,8 @@ class TestCircuitBreaker:
     ) -> None:
         """Verify 5 failures opens circuit."""
         from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
             RequestResponseWiring,
-            _RequestResponseInstance,
         )
 
         wiring = RequestResponseWiring(
@@ -855,7 +855,7 @@ class TestCircuitBreaker:
         )
 
         instance_name = "routing"
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name=instance_name,
             request_topic="test.onex.cmd.routing.request.v1",
             completed_topic="test.onex.evt.routing.completed.v1",
@@ -888,8 +888,8 @@ class TestCircuitBreaker:
         import time
 
         from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
             RequestResponseWiring,
-            _RequestResponseInstance,
         )
 
         wiring = RequestResponseWiring(
@@ -900,7 +900,7 @@ class TestCircuitBreaker:
         )
 
         instance_name = "routing"
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name=instance_name,
             request_topic="test.onex.cmd.routing.request.v1",
             completed_topic="test.onex.evt.routing.completed.v1",
@@ -979,8 +979,8 @@ class TestResponseMessageHandling:
     ) -> None:
         """Verify empty message value is logged and skipped."""
         from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
             RequestResponseWiring,
-            _RequestResponseInstance,
         )
 
         wiring = RequestResponseWiring(
@@ -990,7 +990,7 @@ class TestResponseMessageHandling:
             bootstrap_servers="localhost:9092",
         )
 
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name="test",
             request_topic="test.topic",
             completed_topic="test.completed",
@@ -1015,8 +1015,8 @@ class TestResponseMessageHandling:
     ) -> None:
         """Verify invalid JSON is logged and skipped."""
         from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
             RequestResponseWiring,
-            _RequestResponseInstance,
         )
 
         wiring = RequestResponseWiring(
@@ -1026,7 +1026,7 @@ class TestResponseMessageHandling:
             bootstrap_servers="localhost:9092",
         )
 
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name="test",
             request_topic="test.topic",
             completed_topic="test.completed",
@@ -1051,8 +1051,8 @@ class TestResponseMessageHandling:
     ) -> None:
         """Verify missing correlation_id in response is logged."""
         from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
             RequestResponseWiring,
-            _RequestResponseInstance,
         )
 
         wiring = RequestResponseWiring(
@@ -1062,7 +1062,7 @@ class TestResponseMessageHandling:
             bootstrap_servers="localhost:9092",
         )
 
-        instance = _RequestResponseInstance(
+        instance = RequestResponseInstanceState(
             name="test",
             request_topic="test.topic",
             completed_topic="test.completed",
@@ -1097,8 +1097,8 @@ class TestWireRequestResponse:
     ) -> None:
         """Verify duplicate instance name raises ProtocolConfigurationError."""
         from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
             RequestResponseWiring,
-            _RequestResponseInstance,
         )
 
         wiring = RequestResponseWiring(
@@ -1110,7 +1110,7 @@ class TestWireRequestResponse:
 
         # Pre-register an instance
         instance_name = "routing"
-        wiring._instances[instance_name] = _RequestResponseInstance(
+        wiring._instances[instance_name] = RequestResponseInstanceState(
             name=instance_name,
             request_topic="test.topic",
             completed_topic="test.completed",

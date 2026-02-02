@@ -579,7 +579,7 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
 
         # Create future for response
         future: asyncio.Future[dict[str, object]] = (
-            asyncio.get_event_loop().create_future()
+            asyncio.get_running_loop().create_future()
         )
         instance.pending[correlation_key] = future
 
