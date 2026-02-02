@@ -9,9 +9,10 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.models.projection.model_topic_projection import TopicDirection
 
 
 class ModelTopicSummary(BaseModel):
@@ -34,7 +35,7 @@ class ModelTopicSummary(BaseModel):
         ...,
         description="Topic suffix (without environment prefix)",
     )
-    direction: Literal["publish", "subscribe"] = Field(
+    direction: TopicDirection = Field(
         ...,
         description="Relationship direction ('publish' or 'subscribe')",
     )

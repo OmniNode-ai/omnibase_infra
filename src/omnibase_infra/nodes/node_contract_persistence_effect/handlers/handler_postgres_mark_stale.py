@@ -211,7 +211,7 @@ class HandlerPostgresMarkStale:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="MARK_STALE_TIMEOUT_ERROR",
+                error_code="POSTGRES_MARK_STALE_TIMEOUT_ERROR",
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -232,7 +232,7 @@ class HandlerPostgresMarkStale:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="MARK_STALE_AUTH_ERROR",
+                error_code="POSTGRES_MARK_STALE_AUTH_ERROR",
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -253,7 +253,7 @@ class HandlerPostgresMarkStale:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="MARK_STALE_CONNECTION_ERROR",
+                error_code="POSTGRES_MARK_STALE_CONNECTION_ERROR",
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -277,7 +277,7 @@ class HandlerPostgresMarkStale:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="MARK_STALE_UNKNOWN_ERROR",
+                error_code="POSTGRES_MARK_STALE_UNKNOWN_ERROR",
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,

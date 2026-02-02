@@ -237,7 +237,7 @@ class HandlerPostgresHeartbeat:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="HEARTBEAT_TIMEOUT_ERROR",
+                error_code="POSTGRES_HEARTBEAT_TIMEOUT_ERROR",
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -259,7 +259,7 @@ class HandlerPostgresHeartbeat:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="HEARTBEAT_AUTH_ERROR",
+                error_code="POSTGRES_HEARTBEAT_AUTH_ERROR",
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -281,7 +281,7 @@ class HandlerPostgresHeartbeat:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="HEARTBEAT_CONNECTION_ERROR",
+                error_code="POSTGRES_HEARTBEAT_CONNECTION_ERROR",
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -306,7 +306,7 @@ class HandlerPostgresHeartbeat:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="HEARTBEAT_UNKNOWN_ERROR",
+                error_code="POSTGRES_HEARTBEAT_UNKNOWN_ERROR",
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
