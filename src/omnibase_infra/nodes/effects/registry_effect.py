@@ -100,7 +100,7 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
 )
-from omnibase_infra.nodes.effects.models.model_backend_result import (
+from omnibase_infra.models.model_backend_result import (
     ModelBackendResult,
 )
 from omnibase_infra.nodes.effects.models.model_effect_idempotency_config import (

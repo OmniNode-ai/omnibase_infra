@@ -9,14 +9,11 @@ handlers are extracted for testability and separation of concerns.
 Architecture:
     HandlerPostgresHeartbeat is responsible for:
     - Executing heartbeat timestamp updates against PostgreSQL
-    - Timing operation duration for observability
     - Tracking whether the target row was found
-    - Sanitizing error messages before inclusion in results
     - Returning structured ModelBackendResult
 
-    This extraction supports the declarative node pattern where
-    NodeContractPersistenceEffect delegates backend-specific operations
-    to dedicated handlers.
+    Timing, error classification, and sanitization are delegated to
+    MixinPostgresOpExecutor to eliminate boilerplate drift across handlers.
 
 Operation:
     Updates the last_seen_at timestamp for an active contract identified
@@ -38,14 +35,14 @@ Related:
     - NodeContractPersistenceEffect: Parent effect node that coordinates handlers
     - ModelPayloadUpdateHeartbeat: Payload model defining heartbeat parameters
     - ModelBackendResult: Structured result model for backend operations
+    - MixinPostgresOpExecutor: Shared execution core for timing/error handling
     - OMN-1845: Implementation ticket
-    - OMN-1653: ContractRegistryReducer ticket
+    - OMN-1857: Executor extraction ticket
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -54,8 +51,8 @@ from omnibase_infra.enums import (
     EnumHandlerTypeCategory,
     EnumPostgresErrorCode,
 )
-from omnibase_infra.mixins import MixinPostgresErrorResponse, PostgresErrorContext
-from omnibase_infra.nodes.effects.models.model_backend_result import ModelBackendResult
+from omnibase_infra.mixins.mixin_postgres_op_executor import MixinPostgresOpExecutor
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 
 if TYPE_CHECKING:
     import asyncpg
@@ -74,13 +71,16 @@ WHERE contract_id = $2 AND is_active = TRUE
 """
 
 
-class HandlerPostgresHeartbeat(MixinPostgresErrorResponse):
+class HandlerPostgresHeartbeat(MixinPostgresOpExecutor):
     """Handler for updating contract heartbeat timestamp.
 
     Encapsulates PostgreSQL-specific heartbeat update logic extracted from
     NodeContractPersistenceEffect for declarative node compliance. The handler
-    provides a clean interface for executing timestamp updates with proper
-    timing and error sanitization.
+    provides a clean interface for executing timestamp updates.
+
+    Timing, error classification, and sanitization are handled by the
+    MixinPostgresOpExecutor base class, reducing boilerplate and ensuring
+    consistent error handling across all PostgreSQL handlers.
 
     The heartbeat operation updates the last_seen_at timestamp for an active
     contract, supporting contract lifecycle management by tracking node
@@ -107,6 +107,7 @@ class HandlerPostgresHeartbeat(MixinPostgresErrorResponse):
     See Also:
         - NodeContractPersistenceEffect: Parent node that uses this handler
         - ModelPayloadUpdateHeartbeat: Payload model for heartbeat parameters
+        - MixinPostgresOpExecutor: Shared execution mechanics
     """
 
     def __init__(self, pool: asyncpg.Pool) -> None:
@@ -163,76 +164,80 @@ class HandlerPostgresHeartbeat(MixinPostgresErrorResponse):
             metadata). The operation is considered successful even if no row
             was found (the contract may have been deregistered), which allows
             heartbeat processing to continue without errors.
-
-            Error messages are sanitized using sanitize_error_message to
-            prevent exposure of connection strings, credentials, or other
-            sensitive information in logs and responses.
         """
-        start_time = time.perf_counter()
+        return await self._execute_postgres_op(
+            op_error_code=EnumPostgresErrorCode.HEARTBEAT_ERROR,
+            correlation_id=correlation_id,
+            log_context={
+                "contract_id": payload.contract_id,
+                "node_name": payload.node_name,
+                "source_node_id": payload.source_node_id,
+                "uptime_seconds": payload.uptime_seconds,
+                "sequence_number": payload.sequence_number,
+            },
+            fn=lambda: self._execute_heartbeat(payload, correlation_id),
+        )
 
-        try:
-            async with self._pool.acquire() as conn:
-                # Execute update - returns status string like "UPDATE 1" or "UPDATE 0"
-                status = await conn.execute(
-                    _UPDATE_HEARTBEAT_SQL,
-                    payload.last_seen_at,
-                    payload.contract_id,
-                )
+    async def _execute_heartbeat(
+        self,
+        payload: ModelPayloadUpdateHeartbeat,
+        correlation_id: UUID,
+    ) -> None:
+        """Execute the heartbeat UPDATE query.
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
+        This method contains the handler-specific business logic:
+        - Execute the UPDATE query
+        - Parse the affected row count
+        - Log success/warning based on row_found
 
-            # Parse affected row count from status (format: "UPDATE N")
-            row_found = False
-            if status and status.startswith("UPDATE "):
-                try:
-                    affected_rows = int(status.split()[1])
-                    row_found = affected_rows > 0
-                except (IndexError, ValueError):
-                    pass  # Fallback to False if parsing fails
+        Args:
+            payload: Heartbeat payload with contract_id and timestamp.
+            correlation_id: Correlation ID for logging.
 
-            # Log for observability (since ModelBackendResult doesn't support metadata)
-            _logger.info(
-                "Heartbeat update completed",
+        Raises:
+            Any exception from asyncpg (handled by MixinPostgresOpExecutor).
+        """
+        async with self._pool.acquire() as conn:
+            # Execute update - returns status string like "UPDATE 1" or "UPDATE 0"
+            status = await conn.execute(
+                _UPDATE_HEARTBEAT_SQL,
+                payload.last_seen_at,
+                payload.contract_id,
+            )
+
+        # Parse affected row count from status (format: "UPDATE N")
+        row_found = False
+        if status and status.startswith("UPDATE "):
+            try:
+                affected_rows = int(status.split()[1])
+                row_found = affected_rows > 0
+            except (IndexError, ValueError):
+                pass  # Fallback to False if parsing fails
+
+        # Log for observability
+        _logger.info(
+            "Heartbeat update completed",
+            extra={
+                "correlation_id": str(correlation_id),
+                "contract_id": payload.contract_id,
+                "node_name": payload.node_name,
+                "row_found": row_found,
+                "source_node_id": payload.source_node_id,
+                "uptime_seconds": payload.uptime_seconds,
+                "sequence_number": payload.sequence_number,
+            },
+        )
+
+        # Log warning if row not found (contract may be deregistered)
+        if not row_found:
+            _logger.warning(
+                "Heartbeat update found no matching active contract",
                 extra={
                     "correlation_id": str(correlation_id),
                     "contract_id": payload.contract_id,
                     "node_name": payload.node_name,
-                    "row_found": row_found,
-                    "duration_ms": duration_ms,
-                    "source_node_id": payload.source_node_id,
-                    "uptime_seconds": payload.uptime_seconds,
-                    "sequence_number": payload.sequence_number,
                 },
             )
-
-            # Log warning if row not found (contract may be deregistered)
-            if not row_found:
-                _logger.warning(
-                    "Heartbeat update found no matching active contract",
-                    extra={
-                        "correlation_id": str(correlation_id),
-                        "contract_id": payload.contract_id,
-                        "node_name": payload.node_name,
-                    },
-                )
-
-            return ModelBackendResult(
-                success=True,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
-
-        except Exception as e:
-            ctx = PostgresErrorContext(
-                exception=e,
-                operation="heartbeat_update",
-                correlation_id=correlation_id,
-                start_time=start_time,
-                log_context={"contract_id": payload.contract_id},
-                operation_error_code=EnumPostgresErrorCode.HEARTBEAT_ERROR,
-            )
-            return self._build_error_response(ctx)
 
 
 __all__: list[str] = ["HandlerPostgresHeartbeat"]

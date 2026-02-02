@@ -16,6 +16,7 @@ Exports (in __all__):
         - MixinEnvelopeExtraction: Event envelope extraction utilities
         - MixinNodeIntrospection: Node capability introspection
         - MixinPostgresErrorResponse: PostgreSQL exception handling for persistence
+        - MixinPostgresOpExecutor: PostgreSQL operation execution with error handling
         - MixinRetryExecution: Retry logic with exponential backoff
 
     Dataclasses:
@@ -57,6 +58,7 @@ from omnibase_infra.mixins.mixin_postgres_error_response import (
     MixinPostgresErrorResponse,
     PostgresErrorContext,
 )
+from omnibase_infra.mixins.mixin_postgres_op_executor import MixinPostgresOpExecutor
 from omnibase_infra.mixins.mixin_retry_execution import MixinRetryExecution
 from omnibase_infra.mixins.protocol_circuit_breaker_aware import (
     ProtocolCircuitBreakerAware,
@@ -73,6 +75,7 @@ __all__: list[str] = [
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
     "MixinPostgresErrorResponse",
+    "MixinPostgresOpExecutor",
     "PostgresErrorContext",
     "MixinRetryExecution",
     "ModelCircuitBreakerConfig",

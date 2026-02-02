@@ -10,13 +10,10 @@ Architecture:
     HandlerPostgresContractUpsert is responsible for:
     - Executing upsert operations against the PostgreSQL contracts table
     - Serializing contract_yaml dict to YAML string before INSERT
-    - Timing operation duration for observability
-    - Sanitizing error messages before inclusion in results
     - Returning structured ModelBackendResult
 
-    This extraction supports the declarative node pattern where
-    NodeContractPersistenceEffect delegates backend-specific operations
-    to dedicated handlers.
+    Timing, error classification, and sanitization are delegated to
+    MixinPostgresOpExecutor to eliminate boilerplate drift across handlers.
 
 Coroutine Safety:
     This handler is stateless and coroutine-safe for concurrent calls
@@ -32,14 +29,14 @@ Related:
     - NodeContractPersistenceEffect: Parent effect node that coordinates handlers
     - ModelPayloadUpsertContract: Input payload model
     - ModelBackendResult: Structured result model for backend operations
+    - MixinPostgresOpExecutor: Shared execution core for timing/error handling
     - OMN-1845: Implementation ticket
-    - OMN-1653: ContractRegistryReducer ticket (source of intents)
+    - OMN-1857: Executor extraction ticket
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -50,8 +47,9 @@ from omnibase_infra.enums import (
     EnumHandlerTypeCategory,
     EnumPostgresErrorCode,
 )
-from omnibase_infra.mixins import MixinPostgresErrorResponse, PostgresErrorContext
-from omnibase_infra.nodes.effects.models import ModelBackendResult
+from omnibase_infra.errors import ModelInfraErrorContext, RepositoryExecutionError
+from omnibase_infra.mixins.mixin_postgres_op_executor import MixinPostgresOpExecutor
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 
 if TYPE_CHECKING:
     import asyncpg
@@ -79,15 +77,15 @@ RETURNING contract_id, (xmax = 0) AS was_insert;
 """
 
 
-class HandlerPostgresContractUpsert(MixinPostgresErrorResponse):
+class HandlerPostgresContractUpsert(MixinPostgresOpExecutor):
     """Handler for PostgreSQL contract record upsert.
 
     Encapsulates all PostgreSQL-specific persistence logic for contract
-    record upserts. The handler provides a clean interface for executing
-    upsert operations with proper timing and error sanitization.
+    record upserts.
 
-    This handler never raises exceptions - all errors are captured and
-    returned in the ModelBackendResult with appropriate error codes.
+    Timing, error classification, and sanitization are handled by the
+    MixinPostgresOpExecutor base class, reducing boilerplate and ensuring
+    consistent error handling across all PostgreSQL handlers.
 
     Attributes:
         _pool: asyncpg connection pool for database operations.
@@ -103,7 +101,7 @@ class HandlerPostgresContractUpsert(MixinPostgresErrorResponse):
     See Also:
         - NodeContractPersistenceEffect: Parent node that uses this handler
         - ModelPayloadUpsertContract: Input payload model
-        - contract.yaml: Handler routing configuration
+        - MixinPostgresOpExecutor: Shared execution mechanics
     """
 
     def __init__(self, pool: asyncpg.Pool) -> None:
@@ -134,10 +132,7 @@ class HandlerPostgresContractUpsert(MixinPostgresErrorResponse):
 
         Performs the upsert operation against the contracts table with:
         - Contract YAML serialization (dict to YAML string)
-        - Operation timing via time.perf_counter()
         - Parameterized SQL for injection prevention
-        - Error sanitization for security
-        - Structured result construction
 
         Args:
             payload: Upsert contract payload containing all contract fields
@@ -153,100 +148,95 @@ class HandlerPostgresContractUpsert(MixinPostgresErrorResponse):
                 - duration_ms: Operation duration in milliseconds
                 - backend_id: Set to "postgres"
                 - correlation_id: Passed through for tracing
-
-        Note:
-            This method never raises exceptions. All errors are captured
-            and returned in the result model with appropriate error codes.
-
-            Error messages are sanitized using sanitize_error_message to
-            prevent exposure of connection strings, credentials, or other
-            sensitive information in logs and responses.
         """
-        start_time = time.perf_counter()
+        return await self._execute_postgres_op(
+            op_error_code=EnumPostgresErrorCode.UPSERT_ERROR,
+            correlation_id=correlation_id,
+            log_context={
+                "contract_id": payload.contract_id,
+                "node_name": payload.node_name,
+            },
+            fn=lambda: self._execute_upsert(payload, correlation_id),
+        )
 
-        try:
-            # Serialize contract_yaml to YAML string if it's a dict
-            # The PostgreSQL column is TEXT type, so we need a string representation
-            contract_yaml_str: str
-            if isinstance(payload.contract_yaml, dict):
-                contract_yaml_str = yaml.safe_dump(
-                    payload.contract_yaml,
-                    default_flow_style=False,
-                    sort_keys=True,
-                    allow_unicode=True,
-                )
-            elif isinstance(payload.contract_yaml, str):
-                contract_yaml_str = payload.contract_yaml
-            else:
-                # Handle unexpected types by converting to string representation
-                contract_yaml_str = str(payload.contract_yaml)
+    async def _execute_upsert(
+        self,
+        payload: ModelPayloadUpsertContract,
+        correlation_id: UUID,
+    ) -> None:
+        """Execute the contract upsert query.
 
-            async with self._pool.acquire() as conn:
-                result = await conn.fetchrow(
-                    SQL_UPSERT_CONTRACT,
-                    payload.contract_id,
-                    payload.node_name,
-                    payload.version_major,
-                    payload.version_minor,
-                    payload.version_patch,
-                    payload.contract_hash,
-                    contract_yaml_str,
-                    payload.is_active,
-                    payload.registered_at,
-                    payload.last_seen_at,
-                )
+        Args:
+            payload: Contract upsert payload.
+            correlation_id: Correlation ID for logging.
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
-
-            if result is not None:
-                was_insert = result["was_insert"]
-                operation = "insert" if was_insert else "update"
-                logger.info(
-                    "Contract upsert completed",
-                    extra={
-                        "contract_id": payload.contract_id,
-                        "node_name": payload.node_name,
-                        "operation": operation,
-                        "duration_ms": duration_ms,
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-                return ModelBackendResult(
-                    success=True,
-                    duration_ms=duration_ms,
-                    backend_id="postgres",
-                    correlation_id=correlation_id,
-                )
-            else:
-                # RETURNING clause should always return a row on success
-                # If None, something unexpected happened
-                logger.warning(
-                    "Contract upsert returned no result",
-                    extra={
-                        "contract_id": payload.contract_id,
-                        "duration_ms": duration_ms,
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-                return ModelBackendResult(
-                    success=False,
-                    error="postgres operation failed: no result returned",
-                    error_code=EnumPostgresErrorCode.UPSERT_ERROR,
-                    duration_ms=duration_ms,
-                    backend_id="postgres",
-                    correlation_id=correlation_id,
-                )
-
-        except Exception as e:
-            ctx = PostgresErrorContext(
-                exception=e,
-                operation="contract_upsert",
-                correlation_id=correlation_id,
-                start_time=start_time,
-                log_context={"contract_id": payload.contract_id},
-                operation_error_code=EnumPostgresErrorCode.UPSERT_ERROR,
+        Raises:
+            RepositoryExecutionError: If no result returned from upsert.
+            Any exception from asyncpg (handled by MixinPostgresOpExecutor).
+        """
+        # Serialize contract_yaml to YAML string if it's a dict
+        # The PostgreSQL column is TEXT type, so we need a string representation
+        contract_yaml_str: str
+        if isinstance(payload.contract_yaml, dict):
+            contract_yaml_str = yaml.safe_dump(
+                payload.contract_yaml,
+                default_flow_style=False,
+                sort_keys=True,
+                allow_unicode=True,
             )
-            return self._build_error_response(ctx)
+        elif isinstance(payload.contract_yaml, str):
+            contract_yaml_str = payload.contract_yaml
+        else:
+            # Handle unexpected types by converting to string representation
+            contract_yaml_str = str(payload.contract_yaml)
+
+        async with self._pool.acquire() as conn:
+            result = await conn.fetchrow(
+                SQL_UPSERT_CONTRACT,
+                payload.contract_id,
+                payload.node_name,
+                payload.version_major,
+                payload.version_minor,
+                payload.version_patch,
+                payload.contract_hash,
+                contract_yaml_str,
+                payload.is_active,
+                payload.registered_at,
+                payload.last_seen_at,
+            )
+
+        if result is None:
+            # RETURNING clause should always return a row on success
+            # If None, something unexpected happened
+            logger.warning(
+                "Contract upsert returned no result",
+                extra={
+                    "contract_id": payload.contract_id,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type="db",
+                operation="contract_upsert",
+            )
+            raise RepositoryExecutionError(
+                "postgres operation failed: no result returned",
+                context=context,
+            )
+
+        # Log for observability
+        was_insert = result["was_insert"]
+        operation = "insert" if was_insert else "update"
+        logger.info(
+            "Contract upsert completed",
+            extra={
+                "contract_id": payload.contract_id,
+                "node_name": payload.node_name,
+                "operation": operation,
+                "correlation_id": str(correlation_id),
+            },
+        )
 
 
 __all__: list[str] = ["HandlerPostgresContractUpsert"]

@@ -9,13 +9,10 @@ handlers are extracted for testability and separation of concerns.
 Architecture:
     HandlerPostgresMarkStale is responsible for:
     - Executing batch update operations against PostgreSQL
-    - Timing operation duration for observability
-    - Sanitizing error messages before inclusion in results
     - Returning structured ModelBackendResult with affected row count
 
-    This extraction supports the declarative node pattern where
-    NodeContractPersistenceEffect delegates backend-specific operations
-    to dedicated handlers.
+    Timing, error classification, and sanitization are delegated to
+    MixinPostgresOpExecutor to eliminate boilerplate drift across handlers.
 
 Operation:
     Marks all active contracts with last_seen_at before the stale_cutoff
@@ -36,14 +33,14 @@ Related:
     - NodeContractPersistenceEffect: Parent effect node that coordinates handlers
     - ModelPayloadMarkStale: Payload model defining staleness parameters
     - ModelBackendResult: Structured result model for backend operations
+    - MixinPostgresOpExecutor: Shared execution core for timing/error handling
     - OMN-1845: Implementation ticket
-    - OMN-1653: ContractRegistryReducer ticket
+    - OMN-1857: Executor extraction ticket
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -52,8 +49,8 @@ from omnibase_infra.enums import (
     EnumHandlerTypeCategory,
     EnumPostgresErrorCode,
 )
-from omnibase_infra.mixins import MixinPostgresErrorResponse, PostgresErrorContext
-from omnibase_infra.nodes.effects.models.model_backend_result import ModelBackendResult
+from omnibase_infra.mixins.mixin_postgres_op_executor import MixinPostgresOpExecutor
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 
 if TYPE_CHECKING:
     import asyncpg
@@ -72,13 +69,15 @@ WHERE is_active = TRUE AND last_seen_at < $2
 """
 
 
-class HandlerPostgresMarkStale(MixinPostgresErrorResponse):
+class HandlerPostgresMarkStale(MixinPostgresOpExecutor):
     """Handler for batch marking stale contracts as inactive.
 
     Encapsulates PostgreSQL-specific batch staleness marking logic extracted
-    from NodeContractPersistenceEffect for declarative node compliance. The
-    handler provides a clean interface for executing batch updates with proper
-    timing and error sanitization.
+    from NodeContractPersistenceEffect for declarative node compliance.
+
+    Timing, error classification, and sanitization are handled by the
+    MixinPostgresOpExecutor base class, reducing boilerplate and ensuring
+    consistent error handling across all PostgreSQL handlers.
 
     The staleness operation marks contracts as inactive if their last_seen_at
     timestamp is older than the specified stale_cutoff, supporting contract
@@ -102,6 +101,7 @@ class HandlerPostgresMarkStale(MixinPostgresErrorResponse):
     See Also:
         - NodeContractPersistenceEffect: Parent node that uses this handler
         - ModelPayloadMarkStale: Payload model for staleness parameters
+        - MixinPostgresOpExecutor: Shared execution mechanics
     """
 
     def __init__(self, pool: asyncpg.Pool) -> None:
@@ -154,60 +154,55 @@ class HandlerPostgresMarkStale(MixinPostgresErrorResponse):
             returned in the result model (ModelBackendResult does not support
             metadata). Callers requiring the count should query the database
             separately or rely on log aggregation.
-
-            Error messages are sanitized using sanitize_error_message to
-            prevent exposure of connection strings, credentials, or other
-            sensitive information in logs and responses.
         """
-        start_time = time.perf_counter()
+        return await self._execute_postgres_op(
+            op_error_code=EnumPostgresErrorCode.MARK_STALE_ERROR,
+            correlation_id=correlation_id,
+            log_context={
+                "stale_cutoff": payload.stale_cutoff.isoformat(),
+            },
+            fn=lambda: self._execute_mark_stale(payload, correlation_id),
+        )
 
-        try:
-            async with self._pool.acquire() as conn:
-                # Execute batch update - returns status string like "UPDATE 5"
-                status = await conn.execute(
-                    _MARK_STALE_SQL,
-                    payload.checked_at,
-                    payload.stale_cutoff,
-                )
+    async def _execute_mark_stale(
+        self,
+        payload: ModelPayloadMarkStale,
+        correlation_id: UUID,
+    ) -> None:
+        """Execute the batch staleness UPDATE query.
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
+        Args:
+            payload: Mark stale payload with timestamps.
+            correlation_id: Correlation ID for logging.
 
-            # Parse affected row count from status (format: "UPDATE N")
-            affected_rows = 0
-            if status and status.startswith("UPDATE "):
-                try:
-                    affected_rows = int(status.split()[1])
-                except (IndexError, ValueError):
-                    pass  # Fallback to 0 if parsing fails
-
-            # Log for observability (since ModelBackendResult doesn't support metadata)
-            _logger.info(
-                "Mark stale operation completed",
-                extra={
-                    "correlation_id": str(correlation_id),
-                    "affected_rows": affected_rows,
-                    "stale_cutoff": payload.stale_cutoff.isoformat(),
-                    "duration_ms": duration_ms,
-                },
+        Raises:
+            Any exception from asyncpg (handled by MixinPostgresOpExecutor).
+        """
+        async with self._pool.acquire() as conn:
+            # Execute batch update - returns status string like "UPDATE 5"
+            status = await conn.execute(
+                _MARK_STALE_SQL,
+                payload.checked_at,
+                payload.stale_cutoff,
             )
 
-            return ModelBackendResult(
-                success=True,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
+        # Parse affected row count from status (format: "UPDATE N")
+        affected_rows = 0
+        if status and status.startswith("UPDATE "):
+            try:
+                affected_rows = int(status.split()[1])
+            except (IndexError, ValueError):
+                pass  # Fallback to 0 if parsing fails
 
-        except Exception as e:
-            ctx = PostgresErrorContext(
-                exception=e,
-                operation="mark_stale",
-                correlation_id=correlation_id,
-                start_time=start_time,
-                log_context={"stale_cutoff": payload.stale_cutoff.isoformat()},
-                operation_error_code=EnumPostgresErrorCode.MARK_STALE_ERROR,
-            )
-            return self._build_error_response(ctx)
+        # Log for observability
+        _logger.info(
+            "Mark stale operation completed",
+            extra={
+                "correlation_id": str(correlation_id),
+                "affected_rows": affected_rows,
+                "stale_cutoff": payload.stale_cutoff.isoformat(),
+            },
+        )
 
 
 __all__: list[str] = ["HandlerPostgresMarkStale"]

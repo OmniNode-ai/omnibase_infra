@@ -9,17 +9,14 @@ handlers are extracted for testability and separation of concerns.
 Architecture:
     HandlerPostgresDeactivate is responsible for:
     - Executing soft-delete operations against PostgreSQL
-    - Timing operation duration for observability
-    - Sanitizing error messages before inclusion in results
     - Returning structured ModelBackendResult
+
+    Timing, error classification, and sanitization are delegated to
+    MixinPostgresOpExecutor to eliminate boilerplate drift across handlers.
 
     The deactivation operation performs a soft delete by marking the contract
     record as inactive (is_active=FALSE) and setting deregistered_at timestamp,
     preserving historical data for auditing.
-
-    This extraction supports the declarative node pattern where
-    NodeContractPersistenceEffect delegates backend-specific operations to
-    dedicated handlers.
 
 Coroutine Safety:
     This handler is stateless and coroutine-safe for concurrent calls
@@ -30,14 +27,14 @@ Related:
     - NodeContractPersistenceEffect: Parent effect node that coordinates handlers
     - ModelPayloadDeactivateContract: Input payload model
     - ModelBackendResult: Structured result model for backend operations
+    - MixinPostgresOpExecutor: Shared execution core for timing/error handling
     - OMN-1845: Implementation ticket
-    - OMN-1653: ContractRegistryReducer ticket
+    - OMN-1857: Executor extraction ticket
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -48,8 +45,8 @@ from omnibase_infra.enums import (
     EnumHandlerTypeCategory,
     EnumPostgresErrorCode,
 )
-from omnibase_infra.mixins import MixinPostgresErrorResponse, PostgresErrorContext
-from omnibase_infra.nodes.effects.models.model_backend_result import ModelBackendResult
+from omnibase_infra.mixins.mixin_postgres_op_executor import MixinPostgresOpExecutor
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +66,15 @@ RETURNING contract_id
 """
 
 
-class HandlerPostgresDeactivate(MixinPostgresErrorResponse):
+class HandlerPostgresDeactivate(MixinPostgresOpExecutor):
     """Handler for PostgreSQL contract deactivation (soft-delete).
 
     Encapsulates all PostgreSQL-specific deactivation logic extracted from
-    NodeContractPersistenceEffect for declarative node compliance. The handler
-    provides a clean interface for executing soft-delete operations with proper
-    timing and error sanitization.
+    NodeContractPersistenceEffect for declarative node compliance.
+
+    Timing, error classification, and sanitization are handled by the
+    MixinPostgresOpExecutor base class, reducing boilerplate and ensuring
+    consistent error handling across all PostgreSQL handlers.
 
     The deactivation operation marks a contract as inactive (soft delete)
     rather than performing a hard delete, preserving audit trails and enabling
@@ -95,6 +94,7 @@ class HandlerPostgresDeactivate(MixinPostgresErrorResponse):
     See Also:
         - NodeContractPersistenceEffect: Parent node that uses this handler
         - ModelPayloadDeactivateContract: Input payload model
+        - MixinPostgresOpExecutor: Shared execution mechanics
     """
 
     def __init__(self, pool: asyncpg.Pool) -> None:
@@ -122,12 +122,7 @@ class HandlerPostgresDeactivate(MixinPostgresErrorResponse):
     ) -> ModelBackendResult:
         """Execute PostgreSQL contract deactivation (soft-delete).
 
-        Performs the deactivation operation against PostgreSQL with:
-        - Operation timing via time.perf_counter()
-        - Parameterized query execution
-        - Error sanitization for security
-        - Structured result construction
-
+        Performs the deactivation operation against PostgreSQL.
         The deactivation marks the contract record as inactive without
         deleting the underlying data, supporting audit requirements and
         potential reactivation scenarios.
@@ -147,57 +142,53 @@ class HandlerPostgresDeactivate(MixinPostgresErrorResponse):
                 - correlation_id: Passed through for tracing
 
         Note:
-            This handler never raises exceptions. All errors are caught,
-            sanitized, and returned in ModelBackendResult.
-
             If the contract_id doesn't exist, success=True is still returned
             but with an appropriate message indicating no row was found.
             This follows the idempotency principle - deactivating a
             non-existent or already-deactivated contract is not an error.
         """
-        start_time = time.perf_counter()
+        return await self._execute_postgres_op(
+            op_error_code=EnumPostgresErrorCode.DEACTIVATE_ERROR,
+            correlation_id=correlation_id,
+            log_context={
+                "contract_id": payload.contract_id,
+            },
+            fn=lambda: self._execute_deactivate(payload, correlation_id),
+        )
 
-        try:
-            async with self._pool.acquire() as conn:
-                result = await conn.fetchval(
-                    SQL_DEACTIVATE_CONTRACT,
-                    payload.deactivated_at,
-                    payload.contract_id,
-                )
+    async def _execute_deactivate(
+        self,
+        payload: ModelPayloadDeactivateContract,
+        correlation_id: UUID,
+    ) -> None:
+        """Execute the deactivation UPDATE query.
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
+        Args:
+            payload: Deactivation payload with contract_id and timestamp.
+            correlation_id: Correlation ID for logging.
 
-            # result will be the contract_id if row was updated, None otherwise
-            row_found = result is not None
-
-            # Log the not-found case for observability
-            if not row_found:
-                logger.info(
-                    "Contract not found during deactivation (idempotent no-op)",
-                    extra={
-                        "contract_id": payload.contract_id,
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-
-            return ModelBackendResult(
-                success=True,  # Operation succeeded (idempotent - no-op if not found)
-                error=None,  # No error - operation was successful
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
+        Raises:
+            Any exception from asyncpg (handled by MixinPostgresOpExecutor).
+        """
+        async with self._pool.acquire() as conn:
+            result = await conn.fetchval(
+                SQL_DEACTIVATE_CONTRACT,
+                payload.deactivated_at,
+                payload.contract_id,
             )
 
-        except Exception as e:
-            ctx = PostgresErrorContext(
-                exception=e,
-                operation="deactivate_contract",
-                correlation_id=correlation_id,
-                start_time=start_time,
-                log_context={"contract_id": payload.contract_id},
-                operation_error_code=EnumPostgresErrorCode.DEACTIVATE_ERROR,
+        # result will be the contract_id if row was updated, None otherwise
+        row_found = result is not None
+
+        # Log the not-found case for observability
+        if not row_found:
+            logger.info(
+                "Contract not found during deactivation (idempotent no-op)",
+                extra={
+                    "contract_id": payload.contract_id,
+                    "correlation_id": str(correlation_id),
+                },
             )
-            return self._build_error_response(ctx)
 
 
 __all__: list[str] = ["HandlerPostgresDeactivate"]

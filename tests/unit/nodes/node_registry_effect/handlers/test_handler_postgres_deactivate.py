@@ -22,7 +22,7 @@ import pytest
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
-from omnibase_infra.nodes.effects.models import ModelBackendResult
+from omnibase_infra.models import ModelBackendResult
 from omnibase_infra.nodes.node_registry_effect.handlers.handler_postgres_deactivate import (
     HandlerPostgresDeactivate,
 )

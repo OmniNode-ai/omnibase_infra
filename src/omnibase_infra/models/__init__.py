@@ -30,6 +30,7 @@ from omnibase_infra.models.event_bus import (
 from omnibase_infra.models.handlers import ModelHandlerIdentifier
 from omnibase_infra.models.health import ModelHealthCheckResult
 from omnibase_infra.models.logging import ModelLogContext
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.models.model_node_identity import ModelNodeIdentity
 from omnibase_infra.models.model_retry_error_classification import (
     ModelRetryErrorClassification,
@@ -93,6 +94,8 @@ __all__: list[str] = [
     "ModelConsumerRetryConfig",
     "ModelIdempotencyConfig",
     "ModelOffsetPolicyConfig",
+    # Backend result models
+    "ModelBackendResult",
     # Resilience models
     "ModelCircuitBreakerConfig",
     # Validation models

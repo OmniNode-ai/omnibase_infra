@@ -11,9 +11,10 @@ Architecture:
     - Normalizing topic suffixes (stripping environment prefixes)
     - Executing upsert operations against the PostgreSQL topics table
     - Managing JSONB array of contract_ids for topic-to-contract mapping
-    - Timing operation duration for observability
-    - Sanitizing error messages before inclusion in results
     - Returning structured ModelBackendResult
+
+    Timing, error classification, and sanitization are delegated to
+    MixinPostgresOpExecutor to eliminate boilerplate drift across handlers.
 
 Topic Normalization:
     Topics in contracts may include environment placeholders (e.g., "{env}.topic.name")
@@ -37,14 +38,14 @@ Related:
     - NodeContractPersistenceEffect: Parent effect node that coordinates handlers
     - ModelPayloadUpdateTopic: Input payload model
     - ModelBackendResult: Structured result model for backend operations
+    - MixinPostgresOpExecutor: Shared execution core for timing/error handling
     - OMN-1845: Implementation ticket
-    - OMN-1653: ContractRegistryReducer ticket (source of intents)
+    - OMN-1857: Executor extraction ticket
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -53,8 +54,9 @@ from omnibase_infra.enums import (
     EnumHandlerTypeCategory,
     EnumPostgresErrorCode,
 )
-from omnibase_infra.mixins import MixinPostgresErrorResponse, PostgresErrorContext
-from omnibase_infra.nodes.effects.models import ModelBackendResult
+from omnibase_infra.errors import ModelInfraErrorContext, RepositoryExecutionError
+from omnibase_infra.mixins.mixin_postgres_op_executor import MixinPostgresOpExecutor
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 
 if TYPE_CHECKING:
     import asyncpg
@@ -131,16 +133,15 @@ def normalize_topic_for_storage(topic: str) -> str:
     return topic
 
 
-class HandlerPostgresTopicUpdate(MixinPostgresErrorResponse):
+class HandlerPostgresTopicUpdate(MixinPostgresOpExecutor):
     """Handler for PostgreSQL topic routing table updates.
 
     Encapsulates all PostgreSQL-specific persistence logic for topic
-    routing updates. The handler provides a clean interface for executing
-    upsert operations with proper topic normalization, timing, and error
-    sanitization.
+    routing updates.
 
-    This handler never raises exceptions - all errors are captured and
-    returned in the ModelBackendResult with appropriate error codes.
+    Timing, error classification, and sanitization are handled by the
+    MixinPostgresOpExecutor base class, reducing boilerplate and ensuring
+    consistent error handling across all PostgreSQL handlers.
 
     Topic Contract Mapping:
         The topics table stores a JSONB array of contract_ids that reference
@@ -163,8 +164,8 @@ class HandlerPostgresTopicUpdate(MixinPostgresErrorResponse):
     See Also:
         - NodeContractPersistenceEffect: Parent node that uses this handler
         - ModelPayloadUpdateTopic: Input payload model
-        - contract.yaml: Handler routing configuration
         - normalize_topic_for_storage: Topic normalization function
+        - MixinPostgresOpExecutor: Shared execution mechanics
     """
 
     def __init__(self, pool: asyncpg.Pool) -> None:
@@ -196,10 +197,7 @@ class HandlerPostgresTopicUpdate(MixinPostgresErrorResponse):
         Performs the upsert operation against the topics table with:
         - Topic suffix normalization (strip environment prefix)
         - JSONB array merge for contract_ids
-        - Operation timing via time.perf_counter()
         - Parameterized SQL for injection prevention
-        - Error sanitization for security
-        - Structured result construction
 
         Args:
             payload: Update topic payload containing topic_suffix, direction,
@@ -216,86 +214,85 @@ class HandlerPostgresTopicUpdate(MixinPostgresErrorResponse):
                 - correlation_id: Passed through for tracing
 
         Note:
-            This method never raises exceptions. All errors are captured
-            and returned in the result model with appropriate error codes.
-
-            Error messages are sanitized using sanitize_error_message to
-            prevent exposure of connection strings, credentials, or other
-            sensitive information in logs and responses.
-
             Topic suffixes are normalized before storage - environment
             prefixes like "{env}." or "dev." are stripped.
         """
-        start_time = time.perf_counter()
-
         # Normalize topic suffix by stripping environment prefix
         normalized_topic = normalize_topic_for_storage(payload.topic_suffix)
 
-        try:
-            async with self._pool.acquire() as conn:
-                result = await conn.fetchrow(
-                    SQL_UPSERT_TOPIC,
-                    normalized_topic,
-                    payload.direction,
-                    payload.contract_id,
-                    payload.last_seen_at,  # first_seen_at (on insert)
-                    payload.last_seen_at,  # last_seen_at
-                )
+        return await self._execute_postgres_op(
+            op_error_code=EnumPostgresErrorCode.TOPIC_UPDATE_ERROR,
+            correlation_id=correlation_id,
+            log_context={
+                "topic_suffix": normalized_topic,
+                "original_topic": payload.topic_suffix,
+                "direction": payload.direction,
+                "contract_id": payload.contract_id,
+            },
+            fn=lambda: self._execute_topic_update(
+                payload, normalized_topic, correlation_id
+            ),
+        )
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
+    async def _execute_topic_update(
+        self,
+        payload: ModelPayloadUpdateTopic,
+        normalized_topic: str,
+        correlation_id: UUID,
+    ) -> None:
+        """Execute the topic upsert query.
 
-            if result is not None:
-                logger.info(
-                    "Topic update completed",
-                    extra={
-                        "topic_suffix": normalized_topic,
-                        "original_topic": payload.topic_suffix,
-                        "direction": payload.direction,
-                        "contract_id": payload.contract_id,
-                        "duration_ms": duration_ms,
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-                return ModelBackendResult(
-                    success=True,
-                    duration_ms=duration_ms,
-                    backend_id="postgres",
-                    correlation_id=correlation_id,
-                )
-            else:
-                # RETURNING clause should always return a row on success
-                # If None, something unexpected happened
-                logger.warning(
-                    "Topic update returned no result",
-                    extra={
-                        "topic_suffix": normalized_topic,
-                        "direction": payload.direction,
-                        "duration_ms": duration_ms,
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-                return ModelBackendResult(
-                    success=False,
-                    error="postgres operation failed: no result returned",
-                    error_code=EnumPostgresErrorCode.TOPIC_UPDATE_ERROR,
-                    duration_ms=duration_ms,
-                    backend_id="postgres",
-                    correlation_id=correlation_id,
-                )
+        Args:
+            payload: Topic update payload.
+            normalized_topic: Environment-stripped topic suffix.
+            correlation_id: Correlation ID for logging.
 
-        except Exception as e:
-            ctx = PostgresErrorContext(
-                exception=e,
-                operation="topic_update",
-                correlation_id=correlation_id,
-                start_time=start_time,
-                log_context={
+        Raises:
+            RepositoryExecutionError: If no result returned from upsert.
+            Any exception from asyncpg (handled by MixinPostgresOpExecutor).
+        """
+        async with self._pool.acquire() as conn:
+            result = await conn.fetchrow(
+                SQL_UPSERT_TOPIC,
+                normalized_topic,
+                payload.direction,
+                payload.contract_id,
+                payload.last_seen_at,  # first_seen_at (on insert)
+                payload.last_seen_at,  # last_seen_at
+            )
+
+        if result is None:
+            # RETURNING clause should always return a row on success
+            # If None, something unexpected happened
+            logger.warning(
+                "Topic update returned no result",
+                extra={
                     "topic_suffix": normalized_topic,
                     "direction": payload.direction,
+                    "correlation_id": str(correlation_id),
                 },
-                operation_error_code=EnumPostgresErrorCode.TOPIC_UPDATE_ERROR,
             )
-            return self._build_error_response(ctx)
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type="db",
+                operation="topic_update",
+            )
+            raise RepositoryExecutionError(
+                "postgres operation failed: no result returned",
+                context=context,
+            )
+
+        # Log for observability
+        logger.info(
+            "Topic update completed",
+            extra={
+                "topic_suffix": normalized_topic,
+                "original_topic": payload.topic_suffix,
+                "direction": payload.direction,
+                "contract_id": payload.contract_id,
+                "correlation_id": str(correlation_id),
+            },
+        )
 
 
 __all__: list[str] = ["HandlerPostgresTopicUpdate", "normalize_topic_for_storage"]
