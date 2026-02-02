@@ -243,6 +243,9 @@ from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     load_event_bus_subcontract,
 )
 
+# Request-response wiring (OMN-1742)
+from omnibase_infra.runtime.request_response_wiring import RequestResponseWiring
+
 # Runtime contract config loader (OMN-1519)
 from omnibase_infra.runtime.runtime_contract_config_loader import (
     RuntimeContractConfigLoader,
@@ -429,6 +432,8 @@ __all__: list[str] = [
     # Event bus subcontract wiring (OMN-1621)
     "EventBusSubcontractWiring",
     "load_event_bus_subcontract",
+    # Request-response wiring (OMN-1742)
+    "RequestResponseWiring",
     # Runtime contract config loader (OMN-1519)
     "RuntimeContractConfigLoader",
     # Security constants and configuration (OMN-1519)
