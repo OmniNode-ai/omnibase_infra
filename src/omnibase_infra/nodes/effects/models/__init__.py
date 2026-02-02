@@ -5,15 +5,17 @@
 This module exports models used by Effect layer nodes for external I/O operations.
 
 Available Models:
+    - ModelBackendResult: Individual backend operation result (re-exported)
     - ModelEffectIdempotencyConfig: Configuration for effect idempotency store
     - ModelRegistryRequest: Registry effect input request
     - ModelRegistryResponse: Dual-backend registry operation response
 
 Note:
-    ModelBackendResult has been moved to omnibase_infra.models.model_backend_result.
-    Import from there instead.
+    ModelBackendResult canonical location is omnibase_infra.models.model_backend_result.
+    Re-exported here for backward compatibility.
 """
 
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.nodes.effects.models.model_effect_idempotency_config import (
     ModelEffectIdempotencyConfig,
 )
@@ -25,6 +27,7 @@ from omnibase_infra.nodes.effects.models.model_registry_response import (
 )
 
 __all__ = [
+    "ModelBackendResult",
     "ModelEffectIdempotencyConfig",
     "ModelRegistryRequest",
     "ModelRegistryResponse",

@@ -44,7 +44,7 @@ from omnibase_infra.models.errors import (
     ModelInfraErrorContext,
     ModelTimeoutErrorContext,
 )
-from omnibase_infra.nodes.effects.models.model_backend_result import ModelBackendResult
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 
 if TYPE_CHECKING:
     from collections.abc import Generator
