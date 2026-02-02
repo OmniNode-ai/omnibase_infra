@@ -190,6 +190,50 @@ class TestNormalizeTopicForStorage:
 class TestNormalizeTopicEdgeCases:
     """Edge case tests for normalize_topic_for_storage()."""
 
+    @pytest.mark.parametrize(
+        ("input_topic", "expected"),
+        [
+            # Empty string
+            ("", ""),
+            # Only prefix (results in empty string after stripping)
+            ("dev.", ""),
+            ("{env}.", ""),
+            ("prod.", ""),
+            ("staging.", ""),
+            ("local.", ""),
+            ("test.", ""),
+            # Mixed double prefix - strips only the first ({env}.)
+            ("{env}.dev.topic.v1", "dev.topic.v1"),
+            ("{env}.prod.topic.v1", "prod.topic.v1"),
+            ("{env}.staging.topic.v1", "staging.topic.v1"),
+            ("dev.{env}.topic.v1", "{env}.topic.v1"),
+            # Same-type double prefix - strips only first occurrence
+            ("dev.dev.topic.v1", "dev.topic.v1"),
+            ("{env}.{env}.topic.v1", "{env}.topic.v1"),
+            # Prefix in middle (should NOT strip - not at start)
+            ("topic.dev.name", "topic.dev.name"),
+            ("topic.{env}.name", "topic.{env}.name"),
+            ("onex.prod.events", "onex.prod.events"),
+            # Multiple dots but no matching prefix
+            ("topic.name.v1", "topic.name.v1"),
+            ("onex.evt.platform.v1", "onex.evt.platform.v1"),
+            # Single dot topics without prefix
+            ("topic.v1", "topic.v1"),
+        ],
+    )
+    def test_normalize_topic_edge_cases(self, input_topic: str, expected: str) -> None:
+        """Test edge cases for topic normalization.
+
+        This parametrized test covers:
+        - Empty string handling
+        - Prefix-only topics that result in empty string
+        - Mixed double prefixes (e.g., {env}.dev.) - only first is stripped
+        - Same-type double prefixes (e.g., dev.dev.) - only first is stripped
+        - Prefix-like strings in middle of topic - should NOT be stripped
+        - Topics with multiple dots but no matching prefix
+        """
+        assert normalize_topic_for_storage(input_topic) == expected
+
     def test_normalize_topic_with_numbers(self) -> None:
         """Test topics with version numbers are handled correctly."""
         result = normalize_topic_for_storage("dev.onex.evt.v1.0.0")

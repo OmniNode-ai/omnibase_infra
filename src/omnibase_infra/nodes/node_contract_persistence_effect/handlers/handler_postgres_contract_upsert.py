@@ -50,14 +50,8 @@ from omnibase_infra.enums import (
     EnumHandlerTypeCategory,
     EnumPostgresErrorCode,
 )
-from omnibase_infra.errors import (
-    InfraAuthenticationError,
-    InfraConnectionError,
-    InfraTimeoutError,
-    RepositoryExecutionError,
-)
+from omnibase_infra.mixins import MixinPostgresErrorResponse, PostgresErrorContext
 from omnibase_infra.nodes.effects.models import ModelBackendResult
-from omnibase_infra.utils import sanitize_backend_error, sanitize_error_message
 
 if TYPE_CHECKING:
     import asyncpg
@@ -85,7 +79,7 @@ RETURNING contract_id, (xmax = 0) AS was_insert;
 """
 
 
-class HandlerPostgresContractUpsert:
+class HandlerPostgresContractUpsert(MixinPostgresErrorResponse):
     """Handler for PostgreSQL contract record upsert.
 
     Encapsulates all PostgreSQL-specific persistence logic for contract
@@ -243,120 +237,16 @@ class HandlerPostgresContractUpsert:
                     correlation_id=correlation_id,
                 )
 
-        except (TimeoutError, InfraTimeoutError) as e:
-            # Timeout during upsert - retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            logger.warning(
-                "Contract upsert timed out",
-                extra={
-                    "contract_id": payload.contract_id,
-                    "error": sanitized_error,
-                    "duration_ms": duration_ms,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.TIMEOUT_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
+        except Exception as e:
+            ctx = PostgresErrorContext(
+                exception=e,
+                operation="contract_upsert",
                 correlation_id=correlation_id,
+                start_time=start_time,
+                log_context={"contract_id": payload.contract_id},
+                operation_error_code=EnumPostgresErrorCode.UPSERT_ERROR,
             )
-
-        except InfraAuthenticationError as e:
-            # Authentication failure - non-retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            logger.exception(
-                "Contract upsert authentication failed",
-                extra={
-                    "contract_id": payload.contract_id,
-                    "error": sanitized_error,
-                    "duration_ms": duration_ms,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.AUTH_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
-
-        except InfraConnectionError as e:
-            # Connection failure - retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            logger.warning(
-                "Contract upsert connection failed",
-                extra={
-                    "contract_id": payload.contract_id,
-                    "error": sanitized_error,
-                    "duration_ms": duration_ms,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.CONNECTION_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
-
-        except RepositoryExecutionError as e:
-            # Query execution error - may be retriable
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            logger.warning(
-                "Contract upsert execution failed",
-                extra={
-                    "contract_id": payload.contract_id,
-                    "error": sanitized_error,
-                    "duration_ms": duration_ms,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.UPSERT_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
-
-        except (
-            Exception
-        ) as e:  # ONEX: catch-all - database adapter may raise unexpected exceptions
-            # beyond typed infrastructure errors (e.g., driver errors, encoding errors,
-            # connection pool errors, asyncpg-specific exceptions).
-            # Required to sanitize errors and prevent credential exposure.
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_backend_error("postgres", e)
-            logger.exception(
-                "Contract upsert failed with unexpected error",
-                extra={
-                    "contract_id": payload.contract_id,
-                    "error_type": type(e).__name__,
-                    "error": sanitized_error,
-                    "duration_ms": duration_ms,
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.UNKNOWN_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
+            return self._build_error_response(ctx)
 
 
 __all__: list[str] = ["HandlerPostgresContractUpsert"]

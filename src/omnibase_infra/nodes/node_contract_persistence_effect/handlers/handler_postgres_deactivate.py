@@ -48,13 +48,8 @@ from omnibase_infra.enums import (
     EnumHandlerTypeCategory,
     EnumPostgresErrorCode,
 )
-from omnibase_infra.errors import (
-    InfraAuthenticationError,
-    InfraConnectionError,
-    InfraTimeoutError,
-)
+from omnibase_infra.mixins import MixinPostgresErrorResponse, PostgresErrorContext
 from omnibase_infra.nodes.effects.models.model_backend_result import ModelBackendResult
-from omnibase_infra.utils import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +69,7 @@ RETURNING contract_id
 """
 
 
-class HandlerPostgresDeactivate:
+class HandlerPostgresDeactivate(MixinPostgresErrorResponse):
     """Handler for PostgreSQL contract deactivation (soft-delete).
 
     Encapsulates all PostgreSQL-specific deactivation logic extracted from
@@ -193,60 +188,16 @@ class HandlerPostgresDeactivate:
                 correlation_id=correlation_id,
             )
 
-        except (TimeoutError, InfraTimeoutError) as e:
-            # Timeout during deactivation - retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.TIMEOUT_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
+        except Exception as e:
+            ctx = PostgresErrorContext(
+                exception=e,
+                operation="deactivate_contract",
                 correlation_id=correlation_id,
+                start_time=start_time,
+                log_context={"contract_id": payload.contract_id},
+                operation_error_code=EnumPostgresErrorCode.DEACTIVATE_ERROR,
             )
-
-        except InfraAuthenticationError as e:
-            # Authentication failure - non-retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.AUTH_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
-
-        except InfraConnectionError as e:
-            # Connection failure - retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.CONNECTION_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
-
-        except (
-            Exception
-        ) as e:  # ONEX: catch-all - database adapter may raise unexpected exceptions
-            # beyond typed infrastructure errors (e.g., asyncpg errors, encoding errors,
-            # connection pool errors). Required to sanitize errors and prevent credential exposure.
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.UNKNOWN_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
+            return self._build_error_response(ctx)
 
 
 __all__: list[str] = ["HandlerPostgresDeactivate"]
