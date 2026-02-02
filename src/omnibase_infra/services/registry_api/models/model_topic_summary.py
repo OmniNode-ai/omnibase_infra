@@ -9,6 +9,7 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -27,13 +28,13 @@ class ModelTopicSummary(BaseModel):
         is_active: Whether the topic has active contracts
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     topic_suffix: str = Field(
         ...,
         description="Topic suffix (without environment prefix)",
     )
-    direction: str = Field(
+    direction: Literal["publish", "subscribe"] = Field(
         ...,
         description="Relationship direction ('publish' or 'subscribe')",
     )

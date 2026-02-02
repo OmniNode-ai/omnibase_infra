@@ -23,7 +23,7 @@ class ModelContractRef(BaseModel):
         version: Semantic version string in format major.minor.patch
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     # ONEX_EXCLUDE: pattern_validator - contract_id is a derived natural key (name:version), not UUID
     contract_id: str = Field(

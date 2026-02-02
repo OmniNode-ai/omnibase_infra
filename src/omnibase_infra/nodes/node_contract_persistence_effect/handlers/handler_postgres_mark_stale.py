@@ -47,6 +47,7 @@ import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -110,6 +111,16 @@ class HandlerPostgresMarkStale:
                 operations against the contracts table.
         """
         self._pool = pool
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role of this handler."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification of this handler."""
+        return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
         self,

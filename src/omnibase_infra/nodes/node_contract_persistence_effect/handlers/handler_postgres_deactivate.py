@@ -36,11 +36,16 @@ Related:
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 import asyncpg
+
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+
+logger = logging.getLogger(__name__)
 
 from omnibase_infra.errors import (
     InfraAuthenticationError,
@@ -102,6 +107,16 @@ class HandlerPostgresDeactivate:
         """
         self._pool = pool
 
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role of this handler."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification of this handler."""
+        return EnumHandlerTypeCategory.EFFECT
+
     async def handle(
         self,
         payload: ModelPayloadDeactivateContract,
@@ -157,11 +172,19 @@ class HandlerPostgresDeactivate:
             # result will be the contract_id if row was updated, None otherwise
             row_found = result is not None
 
+            # Log the not-found case for observability
+            if not row_found:
+                logger.info(
+                    "Contract not found during deactivation (idempotent no-op)",
+                    extra={
+                        "contract_id": payload.contract_id,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+
             return ModelBackendResult(
-                success=True,  # Operation succeeded even if no row found (idempotent)
-                error=None
-                if row_found
-                else f"Contract {payload.contract_id} not found",
+                success=True,  # Operation succeeded (idempotent - no-op if not found)
+                error=None,  # No error - operation was successful
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,

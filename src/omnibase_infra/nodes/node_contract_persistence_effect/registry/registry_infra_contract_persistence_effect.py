@@ -72,7 +72,7 @@ class RegistryInfraContractPersistenceEffect:
             container: ONEX dependency injection container. Must have the
                 following protocols registered:
                 - ProtocolPostgresAdapter: PostgreSQL database operations
-                - ProtocolCircuitBreaker: Backend circuit breaker protection
+                - ProtocolCircuitBreakerAware: Backend circuit breaker protection
 
         Returns:
             Configured NodeContractPersistenceEffect instance ready for operation.
@@ -113,7 +113,7 @@ class RegistryInfraContractPersistenceEffect:
         """
         return [
             "ProtocolPostgresAdapter",
-            "ProtocolCircuitBreaker",
+            "ProtocolCircuitBreakerAware",
         ]
 
     @staticmethod

@@ -32,7 +32,7 @@ class ModelTopicView(BaseModel):
         is_active: Whether the topic has active publishers or subscribers
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     topic_suffix: str = Field(
         ...,

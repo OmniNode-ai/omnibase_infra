@@ -31,7 +31,7 @@ class ModelResponseListTopics(BaseModel):
         warnings: List of warnings for partial success scenarios
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     topics: list[ModelTopicSummary] = Field(
         default_factory=list,

@@ -45,6 +45,7 @@ from uuid import UUID
 
 import yaml
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -115,6 +116,16 @@ class HandlerPostgresContractUpsert:
                 The pool should be pre-configured and ready for use.
         """
         self._pool = pool
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role of this handler."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification of this handler."""
+        return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
         self,

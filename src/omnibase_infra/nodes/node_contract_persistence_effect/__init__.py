@@ -34,7 +34,7 @@ Supported Intent Types:
     - postgres.deactivate_contract: Soft delete contract
     - postgres.cleanup_topic_references: Remove contract from topics
 
-Handlers (to be implemented in subsequent tickets):
+Handlers:
     - HandlerPostgresContractUpsert: Contract upsert operations
     - HandlerPostgresTopicUpdate: Topic routing updates
     - HandlerPostgresMarkStale: Batch staleness marking
@@ -66,6 +66,16 @@ Related:
 
 from __future__ import annotations
 
+# Export handlers
+from omnibase_infra.nodes.node_contract_persistence_effect.handlers import (
+    HandlerPostgresCleanupTopics,
+    HandlerPostgresContractUpsert,
+    HandlerPostgresDeactivate,
+    HandlerPostgresHeartbeat,
+    HandlerPostgresMarkStale,
+    HandlerPostgresTopicUpdate,
+)
+
 # Export the declarative node
 from omnibase_infra.nodes.node_contract_persistence_effect.node import (
     NodeContractPersistenceEffect,
@@ -76,20 +86,16 @@ from omnibase_infra.nodes.node_contract_persistence_effect.registry import (
     RegistryInfraContractPersistenceEffect,
 )
 
-# Handlers will be exported here once implemented:
-# from omnibase_infra.nodes.node_contract_persistence_effect.handlers import (
-#     HandlerPostgresContractUpsert,
-#     HandlerPostgresTopicUpdate,
-#     HandlerPostgresMarkStale,
-#     HandlerPostgresHeartbeat,
-#     HandlerPostgresDeactivate,
-#     HandlerPostgresCleanupTopics,
-# )
-
 __all__: list[str] = [
     # Node
     "NodeContractPersistenceEffect",
     # Registry
     "RegistryInfraContractPersistenceEffect",
-    # Handlers (to be added once implemented)
+    # Handlers
+    "HandlerPostgresCleanupTopics",
+    "HandlerPostgresContractUpsert",
+    "HandlerPostgresDeactivate",
+    "HandlerPostgresHeartbeat",
+    "HandlerPostgresMarkStale",
+    "HandlerPostgresTopicUpdate",
 ]

@@ -792,11 +792,10 @@ class TestHandlerPostgresDeactivateSuccess:
         result = await handler.handle(payload, correlation_id)
 
         # Assert - operation still succeeds even if no row found (idempotent)
+        # Per semantic fix: success=True always has error=None (not-found logged instead)
         assert result.success is True
         assert result.backend_id == "postgres"
-        # error field contains "not found" message but success is still True
-        assert result.error is not None
-        assert "not found" in result.error
+        assert result.error is None  # No error on success, even if row not found
 
 
 class TestHandlerPostgresDeactivateErrors:

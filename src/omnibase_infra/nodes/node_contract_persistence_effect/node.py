@@ -50,7 +50,12 @@ Related Tickets:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from omnibase_core.nodes.node_effect import NodeEffect
+
+if TYPE_CHECKING:
+    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 
 
 class NodeContractPersistenceEffect(NodeEffect):
@@ -68,6 +73,9 @@ class NodeContractPersistenceEffect(NodeEffect):
         - postgres.update_heartbeat: Update heartbeat timestamp
         - postgres.deactivate_contract: Soft delete contract
         - postgres.cleanup_topic_references: Remove contract from topics
+
+    Args:
+        container: ONEX dependency injection container.
 
     Dependency Injection:
         Backend adapters (PostgreSQL) are resolved via container.
@@ -94,7 +102,13 @@ class NodeContractPersistenceEffect(NodeEffect):
         ```
     """
 
-    # Pure declarative shell - all behavior defined in contract.yaml
+    def __init__(self, container: ModelONEXContainer) -> None:
+        """Initialize effect node with container dependency injection.
+
+        Args:
+            container: ONEX dependency injection container.
+        """
+        super().__init__(container)
 
 
 __all__ = ["NodeContractPersistenceEffect"]
