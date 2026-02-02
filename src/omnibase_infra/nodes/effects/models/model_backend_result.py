@@ -61,7 +61,9 @@ class ModelBackendResult(BaseModel):
     Attributes:
         success: Whether the backend operation completed successfully.
         error: Sanitized error message if success is False.
-        error_code: Optional error code for programmatic handling.
+        error_code: Error code for programmatic handling. PostgreSQL handlers
+            use EnumPostgresErrorCode enum values which serialize to strings
+            (e.g., "POSTGRES_CONNECTION_ERROR"). Other backends use string codes.
         duration_ms: Time taken for the operation in milliseconds.
         backend_id: Optional identifier for the backend instance.
 
@@ -96,18 +98,30 @@ class ModelBackendResult(BaseModel):
         >>> result.success
         True
 
-    Example (failure case):
+    Example (failure case with PostgreSQL enum):
+        >>> from omnibase_infra.enums import EnumPostgresErrorCode
         >>> result = ModelBackendResult(
         ...     success=False,
         ...     error="Connection refused to database host",
-        ...     error_code="DATABASE_CONNECTION_ERROR",
+        ...     error_code=EnumPostgresErrorCode.CONNECTION_ERROR,
         ...     duration_ms=5000.0,
         ...     backend_id="postgres",
         ... )
         >>> result.success
         False
-        >>> result.error
-        'Connection refused to database host'
+        >>> result.error_code  # Enum serializes to string
+        'POSTGRES_CONNECTION_ERROR'
+
+    Example (failure case with Consul string code):
+        >>> result = ModelBackendResult(
+        ...     success=False,
+        ...     error="Service registration failed",
+        ...     error_code="CONSUL_CONNECTION_ERROR",
+        ...     duration_ms=1500.0,
+        ...     backend_id="consul",
+        ... )
+        >>> result.error_code
+        'CONSUL_CONNECTION_ERROR'
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -122,7 +136,9 @@ class ModelBackendResult(BaseModel):
     )
     error_code: str | None = Field(
         default=None,
-        description="Error code for programmatic handling (e.g., DATABASE_CONNECTION_ERROR)",
+        description="Error code for programmatic handling. PostgreSQL handlers use "
+        "EnumPostgresErrorCode enum values (which serialize to strings like "
+        "'POSTGRES_CONNECTION_ERROR'). Other backends use string codes directly.",
     )
     duration_ms: float = Field(
         default=0.0,

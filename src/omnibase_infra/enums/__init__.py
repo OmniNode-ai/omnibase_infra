@@ -36,6 +36,7 @@ Exports:
     EnumNodeOutputType: Node output types for execution shape validation
     EnumNonRetryableErrorCategory: Non-retryable error categories for DLQ
     EnumPolicyType: Policy types for RegistryPolicy plugins
+    EnumPostgresErrorCode: PostgreSQL error codes for contract persistence operations
     EnumRegistrationState: Registration FSM states for two-way registration
     EnumRegistrationStatus: Registration workflow status (IDLE, PENDING, PARTIAL, COMPLETE, FAILED)
     EnumRegistryResponseStatus: Registry operation response status (SUCCESS, PARTIAL, FAILED)
@@ -82,6 +83,7 @@ from omnibase_infra.enums.enum_non_retryable_error_category import (
     EnumNonRetryableErrorCategory,
 )
 from omnibase_infra.enums.enum_policy_type import EnumPolicyType
+from omnibase_infra.enums.enum_postgres_error_code import EnumPostgresErrorCode
 from omnibase_infra.enums.enum_registration_state import EnumRegistrationState
 from omnibase_infra.enums.enum_registration_status import EnumRegistrationStatus
 from omnibase_infra.enums.enum_registry_response_status import (
@@ -123,6 +125,7 @@ __all__: list[str] = [
     "EnumNodeOutputType",
     "EnumNonRetryableErrorCategory",
     "EnumPolicyType",
+    "EnumPostgresErrorCode",
     "EnumRegistrationState",
     "EnumRegistrationStatus",
     "EnumRegistryResponseStatus",

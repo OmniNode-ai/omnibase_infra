@@ -49,7 +49,11 @@ from uuid import UUID
 
 import asyncpg
 
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumPostgresErrorCode,
+)
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -203,7 +207,7 @@ class HandlerPostgresCleanupTopics:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="POSTGRES_CLEANUP_TOPICS_TIMEOUT_ERROR",
+                error_code=EnumPostgresErrorCode.TIMEOUT_ERROR,
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -216,7 +220,7 @@ class HandlerPostgresCleanupTopics:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="POSTGRES_CLEANUP_TOPICS_AUTH_ERROR",
+                error_code=EnumPostgresErrorCode.AUTH_ERROR,
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -229,7 +233,7 @@ class HandlerPostgresCleanupTopics:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="POSTGRES_CLEANUP_TOPICS_CONNECTION_ERROR",
+                error_code=EnumPostgresErrorCode.CONNECTION_ERROR,
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -245,7 +249,7 @@ class HandlerPostgresCleanupTopics:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="POSTGRES_CLEANUP_TOPICS_UNKNOWN_ERROR",
+                error_code=EnumPostgresErrorCode.UNKNOWN_ERROR,
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,

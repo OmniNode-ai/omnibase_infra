@@ -45,7 +45,11 @@ from uuid import UUID
 
 import yaml
 
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumPostgresErrorCode,
+)
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -233,7 +237,7 @@ class HandlerPostgresContractUpsert:
                 return ModelBackendResult(
                     success=False,
                     error="postgres operation failed: no result returned",
-                    error_code="POSTGRES_UPSERT_ERROR",
+                    error_code=EnumPostgresErrorCode.UPSERT_ERROR,
                     duration_ms=duration_ms,
                     backend_id="postgres",
                     correlation_id=correlation_id,
@@ -255,7 +259,7 @@ class HandlerPostgresContractUpsert:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="POSTGRES_TIMEOUT_ERROR",
+                error_code=EnumPostgresErrorCode.TIMEOUT_ERROR,
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -277,7 +281,7 @@ class HandlerPostgresContractUpsert:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="POSTGRES_AUTH_ERROR",
+                error_code=EnumPostgresErrorCode.AUTH_ERROR,
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -299,7 +303,7 @@ class HandlerPostgresContractUpsert:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="POSTGRES_CONNECTION_ERROR",
+                error_code=EnumPostgresErrorCode.CONNECTION_ERROR,
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -321,7 +325,7 @@ class HandlerPostgresContractUpsert:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="POSTGRES_UPSERT_ERROR",
+                error_code=EnumPostgresErrorCode.UPSERT_ERROR,
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -348,7 +352,7 @@ class HandlerPostgresContractUpsert:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="POSTGRES_UNKNOWN_ERROR",
+                error_code=EnumPostgresErrorCode.UNKNOWN_ERROR,
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,

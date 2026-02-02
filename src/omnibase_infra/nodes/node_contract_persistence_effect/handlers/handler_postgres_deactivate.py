@@ -43,7 +43,11 @@ from uuid import UUID
 
 import asyncpg
 
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumPostgresErrorCode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +201,7 @@ class HandlerPostgresDeactivate:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="POSTGRES_DEACTIVATE_TIMEOUT_ERROR",
+                error_code=EnumPostgresErrorCode.TIMEOUT_ERROR,
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -210,7 +214,7 @@ class HandlerPostgresDeactivate:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="POSTGRES_DEACTIVATE_AUTH_ERROR",
+                error_code=EnumPostgresErrorCode.AUTH_ERROR,
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -223,7 +227,7 @@ class HandlerPostgresDeactivate:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="POSTGRES_DEACTIVATE_CONNECTION_ERROR",
+                error_code=EnumPostgresErrorCode.CONNECTION_ERROR,
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,
@@ -239,7 +243,7 @@ class HandlerPostgresDeactivate:
             return ModelBackendResult(
                 success=False,
                 error=sanitized_error,
-                error_code="POSTGRES_DEACTIVATE_UNKNOWN_ERROR",
+                error_code=EnumPostgresErrorCode.UNKNOWN_ERROR,
                 duration_ms=duration_ms,
                 backend_id="postgres",
                 correlation_id=correlation_id,

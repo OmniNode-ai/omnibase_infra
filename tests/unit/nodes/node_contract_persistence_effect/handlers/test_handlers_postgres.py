@@ -30,6 +30,7 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.enums import EnumPostgresErrorCode
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
@@ -248,7 +249,7 @@ class TestHandlerPostgresContractUpsertSuccess:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_UPSERT_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.UPSERT_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -273,7 +274,7 @@ class TestHandlerPostgresContractUpsertErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_TIMEOUT_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.TIMEOUT_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
         assert result.duration_ms >= 0
@@ -295,7 +296,7 @@ class TestHandlerPostgresContractUpsertErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_CONNECTION_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.CONNECTION_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -316,7 +317,7 @@ class TestHandlerPostgresContractUpsertErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_AUTH_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.AUTH_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -337,7 +338,7 @@ class TestHandlerPostgresContractUpsertErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_UNKNOWN_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.UNKNOWN_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -393,7 +394,7 @@ class TestHandlerPostgresTopicUpdateSuccess:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_TOPIC_UPDATE_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.TOPIC_UPDATE_ERROR
         assert result.backend_id == "postgres"
 
 
@@ -417,7 +418,7 @@ class TestHandlerPostgresTopicUpdateErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_TIMEOUT_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.TIMEOUT_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -438,7 +439,7 @@ class TestHandlerPostgresTopicUpdateErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_CONNECTION_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.CONNECTION_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -459,7 +460,7 @@ class TestHandlerPostgresTopicUpdateErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_AUTH_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.AUTH_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -480,7 +481,7 @@ class TestHandlerPostgresTopicUpdateErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_UNKNOWN_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.UNKNOWN_ERROR
         assert result.backend_id == "postgres"
 
 
@@ -551,7 +552,7 @@ class TestHandlerPostgresMarkStaleErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "MARK_STALE_TIMEOUT_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.TIMEOUT_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -571,7 +572,7 @@ class TestHandlerPostgresMarkStaleErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "MARK_STALE_CONNECTION_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.CONNECTION_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -591,7 +592,7 @@ class TestHandlerPostgresMarkStaleErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "MARK_STALE_AUTH_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.AUTH_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -611,7 +612,7 @@ class TestHandlerPostgresMarkStaleErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "MARK_STALE_UNKNOWN_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.UNKNOWN_ERROR
         assert result.backend_id == "postgres"
 
 
@@ -682,7 +683,7 @@ class TestHandlerPostgresHeartbeatErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "HEARTBEAT_TIMEOUT_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.TIMEOUT_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -702,7 +703,7 @@ class TestHandlerPostgresHeartbeatErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "HEARTBEAT_CONNECTION_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.CONNECTION_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -722,7 +723,7 @@ class TestHandlerPostgresHeartbeatErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "HEARTBEAT_AUTH_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.AUTH_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -742,7 +743,7 @@ class TestHandlerPostgresHeartbeatErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "HEARTBEAT_UNKNOWN_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.UNKNOWN_ERROR
         assert result.backend_id == "postgres"
 
 
@@ -818,7 +819,7 @@ class TestHandlerPostgresDeactivateErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_DEACTIVATE_TIMEOUT_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.TIMEOUT_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -839,7 +840,7 @@ class TestHandlerPostgresDeactivateErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_DEACTIVATE_CONNECTION_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.CONNECTION_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -860,7 +861,7 @@ class TestHandlerPostgresDeactivateErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_DEACTIVATE_AUTH_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.AUTH_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -881,7 +882,7 @@ class TestHandlerPostgresDeactivateErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_DEACTIVATE_UNKNOWN_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.UNKNOWN_ERROR
         assert result.backend_id == "postgres"
 
 
@@ -955,7 +956,7 @@ class TestHandlerPostgresCleanupTopicsErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_CLEANUP_TOPICS_TIMEOUT_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.TIMEOUT_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -976,7 +977,7 @@ class TestHandlerPostgresCleanupTopicsErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_CLEANUP_TOPICS_CONNECTION_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.CONNECTION_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -997,7 +998,7 @@ class TestHandlerPostgresCleanupTopicsErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_CLEANUP_TOPICS_AUTH_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.AUTH_ERROR
         assert result.backend_id == "postgres"
         assert result.correlation_id == correlation_id
 
@@ -1018,7 +1019,7 @@ class TestHandlerPostgresCleanupTopicsErrors:
 
         # Assert
         assert result.success is False
-        assert result.error_code == "POSTGRES_CLEANUP_TOPICS_UNKNOWN_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.UNKNOWN_ERROR
         assert result.backend_id == "postgres"
 
 

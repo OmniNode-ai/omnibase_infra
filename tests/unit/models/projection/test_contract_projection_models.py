@@ -21,6 +21,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from omnibase_infra.enums import EnumPostgresErrorCode
 from omnibase_infra.models.projection.model_contract_projection import (
     ModelContractProjection,
 )
@@ -596,7 +597,7 @@ class TestModelPersistenceResultFailure:
         result = ModelPersistenceResult(
             success=False,
             error="Connection refused to database",
-            error_code="DB_CONNECTION_ERROR",
+            error_code=EnumPostgresErrorCode.CONNECTION_ERROR,
             duration_ms=1.5,
             correlation_id=correlation_id,
             rows_affected=0,
@@ -604,7 +605,7 @@ class TestModelPersistenceResultFailure:
 
         assert result.success is False
         assert result.error == "Connection refused to database"
-        assert result.error_code == "DB_CONNECTION_ERROR"
+        assert result.error_code == EnumPostgresErrorCode.CONNECTION_ERROR
         assert result.duration_ms == 1.5
         assert result.correlation_id == correlation_id
         assert result.rows_affected == 0

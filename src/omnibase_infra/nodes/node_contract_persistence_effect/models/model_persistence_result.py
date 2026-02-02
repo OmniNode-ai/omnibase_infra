@@ -13,6 +13,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums import EnumPostgresErrorCode
+
 
 class ModelPersistenceResult(BaseModel):
     """Result of a contract persistence operation.
@@ -20,7 +22,8 @@ class ModelPersistenceResult(BaseModel):
     Attributes:
         success: Whether the operation succeeded.
         error: Error message if operation failed (sanitized).
-        error_code: Programmatic error code for automated handling.
+        error_code: Typed error code for programmatic handling. Uses
+            EnumPostgresErrorCode for strong typing and validation.
         duration_ms: Operation duration in milliseconds.
         correlation_id: Correlation ID for distributed tracing.
         rows_affected: Number of database rows affected.
@@ -31,7 +34,10 @@ class ModelPersistenceResult(BaseModel):
 
     success: bool = Field(..., description="Whether the operation succeeded.")
     error: str | None = Field(default=None, description="Sanitized error message.")
-    error_code: str | None = Field(default=None, description="Programmatic error code.")
+    error_code: EnumPostgresErrorCode | None = Field(
+        default=None,
+        description="Typed error code for programmatic handling.",
+    )
     duration_ms: float = Field(default=0.0, description="Operation duration in ms.")
     correlation_id: UUID | None = Field(
         default=None, description="Correlation ID for tracing."
