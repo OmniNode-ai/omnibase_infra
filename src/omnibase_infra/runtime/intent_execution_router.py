@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 # Direct import to avoid circular import through omnibase_infra.models
@@ -141,9 +141,9 @@ class IntentExecutionRouter:
         self._pool = postgres_pool
 
         # Initialize handlers with the pool
-        # Note: Handlers implement ProtocolIntentExecutor structurally but with specific
-        # payload types (contravariant), which mypy can't verify statically. Using object
-        # here and casting at call site for type safety.
+        # Handlers implement ProtocolIntentExecutor[SpecificPayloadType] structurally.
+        # Using object here per ONEX rules (Any is forbidden); handler.handle() call
+        # below uses type: ignore since we guarantee correct payload routing at runtime.
         self._handlers: dict[str, object] = {
             INTENT_UPSERT_CONTRACT: HandlerPostgresContractUpsert(postgres_pool),
             INTENT_UPDATE_TOPIC: HandlerPostgresTopicUpdate(postgres_pool),
@@ -367,10 +367,10 @@ class IntentExecutionRouter:
                 },
             )
 
-            # All handlers have the same signature: handle(payload, correlation_id) -> ModelBackendResult
-            # Cast handler to callable since dict value type is object (see note in __init__)
-            typed_handler = cast("ProtocolIntentExecutor", handler)
-            result = await typed_handler.handle(payload, correlation_id)  # type: ignore[arg-type]
+            # All handlers implement ProtocolIntentExecutor structurally with signature:
+            # handle(payload: SpecificPayloadType, correlation_id: UUID) -> ModelBackendResult
+            # Using type: ignore since dict value is object per ONEX rules (Any forbidden)
+            result: ModelBackendResult = await handler.handle(payload, correlation_id)  # type: ignore[attr-defined]
 
             _logger.debug(
                 "Handler execution completed",

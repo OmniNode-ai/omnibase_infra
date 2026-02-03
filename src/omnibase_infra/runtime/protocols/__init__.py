@@ -29,6 +29,7 @@ from omnibase_core.protocols.notifications import (
 )
 from omnibase_infra.runtime.protocols.protocol_intent_executor import (
     IntentPayloadType,
+    PayloadT_contra,
     ProtocolIntentExecutor,
 )
 from omnibase_infra.runtime.protocols.protocol_runtime_scheduler import (
@@ -37,6 +38,7 @@ from omnibase_infra.runtime.protocols.protocol_runtime_scheduler import (
 
 __all__: list[str] = [
     "IntentPayloadType",
+    "PayloadT_contra",
     "ProtocolIntentExecutor",
     "ProtocolRuntimeScheduler",
     "ProtocolTransitionNotificationPublisher",

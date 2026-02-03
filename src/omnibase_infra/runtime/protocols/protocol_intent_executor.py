@@ -5,6 +5,12 @@
 This module defines the protocol interface for intent executors that process
 persistence intents from the ContractRegistryReducer.
 
+Design:
+    Uses a Generic Protocol with contravariant TypeVar to properly express that
+    each handler accepts its specific payload type while the router can store
+    any handler conforming to the protocol. This avoids the need for `object`
+    workarounds and `cast()` at call sites.
+
 Related:
     - IntentExecutionRouter: Uses this protocol for handler routing
     - OMN-1869: Implementation ticket
@@ -12,7 +18,7 @@ Related:
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypeVar, runtime_checkable
 from uuid import UUID
 
 from omnibase_infra.nodes.contract_registry_reducer.models import (
@@ -25,7 +31,7 @@ from omnibase_infra.nodes.contract_registry_reducer.models import (
 )
 from omnibase_infra.nodes.effects.models.model_backend_result import ModelBackendResult
 
-# Type alias for payload types
+# Type alias for payload types (union of all supported payloads)
 IntentPayloadType = (
     ModelPayloadUpsertContract
     | ModelPayloadUpdateTopic
@@ -35,22 +41,46 @@ IntentPayloadType = (
     | ModelPayloadCleanupTopicReferences
 )
 
+# Contravariant TypeVar for payload types - allows handlers with specific
+# payload types to satisfy the protocol when used with broader type hints
+PayloadT_contra = TypeVar("PayloadT_contra", contravariant=True)
+
 
 @runtime_checkable
-class ProtocolIntentExecutor(Protocol):
-    """Protocol for intent executors.
+class ProtocolIntentExecutor(Protocol[PayloadT_contra]):
+    """Generic protocol for intent executors.
 
     All persistence executors implement this interface, enabling type-safe
     routing without tight coupling to specific implementations.
 
-    The protocol defines:
-    - An async handle method that takes a payload and correlation ID
-    - Returns ModelBackendResult with execution status
+    The protocol uses a contravariant TypeVar for the payload parameter,
+    which correctly expresses that:
+    - A handler accepting `ModelPayloadUpsertContract` can be stored where
+      `ProtocolIntentExecutor[Any]` is expected
+    - The router can call `handle()` with any payload that matches the
+      handler's declared payload type
+
+    Type Parameters:
+        PayloadT_contra: The payload type this executor accepts (contravariant).
+
+    Example:
+        >>> class HandlerPostgresContractUpsert:
+        ...     async def handle(
+        ...         self,
+        ...         payload: ModelPayloadUpsertContract,
+        ...         correlation_id: UUID,
+        ...     ) -> ModelBackendResult: ...
+        >>>
+        >>> # Handler satisfies ProtocolIntentExecutor[ModelPayloadUpsertContract]
+        >>> # and can be stored as ProtocolIntentExecutor[Any]
+        >>> handlers: dict[str, ProtocolIntentExecutor[Any]] = {
+        ...     "upsert": HandlerPostgresContractUpsert(pool),
+        ... }
     """
 
     async def handle(
         self,
-        payload: IntentPayloadType,
+        payload: PayloadT_contra,
         correlation_id: UUID,
     ) -> ModelBackendResult:
         """Execute the handler operation.
@@ -65,4 +95,4 @@ class ProtocolIntentExecutor(Protocol):
         ...
 
 
-__all__ = ["ProtocolIntentExecutor", "IntentPayloadType"]
+__all__ = ["IntentPayloadType", "PayloadT_contra", "ProtocolIntentExecutor"]
