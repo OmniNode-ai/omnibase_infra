@@ -68,12 +68,12 @@ class ModelContractView(BaseModel):
         default=None,
         description="Timestamp when contract was deregistered (None if active)",
     )
-    topics_published: list[str] = Field(
-        default_factory=list,
+    topics_published: tuple[str, ...] = Field(
+        default_factory=tuple,
         description="List of topic suffixes this contract publishes to",
     )
-    topics_subscribed: list[str] = Field(
-        default_factory=list,
+    topics_subscribed: tuple[str, ...] = Field(
+        default_factory=tuple,
         description="List of topic suffixes this contract subscribes to",
     )
 

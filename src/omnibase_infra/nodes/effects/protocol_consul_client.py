@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from omnibase_infra.nodes.effects.models import ModelBackendResult
+from omnibase_infra.models import ModelBackendResult
 
 
 @runtime_checkable

@@ -9,9 +9,10 @@ handlers are extracted for testability and separation of concerns.
 Architecture:
     HandlerPostgresCleanupTopics is responsible for:
     - Removing contract_id from topics.contract_ids JSONB arrays
-    - Timing operation duration for observability
-    - Sanitizing error messages before inclusion in results
     - Returning structured ModelBackendResult
+
+    Timing, error classification, and sanitization are delegated to
+    MixinPostgresOpExecutor to eliminate boilerplate drift across handlers.
 
     This handler removes a contract_id from the contract_ids JSONB array in
     all topics that reference it. Topic rows are NOT deleted even when the
@@ -36,34 +37,29 @@ Related:
     - NodeContractPersistenceEffect: Parent effect node that coordinates handlers
     - ModelPayloadCleanupTopicReferences: Input payload model
     - ModelBackendResult: Structured result model for backend operations
+    - MixinPostgresOpExecutor: Shared execution core for timing/error handling
     - OMN-1845: Implementation ticket
-    - OMN-1653: ContractRegistryReducer ticket
+    - OMN-1857: Executor extraction ticket
     - OMN-1709: Topic orphan handling documentation
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 import asyncpg
-
-logger = logging.getLogger(__name__)
 
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumPostgresErrorCode,
 )
-from omnibase_infra.errors import (
-    InfraAuthenticationError,
-    InfraConnectionError,
-    InfraTimeoutError,
-)
-from omnibase_infra.nodes.effects.models.model_backend_result import ModelBackendResult
-from omnibase_infra.utils import sanitize_error_message
+from omnibase_infra.mixins.mixin_postgres_op_executor import MixinPostgresOpExecutor
+from omnibase_infra.models.model_backend_result import ModelBackendResult
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from omnibase_infra.nodes.contract_registry_reducer.models import (
@@ -88,13 +84,15 @@ WHERE contract_ids ? $1
 """
 
 
-class HandlerPostgresCleanupTopics:
+class HandlerPostgresCleanupTopics(MixinPostgresOpExecutor):
     """Handler for removing contract references from topics.
 
     Encapsulates all PostgreSQL-specific topic cleanup logic extracted from
-    NodeContractPersistenceEffect for declarative node compliance. The handler
-    provides a clean interface for removing contract_id from all topic
-    contract_ids arrays with proper timing and error sanitization.
+    NodeContractPersistenceEffect for declarative node compliance.
+
+    Timing, error classification, and sanitization are handled by the
+    MixinPostgresOpExecutor base class, reducing boilerplate and ensuring
+    consistent error handling across all PostgreSQL handlers.
 
     Important: Topic rows are NOT deleted even when contract_ids becomes empty.
     This is intentional per OMN-1709 - orphaned topics are preserved for
@@ -114,6 +112,7 @@ class HandlerPostgresCleanupTopics:
     See Also:
         - NodeContractPersistenceEffect: Parent node that uses this handler
         - ModelPayloadCleanupTopicReferences: Input payload model
+        - MixinPostgresOpExecutor: Shared execution mechanics
     """
 
     def __init__(self, pool: asyncpg.Pool) -> None:
@@ -141,12 +140,6 @@ class HandlerPostgresCleanupTopics:
     ) -> ModelBackendResult:
         """Remove contract_id from all topic contract_ids arrays.
 
-        Performs the cleanup operation against PostgreSQL with:
-        - Operation timing via time.perf_counter()
-        - Parameterized query execution
-        - Error sanitization for security
-        - Structured result construction
-
         The cleanup removes the contract_id from all topics.contract_ids
         JSONB arrays. Topic rows are preserved even if contract_ids becomes
         empty (per OMN-1709 topic orphan handling).
@@ -166,108 +159,59 @@ class HandlerPostgresCleanupTopics:
                 - correlation_id: Passed through for tracing
 
         Note:
-            This handler never raises exceptions. All errors are caught,
-            sanitized, and returned in ModelBackendResult.
-
             If no topics contain the contract_id, success=True is still
             returned. This follows the idempotency principle - cleaning up
             references for a contract that has no topic associations is
             not an error.
         """
-        start_time = time.perf_counter()
+        return await self._execute_postgres_op(
+            op_error_code=EnumPostgresErrorCode.CLEANUP_ERROR,
+            correlation_id=correlation_id,
+            log_context={
+                "contract_id": payload.contract_id,
+            },
+            fn=lambda: self._execute_cleanup(payload, correlation_id),
+        )
 
-        try:
-            async with self._pool.acquire() as conn:
-                # Execute the update and get the number of affected rows
-                result = await conn.execute(
-                    SQL_CLEANUP_TOPIC_REFERENCES,
-                    payload.contract_id,
-                )
+    async def _execute_cleanup(
+        self,
+        payload: ModelPayloadCleanupTopicReferences,
+        correlation_id: UUID,
+    ) -> None:
+        """Execute the topic cleanup UPDATE query.
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
+        Args:
+            payload: Cleanup payload with contract_id.
+            correlation_id: Correlation ID for logging.
 
-            # Parse the result to get affected row count
-            # asyncpg execute returns a string like "UPDATE N"
-            topics_updated = 0
-            if result and result.startswith("UPDATE "):
-                try:
-                    topics_updated = int(result.split(" ")[1])
-                except (ValueError, IndexError):
-                    pass  # Keep default of 0 if parsing fails
-
-            # Log for observability
-            logger.info(
-                "Topic cleanup operation completed",
-                extra={
-                    "correlation_id": str(correlation_id),
-                    "contract_id": payload.contract_id,
-                    "topics_updated": topics_updated,
-                    "duration_ms": duration_ms,
-                },
+        Raises:
+            Any exception from asyncpg (handled by MixinPostgresOpExecutor).
+        """
+        async with self._pool.acquire() as conn:
+            # Execute the update and get the number of affected rows
+            result = await conn.execute(
+                SQL_CLEANUP_TOPIC_REFERENCES,
+                payload.contract_id,
             )
 
-            return ModelBackendResult(
-                success=True,
-                error=None,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
+        # Parse the result to get affected row count
+        # asyncpg execute returns a string like "UPDATE N"
+        topics_updated = 0
+        if result and result.startswith("UPDATE "):
+            try:
+                topics_updated = int(result.split(" ")[1])
+            except (ValueError, IndexError):
+                pass  # Keep default of 0 if parsing fails
 
-        except (TimeoutError, InfraTimeoutError) as e:
-            # Timeout during cleanup - retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.TIMEOUT_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
-
-        except InfraAuthenticationError as e:
-            # Authentication failure - non-retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.AUTH_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
-
-        except InfraConnectionError as e:
-            # Connection failure - retriable error
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.CONNECTION_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
-
-        except (
-            Exception
-        ) as e:  # ONEX: catch-all - database adapter may raise unexpected exceptions
-            # beyond typed infrastructure errors (e.g., asyncpg errors, encoding errors,
-            # connection pool errors). Required to sanitize errors and prevent credential exposure.
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            sanitized_error = sanitize_error_message(e)
-            return ModelBackendResult(
-                success=False,
-                error=sanitized_error,
-                error_code=EnumPostgresErrorCode.UNKNOWN_ERROR,
-                duration_ms=duration_ms,
-                backend_id="postgres",
-                correlation_id=correlation_id,
-            )
+        # Log for observability
+        logger.info(
+            "Topic cleanup operation completed",
+            extra={
+                "correlation_id": str(correlation_id),
+                "contract_id": payload.contract_id,
+                "topics_updated": topics_updated,
+            },
+        )
 
 
 __all__: list[str] = ["HandlerPostgresCleanupTopics"]

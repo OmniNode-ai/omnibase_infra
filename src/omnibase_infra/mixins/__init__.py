@@ -7,6 +7,7 @@ Reusable mixin classes providing:
 - Infrastructure error integration
 - Correlation ID propagation
 - Configurable behavior
+- PostgreSQL error response building for effect persistence
 
 Exports (in __all__):
     Mixins:
@@ -14,7 +15,12 @@ Exports (in __all__):
         - MixinDictLikeAccessors: Dictionary-style access helpers
         - MixinEnvelopeExtraction: Event envelope extraction utilities
         - MixinNodeIntrospection: Node capability introspection
+        - MixinPostgresErrorResponse: PostgreSQL exception handling for persistence
+        - MixinPostgresOpExecutor: PostgreSQL operation execution with error handling
         - MixinRetryExecution: Retry logic with exponential backoff
+
+    Dataclasses:
+        - PostgresErrorContext: Context for PostgreSQL error handling
 
     Protocols (co-located with their tightly-coupled mixins):
         - ProtocolCircuitBreakerAware: Interface for circuit breaker capability.
@@ -48,6 +54,11 @@ from omnibase_infra.mixins.mixin_async_circuit_breaker import MixinAsyncCircuitB
 from omnibase_infra.mixins.mixin_dict_like_accessors import MixinDictLikeAccessors
 from omnibase_infra.mixins.mixin_envelope_extraction import MixinEnvelopeExtraction
 from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
+from omnibase_infra.mixins.mixin_postgres_error_response import (
+    MixinPostgresErrorResponse,
+    PostgresErrorContext,
+)
+from omnibase_infra.mixins.mixin_postgres_op_executor import MixinPostgresOpExecutor
 from omnibase_infra.mixins.mixin_retry_execution import MixinRetryExecution
 from omnibase_infra.mixins.protocol_circuit_breaker_aware import (
     ProtocolCircuitBreakerAware,
@@ -63,6 +74,9 @@ __all__: list[str] = [
     "MixinDictLikeAccessors",
     "MixinEnvelopeExtraction",
     "MixinNodeIntrospection",
+    "MixinPostgresErrorResponse",
+    "MixinPostgresOpExecutor",
+    "PostgresErrorContext",
     "MixinRetryExecution",
     "ModelCircuitBreakerConfig",
     "ModelRetryErrorClassification",

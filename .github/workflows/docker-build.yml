@@ -182,6 +182,7 @@ jobs:
       - name: Run Docker integration tests
         env:
           DOCKER_BUILDKIT: "1"
+          ONEX_EVENT_BUS_TYPE: inmemory
         run: |
           poetry run pytest tests/integration/docker/ \
             --timeout=600 \

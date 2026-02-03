@@ -81,6 +81,10 @@ from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.nodes.contract_registry_reducer.contract_registration_event_router import (
+    ContractRegistrationEventRouter,
+    ProtocolIntentEffect,
+)
 from omnibase_infra.nodes.contract_registry_reducer.reducer import (
     ContractRegistryReducer,
 )
@@ -89,9 +93,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
 )
 from omnibase_infra.nodes.node_registration_orchestrator.introspection_event_router import (
     IntrospectionEventRouter,
-)
-from omnibase_infra.runtime.contract_registration_event_router import (
-    ContractRegistrationEventRouter,
 )
 from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 
@@ -472,7 +473,11 @@ async def bootstrap() -> int:
     health_server: ServiceHealth | None = None
     postgres_pool: asyncpg.Pool | None = None
     introspection_unsubscribe: Callable[[], Awaitable[None]] | None = None
-    contract_registration_unsubscribes: list[Callable[[], Awaitable[None]]] = []
+    # Contract registry unsubscribe functions and router
+    contract_router: ContractRegistrationEventRouter | None = None
+    contract_unsub_registered: Callable[[], Awaitable[None]] | None = None
+    contract_unsub_deregistered: Callable[[], Awaitable[None]] | None = None
+    contract_unsub_heartbeat: Callable[[], Awaitable[None]] | None = None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 
@@ -508,6 +513,7 @@ async def bootstrap() -> int:
 
         # 3. Create event bus
         # Dispatch based on configuration or environment variable:
+        # - ONEX_EVENT_BUS_TYPE env var overrides config.event_bus.type
         # - If KAFKA_BOOTSTRAP_SERVERS env var is set, use EventBusKafka
         # - If config.event_bus.type == "kafka", use EventBusKafka
         # - Otherwise, use EventBusInmemory for local development/testing
@@ -515,12 +521,54 @@ async def bootstrap() -> int:
         environment = os.getenv("ONEX_ENVIRONMENT") or config.event_bus.environment
         kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
 
-        # Explicit bool evaluation (not truthy string) for kafka usage.
-        # KAFKA_BOOTSTRAP_SERVERS env var takes precedence over config.event_bus.type.
-        # This prevents implicit "kafka but localhost" fallback scenarios.
-        use_kafka: bool = (
-            bool(kafka_bootstrap_servers) or config.event_bus.type == "kafka"
-        )
+        # Check for ONEX_EVENT_BUS_TYPE environment variable override
+        # This allows CI/testing environments to force inmemory event bus
+        # even when the config file defaults to kafka.
+        event_bus_type_override = os.getenv("ONEX_EVENT_BUS_TYPE", "").lower()
+        if event_bus_type_override:
+            logger.debug(
+                "Event bus type override from ONEX_EVENT_BUS_TYPE=%s (correlation_id=%s)",
+                event_bus_type_override,
+                correlation_id,
+            )
+
+        # Determine effective event bus type with override precedence:
+        # 1. ONEX_EVENT_BUS_TYPE env var (highest priority)
+        # 2. KAFKA_BOOTSTRAP_SERVERS env var (if set, implies kafka)
+        # 3. config.event_bus.type (from runtime_config.yaml)
+        if event_bus_type_override == "inmemory":
+            # Explicit inmemory override - use inmemory regardless of other config
+            use_kafka = False
+            logger.info(
+                "Using inmemory event bus (ONEX_EVENT_BUS_TYPE override) (correlation_id=%s)",
+                correlation_id,
+            )
+        elif event_bus_type_override == "kafka":
+            # Explicit kafka override - validate that bootstrap_servers is available
+            use_kafka = True
+        elif event_bus_type_override and event_bus_type_override not in (
+            "inmemory",
+            "kafka",
+        ):
+            # Invalid override value - warn and fall back to config
+            logger.warning(
+                "Invalid ONEX_EVENT_BUS_TYPE value '%s', expected 'inmemory' or 'kafka'. "
+                "Falling back to config.event_bus.type='%s' (correlation_id=%s)",
+                event_bus_type_override,
+                config.event_bus.type,
+                correlation_id,
+            )
+            use_kafka = (
+                bool(kafka_bootstrap_servers) or config.event_bus.type == "kafka"
+            )
+        else:
+            # No override - use original logic
+            # Explicit bool evaluation (not truthy string) for kafka usage.
+            # KAFKA_BOOTSTRAP_SERVERS env var takes precedence over config.event_bus.type.
+            # This prevents implicit "kafka but localhost" fallback scenarios.
+            use_kafka = (
+                bool(kafka_bootstrap_servers) or config.event_bus.type == "kafka"
+            )
 
         # Validate bootstrap_servers is provided when kafka is requested via config
         # This prevents confusing implicit localhost:9092 fallback
@@ -981,6 +1029,81 @@ async def bootstrap() -> int:
                         },
                     )
 
+                # 4.9. Wire ContractRegistrationEventRouter if contract_registry.enabled
+                # This router subscribes to contract lifecycle events (registration,
+                # deregistration, heartbeat) and routes them to the ContractRegistryReducer.
+                # The router also runs an internal tick timer for staleness computation.
+                if config.contract_registry.enabled and postgres_pool is not None:
+                    # Import postgres handlers for contract persistence
+                    # Deferred import to avoid loading heavy dependencies when not needed
+                    from omnibase_infra.nodes.node_contract_persistence_effect.handlers import (
+                        HandlerPostgresCleanupTopics,
+                        HandlerPostgresContractUpsert,
+                        HandlerPostgresDeactivate,
+                        HandlerPostgresHeartbeat,
+                        HandlerPostgresMarkStale,
+                        HandlerPostgresTopicUpdate,
+                    )
+
+                    # Create effect handlers keyed by intent_type
+                    # These handlers execute PostgreSQL operations for intents from the reducer
+                    # Note: Handlers implement ProtocolIntentEffect duck-typing style with
+                    # more specific payload types. Cast tells mypy they satisfy the protocol.
+                    contract_effect_handlers: dict[str, ProtocolIntentEffect] = {
+                        "postgres.upsert_contract": cast(
+                            "ProtocolIntentEffect",
+                            HandlerPostgresContractUpsert(postgres_pool),
+                        ),
+                        "postgres.update_topic": cast(
+                            "ProtocolIntentEffect",
+                            HandlerPostgresTopicUpdate(postgres_pool),
+                        ),
+                        "postgres.mark_stale": cast(
+                            "ProtocolIntentEffect",
+                            HandlerPostgresMarkStale(postgres_pool),
+                        ),
+                        "postgres.update_heartbeat": cast(
+                            "ProtocolIntentEffect",
+                            HandlerPostgresHeartbeat(postgres_pool),
+                        ),
+                        "postgres.deactivate_contract": cast(
+                            "ProtocolIntentEffect",
+                            HandlerPostgresDeactivate(postgres_pool),
+                        ),
+                        "postgres.cleanup_topic_references": cast(
+                            "ProtocolIntentEffect",
+                            HandlerPostgresCleanupTopics(postgres_pool),
+                        ),
+                    }
+
+                    # Create reducer and router
+                    contract_reducer = ContractRegistryReducer()
+                    contract_router = ContractRegistrationEventRouter(
+                        container=container,
+                        reducer=contract_reducer,
+                        effect_handlers=contract_effect_handlers,
+                        event_bus=event_bus,
+                        tick_interval_seconds=config.contract_registry.tick_interval_seconds,
+                    )
+
+                    logger.info(
+                        "ContractRegistrationEventRouter created (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "tick_interval_seconds": config.contract_registry.tick_interval_seconds,
+                            "handler_count": len(contract_effect_handlers),
+                        },
+                    )
+                else:
+                    logger.debug(
+                        "Contract registry disabled or no postgres_pool (correlation_id=%s)",
+                        correlation_id,
+                        extra={
+                            "contract_registry_enabled": config.contract_registry.enabled,
+                            "postgres_pool_available": postgres_pool is not None,
+                        },
+                    )
+
             except Exception as pool_error:
                 # Log warning but continue without registration support
                 # Use sanitize_error_message to prevent credential leakage in logs
@@ -1348,129 +1471,83 @@ async def bootstrap() -> int:
                 },
             )
 
-        # 9.6. Start contract registration event consumer if postgres_pool is available
-        # This consumer subscribes to contract lifecycle topics and routes events
-        # through ContractRegistryReducer for state management, then executes
-        # resulting intents via IntentExecutionRouter for PostgreSQL persistence.
-        #
-        # Topics consumed:
-        # - {env}.onex.evt.platform.contract-registered.v1
-        # - {env}.onex.evt.platform.contract-deregistered.v1
-        # - {env}.onex.evt.platform.node-heartbeat.v1
-        #
-        # The consumer follows the same pattern as the introspection consumer,
-        # using ModelNodeIdentity for proper consumer group naming.
-        #
-        # Requires config.name for node identity (same requirement as introspection).
-        if postgres_pool is not None and has_subscribe and config.name:
-            contract_registration_start_time = time.time()
-            logger.info(
-                "Setting up contract registration event consumer (correlation_id=%s)",
-                correlation_id,
+        # 9.6. Start contract registry event consumer if router is available
+        # This consumer subscribes to 3 Kafka topics for contract lifecycle events
+        # and routes them to the ContractRegistryReducer for projection.
+        if contract_router is not None and has_subscribe:
+            # Create typed node identity for contract registry subscriptions
+            contract_node_identity = ModelNodeIdentity(
+                env=environment,
+                service=config.name or "onex-kernel",
+                node_name="contract-registry",
+                version=config.contract_version or "v1",
             )
 
-            try:
-                # Create the reducer (stateless, processes events and emits intents)
-                contract_registry_reducer = ContractRegistryReducer()
+            # Subscribe to 3 contract lifecycle topics with same identity
+            contract_subscribe_start_time = time.time()
 
-                # Create the intent execution router (executes intents against PostgreSQL)
-                # Lazy import to avoid circular import (depends on nodes.effects)
-                from omnibase_infra.runtime.intent_execution_router import (
-                    IntentExecutionRouter,
-                )
+            # Derive environment-aware topic names (avoid hardcoded "dev." prefix)
+            contract_registered_topic = (
+                f"{environment}.onex.evt.platform.contract-registered.v1"
+            )
+            contract_deregistered_topic = (
+                f"{environment}.onex.evt.platform.contract-deregistered.v1"
+            )
+            node_heartbeat_topic = f"{environment}.onex.evt.platform.node-heartbeat.v1"
 
-                intent_execution_router = IntentExecutionRouter(
-                    container=container,
-                    postgres_pool=postgres_pool,
-                )
-
-                # Create the event router that wraps reducer and intent execution
-                contract_registration_event_router = ContractRegistrationEventRouter(
-                    container=container,
-                    reducer=contract_registry_reducer,
-                    event_bus=event_bus,
-                    output_topic=config.output_topic,
-                )
-
-                # Create the callback binding the routers
-                # Uses module-level _handle_contract_registration_message for testability
-                contract_registration_callback = partial(
-                    _handle_contract_registration_message,
-                    event_router=contract_registration_event_router,
-                    intent_router=intent_execution_router,
-                )
-
-                # Create node identity for contract registration subscription
-                # Uses the same base identity as introspection with different purpose
-                contract_registration_node_identity = ModelNodeIdentity(
-                    env=environment,
-                    service=config.name,
-                    node_name=config.name,
-                    version=config.contract_version or "v1",
-                )
-
-                # Define the contract registration topics based on environment
-                contract_registration_topics = [
-                    f"{environment}.onex.evt.platform.contract-registered.v1",
-                    f"{environment}.onex.evt.platform.contract-deregistered.v1",
-                    f"{environment}.onex.evt.platform.node-heartbeat.v1",
-                ]
-
-                # Subscribe to each topic
-                for topic in contract_registration_topics:
-                    logger.debug(
-                        "Subscribing to contract registration topic: %s (correlation_id=%s)",
-                        topic,
-                        correlation_id,
-                    )
-                    unsubscribe_fn = await event_bus.subscribe(
-                        topic=topic,
-                        node_identity=contract_registration_node_identity,
-                        on_message=contract_registration_callback,
-                        purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRATION,
-                    )
-                    contract_registration_unsubscribes.append(unsubscribe_fn)
-
-                contract_registration_duration = (
-                    time.time() - contract_registration_start_time
-                )
-                logger.info(
-                    "Contract registration event consumer started successfully in %.3fs "
-                    "(correlation_id=%s)",
-                    contract_registration_duration,
-                    correlation_id,
-                    extra={
-                        "topics": contract_registration_topics,
-                        "topic_count": len(contract_registration_topics),
-                        "node_identity": {
-                            "env": contract_registration_node_identity.env,
-                            "service": contract_registration_node_identity.service,
-                            "node_name": contract_registration_node_identity.node_name,
-                            "version": contract_registration_node_identity.version,
-                        },
-                        "purpose": EnumConsumerGroupPurpose.CONTRACT_REGISTRATION.value,
-                        "subscribe_duration_seconds": contract_registration_duration,
-                        "event_bus_type": event_bus_type,
+            logger.info(
+                "Subscribing to contract registry events on event bus (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "topics": [
+                        contract_registered_topic,
+                        contract_deregistered_topic,
+                        node_heartbeat_topic,
+                    ],
+                    "node_identity": {
+                        "env": contract_node_identity.env,
+                        "service": contract_node_identity.service,
+                        "node_name": contract_node_identity.node_name,
+                        "version": contract_node_identity.version,
                     },
-                )
+                    "purpose": EnumConsumerGroupPurpose.CONTRACT_REGISTRY.value,
+                },
+            )
 
-            except Exception as contract_reg_error:
-                # Log warning but continue - contract registration is not critical for startup
-                logger.warning(
-                    "Failed to start contract registration consumer: %s (correlation_id=%s)",
-                    sanitize_error_message(contract_reg_error),
-                    correlation_id,
-                    extra={
-                        "error_type": type(contract_reg_error).__name__,
-                    },
-                )
-                # Clean up any partial subscriptions
-                for unsub in contract_registration_unsubscribes:
-                    try:
-                        await unsub()
-                    except Exception:
-                        pass  # Best effort cleanup
-                contract_registration_unsubscribes.clear()
+            contract_unsub_registered = await event_bus.subscribe(
+                topic=contract_registered_topic,
+                node_identity=contract_node_identity,
+                on_message=contract_router.handle_message,
+                purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
+            )
+            contract_unsub_deregistered = await event_bus.subscribe(
+                topic=contract_deregistered_topic,
+                node_identity=contract_node_identity,
+                on_message=contract_router.handle_message,
+                purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
+            )
+            contract_unsub_heartbeat = await event_bus.subscribe(
+                topic=node_heartbeat_topic,
+                node_identity=contract_node_identity,
+                on_message=contract_router.handle_message,
+                purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
+            )
+
+            # Start the router's tick timer
+            await contract_router.start()
+
+            contract_subscribe_duration = time.time() - contract_subscribe_start_time
+            logger.info(
+                "Contract registry event consumers started successfully in %.3fs (correlation_id=%s)",
+                contract_subscribe_duration,
+                correlation_id,
+                extra={
+                    "topics_count": 3,
+                    "tick_interval_seconds": contract_router.tick_interval_seconds,
+                    "subscribe_duration_seconds": contract_subscribe_duration,
+                    "event_bus_type": event_bus_type,
+                },
+            )
 
         # Calculate total bootstrap time
         bootstrap_duration = time.time() - bootstrap_start_time
@@ -1484,13 +1561,13 @@ async def bootstrap() -> int:
         else:
             registration_status = "disabled"
 
-        # Contract registration status
-        if contract_registration_unsubscribes:
-            contract_reg_status = (
-                f"enabled ({len(contract_registration_unsubscribes)} topics)"
+        # Contract registry status for banner
+        if contract_router is not None:
+            contract_registry_status = (
+                f"enabled (tick: {config.contract_registry.tick_interval_seconds}s)"
             )
         else:
-            contract_reg_status = "disabled"
+            contract_registry_status = "disabled"
 
         banner_lines = [
             "=" * 60,
@@ -1500,7 +1577,7 @@ async def bootstrap() -> int:
             f"Event Bus: {event_bus_type} (group: {config.consumer_group})",
             f"Topics: {config.input_topic} -> {config.output_topic}",
             f"Registration: {registration_status}",
-            f"Contract Registry: {contract_reg_status}",
+            f"Contract Registry: {contract_registry_status}",
             f"Health endpoint: http://0.0.0.0:{http_port}/health",
             f"Bootstrap time: {bootstrap_duration:.3f}s",
             f"Correlation ID: {correlation_id}",
@@ -1551,27 +1628,46 @@ async def bootstrap() -> int:
                 )
             introspection_unsubscribe = None
 
-        # Stop contract registration consumers (fast)
-        if contract_registration_unsubscribes:
-            logger.debug(
-                "Stopping %d contract registration consumer(s) (correlation_id=%s)",
-                len(contract_registration_unsubscribes),
-                correlation_id,
-            )
-            for unsub in contract_registration_unsubscribes:
+        # Stop contract registry router and consumers
+        if contract_router is not None:
+            try:
+                await contract_router.stop()
+                logger.debug(
+                    "Contract registry router stopped (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception as router_stop_error:
+                logger.warning(
+                    "Failed to stop contract registry router: %s (correlation_id=%s)",
+                    sanitize_error_message(router_stop_error),
+                    correlation_id,
+                )
+            contract_router = None
+
+        # Unsubscribe from contract registry topics
+        for unsub_name, unsub_func in [
+            ("contract-registered", contract_unsub_registered),
+            ("contract-deregistered", contract_unsub_deregistered),
+            ("node-heartbeat", contract_unsub_heartbeat),
+        ]:
+            if unsub_func is not None:
                 try:
-                    await unsub()
-                except Exception as consumer_stop_error:
-                    logger.warning(
-                        "Failed to stop contract registration consumer: %s (correlation_id=%s)",
-                        sanitize_error_message(consumer_stop_error),
+                    await unsub_func()
+                    logger.debug(
+                        "Contract registry consumer %s stopped (correlation_id=%s)",
+                        unsub_name,
                         correlation_id,
                     )
-            contract_registration_unsubscribes.clear()
-            logger.debug(
-                "Contract registration consumers stopped (correlation_id=%s)",
-                correlation_id,
-            )
+                except Exception as unsub_error:
+                    logger.warning(
+                        "Failed to stop contract registry consumer %s: %s (correlation_id=%s)",
+                        unsub_name,
+                        sanitize_error_message(unsub_error),
+                        correlation_id,
+                    )
+        contract_unsub_registered = None
+        contract_unsub_deregistered = None
+        contract_unsub_heartbeat = None
 
         # Stop health server (fast, non-blocking)
         if health_server is not None:
@@ -1698,7 +1794,7 @@ async def bootstrap() -> int:
 
     finally:
         # Guard cleanup - stop all resources if not already stopped
-        # Order: introspection consumer -> contract registration consumers -> health server -> runtime -> pool
+        # Order: introspection consumer -> contract registry -> health server -> runtime -> pool
 
         if introspection_unsubscribe is not None:
             try:
@@ -1710,13 +1806,28 @@ async def bootstrap() -> int:
                     correlation_id,
                 )
 
-        if contract_registration_unsubscribes:
-            for unsub in contract_registration_unsubscribes:
+        # Cleanup contract registry router and consumers
+        if contract_router is not None:
+            try:
+                await contract_router.stop()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Failed to stop contract registry router during cleanup: %s (correlation_id=%s)",
+                    sanitize_error_message(cleanup_error),
+                    correlation_id,
+                )
+
+        for unsub_func in [
+            contract_unsub_registered,
+            contract_unsub_deregistered,
+            contract_unsub_heartbeat,
+        ]:
+            if unsub_func is not None:
                 try:
-                    await unsub()
+                    await unsub_func()
                 except Exception as cleanup_error:
                     logger.warning(
-                        "Failed to stop contract registration consumer during cleanup: %s (correlation_id=%s)",
+                        "Failed to stop contract registry consumer during cleanup: %s (correlation_id=%s)",
                         sanitize_error_message(cleanup_error),
                         correlation_id,
                     )

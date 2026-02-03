@@ -16,6 +16,9 @@ env:
   POETRY_VERSION: "2.2.1"
   PYTHON_VERSION: "3.12"
   CACHE_VERSION: "0.4.0"
+  # Force inmemory event bus for CI tests (no Kafka infrastructure available)
+  # This overrides the default "kafka" in contracts/runtime/runtime_config.yaml
+  ONEX_EVENT_BUS_TYPE: "inmemory"
 
 jobs:
   # =============================================================================

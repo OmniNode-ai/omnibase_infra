@@ -11,6 +11,7 @@ Consumer Group Purpose Categories:
     - REPLAY: Reprocess historical data from earliest offset
     - AUDIT: Compliance and read-only consumption
     - BACKFILL: One-shot bounded consumers for populating derived state
+    - CONTRACT_REGISTRY: Contract lifecycle events (registration, deregistration, heartbeat)
 
 The purpose determines consumer group naming conventions and default
 offset reset policies in the Kafka adapter layer.
@@ -63,6 +64,11 @@ class EnumConsumerGroupPurpose(str, Enum):
             - Naming: {base_group_id}-backfill
             - Pattern: Bounded consumption until caught up
 
+        CONTRACT_REGISTRY: Contract lifecycle events processing.
+            - Default offset reset: latest
+            - Naming: {base_group_id}-contract-registry
+            - Pattern: Continuous consumption of registration, deregistration, heartbeat events
+
     Example:
         >>> purpose = EnumConsumerGroupPurpose.REPLAY
         >>> f"order-processor-{purpose.value}"
@@ -84,8 +90,8 @@ class EnumConsumerGroupPurpose(str, Enum):
     BACKFILL = "backfill"
     """One-shot bounded consumers for populating derived state."""
 
-    CONTRACT_REGISTRATION = "contract-registration"
-    """Contract registration event processing for the contract registry."""
+    CONTRACT_REGISTRY = "contract-registry"
+    """Contract lifecycle events (registration, deregistration, heartbeat)."""
 
     def __str__(self) -> str:
         """Return the string value for serialization."""

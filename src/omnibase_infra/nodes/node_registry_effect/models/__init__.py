@@ -21,9 +21,9 @@ Related:
 
 from __future__ import annotations
 
-# Re-export shared effect models for convenience
+# Re-export shared models for convenience
+from omnibase_infra.models import ModelBackendResult
 from omnibase_infra.nodes.effects.models import (
-    ModelBackendResult,
     ModelEffectIdempotencyConfig,
     ModelRegistryRequest,
     ModelRegistryResponse,

@@ -383,6 +383,9 @@ class TestComputeConsumerGroupIdPurposes:
         result_backfill = compute_consumer_group_id(
             identity, EnumConsumerGroupPurpose.BACKFILL
         )
+        result_contract_registry = compute_consumer_group_id(
+            identity, EnumConsumerGroupPurpose.CONTRACT_REGISTRY
+        )
 
         # All should be distinct
         all_results = [
@@ -391,8 +394,9 @@ class TestComputeConsumerGroupIdPurposes:
             result_replay,
             result_audit,
             result_backfill,
+            result_contract_registry,
         ]
-        assert len(set(all_results)) == 5, (
+        assert len(set(all_results)) == 6, (
             "All purposes should produce unique group IDs"
         )
 
@@ -796,7 +800,7 @@ class TestEnumConsumerGroupPurpose:
         assert EnumConsumerGroupPurpose.REPLAY is not None
         assert EnumConsumerGroupPurpose.AUDIT is not None
         assert EnumConsumerGroupPurpose.BACKFILL is not None
-        assert EnumConsumerGroupPurpose.CONTRACT_REGISTRATION is not None
+        assert EnumConsumerGroupPurpose.CONTRACT_REGISTRY is not None
 
     def test_values_are_lowercase(self) -> None:
         """Test that all enum values are lowercase strings."""
@@ -812,10 +816,7 @@ class TestEnumConsumerGroupPurpose:
         assert EnumConsumerGroupPurpose.REPLAY.value == "replay"
         assert EnumConsumerGroupPurpose.AUDIT.value == "audit"
         assert EnumConsumerGroupPurpose.BACKFILL.value == "backfill"
-        assert (
-            EnumConsumerGroupPurpose.CONTRACT_REGISTRATION.value
-            == "contract-registration"
-        )
+        assert EnumConsumerGroupPurpose.CONTRACT_REGISTRY.value == "contract-registry"
 
     def test_string_conversion_via_str(self) -> None:
         """Test that __str__ returns the value."""
@@ -824,10 +825,7 @@ class TestEnumConsumerGroupPurpose:
         assert str(EnumConsumerGroupPurpose.REPLAY) == "replay"
         assert str(EnumConsumerGroupPurpose.AUDIT) == "audit"
         assert str(EnumConsumerGroupPurpose.BACKFILL) == "backfill"
-        assert (
-            str(EnumConsumerGroupPurpose.CONTRACT_REGISTRATION)
-            == "contract-registration"
-        )
+        assert str(EnumConsumerGroupPurpose.CONTRACT_REGISTRY) == "contract-registry"
 
     def test_string_conversion_in_format_string(self) -> None:
         """Test enum works correctly in format strings."""
@@ -867,7 +865,7 @@ class TestEnumConsumerGroupPurpose:
         assert len(values) == 6
         assert EnumConsumerGroupPurpose.CONSUME in values
         assert EnumConsumerGroupPurpose.INTROSPECTION in values
-        assert EnumConsumerGroupPurpose.CONTRACT_REGISTRATION in values
+        assert EnumConsumerGroupPurpose.CONTRACT_REGISTRY in values
 
 
 class TestPurposeDifferentiationVerification:
@@ -876,8 +874,8 @@ class TestPurposeDifferentiationVerification:
     This test class provides explicit proof that:
     1. Same identity with different purposes produces different group IDs
     2. The derivation from ModelNodeIdentity is deterministic
-    3. All purpose values (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL,
-       CONTRACT_REGISTRATION) produce unique group IDs for the same identity
+    3. All purpose values (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL, CONTRACT_REGISTRY)
+       produce unique group IDs for the same identity
     4. The purpose component appears correctly in the derived ID
 
     .. versionadded:: 0.2.6
@@ -921,9 +919,8 @@ class TestPurposeDifferentiationVerification:
     ) -> None:
         """Prove: All 6 purpose values produce unique group IDs for same identity.
 
-        Each purpose (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL,
-        CONTRACT_REGISTRATION) must produce a distinct consumer group ID to
-        prevent offset conflicts.
+        Each purpose (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL, CONTRACT_REGISTRY)
+        must produce a distinct consumer group ID to prevent offset conflicts.
         """
         # Compute group ID for each purpose
         purpose_to_id: dict[EnumConsumerGroupPurpose, str] = {
@@ -1049,7 +1046,7 @@ class TestPurposeDifferentiationVerification:
             EnumConsumerGroupPurpose.REPLAY: "replay",
             EnumConsumerGroupPurpose.AUDIT: "audit",
             EnumConsumerGroupPurpose.BACKFILL: "backfill",
-            EnumConsumerGroupPurpose.CONTRACT_REGISTRATION: "contract-registration",
+            EnumConsumerGroupPurpose.CONTRACT_REGISTRY: "contract-registry",
         }
 
         for purpose, expected_string in expected_values.items():

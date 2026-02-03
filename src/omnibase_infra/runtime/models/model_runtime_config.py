@@ -47,6 +47,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.runtime.models.model_contract_registry_config import (
+    ModelContractRegistryConfig,
+)
 from omnibase_infra.runtime.models.model_enabled_protocols_config import (
     ModelEnabledProtocolsConfig,
 )
@@ -72,6 +75,7 @@ class ModelRuntimeConfig(BaseModel):
         protocols: Enabled protocols configuration [RESERVED]
         logging: Logging configuration [RESERVED]
         shutdown: Shutdown configuration [ACTIVE - grace_period_seconds used]
+        contract_registry: Contract registry configuration [ACTIVE]
 
     Field Status Legend:
         [ACTIVE]   - Currently used by kernel.py
@@ -144,6 +148,10 @@ class ModelRuntimeConfig(BaseModel):
     shutdown: ModelShutdownConfig = Field(
         default_factory=ModelShutdownConfig,
         description="Shutdown configuration",
+    )
+    contract_registry: ModelContractRegistryConfig = Field(
+        default_factory=ModelContractRegistryConfig,
+        description="Contract registry configuration",
     )
 
 
