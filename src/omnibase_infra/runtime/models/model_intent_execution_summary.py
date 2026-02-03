@@ -12,15 +12,16 @@ Related:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-if TYPE_CHECKING:
-    from omnibase_infra.nodes.effects.models.model_backend_result import (
-        ModelBackendResult,
-    )
+# Direct import (not TYPE_CHECKING) because Pydantic v2 needs the class at runtime
+# for forward reference resolution. This module doesn't create a circular import
+# because model_backend_result.py doesn't import from runtime.models.
+from omnibase_infra.nodes.effects.models.model_backend_result import (
+    ModelBackendResult,
+)
 
 
 class ModelIntentExecutionSummary(BaseModel):
@@ -74,20 +75,5 @@ class ModelIntentExecutionSummary(BaseModel):
         """Check if all intents failed."""
         return self.successful_count == 0 and self.total_intents > 0
 
-
-# Rebuild model to resolve forward reference to ModelBackendResult.
-# This deferred import avoids circular import during omnibase_infra package init.
-def _rebuild_model() -> None:
-    """Rebuild model with forward references resolved."""
-    from omnibase_infra.nodes.effects.models.model_backend_result import (
-        ModelBackendResult,
-    )
-
-    ModelIntentExecutionSummary.model_rebuild(
-        _types_namespace={"ModelBackendResult": ModelBackendResult}
-    )
-
-
-_rebuild_model()
 
 __all__ = ["ModelIntentExecutionSummary"]
