@@ -40,20 +40,29 @@ description: "Configuration for ONEX runtime kernel"
 input_topic: "dev.onex.evt.node-introspection.v1"
 output_topic: "dev.onex.evt.registration-completed.v1"
 group_id: "onex-runtime-e2e"
-# Event bus configuration
+# Event bus configuration [ACTIVE - used by ServiceKernel]
+# The kernel uses this configuration to wire the event bus via the registry.
 event_bus:
-  # [RESERVED] type is not currently used - kernel always creates InMemoryEventBus
-  # Future: Will be used to select Kafka or other event bus implementations
-  type: "inmemory" # inmemory | kafka
-  # [ACTIVE] environment is used by InMemoryEventBus constructor
+  # [ACTIVE] type selects the event bus implementation
+  # - "kafka": Production event bus using Redpanda/Kafka (default)
+  # - "inmemory": In-memory event bus for testing/development
+  type: "kafka"
+  # [ACTIVE] environment is used by event bus constructor
   # Can be overridden by ONEX_ENVIRONMENT env var
   environment: "local"
-  # [RESERVED] max_history is not currently used
-  # Future: Will configure event history buffer size
+  # [ACTIVE] max_history configures event history buffer size (inmemory only)
   max_history: 1000
-  # [RESERVED] circuit_breaker_threshold is not currently used
-  # Future: Will configure fault tolerance behavior
+  # [ACTIVE] circuit_breaker_threshold configures fault tolerance behavior
   circuit_breaker_threshold: 5
+# Contract registry configuration [ACTIVE - used by ServiceKernel]
+# The contract registry manages contract staleness checks and persistence.
+contract_registry:
+  # [ACTIVE] enabled controls whether the contract registry is active
+  # When true, the kernel wires contract persistence and staleness checking
+  enabled: true
+  # [ACTIVE] tick_interval_seconds controls periodic staleness check frequency
+  # The registry will check for stale contracts at this interval (in seconds)
+  tick_interval_seconds: 60
 # Handler configuration [RESERVED - not currently used]
 # Future: Will be used for dynamic protocol loading and configuration
 handlers:
