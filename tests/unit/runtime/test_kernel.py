@@ -427,6 +427,8 @@ class TestBootstrap:
         """Test that bootstrap creates EventBusKafka when KAFKA_BOOTSTRAP_SERVERS is set."""
         monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
         monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+        # Clear any CI override that forces inmemory event bus
+        monkeypatch.delenv("ONEX_EVENT_BUS_TYPE", raising=False)
 
         with (
             patch(
@@ -475,6 +477,8 @@ class TestBootstrap:
         """
         # Clear KAFKA_BOOTSTRAP_SERVERS to ensure it's not set
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+        # Clear any CI override that would force inmemory event bus
+        monkeypatch.delenv("ONEX_EVENT_BUS_TYPE", raising=False)
         monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
         monkeypatch.setenv("ONEX_CONTRACTS_DIR", str(tmp_path))
 
