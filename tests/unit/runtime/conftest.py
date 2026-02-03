@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from omnibase_infra.runtime.models import ModelEventBusConfig, ModelRuntimeConfig
 from omnibase_infra.runtime.registry import RegistryProtocolBinding
 
 # Re-export handler seeding utilities from root conftest
@@ -85,3 +86,33 @@ def mock_wire_infrastructure() -> Generator[MagicMock, None, None]:
             mock_container.service_registry = mock_service_registry
             mock_container_cls.return_value = mock_container
             yield mock_wire
+
+
+@pytest.fixture
+def mock_inmemory_runtime_config() -> Generator[MagicMock, None, None]:
+    """Mock load_runtime_config to return a config with inmemory event bus.
+
+    This fixture is needed because the default runtime_config.yaml has
+    event_bus.type='kafka', which requires KAFKA_BOOTSTRAP_SERVERS env var.
+    For unit tests that don't test Kafka specifically, we mock the config
+    to use inmemory event bus.
+
+    Yields:
+        MagicMock for the patched load_runtime_config function.
+    """
+    mock_config = ModelRuntimeConfig(
+        name="test-runtime",
+        input_topic="test-input",
+        output_topic="test-output",
+        consumer_group="test-group",
+        event_bus=ModelEventBusConfig(
+            type="inmemory",
+            environment="test",
+        ),
+    )
+
+    with patch(
+        "omnibase_infra.runtime.service_kernel.load_runtime_config",
+        return_value=mock_config,
+    ) as mock_load:
+        yield mock_load

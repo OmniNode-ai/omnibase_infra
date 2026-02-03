@@ -320,6 +320,7 @@ class TestBootstrap:
     async def test_bootstrap_starts_and_stops_runtime(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -352,6 +353,7 @@ class TestBootstrap:
     async def test_bootstrap_returns_error_on_unexpected_exception(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -402,8 +404,26 @@ class TestBootstrap:
         """Test that bootstrap creates event bus with correct environment."""
         monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
         # Ensure EventBusInmemory is used by unsetting KAFKA_BOOTSTRAP_SERVERS
+        # and setting event_bus.type to inmemory (default config now uses kafka)
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
-        with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
+
+        # Mock config to use inmemory event bus
+        mock_config = MagicMock()
+        mock_config.name = "test-runtime"
+        mock_config.input_topic = "test-input"
+        mock_config.output_topic = "test-output"
+        mock_config.group_id = "test-group"
+        mock_config.event_bus = MagicMock()
+        mock_config.event_bus.type = "inmemory"  # Force inmemory for this test
+        mock_config.event_bus.environment = "test-env"
+
+        with (
+            patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event,
+            patch(
+                "omnibase_infra.runtime.service_kernel.load_runtime_config",
+                return_value=mock_config,
+            ),
+        ):
             event_instance = MagicMock()
             event_instance.wait = AsyncMock(return_value=None)
             mock_event.return_value = event_instance
@@ -535,6 +555,7 @@ shutdown:
     async def test_bootstrap_handles_windows_signal_setup(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -683,6 +704,7 @@ shutdown:
     async def test_bootstrap_passes_container_to_service_health(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -714,6 +736,7 @@ shutdown:
     async def test_bootstrap_passes_all_required_args_to_service_health(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -1020,6 +1043,7 @@ class TestHttpPortValidation:
     async def test_bootstrap_rejects_port_zero(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -1055,6 +1079,7 @@ class TestHttpPortValidation:
     async def test_bootstrap_rejects_port_above_max(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -1090,6 +1115,7 @@ class TestHttpPortValidation:
     async def test_bootstrap_accepts_min_port(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -1114,6 +1140,7 @@ class TestHttpPortValidation:
     async def test_bootstrap_accepts_max_port(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -1138,6 +1165,7 @@ class TestHttpPortValidation:
     async def test_bootstrap_rejects_negative_port(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -1173,6 +1201,7 @@ class TestHttpPortValidation:
     async def test_bootstrap_rejects_very_large_port(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -1199,6 +1228,7 @@ class TestHttpPortValidation:
     async def test_bootstrap_rejects_non_numeric_port(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -1245,6 +1275,7 @@ class TestHttpPortValidation:
     async def test_bootstrap_rejects_non_numeric_port_edge_cases(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,

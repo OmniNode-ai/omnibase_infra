@@ -105,6 +105,9 @@ from omnibase_infra.runtime.models.model_health_check_response import (
 from omnibase_infra.runtime.models.model_health_check_result import (
     ModelHealthCheckResult,
 )
+from omnibase_infra.runtime.models.model_intent_execution_summary import (
+    ModelIntentExecutionSummary,
+)
 from omnibase_infra.runtime.models.model_lifecycle_result import (
     ModelLifecycleResult,
 )
@@ -190,6 +193,7 @@ __all__: list[str] = [
     "ModelFailedComponent",
     "ModelHealthCheckResponse",
     "ModelHealthCheckResult",
+    "ModelIntentExecutionSummary",
     "ModelLifecycleResult",
     "ModelLoggingConfig",
     "ModelOptionalCorrelationId",

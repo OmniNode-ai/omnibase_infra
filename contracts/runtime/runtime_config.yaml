@@ -42,17 +42,18 @@ output_topic: "dev.onex.evt.registration-completed.v1"
 group_id: "onex-runtime-e2e"
 # Event bus configuration
 event_bus:
-  # [RESERVED] type is not currently used - kernel always creates InMemoryEventBus
-  # Future: Will be used to select Kafka or other event bus implementations
-  type: "inmemory" # inmemory | kafka
-  # [ACTIVE] environment is used by InMemoryEventBus constructor
+  # [ACTIVE] type selects the event bus implementation
+  # Options: "inmemory" (local dev/testing) | "kafka" (production)
+  # Note: If KAFKA_BOOTSTRAP_SERVERS env var is set, Kafka is used regardless of this value
+  type: "kafka"
+  # [ACTIVE] environment is used for topic prefixing and consumer group naming
   # Can be overridden by ONEX_ENVIRONMENT env var
   environment: "local"
   # [RESERVED] max_history is not currently used
   # Future: Will configure event history buffer size
   max_history: 1000
-  # [RESERVED] circuit_breaker_threshold is not currently used
-  # Future: Will configure fault tolerance behavior
+  # [ACTIVE] circuit_breaker_threshold configures Kafka fault tolerance
+  # Number of failures before circuit breaker opens
   circuit_breaker_threshold: 5
 # Handler configuration [RESERVED - not currently used]
 # Future: Will be used for dynamic protocol loading and configuration

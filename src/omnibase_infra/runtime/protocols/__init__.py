@@ -27,11 +27,17 @@ from __future__ import annotations
 from omnibase_core.protocols.notifications import (
     ProtocolTransitionNotificationPublisher,
 )
+from omnibase_infra.runtime.protocols.protocol_intent_executor import (
+    IntentPayloadType,
+    ProtocolIntentExecutor,
+)
 from omnibase_infra.runtime.protocols.protocol_runtime_scheduler import (
     ProtocolRuntimeScheduler,
 )
 
 __all__: list[str] = [
+    "IntentPayloadType",
+    "ProtocolIntentExecutor",
     "ProtocolRuntimeScheduler",
     "ProtocolTransitionNotificationPublisher",
 ]
