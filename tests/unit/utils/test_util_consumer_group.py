@@ -383,6 +383,9 @@ class TestComputeConsumerGroupIdPurposes:
         result_backfill = compute_consumer_group_id(
             identity, EnumConsumerGroupPurpose.BACKFILL
         )
+        result_contract_registry = compute_consumer_group_id(
+            identity, EnumConsumerGroupPurpose.CONTRACT_REGISTRY
+        )
 
         # All should be distinct
         all_results = [
@@ -391,8 +394,9 @@ class TestComputeConsumerGroupIdPurposes:
             result_replay,
             result_audit,
             result_backfill,
+            result_contract_registry,
         ]
-        assert len(set(all_results)) == 5, (
+        assert len(set(all_results)) == 6, (
             "All purposes should produce unique group IDs"
         )
 
@@ -780,7 +784,7 @@ class TestEnumConsumerGroupPurpose:
     """Tests for EnumConsumerGroupPurpose enum.
 
     Verifies:
-    - All 5 values exist
+    - All 6 values exist
     - String conversion works
     - Values are lowercase
     """
@@ -868,7 +872,7 @@ class TestPurposeDifferentiationVerification:
     This test class provides explicit proof that:
     1. Same identity with different purposes produces different group IDs
     2. The derivation from ModelNodeIdentity is deterministic
-    3. All purpose values (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL)
+    3. All purpose values (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL, CONTRACT_REGISTRY)
        produce unique group IDs for the same identity
     4. The purpose component appears correctly in the derived ID
 
@@ -1040,6 +1044,7 @@ class TestPurposeDifferentiationVerification:
             EnumConsumerGroupPurpose.REPLAY: "replay",
             EnumConsumerGroupPurpose.AUDIT: "audit",
             EnumConsumerGroupPurpose.BACKFILL: "backfill",
+            EnumConsumerGroupPurpose.CONTRACT_REGISTRY: "contract-registry",
         }
 
         for purpose, expected_string in expected_values.items():
