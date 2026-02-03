@@ -35,13 +35,6 @@ from contextlib import asynccontextmanager
 
 import pytest
 
-from omnibase_core.models.contracts import (
-    ModelDbOperation,
-    ModelDbParam,
-    ModelDbRepositoryContract,
-    ModelDbReturn,
-    ModelDbSafetyPolicy,
-)
 from omnibase_infra.errors.repository import (
     RepositoryContractError,
     RepositoryExecutionError,
@@ -49,6 +42,11 @@ from omnibase_infra.errors.repository import (
     RepositoryValidationError,
 )
 from omnibase_infra.runtime.db import (
+    ModelDbOperation,
+    ModelDbParam,
+    ModelDbRepositoryContract,
+    ModelDbReturn,
+    ModelDbSafetyPolicy,
     ModelRepositoryRuntimeConfig,
     PostgresRepositoryRuntime,
 )

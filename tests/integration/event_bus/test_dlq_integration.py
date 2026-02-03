@@ -34,7 +34,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models import ModelNodeIdentity
 
 from .conftest import wait_for_consumer_ready
 
@@ -89,9 +91,14 @@ def unique_dlq_topic() -> str:
 
 
 @pytest.fixture
-def unique_group() -> str:
-    """Generate unique consumer group for test isolation."""
-    return f"test-dlq-group-{uuid.uuid4().hex[:8]}"
+def unique_group() -> ModelNodeIdentity:
+    """Generate unique node identity for test isolation."""
+    return ModelNodeIdentity(
+        env="dlq-integration-test",
+        service="test-service",
+        node_name=f"test-node-{uuid.uuid4().hex[:8]}",
+        version="1.0.0",
+    )
 
 
 @pytest.fixture
@@ -112,7 +119,6 @@ async def kafka_event_bus_with_dlq(
     config = ModelKafkaEventBusConfig(
         bootstrap_servers=kafka_bootstrap_servers,
         environment="dlq-integration-test",
-        group="test-dlq-default",
         timeout_seconds=TEST_TIMEOUT_SECONDS,
         max_retry_attempts=2,  # Low retry count for faster testing
         retry_backoff_base=0.1,  # Fast backoff for testing
@@ -328,7 +334,7 @@ class TestDlqPublishing:
         started_dlq_bus: EventBusKafka,
         created_unique_topic: str,
         created_unique_dlq_topic: str,
-        unique_group: str,
+        unique_group: ModelNodeIdentity,
     ) -> None:
         """Verify messages are published to DLQ after handler failure with exhausted retries.
 
@@ -360,10 +366,15 @@ class TestDlqPublishing:
         )
 
         # Subscribe to DLQ topic to capture messages
-        dlq_group = f"dlq-collector-{uuid.uuid4().hex[:8]}"
+        dlq_identity = ModelNodeIdentity(
+            env="dlq-integration-test",
+            service="dlq-collector",
+            node_name=f"dlq-node-{uuid.uuid4().hex[:8]}",
+            version="1.0.0",
+        )
         unsubscribe_dlq = await started_dlq_bus.subscribe(
             created_unique_dlq_topic,
-            dlq_group,
+            dlq_identity,
             dlq_collector,
         )
 
@@ -436,7 +447,7 @@ class TestDlqMessageFormat:
         started_dlq_bus: EventBusKafka,
         created_unique_topic: str,
         created_unique_dlq_topic: str,
-        unique_group: str,
+        unique_group: ModelNodeIdentity,
     ) -> None:
         """Verify DLQ messages contain complete original message context.
 
@@ -463,8 +474,14 @@ class TestDlqMessageFormat:
         unsub_source = await started_dlq_bus.subscribe(
             created_unique_topic, unique_group, failing_handler
         )
+        dlq_fmt_identity = ModelNodeIdentity(
+            env="dlq-integration-test",
+            service="dlq-fmt-collector",
+            node_name=f"dlq-fmt-node-{uuid.uuid4().hex[:6]}",
+            version="1.0.0",
+        )
         unsub_dlq = await started_dlq_bus.subscribe(
-            created_unique_dlq_topic, f"dlq-fmt-{uuid.uuid4().hex[:6]}", dlq_collector
+            created_unique_dlq_topic, dlq_fmt_identity, dlq_collector
         )
 
         # Wait for consumers to be ready (uses polling with exponential backoff)
@@ -536,7 +553,7 @@ class TestDlqCallbacks:
         self,
         started_dlq_bus: EventBusKafka,
         created_unique_topic: str,
-        unique_group: str,
+        unique_group: ModelNodeIdentity,
     ) -> None:
         """Verify DLQ callbacks are invoked when messages are published to DLQ."""
         callback_events: list[ModelDlqEvent] = []
@@ -694,6 +711,7 @@ class TestDlqMetrics:
             failed_message=failed_message,
             error=error,
             correlation_id=correlation_id,
+            consumer_group="test-dlq-metrics-group",
         )
 
         # Verify metrics were incremented (PR #90 feedback: strict assertions)
@@ -725,7 +743,7 @@ class TestDlqMetrics:
         self,
         started_dlq_bus: EventBusKafka,
         created_unique_topic: str,
-        unique_group: str,
+        unique_group: ModelNodeIdentity,
     ) -> None:
         """Verify DLQ metrics are incremented in full consumer flow.
 

@@ -39,18 +39,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from omnibase_core.models.contracts import (
-    ModelDbOperation,
-    ModelDbParam,
-    ModelDbRepositoryContract,
-    ModelDbReturn,
-    ModelDbSafetyPolicy,
-)
 from omnibase_infra.errors.repository import (
     RepositoryContractError,
     RepositoryValidationError,
 )
 from omnibase_infra.runtime.db import (
+    ModelDbOperation,
+    ModelDbParam,
+    ModelDbRepositoryContract,
+    ModelDbReturn,
+    ModelDbSafetyPolicy,
     ModelRepositoryRuntimeConfig,
     PostgresRepositoryRuntime,
 )
