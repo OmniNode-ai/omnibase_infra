@@ -25,7 +25,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from omnibase_infra.nodes.effects.models.model_backend_result import ModelBackendResult
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.runtime.intent_execution_router import (
     INTENT_CLEANUP_TOPIC_REFERENCES,
     INTENT_DEACTIVATE_CONTRACT,

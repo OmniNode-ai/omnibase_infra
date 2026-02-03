@@ -50,7 +50,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 # Direct import to avoid circular import through omnibase_infra.models
-from omnibase_infra.nodes.effects.models.model_backend_result import ModelBackendResult
+from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.nodes.node_contract_persistence_effect.handlers import (
     HandlerPostgresCleanupTopics,
     HandlerPostgresContractUpsert,

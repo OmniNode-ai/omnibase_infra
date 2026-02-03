@@ -25,6 +25,9 @@ if TYPE_CHECKING:
     # These imports are only needed for type annotations.
     # Using TYPE_CHECKING avoids circular import during package initialization
     # (runtime.protocols is loaded before nodes is loaded).
+    from omnibase_infra.models.model_backend_result import (
+        ModelBackendResult,
+    )
     from omnibase_infra.nodes.contract_registry_reducer.models import (
         ModelPayloadCleanupTopicReferences,
         ModelPayloadDeactivateContract,
@@ -32,9 +35,6 @@ if TYPE_CHECKING:
         ModelPayloadUpdateHeartbeat,
         ModelPayloadUpdateTopic,
         ModelPayloadUpsertContract,
-    )
-    from omnibase_infra.nodes.effects.models.model_backend_result import (
-        ModelBackendResult,
     )
 
     # Type alias for payload types (union of all supported payloads)

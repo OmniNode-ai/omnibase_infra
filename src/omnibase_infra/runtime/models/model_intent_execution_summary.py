@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # Direct import (not TYPE_CHECKING) because Pydantic v2 needs the class at runtime
 # for forward reference resolution. This module doesn't create a circular import
 # because model_backend_result.py doesn't import from runtime.models.
-from omnibase_infra.nodes.effects.models.model_backend_result import (
+from omnibase_infra.models.model_backend_result import (
     ModelBackendResult,
 )
 
