@@ -55,6 +55,7 @@ import signal
 import sys
 import time
 from collections.abc import Awaitable, Callable
+from functools import partial
 from importlib.metadata import version as get_package_version
 from pathlib import Path
 from typing import cast
@@ -75,6 +76,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.nodes.contract_registry_reducer.contract_registration_event_router import (
     ContractRegistrationEventRouter,
@@ -1532,7 +1534,7 @@ async def bootstrap() -> int:
             f"Environment: {environment}",
             f"Contracts: {contracts_dir}",
             f"Event Bus: {event_bus_type} (group: {config.consumer_group})",
-            f"Topics: {config.input_topic} → {config.output_topic}",
+            f"Topics: {config.input_topic} -> {config.output_topic}",
             f"Registration: {registration_status}",
             f"Contract Registry: {contract_registry_status}",
             f"Health endpoint: http://0.0.0.0:{http_port}/health",

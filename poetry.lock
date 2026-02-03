@@ -2796,14 +2796,14 @@ files = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.12.0"
+version = "0.13.1"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_core-0.12.0-py3-none-any.whl", hash = "sha256:091d911743b9f7676ffdd5026cb5df3360bca8dd948cc1c872816fc89c7c7347"},
-    {file = "omnibase_core-0.12.0.tar.gz", hash = "sha256:a4f5a4a03ae7daa9ff321d43c4fba1a68167b068c5170c1f8d712d28b7b027af"},
+    {file = "omnibase_core-0.13.1-py3-none-any.whl", hash = "sha256:afa4bd68e4895414b651fc5242cdb0755ee0d395ce4b2fec4736af3bbcd72acc"},
+    {file = "omnibase_core-0.13.1.tar.gz", hash = "sha256:23a39142b88b7abf4b3ffb1cfbece926a102a9852386df67c1923fe008165c01"},
 ]
 
 [package.dependencies]
@@ -3908,19 +3908,19 @@ setproctitle = ["setproctitle"]
 testing = ["filelock"]
 
 [[package]]
-name = "python-consul"
-version = "1.1.0"
+name = "python-consul2"
+version = "0.1.5"
 description = "Python client for Consul (http://www.consul.io/)"
 optional = false
 python-versions = "*"
 groups = ["main"]
 files = [
-    {file = "python-consul-1.1.0.tar.gz", hash = "sha256:168f1fa53948047effe4f14d53fc1dab50192e2a2cf7855703f126f469ea11f4"},
-    {file = "python_consul-1.1.0-py2.py3-none-any.whl", hash = "sha256:eeaaeeae87807ad1bc0d476ca3a9c53823ed5d514832951acebeca671eb54b20"},
+    {file = "python-consul2-0.1.5.tar.gz", hash = "sha256:29c859de73e17f36ab99be831fdc1d924f16e8772233277a28ef92b7b99995cd"},
+    {file = "python_consul2-0.1.5-py2.py3-none-any.whl", hash = "sha256:ff8c6642c5a8d5f13a072e90adbad44cde824fc46fb2ab76b40dd1c77d6c0c41"},
 ]
 
 [package.dependencies]
-requests = ">=2.0"
+requests = "*"
 six = ">=1.4"
 
 [package.extras]
@@ -5212,4 +5212,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "9a3e402b8527c23e474902367ffe51ad2eab3ab32d2350645c2cc710a12a8ccd"
+content-hash = "b8693ab8e15916abfcf703b561ede8d8a2ad14e3626bc3cb4f3d364d49a23b41"

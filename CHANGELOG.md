@@ -5,6 +5,18 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-02-02
+
+### Changed
+
+#### Dependencies
+- Update `omnibase-core` from `^0.12.0` to `^0.13.1`
+
+#### Database Repository Models Migration
+- Moved `ModelDbOperation`, `ModelDbParam`, `ModelDbRepositoryContract`, `ModelDbReturn`, `ModelDbSafetyPolicy` from `omnibase_core.models.contracts` to `omnibase_infra.runtime.db.models`
+- These infrastructure-specific models are now owned by omnibase_infra
+- Import path changed: `from omnibase_infra.runtime.db import ModelDbRepositoryContract, ...`
+
 ## [0.3.1] - 2026-02-02
 
 ### Fixed

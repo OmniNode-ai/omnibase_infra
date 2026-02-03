@@ -56,8 +56,10 @@ from __future__ import annotations
 
 from omnibase_infra.runtime.db.models import (
     ModelDbOperation,
+    ModelDbParam,
     ModelDbRepositoryContract,
     ModelDbReturn,
+    ModelDbSafetyPolicy,
     ModelRepositoryRuntimeConfig,
 )
 from omnibase_infra.runtime.db.postgres_repository_runtime import (
@@ -66,8 +68,10 @@ from omnibase_infra.runtime.db.postgres_repository_runtime import (
 
 __all__: list[str] = [
     "ModelDbOperation",
+    "ModelDbParam",
     "ModelDbRepositoryContract",
     "ModelDbReturn",
+    "ModelDbSafetyPolicy",
     "ModelRepositoryRuntimeConfig",
     "PostgresRepositoryRuntime",
 ]

@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from omnibase_infra.models import ModelNodeIdentity
+
 from .conftest import wait_for_consumer_ready
 
 if TYPE_CHECKING:
@@ -73,9 +75,14 @@ def unique_topic() -> str:
 
 
 @pytest.fixture
-def unique_group() -> str:
-    """Generate unique consumer group for test isolation."""
-    return f"test-group-{uuid.uuid4().hex[:8]}"
+def unique_group() -> ModelNodeIdentity:
+    """Generate unique node identity for test isolation."""
+    return ModelNodeIdentity(
+        env="kafka-integration-test",
+        service="test-service",
+        node_name=f"test-node-{uuid.uuid4().hex[:8]}",
+        version="1.0.0",
+    )
 
 
 @pytest.fixture
@@ -92,7 +99,6 @@ async def kafka_event_bus(
     config = ModelKafkaEventBusConfig(
         bootstrap_servers=kafka_bootstrap_servers,
         environment="integration-test",
-        group="test-default",
         timeout_seconds=TEST_TIMEOUT_SECONDS,
         max_retry_attempts=2,
         retry_backoff_base=0.5,
@@ -204,7 +210,7 @@ class TestKafkaEventBusE2E:
         self,
         started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
-        unique_group: str,
+        unique_group: ModelNodeIdentity,
     ) -> None:
         """Verify message can be published and received through Kafka.
 
@@ -281,8 +287,18 @@ class TestKafkaEventBusE2E:
             sub2_received.set()
 
         # Subscribe with different consumer groups
-        group1 = f"group1-{uuid.uuid4().hex[:8]}"
-        group2 = f"group2-{uuid.uuid4().hex[:8]}"
+        group1 = ModelNodeIdentity(
+            env="kafka-integration-test",
+            service="test-service",
+            node_name=f"group1-node-{uuid.uuid4().hex[:8]}",
+            version="1.0.0",
+        )
+        group2 = ModelNodeIdentity(
+            env="kafka-integration-test",
+            service="test-service",
+            node_name=f"group2-node-{uuid.uuid4().hex[:8]}",
+            version="1.0.0",
+        )
 
         unsubscribe1 = await started_kafka_bus.subscribe(
             created_unique_topic, group1, handler1
@@ -322,7 +338,7 @@ class TestKafkaEventBusE2E:
         self,
         started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
-        unique_group: str,
+        unique_group: ModelNodeIdentity,
     ) -> None:
         """Verify publish_envelope correctly serializes and publishes envelopes.
 
@@ -379,7 +395,7 @@ class TestKafkaEventBusE2E:
         self,
         started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
-        unique_group: str,
+        unique_group: ModelNodeIdentity,
     ) -> None:
         """Verify messages are received in order when using same partition key.
 
@@ -438,7 +454,7 @@ class TestKafkaEventBusE2E:
         self,
         started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
-        unique_group: str,
+        unique_group: ModelNodeIdentity,
     ) -> None:
         """Verify unsubscribe stops message delivery to handler."""
         received_messages: list[ModelEventMessage] = []
@@ -524,7 +540,6 @@ class TestKafkaEventBusResilience:
         config = ModelKafkaEventBusConfig(
             bootstrap_servers="invalid-host:9092",
             environment="test",
-            group="test",
             timeout_seconds=2,
             circuit_breaker_threshold=2,
             circuit_breaker_reset_timeout=60.0,
@@ -574,8 +589,18 @@ class TestKafkaEventBusResilience:
             good_received.append(msg)
             good_message_event.set()
 
-        group1 = f"fail-group-{uuid.uuid4().hex[:8]}"
-        group2 = f"good-group-{uuid.uuid4().hex[:8]}"
+        group1 = ModelNodeIdentity(
+            env="kafka-integration-test",
+            service="test-service",
+            node_name=f"fail-node-{uuid.uuid4().hex[:8]}",
+            version="1.0.0",
+        )
+        group2 = ModelNodeIdentity(
+            env="kafka-integration-test",
+            service="test-service",
+            node_name=f"good-node-{uuid.uuid4().hex[:8]}",
+            version="1.0.0",
+        )
 
         # Subscribe both handlers
         unsub_fail = await started_kafka_bus.subscribe(
@@ -634,7 +659,7 @@ class TestKafkaEventBusHeaders:
         self,
         started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
-        unique_group: str,
+        unique_group: ModelNodeIdentity,
     ) -> None:
         """Verify custom headers are preserved through publish/subscribe cycle."""
         from omnibase_infra.event_bus.models import ModelEventHeaders
@@ -696,7 +721,7 @@ class TestKafkaEventBusHeaders:
         self,
         started_kafka_bus: EventBusKafka,
         created_unique_topic: str,
-        unique_group: str,
+        unique_group: ModelNodeIdentity,
     ) -> None:
         """Verify correlation_id is preserved through message flow."""
         from uuid import UUID
@@ -767,7 +792,7 @@ class TestKafkaEventBusBroadcast:
     async def test_broadcast_to_environment(
         self,
         started_kafka_bus: EventBusKafka,
-        unique_group: str,
+        unique_group: ModelNodeIdentity,
         created_broadcast_topic: str,
     ) -> None:
         """Verify broadcast_to_environment sends to correct topic."""
@@ -817,7 +842,7 @@ class TestKafkaEventBusBroadcast:
     async def test_send_to_group(
         self,
         started_kafka_bus: EventBusKafka,
-        unique_group: str,
+        unique_group: ModelNodeIdentity,
         ensure_test_topic: Callable[[str, int], Coroutine[None, None, str]],
     ) -> None:
         """Verify send_to_group sends to correct topic."""

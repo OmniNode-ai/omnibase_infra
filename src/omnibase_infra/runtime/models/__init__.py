@@ -105,6 +105,11 @@ from omnibase_infra.runtime.models.model_health_check_response import (
 from omnibase_infra.runtime.models.model_health_check_result import (
     ModelHealthCheckResult,
 )
+
+# NOTE: ModelIntentExecutionSummary is NOT imported here to avoid circular import.
+# It depends on ModelBackendResult from nodes.effects, which loads after runtime.models.
+# Import directly when needed:
+#   from omnibase_infra.runtime.models.model_intent_execution_summary import ModelIntentExecutionSummary
 from omnibase_infra.runtime.models.model_lifecycle_result import (
     ModelLifecycleResult,
 )
@@ -190,6 +195,7 @@ __all__: list[str] = [
     "ModelFailedComponent",
     "ModelHealthCheckResponse",
     "ModelHealthCheckResult",
+    # NOTE: ModelIntentExecutionSummary excluded - import directly from module
     "ModelLifecycleResult",
     "ModelLoggingConfig",
     "ModelOptionalCorrelationId",

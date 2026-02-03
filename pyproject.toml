@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "omnibase_infra"
-version = "0.3.1"
+version = "0.3.2"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = ["OmniNode Team <team@omninode.ai>"]
 license = "MIT"
@@ -36,9 +36,9 @@ python = "^3.12"
 #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
 # Remember to switch back to PyPI versions before merging to main.
 #
-# omnibase-core v0.12.0: Adds ModelDbRepositoryContract schema + validators (OMN-1782)
-# (v0.11.0 included: ModelTimeoutErrorContext requires transport_type/timeout_seconds; Handler.describe() returns "infra_handler")
-omnibase-core = "^0.12.0"
+# omnibase-core v0.13.1: Latest core release
+# (v0.12.0 included: ModelDbRepositoryContract schema + validators)
+omnibase-core = "^0.13.1"
 # omnibase-spi v0.6.4: Version bump
 omnibase-spi = "^0.6.4"
 
@@ -71,7 +71,7 @@ asyncpg = "^0.29.0"
 psycopg2-binary = "^2.9.10"
 
 # Service integration dependencies (for the actual tools we're migrating)
-python-consul = "^1.1.0"  # For Consul adapter tools
+python-consul2 = "^0.1.5"  # For Consul adapter tools (fork with meta/metadata support)
 redis = "^6.0.0"  # For Redis/Valkey integration (redis-py 6.x required by omnibase_core)
 aiokafka = "^0.11.0"  # For Kafka tools (async Python client)
 confluent-kafka = "^2.12.0"  # For Kafka integration (C-based high-performance client)

@@ -50,6 +50,7 @@ import asyncpg
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -87,6 +88,9 @@ DEFAULT_POOL_SIZE = 10
 DEFAULT_TIMEOUT_SECONDS = 30.0
 
 # SQL statements
+# NOTE: Database column is `registered_at` but model uses `created_at`. The column
+# is aliased in queries for mapping. This aligns with the existing database schema
+# on 192.168.86.200 which uses `registered_at` for the creation timestamp.
 SQL_CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS node_registrations (
     node_id UUID PRIMARY KEY,
@@ -95,13 +99,13 @@ CREATE TABLE IF NOT EXISTS node_registrations (
     capabilities JSONB NOT NULL DEFAULT '[]',
     endpoints JSONB NOT NULL DEFAULT '{}',
     metadata JSONB NOT NULL DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 """
 
 SQL_UPSERT = """
-INSERT INTO node_registrations (node_id, node_type, node_version, capabilities, endpoints, metadata, created_at, updated_at)
+INSERT INTO node_registrations (node_id, node_type, node_version, capabilities, endpoints, metadata, registered_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (node_id) DO UPDATE SET
     node_type = EXCLUDED.node_type,
@@ -114,7 +118,7 @@ RETURNING (xmax = 0) AS was_insert;
 """
 
 SQL_QUERY_BASE = """
-SELECT node_id, node_type, node_version, capabilities, endpoints, metadata, created_at, updated_at
+SELECT node_id, node_type, node_version, capabilities, endpoints, metadata, registered_at AS created_at, updated_at
 FROM node_registrations
 """
 
@@ -384,9 +388,9 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
                 result = await asyncio.wait_for(
                     conn.fetchrow(
                         SQL_UPSERT,
-                        record.node_id,
+                        str(record.node_id),  # VARCHAR column requires string
                         record.node_type.value,
-                        record.node_version,
+                        str(record.node_version),  # VARCHAR column requires string
                         capabilities_json,
                         endpoints_json,
                         metadata_json,
@@ -502,7 +506,7 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
             # Filter by node_id if specified (exact match)
             if query.node_id is not None:
                 conditions.append(f"node_id = ${param_idx}")
-                params.append(query.node_id)
+                params.append(str(query.node_id))  # VARCHAR column requires string
                 param_idx += 1
 
             # Filter by node_type if specified
@@ -531,15 +535,15 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
             count_params = params[:-2]  # Exclude limit and offset
 
             async with pool.acquire() as conn:
-                rows, count_result = await asyncio.gather(
-                    asyncio.wait_for(
-                        conn.fetch(sql_query, *params),
-                        timeout=self._timeout_seconds,
-                    ),
-                    asyncio.wait_for(
-                        conn.fetchval(count_query, *count_params),
-                        timeout=self._timeout_seconds,
-                    ),
+                # NOTE: asyncpg connections don't support concurrent operations,
+                # so we run these queries sequentially instead of with asyncio.gather
+                rows = await asyncio.wait_for(
+                    conn.fetch(sql_query, *params),
+                    timeout=self._timeout_seconds,
+                )
+                count_result = await asyncio.wait_for(
+                    conn.fetchval(count_query, *count_params),
+                    timeout=self._timeout_seconds,
                 )
 
             # Reset circuit breaker on success
@@ -555,11 +559,14 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
                 endpoints = json.loads(row["endpoints"]) if row["endpoints"] else {}
                 metadata = json.loads(row["metadata"]) if row["metadata"] else {}
 
+                # Convert database types to model types:
+                # - node_id: VARCHAR -> UUID
+                # - node_version: VARCHAR -> ModelSemVer
                 records.append(
                     ModelRegistrationRecord(
-                        node_id=row["node_id"],
+                        node_id=UUID(row["node_id"]),
                         node_type=EnumNodeKind(row["node_type"]),
-                        node_version=row["node_version"],
+                        node_version=ModelSemVer.parse(row["node_version"]),
                         capabilities=capabilities,
                         endpoints=endpoints,
                         metadata=metadata,
@@ -684,11 +691,11 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
                 result = await asyncio.wait_for(
                     conn.fetchval(
                         SQL_UPDATE,
-                        node_id,
+                        str(node_id),  # VARCHAR column requires string
                         capabilities_json,
                         endpoints_json,
                         metadata_json,
-                        node_version,
+                        str(node_version) if node_version is not None else None,
                     ),
                     timeout=self._timeout_seconds,
                 )
@@ -792,7 +799,9 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
 
             async with pool.acquire() as conn:
                 result = await asyncio.wait_for(
-                    conn.fetchval(SQL_DELETE, node_id),
+                    conn.fetchval(
+                        SQL_DELETE, str(node_id)
+                    ),  # VARCHAR column requires string
                     timeout=self._timeout_seconds,
                 )
 

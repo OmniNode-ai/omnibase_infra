@@ -816,6 +816,7 @@ class TestEnumConsumerGroupPurpose:
         assert EnumConsumerGroupPurpose.REPLAY.value == "replay"
         assert EnumConsumerGroupPurpose.AUDIT.value == "audit"
         assert EnumConsumerGroupPurpose.BACKFILL.value == "backfill"
+        assert EnumConsumerGroupPurpose.CONTRACT_REGISTRY.value == "contract-registry"
 
     def test_string_conversion_via_str(self) -> None:
         """Test that __str__ returns the value."""
@@ -824,6 +825,7 @@ class TestEnumConsumerGroupPurpose:
         assert str(EnumConsumerGroupPurpose.REPLAY) == "replay"
         assert str(EnumConsumerGroupPurpose.AUDIT) == "audit"
         assert str(EnumConsumerGroupPurpose.BACKFILL) == "backfill"
+        assert str(EnumConsumerGroupPurpose.CONTRACT_REGISTRY) == "contract-registry"
 
     def test_string_conversion_in_format_string(self) -> None:
         """Test enum works correctly in format strings."""

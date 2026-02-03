@@ -49,7 +49,7 @@ event_bus:
   # - "kafka": Production event bus using Redpanda/Kafka (default)
   # - "inmemory": In-memory event bus for testing/development
   type: "kafka"
-  # [ACTIVE] environment is used by event bus constructor
+  # [ACTIVE] environment is used for topic prefixing and consumer group naming
   # Can be overridden by ONEX_ENVIRONMENT env var
   environment: "local"
   # [ACTIVE] max_history configures event history buffer size (inmemory only)
