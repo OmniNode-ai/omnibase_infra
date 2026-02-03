@@ -459,6 +459,7 @@ class TestDockerRuntime:
 
         try:
             # Start container with required environment variables
+            # ONEX_EVENT_BUS_TYPE=inmemory ensures kernel doesn't require Kafka
             result = subprocess.run(
                 [
                     "docker",
@@ -476,6 +477,8 @@ class TestDockerRuntime:
                     "REDIS_PASSWORD=test_password",
                     "-e",
                     "ONEX_LOG_LEVEL=DEBUG",
+                    "-e",
+                    "ONEX_EVENT_BUS_TYPE=inmemory",
                     built_test_image,
                 ],
                 capture_output=True,
@@ -581,6 +584,7 @@ class TestDockerRuntime:
 
         try:
             # Start container
+            # ONEX_EVENT_BUS_TYPE=inmemory ensures kernel doesn't require Kafka
             subprocess.run(
                 [
                     "docker",
@@ -596,6 +600,8 @@ class TestDockerRuntime:
                     "VAULT_TOKEN=test",
                     "-e",
                     "REDIS_PASSWORD=test",
+                    "-e",
+                    "ONEX_EVENT_BUS_TYPE=inmemory",
                     built_test_image,
                 ],
                 capture_output=True,
@@ -698,6 +704,7 @@ class TestDockerHealthCheck:
         container_name = f"{TEST_CONTAINER_PREFIX}-health-{os.getpid()}"
 
         try:
+            # ONEX_EVENT_BUS_TYPE=inmemory ensures kernel doesn't require Kafka
             subprocess.run(
                 [
                     "docker",
@@ -713,6 +720,8 @@ class TestDockerHealthCheck:
                     "VAULT_TOKEN=test",
                     "-e",
                     "REDIS_PASSWORD=test",
+                    "-e",
+                    "ONEX_EVENT_BUS_TYPE=inmemory",
                     built_test_image,
                 ],
                 capture_output=True,
@@ -786,6 +795,7 @@ class TestDockerHealthCheck:
         container_name = f"{TEST_CONTAINER_PREFIX}-healthprog-{os.getpid()}"
 
         try:
+            # ONEX_EVENT_BUS_TYPE=inmemory ensures kernel doesn't require Kafka
             subprocess.run(
                 [
                     "docker",
@@ -801,6 +811,8 @@ class TestDockerHealthCheck:
                     "VAULT_TOKEN=test",
                     "-e",
                     "REDIS_PASSWORD=test",
+                    "-e",
+                    "ONEX_EVENT_BUS_TYPE=inmemory",
                     built_test_image,
                 ],
                 capture_output=True,

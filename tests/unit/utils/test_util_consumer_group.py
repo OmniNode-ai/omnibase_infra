@@ -383,6 +383,9 @@ class TestComputeConsumerGroupIdPurposes:
         result_backfill = compute_consumer_group_id(
             identity, EnumConsumerGroupPurpose.BACKFILL
         )
+        result_contract_registry = compute_consumer_group_id(
+            identity, EnumConsumerGroupPurpose.CONTRACT_REGISTRY
+        )
 
         # All should be distinct
         all_results = [
@@ -391,8 +394,9 @@ class TestComputeConsumerGroupIdPurposes:
             result_replay,
             result_audit,
             result_backfill,
+            result_contract_registry,
         ]
-        assert len(set(all_results)) == 5, (
+        assert len(set(all_results)) == 6, (
             "All purposes should produce unique group IDs"
         )
 
@@ -780,15 +784,15 @@ class TestEnumConsumerGroupPurpose:
     """Tests for EnumConsumerGroupPurpose enum.
 
     Verifies:
-    - All 5 values exist
+    - All 6 values exist
     - String conversion works
     - Values are lowercase
     """
 
-    def test_all_five_values_exist(self) -> None:
-        """Test that all 5 purpose values exist."""
-        # Should have exactly 5 members
-        assert len(EnumConsumerGroupPurpose) == 5
+    def test_all_six_values_exist(self) -> None:
+        """Test that all 6 purpose values exist."""
+        # Should have exactly 6 members
+        assert len(EnumConsumerGroupPurpose) == 6
 
         # All expected values should exist
         assert EnumConsumerGroupPurpose.CONSUME is not None
@@ -796,6 +800,7 @@ class TestEnumConsumerGroupPurpose:
         assert EnumConsumerGroupPurpose.REPLAY is not None
         assert EnumConsumerGroupPurpose.AUDIT is not None
         assert EnumConsumerGroupPurpose.BACKFILL is not None
+        assert EnumConsumerGroupPurpose.CONTRACT_REGISTRY is not None
 
     def test_values_are_lowercase(self) -> None:
         """Test that all enum values are lowercase strings."""
@@ -855,9 +860,10 @@ class TestEnumConsumerGroupPurpose:
     def test_iteration(self) -> None:
         """Test that enum can be iterated."""
         values = list(EnumConsumerGroupPurpose)
-        assert len(values) == 5
+        assert len(values) == 6
         assert EnumConsumerGroupPurpose.CONSUME in values
         assert EnumConsumerGroupPurpose.INTROSPECTION in values
+        assert EnumConsumerGroupPurpose.CONTRACT_REGISTRY in values
 
 
 class TestPurposeDifferentiationVerification:
@@ -866,7 +872,7 @@ class TestPurposeDifferentiationVerification:
     This test class provides explicit proof that:
     1. Same identity with different purposes produces different group IDs
     2. The derivation from ModelNodeIdentity is deterministic
-    3. All purpose values (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL)
+    3. All purpose values (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL, CONTRACT_REGISTRY)
        produce unique group IDs for the same identity
     4. The purpose component appears correctly in the derived ID
 
@@ -906,13 +912,13 @@ class TestPurposeDifferentiationVerification:
             f"INTROSPECTION: {introspection_id}"
         )
 
-    def test_all_five_purposes_produce_unique_ids(
+    def test_all_six_purposes_produce_unique_ids(
         self, standard_identity: ModelNodeIdentity
     ) -> None:
-        """Prove: All 5 purpose values produce unique group IDs for same identity.
+        """Prove: All 6 purpose values produce unique group IDs for same identity.
 
-        Each purpose (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL) must
-        produce a distinct consumer group ID to prevent offset conflicts.
+        Each purpose (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL, CONTRACT_REGISTRY)
+        must produce a distinct consumer group ID to prevent offset conflicts.
         """
         # Compute group ID for each purpose
         purpose_to_id: dict[EnumConsumerGroupPurpose, str] = {
@@ -920,14 +926,14 @@ class TestPurposeDifferentiationVerification:
             for purpose in EnumConsumerGroupPurpose
         }
 
-        # Verify we have exactly 5 purposes
-        assert len(purpose_to_id) == 5, "Expected exactly 5 purposes"
+        # Verify we have exactly 6 purposes
+        assert len(purpose_to_id) == 6, "Expected exactly 6 purposes"
 
         # Verify all IDs are unique
         all_ids = list(purpose_to_id.values())
         unique_ids = set(all_ids)
-        assert len(unique_ids) == 5, (
-            f"All 5 purposes must produce unique group IDs!\n"
+        assert len(unique_ids) == 6, (
+            f"All 6 purposes must produce unique group IDs!\n"
             f"Generated IDs: {purpose_to_id}"
         )
 
@@ -1038,6 +1044,7 @@ class TestPurposeDifferentiationVerification:
             EnumConsumerGroupPurpose.REPLAY: "replay",
             EnumConsumerGroupPurpose.AUDIT: "audit",
             EnumConsumerGroupPurpose.BACKFILL: "backfill",
+            EnumConsumerGroupPurpose.CONTRACT_REGISTRY: "contract-registry",
         }
 
         for purpose, expected_string in expected_values.items():

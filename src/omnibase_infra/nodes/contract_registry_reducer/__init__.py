@@ -9,9 +9,13 @@ the ONEX declarative pattern.
 Exports:
     NodeContractRegistryReducer: Declarative reducer node shell.
     ContractRegistryReducer: Pure function reducer class.
+    ContractRegistrationEventRouter: Event router for Kafka messages.
     ModelContractRegistryState: Immutable state model for the reducer.
 """
 
+from omnibase_infra.nodes.contract_registry_reducer.contract_registration_event_router import (
+    ContractRegistrationEventRouter,
+)
 from omnibase_infra.nodes.contract_registry_reducer.models import (
     ModelContractRegistryState,
 )
@@ -23,6 +27,7 @@ from omnibase_infra.nodes.contract_registry_reducer.reducer import (
 )
 
 __all__ = [
+    "ContractRegistrationEventRouter",
     "ContractRegistryReducer",
     "ModelContractRegistryState",
     "NodeContractRegistryReducer",

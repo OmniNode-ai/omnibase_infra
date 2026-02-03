@@ -72,7 +72,7 @@ from omnibase_infra.utils import sanitize_backend_error, sanitize_error_message
 if TYPE_CHECKING:
     from uuid import UUID
 
-    from omnibase_infra.nodes.effects.models.model_backend_result import (
+    from omnibase_infra.models.model_backend_result import (
         ModelBackendResult,
     )
 
@@ -191,7 +191,7 @@ class MixinPostgresErrorResponse:
         operation_error_code = ctx.operation_error_code
         # Local import to avoid circular import at module load time
         # (mixins/__init__.py loads before nodes/__init__.py in some paths)
-        from omnibase_infra.nodes.effects.models.model_backend_result import (
+        from omnibase_infra.models.model_backend_result import (
             ModelBackendResult as BackendResult,
         )
 
