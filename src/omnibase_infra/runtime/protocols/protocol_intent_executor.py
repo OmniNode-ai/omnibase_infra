@@ -18,28 +18,35 @@ Related:
 
 from __future__ import annotations
 
-from typing import Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 from uuid import UUID
 
-from omnibase_infra.nodes.contract_registry_reducer.models import (
-    ModelPayloadCleanupTopicReferences,
-    ModelPayloadDeactivateContract,
-    ModelPayloadMarkStale,
-    ModelPayloadUpdateHeartbeat,
-    ModelPayloadUpdateTopic,
-    ModelPayloadUpsertContract,
-)
-from omnibase_infra.nodes.effects.models.model_backend_result import ModelBackendResult
+if TYPE_CHECKING:
+    # These imports are only needed for type annotations.
+    # Using TYPE_CHECKING avoids circular import during package initialization
+    # (runtime.protocols is loaded before nodes is loaded).
+    from omnibase_infra.nodes.contract_registry_reducer.models import (
+        ModelPayloadCleanupTopicReferences,
+        ModelPayloadDeactivateContract,
+        ModelPayloadMarkStale,
+        ModelPayloadUpdateHeartbeat,
+        ModelPayloadUpdateTopic,
+        ModelPayloadUpsertContract,
+    )
+    from omnibase_infra.nodes.effects.models.model_backend_result import (
+        ModelBackendResult,
+    )
 
-# Type alias for payload types (union of all supported payloads)
-IntentPayloadType = (
-    ModelPayloadUpsertContract
-    | ModelPayloadUpdateTopic
-    | ModelPayloadMarkStale
-    | ModelPayloadUpdateHeartbeat
-    | ModelPayloadDeactivateContract
-    | ModelPayloadCleanupTopicReferences
-)
+    # Type alias for payload types (union of all supported payloads)
+    # Defined inside TYPE_CHECKING since it references models only available there
+    IntentPayloadType = (
+        ModelPayloadUpsertContract
+        | ModelPayloadUpdateTopic
+        | ModelPayloadMarkStale
+        | ModelPayloadUpdateHeartbeat
+        | ModelPayloadDeactivateContract
+        | ModelPayloadCleanupTopicReferences
+    )
 
 # Contravariant TypeVar for payload types - allows handlers with specific
 # payload types to satisfy the protocol when used with broader type hints
@@ -95,4 +102,6 @@ class ProtocolIntentExecutor(Protocol[PayloadT_contra]):
         ...
 
 
-__all__ = ["IntentPayloadType", "PayloadT_contra", "ProtocolIntentExecutor"]
+# NOTE: IntentPayloadType is only available under TYPE_CHECKING.
+# Import it with: if TYPE_CHECKING: from ...protocol_intent_executor import IntentPayloadType
+__all__ = ["PayloadT_contra", "ProtocolIntentExecutor"]

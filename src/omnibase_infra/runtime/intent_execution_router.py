@@ -63,7 +63,6 @@ from omnibase_infra.runtime.models.model_intent_execution_summary import (
     ModelIntentExecutionSummary,
 )
 from omnibase_infra.runtime.protocols.protocol_intent_executor import (
-    IntentPayloadType,
     ProtocolIntentExecutor,
 )
 from omnibase_infra.utils import sanitize_error_message
