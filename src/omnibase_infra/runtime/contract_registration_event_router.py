@@ -204,12 +204,15 @@ class ContractRegistrationEventRouter:
         """Return the current contract registry state."""
         return self._state
 
-    def _extract_correlation_id_from_message(self, msg: ModelEventMessage) -> UUID:
+    def extract_correlation_id_from_message(self, msg: ModelEventMessage) -> UUID:
         """Extract correlation ID from message headers or payload.
 
         Attempts to extract the correlation_id from message headers or payload
         to ensure proper propagation for distributed tracing. Falls back to
         generating a new UUID if no correlation ID is found.
+
+        This is a public method that may be called by external components
+        (e.g., ServiceKernel) to extract correlation IDs for intent execution.
 
         Args:
             msg: The incoming event message.
@@ -299,7 +302,7 @@ class ContractRegistrationEventRouter:
             The intents should be dispatched to the Effect layer by the caller.
         """
         # Extract correlation_id from message for proper propagation
-        callback_correlation_id = self._extract_correlation_id_from_message(msg)
+        callback_correlation_id = self.extract_correlation_id_from_message(msg)
         callback_start_time = time.time()
 
         # Extract topic from message

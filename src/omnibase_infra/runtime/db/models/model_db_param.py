@@ -19,3 +19,6 @@ class ModelDbParam(BaseModel):
 
     name: str = Field(..., description="Parameter name")
     param_type: str = Field(..., description="Parameter type")
+
+
+__all__ = ["ModelDbParam"]

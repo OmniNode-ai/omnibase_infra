@@ -27,3 +27,6 @@ class ModelDbSafetyPolicy(BaseModel):
     allow_full_table_scan: bool = Field(
         default=True, description="Allow queries without index usage"
     )
+
+
+__all__ = ["ModelDbSafetyPolicy"]

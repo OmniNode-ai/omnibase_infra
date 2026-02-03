@@ -35,3 +35,6 @@ class ModelDbRepositoryContract(BaseModel):
     ops: dict[str, ModelDbOperation] = Field(
         default_factory=dict, description="Operation name -> definition mapping"
     )
+
+
+__all__ = ["ModelDbRepositoryContract"]

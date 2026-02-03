@@ -21,3 +21,6 @@ class ModelDbReturn(BaseModel):
     many: bool = Field(
         default=False, description="Whether operation returns multiple rows"
     )
+
+
+__all__ = ["ModelDbReturn"]

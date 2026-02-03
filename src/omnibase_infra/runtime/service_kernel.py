@@ -55,6 +55,7 @@ import signal
 import sys
 import time
 from collections.abc import Awaitable, Callable
+from functools import partial
 from importlib.metadata import version as get_package_version
 from pathlib import Path
 from typing import cast
@@ -75,6 +76,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.nodes.contract_registry_reducer.reducer import (
     ContractRegistryReducer,
@@ -352,6 +354,41 @@ def load_runtime_config(
         },
     )
     return config
+
+
+async def _handle_contract_registration_message(
+    msg: ModelEventMessage,
+    event_router: ContractRegistrationEventRouter,
+    intent_router: IntentExecutionRouter,
+) -> None:
+    """Handle contract registration message and execute resulting intents.
+
+    This function is the callback for contract registration event subscriptions.
+    It routes the message through the event router, then executes any resulting
+    intents via the intent execution router.
+
+    Args:
+        msg: The event message from the subscription.
+        event_router: Router for contract registration events.
+        intent_router: Router for executing persistence intents.
+    """
+    result = await event_router.handle_message(msg)
+    if result is not None and result.intents:
+        msg_correlation_id = event_router.extract_correlation_id_from_message(msg)
+        intent_summary = await intent_router.execute_intents(
+            result.intents,
+            msg_correlation_id,
+        )
+        if not intent_summary.all_successful:
+            logger.warning(
+                "Some intents failed during contract registration (correlation_id=%s)",
+                msg_correlation_id,
+                extra={
+                    "successful": intent_summary.successful_count,
+                    "failed": intent_summary.failed_count,
+                    "total": intent_summary.total_intents,
+                },
+            )
 
 
 async def bootstrap() -> int:
@@ -1345,43 +1382,13 @@ async def bootstrap() -> int:
                     output_topic=config.output_topic,
                 )
 
-                # Create wrapper callback that executes intents after routing
-                from omnibase_infra.event_bus.models.model_event_message import (
-                    ModelEventMessage,
+                # Create the callback binding the routers
+                # Uses module-level _handle_contract_registration_message for testability
+                contract_registration_callback = partial(
+                    _handle_contract_registration_message,
+                    event_router=contract_registration_event_router,
+                    intent_router=intent_execution_router,
                 )
-
-                async def contract_registration_callback(
-                    msg: ModelEventMessage,
-                ) -> None:
-                    """Handle contract registration message and execute resulting intents.
-
-                    This wrapper invokes the event router's handle_message, then executes
-                    any intents returned by the reducer via the IntentExecutionRouter.
-                    """
-                    result = await contract_registration_event_router.handle_message(
-                        msg
-                    )
-                    if result is not None and result.intents:
-                        # Extract correlation_id from message or generate new one
-                        msg_correlation_id = contract_registration_event_router._extract_correlation_id_from_message(
-                            msg
-                        )
-                        # Execute intents via IntentExecutionRouter
-                        intent_summary = await intent_execution_router.execute_intents(
-                            result.intents,
-                            msg_correlation_id,
-                        )
-                        if not intent_summary.all_successful:
-                            logger.warning(
-                                "Some intents failed during contract registration "
-                                "(correlation_id=%s)",
-                                msg_correlation_id,
-                                extra={
-                                    "successful": intent_summary.successful_count,
-                                    "failed": intent_summary.failed_count,
-                                    "total": intent_summary.total_intents,
-                                },
-                            )
 
                 # Create node identity for contract registration subscription
                 # Uses the same base identity as introspection with different purpose
