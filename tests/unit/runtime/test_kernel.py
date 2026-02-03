@@ -945,6 +945,17 @@ class TestIntegration:
 class TestHttpPortValidation:
     """Tests for HTTP port validation in bootstrap."""
 
+    @pytest.fixture(autouse=True)
+    def use_inmemory_event_bus(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ensure inmemory event bus is used for all port validation tests.
+
+        Since OMN-1869, the runtime config defaults to kafka event bus.
+        These tests focus on HTTP port validation, not event bus configuration,
+        so we force inmemory to avoid Kafka configuration errors.
+        """
+        monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+
     @pytest.fixture
     def mock_runtime_host(self) -> Generator[MagicMock, None, None]:
         """Create a mock RuntimeHostProcess.
@@ -1210,6 +1221,9 @@ class TestHttpPortValidation:
         from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", "not_a_number")
+        # Ensure inmemory event bus is used (config defaults to kafka since OMN-1869)
+        monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
 
         with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
@@ -1266,6 +1280,9 @@ class TestHttpPortValidation:
         from omnibase_infra.services.service_health import DEFAULT_HTTP_PORT
 
         monkeypatch.setenv("ONEX_HTTP_PORT", invalid_port_value)
+        # Ensure inmemory event bus is used (config defaults to kafka since OMN-1869)
+        monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
 
         with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()

@@ -785,10 +785,10 @@ class TestEnumConsumerGroupPurpose:
     - Values are lowercase
     """
 
-    def test_all_five_values_exist(self) -> None:
-        """Test that all 5 purpose values exist."""
-        # Should have exactly 5 members
-        assert len(EnumConsumerGroupPurpose) == 5
+    def test_all_six_values_exist(self) -> None:
+        """Test that all 6 purpose values exist."""
+        # Should have exactly 6 members
+        assert len(EnumConsumerGroupPurpose) == 6
 
         # All expected values should exist
         assert EnumConsumerGroupPurpose.CONSUME is not None
@@ -796,6 +796,7 @@ class TestEnumConsumerGroupPurpose:
         assert EnumConsumerGroupPurpose.REPLAY is not None
         assert EnumConsumerGroupPurpose.AUDIT is not None
         assert EnumConsumerGroupPurpose.BACKFILL is not None
+        assert EnumConsumerGroupPurpose.CONTRACT_REGISTRY is not None
 
     def test_values_are_lowercase(self) -> None:
         """Test that all enum values are lowercase strings."""
@@ -855,9 +856,10 @@ class TestEnumConsumerGroupPurpose:
     def test_iteration(self) -> None:
         """Test that enum can be iterated."""
         values = list(EnumConsumerGroupPurpose)
-        assert len(values) == 5
+        assert len(values) == 6
         assert EnumConsumerGroupPurpose.CONSUME in values
         assert EnumConsumerGroupPurpose.INTROSPECTION in values
+        assert EnumConsumerGroupPurpose.CONTRACT_REGISTRY in values
 
 
 class TestPurposeDifferentiationVerification:
@@ -906,13 +908,13 @@ class TestPurposeDifferentiationVerification:
             f"INTROSPECTION: {introspection_id}"
         )
 
-    def test_all_five_purposes_produce_unique_ids(
+    def test_all_six_purposes_produce_unique_ids(
         self, standard_identity: ModelNodeIdentity
     ) -> None:
-        """Prove: All 5 purpose values produce unique group IDs for same identity.
+        """Prove: All 6 purpose values produce unique group IDs for same identity.
 
-        Each purpose (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL) must
-        produce a distinct consumer group ID to prevent offset conflicts.
+        Each purpose (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL, CONTRACT_REGISTRY)
+        must produce a distinct consumer group ID to prevent offset conflicts.
         """
         # Compute group ID for each purpose
         purpose_to_id: dict[EnumConsumerGroupPurpose, str] = {
@@ -920,14 +922,14 @@ class TestPurposeDifferentiationVerification:
             for purpose in EnumConsumerGroupPurpose
         }
 
-        # Verify we have exactly 5 purposes
-        assert len(purpose_to_id) == 5, "Expected exactly 5 purposes"
+        # Verify we have exactly 6 purposes
+        assert len(purpose_to_id) == 6, "Expected exactly 6 purposes"
 
         # Verify all IDs are unique
         all_ids = list(purpose_to_id.values())
         unique_ids = set(all_ids)
-        assert len(unique_ids) == 5, (
-            f"All 5 purposes must produce unique group IDs!\n"
+        assert len(unique_ids) == 6, (
+            f"All 6 purposes must produce unique group IDs!\n"
             f"Generated IDs: {purpose_to_id}"
         )
 
