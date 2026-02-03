@@ -58,13 +58,10 @@ from collections.abc import Awaitable, Callable
 from functools import partial
 from importlib.metadata import version as get_package_version
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import cast
 from uuid import UUID
 
 import asyncpg
-
-if TYPE_CHECKING:
-    from omnibase_infra.runtime.intent_execution_router import IntentExecutionRouter
 import yaml
 from pydantic import ValidationError
 
@@ -95,9 +92,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.introspection_event_rou
     IntrospectionEventRouter,
 )
 from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
-
-# NOTE: IntentExecutionRouter is imported lazily inside bootstrap() to avoid
-# circular import. It depends on nodes.effects which loads after runtime.
 from omnibase_infra.runtime.models import (
     ModelProjectorPluginLoaderConfig,
     ModelRuntimeConfig,
@@ -360,41 +354,6 @@ def load_runtime_config(
         },
     )
     return config
-
-
-async def _handle_contract_registration_message(
-    msg: ModelEventMessage,
-    event_router: ContractRegistrationEventRouter,
-    intent_router: IntentExecutionRouter,
-) -> None:
-    """Handle contract registration message and execute resulting intents.
-
-    This function is the callback for contract registration event subscriptions.
-    It routes the message through the event router, then executes any resulting
-    intents via the intent execution router.
-
-    Args:
-        msg: The event message from the subscription.
-        event_router: Router for contract registration events.
-        intent_router: Router for executing persistence intents.
-    """
-    result = await event_router.handle_message(msg)
-    if result is not None and result.intents:
-        msg_correlation_id = event_router.extract_correlation_id_from_message(msg)
-        intent_summary = await intent_router.execute_intents(
-            result.intents,
-            msg_correlation_id,
-        )
-        if not intent_summary.all_successful:
-            logger.warning(
-                "Some intents failed during contract registration (correlation_id=%s)",
-                msg_correlation_id,
-                extra={
-                    "successful": intent_summary.successful_count,
-                    "failed": intent_summary.failed_count,
-                    "total": intent_summary.total_intents,
-                },
-            )
 
 
 async def bootstrap() -> int:
