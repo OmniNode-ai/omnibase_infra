@@ -470,6 +470,7 @@ async def bootstrap() -> int:
 
         # 3. Create event bus
         # Dispatch based on configuration or environment variable:
+        # - ONEX_EVENT_BUS_TYPE env var overrides config.event_bus.type
         # - If KAFKA_BOOTSTRAP_SERVERS env var is set, use EventBusKafka
         # - If config.event_bus.type == "kafka", use EventBusKafka
         # - Otherwise, use EventBusInmemory for local development/testing
@@ -477,12 +478,54 @@ async def bootstrap() -> int:
         environment = os.getenv("ONEX_ENVIRONMENT") or config.event_bus.environment
         kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
 
-        # Explicit bool evaluation (not truthy string) for kafka usage.
-        # KAFKA_BOOTSTRAP_SERVERS env var takes precedence over config.event_bus.type.
-        # This prevents implicit "kafka but localhost" fallback scenarios.
-        use_kafka: bool = (
-            bool(kafka_bootstrap_servers) or config.event_bus.type == "kafka"
-        )
+        # Check for ONEX_EVENT_BUS_TYPE environment variable override
+        # This allows CI/testing environments to force inmemory event bus
+        # even when the config file defaults to kafka.
+        event_bus_type_override = os.getenv("ONEX_EVENT_BUS_TYPE", "").lower()
+        if event_bus_type_override:
+            logger.debug(
+                "Event bus type override from ONEX_EVENT_BUS_TYPE=%s (correlation_id=%s)",
+                event_bus_type_override,
+                correlation_id,
+            )
+
+        # Determine effective event bus type with override precedence:
+        # 1. ONEX_EVENT_BUS_TYPE env var (highest priority)
+        # 2. KAFKA_BOOTSTRAP_SERVERS env var (if set, implies kafka)
+        # 3. config.event_bus.type (from runtime_config.yaml)
+        if event_bus_type_override == "inmemory":
+            # Explicit inmemory override - use inmemory regardless of other config
+            use_kafka = False
+            logger.info(
+                "Using inmemory event bus (ONEX_EVENT_BUS_TYPE override) (correlation_id=%s)",
+                correlation_id,
+            )
+        elif event_bus_type_override == "kafka":
+            # Explicit kafka override - validate that bootstrap_servers is available
+            use_kafka = True
+        elif event_bus_type_override and event_bus_type_override not in (
+            "inmemory",
+            "kafka",
+        ):
+            # Invalid override value - warn and fall back to config
+            logger.warning(
+                "Invalid ONEX_EVENT_BUS_TYPE value '%s', expected 'inmemory' or 'kafka'. "
+                "Falling back to config.event_bus.type='%s' (correlation_id=%s)",
+                event_bus_type_override,
+                config.event_bus.type,
+                correlation_id,
+            )
+            use_kafka = (
+                bool(kafka_bootstrap_servers) or config.event_bus.type == "kafka"
+            )
+        else:
+            # No override - use original logic
+            # Explicit bool evaluation (not truthy string) for kafka usage.
+            # KAFKA_BOOTSTRAP_SERVERS env var takes precedence over config.event_bus.type.
+            # This prevents implicit "kafka but localhost" fallback scenarios.
+            use_kafka = (
+                bool(kafka_bootstrap_servers) or config.event_bus.type == "kafka"
+            )
 
         # Validate bootstrap_servers is provided when kafka is requested via config
         # This prevents confusing implicit localhost:9092 fallback

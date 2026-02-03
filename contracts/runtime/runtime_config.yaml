@@ -16,12 +16,14 @@
 # =============================================================================
 # ENVIRONMENT VARIABLE OVERRIDES:
 # =============================================================================
-#   ONEX_INPUT_TOPIC  - Override input_topic
-#   ONEX_OUTPUT_TOPIC - Override output_topic
-#   ONEX_GROUP_ID     - Override group_id
-#   ONEX_ENVIRONMENT  - Override event_bus.environment
-#   ONEX_LOG_LEVEL    - Override logging level (used directly by kernel,
-#                       not through this contract)
+#   ONEX_INPUT_TOPIC    - Override input_topic
+#   ONEX_OUTPUT_TOPIC   - Override output_topic
+#   ONEX_GROUP_ID       - Override group_id
+#   ONEX_ENVIRONMENT    - Override event_bus.environment
+#   ONEX_EVENT_BUS_TYPE - Override event_bus.type ("inmemory" or "kafka")
+#                         Use "inmemory" for CI/testing without Kafka infrastructure
+#   ONEX_LOG_LEVEL      - Override logging level (used directly by kernel,
+#                         not through this contract)
 #
 # =============================================================================
 # FIELD STATUS LEGEND:

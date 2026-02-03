@@ -401,7 +401,9 @@ class TestBootstrap:
     ) -> None:
         """Test that bootstrap creates event bus with correct environment."""
         monkeypatch.setenv("ONEX_ENVIRONMENT", "test-env")
-        # Ensure EventBusInmemory is used by unsetting KAFKA_BOOTSTRAP_SERVERS
+        # Ensure EventBusInmemory is used by setting ONEX_EVENT_BUS_TYPE override
+        # (config defaults to kafka since OMN-1869)
+        monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
         with patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event:
             event_instance = MagicMock()
