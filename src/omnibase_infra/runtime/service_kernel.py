@@ -58,10 +58,13 @@ from collections.abc import Awaitable, Callable
 from functools import partial
 from importlib.metadata import version as get_package_version
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 import asyncpg
+
+if TYPE_CHECKING:
+    from omnibase_infra.runtime.intent_execution_router import IntentExecutionRouter
 import yaml
 from pydantic import ValidationError
 
@@ -91,7 +94,9 @@ from omnibase_infra.runtime.contract_registration_event_router import (
     ContractRegistrationEventRouter,
 )
 from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
-from omnibase_infra.runtime.intent_execution_router import IntentExecutionRouter
+
+# NOTE: IntentExecutionRouter is imported lazily inside bootstrap() to avoid
+# circular import. It depends on nodes.effects which loads after runtime.
 from omnibase_infra.runtime.models import (
     ModelProjectorPluginLoaderConfig,
     ModelRuntimeConfig,
@@ -1369,6 +1374,11 @@ async def bootstrap() -> int:
                 contract_registry_reducer = ContractRegistryReducer()
 
                 # Create the intent execution router (executes intents against PostgreSQL)
+                # Lazy import to avoid circular import (depends on nodes.effects)
+                from omnibase_infra.runtime.intent_execution_router import (
+                    IntentExecutionRouter,
+                )
+
                 intent_execution_router = IntentExecutionRouter(
                     container=container,
                     postgres_pool=postgres_pool,
