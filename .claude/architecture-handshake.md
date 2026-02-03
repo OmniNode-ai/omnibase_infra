@@ -52,7 +52,7 @@ installed_by: jonah
 
 ## Layer Boundaries
 
-```
+```text
 omnibase_core (contracts, models)
     ↑ imported by
 omnibase_spi (protocols)

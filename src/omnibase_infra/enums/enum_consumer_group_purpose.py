@@ -90,7 +90,7 @@ class EnumConsumerGroupPurpose(str, Enum):
     BACKFILL = "backfill"
     """One-shot bounded consumers for populating derived state."""
 
-    CONTRACT_REGISTRY = "contract_registry"
+    CONTRACT_REGISTRY = "contract-registry"
     """Contract lifecycle events (registration, deregistration, heartbeat)."""
 
     def __str__(self) -> str:

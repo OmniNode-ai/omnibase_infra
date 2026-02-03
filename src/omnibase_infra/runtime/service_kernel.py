@@ -1443,14 +1443,23 @@ async def bootstrap() -> int:
             # Subscribe to 3 contract lifecycle topics with same identity
             contract_subscribe_start_time = time.time()
 
+            # Derive environment-aware topic names (avoid hardcoded "dev." prefix)
+            contract_registered_topic = (
+                f"{environment}.onex.evt.platform.contract-registered.v1"
+            )
+            contract_deregistered_topic = (
+                f"{environment}.onex.evt.platform.contract-deregistered.v1"
+            )
+            node_heartbeat_topic = f"{environment}.onex.evt.platform.node-heartbeat.v1"
+
             logger.info(
                 "Subscribing to contract registry events on event bus (correlation_id=%s)",
                 correlation_id,
                 extra={
                     "topics": [
-                        "dev.onex.evt.platform.contract-registered.v1",
-                        "dev.onex.evt.platform.contract-deregistered.v1",
-                        "dev.onex.evt.platform.node-heartbeat.v1",
+                        contract_registered_topic,
+                        contract_deregistered_topic,
+                        node_heartbeat_topic,
                     ],
                     "node_identity": {
                         "env": contract_node_identity.env,
@@ -1463,19 +1472,19 @@ async def bootstrap() -> int:
             )
 
             contract_unsub_registered = await event_bus.subscribe(
-                topic="dev.onex.evt.platform.contract-registered.v1",
+                topic=contract_registered_topic,
                 node_identity=contract_node_identity,
                 on_message=contract_router.handle_message,
                 purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
             )
             contract_unsub_deregistered = await event_bus.subscribe(
-                topic="dev.onex.evt.platform.contract-deregistered.v1",
+                topic=contract_deregistered_topic,
                 node_identity=contract_node_identity,
                 on_message=contract_router.handle_message,
                 purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
             )
             contract_unsub_heartbeat = await event_bus.subscribe(
-                topic="dev.onex.evt.platform.node-heartbeat.v1",
+                topic=node_heartbeat_topic,
                 node_identity=contract_node_identity,
                 on_message=contract_router.handle_message,
                 purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
