@@ -78,6 +78,7 @@ from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.nodes.contract_registry_reducer.contract_registration_event_router import (
     ContractRegistrationEventRouter,
+    ProtocolIntentEffect,
 )
 from omnibase_infra.nodes.contract_registry_reducer.reducer import (
     ContractRegistryReducer,
@@ -960,22 +961,32 @@ async def bootstrap() -> int:
 
                     # Create effect handlers keyed by intent_type
                     # These handlers execute PostgreSQL operations for intents from the reducer
-                    contract_effect_handlers: dict[str, object] = {
-                        "postgres.upsert_contract": HandlerPostgresContractUpsert(
-                            postgres_pool
+                    # Note: Handlers implement ProtocolIntentEffect duck-typing style with
+                    # more specific payload types. Cast tells mypy they satisfy the protocol.
+                    contract_effect_handlers: dict[str, ProtocolIntentEffect] = {
+                        "postgres.upsert_contract": cast(
+                            "ProtocolIntentEffect",
+                            HandlerPostgresContractUpsert(postgres_pool),
                         ),
-                        "postgres.update_topic": HandlerPostgresTopicUpdate(
-                            postgres_pool
+                        "postgres.update_topic": cast(
+                            "ProtocolIntentEffect",
+                            HandlerPostgresTopicUpdate(postgres_pool),
                         ),
-                        "postgres.mark_stale": HandlerPostgresMarkStale(postgres_pool),
-                        "postgres.update_heartbeat": HandlerPostgresHeartbeat(
-                            postgres_pool
+                        "postgres.mark_stale": cast(
+                            "ProtocolIntentEffect",
+                            HandlerPostgresMarkStale(postgres_pool),
                         ),
-                        "postgres.deactivate_contract": HandlerPostgresDeactivate(
-                            postgres_pool
+                        "postgres.update_heartbeat": cast(
+                            "ProtocolIntentEffect",
+                            HandlerPostgresHeartbeat(postgres_pool),
                         ),
-                        "postgres.cleanup_topic_references": HandlerPostgresCleanupTopics(
-                            postgres_pool
+                        "postgres.deactivate_contract": cast(
+                            "ProtocolIntentEffect",
+                            HandlerPostgresDeactivate(postgres_pool),
+                        ),
+                        "postgres.cleanup_topic_references": cast(
+                            "ProtocolIntentEffect",
+                            HandlerPostgresCleanupTopics(postgres_pool),
                         ),
                     }
 
@@ -984,7 +995,7 @@ async def bootstrap() -> int:
                     contract_router = ContractRegistrationEventRouter(
                         container=container,
                         reducer=contract_reducer,
-                        effect_handlers=contract_effect_handlers,  # type: ignore[arg-type]
+                        effect_handlers=contract_effect_handlers,
                         event_bus=event_bus,
                         tick_interval_seconds=config.contract_registry.tick_interval_seconds,
                     )

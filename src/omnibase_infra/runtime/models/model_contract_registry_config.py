@@ -28,7 +28,7 @@ class ModelContractRegistryConfig(BaseModel):
         enabled: Whether contract registry processing is enabled
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     tick_interval_seconds: int = Field(
         default=60,

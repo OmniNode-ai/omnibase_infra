@@ -50,7 +50,7 @@ from omnibase_infra.nodes.contract_registry_reducer.reducer import (
 )
 
 # Fixed test time for deterministic testing
-TEST_NOW = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+TEST_NOW = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 
 # =============================================================================
