@@ -282,6 +282,11 @@ from omnibase_infra.runtime.baseline_subscriptions import (
     get_baseline_topics,
 )
 
+# Contract dependency resolver (OMN-1732)
+from omnibase_infra.runtime.contract_dependency_resolver import (
+    ContractDependencyResolver,
+)
+
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
 from omnibase_infra.runtime.chain_aware_dispatch import (
     ChainAwareDispatcher,
@@ -458,4 +463,6 @@ __all__: list[str] = [
     "BASELINE_CONTRACT_TOPICS",
     "BASELINE_PLATFORM_TOPICS",
     "get_baseline_topics",
+    # Contract dependency resolver (OMN-1732)
+    "ContractDependencyResolver",
 ]

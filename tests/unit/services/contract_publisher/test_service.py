@@ -133,7 +133,7 @@ class TestServiceContractPublisherPublishAll:
         mock_publisher.publish.assert_called_once()
         call_kwargs = mock_publisher.publish.call_args.kwargs
         assert "topic" in call_kwargs
-        assert call_kwargs["topic"] == "dev.onex.evt.contract-registered.v1"
+        assert call_kwargs["topic"] == "dev.onex.evt.platform.contract-registered.v1"
 
     @pytest.mark.asyncio
     async def test_publish_all_multiple_contracts(
