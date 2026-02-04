@@ -475,9 +475,9 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
     ) -> int:
         """Write batch of latency breakdown events to PostgreSQL.
 
-        Performs two operations:
-            1. INSERT to latency_breakdowns table (ON CONFLICT DO NOTHING)
-            2. UPSERT to injection_effectiveness table (update user_visible_latency_ms with MAX)
+        Performs two operations (order matters for FK constraint):
+            1. UPSERT to injection_effectiveness table (creates parent row if needed)
+            2. INSERT to latency_breakdowns table (ON CONFLICT DO NOTHING)
 
         Args:
             events: List of latency breakdown events to write.
@@ -540,7 +540,41 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
         try:
             async with self._pool.acquire() as conn:
-                # Write to latency_breakdowns
+                # IMPORTANT: Upsert to injection_effectiveness FIRST to satisfy FK constraint
+                # If latency event arrives before utilization/agent-match events, we need
+                # the parent row to exist before inserting the child row.
+
+                # Compute MAX user_latency_ms per session for the batch
+                session_latencies: dict[
+                    UUID, tuple[int, ModelLatencyBreakdownEvent]
+                ] = {}
+                for e in events:
+                    if e.session_id not in session_latencies:
+                        session_latencies[e.session_id] = (e.user_latency_ms, e)
+                    else:
+                        existing_latency, _ = session_latencies[e.session_id]
+                        if e.user_latency_ms > existing_latency:
+                            session_latencies[e.session_id] = (e.user_latency_ms, e)
+
+                # 1. First: Upsert to injection_effectiveness (creates parent row if needed)
+                await conn.executemany(
+                    sql_effectiveness,
+                    [
+                        (
+                            session_id,
+                            event.correlation_id,
+                            event.cohort,
+                            max_latency,
+                            event.created_at,
+                        )
+                        for session_id, (
+                            max_latency,
+                            event,
+                        ) in session_latencies.items()
+                    ],
+                )
+
+                # 2. Then: Insert to latency_breakdowns (FK now satisfied)
                 await conn.executemany(
                     sql_breakdowns,
                     [
@@ -556,37 +590,6 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                             e.emitted_at,
                         )
                         for e in events
-                    ],
-                )
-
-                # Update injection_effectiveness with MAX user_visible_latency_ms
-                # Group events by session_id and take MAX user_latency_ms
-                session_latencies: dict[
-                    UUID, tuple[int, ModelLatencyBreakdownEvent]
-                ] = {}
-                for e in events:
-                    if e.session_id not in session_latencies:
-                        session_latencies[e.session_id] = (e.user_latency_ms, e)
-                    else:
-                        existing_latency, _ = session_latencies[e.session_id]
-                        if e.user_latency_ms > existing_latency:
-                            session_latencies[e.session_id] = (e.user_latency_ms, e)
-
-                # Write aggregated latencies to injection_effectiveness
-                await conn.executemany(
-                    sql_effectiveness,
-                    [
-                        (
-                            session_id,
-                            event.correlation_id,
-                            event.cohort,
-                            max_latency,
-                            event.created_at,
-                        )
-                        for session_id, (
-                            max_latency,
-                            event,
-                        ) in session_latencies.items()
                     ],
                 )
 
