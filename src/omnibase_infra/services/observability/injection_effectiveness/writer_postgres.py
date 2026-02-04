@@ -11,7 +11,6 @@ Design Decisions:
     - Batch inserts: Uses executemany for efficient batch processing
     - Idempotency: ON CONFLICT DO NOTHING/UPDATE per table contract
     - Circuit breaker: MixinAsyncCircuitBreaker for resilience
-    - JSONB serialization: dict fields serialized to JSON strings
 
 Idempotency Contract:
     | Table                  | Unique Key                   | Conflict Action |
@@ -39,9 +38,7 @@ Example:
 
 from __future__ import annotations
 
-import json
 import logging
-from collections.abc import Mapping
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -80,7 +77,6 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         - Batch inserts/upserts via executemany for efficiency
         - Idempotent writes via ON CONFLICT clauses
         - Circuit breaker for database resilience
-        - JSONB field serialization
         - Correlation ID propagation for tracing
 
     Attributes:
@@ -176,20 +172,6 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 "hit_miss_threshold": self._hit_miss_threshold,
             },
         )
-
-    @staticmethod
-    def _serialize_json(value: Mapping[str, object] | None) -> str | None:
-        """Serialize a mapping to JSON string for JSONB columns.
-
-        Args:
-            value: Mapping to serialize, or None.
-
-        Returns:
-            JSON string if value is not None, otherwise None.
-        """
-        if value is None:
-            return None
-        return json.dumps(dict(value))
 
     async def write_context_utilization(
         self,
