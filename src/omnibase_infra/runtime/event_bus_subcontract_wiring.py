@@ -99,6 +99,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.event_bus import (
     ModelConsumerRetryConfig,
     ModelDlqConfig,
@@ -217,6 +218,8 @@ class EventBusSubcontractWiring:
         dispatch_engine: ProtocolDispatchEngine,
         environment: str,
         node_name: str,
+        service: str,
+        version: str,
         idempotency_store: ProtocolIdempotencyStore | None = None,
         idempotency_config: ModelIdempotencyConfig | None = None,
         dlq_config: ModelDlqConfig | None = None,
@@ -227,7 +230,7 @@ class EventBusSubcontractWiring:
 
         Args:
             event_bus: The event bus implementation (EventBusKafka or EventBusInmemory).
-                Must implement subscribe(topic, group_id, on_message) -> unsubscribe callable.
+                Must implement subscribe(topic, node_identity, on_message) -> unsubscribe callable.
                 Duck typed per ONEX patterns.
             dispatch_engine: Engine to dispatch received messages to handlers.
                 Must implement ProtocolDispatchEngine interface.
@@ -235,6 +238,10 @@ class EventBusSubcontractWiring:
             environment: Environment prefix for topics (e.g., 'dev', 'prod').
                 Used to resolve topic suffixes to full topic names.
             node_name: Name of the node/handler for consumer group identification and logging.
+            service: Service name for node identity (e.g., 'omniintelligence', 'omnibridge').
+                Used to derive consumer group ID.
+            version: Version string for node identity (e.g., 'v1', 'v1.0.0').
+                Used to derive consumer group ID.
             idempotency_store: Optional idempotency store for message deduplication.
                 If provided with enabled config, messages are deduplicated by envelope_id.
             idempotency_config: Optional configuration for idempotency behavior.
@@ -263,6 +270,8 @@ class EventBusSubcontractWiring:
         self._dispatch_engine = dispatch_engine
         self._environment = environment
         self._node_name = node_name
+        self._service = service
+        self._version = version
         self._idempotency_store = idempotency_store
         self._idempotency_config = idempotency_config or ModelIdempotencyConfig()
         self._dlq_config = dlq_config or ModelDlqConfig()
@@ -348,9 +357,19 @@ class EventBusSubcontractWiring:
 
         for topic_suffix in subcontract.subscribe_topics:
             full_topic = self.resolve_topic(topic_suffix)
-            # Consumer group ID derived from environment and node_name
-            # This same group_id is passed to DLQ publishing for traceability
-            consumer_group = f"{self._environment}.{node_name}"
+
+            # Create typed node identity for consumer group derivation
+            # The event bus derives consumer group as: {env}.{service}.{node_name}.{purpose}.{version}
+            node_identity = ModelNodeIdentity(
+                env=self._environment,
+                service=self._service,
+                node_name=node_name,
+                version=self._version,
+            )
+
+            # Consumer group for logging and DLQ traceability
+            # Matches the pattern derived by the event bus
+            consumer_group = f"{self._environment}.{self._service}.{node_name}.consume.{self._version}"
 
             # Create dispatch callback for this topic, capturing the consumer_group
             # used for this subscription to ensure DLQ messages have consistent
@@ -360,7 +379,7 @@ class EventBusSubcontractWiring:
             # Subscribe and store unsubscribe callable
             unsubscribe = await self._event_bus.subscribe(
                 topic=full_topic,
-                group_id=consumer_group,
+                node_identity=node_identity,
                 on_message=callback,
             )
             self._unsubscribe_callables.append(unsubscribe)

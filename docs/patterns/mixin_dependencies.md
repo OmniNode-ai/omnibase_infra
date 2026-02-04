@@ -282,6 +282,7 @@ class HandlerConsul(MixinAsyncCircuitBreaker, MixinRetryExecution):
 config = ModelIntrospectionConfig(
     node_id=node_config.node_id,
     node_type=EnumNodeKind.EFFECT,
+    node_name="my_effect_node",
     event_bus=event_bus,  # Optional
 )
 self.initialize_introspection(config)
@@ -305,6 +306,7 @@ class MyNode(MixinNodeIntrospection):
         config = ModelIntrospectionConfig(
             node_id=node_id,
             node_type=EnumNodeKind.EFFECT,
+            node_name="my_node",
             event_bus=event_bus,
         )
         self.initialize_introspection(config)

@@ -347,6 +347,7 @@ class TestSuite1NodeStartupIntrospection:
                 config = ModelIntrospectionConfig(
                     node_id=node_id,
                     node_type=node_type,
+                    node_name="test_node_with_type",
                     event_bus=event_bus,
                     version="1.0.0",
                     cache_ttl=60.0,
@@ -2270,6 +2271,7 @@ class TestSuite7GracefulDegradation:
                 config = ModelIntrospectionConfig(
                     node_id=node_id,
                     node_type=EnumNodeKind.EFFECT,
+                    node_name="resilient_test_node",
                     event_bus=None,  # No event bus - simulates Kafka unavailable
                     version="1.0.0",
                     cache_ttl=60.0,

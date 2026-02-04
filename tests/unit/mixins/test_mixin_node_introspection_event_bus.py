@@ -277,6 +277,7 @@ class TestEventBusInGetIntrospectionData:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_event_bus_node",
             version="1.0.0",
         )
         self.node.initialize_introspection(config)

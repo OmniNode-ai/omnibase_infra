@@ -89,6 +89,7 @@ class NodeWithPublicAndPrivateMethods(MixinNodeIntrospection):
         config = ModelIntrospectionConfig(
             node_id=node_id,
             node_type=EnumNodeKind.EFFECT,
+            node_name="private_method_test_node",
         )
         self.initialize_introspection(config)
 
@@ -231,6 +232,7 @@ class NodeWithManyPrivateMethods(MixinNodeIntrospection):
         config = ModelIntrospectionConfig(
             node_id=node_id,
             node_type=EnumNodeKind.COMPUTE,
+            node_name="minimal_method_node",
         )
         self.initialize_introspection(config)
 
@@ -293,6 +295,7 @@ class NodeWithOnlyPrivateMethods(MixinNodeIntrospection):
         config = ModelIntrospectionConfig(
             node_id=node_id,
             node_type=EnumNodeKind.REDUCER,
+            node_name="all_private_node",
         )
         self.initialize_introspection(config)
 

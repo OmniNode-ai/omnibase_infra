@@ -154,6 +154,7 @@ Usage:
             config = ModelIntrospectionConfig(
                 node_id=node_config.node_id,
                 node_type=EnumNodeKind.EFFECT,
+                node_name="my_node",
                 event_bus=event_bus,
             )
             self.initialize_introspection(config)
@@ -208,12 +209,14 @@ from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.envelope.model_emitter_identity import ModelEmitterIdentity
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.capabilities import ContractCapabilityExtractor
 from omnibase_infra.constants_topic_patterns import TOPIC_NAME_PATTERN
 from omnibase_infra.enums import EnumInfraTransportType, EnumIntrospectionReason
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.discovery import (
     ModelDiscoveredCapabilities,
     ModelIntrospectionConfig,
@@ -422,6 +425,7 @@ class MixinNodeIntrospection:
                 config = ModelIntrospectionConfig(
                     node_id=node_id,
                     node_type=EnumNodeKind.EFFECT,
+                    node_name="postgres_adapter",
                     event_bus=adapter_config.event_bus,
                 )
                 self.initialize_introspection(config)
@@ -463,6 +467,9 @@ class MixinNodeIntrospection:
     _introspection_node_type: EnumNodeKind | None
     _introspection_event_bus: ProtocolEventBus | None
     _introspection_version: str
+    _introspection_node_name: str
+    _introspection_env: str
+    _introspection_service: str
     _introspection_start_time: float | None
     _introspection_contract: ModelContractBase | None
 
@@ -590,6 +597,7 @@ class MixinNodeIntrospection:
                     config = ModelIntrospectionConfig(
                         node_id=node_config.node_id,
                         node_type=EnumNodeKind.EFFECT,
+                        node_name="my_node",
                         event_bus=node_config.event_bus,
                         version="1.2.0",
                     )
@@ -601,6 +609,7 @@ class MixinNodeIntrospection:
                     config = ModelIntrospectionConfig(
                         node_id=node_config.node_id,
                         node_type=EnumNodeKind.EFFECT,
+                        node_name="my_effect_node",
                         event_bus=node_config.event_bus,
                         operation_keywords=frozenset({"fetch", "upload", "download"}),
                     )
@@ -638,6 +647,9 @@ class MixinNodeIntrospection:
             )
         self._introspection_event_bus = config.event_bus
         self._introspection_version = config.version
+        self._introspection_node_name = config.node_name
+        self._introspection_env = config.env
+        self._introspection_service = config.service
         self._introspection_cache_ttl = config.cache_ttl
 
         # Capability discovery configuration - frozensets are immutable, no copy needed
@@ -2081,9 +2093,15 @@ class MixinNodeIntrospection:
             return False
 
         request_topic = self._request_introspection_topic
+        node_identity = ModelEmitterIdentity(
+            env=self._introspection_env,
+            service=self._introspection_service,
+            node_name=self._introspection_node_name,
+            version=self._introspection_version,
+        )
         unsubscribe = await event_bus.subscribe(
             topic=request_topic,
-            group_id=f"introspection-{self._introspection_node_id}",
+            node_identity=node_identity,
             on_message=self._handle_introspection_request,
         )
         self._registry_unsubscribe = unsubscribe

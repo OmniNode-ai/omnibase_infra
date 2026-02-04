@@ -345,6 +345,7 @@ class MyNode(MixinNodeIntrospection):
         config = ModelIntrospectionConfig(
             node_id=uuid4(),
             node_type="EFFECT",
+            node_name="my_effect_node",
             event_bus=event_bus,
             version="1.0.0",
             cache_ttl=300.0,

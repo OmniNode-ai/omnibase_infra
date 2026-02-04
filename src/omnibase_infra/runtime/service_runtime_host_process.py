@@ -3061,6 +3061,8 @@ class RuntimeHostProcess:
             dispatch_engine=self._dispatch_engine,
             environment=environment,
             node_name="runtime-host",
+            service=self._node_identity.service,
+            version=self._node_identity.version,
         )
 
         # Wire subscriptions for each handler with a contract

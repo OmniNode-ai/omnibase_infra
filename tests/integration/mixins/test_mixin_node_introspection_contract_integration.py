@@ -200,6 +200,7 @@ class ContractDrivenEffectNode(MixinNodeIntrospection):
         config_kwargs: dict[str, object] = {
             "node_id": uuid4(),  # Generate unique UUID for each node instance
             "node_type": metadata.get("node_type", EnumNodeKind.EFFECT),
+            "node_name": metadata.get("name", "contract_driven_node"),
             "event_bus": event_bus,
             "version": metadata.get("version", "1.0.0"),
         }
@@ -257,6 +258,7 @@ class ComputeNodeWithCustomTopics(MixinNodeIntrospection):
         config = ModelIntrospectionConfig(
             node_id=uuid4(),  # Generate unique UUID for each node instance
             node_type=EnumNodeKind.COMPUTE,
+            node_name=node_name,
             event_bus=event_bus,
             version="2.0.0",
             introspection_topic=f"onex.{domain}.introspection.published.v1",
@@ -944,6 +946,7 @@ class TestTopicValidation:
             config = ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_contract_node",
                 introspection_topic=topic,
             )
             assert config.introspection_topic == topic
@@ -955,6 +958,7 @@ class TestTopicValidation:
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_contract_node",
                 introspection_topic="Invalid.topic.v1",
             )
 
@@ -965,6 +969,7 @@ class TestTopicValidation:
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_contract_node",
                 introspection_topic="onex.invalid@topic.v1",
             )
 
@@ -976,6 +981,7 @@ class TestTopicValidation:
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_contract_node",
                 introspection_topic="onex.",
             )
 
@@ -1002,6 +1008,7 @@ class TestSubclassTopicOverrides:
                 config = ModelIntrospectionConfig(
                     node_id=node_id,
                     node_type=EnumNodeKind.EFFECT,
+                    node_name="tenant_specific_node",
                     introspection_topic="onex.tenant1.introspection.published.v1",
                     heartbeat_topic="onex.tenant1.heartbeat.published.v1",
                     request_introspection_topic="onex.tenant1.introspection.requested.v1",
@@ -1036,6 +1043,7 @@ class TestSubclassTopicOverrides:
                 config_kwargs: dict[str, object] = {
                     "node_id": node_id,
                     "node_type": EnumNodeKind.EFFECT,
+                    "node_name": "partial_config_node",
                 }
                 if introspection_topic is not None:
                     config_kwargs["introspection_topic"] = introspection_topic

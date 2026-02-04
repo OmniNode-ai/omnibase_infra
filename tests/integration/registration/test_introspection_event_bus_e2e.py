@@ -140,6 +140,7 @@ class IntrospectionTestNode(MixinNodeIntrospection):
         config = ModelIntrospectionConfig(
             node_id=node_id,
             node_type=EnumNodeKind.EFFECT,
+            node_name="event_bus_test_node",
             event_bus=event_bus,
             version="1.0.0",
             introspection_topic="node.introspection",

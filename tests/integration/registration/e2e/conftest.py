@@ -878,6 +878,7 @@ async def introspectable_test_node(
             config = ModelIntrospectionConfig(
                 node_id=node_id,
                 node_type=node_type,
+                node_name="e2e_test_node",
                 event_bus=event_bus,
                 version=version,
                 cache_ttl=60.0,
