@@ -30,6 +30,7 @@ DROP INDEX IF EXISTS idx_pattern_hit_rates_pattern_id;
 -- latency_breakdowns indexes
 DROP INDEX IF EXISTS idx_latency_breakdowns_cache_hit;
 DROP INDEX IF EXISTS idx_latency_breakdowns_cohort_created;
+DROP INDEX IF EXISTS idx_latency_breakdowns_created_at;
 DROP INDEX IF EXISTS idx_latency_breakdowns_session_id;
 
 -- injection_effectiveness indexes
