@@ -26,7 +26,6 @@ from uuid import uuid4
 import yaml
 from pydantic import ValidationError
 
-from omnibase_core.constants import TOPIC_SUFFIX_CONTRACT_REGISTERED
 from omnibase_core.models.contracts.model_handler_contract import ModelHandlerContract
 from omnibase_core.models.events import ModelContractRegisteredEvent
 from omnibase_core.protocols.event_bus import ProtocolEventBusPublisher
@@ -34,6 +33,9 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+)
+from omnibase_infra.runtime.contract_registration_event_router import (
+    TOPIC_SUFFIX_CONTRACT_REGISTERED,
 )
 from omnibase_infra.services.contract_publisher.config import (
     ModelContractPublisherConfig,

@@ -597,6 +597,65 @@ class UnknownHandlerTypeError(RuntimeHostError):
         )
 
 
+class ProtocolDependencyResolutionError(RuntimeHostError):
+    """Raised when protocol dependencies cannot be resolved from container.
+
+    Used when a node's contract.yaml declares protocol dependencies that
+    are not registered in the container's service_registry. This is a
+    fail-fast error that prevents node creation with missing dependencies.
+
+    Example:
+        >>> context = ModelInfraErrorContext(
+        ...     transport_type=EnumInfraTransportType.RUNTIME,
+        ...     operation="resolve_dependencies",
+        ...     target_name="NodeContractPersistenceEffect",
+        ... )
+        >>> raise ProtocolDependencyResolutionError(
+        ...     "Missing required protocols for node",
+        ...     context=context,
+        ...     missing_protocols=["ProtocolPostgresAdapter"],
+        ...     node_name="node_contract_persistence_effect",
+        ... )
+
+    .. versionadded:: 0.x.x
+        Part of OMN-1732 runtime dependency injection.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        context: ModelInfraErrorContext | None = None,
+        *,
+        missing_protocols: list[str] | None = None,
+        node_name: str | None = None,
+        contract_path: str | None = None,
+        **extra_context: object,
+    ) -> None:
+        """Initialize ProtocolDependencyResolutionError.
+
+        Args:
+            message: Human-readable error message
+            context: Bundled infrastructure context
+            missing_protocols: List of protocol class names that could not be resolved
+            node_name: Name of the node requiring the protocols
+            contract_path: Path to the contract.yaml file (for debugging)
+            **extra_context: Additional context information
+        """
+        if missing_protocols is not None:
+            extra_context["missing_protocols"] = missing_protocols
+        if node_name is not None:
+            extra_context["node_name"] = node_name
+        if contract_path is not None:
+            extra_context["contract_path"] = contract_path
+
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.DEPENDENCY_ERROR,
+            context=context,
+            **extra_context,
+        )
+
+
 __all__: list[str] = [
     "EnvelopeValidationError",
     "InfraAuthenticationError",
@@ -604,6 +663,7 @@ __all__: list[str] = [
     "InfraTimeoutError",
     "InfraUnavailableError",
     "ProtocolConfigurationError",
+    "ProtocolDependencyResolutionError",
     "RuntimeHostError",
     "SecretResolutionError",
     "UnknownHandlerTypeError",

@@ -10,6 +10,7 @@ Exports:
     ModelInfraErrorContext: Configuration model for bundled error context
     RuntimeHostError: Base infrastructure error class
     ProtocolConfigurationError: Protocol configuration validation errors
+    ProtocolDependencyResolutionError: Protocol dependency resolution errors
     SecretResolutionError: Secret/credential resolution errors
     InfraConnectionError: Infrastructure connection errors
     InfraTimeoutError: Infrastructure timeout errors
@@ -115,6 +116,7 @@ from omnibase_infra.errors.error_infra import (
     InfraTimeoutError,
     InfraUnavailableError,
     ProtocolConfigurationError,
+    ProtocolDependencyResolutionError,
     RuntimeHostError,
     SecretResolutionError,
     UnknownHandlerTypeError,
@@ -162,6 +164,8 @@ __all__: list[str] = [
     "ModelTimeoutErrorContext",
     "PolicyRegistryError",
     "ProtocolConfigurationError",
+    # Protocol dependency resolution errors
+    "ProtocolDependencyResolutionError",
     # Repository errors
     "RepositoryContractError",
     "RepositoryError",

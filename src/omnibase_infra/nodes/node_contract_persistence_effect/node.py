@@ -56,8 +56,14 @@ from omnibase_core.nodes.node_effect import NodeEffect
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+    from omnibase_infra.models.runtime.model_resolved_dependencies import (
+        ModelResolvedDependencies,
+    )
 
 
+# ONEX_EXCLUDE: declarative_node - OMN-1732 DEC-003 requires constructor injection
+# for protocol dependencies. The _resolved_dependencies instance variable stores
+# pre-resolved protocols from ContractDependencyResolver.
 class NodeContractPersistenceEffect(NodeEffect):
     """Declarative effect node for contract registry persistence.
 
@@ -76,6 +82,9 @@ class NodeContractPersistenceEffect(NodeEffect):
 
     Args:
         container: ONEX dependency injection container.
+        dependencies: Optional pre-resolved protocol dependencies. If provided,
+            the node will use these instead of resolving from container.
+            Part of OMN-1732 runtime dependency injection.
 
     Dependency Injection:
         Backend adapters (PostgreSQL) are resolved via container.
@@ -102,13 +111,21 @@ class NodeContractPersistenceEffect(NodeEffect):
         ```
     """
 
-    def __init__(self, container: ModelONEXContainer) -> None:
+    def __init__(
+        self,
+        container: ModelONEXContainer,
+        dependencies: ModelResolvedDependencies | None = None,
+    ) -> None:
         """Initialize effect node with container dependency injection.
 
         Args:
             container: ONEX dependency injection container.
+            dependencies: Optional pre-resolved protocol dependencies from
+                ContractDependencyResolver. If provided, the node uses these
+                instead of resolving from container. Part of OMN-1732.
         """
         super().__init__(container)
+        self._resolved_dependencies = dependencies
 
 
 __all__ = ["NodeContractPersistenceEffect"]
