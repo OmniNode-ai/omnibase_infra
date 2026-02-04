@@ -8,8 +8,8 @@
 --
 -- Idempotency:
 --   - injection_effectiveness: ON CONFLICT (session_id) DO UPDATE
---   - latency_breakdowns: ON CONFLICT (session_id, prompt_index) DO NOTHING
---   - pattern_hit_rates: ON CONFLICT (session_id, pattern_id) DO NOTHING
+--   - latency_breakdowns: ON CONFLICT (session_id, prompt_id) DO NOTHING
+--   - pattern_hit_rates: ON CONFLICT (pattern_id, utilization_method) DO NOTHING
 --
 -- TTL Column: updated_at for injection_effectiveness, created_at for others
 --
@@ -78,6 +78,22 @@ CREATE TABLE IF NOT EXISTS injection_effectiveness (
     CONSTRAINT valid_routing_path CHECK (
         routing_path IS NULL
         OR routing_path IN ('event', 'local', 'hybrid')
+    ),
+    -- Non-negative counters and latencies
+    CONSTRAINT non_negative_total_injected_tokens CHECK (
+        total_injected_tokens IS NULL OR total_injected_tokens >= 0
+    ),
+    CONSTRAINT non_negative_patterns_injected CHECK (
+        patterns_injected IS NULL OR patterns_injected >= 0
+    ),
+    CONSTRAINT non_negative_injected_identifiers_count CHECK (
+        injected_identifiers_count IS NULL OR injected_identifiers_count >= 0
+    ),
+    CONSTRAINT non_negative_reused_identifiers_count CHECK (
+        reused_identifiers_count IS NULL OR reused_identifiers_count >= 0
+    ),
+    CONSTRAINT non_negative_user_visible_latency_ms CHECK (
+        user_visible_latency_ms IS NULL OR user_visible_latency_ms >= 0
     )
 );
 
@@ -110,14 +126,29 @@ CREATE TABLE IF NOT EXISTS latency_breakdowns (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- Ingest time
 
     -- Foreign key to session (ensures referential integrity)
+    -- Note: The writer upserts to injection_effectiveness BEFORE inserting here,
+    -- so FK constraint is satisfied by operation order, not transaction deferral.
+    -- DEFERRABLE retained for flexibility if explicit transactions are added later.
     CONSTRAINT fk_latency_breakdowns_session
         FOREIGN KEY (session_id)
         REFERENCES injection_effectiveness(session_id)
-        ON DELETE CASCADE,
+        ON DELETE CASCADE
+        DEFERRABLE INITIALLY DEFERRED,
 
     -- Constraints
     CONSTRAINT unique_session_prompt UNIQUE (session_id, prompt_id),
-    CONSTRAINT valid_cohort_breakdown CHECK (cohort IS NULL OR cohort IN ('control', 'treatment'))
+    CONSTRAINT valid_cohort_breakdown CHECK (cohort IS NULL OR cohort IN ('control', 'treatment')),
+    -- Non-negative latencies
+    CONSTRAINT non_negative_routing_latency_ms CHECK (
+        routing_latency_ms IS NULL OR routing_latency_ms >= 0
+    ),
+    CONSTRAINT non_negative_retrieval_latency_ms CHECK (
+        retrieval_latency_ms IS NULL OR retrieval_latency_ms >= 0
+    ),
+    CONSTRAINT non_negative_injection_latency_ms CHECK (
+        injection_latency_ms IS NULL OR injection_latency_ms >= 0
+    ),
+    CONSTRAINT non_negative_user_latency_ms CHECK (user_latency_ms >= 0)
 );
 
 -- ============================================================================
@@ -156,7 +187,11 @@ CREATE TABLE IF NOT EXISTS pattern_hit_rates (
     CONSTRAINT valid_pattern_confidence CHECK (
         confidence IS NULL
         OR (confidence >= 0.0 AND confidence <= 1.0)
-    )
+    ),
+    -- Non-negative counters
+    CONSTRAINT non_negative_hit_count CHECK (hit_count >= 0),
+    CONSTRAINT non_negative_miss_count CHECK (miss_count >= 0),
+    CONSTRAINT non_negative_sample_count CHECK (sample_count >= 0)
 );
 
 -- ============================================================================
@@ -164,6 +199,9 @@ CREATE TABLE IF NOT EXISTS pattern_hit_rates (
 -- ============================================================================
 
 -- injection_effectiveness indexes
+CREATE INDEX IF NOT EXISTS idx_injection_effectiveness_created_at
+    ON injection_effectiveness (created_at);
+
 CREATE INDEX IF NOT EXISTS idx_injection_effectiveness_updated_at
     ON injection_effectiveness (updated_at);
 
@@ -266,6 +304,24 @@ COMMENT ON COLUMN injection_effectiveness.runtime_id IS
     'Runtime instance identifier for multi-runtime deployments';
 COMMENT ON COLUMN injection_effectiveness.routing_path IS
     'Event routing path: event (Kafka), local (direct), hybrid (both)';
+COMMENT ON COLUMN injection_effectiveness.total_injected_tokens IS
+    'Total tokens injected into context for this session';
+COMMENT ON COLUMN injection_effectiveness.patterns_injected IS
+    'Number of patterns injected into context';
+COMMENT ON COLUMN injection_effectiveness.injected_identifiers_count IS
+    'Count of unique identifiers injected into context';
+COMMENT ON COLUMN injection_effectiveness.reused_identifiers_count IS
+    'Count of injected identifiers that were reused in response';
+COMMENT ON COLUMN injection_effectiveness.expected_agent IS
+    'Agent predicted by routing intelligence';
+COMMENT ON COLUMN injection_effectiveness.actual_agent IS
+    'Agent actually selected by the system';
+COMMENT ON COLUMN injection_effectiveness.created_at IS
+    'Row creation timestamp';
+COMMENT ON COLUMN injection_effectiveness.updated_at IS
+    'Last update timestamp (TTL key for upsert tables)';
+COMMENT ON COLUMN injection_effectiveness.metadata IS
+    'Extensible JSON for future fields and debugging context';
 
 COMMENT ON TABLE latency_breakdowns IS
     'Per-prompt latency breakdowns for detailed performance analysis (OMN-1890). '
@@ -279,6 +335,20 @@ COMMENT ON COLUMN latency_breakdowns.user_latency_ms IS
     'User-perceived latency for this specific prompt';
 COMMENT ON COLUMN latency_breakdowns.emitted_at IS
     'Event timestamp from producer (for drift analysis vs created_at ingest time)';
+COMMENT ON COLUMN latency_breakdowns.id IS
+    'Auto-generated primary key (UUID)';
+COMMENT ON COLUMN latency_breakdowns.session_id IS
+    'Foreign key to injection_effectiveness.session_id';
+COMMENT ON COLUMN latency_breakdowns.cohort IS
+    'A/B test cohort (denormalized for fast queries)';
+COMMENT ON COLUMN latency_breakdowns.routing_latency_ms IS
+    'Time spent in agent routing decision (milliseconds)';
+COMMENT ON COLUMN latency_breakdowns.retrieval_latency_ms IS
+    'Time spent retrieving patterns from storage (milliseconds)';
+COMMENT ON COLUMN latency_breakdowns.injection_latency_ms IS
+    'Time spent injecting context into prompt (milliseconds)';
+COMMENT ON COLUMN latency_breakdowns.created_at IS
+    'Ingest timestamp (when row was created in database)';
 
 COMMENT ON TABLE pattern_hit_rates IS
     'Pattern-level utilization aggregates across all sessions (OMN-1890). '
@@ -298,6 +368,14 @@ COMMENT ON COLUMN pattern_hit_rates.sample_count IS
     'Total observations (hit_count + miss_count)';
 COMMENT ON COLUMN pattern_hit_rates.confidence IS
     'Confidence level (NULL if sample_count < 20 per minimum support gating)';
+COMMENT ON COLUMN pattern_hit_rates.id IS
+    'Auto-generated primary key (UUID)';
+COMMENT ON COLUMN pattern_hit_rates.utilization_method IS
+    'Method used to measure utilization: identifier_match, semantic, or timeout';
+COMMENT ON COLUMN pattern_hit_rates.created_at IS
+    'Row creation timestamp';
+COMMENT ON COLUMN pattern_hit_rates.updated_at IS
+    'Last update timestamp (TTL key)';
 
 -- ============================================================================
 -- TRIGGER: Auto-update updated_at for pattern_hit_rates

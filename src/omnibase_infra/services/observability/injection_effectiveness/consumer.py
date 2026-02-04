@@ -207,8 +207,10 @@ class ConsumerMetrics:
         messages_failed: Messages that failed processing.
         messages_skipped: Messages skipped (invalid, duplicate, etc.).
         batches_processed: Number of batches successfully processed.
+        commit_failures: Number of offset commit failures (tracks persistent issues).
         last_poll_at: Timestamp of last Kafka poll.
         last_successful_write_at: Timestamp of last successful database write.
+        last_commit_failure_at: Timestamp of last commit failure (for diagnostics).
         started_at: Timestamp when metrics were initialized (consumer start time).
     """
 
@@ -219,8 +221,10 @@ class ConsumerMetrics:
         self.messages_failed: int = 0
         self.messages_skipped: int = 0
         self.batches_processed: int = 0
+        self.commit_failures: int = 0
         self.last_poll_at: datetime | None = None
         self.last_successful_write_at: datetime | None = None
+        self.last_commit_failure_at: datetime | None = None
         self.started_at: datetime = datetime.now(UTC)
         self._lock = asyncio.Lock()
 
@@ -264,6 +268,28 @@ class ConsumerMetrics:
         async with self._lock:
             self.last_poll_at = datetime.now(UTC)
 
+    async def record_commit_failure(self) -> None:
+        """Record an offset commit failure for tracking consecutive failures.
+
+        Commit failures don't lose data (messages will be reprocessed on restart),
+        but persistent failures may indicate Kafka connectivity issues that require
+        investigation. This metric tracks consecutive failures - a successful commit
+        resets the counter via reset_commit_failures().
+        """
+        async with self._lock:
+            self.commit_failures += 1
+            self.last_commit_failure_at = datetime.now(UTC)
+
+    async def reset_commit_failures(self) -> None:
+        """Reset consecutive commit failure counter after successful commit.
+
+        Called after a successful offset commit to reset the consecutive failure
+        tracking. This ensures the "persistent failures" warning only triggers
+        when failures are truly consecutive, not spread across time.
+        """
+        async with self._lock:
+            self.commit_failures = 0
+
     async def snapshot(self) -> dict[str, object]:
         """Get a snapshot of current metrics.
 
@@ -277,12 +303,18 @@ class ConsumerMetrics:
                 "messages_failed": self.messages_failed,
                 "messages_skipped": self.messages_skipped,
                 "batches_processed": self.batches_processed,
+                "commit_failures": self.commit_failures,
                 "last_poll_at": (
                     self.last_poll_at.isoformat() if self.last_poll_at else None
                 ),
                 "last_successful_write_at": (
                     self.last_successful_write_at.isoformat()
                     if self.last_successful_write_at
+                    else None
+                ),
+                "last_commit_failure_at": (
+                    self.last_commit_failure_at.isoformat()
+                    if self.last_commit_failure_at
                     else None
                 ),
                 "started_at": self.started_at.isoformat(),
@@ -464,6 +496,7 @@ class InjectionEffectivenessConsumer:
                 circuit_breaker_threshold=self._config.circuit_breaker_threshold,
                 circuit_breaker_reset_timeout=self._config.circuit_breaker_reset_timeout,
                 circuit_breaker_half_open_successes=self._config.circuit_breaker_half_open_successes,
+                minimum_support_threshold=self._config.min_pattern_support,
             )
 
             # Create Kafka consumer
@@ -786,6 +819,25 @@ class InjectionEffectivenessConsumer:
     # Batch Processing
     # =========================================================================
 
+    @staticmethod
+    def _track_skipped_offset(
+        skipped_offsets: dict[TopicPartition, int],
+        msg: ConsumerRecord,
+    ) -> None:
+        """Track offset for a skipped message to enable commit after processing.
+
+        Skipped messages (tombstones, invalid UTF-8, JSON errors, validation errors)
+        must have their offsets committed to avoid reprocessing. This helper updates
+        the skipped_offsets dict with the highest offset seen for each partition.
+
+        Args:
+            skipped_offsets: Dictionary mapping TopicPartition to highest skipped offset.
+            msg: The ConsumerRecord being skipped.
+        """
+        tp = TopicPartition(msg.topic, msg.partition)
+        current = skipped_offsets.get(tp, -1)
+        skipped_offsets[tp] = max(current, msg.offset)
+
     async def _process_batch(
         self,
         messages: list[ConsumerRecord],
@@ -836,9 +888,7 @@ class InjectionEffectivenessConsumer:
                     },
                 )
                 parsed_skipped += 1
-                tp = TopicPartition(msg.topic, msg.partition)
-                current = skipped_offsets.get(tp, -1)
-                skipped_offsets[tp] = max(current, msg.offset)
+                self._track_skipped_offset(skipped_offsets, msg)
                 continue
 
             try:
@@ -860,9 +910,7 @@ class InjectionEffectivenessConsumer:
                             },
                         )
                         parsed_skipped += 1
-                        tp = TopicPartition(msg.topic, msg.partition)
-                        current = skipped_offsets.get(tp, -1)
-                        skipped_offsets[tp] = max(current, msg.offset)
+                        self._track_skipped_offset(skipped_offsets, msg)
                         continue
 
                 payload = json.loads(value)
@@ -879,10 +927,7 @@ class InjectionEffectivenessConsumer:
                         },
                     )
                     parsed_skipped += 1
-                    # Track offset separately to preserve on write failures
-                    tp = TopicPartition(msg.topic, msg.partition)
-                    current = skipped_offsets.get(tp, -1)
-                    skipped_offsets[tp] = max(current, msg.offset)
+                    self._track_skipped_offset(skipped_offsets, msg)
                     continue
 
                 # Validate with Pydantic model
@@ -902,10 +947,7 @@ class InjectionEffectivenessConsumer:
                     },
                 )
                 parsed_skipped += 1
-                # Skip malformed messages but track offset separately to preserve on write failures
-                tp = TopicPartition(msg.topic, msg.partition)
-                current = skipped_offsets.get(tp, -1)
-                skipped_offsets[tp] = max(current, msg.offset)
+                self._track_skipped_offset(skipped_offsets, msg)
 
             except ValidationError as e:
                 logger.warning(
@@ -920,10 +962,7 @@ class InjectionEffectivenessConsumer:
                     },
                 )
                 parsed_skipped += 1
-                # Skip invalid messages but track offset separately to preserve on write failures
-                tp = TopicPartition(msg.topic, msg.partition)
-                current = skipped_offsets.get(tp, -1)
-                skipped_offsets[tp] = max(current, msg.offset)
+                self._track_skipped_offset(skipped_offsets, msg)
 
         if parsed_skipped > 0:
             await self.metrics.record_skipped(parsed_skipped)
@@ -1020,6 +1059,9 @@ class InjectionEffectivenessConsumer:
         try:
             await self._consumer.commit(commit_offsets)
 
+            # Reset consecutive failure counter on successful commit
+            await self.metrics.reset_commit_failures()
+
             logger.debug(
                 "Committed offsets",
                 extra={
@@ -1030,14 +1072,35 @@ class InjectionEffectivenessConsumer:
             )
 
         except KafkaError:
-            logger.exception(
-                "Failed to commit offsets",
-                extra={
-                    "consumer_id": self._consumer_id,
-                    "correlation_id": str(correlation_id),
-                },
-            )
+            # Track commit failures to identify persistent issues
+            await self.metrics.record_commit_failure()
+
+            # Get current failure count for warning threshold
+            metrics_snapshot = await self.metrics.snapshot()
+            commit_failures = metrics_snapshot.get("commit_failures", 0)
+
+            # Escalate logging level if failures are persistent (5+ consecutive)
+            if isinstance(commit_failures, int) and commit_failures >= 5:
+                logger.exception(
+                    "Persistent commit failures detected - may indicate Kafka "
+                    "connectivity issues requiring investigation",
+                    extra={
+                        "consumer_id": self._consumer_id,
+                        "correlation_id": str(correlation_id),
+                        "commit_failures": commit_failures,
+                    },
+                )
+            else:
+                logger.exception(
+                    "Failed to commit offsets",
+                    extra={
+                        "consumer_id": self._consumer_id,
+                        "correlation_id": str(correlation_id),
+                        "commit_failures": commit_failures,
+                    },
+                )
             # Don't re-raise - messages will be reprocessed on restart
+            # (at-least-once delivery semantics preserved)
 
     # =========================================================================
     # Health Check Server
