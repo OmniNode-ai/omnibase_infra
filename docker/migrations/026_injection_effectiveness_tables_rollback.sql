@@ -23,6 +23,7 @@ DROP FUNCTION IF EXISTS update_pattern_hit_rates_updated_at();
 
 -- pattern_hit_rates indexes
 DROP INDEX IF EXISTS idx_pattern_hit_rates_updated_at;
+DROP INDEX IF EXISTS idx_pattern_hit_rates_created_at;
 DROP INDEX IF EXISTS idx_pattern_hit_rates_confident;
 DROP INDEX IF EXISTS idx_pattern_hit_rates_domain_id;
 DROP INDEX IF EXISTS idx_pattern_hit_rates_pattern_id;
