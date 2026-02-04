@@ -90,6 +90,11 @@ Manifest Persistence Models:
     ModelManifestQueryPayload: Payload for manifest.query operation
     ModelManifestQueryResult: Result from manifest.query operation
     ModelManifestMetadata: Lightweight metadata for manifest queries
+
+Slack Models:
+    EnumAlertSeverity: Alert severity levels (critical, error, warning, info)
+    ModelSlackAlert: Input payload for Slack alert operations
+    ModelSlackAlertResult: Response from Slack webhook operations
 """
 
 from omnibase_infra.handlers.models.consul import (
@@ -104,6 +109,7 @@ from omnibase_infra.handlers.models.consul import (
     ModelConsulKVPutPayload,
     ModelConsulRegisterPayload,
 )
+from omnibase_infra.handlers.models.enum_alert_severity import EnumAlertSeverity
 from omnibase_infra.handlers.models.http import (
     EnumHttpOperationType,
     HttpPayload,
@@ -198,6 +204,10 @@ from omnibase_infra.handlers.models.model_qdrant_handler_response import (
     ModelQdrantHandlerResponse,
 )
 from omnibase_infra.handlers.models.model_retry_state import ModelRetryState
+from omnibase_infra.handlers.models.model_slack_alert_payload import ModelSlackAlert
+from omnibase_infra.handlers.models.model_slack_alert_result import (
+    ModelSlackAlertResult,
+)
 from omnibase_infra.handlers.models.model_vault_handler_response import (
     ModelVaultHandlerResponse,
 )
@@ -283,4 +293,8 @@ __all__: list[str] = [
     "ModelManifestQueryPayload",
     "ModelManifestQueryResult",
     "ModelManifestMetadata",
+    # Slack models
+    "EnumAlertSeverity",
+    "ModelSlackAlert",
+    "ModelSlackAlertResult",
 ]

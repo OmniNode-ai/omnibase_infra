@@ -1,0 +1,291 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeSlackAlerterEffect
+#
+# This contract defines the interface for the Slack Alerter Effect node,
+# which sends infrastructure alerts to Slack via webhooks. The node uses
+# declarative operation routing to dispatch operations to the handler.
+#
+# Related Tickets:
+#   - OMN-1905: Add declarative Slack webhook handler to omnibase_infra
+# Contract identifiers
+name: "node_slack_alerter_effect"
+contract_name: "node_slack_alerter_effect"
+node_name: "node_slack_alerter_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Description
+description: >
+  Effect node for Slack webhook alerting. Sends infrastructure alerts to Slack channels using incoming webhooks with Block Kit formatting, retry with exponential backoff, and rate limit handling. Uses declarative operation routing to dispatch to the HandlerSlackWebhook.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelSlackAlert"
+  module: "omnibase_infra.handlers.models.model_slack_alert"
+  description: "Input model containing alert severity, message, and optional details."
+output_model:
+  name: "ModelSlackAlertResult"
+  module: "omnibase_infra.handlers.models.model_slack_alert"
+  description: "Output model containing delivery status, timing, and error information."
+# =============================================================================
+# HANDLER ROUTING (Declarative Handler Dispatch)
+# =============================================================================
+# This section defines how operations are routed to the Slack webhook handler.
+# The routing strategy determines handler selection based on operation type.
+#
+# Design Rationale:
+#   - Single handler for all Slack operations
+#   - Block Kit formatting for rich messages
+#   - Retry with exponential backoff for resilience
+#   - Rate limit handling for graceful degradation
+#
+# Execution Flow:
+#   1. Receive ModelSlackAlert with operation type
+#   2. Route to HandlerSlackWebhook based on operation
+#   3. Execute webhook delivery with retry logic
+#   4. Return ModelSlackAlertResult with delivery status
+# =============================================================================
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    # Send Alert - Formatted Block Kit message
+    # Sends a rich formatted alert with severity, message, and details.
+    - operation: "send_alert"
+      handler:
+        name: "HandlerSlackWebhook"
+        module: "omnibase_infra.handlers.handler_slack_webhook"
+      description: "Send formatted alert to Slack with Block Kit formatting"
+      output_fields:
+        - success
+        - duration_ms
+        - retry_count
+    # Send Message - Plain text message
+    # Sends a simple text message (uses same handler, alert formatting applied)
+    - operation: "send_message"
+      handler:
+        name: "HandlerSlackWebhook"
+        module: "omnibase_infra.handlers.handler_slack_webhook"
+      description: "Send message to Slack channel"
+      output_fields:
+        - success
+        - duration_ms
+        - retry_count
+# =============================================================================
+# ERROR HANDLING (Retry + Rate Limiting)
+# =============================================================================
+# Error handling configuration for Slack webhook operations.
+# Uses retry with exponential backoff and handles rate limiting gracefully.
+#
+# Note: The handler implements its own retry logic internally rather than
+# relying on external retry orchestration. This ensures consistent behavior
+# and proper rate limit handling.
+# =============================================================================
+error_handling:
+  # Retry policy with exponential backoff
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 1000
+    max_delay_ms: 4000
+    exponential_base: 2
+    retry_on:
+      - "SLACK_RATE_LIMITED"
+      - "SLACK_TIMEOUT"
+      - "SLACK_CONNECTION_ERROR"
+      - "SLACK_CLIENT_ERROR"
+  # Error type definitions
+  error_types:
+    - name: "SLACK_NOT_CONFIGURED"
+      description: "SLACK_WEBHOOK_URL environment variable not set"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "SLACK_RATE_LIMITED"
+      description: "Slack returned HTTP 429 rate limit"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "SLACK_TIMEOUT"
+      description: "Webhook request timed out"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "SLACK_CONNECTION_ERROR"
+      description: "Failed to connect to Slack webhook"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "SLACK_CLIENT_ERROR"
+      description: "HTTP client error during request"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "SLACK_HTTP_4XX"
+      description: "Slack returned HTTP 4xx error (non-429)"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "SLACK_HTTP_5XX"
+      description: "Slack returned HTTP 5xx error"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+# IO operations (EFFECT node specific)
+io_operations:
+  - operation: "send_alert"
+    description: "Send a formatted alert to Slack with Block Kit formatting"
+    input_fields:
+      - severity
+      - message
+      - title
+      - details
+      - channel
+      - correlation_id
+    output_fields:
+      - success
+      - duration_ms
+      - correlation_id
+      - error
+      - error_code
+      - retry_count
+  - operation: "send_message"
+    description: "Send a plain text message to Slack"
+    input_fields:
+      - message
+      - channel
+      - correlation_id
+    output_fields:
+      - success
+      - duration_ms
+      - correlation_id
+      - error
+      - error_code
+      - retry_count
+# Dependencies (protocols this node requires)
+dependencies:
+  - name: "http_client"
+    type: "library"
+    library: "aiohttp"
+    description: "Async HTTP client for webhook requests"
+  - name: "slack_webhook_url"
+    type: "environment"
+    env_var: "SLACK_WEBHOOK_URL"
+    description: "Slack incoming webhook URL"
+    required: true
+# Capabilities provided by this node
+capabilities:
+  - name: "slack_alerting"
+    description: "Send infrastructure alerts to Slack channels"
+  - name: "block_kit_formatting"
+    description: "Format messages using Slack Block Kit for rich display"
+  - name: "retry_with_backoff"
+    description: "Retry failed requests with exponential backoff"
+  - name: "rate_limit_handling"
+    description: "Handle Slack rate limiting gracefully"
+# Model definitions
+definitions:
+  ModelSlackAlert:
+    type: object
+    description: "Input payload for Slack alert operations"
+    frozen: true
+    extra: "forbid"
+    properties:
+      severity:
+        type: enum
+        enum_class: "EnumAlertSeverity"
+        module: "omnibase_infra.handlers.models.model_slack_alert"
+        description: "Alert severity level for visual formatting"
+        default: "info"
+        enum:
+          - "critical"
+          - "error"
+          - "warning"
+          - "info"
+      message:
+        type: string
+        description: "Main alert message content"
+        min_length: 1
+        max_length: 3000
+      title:
+        type: string
+        nullable: true
+        default: null
+        max_length: 150
+        description: "Optional alert title"
+      details:
+        type: object
+        key_type: string
+        value_type: any
+        description: "Additional key-value details"
+        default_factory: "dict"
+      channel:
+        type: string
+        nullable: true
+        default: null
+        description: "Optional channel override"
+      correlation_id:
+        type: uuid
+        description: "UUID for distributed tracing"
+        default_factory: "uuid4"
+    required:
+      - message
+  ModelSlackAlertResult:
+    type: object
+    description: "Response from Slack webhook operations"
+    frozen: true
+    extra: "forbid"
+    properties:
+      success:
+        type: boolean
+        description: "Whether the alert was delivered successfully"
+      duration_ms:
+        type: float
+        description: "Time taken for the operation in milliseconds"
+        default: 0.0
+        ge: 0.0
+      correlation_id:
+        type: uuid
+        description: "UUID from the original request"
+      error:
+        type: string
+        nullable: true
+        default: null
+        description: "Sanitized error message if success is False"
+      error_code:
+        type: string
+        nullable: true
+        default: null
+        description: "Error code for programmatic handling"
+      retry_count:
+        type: integer
+        description: "Number of retry attempts made"
+        default: 0
+        ge: 0
+    required:
+      - success
+      - correlation_id
+# Health check configuration
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  checks:
+    - name: "webhook_configured"
+      check_type: "environment"
+      env_var: "SLACK_WEBHOOK_URL"
+      description: "Verify SLACK_WEBHOOK_URL is configured"
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-04"
+  updated: "2026-02-04"
+  tags:
+    - effect
+    - slack
+    - alerting
+    - webhook
+    - infrastructure
+    - block-kit
