@@ -546,3 +546,188 @@ class TestModelResolvedDependencies:
                 protocols={},
                 extra_field="not allowed",  # type: ignore[call-arg]
             )
+
+
+class TestResolveFromPath:
+    """Tests for ContractDependencyResolver.resolve_from_path (OMN-1903)."""
+
+    @pytest.fixture
+    def mock_container(self) -> MagicMock:
+        """Create a mock ONEX container with service_registry."""
+        container = MagicMock()
+        container.service_registry = MagicMock()
+        container.service_registry.resolve_service = AsyncMock()
+        return container
+
+    @pytest.fixture
+    def temp_contract_file(self, tmp_path: Any) -> Any:
+        """Create a temporary contract.yaml file with dependencies."""
+        contract_path = tmp_path / "contract.yaml"
+        contract_content = """
+name: test_node
+node_type: EFFECT_GENERIC
+dependencies:
+  - name: protocol_postgres
+    type: protocol
+    class_name: ProtocolPostgresAdapter
+    module: test.module.postgres
+  - name: protocol_circuit_breaker
+    type: protocol
+    class_name: ProtocolCircuitBreakerAware
+    module: test.module.circuit_breaker
+"""
+        contract_path.write_text(contract_content)
+        return contract_path
+
+    @pytest.fixture
+    def temp_contract_no_deps(self, tmp_path: Any) -> Any:
+        """Create a temporary contract.yaml file without dependencies."""
+        contract_path = tmp_path / "contract.yaml"
+        contract_content = """
+name: test_node_no_deps
+node_type: COMPUTE_GENERIC
+"""
+        contract_path.write_text(contract_content)
+        return contract_path
+
+    @pytest.mark.asyncio
+    async def test_resolve_from_path_success(
+        self,
+        mock_container: MagicMock,
+        temp_contract_file: Any,
+    ) -> None:
+        """Test successful dependency resolution from a contract file."""
+        mock_postgres = MagicMock()
+        mock_circuit_breaker = MagicMock()
+        mock_container.service_registry.resolve_service = AsyncMock(
+            side_effect=[mock_postgres, mock_circuit_breaker]
+        )
+
+        resolver = ContractDependencyResolver(mock_container)
+
+        with patch.object(resolver, "_import_protocol_class") as mock_import:
+            mock_import.side_effect = [
+                MagicMock(__name__="ProtocolPostgresAdapter"),
+                MagicMock(__name__="ProtocolCircuitBreakerAware"),
+            ]
+
+            result = await resolver.resolve_from_path(temp_contract_file)
+
+        assert isinstance(result, ModelResolvedDependencies)
+        assert len(result) == 2
+        assert result.get("ProtocolPostgresAdapter") is mock_postgres
+        assert result.get("ProtocolCircuitBreakerAware") is mock_circuit_breaker
+
+    @pytest.mark.asyncio
+    async def test_resolve_from_path_no_dependencies(
+        self,
+        mock_container: MagicMock,
+        temp_contract_no_deps: Any,
+    ) -> None:
+        """Test that contracts without dependencies return empty result."""
+        resolver = ContractDependencyResolver(mock_container)
+
+        result = await resolver.resolve_from_path(temp_contract_no_deps)
+
+        assert isinstance(result, ModelResolvedDependencies)
+        assert len(result) == 0
+        mock_container.service_registry.resolve_service.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_resolve_from_path_file_not_found(
+        self,
+        mock_container: MagicMock,
+        tmp_path: Any,
+    ) -> None:
+        """Test that missing contract file raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        resolver = ContractDependencyResolver(mock_container)
+        nonexistent_path = tmp_path / "nonexistent.yaml"
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await resolver.resolve_from_path(nonexistent_path)
+
+        assert "not found" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_resolve_from_path_invalid_yaml(
+        self,
+        mock_container: MagicMock,
+        tmp_path: Any,
+    ) -> None:
+        """Test that invalid YAML raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        contract_path = tmp_path / "invalid.yaml"
+        contract_path.write_text("invalid: yaml: content: [unclosed")
+
+        resolver = ContractDependencyResolver(mock_container)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            await resolver.resolve_from_path(contract_path)
+
+        assert (
+            "parse" in str(exc_info.value).lower()
+            or "yaml" in str(exc_info.value).lower()
+        )
+
+    @pytest.mark.asyncio
+    async def test_resolve_from_path_path_object(
+        self,
+        mock_container: MagicMock,
+        temp_contract_no_deps: Any,
+    ) -> None:
+        """Test that Path objects are correctly handled."""
+        resolver = ContractDependencyResolver(mock_container)
+
+        # Pass Path object directly
+        result = await resolver.resolve_from_path(temp_contract_no_deps)
+
+        assert isinstance(result, ModelResolvedDependencies)
+
+    @pytest.mark.asyncio
+    async def test_resolve_from_path_fail_fast_on_missing_protocol(
+        self,
+        mock_container: MagicMock,
+        temp_contract_file: Any,
+    ) -> None:
+        """Test that missing protocols raise ProtocolDependencyResolutionError."""
+        mock_container.service_registry.resolve_service = AsyncMock(
+            side_effect=Exception("Protocol not registered")
+        )
+
+        resolver = ContractDependencyResolver(mock_container)
+
+        with patch.object(resolver, "_import_protocol_class") as mock_import:
+            mock_import.return_value = MagicMock()
+
+            with pytest.raises(ProtocolDependencyResolutionError) as exc_info:
+                await resolver.resolve_from_path(temp_contract_file)
+
+        assert "missing required protocols" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_resolve_from_path_allow_missing(
+        self,
+        mock_container: MagicMock,
+        temp_contract_file: Any,
+    ) -> None:
+        """Test that allow_missing=True skips failed resolutions."""
+        mock_container.service_registry.resolve_service = AsyncMock(
+            side_effect=Exception("Protocol not registered")
+        )
+
+        resolver = ContractDependencyResolver(mock_container)
+
+        with patch.object(resolver, "_import_protocol_class") as mock_import:
+            mock_import.return_value = MagicMock()
+
+            # Should not raise with allow_missing=True
+            result = await resolver.resolve_from_path(
+                temp_contract_file,
+                allow_missing=True,
+            )
+
+        assert isinstance(result, ModelResolvedDependencies)
+        assert len(result) == 0  # All failed but no error raised

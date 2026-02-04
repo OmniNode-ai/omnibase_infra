@@ -73,6 +73,12 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.models.runtime.model_resolved_dependencies import (
+    ModelResolvedDependencies,
+)
+from omnibase_infra.runtime.contract_dependency_resolver import (
+    ContractDependencyResolver,
+)
 from omnibase_infra.runtime.envelope_validator import (
     normalize_correlation_id,
     validate_envelope,
@@ -763,6 +769,10 @@ class RuntimeHostProcess:
         # Stored during registration for use during handler initialization
         # Enables contract config to be passed to handlers via initialize()
         self._handler_descriptors: dict[str, ModelHandlerDescriptor] = {}
+
+        # Contract dependency resolver for protocol auto-injection (OMN-1903)
+        # Lazy-created when first needed during handler population
+        self._dependency_resolver: ContractDependencyResolver | None = None
 
         # Pending message tracking for graceful shutdown (OMN-756)
         # Tracks count of in-flight messages currently being processed
@@ -1798,11 +1808,44 @@ class RuntimeHostProcess:
                     handler_type
                 )
 
-                # Instantiate the handler with container for dependency injection
+                # Get descriptor early for dependency resolution (OMN-1903)
+                descriptor = self._handler_descriptors.get(handler_type)
+
+                # R1/R3: Resolve dependencies if contract has them (OMN-1903)
+                # Returns None if descriptor has no contract_path or no dependencies
+                resolved_dependencies: ModelResolvedDependencies | None = None
+                if descriptor:
+                    # This may raise ProtocolDependencyResolutionError (R2: fail-fast)
+                    resolved_dependencies = await self._resolve_handler_dependencies(
+                        descriptor
+                    )
+
+                # Instantiate the handler with container (and dependencies if supported)
                 # ProtocolContainerAware defines __init__(container: ModelONEXContainer)
-                handler_instance: ProtocolContainerAware = handler_cls(
-                    container=container
-                )
+                # Handlers that support OMN-1732 can accept optional dependencies parameter
+                handler_instance: ProtocolContainerAware
+                if resolved_dependencies and self._accepts_dependencies_param(
+                    handler_cls
+                ):
+                    # New-style handler with dependency injection
+                    # Type ignore: handler_cls is typed as ProtocolContainerAware which doesn't
+                    # have dependencies param, but runtime introspection confirmed it exists
+                    handler_instance = handler_cls(  # type: ignore[call-arg]
+                        container=container,
+                        dependencies=resolved_dependencies,
+                    )
+                    logger.debug(
+                        "Instantiated handler with resolved dependencies",
+                        extra={
+                            "handler_type": handler_type,
+                            "resolved_protocols": list(
+                                resolved_dependencies.protocols.keys()
+                            ),
+                        },
+                    )
+                else:
+                    # Legacy handler without dependency parameter
+                    handler_instance = handler_cls(container=container)
 
                 # Call initialize() if the handler has this method
                 # Handlers may require async initialization with config
@@ -1814,7 +1857,6 @@ class RuntimeHostProcess:
                     config_source = "runtime_only"
 
                     # Layer 1: Contract config as baseline (if descriptor exists with config)
-                    descriptor = self._handler_descriptors.get(handler_type)
                     if descriptor and descriptor.contract_config:
                         effective_config.update(descriptor.contract_config)
                         config_source = "contract_only"
@@ -1889,6 +1931,106 @@ class RuntimeHostProcess:
                 "total_count": len(self._handlers),
             },
         )
+
+    async def _resolve_handler_dependencies(
+        self,
+        descriptor: ModelHandlerDescriptor,
+    ) -> ModelResolvedDependencies | None:
+        """Resolve protocol dependencies for a handler from its contract.
+
+        Part of OMN-1903: Runtime dependency injection integration.
+
+        If the handler's contract declares protocol dependencies, this method
+        resolves them from the container's service_registry. Returns None if:
+        - No contract_path in descriptor (opt-in behavior, R3)
+        - Contract has no dependencies section
+
+        Args:
+            descriptor: Handler descriptor containing contract_path.
+
+        Returns:
+            ModelResolvedDependencies with resolved protocols, or None if no
+            dependencies to resolve.
+
+        Raises:
+            ProtocolDependencyResolutionError: If any required protocol cannot
+                be resolved (fail-fast behavior, R2).
+            ProtocolConfigurationError: If contract file cannot be loaded.
+        """
+        # R3: Opt-in behavior - skip if no contract_path
+        if not descriptor.contract_path:
+            logger.debug(
+                "Handler has no contract_path, skipping dependency resolution",
+                extra={"handler_id": descriptor.handler_id},
+            )
+            return None
+
+        # Lazy-create resolver on first use
+        if self._dependency_resolver is None:
+            container = self._get_or_create_container()
+            self._dependency_resolver = ContractDependencyResolver(container)
+
+        # R1: Call resolver with contract path
+        contract_path = Path(descriptor.contract_path)
+        logger.debug(
+            "Resolving dependencies for handler",
+            extra={
+                "handler_id": descriptor.handler_id,
+                "contract_path": str(contract_path),
+            },
+        )
+
+        # R2: Fail-fast on missing protocols (allow_missing=False)
+        resolved = await self._dependency_resolver.resolve_from_path(
+            contract_path,
+            allow_missing=False,
+        )
+
+        if resolved:
+            logger.debug(
+                "Resolved dependencies for handler",
+                extra={
+                    "handler_id": descriptor.handler_id,
+                    "resolved_protocols": list(resolved.protocols.keys()),
+                },
+            )
+        else:
+            logger.debug(
+                "No protocol dependencies in contract",
+                extra={
+                    "handler_id": descriptor.handler_id,
+                    "contract_path": str(contract_path),
+                },
+            )
+
+        return resolved if resolved else None
+
+    def _accepts_dependencies_param(self, handler_cls: type) -> bool:
+        """Check if a handler class accepts 'dependencies' in its constructor.
+
+        Part of OMN-1903: Runtime dependency injection integration.
+
+        Uses introspection to check if the handler's __init__ accepts a
+        'dependencies' keyword argument. This enables gradual migration:
+        - Legacy handlers: __init__(container) - no dependencies param
+        - New handlers: __init__(container, dependencies=...) - receives deps
+
+        Args:
+            handler_cls: The handler class to check.
+
+        Returns:
+            True if the handler accepts 'dependencies' parameter, False otherwise.
+        """
+        import inspect
+
+        try:
+            # Use inspect.signature on the class itself, not __init__
+            # This avoids the "unsound instance access" mypy warning
+            sig = inspect.signature(handler_cls)
+            return "dependencies" in sig.parameters
+        except (ValueError, TypeError):
+            # Cannot inspect signature (e.g., builtin class)
+            return False
 
     async def _load_contract_configs(self, correlation_id: UUID) -> None:
         """Load contract configurations from all discovered contracts.

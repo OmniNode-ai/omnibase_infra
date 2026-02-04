@@ -18,11 +18,16 @@ from __future__ import annotations
 
 import importlib
 import logging
+from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
+
+import yaml
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     ModelInfraErrorContext,
+    ProtocolConfigurationError,
     ProtocolDependencyResolutionError,
 )
 from omnibase_infra.models.runtime.model_resolved_dependencies import (
@@ -323,6 +328,128 @@ class ContractDependencyResolver:
             )
 
         return await self._container.service_registry.resolve_service(protocol_class)
+
+    async def resolve_from_path(
+        self,
+        contract_path: Path,
+        *,
+        allow_missing: bool = False,
+    ) -> ModelResolvedDependencies:
+        """Resolve protocol dependencies from a contract.yaml file path.
+
+        Loads the contract YAML, extracts the dependencies section, and resolves
+        each protocol from the container's service_registry. This is a convenience
+        method that combines file loading with dependency resolution.
+
+        Part of OMN-1903: Runtime dependency injection integration.
+
+        Args:
+            contract_path: Path object to the contract.yaml file.
+            allow_missing: If True, skip missing protocols instead of raising.
+                          Default False (fail-fast behavior).
+
+        Returns:
+            ModelResolvedDependencies containing resolved protocol instances.
+            Returns empty ModelResolvedDependencies if contract has no dependencies.
+
+        Raises:
+            ProtocolConfigurationError: If contract file cannot be loaded or parsed.
+            ProtocolDependencyResolutionError: If any required protocol cannot
+                be resolved and allow_missing is False.
+
+        Example:
+            >>> resolver = ContractDependencyResolver(container)
+            >>> resolved = await resolver.resolve_from_path(
+            ...     Path("src/nodes/my_node/contract.yaml")
+            ... )
+            >>> adapter = resolved.get("ProtocolPostgresAdapter")
+
+        .. versionadded:: 0.x.x
+            Part of OMN-1903 runtime dependency injection integration.
+        """
+        path = contract_path
+
+        # Load and parse the contract YAML
+        contract_data = self._load_contract_yaml(path)
+
+        # Check if contract has dependencies section
+        if "dependencies" not in contract_data or not contract_data["dependencies"]:
+            logger.debug(
+                "No dependencies section in contract, skipping resolution",
+                extra={"contract_path": str(path)},
+            )
+            return ModelResolvedDependencies()
+
+        # Create a lightweight contract object for the resolver
+        # Uses SimpleNamespace for duck-typing compatibility with resolve()
+        contract_name = contract_data.get("name", path.stem)
+        dependencies = [SimpleNamespace(**dep) for dep in contract_data["dependencies"]]
+        contract = SimpleNamespace(name=contract_name, dependencies=dependencies)
+
+        logger.debug(
+            "Resolving dependencies from contract path",
+            extra={
+                "contract_path": str(path),
+                "contract_name": contract_name,
+                "dependency_count": len(dependencies),
+            },
+        )
+
+        # Type ignore: contract is a SimpleNamespace duck-typed to match ModelContractBase
+        # The resolver uses getattr() internally so any object with name/dependencies works
+        return await self.resolve(contract, allow_missing=allow_missing)  # type: ignore[arg-type]
+
+    # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict, values vary by contract schema
+    def _load_contract_yaml(self, path: Path) -> dict[str, Any]:
+        """Load and parse a contract.yaml file.
+
+        Args:
+            path: Path to the contract YAML file.
+
+        Returns:
+            Parsed YAML content as a dictionary.
+
+        Raises:
+            ProtocolConfigurationError: If file doesn't exist or cannot be parsed.
+        """
+        if not path.exists():
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.FILESYSTEM,
+                operation="load_contract_yaml",
+                target_name=str(path),
+            )
+            raise ProtocolConfigurationError(
+                f"Contract file not found: {path}",
+                context=context,
+            )
+
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+                if data is None:
+                    data = {}
+                # ONEX_EXCLUDE: any_type - yaml.safe_load returns Any, we validate structure elsewhere
+                return cast("dict[str, Any]", data)
+        except yaml.YAMLError as e:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.FILESYSTEM,
+                operation="load_contract_yaml",
+                target_name=str(path),
+            )
+            raise ProtocolConfigurationError(
+                f"Failed to parse contract YAML at {path}: {e}",
+                context=context,
+            ) from e
+        except OSError as e:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.FILESYSTEM,
+                operation="load_contract_yaml",
+                target_name=str(path),
+            )
+            raise ProtocolConfigurationError(
+                f"Failed to read contract file at {path}: {e}",
+                context=context,
+            ) from e
 
 
 __all__ = ["ContractDependencyResolver"]
