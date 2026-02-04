@@ -20,6 +20,7 @@ Available Handlers:
 - HandlerGraph: Graph database handler (Memgraph/Neo4j via Bolt protocol)
 - HandlerIntent: Intent storage and query handler wrapping HandlerGraph (demo wiring)
 - HandlerQdrant: Qdrant vector database handler (MVP: create, upsert, search, delete)
+- HandlerSlackWebhook: Slack webhook handler for infrastructure alerting
 
 Response Models:
 - ModelDbQueryPayload: Database query result payload
@@ -45,6 +46,7 @@ from omnibase_infra.handlers.handler_manifest_persistence import (
 )
 from omnibase_infra.handlers.handler_mcp import HandlerMCP
 from omnibase_infra.handlers.handler_qdrant import HandlerQdrant
+from omnibase_infra.handlers.handler_slack_webhook import HandlerSlackWebhook
 from omnibase_infra.handlers.handler_vault import HandlerVault
 from omnibase_infra.handlers.models import (
     ModelConsulHandlerPayload,
@@ -71,6 +73,7 @@ __all__: list[str] = [
     "HandlerManifestPersistence",
     "HandlerMCP",
     "HandlerQdrant",
+    "HandlerSlackWebhook",
     "HandlerVault",
     "ModelConsulHandlerPayload",
     "ModelConsulHandlerResponse",
