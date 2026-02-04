@@ -45,13 +45,6 @@ import asyncpg
 
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import (
-    InfraConnectionError,
-    InfraTimeoutError,
-    ModelInfraErrorContext,
-    ModelTimeoutErrorContext,
-    RuntimeHostError,
-)
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.services.observability.injection_effectiveness.models.model_agent_match import (
     ModelAgentMatchEvent,
@@ -62,6 +55,7 @@ from omnibase_infra.services.observability.injection_effectiveness.models.model_
 from omnibase_infra.services.observability.injection_effectiveness.models.model_latency_breakdown import (
     ModelLatencyBreakdownEvent,
 )
+from omnibase_infra.utils.util_db_error_context import db_operation_error_context
 
 logger = logging.getLogger(__name__)
 
@@ -199,21 +193,26 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         if not events:
             return 0
 
-        op_correlation_id = correlation_id or uuid4()
+        # Generate fallback correlation_id if none provided, logging for traceability.
+        # This ensures all database writes can be traced even when callers don't provide IDs.
+        if correlation_id is None:
+            op_correlation_id = uuid4()
+            logger.debug(
+                "Generated fallback correlation_id for write_context_utilization",
+                extra={
+                    "correlation_id": str(op_correlation_id),
+                    "event_count": len(events),
+                },
+            )
+        else:
+            op_correlation_id = correlation_id
 
-        # Check circuit breaker
+        # Check circuit breaker before entering error context
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(
                 operation="write_context_utilization",
                 correlation_id=op_correlation_id,
             )
-
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.DATABASE,
-            operation="write_context_utilization",
-            target_name="injection_effectiveness",
-            correlation_id=op_correlation_id,
-        )
 
         # SQL for injection_effectiveness upsert
         sql_effectiveness = """
@@ -268,7 +267,14 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 updated_at = NOW()
         """.replace("__MIN_SUPPORT__", min_support_str)
 
-        try:
+        # Use shared error context for consistent exception handling
+        async with db_operation_error_context(
+            operation="write_context_utilization",
+            target_name="injection_effectiveness",
+            correlation_id=op_correlation_id,
+            timeout_seconds=self._query_timeout,
+            circuit_breaker=self,
+        ):
             async with self._pool.acquire() as conn:
                 # Apply statement_timeout for query timeout enforcement
                 # Convert seconds to milliseconds for PostgreSQL
@@ -303,10 +309,21 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                     )
 
                     # Write pattern utilizations to pattern_hit_rates (aggregated per pattern)
-                    # Hit/miss classification uses configurable threshold (default 0.5):
-                    # - hit: score > threshold (pattern injection was sufficiently useful)
-                    # - miss: score <= threshold (pattern injection had limited utility)
-                    # This heuristic enables aggregate hit rate tracking across patterns.
+                    #
+                    # Hit/miss classification threshold rationale:
+                    # The default threshold of 0.5 represents a "majority utility" heuristic:
+                    # - hit (score > 0.5): More than half the injected pattern content was
+                    #   utilized by the model, indicating the injection was net-positive.
+                    # - miss (score <= 0.5): Half or less was utilized, indicating the
+                    #   injection added noise/tokens without proportional benefit.
+                    #
+                    # This threshold is configurable via hit_miss_threshold parameter to
+                    # accommodate different utilization measurement methods and use cases.
+                    # For example, strict environments might use 0.7, while exploratory
+                    # injections might tolerate 0.3.
+                    #
+                    # Classification is binary (hit=1/miss=1) to enable simple aggregate
+                    # hit rate calculations: hit_rate = hit_count / (hit_count + miss_count)
                     pattern_rows = []
                     for e in events:
                         for p in e.pattern_utilizations:
@@ -333,7 +350,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                     if pattern_rows:
                         await conn.executemany(sql_patterns, pattern_rows)
 
-            # Record success
+            # Record success - reset circuit breaker after successful write
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
@@ -346,43 +363,6 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 },
             )
             return len(events)
-
-        except asyncpg.QueryCanceledError as e:
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(
-                    operation="write_context_utilization",
-                    correlation_id=op_correlation_id,
-                )
-            raise InfraTimeoutError(
-                "Write context utilization timed out",
-                context=ModelTimeoutErrorContext(
-                    transport_type=context.transport_type,
-                    operation=context.operation,
-                    target_name=context.target_name,
-                    correlation_id=context.correlation_id,
-                    timeout_seconds=self._query_timeout,
-                ),
-            ) from e
-        except asyncpg.PostgresConnectionError as e:
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(
-                    operation="write_context_utilization",
-                    correlation_id=op_correlation_id,
-                )
-            raise InfraConnectionError(
-                "Database connection failed during write_context_utilization",
-                context=context,
-            ) from e
-        except asyncpg.PostgresError as e:
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(
-                    operation="write_context_utilization",
-                    correlation_id=op_correlation_id,
-                )
-            raise RuntimeHostError(
-                f"Database error during write_context_utilization: {type(e).__name__}",
-                context=context,
-            ) from e
 
     async def write_agent_match(
         self,
@@ -409,21 +389,26 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         if not events:
             return 0
 
-        op_correlation_id = correlation_id or uuid4()
+        # Generate fallback correlation_id if none provided, logging for traceability.
+        # This ensures all database writes can be traced even when callers don't provide IDs.
+        if correlation_id is None:
+            op_correlation_id = uuid4()
+            logger.debug(
+                "Generated fallback correlation_id for write_agent_match",
+                extra={
+                    "correlation_id": str(op_correlation_id),
+                    "event_count": len(events),
+                },
+            )
+        else:
+            op_correlation_id = correlation_id
 
-        # Check circuit breaker
+        # Check circuit breaker before entering error context
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(
                 operation="write_agent_match",
                 correlation_id=op_correlation_id,
             )
-
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.DATABASE,
-            operation="write_agent_match",
-            target_name="injection_effectiveness",
-            correlation_id=op_correlation_id,
-        )
 
         sql = """
             INSERT INTO injection_effectiveness (
@@ -439,7 +424,14 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 updated_at = NOW()
         """
 
-        try:
+        # Use shared error context for consistent exception handling
+        async with db_operation_error_context(
+            operation="write_agent_match",
+            target_name="injection_effectiveness",
+            correlation_id=op_correlation_id,
+            timeout_seconds=self._query_timeout,
+            circuit_breaker=self,
+        ):
             async with self._pool.acquire() as conn:
                 # Apply statement_timeout for query timeout enforcement
                 # Use parameterized query for defense in depth
@@ -461,7 +453,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                     ],
                 )
 
-            # Record success
+            # Record success - reset circuit breaker after successful write
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
@@ -473,43 +465,6 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 },
             )
             return len(events)
-
-        except asyncpg.QueryCanceledError as e:
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(
-                    operation="write_agent_match",
-                    correlation_id=op_correlation_id,
-                )
-            raise InfraTimeoutError(
-                "Write agent match timed out",
-                context=ModelTimeoutErrorContext(
-                    transport_type=context.transport_type,
-                    operation=context.operation,
-                    target_name=context.target_name,
-                    correlation_id=context.correlation_id,
-                    timeout_seconds=self._query_timeout,
-                ),
-            ) from e
-        except asyncpg.PostgresConnectionError as e:
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(
-                    operation="write_agent_match",
-                    correlation_id=op_correlation_id,
-                )
-            raise InfraConnectionError(
-                "Database connection failed during write_agent_match",
-                context=context,
-            ) from e
-        except asyncpg.PostgresError as e:
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(
-                    operation="write_agent_match",
-                    correlation_id=op_correlation_id,
-                )
-            raise RuntimeHostError(
-                f"Database error during write_agent_match: {type(e).__name__}",
-                context=context,
-            ) from e
 
     async def write_latency_breakdowns(
         self,
@@ -537,21 +492,26 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         if not events:
             return 0
 
-        op_correlation_id = correlation_id or uuid4()
+        # Generate fallback correlation_id if none provided, logging for traceability.
+        # This ensures all database writes can be traced even when callers don't provide IDs.
+        if correlation_id is None:
+            op_correlation_id = uuid4()
+            logger.debug(
+                "Generated fallback correlation_id for write_latency_breakdowns",
+                extra={
+                    "correlation_id": str(op_correlation_id),
+                    "event_count": len(events),
+                },
+            )
+        else:
+            op_correlation_id = correlation_id
 
-        # Check circuit breaker
+        # Check circuit breaker before entering error context
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(
                 operation="write_latency_breakdowns",
                 correlation_id=op_correlation_id,
             )
-
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.DATABASE,
-            operation="write_latency_breakdowns",
-            target_name="latency_breakdowns",
-            correlation_id=op_correlation_id,
-        )
 
         # SQL for latency_breakdowns insert
         sql_breakdowns = """
@@ -581,7 +541,14 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 updated_at = NOW()
         """
 
-        try:
+        # Use shared error context for consistent exception handling
+        async with db_operation_error_context(
+            operation="write_latency_breakdowns",
+            target_name="latency_breakdowns",
+            correlation_id=op_correlation_id,
+            timeout_seconds=self._query_timeout,
+            circuit_breaker=self,
+        ):
             async with self._pool.acquire() as conn:
                 # Apply statement_timeout for query timeout enforcement
                 # Use parameterized query for defense in depth
@@ -645,7 +612,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                         ],
                     )
 
-            # Record success
+            # Record success - reset circuit breaker after successful write
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
@@ -658,43 +625,6 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 },
             )
             return len(events)
-
-        except asyncpg.QueryCanceledError as e:
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(
-                    operation="write_latency_breakdowns",
-                    correlation_id=op_correlation_id,
-                )
-            raise InfraTimeoutError(
-                "Write latency breakdowns timed out",
-                context=ModelTimeoutErrorContext(
-                    transport_type=context.transport_type,
-                    operation=context.operation,
-                    target_name=context.target_name,
-                    correlation_id=context.correlation_id,
-                    timeout_seconds=self._query_timeout,
-                ),
-            ) from e
-        except asyncpg.PostgresConnectionError as e:
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(
-                    operation="write_latency_breakdowns",
-                    correlation_id=op_correlation_id,
-                )
-            raise InfraConnectionError(
-                "Database connection failed during write_latency_breakdowns",
-                context=context,
-            ) from e
-        except asyncpg.PostgresError as e:
-            async with self._circuit_breaker_lock:
-                await self._record_circuit_failure(
-                    operation="write_latency_breakdowns",
-                    correlation_id=op_correlation_id,
-                )
-            raise RuntimeHostError(
-                f"Database error during write_latency_breakdowns: {type(e).__name__}",
-                context=context,
-            ) from e
 
     def get_circuit_breaker_state(self) -> dict[str, JsonType]:
         """Return current circuit breaker state for health checks.

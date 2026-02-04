@@ -7,6 +7,7 @@ This package provides common utilities used across the infrastructure:
     - util_atomic_file: Atomic file write primitives using temp-file-rename pattern
     - util_consumer_group: Kafka consumer group ID generation with deterministic hashing
     - util_datetime: Datetime validation and timezone normalization
+    - util_db_error_context: Database operation error handling context manager
     - util_db_transaction: Database transaction context manager for asyncpg
     - util_dsn_validation: PostgreSQL DSN validation and sanitization
     - util_env_parsing: Type-safe environment variable parsing with validation
@@ -38,6 +39,10 @@ from omnibase_infra.utils.util_datetime import (
     validate_timezone_aware_with_context,
     warn_if_naive_datetime,
 )
+
+# Note: util_db_error_context is NOT imported here to avoid circular imports.
+# Import directly: from omnibase_infra.utils.util_db_error_context import db_operation_error_context
+# See: omnibase_infra.errors -> util_error_sanitization -> utils.__init__ -> util_db_error_context -> errors
 from omnibase_infra.utils.util_db_transaction import (
     transaction_context,
 )
@@ -80,6 +85,8 @@ __all__: list[str] = [
     "CorrelationContext",
     "KAFKA_CONSUMER_GROUP_MAX_LENGTH",
     "OptimisticConflictError",
+    # Note: ProtocolCircuitBreakerFailureRecorder and db_operation_error_context are NOT exported
+    # here to avoid circular imports. Import directly from util_db_error_context.
     "SAFE_ERROR_PATTERNS",
     "SEMVER_PATTERN",
     "SENSITIVE_PATTERNS",

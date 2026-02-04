@@ -6,10 +6,10 @@
 -- Three tables track session-level metrics, per-prompt latency breakdowns,
 -- and per-pattern utilization rates.
 --
--- Idempotency:
---   - injection_effectiveness: ON CONFLICT (session_id) DO UPDATE
---   - latency_breakdowns: ON CONFLICT (session_id, prompt_id) DO NOTHING
---   - pattern_hit_rates: ON CONFLICT (pattern_id, utilization_method) DO NOTHING
+-- Idempotency (writer-side ON CONFLICT handling):
+--   - injection_effectiveness: UNIQUE on session_id (PK) enables upsert
+--   - latency_breakdowns: UNIQUE on (session_id, prompt_id) enables idempotent inserts
+--   - pattern_hit_rates: UNIQUE on (pattern_id, utilization_method) enables upsert
 --
 -- TTL Column: updated_at for injection_effectiveness, created_at for others
 --
@@ -125,15 +125,14 @@ CREATE TABLE IF NOT EXISTS latency_breakdowns (
     emitted_at TIMESTAMPTZ,                -- Event time from producer (for drift analysis)
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- Ingest time
 
-    -- Foreign key to session (ensures referential integrity)
-    -- Note: The writer upserts to injection_effectiveness BEFORE inserting here,
-    -- so FK constraint is satisfied by operation order, not transaction deferral.
-    -- DEFERRABLE retained for flexibility if explicit transactions are added later.
-    CONSTRAINT fk_latency_breakdowns_session
-        FOREIGN KEY (session_id)
-        REFERENCES injection_effectiveness(session_id)
-        ON DELETE CASCADE
-        DEFERRABLE INITIALLY DEFERRED,
+    -- No FK to injection_effectiveness: In async event-driven systems (Kafka),
+    -- latency breakdown events may arrive BEFORE their parent session record.
+    -- DEFERRABLE only works within a single transaction, not across separate
+    -- Kafka message processing. Referential integrity is managed by:
+    --   1. Writer ensures parent exists before child insert (within same handler)
+    --   2. Orphan cleanup via scheduled job (if events arrive truly out-of-order)
+    --   3. JOINs naturally exclude orphans in analytics queries
+    -- The session_id index (below) enables efficient JOINs without FK overhead.
 
     -- Constraints
     CONSTRAINT unique_session_prompt UNIQUE (session_id, prompt_id),
@@ -226,6 +225,9 @@ CREATE INDEX IF NOT EXISTS idx_injection_effectiveness_utilization_method
 CREATE INDEX IF NOT EXISTS idx_latency_breakdowns_session_id
     ON latency_breakdowns (session_id);
 
+CREATE INDEX IF NOT EXISTS idx_latency_breakdowns_created_at
+    ON latency_breakdowns (created_at);
+
 CREATE INDEX IF NOT EXISTS idx_latency_breakdowns_cohort_created
     ON latency_breakdowns (cohort, created_at)
     WHERE cohort IS NOT NULL;
@@ -237,6 +239,9 @@ CREATE INDEX IF NOT EXISTS idx_latency_breakdowns_cache_hit
 -- pattern_hit_rates indexes
 CREATE INDEX IF NOT EXISTS idx_pattern_hit_rates_pattern_id
     ON pattern_hit_rates (pattern_id);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_hit_rates_created_at
+    ON pattern_hit_rates (created_at);
 
 CREATE INDEX IF NOT EXISTS idx_pattern_hit_rates_domain_id
     ON pattern_hit_rates (domain_id)
@@ -330,7 +335,7 @@ COMMENT ON COLUMN injection_effectiveness.metadata IS
 
 COMMENT ON TABLE latency_breakdowns IS
     'Per-prompt latency breakdowns for detailed performance analysis (OMN-1890). '
-    'One row per (session_id, prompt_id) pair. FK to injection_effectiveness.';
+    'One row per (session_id, prompt_id) pair. No FK constraint (async event arrival).';
 
 COMMENT ON COLUMN latency_breakdowns.prompt_id IS
     'Unique prompt identifier from event emitter (UUID)';
@@ -343,7 +348,7 @@ COMMENT ON COLUMN latency_breakdowns.emitted_at IS
 COMMENT ON COLUMN latency_breakdowns.id IS
     'Auto-generated primary key (UUID)';
 COMMENT ON COLUMN latency_breakdowns.session_id IS
-    'Foreign key to injection_effectiveness.session_id';
+    'Session identifier (logical reference to injection_effectiveness, no FK constraint)';
 COMMENT ON COLUMN latency_breakdowns.cohort IS
     'A/B test cohort (denormalized for fast queries)';
 COMMENT ON COLUMN latency_breakdowns.routing_latency_ms IS

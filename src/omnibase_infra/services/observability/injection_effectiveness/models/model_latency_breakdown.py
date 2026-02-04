@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -51,8 +51,8 @@ class ModelLatencyBreakdownEvent(BaseModel):
         description="Event type discriminator",
     )
     session_id: UUID = Field(..., description="Session identifier")
-    correlation_id: UUID | None = Field(
-        default=None,
+    correlation_id: UUID = Field(
+        default_factory=uuid4,
         description="Correlation ID for tracing",
     )
 

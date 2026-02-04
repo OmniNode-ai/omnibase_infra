@@ -475,11 +475,11 @@ class InjectionEffectivenessConsumer:
         )
 
         try:
-            # Create PostgreSQL pool
+            # Create PostgreSQL pool with configurable sizes
             self._pool = await asyncpg.create_pool(
                 dsn=self._config.postgres_dsn,
-                min_size=2,
-                max_size=10,
+                min_size=self._config.pool_min_size,
+                max_size=self._config.pool_max_size,
             )
             logger.info(
                 "PostgreSQL pool created",
@@ -986,8 +986,23 @@ class InjectionEffectivenessConsumer:
             ] = getattr(self._writer, writer_method_name)
             models = [item[1] for item in items]
 
+            # Extract correlation_id from events if available, otherwise use batch correlation_id.
+            # This enables end-to-end tracing from producer through to the writer.
+            # Use first non-None correlation_id found in the batch.
+            event_correlation_id: UUID | None = None
+            for _, model in items:
+                if (
+                    hasattr(model, "correlation_id")
+                    and model.correlation_id is not None
+                ):
+                    event_correlation_id = model.correlation_id
+                    break
+
+            # Use event correlation_id if found, otherwise fall back to batch correlation_id
+            writer_correlation_id = event_correlation_id or correlation_id
+
             try:
-                written_count = await writer_method(models, correlation_id)
+                written_count = await writer_method(models, writer_correlation_id)
 
                 # Record successful offsets per partition for this topic
                 for msg, _ in items:
@@ -1109,10 +1124,15 @@ class InjectionEffectivenessConsumer:
     async def _start_health_server(self) -> None:
         """Start minimal HTTP health check server.
 
-        Starts an aiohttp server on the configured port with a /health endpoint.
+        Starts an aiohttp server on the configured port with health check endpoints:
+            - /health: Full health status (backwards compatible)
+            - /health/live: Kubernetes liveness probe (process running)
+            - /health/ready: Kubernetes readiness probe (dependencies connected)
         """
         self._health_app = web.Application()
         self._health_app.router.add_get("/health", self._health_handler)
+        self._health_app.router.add_get("/health/live", self._liveness_handler)
+        self._health_app.router.add_get("/health/ready", self._readiness_handler)
 
         self._health_runner = web.AppRunner(self._health_app)
         await self._health_runner.setup()
@@ -1130,6 +1150,7 @@ class InjectionEffectivenessConsumer:
                 "consumer_id": self._consumer_id,
                 "host": self._config.health_check_host,
                 "port": self._config.health_check_port,
+                "endpoints": ["/health", "/health/live", "/health/ready"],
             },
         )
 
@@ -1265,6 +1286,73 @@ class InjectionEffectivenessConsumer:
         http_status = 200 if status == EnumHealthStatus.HEALTHY else 503
 
         return web.json_response(response_body, status=http_status)
+
+    async def _liveness_handler(self, request: web.Request) -> web.Response:
+        """Handle Kubernetes liveness probe requests.
+
+        Liveness indicates the process is running and not deadlocked.
+        Returns 200 if the consumer event loop is responsive.
+        Returns 503 if the consumer is not running.
+
+        This is a minimal check - if we can respond to this request,
+        the event loop is not blocked and the process is alive.
+
+        Args:
+            request: aiohttp request object.
+
+        Returns:
+            JSON response with liveness status.
+        """
+        # If we can respond, the process is alive
+        is_alive = self._running
+
+        response_body = {
+            "status": "alive" if is_alive else "dead",
+            "consumer_id": self._consumer_id,
+        }
+
+        return web.json_response(response_body, status=200 if is_alive else 503)
+
+    async def _readiness_handler(self, request: web.Request) -> web.Response:
+        """Handle Kubernetes readiness probe requests.
+
+        Readiness indicates the consumer can accept work - all dependencies
+        are connected and the circuit breaker is not open.
+
+        Dependencies checked:
+            - PostgreSQL pool connected
+            - Kafka consumer initialized
+            - Writer available
+            - Circuit breaker not in OPEN state
+
+        Args:
+            request: aiohttp request object.
+
+        Returns:
+            JSON response with readiness status and dependency states.
+        """
+        dependencies_ready = {
+            "postgres_pool": self._pool is not None,
+            "kafka_consumer": self._consumer is not None,
+            "writer": self._writer is not None,
+        }
+
+        # Check circuit breaker - OPEN means not ready to accept work
+        circuit_state = self._writer.get_circuit_breaker_state() if self._writer else {}
+        circuit_ready = circuit_state.get("state") != "open"
+        dependencies_ready["circuit_breaker"] = circuit_ready
+
+        all_ready = all(dependencies_ready.values()) and self._running
+
+        response_body = {
+            "status": "ready" if all_ready else "not_ready",
+            "consumer_id": self._consumer_id,
+            "consumer_running": self._running,
+            "dependencies": dependencies_ready,
+            "circuit_breaker_state": circuit_state.get("state", "unknown"),
+        }
+
+        return web.json_response(response_body, status=200 if all_ready else 503)
 
     # =========================================================================
     # Health Check (Direct API)
