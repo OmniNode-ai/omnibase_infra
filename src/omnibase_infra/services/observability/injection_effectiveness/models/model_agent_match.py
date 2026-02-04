@@ -44,7 +44,7 @@ class ModelAgentMatchEvent(BaseModel):
         created_at: Event timestamp.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     event_type: Literal["agent_match"] = Field(
         default="agent_match",

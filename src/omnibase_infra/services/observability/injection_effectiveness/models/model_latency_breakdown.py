@@ -44,7 +44,7 @@ class ModelLatencyBreakdownEvent(BaseModel):
         created_at: Event timestamp (ingest time).
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     event_type: Literal["latency_breakdown"] = Field(
         default="latency_breakdown",

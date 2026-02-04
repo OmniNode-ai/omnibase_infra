@@ -94,29 +94,42 @@ COMMENT ON COLUMN latency_baseline.sample_count IS
 -- HELPER FUNCTION: Refresh with logging
 -- ============================================================================
 
+-- Note: REFRESH MATERIALIZED VIEW CONCURRENTLY cannot be used inside PL/pgSQL
+-- functions due to transaction context restrictions. Use regular REFRESH here.
+-- For concurrent refresh (allowing queries during refresh), call directly via
+-- pg_cron: REFRESH MATERIALIZED VIEW CONCURRENTLY latency_baseline;
+
 CREATE OR REPLACE FUNCTION refresh_latency_baseline()
 RETURNS void AS $$
 DECLARE
     start_time TIMESTAMPTZ;
     end_time TIMESTAMPTZ;
+    duration_ms NUMERIC;
     row_count INTEGER;
 BEGIN
     start_time := clock_timestamp();
 
-    -- Use CONCURRENTLY to allow queries during refresh
-    REFRESH MATERIALIZED VIEW CONCURRENTLY latency_baseline;
+    -- Use regular REFRESH (not CONCURRENTLY) inside PL/pgSQL function.
+    -- CONCURRENTLY is not allowed inside PL/pgSQL transaction context.
+    REFRESH MATERIALIZED VIEW latency_baseline;
 
     end_time := clock_timestamp();
 
     -- Get row count for logging
     SELECT COUNT(*) INTO row_count FROM latency_baseline;
 
+    -- Calculate total duration in milliseconds using EPOCH (handles any duration).
+    -- Note: EXTRACT(MILLISECONDS FROM interval) only returns the ms component,
+    -- not total ms. EXTRACT(EPOCH FROM ...) returns total seconds as decimal.
+    duration_ms := EXTRACT(EPOCH FROM (end_time - start_time)) * 1000;
+
     RAISE NOTICE 'latency_baseline refreshed: % rows in % ms',
         row_count,
-        EXTRACT(MILLISECONDS FROM (end_time - start_time))::INTEGER;
+        ROUND(duration_ms)::INTEGER;
 END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION refresh_latency_baseline() IS
     'Refresh latency_baseline materialized view with timing log. '
-    'Call via pg_cron: SELECT refresh_latency_baseline();';
+    'Uses regular REFRESH (not CONCURRENTLY) due to PL/pgSQL transaction restrictions. '
+    'For concurrent refresh, call directly: REFRESH MATERIALIZED VIEW CONCURRENTLY latency_baseline;';

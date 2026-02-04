@@ -28,7 +28,7 @@ class ModelPatternUtilization(BaseModel):
         utilization_method: Detection method used for this pattern.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     pattern_id: UUID = Field(
         ...,

@@ -87,7 +87,9 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         _pool: Injected asyncpg connection pool.
         circuit_breaker_threshold: Failure threshold before opening circuit.
         circuit_breaker_reset_timeout: Seconds before auto-reset.
-        DEFAULT_QUERY_TIMEOUT_SECONDS: Default timeout for database queries.
+        DEFAULT_QUERY_TIMEOUT_SECONDS: Default timeout for database queries (30s).
+        DEFAULT_MINIMUM_SUPPORT_THRESHOLD: Default minimum sample count for confidence (20).
+        DEFAULT_HIT_MISS_THRESHOLD: Default threshold for hit/miss classification (0.5).
 
     Example:
         >>> pool = await asyncpg.create_pool(dsn="postgresql://...")
@@ -97,6 +99,8 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         ...     circuit_breaker_reset_timeout=60.0,
         ...     circuit_breaker_half_open_successes=2,
         ...     query_timeout=30.0,
+        ...     minimum_support_threshold=20,  # samples needed before confidence
+        ...     hit_miss_threshold=0.5,  # score threshold for hit vs miss
         ... )
         >>>
         >>> # Write batch of context utilization events
@@ -104,6 +108,8 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
     """
 
     DEFAULT_QUERY_TIMEOUT_SECONDS: float = 30.0
+    DEFAULT_MINIMUM_SUPPORT_THRESHOLD: int = 20
+    DEFAULT_HIT_MISS_THRESHOLD: float = 0.5
 
     def __init__(
         self,
@@ -112,6 +118,8 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         circuit_breaker_reset_timeout: float = 60.0,
         circuit_breaker_half_open_successes: int = 1,
         query_timeout: float | None = None,
+        minimum_support_threshold: int | None = None,
+        hit_miss_threshold: float | None = None,
     ) -> None:
         """Initialize the PostgreSQL writer with an injected pool.
 
@@ -121,14 +129,32 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker_reset_timeout: Seconds before auto-reset (default: 60.0).
             circuit_breaker_half_open_successes: Successful requests required to close
                 circuit from half-open state (default: 1).
-            query_timeout: Timeout in seconds for database queries. Used in error
-                context for timeout diagnostics (default: DEFAULT_QUERY_TIMEOUT_SECONDS).
+            query_timeout: Timeout in seconds for database queries. Applied via
+                PostgreSQL statement_timeout (default: DEFAULT_QUERY_TIMEOUT_SECONDS).
+            minimum_support_threshold: Minimum sample count required before calculating
+                confidence score for pattern_hit_rates. This implements statistical
+                minimum support gating to avoid premature confidence scores based on
+                insufficient data (default: DEFAULT_MINIMUM_SUPPORT_THRESHOLD = 20).
+            hit_miss_threshold: Threshold for classifying pattern utilization as hit
+                vs miss. Scores > threshold count as hits, scores <= threshold count
+                as misses. This heuristic determines when a pattern injection was
+                "useful enough" to count as a hit (default: DEFAULT_HIT_MISS_THRESHOLD = 0.5).
 
         Raises:
             ProtocolConfigurationError: If circuit breaker parameters are invalid.
         """
         self._pool = pool
         self._query_timeout = query_timeout or self.DEFAULT_QUERY_TIMEOUT_SECONDS
+        self._minimum_support_threshold = (
+            minimum_support_threshold
+            if minimum_support_threshold is not None
+            else self.DEFAULT_MINIMUM_SUPPORT_THRESHOLD
+        )
+        self._hit_miss_threshold = (
+            hit_miss_threshold
+            if hit_miss_threshold is not None
+            else self.DEFAULT_HIT_MISS_THRESHOLD
+        )
 
         # Initialize circuit breaker mixin
         self._init_circuit_breaker(
@@ -146,6 +172,8 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 "circuit_breaker_reset_timeout": circuit_breaker_reset_timeout,
                 "circuit_breaker_half_open_successes": circuit_breaker_half_open_successes,
                 "query_timeout": self._query_timeout,
+                "minimum_support_threshold": self._minimum_support_threshold,
+                "hit_miss_threshold": self._hit_miss_threshold,
             },
         )
 
@@ -229,6 +257,11 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
         # SQL for pattern_hit_rates upsert with rolling average
         # Aggregates per-pattern statistics across all sessions
+        # Note: minimum_support_threshold is formatted into SQL since executemany
+        # doesn't support different parameter values per-position, and this is a
+        # controlled integer configuration value (not user input).
+        # Security: int() cast guarantees numeric-only output, preventing SQL injection.
+        min_support_str = str(int(self._minimum_support_threshold))
         sql_patterns = """
             INSERT INTO pattern_hit_rates (
                 pattern_id, utilization_method, utilization_score,
@@ -243,17 +276,23 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 hit_count = pattern_hit_rates.hit_count + EXCLUDED.hit_count,
                 miss_count = pattern_hit_rates.miss_count + EXCLUDED.miss_count,
                 sample_count = pattern_hit_rates.sample_count + 1,
-                -- Set confidence when N >= 20 (minimum support gating)
+                -- Set confidence when sample_count >= minimum_support_threshold
+                -- (minimum support gating prevents premature confidence scores)
                 confidence = CASE
-                    WHEN pattern_hit_rates.sample_count + 1 >= 20 THEN
+                    WHEN pattern_hit_rates.sample_count + 1 >= __MIN_SUPPORT__ THEN
                         (pattern_hit_rates.utilization_score * pattern_hit_rates.sample_count + EXCLUDED.utilization_score) / (pattern_hit_rates.sample_count + 1)
                     ELSE NULL
                 END,
                 updated_at = NOW()
-        """
+        """.replace("__MIN_SUPPORT__", min_support_str)
 
         try:
             async with self._pool.acquire() as conn:
+                # Apply statement_timeout for query timeout enforcement
+                # Convert seconds to milliseconds for PostgreSQL
+                timeout_ms = int(self._query_timeout * 1000)
+                await conn.execute(f"SET statement_timeout = {timeout_ms}")
+
                 # Write to injection_effectiveness
                 await conn.executemany(
                     sql_effectiveness,
@@ -276,12 +315,19 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 )
 
                 # Write pattern utilizations to pattern_hit_rates (aggregated per pattern)
-                # hit = score > 0.5, miss = score <= 0.5 (heuristic threshold)
+                # Hit/miss classification uses configurable threshold (default 0.5):
+                # - hit: score > threshold (pattern injection was sufficiently useful)
+                # - miss: score <= threshold (pattern injection had limited utility)
+                # This heuristic enables aggregate hit rate tracking across patterns.
                 pattern_rows = []
                 for e in events:
                     for p in e.pattern_utilizations:
-                        hit_count = 1 if p.utilization_score > 0.5 else 0
-                        miss_count = 0 if p.utilization_score > 0.5 else 1
+                        hit_count = (
+                            1 if p.utilization_score > self._hit_miss_threshold else 0
+                        )
+                        miss_count = (
+                            0 if p.utilization_score > self._hit_miss_threshold else 1
+                        )
                         pattern_rows.append(
                             (
                                 p.pattern_id,
@@ -403,6 +449,10 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
         try:
             async with self._pool.acquire() as conn:
+                # Apply statement_timeout for query timeout enforcement
+                timeout_ms = int(self._query_timeout * 1000)
+                await conn.execute(f"SET statement_timeout = {timeout_ms}")
+
                 await conn.executemany(
                     sql,
                     [
@@ -540,6 +590,10 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
         try:
             async with self._pool.acquire() as conn:
+                # Apply statement_timeout for query timeout enforcement
+                timeout_ms = int(self._query_timeout * 1000)
+                await conn.execute(f"SET statement_timeout = {timeout_ms}")
+
                 # IMPORTANT: Upsert to injection_effectiveness FIRST to satisfy FK constraint
                 # If latency event arrives before utilization/agent-match events, we need
                 # the parent row to exist before inserting the child row.

@@ -15,6 +15,9 @@ from typing import Self
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
 logger = logging.getLogger(__name__)
 
 
@@ -165,10 +168,16 @@ class ConfigInjectionEffectivenessConsumer(BaseSettings):
             ProtocolConfigurationError: If no topics are configured.
         """
         if not self.topics:
-            from omnibase_infra.errors import ProtocolConfigurationError
-
+            # Auto-generate correlation_id for configuration errors
+            # (no request context available during model validation)
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="validate_topic_configuration",
+                target_name="ConfigInjectionEffectivenessConsumer",
+            )
             raise ProtocolConfigurationError(
-                "No topics configured for injection effectiveness consumer."
+                "No topics configured for injection effectiveness consumer.",
+                context=context,
             )
         return self
 

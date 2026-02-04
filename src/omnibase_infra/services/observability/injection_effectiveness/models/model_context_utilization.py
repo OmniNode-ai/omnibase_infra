@@ -49,7 +49,7 @@ class ModelContextUtilizationEvent(BaseModel):
         created_at: Event timestamp.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     event_type: Literal["context_utilization"] = Field(
         default="context_utilization",
@@ -106,8 +106,8 @@ class ModelContextUtilizationEvent(BaseModel):
     )
 
     # Per-pattern breakdown
-    pattern_utilizations: list[ModelPatternUtilization] = Field(
-        default_factory=list,
+    pattern_utilizations: tuple[ModelPatternUtilization, ...] = Field(
+        default_factory=tuple,
         description="Per-pattern utilization metrics",
     )
 
