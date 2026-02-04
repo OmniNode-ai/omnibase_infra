@@ -982,24 +982,24 @@ class InjectionEffectivenessConsumer:
                 continue
 
             writer_method: Callable[
-                [list[BaseModel], UUID | None], Coroutine[object, object, int]
+                [list[BaseModel], UUID], Coroutine[object, object, int]
             ] = getattr(self._writer, writer_method_name)
             models = [item[1] for item in items]
 
-            # Extract correlation_id from events if available, otherwise use batch correlation_id.
-            # This enables end-to-end tracing from producer through to the writer.
-            # Use first non-None correlation_id found in the batch.
+            # Extract correlation_id from events. Models use default_factory=uuid4,
+            # so correlation_id is ALWAYS present - this is defensive iteration.
             event_correlation_id: UUID | None = None
             for _, model in items:
-                if (
-                    hasattr(model, "correlation_id")
-                    and model.correlation_id is not None
-                ):
+                if hasattr(model, "correlation_id"):
                     event_correlation_id = model.correlation_id
                     break
 
-            # Use event correlation_id if found, otherwise fall back to batch correlation_id
+            # Use event correlation_id (always present via default_factory), or batch fallback.
+            # The assertion guards against impossible state - models guarantee correlation_id.
             writer_correlation_id = event_correlation_id or correlation_id
+            assert writer_correlation_id is not None, (
+                "correlation_id must be present - models use default_factory=uuid4"
+            )
 
             try:
                 written_count = await writer_method(models, writer_correlation_id)

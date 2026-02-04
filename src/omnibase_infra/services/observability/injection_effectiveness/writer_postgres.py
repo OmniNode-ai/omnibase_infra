@@ -39,7 +39,7 @@ Example:
 from __future__ import annotations
 
 import logging
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import asyncpg
 
@@ -170,7 +170,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
     async def write_context_utilization(
         self,
         events: list[ModelContextUtilizationEvent],
-        correlation_id: UUID | None = None,
+        correlation_id: UUID,
     ) -> int:
         """Write batch of context utilization events to PostgreSQL.
 
@@ -180,7 +180,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
         Args:
             events: List of context utilization events to write.
-            correlation_id: Optional correlation ID for tracing.
+            correlation_id: Correlation ID for tracing (required - models auto-generate).
 
         Returns:
             Count of events in the batch (executemany doesn't return affected rows).
@@ -193,25 +193,11 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         if not events:
             return 0
 
-        # Generate fallback correlation_id if none provided, logging for traceability.
-        # This ensures all database writes can be traced even when callers don't provide IDs.
-        if correlation_id is None:
-            op_correlation_id = uuid4()
-            logger.debug(
-                "Generated fallback correlation_id for write_context_utilization",
-                extra={
-                    "correlation_id": str(op_correlation_id),
-                    "event_count": len(events),
-                },
-            )
-        else:
-            op_correlation_id = correlation_id
-
         # Check circuit breaker before entering error context
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(
                 operation="write_context_utilization",
-                correlation_id=op_correlation_id,
+                correlation_id=correlation_id,
             )
 
         # SQL for injection_effectiveness upsert
@@ -271,7 +257,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         async with db_operation_error_context(
             operation="write_context_utilization",
             target_name="injection_effectiveness",
-            correlation_id=op_correlation_id,
+            correlation_id=correlation_id,
             timeout_seconds=self._query_timeout,
             circuit_breaker=self,
         ):
@@ -359,7 +345,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 extra={
                     "count": len(events),
                     "pattern_count": len(pattern_rows) if pattern_rows else 0,
-                    "correlation_id": str(op_correlation_id),
+                    "correlation_id": str(correlation_id),
                 },
             )
             return len(events)
@@ -367,7 +353,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
     async def write_agent_match(
         self,
         events: list[ModelAgentMatchEvent],
-        correlation_id: UUID | None = None,
+        correlation_id: UUID,
     ) -> int:
         """Write batch of agent match events to PostgreSQL.
 
@@ -376,7 +362,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
         Args:
             events: List of agent match events to write.
-            correlation_id: Optional correlation ID for tracing.
+            correlation_id: Correlation ID for tracing (required - models auto-generate).
 
         Returns:
             Count of events in the batch.
@@ -389,25 +375,11 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         if not events:
             return 0
 
-        # Generate fallback correlation_id if none provided, logging for traceability.
-        # This ensures all database writes can be traced even when callers don't provide IDs.
-        if correlation_id is None:
-            op_correlation_id = uuid4()
-            logger.debug(
-                "Generated fallback correlation_id for write_agent_match",
-                extra={
-                    "correlation_id": str(op_correlation_id),
-                    "event_count": len(events),
-                },
-            )
-        else:
-            op_correlation_id = correlation_id
-
         # Check circuit breaker before entering error context
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(
                 operation="write_agent_match",
-                correlation_id=op_correlation_id,
+                correlation_id=correlation_id,
             )
 
         sql = """
@@ -428,7 +400,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         async with db_operation_error_context(
             operation="write_agent_match",
             target_name="injection_effectiveness",
-            correlation_id=op_correlation_id,
+            correlation_id=correlation_id,
             timeout_seconds=self._query_timeout,
             circuit_breaker=self,
         ):
@@ -461,7 +433,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 "Wrote agent match batch",
                 extra={
                     "count": len(events),
-                    "correlation_id": str(op_correlation_id),
+                    "correlation_id": str(correlation_id),
                 },
             )
             return len(events)
@@ -469,7 +441,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
     async def write_latency_breakdowns(
         self,
         events: list[ModelLatencyBreakdownEvent],
-        correlation_id: UUID | None = None,
+        correlation_id: UUID,
     ) -> int:
         """Write batch of latency breakdown events to PostgreSQL.
 
@@ -479,7 +451,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
         Args:
             events: List of latency breakdown events to write.
-            correlation_id: Optional correlation ID for tracing.
+            correlation_id: Correlation ID for tracing (required - models auto-generate).
 
         Returns:
             Count of events in the batch.
@@ -492,25 +464,11 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         if not events:
             return 0
 
-        # Generate fallback correlation_id if none provided, logging for traceability.
-        # This ensures all database writes can be traced even when callers don't provide IDs.
-        if correlation_id is None:
-            op_correlation_id = uuid4()
-            logger.debug(
-                "Generated fallback correlation_id for write_latency_breakdowns",
-                extra={
-                    "correlation_id": str(op_correlation_id),
-                    "event_count": len(events),
-                },
-            )
-        else:
-            op_correlation_id = correlation_id
-
         # Check circuit breaker before entering error context
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(
                 operation="write_latency_breakdowns",
-                correlation_id=op_correlation_id,
+                correlation_id=correlation_id,
             )
 
         # SQL for latency_breakdowns insert
@@ -545,7 +503,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         async with db_operation_error_context(
             operation="write_latency_breakdowns",
             target_name="latency_breakdowns",
-            correlation_id=op_correlation_id,
+            correlation_id=correlation_id,
             timeout_seconds=self._query_timeout,
             circuit_breaker=self,
         ):
@@ -621,7 +579,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 extra={
                     "count": len(events),
                     "sessions_updated": len(session_latencies),
-                    "correlation_id": str(op_correlation_id),
+                    "correlation_id": str(correlation_id),
                 },
             )
             return len(events)
