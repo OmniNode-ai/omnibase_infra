@@ -205,6 +205,11 @@ CREATE INDEX IF NOT EXISTS idx_injection_effectiveness_created_at
 CREATE INDEX IF NOT EXISTS idx_injection_effectiveness_updated_at
     ON injection_effectiveness (updated_at);
 
+-- Index on correlation_id for cross-service tracing lookups
+CREATE INDEX IF NOT EXISTS idx_injection_effectiveness_correlation_id
+    ON injection_effectiveness (correlation_id)
+    WHERE correlation_id IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_injection_effectiveness_cohort
     ON injection_effectiveness (cohort)
     WHERE cohort IS NOT NULL;

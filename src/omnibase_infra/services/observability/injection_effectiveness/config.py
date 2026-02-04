@@ -156,6 +156,16 @@ class ConfigInjectionEffectivenessConsumer(BaseSettings):
         le=300,
         description="Maximum age for last poll before DEGRADED status.",
     )
+    startup_grace_period_seconds: float = Field(
+        default=60.0,
+        ge=10.0,
+        le=300.0,
+        description=(
+            "Grace period in seconds after startup during which the consumer is "
+            "considered healthy even without successful writes. Allows time for "
+            "initial Kafka partition assignment and first message processing."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_topic_configuration(self) -> Self:

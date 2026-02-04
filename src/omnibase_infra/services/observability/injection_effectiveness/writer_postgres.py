@@ -290,56 +290,66 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             async with self._pool.acquire() as conn:
                 # Apply statement_timeout for query timeout enforcement
                 # Convert seconds to milliseconds for PostgreSQL
+                # Use parameterized query for defense in depth (even though int() cast
+                # already guarantees numeric output, parameterized is the preferred pattern)
                 timeout_ms = int(self._query_timeout * 1000)
-                await conn.execute(f"SET statement_timeout = {timeout_ms}")
+                await conn.execute("SET statement_timeout = $1", str(timeout_ms))
 
-                # Write to injection_effectiveness
-                await conn.executemany(
-                    sql_effectiveness,
-                    [
-                        (
-                            e.session_id,
-                            e.correlation_id,
-                            e.cohort,
-                            e.cohort_identity_type,
-                            e.total_injected_tokens,
-                            e.patterns_injected,
-                            e.utilization_score,
-                            e.utilization_method,
-                            e.injected_identifiers_count,
-                            e.reused_identifiers_count,
-                            e.created_at,
-                        )
-                        for e in events
-                    ],
-                )
-
-                # Write pattern utilizations to pattern_hit_rates (aggregated per pattern)
-                # Hit/miss classification uses configurable threshold (default 0.5):
-                # - hit: score > threshold (pattern injection was sufficiently useful)
-                # - miss: score <= threshold (pattern injection had limited utility)
-                # This heuristic enables aggregate hit rate tracking across patterns.
-                pattern_rows = []
-                for e in events:
-                    for p in e.pattern_utilizations:
-                        hit_count = (
-                            1 if p.utilization_score > self._hit_miss_threshold else 0
-                        )
-                        miss_count = (
-                            0 if p.utilization_score > self._hit_miss_threshold else 1
-                        )
-                        pattern_rows.append(
+                # Wrap both writes in an explicit transaction for atomicity.
+                # If pattern_hit_rates write fails after injection_effectiveness succeeds,
+                # both are rolled back to prevent partial data.
+                async with conn.transaction():
+                    # Write to injection_effectiveness
+                    await conn.executemany(
+                        sql_effectiveness,
+                        [
                             (
-                                p.pattern_id,
-                                p.utilization_method,
-                                p.utilization_score,
-                                hit_count,
-                                miss_count,
+                                e.session_id,
+                                e.correlation_id,
+                                e.cohort,
+                                e.cohort_identity_type,
+                                e.total_injected_tokens,
+                                e.patterns_injected,
+                                e.utilization_score,
+                                e.utilization_method,
+                                e.injected_identifiers_count,
+                                e.reused_identifiers_count,
+                                e.created_at,
                             )
-                        )
+                            for e in events
+                        ],
+                    )
 
-                if pattern_rows:
-                    await conn.executemany(sql_patterns, pattern_rows)
+                    # Write pattern utilizations to pattern_hit_rates (aggregated per pattern)
+                    # Hit/miss classification uses configurable threshold (default 0.5):
+                    # - hit: score > threshold (pattern injection was sufficiently useful)
+                    # - miss: score <= threshold (pattern injection had limited utility)
+                    # This heuristic enables aggregate hit rate tracking across patterns.
+                    pattern_rows = []
+                    for e in events:
+                        for p in e.pattern_utilizations:
+                            hit_count = (
+                                1
+                                if p.utilization_score > self._hit_miss_threshold
+                                else 0
+                            )
+                            miss_count = (
+                                0
+                                if p.utilization_score > self._hit_miss_threshold
+                                else 1
+                            )
+                            pattern_rows.append(
+                                (
+                                    p.pattern_id,
+                                    p.utilization_method,
+                                    p.utilization_score,
+                                    hit_count,
+                                    miss_count,
+                                )
+                            )
+
+                    if pattern_rows:
+                        await conn.executemany(sql_patterns, pattern_rows)
 
             # Record success
             async with self._circuit_breaker_lock:
@@ -450,8 +460,9 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         try:
             async with self._pool.acquire() as conn:
                 # Apply statement_timeout for query timeout enforcement
+                # Use parameterized query for defense in depth
                 timeout_ms = int(self._query_timeout * 1000)
-                await conn.execute(f"SET statement_timeout = {timeout_ms}")
+                await conn.execute("SET statement_timeout = $1", str(timeout_ms))
 
                 await conn.executemany(
                     sql,
@@ -591,8 +602,9 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         try:
             async with self._pool.acquire() as conn:
                 # Apply statement_timeout for query timeout enforcement
+                # Use parameterized query for defense in depth
                 timeout_ms = int(self._query_timeout * 1000)
-                await conn.execute(f"SET statement_timeout = {timeout_ms}")
+                await conn.execute("SET statement_timeout = $1", str(timeout_ms))
 
                 # IMPORTANT: Upsert to injection_effectiveness FIRST to satisfy FK constraint
                 # If latency event arrives before utilization/agent-match events, we need

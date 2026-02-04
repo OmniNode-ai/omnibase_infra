@@ -1144,12 +1144,13 @@ class InjectionEffectivenessConsumer:
         1. UNHEALTHY: Consumer is not running (stopped or crashed)
         2. DEGRADED: Circuit breaker is open or half-open (database issues, retrying)
         3. DEGRADED: Last poll exceeds poll staleness threshold (consumer not polling)
-        4. DEGRADED: No writes yet AND consumer running > 60s (startup grace period exceeded)
+        4. DEGRADED: No writes yet AND consumer running > startup_grace_period_seconds (configurable)
         5. DEGRADED: Last successful write exceeds staleness threshold (with messages received)
         6. HEALTHY: All other cases (running, circuit closed, recent activity or in grace period)
 
-        The 60-second startup grace period allows the consumer to be considered
-        healthy immediately after starting, before any messages have been consumed.
+        The startup grace period (configurable via startup_grace_period_seconds, default 60s)
+        allows the consumer to be considered healthy immediately after starting, before any
+        messages have been consumed.
 
         Args:
             metrics_snapshot: Snapshot of current consumer metrics including
@@ -1190,17 +1191,17 @@ class InjectionEffectivenessConsumer:
         messages_received = metrics_snapshot.get("messages_received", 0)
 
         if last_write is None:
-            # No writes yet - check startup grace period (60 seconds)
+            # No writes yet - check startup grace period (configurable, default 60s)
             started_at_str = metrics_snapshot.get("started_at")
             if started_at_str is not None:
                 try:
                     started_at_dt = datetime.fromisoformat(str(started_at_str))
                     age_seconds = (datetime.now(UTC) - started_at_dt).total_seconds()
-                    if age_seconds <= 60.0:
+                    if age_seconds <= self._config.startup_grace_period_seconds:
                         # Rule 6: Consumer just started, healthy even without writes
                         return EnumHealthStatus.HEALTHY
                     else:
-                        # Rule 4: Consumer running > 60s with no writes -> DEGRADED
+                        # Rule 4: Consumer running > grace period with no writes -> DEGRADED
                         return EnumHealthStatus.DEGRADED
                 except (ValueError, TypeError):
                     # Parse error - fallback to healthy
