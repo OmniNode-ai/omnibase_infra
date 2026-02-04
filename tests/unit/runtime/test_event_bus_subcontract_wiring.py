@@ -190,20 +190,23 @@ class TestWireSubscriptions:
         assert "dev.onex.evt.node.registered.v1" in topics
 
     @pytest.mark.asyncio
-    async def test_wire_subscriptions_uses_correct_group_ids(
+    async def test_wire_subscriptions_uses_correct_node_identity(
         self,
         wiring: EventBusSubcontractWiring,
         mock_event_bus: AsyncMock,
         sample_subcontract: ModelEventBusSubcontract,
     ) -> None:
-        """Test wiring uses environment-prefixed group IDs."""
+        """Test wiring uses correct node identity for consumer groups."""
         await wiring.wire_subscriptions(
             sample_subcontract, node_name="registration-handler"
         )
 
         calls = mock_event_bus.subscribe.call_args_list
-        group_ids = [call.kwargs["group_id"] for call in calls]
-        assert all(gid == "dev.registration-handler" for gid in group_ids)
+        node_identities = [call.kwargs["node_identity"] for call in calls]
+        # Verify all node identities have correct env and service for consumer group
+        for identity in node_identities:
+            assert identity.env == "dev"
+            assert identity.service == "registration-handler"
 
     @pytest.mark.asyncio
     async def test_wire_subscriptions_stores_unsubscribe_callables(

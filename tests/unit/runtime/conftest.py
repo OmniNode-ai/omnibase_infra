@@ -89,30 +89,30 @@ def mock_wire_infrastructure() -> Generator[MagicMock, None, None]:
 
 
 @pytest.fixture
-def mock_inmemory_runtime_config() -> Generator[MagicMock, None, None]:
-    """Mock load_runtime_config to return a config with inmemory event bus.
+def mock_inmemory_runtime_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[MagicMock, None, None]:
+    """Force inmemory event bus via environment variable override.
 
-    This fixture is needed because the default runtime_config.yaml has
-    event_bus.type='kafka', which requires KAFKA_BOOTSTRAP_SERVERS env var.
-    For unit tests that don't test Kafka specifically, we mock the config
-    to use inmemory event bus.
+    This fixture uses the ONEX_EVENT_BUS_TYPE environment variable override
+    mechanism (documented in runtime_config.yaml) to force inmemory event bus.
+    This is more robust than patching load_runtime_config because:
+    1. It uses the documented environment variable override mechanism
+    2. The kernel explicitly checks ONEX_EVENT_BUS_TYPE before config.event_bus.type
+    3. It doesn't rely on patch timing
+
+    The default runtime_config.yaml has event_bus.type='kafka', which requires
+    KAFKA_BOOTSTRAP_SERVERS env var. For unit tests that don't test Kafka
+    specifically, we use ONEX_EVENT_BUS_TYPE=inmemory to bypass this.
 
     Yields:
-        MagicMock for the patched load_runtime_config function.
+        MagicMock (for backwards compatibility with tests expecting a MagicMock).
     """
-    mock_config = ModelRuntimeConfig(
-        name="test-runtime",
-        input_topic="test-input",
-        output_topic="test-output",
-        consumer_group="test-group",
-        event_bus=ModelEventBusConfig(
-            type="inmemory",
-            environment="test",
-        ),
-    )
+    # Use environment variable override (highest precedence per service_kernel.py)
+    monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
+    # Ensure no Kafka bootstrap servers are set
+    monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
 
-    with patch(
-        "omnibase_infra.runtime.service_kernel.load_runtime_config",
-        return_value=mock_config,
-    ) as mock_load:
-        yield mock_load
+    # Return MagicMock for backwards compatibility with tests that
+    # reference the fixture but don't actually use the mock object
+    return MagicMock()
