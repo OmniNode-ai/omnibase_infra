@@ -248,6 +248,21 @@ class TestLoadRuntimeConfig:
 class TestBootstrap:
     """Tests for the bootstrap function."""
 
+    @pytest.fixture(autouse=True)
+    def use_inmemory_event_bus(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ensure inmemory event bus is used for all bootstrap tests by default.
+
+        Since OMN-1869, the runtime config defaults to kafka event bus.
+        Most tests in this class focus on bootstrap behavior, not event bus
+        configuration, so we force inmemory to avoid Kafka configuration errors.
+
+        Tests that specifically test Kafka behavior (like
+        test_bootstrap_creates_kafka_event_bus_when_configured) override this
+        by explicitly setting/clearing environment variables.
+        """
+        monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+
     @pytest.fixture
     def mock_runtime_host(self) -> Generator[MagicMock, None, None]:
         """Create a mock RuntimeHostProcess.
@@ -849,6 +864,17 @@ class TestMain:
 @pytest.mark.skipif(not _SERVICE_REGISTRY_AVAILABLE, reason=_SKIP_REASON)
 class TestIntegration:
     """Integration tests for kernel with real components."""
+
+    @pytest.fixture(autouse=True)
+    def use_inmemory_event_bus(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ensure inmemory event bus is used for all integration tests.
+
+        Since OMN-1869, the runtime config defaults to kafka event bus.
+        These integration tests use real EventBusInmemory but mocked shutdown,
+        so we force inmemory to avoid Kafka configuration errors.
+        """
+        monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
+        monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
 
     async def test_full_bootstrap_with_real_event_bus(
         self,
