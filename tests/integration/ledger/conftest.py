@@ -17,7 +17,7 @@ import base64
 import logging
 import os
 from collections.abc import AsyncGenerator, Callable
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
@@ -53,7 +53,7 @@ def _get_postgres_dsn() -> str | None:
 
 
 @pytest.fixture
-async def postgres_dsn() -> str:
+def postgres_dsn() -> str:
     """Get PostgreSQL DSN or skip test if not configured.
 
     Returns:

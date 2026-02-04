@@ -11,7 +11,7 @@ These tests verify that HandlerLedgerQuery.query_by_correlation_id works correct
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 

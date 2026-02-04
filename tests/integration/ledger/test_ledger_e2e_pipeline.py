@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
@@ -39,13 +39,6 @@ if TYPE_CHECKING:
 
 class TestLedgerE2EPipeline:
     """Test the complete ledger pipeline from event to database."""
-
-    @pytest.fixture
-    def mock_container(self) -> MagicMock:
-        """Create a mock container for handlers."""
-        container = MagicMock()
-        container.get_config.return_value = {}
-        return container
 
     @pytest.fixture
     def projection_handler(self, mock_container: MagicMock):
@@ -343,13 +336,6 @@ class TestLedgerE2EPipeline:
 
 class TestLedgerProjectionHandler:
     """Test HandlerLedgerProjection in isolation."""
-
-    @pytest.fixture
-    def mock_container(self) -> MagicMock:
-        """Create a mock container."""
-        container = MagicMock()
-        container.get_config.return_value = {}
-        return container
 
     @pytest.fixture
     def handler(self, mock_container: MagicMock):
