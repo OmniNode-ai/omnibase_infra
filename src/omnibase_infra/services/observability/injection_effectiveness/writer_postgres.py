@@ -622,42 +622,46 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                         if e.user_latency_ms > existing_latency:
                             session_latencies[e.session_id] = (e.user_latency_ms, e)
 
-                # 1. First: Upsert to injection_effectiveness (creates parent row if needed)
-                await conn.executemany(
-                    sql_effectiveness,
-                    [
-                        (
-                            session_id,
-                            event.correlation_id,
-                            event.cohort,
-                            max_latency,
-                            event.created_at,
-                        )
-                        for session_id, (
-                            max_latency,
-                            event,
-                        ) in session_latencies.items()
-                    ],
-                )
+                # Wrap both writes in an explicit transaction for atomicity.
+                # If latency_breakdowns insert fails after injection_effectiveness upsert,
+                # both are rolled back to prevent partial data.
+                async with conn.transaction():
+                    # 1. First: Upsert to injection_effectiveness (creates parent row if needed)
+                    await conn.executemany(
+                        sql_effectiveness,
+                        [
+                            (
+                                session_id,
+                                event.correlation_id,
+                                event.cohort,
+                                max_latency,
+                                event.created_at,
+                            )
+                            for session_id, (
+                                max_latency,
+                                event,
+                            ) in session_latencies.items()
+                        ],
+                    )
 
-                # 2. Then: Insert to latency_breakdowns (FK now satisfied)
-                await conn.executemany(
-                    sql_breakdowns,
-                    [
-                        (
-                            e.session_id,
-                            e.prompt_id,
-                            e.cohort,
-                            e.cache_hit,
-                            e.routing_latency_ms,
-                            e.retrieval_latency_ms,
-                            e.injection_latency_ms,
-                            e.user_latency_ms,
-                            e.emitted_at,
-                        )
-                        for e in events
-                    ],
-                )
+                    # 2. Then: Insert to latency_breakdowns (FK now satisfied)
+                    await conn.executemany(
+                        sql_breakdowns,
+                        [
+                            (
+                                e.session_id,
+                                e.prompt_id,
+                                e.cohort,
+                                e.cache_hit,
+                                e.routing_latency_ms,
+                                e.retrieval_latency_ms,
+                                e.injection_latency_ms,
+                                e.user_latency_ms,
+                                e.emitted_at,
+                            )
+                            for e in events
+                        ],
+                    )
 
             # Record success
             async with self._circuit_breaker_lock:

@@ -38,6 +38,7 @@ DROP INDEX IF EXISTS idx_injection_effectiveness_realm;
 DROP INDEX IF EXISTS idx_injection_effectiveness_utilization_method;
 DROP INDEX IF EXISTS idx_injection_effectiveness_cohort_created;
 DROP INDEX IF EXISTS idx_injection_effectiveness_cohort;
+DROP INDEX IF EXISTS idx_injection_effectiveness_correlation_id;
 DROP INDEX IF EXISTS idx_injection_effectiveness_updated_at;
 DROP INDEX IF EXISTS idx_injection_effectiveness_created_at;
 
