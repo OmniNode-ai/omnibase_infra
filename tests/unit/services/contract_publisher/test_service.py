@@ -485,8 +485,8 @@ class TestServiceContractPublisherResolveTopic:
         )
         service = ServiceContractPublisher(mock_publisher, mock_source, config)
 
-        topic = service.resolve_topic("onex.evt.contract-registered.v1")
-        assert topic == "dev.onex.evt.contract-registered.v1"
+        topic = service.resolve_topic("onex.evt.platform.contract-registered.v1")
+        assert topic == "dev.onex.evt.platform.contract-registered.v1"
 
     @pytest.mark.asyncio
     async def test_resolve_topic_custom_environment(
@@ -502,8 +502,8 @@ class TestServiceContractPublisherResolveTopic:
         )
         service = ServiceContractPublisher(mock_publisher, mock_source, config)
 
-        topic = service.resolve_topic("onex.evt.contract-registered.v1")
-        assert topic == "prod.onex.evt.contract-registered.v1"
+        topic = service.resolve_topic("onex.evt.platform.contract-registered.v1")
+        assert topic == "prod.onex.evt.platform.contract-registered.v1"
 
     @pytest.mark.asyncio
     async def test_resolve_topic_env_var(
@@ -521,8 +521,8 @@ class TestServiceContractPublisherResolveTopic:
         )
         service = ServiceContractPublisher(mock_publisher, mock_source, config)
 
-        topic = service.resolve_topic("onex.evt.contract-registered.v1")
-        assert topic == "staging.onex.evt.contract-registered.v1"
+        topic = service.resolve_topic("onex.evt.platform.contract-registered.v1")
+        assert topic == "staging.onex.evt.platform.contract-registered.v1"
 
 
 class TestServiceContractPublisherCreateSource:
