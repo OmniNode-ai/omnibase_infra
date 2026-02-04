@@ -16,9 +16,9 @@ from __future__ import annotations
 import base64
 import logging
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
@@ -221,7 +221,7 @@ def sample_ledger_payload() -> ModelPayloadLedgerAppend:
 
 
 @pytest.fixture
-def make_ledger_payload():
+def make_ledger_payload() -> Callable[..., ModelPayloadLedgerAppend]:
     """Factory fixture to create ledger payloads with custom parameters.
 
     Returns:
@@ -238,7 +238,7 @@ def make_ledger_payload():
         ModelPayloadLedgerAppend,
     )
 
-    def _make(**overrides) -> ModelPayloadLedgerAppend:
+    def _make(**overrides: Any) -> ModelPayloadLedgerAppend:
         # Generate unique Kafka position
         unique_offset = int(uuid4().int % (2**62))
 

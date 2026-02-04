@@ -255,11 +255,11 @@ class TestLedgerQueryModel:
             offset=0,
         )
 
-        result = await ledger_query_handler.query(query, correlation_id=uuid4())
+        query_result = await ledger_query_handler.query(query, correlation_id=uuid4())
 
-        assert len(result.entries) == 3
-        assert result.total_count == 3
-        assert result.has_more is False
+        assert len(query_result.entries) == 3
+        assert query_result.total_count == 3
+        assert query_result.has_more is False
 
     @pytest.mark.asyncio
     async def test_query_method_pagination_has_more(
@@ -292,11 +292,11 @@ class TestLedgerQueryModel:
             offset=0,
         )
 
-        result = await ledger_query_handler.query(query, correlation_id=uuid4())
+        query_result = await ledger_query_handler.query(query, correlation_id=uuid4())
 
-        assert len(result.entries) == 2
-        assert result.total_count == 5
-        assert result.has_more is True  # 2 < 5
+        assert len(query_result.entries) == 2
+        assert query_result.total_count == 5
+        assert query_result.has_more is True  # 2 < 5
 
         # Query with limit=2, offset=4 (should NOT have more)
         query2 = ModelLedgerQuery(
@@ -305,8 +305,8 @@ class TestLedgerQueryModel:
             offset=4,
         )
 
-        result2 = await ledger_query_handler.query(query2, correlation_id=uuid4())
+        query_result2 = await ledger_query_handler.query(query2, correlation_id=uuid4())
 
-        assert len(result2.entries) == 1  # Only 1 remaining
-        assert result2.total_count == 5
-        assert result2.has_more is False  # 4 + 1 = 5, no more
+        assert len(query_result2.entries) == 1  # Only 1 remaining
+        assert query_result2.total_count == 5
+        assert query_result2.has_more is False  # 4 + 1 = 5, no more
