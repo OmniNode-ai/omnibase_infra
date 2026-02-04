@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
@@ -41,7 +42,7 @@ class TestLedgerE2EPipeline:
     """Test the complete ledger pipeline from event to database."""
 
     @pytest.fixture
-    def projection_handler(self, mock_container: MagicMock):
+    def projection_handler(self, mock_container: MagicMock) -> Any:
         """Create a HandlerLedgerProjection instance."""
         from omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection import (
             HandlerLedgerProjection,
@@ -52,10 +53,10 @@ class TestLedgerE2EPipeline:
     @pytest.mark.asyncio
     async def test_event_message_to_database_flow(
         self,
-        projection_handler,
+        projection_handler: Any,
         ledger_append_handler: HandlerLedgerAppend,
         postgres_pool: asyncpg.Pool,
-        cleanup_event_ledger: list[UUID],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Full E2E: EventMessage → Projection → Append → Database."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
@@ -141,10 +142,10 @@ class TestLedgerE2EPipeline:
     @pytest.mark.asyncio
     async def test_event_without_headers_still_persists(
         self,
-        projection_handler,
+        projection_handler: Any,
         ledger_append_handler: HandlerLedgerAppend,
         postgres_pool: asyncpg.Pool,
-        cleanup_event_ledger: list[UUID],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Events without ONEX metadata should still be captured (best-effort metadata)."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
@@ -197,10 +198,10 @@ class TestLedgerE2EPipeline:
     @pytest.mark.asyncio
     async def test_binary_event_value_preserved(
         self,
-        projection_handler,
+        projection_handler: Any,
         ledger_append_handler: HandlerLedgerAppend,
         postgres_pool: asyncpg.Pool,
-        cleanup_event_ledger: list[UUID],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Binary (non-JSON) event values should be preserved exactly."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
@@ -244,10 +245,10 @@ class TestLedgerE2EPipeline:
     @pytest.mark.asyncio
     async def test_query_after_append_finds_event(
         self,
-        projection_handler,
+        projection_handler: Any,
         ledger_append_handler: HandlerLedgerAppend,
         ledger_query_handler: HandlerLedgerQuery,
-        cleanup_event_ledger: list[UUID],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Events can be queried immediately after append."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
@@ -287,10 +288,10 @@ class TestLedgerE2EPipeline:
     @pytest.mark.asyncio
     async def test_multiple_events_same_correlation_id(
         self,
-        projection_handler,
+        projection_handler: Any,
         ledger_append_handler: HandlerLedgerAppend,
         ledger_query_handler: HandlerLedgerQuery,
-        cleanup_event_ledger: list[UUID],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Multiple events with same correlation_id are all captured and queryable."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
@@ -338,7 +339,7 @@ class TestLedgerProjectionHandler:
     """Test HandlerLedgerProjection in isolation."""
 
     @pytest.fixture
-    def handler(self, mock_container: MagicMock):
+    def handler(self, mock_container: MagicMock) -> Any:
         """Create a HandlerLedgerProjection instance."""
         from omnibase_infra.nodes.node_ledger_projection_compute.handlers.handler_ledger_projection import (
             HandlerLedgerProjection,
@@ -348,7 +349,7 @@ class TestLedgerProjectionHandler:
 
     def test_projection_extracts_metadata_correctly(
         self,
-        handler,
+        handler: Any,
     ) -> None:
         """Projection should extract all metadata from headers."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
@@ -388,7 +389,7 @@ class TestLedgerProjectionHandler:
 
     def test_projection_base64_encodes_bytes(
         self,
-        handler,
+        handler: Any,
     ) -> None:
         """Projection should base64-encode event_key and event_value."""
         from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
@@ -427,7 +428,7 @@ class TestLedgerProjectionHandler:
 
     def test_projection_returns_model_intent(
         self,
-        handler,
+        handler: Any,
     ) -> None:
         """Projection should return a properly structured ModelIntent."""
         from omnibase_core.models.reducer.model_intent import ModelIntent

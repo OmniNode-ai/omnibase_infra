@@ -92,11 +92,15 @@ async def postgres_pool(postgres_dsn: str) -> AsyncGenerator[asyncpg.Pool, None]
 @pytest.fixture
 async def cleanup_event_ledger(
     postgres_pool: asyncpg.Pool,
-) -> AsyncGenerator[list[UUID], None]:
+) -> AsyncGenerator[list[UUID | None], None]:
     """Track and cleanup ledger entries created during tests.
 
     This fixture provides a list that tests can append ledger_entry_ids to.
     After the test completes, all tracked entries are deleted.
+
+    Note:
+        The list accepts ``UUID | None`` because duplicate appends return
+        ``ledger_entry_id=None``. None values are filtered during cleanup.
 
     Usage:
         async def test_something(cleanup_event_ledger, ...):
@@ -106,9 +110,9 @@ async def cleanup_event_ledger(
             # Cleanup happens automatically after test
 
     Yields:
-        List to collect ledger_entry_ids for cleanup.
+        List to collect ledger_entry_ids for cleanup (None values filtered).
     """
-    entry_ids: list[UUID] = []
+    entry_ids: list[UUID | None] = []
 
     yield entry_ids
 

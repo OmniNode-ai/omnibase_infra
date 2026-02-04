@@ -11,8 +11,9 @@ These tests verify that HandlerLedgerQuery.query_by_correlation_id works correct
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -36,8 +37,8 @@ class TestLedgerQueryByCorrelationId:
         self,
         ledger_append_handler: HandlerLedgerAppend,
         ledger_query_handler: HandlerLedgerQuery,
-        make_ledger_payload,
-        cleanup_event_ledger: list[UUID],
+        make_ledger_payload: Callable[..., Any],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Query should return events matching the correlation_id."""
         target_correlation_id = uuid4()
@@ -86,8 +87,8 @@ class TestLedgerQueryByCorrelationId:
         self,
         ledger_append_handler: HandlerLedgerAppend,
         ledger_query_handler: HandlerLedgerQuery,
-        make_ledger_payload,
-        cleanup_event_ledger: list[UUID],
+        make_ledger_payload: Callable[..., Any],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Query should respect the limit parameter."""
         correlation_id = uuid4()
@@ -113,8 +114,8 @@ class TestLedgerQueryByCorrelationId:
         self,
         ledger_append_handler: HandlerLedgerAppend,
         ledger_query_handler: HandlerLedgerQuery,
-        make_ledger_payload,
-        cleanup_event_ledger: list[UUID],
+        make_ledger_payload: Callable[..., Any],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Query should skip entries based on offset parameter."""
         correlation_id = uuid4()
@@ -144,8 +145,8 @@ class TestLedgerQueryByCorrelationId:
         self,
         ledger_append_handler: HandlerLedgerAppend,
         ledger_query_handler: HandlerLedgerQuery,
-        make_ledger_payload,
-        cleanup_event_ledger: list[UUID],
+        make_ledger_payload: Callable[..., Any],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Query should return entries with all expected fields populated."""
         correlation_id = uuid4()
@@ -189,8 +190,8 @@ class TestLedgerQueryByCorrelationId:
         self,
         ledger_append_handler: HandlerLedgerAppend,
         ledger_query_handler: HandlerLedgerQuery,
-        make_ledger_payload,
-        cleanup_event_ledger: list[UUID],
+        make_ledger_payload: Callable[..., Any],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Query should not return entries that have NULL correlation_id."""
         target_correlation_id = uuid4()
@@ -229,8 +230,8 @@ class TestLedgerQueryModel:
         self,
         ledger_append_handler: HandlerLedgerAppend,
         ledger_query_handler: HandlerLedgerQuery,
-        make_ledger_payload,
-        cleanup_event_ledger: list[UUID],
+        make_ledger_payload: Callable[..., Any],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """The query() method should work with correlation_id parameter."""
         from omnibase_infra.nodes.node_ledger_write_effect.models import (
@@ -266,8 +267,8 @@ class TestLedgerQueryModel:
         self,
         ledger_append_handler: HandlerLedgerAppend,
         ledger_query_handler: HandlerLedgerQuery,
-        make_ledger_payload,
-        cleanup_event_ledger: list[UUID],
+        make_ledger_payload: Callable[..., Any],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """The query() method should correctly set has_more for pagination."""
         from omnibase_infra.nodes.node_ledger_write_effect.models import (

@@ -14,8 +14,8 @@ Implementation: INSERT ... ON CONFLICT DO NOTHING RETURNING
 from __future__ import annotations
 
 import base64
-from datetime import datetime
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -39,7 +39,7 @@ class TestLedgerAppendIdempotency:
         self,
         ledger_append_handler: HandlerLedgerAppend,
         sample_ledger_payload: ModelPayloadLedgerAppend,
-        cleanup_event_ledger: list[UUID],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """First append should succeed and return a ledger_entry_id."""
         result = await ledger_append_handler.append(sample_ledger_payload)
@@ -59,8 +59,8 @@ class TestLedgerAppendIdempotency:
     async def test_duplicate_append_returns_duplicate_true(
         self,
         ledger_append_handler: HandlerLedgerAppend,
-        make_ledger_payload,
-        cleanup_event_ledger: list[UUID],
+        make_ledger_payload: Callable[..., Any],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Second append with same (topic, partition, offset) returns duplicate=True."""
         # Create payload with fixed Kafka position
@@ -89,8 +89,8 @@ class TestLedgerAppendIdempotency:
         self,
         ledger_append_handler: HandlerLedgerAppend,
         postgres_pool: asyncpg.Pool,
-        make_ledger_payload,
-        cleanup_event_ledger: list[UUID],
+        make_ledger_payload: Callable[..., Any],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Verify only one row exists after duplicate append."""
         # Create payload with fixed Kafka position
@@ -131,8 +131,8 @@ class TestLedgerAppendIdempotency:
     async def test_different_offsets_create_separate_entries(
         self,
         ledger_append_handler: HandlerLedgerAppend,
-        make_ledger_payload,
-        cleanup_event_ledger: list[UUID],
+        make_ledger_payload: Callable[..., Any],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Different kafka_offsets should create separate ledger entries."""
         topic = "test.idempotency.multi-offset.v1"
@@ -162,8 +162,8 @@ class TestLedgerAppendIdempotency:
     async def test_different_partitions_create_separate_entries(
         self,
         ledger_append_handler: HandlerLedgerAppend,
-        make_ledger_payload,
-        cleanup_event_ledger: list[UUID],
+        make_ledger_payload: Callable[..., Any],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Same offset on different partitions should create separate entries."""
         topic = "test.idempotency.multi-partition.v1"
@@ -191,8 +191,8 @@ class TestLedgerAppendIdempotency:
     async def test_different_topics_create_separate_entries(
         self,
         ledger_append_handler: HandlerLedgerAppend,
-        make_ledger_payload,
-        cleanup_event_ledger: list[UUID],
+        make_ledger_payload: Callable[..., Any],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Same offset/partition on different topics should create separate entries."""
         fixed_offset = int(uuid4().int % (2**62))
@@ -232,8 +232,8 @@ class TestLedgerAppendIdempotency:
         self,
         ledger_append_handler: HandlerLedgerAppend,
         postgres_pool: asyncpg.Pool,
-        make_ledger_payload,
-        cleanup_event_ledger: list[UUID],
+        make_ledger_payload: Callable[..., Any],
+        cleanup_event_ledger: list[UUID | None],
     ) -> None:
         """Duplicate append should not modify the original entry's data."""
         fixed_offset = int(uuid4().int % (2**62))
