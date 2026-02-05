@@ -967,49 +967,56 @@ class TestDockerComposeProfiles:
     to validate profile definitions. This approach is more robust than string
     matching because it correctly handles different YAML quoting styles and
     formatting variations.
+
+    Profile Architecture (docker-compose.infra.yml):
+    - (default): Core infrastructure - postgres, redpanda, valkey, topic-manager
+    - runtime: ONEX runtime services with observability
+    - consul: Service discovery (optional)
+    - secrets: Secrets management with Infisical (optional)
+    - full: All services including optional profiles
     """
 
-    def test_main_profile_defined(
+    def test_runtime_profile_defined(
         self,
         compose_file_path: Path,
     ) -> None:
-        """Verify main profile is defined in docker-compose."""
+        """Verify runtime profile is defined in docker-compose."""
         profiles = extract_profiles_from_compose(compose_file_path)
-        assert "main" in profiles, (
-            f"docker-compose should define 'main' profile. "
+        assert "runtime" in profiles, (
+            f"docker-compose should define 'runtime' profile. "
             f"Found profiles: {sorted(profiles)}"
         )
 
-    def test_effects_profile_defined(
+    def test_consul_profile_defined(
         self,
         compose_file_path: Path,
     ) -> None:
-        """Verify effects profile is defined in docker-compose."""
+        """Verify consul profile is defined in docker-compose."""
         profiles = extract_profiles_from_compose(compose_file_path)
-        assert "effects" in profiles, (
-            f"docker-compose should define 'effects' profile. "
+        assert "consul" in profiles, (
+            f"docker-compose should define 'consul' profile. "
             f"Found profiles: {sorted(profiles)}"
         )
 
-    def test_workers_profile_defined(
+    def test_secrets_profile_defined(
         self,
         compose_file_path: Path,
     ) -> None:
-        """Verify workers profile is defined in docker-compose."""
+        """Verify secrets profile is defined in docker-compose."""
         profiles = extract_profiles_from_compose(compose_file_path)
-        assert "workers" in profiles, (
-            f"docker-compose should define 'workers' profile. "
+        assert "secrets" in profiles, (
+            f"docker-compose should define 'secrets' profile. "
             f"Found profiles: {sorted(profiles)}"
         )
 
-    def test_all_profile_defined(
+    def test_full_profile_defined(
         self,
         compose_file_path: Path,
     ) -> None:
-        """Verify all profile is defined in docker-compose."""
+        """Verify full profile is defined in docker-compose."""
         profiles = extract_profiles_from_compose(compose_file_path)
-        assert "all" in profiles, (
-            f"docker-compose should define 'all' profile. "
+        assert "full" in profiles, (
+            f"docker-compose should define 'full' profile. "
             f"Found profiles: {sorted(profiles)}"
         )
 
