@@ -206,12 +206,15 @@ from omnibase_infra.event_bus.models import (
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models import ModelNodeIdentity
+from omnibase_infra.observability.wiring_health import MixinEmissionCounter
 from omnibase_infra.utils import compute_consumer_group_id
 
 logger = logging.getLogger(__name__)
 
 
-class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker):
+class EventBusKafka(
+    MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker, MixinEmissionCounter
+):
     """Kafka-backed event bus for production message streaming.
 
     Implements ProtocolEventBus interface using Apache Kafka (via aiokafka)
@@ -237,6 +240,7 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
         - MixinKafkaBroadcast: Environment broadcast messaging, envelope publishing
         - MixinKafkaDlq: Dead letter queue handling and metrics
         - MixinAsyncCircuitBreaker: Circuit breaker resilience pattern
+        - MixinEmissionCounter: Wiring health emission tracking (OMN-1895)
 
         The core class provides:
         - Factory methods (3): from_config, from_yaml, default
@@ -365,6 +369,9 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
 
         # Initialize DLQ mixin (metrics tracking, callback hooks)
         self._init_dlq()
+
+        # Initialize emission counter mixin (wiring health monitoring)
+        self._init_emission_counter()
 
     # =========================================================================
     # Factory Methods
@@ -816,6 +823,9 @@ class EventBusKafka(MixinKafkaBroadcast, MixinKafkaDlq, MixinAsyncCircuitBreaker
                 # Success - reset circuit breaker (thread-safe)
                 async with self._circuit_breaker_lock:
                     await self._reset_circuit_breaker()
+
+                # Record emission for wiring health monitoring
+                await self._record_emission(topic)
 
                 logger.debug(
                     f"Published to topic {topic}",

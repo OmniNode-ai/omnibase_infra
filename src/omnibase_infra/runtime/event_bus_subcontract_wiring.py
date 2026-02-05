@@ -111,6 +111,7 @@ from omnibase_infra.models.event_bus import (
     ModelIdempotencyConfig,
     ModelOffsetPolicyConfig,
 )
+from omnibase_infra.observability.wiring_health import MixinConsumptionCounter
 from omnibase_infra.protocols import ProtocolDispatchEngine, ProtocolIdempotencyStore
 from omnibase_infra.utils import compute_consumer_group_id
 
@@ -122,7 +123,7 @@ if TYPE_CHECKING:
     )
 
 
-class EventBusSubcontractWiring:
+class EventBusSubcontractWiring(MixinConsumptionCounter):
     """Wires event_bus subcontracts to Kafka subscriptions and publishers.
 
     This class bridges contract-declared topics to actual Kafka subscriptions,
@@ -292,6 +293,9 @@ class EventBusSubcontractWiring:
         self._logger = logging.getLogger(__name__)
         # Track retry attempts per correlation_id for infrastructure errors
         self._retry_counts: dict[UUID, int] = {}
+
+        # Initialize consumption counter mixin (wiring health monitoring)
+        self._init_consumption_counter()
 
     def resolve_topic(self, topic_suffix: str) -> str:
         """Resolve topic suffix to topic name (realm-agnostic, no environment prefix).
@@ -657,6 +661,10 @@ class EventBusSubcontractWiring:
                 if self._should_commit_after_handler():
                     await self._commit_offset(message, correlation_id)
                 self._clear_retry_count(correlation_id)
+
+                # Record consumption for wiring health monitoring
+                # Only called on SUCCESS - DLQ-routed messages are NOT counted
+                await self._record_consumption(topic)
 
             except (json.JSONDecodeError, ValidationError) as e:
                 # Content error: malformed JSON or schema validation failure
