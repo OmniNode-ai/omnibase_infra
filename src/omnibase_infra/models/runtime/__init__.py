@@ -29,6 +29,9 @@ from omnibase_infra.models.runtime.model_plugin_load_summary import (
 from omnibase_infra.models.runtime.model_resolved_dependencies import (
     ModelResolvedDependencies,
 )
+from omnibase_infra.models.runtime.model_runtime_introspection_config import (
+    ModelRuntimeIntrospectionConfig,
+)
 
 # ModelContractLoadResult and ModelRuntimeContractConfig are exported from
 # omnibase_infra.runtime.models (canonical location for runtime loader models)
@@ -50,4 +53,5 @@ __all__ = [
     "ModelPluginLoadSummary",
     "ModelResolvedDependencies",
     "ModelRuntimeContractConfig",
+    "ModelRuntimeIntrospectionConfig",
 ]

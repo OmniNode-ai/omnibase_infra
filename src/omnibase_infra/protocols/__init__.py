@@ -77,6 +77,9 @@ from omnibase_infra.protocols.protocol_message_dispatcher import (
 from omnibase_infra.protocols.protocol_message_type_registry import (
     ProtocolMessageTypeRegistry,
 )
+from omnibase_infra.protocols.protocol_node_introspection import (
+    ProtocolNodeIntrospection,
+)
 from omnibase_infra.protocols.protocol_plugin_compute import ProtocolPluginCompute
 from omnibase_infra.protocols.protocol_projector_schema_validator import (
     ProtocolProjectorSchemaValidator,
@@ -95,6 +98,7 @@ __all__: list[str] = [
     "ProtocolContainerAware",
     "ProtocolDispatchEngine",
     "ProtocolIdempotencyStore",
+    "ProtocolNodeIntrospection",
     "ProtocolLedgerSink",
     "ProtocolMessageDispatcher",
     "ProtocolMessageTypeRegistry",
