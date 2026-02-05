@@ -17,7 +17,6 @@ Test coverage includes:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from unittest.mock import patch
 from uuid import UUID
 
@@ -35,6 +34,7 @@ FIXED_TIMESTAMP = datetime(2025, 1, 15, 10, 30, 0, tzinfo=UTC)
 FIXED_ISO_TIMESTAMP = "2025-01-15T10:30:00+00:00"
 
 
+@pytest.mark.unit
 class TestModelEventRegistration:
     """Tests for ModelEventRegistration Pydantic model."""
 
@@ -84,6 +84,7 @@ class TestModelEventRegistration:
             )
 
 
+@pytest.mark.unit
 class TestEventRegistryDefaultRegistrations:
     """Tests for default event type registrations."""
 
@@ -131,6 +132,7 @@ class TestEventRegistryDefaultRegistrations:
         assert sorted(event_types) == sorted(expected)
 
 
+@pytest.mark.unit
 class TestEventRegistryResolveTopic:
     """Tests for resolve_topic() method."""
 
@@ -168,6 +170,7 @@ class TestEventRegistryResolveTopic:
         assert "session.started" in error_message
 
 
+@pytest.mark.unit
 class TestEventRegistryCustomRegistration:
     """Tests for register() method and custom registrations."""
 
@@ -221,6 +224,7 @@ class TestEventRegistryCustomRegistration:
         assert registry.resolve_topic("custom.two") == "onex.evt.custom.two.v1"
 
 
+@pytest.mark.unit
 class TestEventRegistryGetPartitionKey:
     """Tests for get_partition_key() method."""
 
@@ -288,6 +292,7 @@ class TestEventRegistryGetPartitionKey:
         assert key is None
 
 
+@pytest.mark.unit
 class TestEventRegistryValidatePayload:
     """Tests for validate_payload() method."""
 
@@ -355,6 +360,7 @@ class TestEventRegistryValidatePayload:
         assert result is True
 
 
+@pytest.mark.unit
 class TestEventRegistryInjectMetadata:
     """Tests for inject_metadata() method with deterministic mocking."""
 
@@ -569,6 +575,7 @@ class TestEventRegistryInjectMetadata:
             registry.inject_metadata("unknown.event", {"data": "value"})
 
 
+@pytest.mark.unit
 class TestEventRegistryRealmAgnostic:
     """Tests for realm-agnostic topic resolution."""
 
@@ -608,6 +615,7 @@ class TestEventRegistryRealmAgnostic:
         assert not topic.startswith("dev.")
 
 
+@pytest.mark.unit
 class TestEventRegistryListEventTypes:
     """Tests for list_event_types() method."""
 
@@ -660,6 +668,7 @@ class TestEventRegistryListEventTypes:
         assert final_count == initial_count + 2
 
 
+@pytest.mark.unit
 class TestEventRegistryGetRegistration:
     """Tests for get_registration() method."""
 
@@ -696,6 +705,7 @@ class TestEventRegistryGetRegistration:
         assert retrieved.schema_version == "3.0.0"
 
 
+@pytest.mark.unit
 class TestEventRegistryDefaultRegistrationDetails:
     """Tests verifying specific details of default registrations."""
 

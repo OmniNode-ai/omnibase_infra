@@ -126,8 +126,11 @@ class NotificationConsumer:
         Subscribes to notification topics and begins processing events.
         This method blocks until stop() is called.
 
+        If the consumer is already running, logs a warning and returns
+        immediately without starting a second instance.
+
         Raises:
-            RuntimeError: If the consumer is already running.
+            TypeError: If the event bus does not implement consume() method.
         """
         if self._running:
             logger.warning("NotificationConsumer already running")
@@ -163,7 +166,11 @@ class NotificationConsumer:
     async def stop(self) -> None:
         """Stop the notification consumer gracefully.
 
-        Cancels consumer tasks and waits for them to complete.
+        Cancels all consumer tasks, waits for them to complete, and clears
+        internal state. Safe to call multiple times; subsequent calls are
+        no-ops if the consumer is not running.
+
+        This method is idempotent and will not raise exceptions.
         """
         if not self._running:
             logger.debug("NotificationConsumer not running")
@@ -218,11 +225,12 @@ class NotificationConsumer:
                                     exc_info=True,
                                 )
                     else:
-                        # Event bus doesn't support consume - wait and retry
-                        logger.debug(
-                            f"Event bus doesn't support consume, sleeping for topic: {topic}"
+                        # Event bus doesn't support consume - fail fast
+                        raise TypeError(
+                            f"Event bus {type(self._event_bus).__name__} does not "
+                            f"implement consume() method. NotificationConsumer requires "
+                            f"an event bus with consume() support (e.g., EventBusKafka)."
                         )
-                        await asyncio.sleep(5.0)
 
                 except asyncio.CancelledError:
                     raise
@@ -247,7 +255,12 @@ class NotificationConsumer:
         Args:
             message: Raw message bytes from Kafka.
             handler: Handler function to invoke with parsed payload.
+
+        Note:
+            Errors are logged with correlation_id when available for traceability.
+            If correlation_id cannot be extracted, a generated UUID is used.
         """
+        correlation_id: UUID | None = None
         try:
             # Parse the message payload
             payload = json.loads(message.decode("utf-8"))
@@ -256,13 +269,26 @@ class NotificationConsumer:
                 logger.warning("Invalid message payload: not a dict")
                 return
 
+            # Extract correlation_id early for error traceability
+            correlation_id = self._extract_correlation_id(payload)
+
             # Invoke the handler
             await handler(payload)  # type: ignore[operator]
 
         except json.JSONDecodeError as e:
-            logger.warning(f"Failed to decode message: {e}")
+            # Generate correlation_id for decode errors since payload unavailable
+            correlation_id = correlation_id or uuid4()
+            logger.warning(
+                f"Failed to decode message: {e}",
+                extra={"correlation_id": str(correlation_id)},
+            )
         except Exception as e:
-            logger.warning(f"Failed to process message: {e}", exc_info=True)
+            correlation_id = correlation_id or uuid4()
+            logger.warning(
+                f"Failed to process message: {e}",
+                extra={"correlation_id": str(correlation_id)},
+                exc_info=True,
+            )
 
     async def _handle_blocked_event(self, payload: dict[str, object]) -> None:
         """Handle a notification.blocked event.
