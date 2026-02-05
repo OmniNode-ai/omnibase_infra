@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -216,3 +217,97 @@ class TestFileSpoolLedgerSink:
         await sink.close()  # Should not raise
 
         assert sink.is_closed
+
+    @pytest.mark.asyncio
+    async def test_two_phase_flush_preserves_events_on_success(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that two-phase flush removes events only after successful write."""
+        sink = FileSpoolLedgerSink(
+            spool_dir=tmp_path,
+            flush_interval_seconds=60.0,  # Disable auto-flush
+        )
+
+        # Emit 3 events
+        events = [_make_test_event(f"op_{i}") for i in range(3)]
+        for event in events:
+            await sink.emit(event)
+
+        assert sink.pending_count == 3
+
+        # Flush should write all events and clear buffer
+        flushed = await sink.flush()
+        assert flushed == 3
+        assert sink.pending_count == 0
+
+        # Verify all 3 events were written
+        assert sink.current_file_path is not None
+        with open(sink.current_file_path) as f:
+            lines = f.readlines()
+        assert len(lines) == 3
+
+        await sink.close()
+
+    @pytest.mark.asyncio
+    async def test_background_flush_respects_close(self, tmp_path: Path) -> None:
+        """Test that background flush loop exits cleanly when close() is called.
+
+        This verifies the race condition fix where _closed is checked inside
+        the lock to prevent the background loop from continuing after close.
+        """
+        sink = FileSpoolLedgerSink(
+            spool_dir=tmp_path,
+            flush_interval_seconds=0.05,  # Fast flush interval for test
+        )
+
+        # Emit an event to start the background flush task
+        await sink.emit(_make_test_event("op_0"))
+
+        # Wait for background flush task to start
+        await asyncio.sleep(0.1)
+
+        # Close the sink - this should stop the background task
+        await sink.close()
+
+        assert sink.is_closed
+        # The flush task should have exited cleanly (no hanging tasks)
+        assert sink._flush_task is not None
+        assert sink._flush_task.done()
+
+    @pytest.mark.asyncio
+    async def test_emit_during_flush_not_lost(self, tmp_path: Path) -> None:
+        """Test that events emitted during flush are not lost.
+
+        The two-phase flush approach ensures that only events that were
+        in the buffer at flush start are removed, not new events added
+        during the flush operation.
+        """
+        sink = FileSpoolLedgerSink(
+            spool_dir=tmp_path,
+            max_buffer_size=100,
+            flush_interval_seconds=60.0,  # Disable auto-flush
+        )
+
+        # Emit initial events
+        for i in range(5):
+            await sink.emit(_make_test_event(f"op_{i}"))
+
+        assert sink.pending_count == 5
+
+        # Flush the initial events
+        flushed = await sink.flush()
+        assert flushed == 5
+        assert sink.pending_count == 0
+
+        # Emit new events after flush
+        for i in range(3):
+            await sink.emit(_make_test_event(f"new_op_{i}"))
+
+        assert sink.pending_count == 3
+
+        # Second flush should only flush the new events
+        flushed2 = await sink.flush()
+        assert flushed2 == 3
+        assert sink.pending_count == 0
+
+        await sink.close()

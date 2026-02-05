@@ -370,3 +370,98 @@ class TestPostgresRepositoryRuntimeLedger:
         assert failed.error_type == "RepositoryTimeoutError"
         assert failed.retriable is True  # Timeout is retriable
         assert failed.duration_ms >= 0
+
+
+class TestRetriableErrorClassification:
+    """Tests for _is_retriable_error() error classification."""
+
+    @pytest.fixture
+    def runtime(
+        self,
+        mock_pool: MagicMock,
+        test_contract: ModelDbRepositoryContract,
+        test_config: ModelRepositoryRuntimeConfig,
+    ) -> PostgresRepositoryRuntime:
+        """Create a runtime instance for testing."""
+        return PostgresRepositoryRuntime(
+            pool=mock_pool, contract=test_contract, config=test_config
+        )
+
+    def test_timeout_error_is_retriable(
+        self, runtime: PostgresRepositoryRuntime
+    ) -> None:
+        """Test that TimeoutError is classified as retriable."""
+        assert runtime._is_retriable_error(TimeoutError("operation timed out")) is True
+
+    def test_connection_refused_is_retriable(
+        self, runtime: PostgresRepositoryRuntime
+    ) -> None:
+        """Test that ConnectionRefusedError is classified as retriable."""
+        assert runtime._is_retriable_error(ConnectionRefusedError()) is True
+
+    def test_connection_reset_is_retriable(
+        self, runtime: PostgresRepositoryRuntime
+    ) -> None:
+        """Test that ConnectionResetError is classified as retriable."""
+        assert runtime._is_retriable_error(ConnectionResetError()) is True
+
+    def test_broken_pipe_is_retriable(self, runtime: PostgresRepositoryRuntime) -> None:
+        """Test that BrokenPipeError is classified as retriable."""
+        assert runtime._is_retriable_error(BrokenPipeError()) is True
+
+    def test_os_error_is_retriable(self, runtime: PostgresRepositoryRuntime) -> None:
+        """Test that OSError is classified as retriable."""
+        assert runtime._is_retriable_error(OSError("network unreachable")) is True
+
+    def test_value_error_not_retriable(
+        self, runtime: PostgresRepositoryRuntime
+    ) -> None:
+        """Test that ValueError is NOT classified as retriable."""
+        assert runtime._is_retriable_error(ValueError("invalid value")) is False
+
+    def test_key_error_not_retriable(self, runtime: PostgresRepositoryRuntime) -> None:
+        """Test that KeyError is NOT classified as retriable."""
+        assert runtime._is_retriable_error(KeyError("missing key")) is False
+
+    def test_runtime_error_not_retriable(
+        self, runtime: PostgresRepositoryRuntime
+    ) -> None:
+        """Test that RuntimeError is NOT classified as retriable."""
+        assert runtime._is_retriable_error(RuntimeError("general error")) is False
+
+    def test_connection_keyword_in_message_is_retriable(
+        self, runtime: PostgresRepositoryRuntime
+    ) -> None:
+        """Test that errors with 'connection' in message are retriable."""
+        assert (
+            runtime._is_retriable_error(Exception("Connection to database lost"))
+            is True
+        )
+
+    def test_timeout_keyword_in_message_is_retriable(
+        self, runtime: PostgresRepositoryRuntime
+    ) -> None:
+        """Test that errors with 'timeout' in message are retriable."""
+        assert (
+            runtime._is_retriable_error(Exception("Request timeout exceeded")) is True
+        )
+
+    def test_constraint_violation_not_retriable(
+        self, runtime: PostgresRepositoryRuntime
+    ) -> None:
+        """Test that constraint violations are NOT retriable."""
+        assert (
+            runtime._is_retriable_error(
+                Exception("unique constraint violated for key 'email'")
+            )
+            is False
+        )
+
+    def test_syntax_error_not_retriable(
+        self, runtime: PostgresRepositoryRuntime
+    ) -> None:
+        """Test that SQL syntax errors are NOT retriable."""
+        assert (
+            runtime._is_retriable_error(Exception("syntax error at or near 'SELECT'"))
+            is False
+        )

@@ -267,28 +267,41 @@ class PostgresRepositoryRuntime:
 
         Returns:
             True if the error is transient and retriable, False otherwise.
-        """
-        error_type = type(exc).__name__
-        error_str = str(exc).lower()
 
-        # asyncpg connection-related exceptions (retriable)
-        retriable_types = {
+        Note:
+            Uses isinstance() for built-in exceptions but string-based checking
+            for asyncpg exceptions because asyncpg is imported under TYPE_CHECKING.
+            This avoids runtime import requirements when asyncpg may not be installed.
+        """
+        # Check built-in exceptions first (use isinstance for type safety)
+        if isinstance(
+            exc,
+            (
+                TimeoutError,
+                ConnectionRefusedError,
+                ConnectionResetError,
+                BrokenPipeError,
+                OSError,
+            ),
+        ):
+            return True
+
+        # asyncpg-specific exceptions (string-based to avoid import dependency)
+        # asyncpg is only imported under TYPE_CHECKING for type hints
+        error_type = type(exc).__name__
+        asyncpg_retriable_types = {
             "ConnectionDoesNotExistError",
             "InterfaceError",
             "InterfaceWarning",
             "CannotConnectNowError",
             "TooManyConnectionsError",
-            "ConnectionRefusedError",
-            "ConnectionResetError",
-            "BrokenPipeError",
-            "TimeoutError",
-            "OSError",
         }
 
-        if error_type in retriable_types:
+        if error_type in asyncpg_retriable_types:
             return True
 
-        # Check for connection-related error messages (fallback)
+        # Fallback: check error message for connection-related keywords
+        error_str = str(exc).lower()
         retriable_keywords = [
             "connection",
             "connect",
