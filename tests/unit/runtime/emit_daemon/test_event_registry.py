@@ -17,7 +17,6 @@ Test coverage includes:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from unittest.mock import patch
 from uuid import UUID
 
@@ -35,6 +34,7 @@ FIXED_TIMESTAMP = datetime(2025, 1, 15, 10, 30, 0, tzinfo=UTC)
 FIXED_ISO_TIMESTAMP = "2025-01-15T10:30:00+00:00"
 
 
+@pytest.mark.unit
 class TestModelEventRegistration:
     """Tests for ModelEventRegistration Pydantic model."""
 
@@ -84,6 +84,7 @@ class TestModelEventRegistration:
             )
 
 
+@pytest.mark.unit
 class TestEventRegistryDefaultRegistrations:
     """Tests for default event type registrations."""
 
@@ -112,18 +113,26 @@ class TestEventRegistryDefaultRegistrations:
         assert topic == "onex.evt.omniclaude.tool-executed.v1"
 
     def test_all_defaults_registered(self) -> None:
-        """Should register all four default event types."""
+        """Should register all default event types."""
         registry = EventRegistry()
         event_types = registry.list_event_types()
         expected = [
             "prompt.submitted",
             "session.started",
             "session.ended",
+            "session.outcome",
             "tool.executed",
+            "injection.recorded",
+            "context.utilization",
+            "agent.match",
+            "latency.breakdown",
+            "notification.blocked",
+            "notification.completed",
         ]
         assert sorted(event_types) == sorted(expected)
 
 
+@pytest.mark.unit
 class TestEventRegistryResolveTopic:
     """Tests for resolve_topic() method."""
 
@@ -161,6 +170,7 @@ class TestEventRegistryResolveTopic:
         assert "session.started" in error_message
 
 
+@pytest.mark.unit
 class TestEventRegistryCustomRegistration:
     """Tests for register() method and custom registrations."""
 
@@ -214,6 +224,7 @@ class TestEventRegistryCustomRegistration:
         assert registry.resolve_topic("custom.two") == "onex.evt.custom.two.v1"
 
 
+@pytest.mark.unit
 class TestEventRegistryGetPartitionKey:
     """Tests for get_partition_key() method."""
 
@@ -281,6 +292,7 @@ class TestEventRegistryGetPartitionKey:
         assert key is None
 
 
+@pytest.mark.unit
 class TestEventRegistryValidatePayload:
     """Tests for validate_payload() method."""
 
@@ -348,6 +360,7 @@ class TestEventRegistryValidatePayload:
         assert result is True
 
 
+@pytest.mark.unit
 class TestEventRegistryInjectMetadata:
     """Tests for inject_metadata() method with deterministic mocking."""
 
@@ -562,6 +575,7 @@ class TestEventRegistryInjectMetadata:
             registry.inject_metadata("unknown.event", {"data": "value"})
 
 
+@pytest.mark.unit
 class TestEventRegistryRealmAgnostic:
     """Tests for realm-agnostic topic resolution."""
 
@@ -601,6 +615,7 @@ class TestEventRegistryRealmAgnostic:
         assert not topic.startswith("dev.")
 
 
+@pytest.mark.unit
 class TestEventRegistryListEventTypes:
     """Tests for list_event_types() method."""
 
@@ -653,6 +668,7 @@ class TestEventRegistryListEventTypes:
         assert final_count == initial_count + 2
 
 
+@pytest.mark.unit
 class TestEventRegistryGetRegistration:
     """Tests for get_registration() method."""
 
@@ -689,6 +705,7 @@ class TestEventRegistryGetRegistration:
         assert retrieved.schema_version == "3.0.0"
 
 
+@pytest.mark.unit
 class TestEventRegistryDefaultRegistrationDetails:
     """Tests verifying specific details of default registrations."""
 
@@ -733,3 +750,49 @@ class TestEventRegistryDefaultRegistrationDetails:
         reg = registry.get_registration("tool.executed")
         assert reg is not None
         assert reg.partition_key_field == "session_id"
+
+    def test_notification_blocked_required_fields(self) -> None:
+        """notification.blocked should require ticket_identifier, reason, repo, session_id."""
+        registry = EventRegistry()
+        reg = registry.get_registration("notification.blocked")
+        assert reg is not None
+        assert "ticket_identifier" in reg.required_fields
+        assert "reason" in reg.required_fields
+        assert "repo" in reg.required_fields
+        assert "session_id" in reg.required_fields
+
+    def test_notification_blocked_partition_key(self) -> None:
+        """notification.blocked should use session_id as partition key."""
+        registry = EventRegistry()
+        reg = registry.get_registration("notification.blocked")
+        assert reg is not None
+        assert reg.partition_key_field == "session_id"
+
+    def test_notification_blocked_topic(self) -> None:
+        """notification.blocked should have correct topic template."""
+        registry = EventRegistry()
+        topic = registry.resolve_topic("notification.blocked")
+        assert topic == "onex.evt.omniclaude.notification-blocked.v1"
+
+    def test_notification_completed_required_fields(self) -> None:
+        """notification.completed should require ticket_identifier, summary, repo, session_id."""
+        registry = EventRegistry()
+        reg = registry.get_registration("notification.completed")
+        assert reg is not None
+        assert "ticket_identifier" in reg.required_fields
+        assert "summary" in reg.required_fields
+        assert "repo" in reg.required_fields
+        assert "session_id" in reg.required_fields
+
+    def test_notification_completed_partition_key(self) -> None:
+        """notification.completed should use session_id as partition key."""
+        registry = EventRegistry()
+        reg = registry.get_registration("notification.completed")
+        assert reg is not None
+        assert reg.partition_key_field == "session_id"
+
+    def test_notification_completed_topic(self) -> None:
+        """notification.completed should have correct topic template."""
+        registry = EventRegistry()
+        topic = registry.resolve_topic("notification.completed")
+        assert topic == "onex.evt.omniclaude.notification-completed.v1"
