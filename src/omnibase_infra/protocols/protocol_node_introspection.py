@@ -110,11 +110,9 @@ class ProtocolNodeIntrospection(Protocol):
         on startup.
 
         Thread Safety:
-            This method MUST be idempotent - calling it multiple times should
-            not create multiple heartbeat tasks.
-
-        Raises:
-            RuntimeError: If heartbeat task is already running.
+            This method MUST be idempotent - calling it multiple times MUST NOT
+            create multiple heartbeat tasks. If the task is already running,
+            subsequent calls should be a no-op (silently ignored).
         """
         ...
 
