@@ -806,15 +806,18 @@ class MockEventBusWithPartition:
     async def subscribe(
         self,
         topic: str,
-        group: str,
+        node_identity: object,
         handler: Callable[[dict[str, object]], Awaitable[None]],
+        *,
+        purpose: str = "consume",
     ) -> Callable[[], Coroutine[object, object, None]]:
         """Subscribe to a topic.
 
         Args:
             topic: Topic to subscribe to.
-            group: Consumer group.
+            node_identity: Node identity for consumer group derivation.
             handler: Async handler callback that receives message dict.
+            purpose: Consumer group purpose (default: "consume").
 
         Returns:
             Async unsubscribe function.

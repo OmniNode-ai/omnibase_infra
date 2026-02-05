@@ -177,19 +177,28 @@ class MockEventBus:
     async def subscribe(
         self,
         topic: str,
-        group_id: str,
+        node_identity: object,
         on_message: Callable[..., object],
+        *,
+        purpose: str = "consume",
     ) -> AsyncMock:
         """Subscribe to a topic.
 
         Args:
             topic: Topic to subscribe to.
-            group_id: Consumer group identifier for this subscription.
+            node_identity: Node identity object (ProtocolNodeIdentity) for
+                deriving consumer group identifier.
             on_message: Async callback invoked for each message.
+            purpose: Consumer group purpose (default: "consume").
 
         Returns:
             Unsubscribe callback.
         """
+        # Derive group identifier from node_identity
+        if hasattr(node_identity, "node_name"):
+            group_id = str(node_identity.node_name)
+        else:
+            group_id = str(node_identity)
         self.subscriptions.append((topic, group_id, on_message))
         unsubscribe = AsyncMock()
         self.unsubscribe_callbacks.append(unsubscribe)

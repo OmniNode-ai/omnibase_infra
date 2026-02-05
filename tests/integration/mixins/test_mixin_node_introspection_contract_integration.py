@@ -137,21 +137,29 @@ class MockEventBus:
     async def subscribe(
         self,
         topic: str,
-        group_id: str,
+        node_identity: object,
         on_message: Callable[[object], Awaitable[None]],
+        *,
+        purpose: str = "consume",
     ) -> Callable[[], Awaitable[None]]:
         """Mock subscribe method.
 
         Args:
             topic: Topic to subscribe to.
-            group_id: Consumer group ID.
+            node_identity: Node identity for consumer group derivation.
             on_message: Callback function for messages.
+            purpose: Consumer group purpose (default: "consume").
 
         Returns:
             An async unsubscribe function.
         """
         self.subscribed_topics.append(topic)
-        self.subscribed_groups.append(group_id)
+        # Derive group from node_identity for test verification
+        if hasattr(node_identity, "node_name"):
+            group = f"{getattr(node_identity, 'env', 'test')}.{getattr(node_identity, 'service', 'test')}.{node_identity.node_name}.{purpose}.{getattr(node_identity, 'version', '1.0.0')}"
+        else:
+            group = str(node_identity)
+        self.subscribed_groups.append(group)
 
         async def unsubscribe() -> None:
             pass
@@ -612,9 +620,9 @@ class TestEndToEndIntrospectionWorkflow:
             assert len(event_bus.subscribed_topics) >= 1
             assert "onex.custom.registry.request.v1" in event_bus.subscribed_topics
 
-            # Verify group ID includes node ID (now a UUID)
-            node_id_str = str(node._introspection_node_id)
-            assert any(node_id_str in group for group in event_bus.subscribed_groups)
+            # Verify group ID includes node name (derived from contract metadata)
+            node_name = node._introspection_node_name
+            assert any(node_name in group for group in event_bus.subscribed_groups)
         finally:
             await node.stop_introspection_tasks()
 
