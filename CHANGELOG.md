@@ -27,6 +27,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **New**: `event_bus.subscribe(topic, node_identity=ModelEmitterIdentity(...), on_message=handler)`
   - **Migration**: Replace `group_id` with `ModelEmitterIdentity(env, service, node_name, version)`
 
+#### ModelIntrospectionConfig Requires node_name
+- **`ModelIntrospectionConfig`** now requires `node_name` as a mandatory field
+  - **Old**: Could instantiate with only `node_id` and `node_type`
+  - **New**: Must also provide `node_name` parameter
+  - **Migration**: Add `node_name=<your_node_name>` to all `ModelIntrospectionConfig` instantiations
+  - **Failure**: Omitting `node_name` raises `ValidationError`
+
+#### ModelPostgresIntentPayload.endpoints Validation
+- **`ModelPostgresIntentPayload.endpoints`** validator now raises `ValueError` for empty Mapping
+  - **Old**: Empty `{}` logged a warning and returned empty tuple
+  - **New**: Empty `{}` raises `ValueError("endpoints cannot be an empty Mapping")`
+  - **Migration**: Ensure `endpoints` is either `None` or a non-empty Mapping
+
+### Deprecated
+
+#### RegistryPolicy.register_policy()
+- **`RegistryPolicy.register_policy()`** method is deprecated
+  - **Old**: `policy.register_policy(policy_type, priority, handler)`
+  - **New**: `policy.register(ModelPolicyRegistration(policy_type, priority, handler))`
+  - **Migration**: Replace `register_policy()` calls with `register(ModelPolicyRegistration(...))`
+  - **Warning**: Emits `DeprecationWarning` at call site
+
 ### Changed
 
 #### Dependencies
