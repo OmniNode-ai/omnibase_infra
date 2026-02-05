@@ -47,6 +47,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.gateway.models import ModelGatewayConfig
 from omnibase_infra.runtime.models.model_contract_registry_config import (
     ModelContractRegistryConfig,
 )
@@ -76,6 +77,7 @@ class ModelRuntimeConfig(BaseModel):
         logging: Logging configuration [RESERVED]
         shutdown: Shutdown configuration [ACTIVE - grace_period_seconds used]
         contract_registry: Contract registry configuration [ACTIVE]
+        gateway: Gateway configuration for envelope signing and realm enforcement [RESERVED]
 
     Field Status Legend:
         [ACTIVE]   - Currently used by kernel.py
@@ -152,6 +154,10 @@ class ModelRuntimeConfig(BaseModel):
     contract_registry: ModelContractRegistryConfig = Field(
         default_factory=ModelContractRegistryConfig,
         description="Contract registry configuration",
+    )
+    gateway: ModelGatewayConfig | None = Field(
+        default=None,
+        description="Gateway configuration for envelope signing and realm enforcement",
     )
 
 

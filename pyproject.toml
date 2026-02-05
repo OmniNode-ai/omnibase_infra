@@ -38,7 +38,7 @@ python = "^3.12"
 #
 # omnibase-core v0.14.0: Latest core release
 # (v0.13.1 included: Contract registration support)
-omnibase-core = "^0.14.0"
+omnibase-core = "^0.15.0"
 # omnibase-spi v0.6.4: Version bump
 omnibase-spi = "^0.6.4"
 
