@@ -44,9 +44,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Final
+from typing import TYPE_CHECKING
 
 from omnibase_infra.event_bus.topic_constants import WIRING_HEALTH_MONITORED_TOPICS
+
+if TYPE_CHECKING:
+    from typing import Final
 
 _logger = logging.getLogger(__name__)
 
@@ -133,12 +136,13 @@ class MixinConsumptionCounter:
 
         async with self._consumption_counter_lock:
             self._consumption_counts[topic] = self._consumption_counts.get(topic, 0) + 1
+            count = self._consumption_counts[topic]
 
         _logger.debug(
             "Recorded consumption",
             extra={
                 "topic": topic,
-                "count": self._consumption_counts.get(topic, 0),
+                "count": count,
             },
         )
 

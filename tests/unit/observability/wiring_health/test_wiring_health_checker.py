@@ -17,6 +17,8 @@ from omnibase_infra.observability.wiring_health import (
     WiringHealthChecker,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class MockEmissionSource:
     """Mock emission count source for testing."""

@@ -161,7 +161,7 @@ class WiringHealthChecker:
 
         # Update Prometheus metrics if sink available
         if self._prometheus_sink is not None:
-            self._update_prometheus_metrics(metrics)
+            self._update_prometheus_metrics(metrics, correlation_id)
 
         return metrics
 
@@ -202,11 +202,14 @@ class WiringHealthChecker:
 
         return metrics, alert
 
-    def _update_prometheus_metrics(self, metrics: ModelWiringHealthMetrics) -> None:
+    def _update_prometheus_metrics(
+        self, metrics: ModelWiringHealthMetrics, correlation_id: UUID
+    ) -> None:
         """Update Prometheus metrics from health metrics.
 
         Args:
             metrics: The computed wiring health metrics.
+            correlation_id: Correlation ID for error tracing.
         """
         try:
             # Update gauges for each topic
@@ -246,7 +249,7 @@ class WiringHealthChecker:
         except Exception as e:
             _logger.warning(
                 "Failed to update Prometheus metrics",
-                extra={"error": str(e)},
+                extra={"error": str(e), "correlation_id": str(correlation_id)},
             )
 
     def to_health_response(

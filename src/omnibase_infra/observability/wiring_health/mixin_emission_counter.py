@@ -40,9 +40,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Final
+from typing import TYPE_CHECKING
 
 from omnibase_infra.event_bus.topic_constants import WIRING_HEALTH_MONITORED_TOPICS
+
+if TYPE_CHECKING:
+    from typing import Final
 
 _logger = logging.getLogger(__name__)
 
@@ -123,12 +126,13 @@ class MixinEmissionCounter:
 
         async with self._emission_counter_lock:
             self._emission_counts[topic] = self._emission_counts.get(topic, 0) + 1
+            count = self._emission_counts[topic]
 
         _logger.debug(
             "Recorded emission",
             extra={
                 "topic": topic,
-                "count": self._emission_counts.get(topic, 0),
+                "count": count,
             },
         )
 

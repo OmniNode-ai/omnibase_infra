@@ -11,6 +11,8 @@ import pytest
 from omnibase_infra.event_bus.topic_constants import WIRING_HEALTH_MONITORED_TOPICS
 from omnibase_infra.observability.wiring_health import MixinConsumptionCounter
 
+pytestmark = pytest.mark.unit
+
 
 class _ConsumptionCounterTestable(MixinConsumptionCounter):
     """Testable class that uses the consumption counter mixin."""
