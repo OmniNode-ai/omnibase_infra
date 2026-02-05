@@ -76,6 +76,7 @@ from omnibase_infra.enums.enum_handler_type_category import EnumHandlerTypeCateg
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.enums.enum_introspection_reason import EnumIntrospectionReason
 from omnibase_infra.enums.enum_kafka_acks import EnumKafkaAcks
+from omnibase_infra.enums.enum_ledger_sink_drop_policy import EnumLedgerSinkDropPolicy
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
@@ -120,6 +121,7 @@ __all__: list[str] = [
     "EnumInfraTransportType",
     "EnumIntrospectionReason",
     "EnumKafkaAcks",
+    "EnumLedgerSinkDropPolicy",
     "EnumMessageCategory",
     "EnumNodeArchetype",
     "EnumNodeOutputType",

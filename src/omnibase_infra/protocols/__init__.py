@@ -70,6 +70,7 @@ from omnibase_infra.protocols.protocol_event_projector import ProtocolEventProje
 from omnibase_infra.protocols.protocol_idempotency_store import (
     ProtocolIdempotencyStore,
 )
+from omnibase_infra.protocols.protocol_ledger_sink import ProtocolLedgerSink
 from omnibase_infra.protocols.protocol_message_dispatcher import (
     ProtocolMessageDispatcher,
 )
@@ -94,6 +95,7 @@ __all__: list[str] = [
     "ProtocolContainerAware",
     "ProtocolDispatchEngine",
     "ProtocolIdempotencyStore",
+    "ProtocolLedgerSink",
     "ProtocolMessageDispatcher",
     "ProtocolMessageTypeRegistry",
     "ProtocolPluginCompute",
