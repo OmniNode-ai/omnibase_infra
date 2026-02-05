@@ -14,7 +14,7 @@ Related Tickets:
     - OMN-1930: Phase 1 - Fix Auto-Introspection (P0)
 
 See Also:
-    - ProtocolIntrospectionService: Protocol interface for introspection
+    - ProtocolNodeIntrospection: Protocol interface for introspection
     - RuntimeHostProcess: Consumer of this configuration
     - ModelIntrospectionConfig: Mixin initialization configuration (different purpose)
     - ModelIntrospectionTaskConfig: Background task configuration
@@ -86,7 +86,7 @@ class ModelRuntimeIntrospectionConfig(BaseModel):
 
     See Also:
         RuntimeHostProcess: Uses this configuration for startup introspection.
-        ProtocolIntrospectionService: Protocol for introspection operations.
+        ProtocolNodeIntrospection: Protocol for introspection operations.
         ModelIntrospectionTaskConfig: Background task configuration.
     """
 
