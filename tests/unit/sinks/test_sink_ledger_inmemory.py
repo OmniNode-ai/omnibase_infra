@@ -4,13 +4,13 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.enums import EnumLedgerSinkDropPolicy
 from omnibase_infra.models.ledger import ModelDbQueryRequested, ModelLedgerEventBase
-from omnibase_infra.protocols import EnumLedgerSinkDropPolicy
 from omnibase_infra.sinks import InMemoryLedgerSink
 from omnibase_infra.sinks.sink_ledger_inmemory import (
     LedgerSinkClosedError,

@@ -29,7 +29,7 @@ import json
 import logging
 import os
 from collections import deque
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
@@ -87,7 +87,7 @@ class FileSpoolLedgerSink:
 
     def __init__(
         self,
-        spool_dir: str | Path,
+        spool_dir: Path,
         max_file_size_bytes: int = 10 * 1024 * 1024,  # 10MB
         max_buffer_size: int = 1000,
         flush_interval_seconds: float = 1.0,
@@ -96,7 +96,7 @@ class FileSpoolLedgerSink:
         """Initialize the file spool sink.
 
         Args:
-            spool_dir: Directory for spool files. Created if not exists.
+            spool_dir: Path to directory for spool files. Created if not exists.
             max_file_size_bytes: Maximum size per file before rotation (default: 10MB).
             max_buffer_size: Maximum events to buffer (default: 1000).
             flush_interval_seconds: Background flush interval (default: 1.0s).
@@ -214,7 +214,8 @@ class FileSpoolLedgerSink:
         self._current_file_path = self._spool_dir / filename
 
         # Open file for binary append with buffering
-        self._file_handle = open(self._current_file_path, "ab", buffering=8192)
+        # File handle is manually managed for rotation, not via context manager
+        self._file_handle = open(self._current_file_path, "ab", buffering=8192)  # noqa: SIM115
         self._current_file_size = 0
 
         logger.info(f"Opened new ledger spool file: {self._current_file_path}")
