@@ -94,10 +94,10 @@ class InMemoryLedgerSink:
             LedgerSinkFullError: If buffer is full and policy is RAISE.
             NotImplementedError: If drop_policy is BLOCK (not supported in test sink).
         """
-        if self._closed:
-            raise LedgerSinkClosedError("Cannot emit to closed sink")
-
         async with self._lock:
+            # Check closed INSIDE lock to prevent race with close()
+            if self._closed:
+                raise LedgerSinkClosedError("Cannot emit to closed sink")
             if len(self._events) >= self._max_size:
                 if self._drop_policy == EnumLedgerSinkDropPolicy.DROP_NEWEST:
                     return False

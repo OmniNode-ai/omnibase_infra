@@ -79,6 +79,7 @@ from omnibase_infra.runtime.db.models import (
     ModelDbRepositoryContract,
     ModelRepositoryRuntimeConfig,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 if TYPE_CHECKING:
     import asyncpg
@@ -365,8 +366,11 @@ class PostgresRepositoryRuntime:
             # Emit failure event for any other exception
             elapsed_ms = (time.monotonic() - start_time) * 1000
             if self._ledger_sink is not None:
-                # Determine if retriable based on exception type
-                retriable = isinstance(e, RepositoryExecutionError)
+                # Determine if retriable: most database errors (constraint violations,
+                # syntax errors) are NOT retriable. Only connection/transient errors
+                # warrant retry. RepositoryExecutionError wraps all DB errors, so
+                # default to False (safe; caller can override retry logic).
+                retriable = False
                 failed_event = ModelDbQueryFailed(
                     event_id=uuid4(),
                     correlation_id=corr_id,
@@ -379,7 +383,7 @@ class PostgresRepositoryRuntime:
                     emitted_at=datetime.now(UTC),
                     duration_ms=elapsed_ms,
                     error_type=type(e).__name__,
-                    error_message=str(e)[:200],  # Truncate for safety
+                    error_message=sanitize_error_string(str(e), max_length=200),
                     retriable=retriable,
                 )
                 await self._emit_ledger_event(failed_event)

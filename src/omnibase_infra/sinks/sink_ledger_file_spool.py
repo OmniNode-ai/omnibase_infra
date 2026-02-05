@@ -136,10 +136,10 @@ class FileSpoolLedgerSink:
             LedgerSinkClosedError: If sink is closed.
             LedgerSinkFullError: If buffer is full and policy is RAISE.
         """
-        if self._closed:
-            raise LedgerSinkClosedError("Cannot emit to closed sink")
-
         async with self._lock:
+            # Check closed INSIDE lock to prevent race with close()
+            if self._closed:
+                raise LedgerSinkClosedError("Cannot emit to closed sink")
             if len(self._buffer) >= self._max_buffer_size:
                 if self._drop_policy == EnumLedgerSinkDropPolicy.DROP_NEWEST:
                     return False

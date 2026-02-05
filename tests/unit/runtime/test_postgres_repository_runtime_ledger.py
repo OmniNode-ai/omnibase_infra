@@ -4,8 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -332,3 +331,42 @@ class TestPostgresRepositoryRuntimeLedger:
         succeeded = ledger_sink.events[1]
         assert isinstance(succeeded, ModelDbQuerySucceeded)
         assert succeeded.rows_returned == 3
+
+    @pytest.mark.asyncio
+    async def test_emits_failed_on_timeout(
+        self,
+        mock_pool: MagicMock,
+        test_contract: ModelDbRepositoryContract,
+        test_config: ModelRepositoryRuntimeConfig,
+        ledger_sink: InMemoryLedgerSink,
+    ) -> None:
+        """Test that timeout emits requested and failed events with retriable=True."""
+        # Setup mock to raise TimeoutError (simulating asyncio.wait_for timeout)
+        connection = mock_pool.acquire.return_value.__aenter__.return_value
+        connection.fetchrow = AsyncMock(side_effect=TimeoutError("Query timed out"))
+
+        runtime = PostgresRepositoryRuntime(
+            pool=mock_pool,
+            contract=test_contract,
+            config=test_config,
+            ledger_sink=ledger_sink,
+        )
+
+        from omnibase_infra.errors.repository import RepositoryTimeoutError
+
+        with pytest.raises(RepositoryTimeoutError):
+            await runtime.call("find_by_id", 1)
+
+        assert ledger_sink.pending_count == 2
+
+        # Check requested event
+        requested = ledger_sink.events[0]
+        assert isinstance(requested, ModelDbQueryRequested)
+
+        # Check failed event
+        failed = ledger_sink.events[1]
+        assert isinstance(failed, ModelDbQueryFailed)
+        assert failed.event_type == "db.query.failed"
+        assert failed.error_type == "RepositoryTimeoutError"
+        assert failed.retriable is True  # Timeout is retriable
+        assert failed.duration_ms >= 0

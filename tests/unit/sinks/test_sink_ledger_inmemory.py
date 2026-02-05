@@ -157,6 +157,19 @@ class TestInMemoryLedgerSink:
         sink = InMemoryLedgerSink(drop_policy=EnumLedgerSinkDropPolicy.RAISE)
         assert sink.drop_policy == EnumLedgerSinkDropPolicy.RAISE
 
+    @pytest.mark.asyncio
+    async def test_block_policy_raises_not_implemented(self) -> None:
+        """Test BLOCK policy raises NotImplementedError."""
+        sink = InMemoryLedgerSink(
+            max_size=1, drop_policy=EnumLedgerSinkDropPolicy.BLOCK
+        )
+        # First event fills the buffer
+        await sink.emit(_make_test_event("op_0"))
+
+        # Second event should trigger BLOCK policy
+        with pytest.raises(NotImplementedError, match="BLOCK policy"):
+            await sink.emit(_make_test_event("op_1"))
+
 
 class TestIdempotencyKey:
     """Tests for idempotency key generation."""
