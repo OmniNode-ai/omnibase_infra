@@ -234,6 +234,14 @@ services:
   # ==========================================================================
   # Valkey - Redis-Compatible Cache and Pub/Sub
   # ==========================================================================
+  # SECURITY NOTE: Port 16379 is intentionally exposed for local development.
+  # This allows host-based tools and tests to connect directly to Valkey.
+  # The default binding to 0.0.0.0 is acceptable for development environments
+  # where localhost isolation via host firewall provides sufficient security.
+  # For production, either:
+  #   - Remove port exposure and use internal Docker networking only
+  #   - Bind to 127.0.0.1: "127.0.0.1:16379:6379"
+  #   - Enable Valkey authentication with REDIS_PASSWORD
   valkey:
     image: valkey/valkey:8.0-alpine
     container_name: omnibase-infra-valkey

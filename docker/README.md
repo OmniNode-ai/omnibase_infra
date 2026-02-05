@@ -68,10 +68,10 @@ cp .env.example .env
 #    Generate secure passwords: openssl rand -base64 32
 
 # 3. Build and start (main profile)
-docker compose -f docker-compose.runtime.yml --profile main up -d --build
+docker compose -f docker-compose.infra.yml --profile main up -d --build
 
 # 4. View logs
-docker compose -f docker-compose.runtime.yml logs -f
+docker compose -f docker-compose.infra.yml logs -f
 
 # 5. Verify health
 curl http://localhost:8085/health
@@ -79,36 +79,40 @@ curl http://localhost:8085/health
 
 ## Architecture
 
-The runtime deployment follows a multi-profile architecture designed for flexible scaling and separation of concerns:
+The deployment follows a multi-profile architecture designed for flexible scaling and separation of concerns:
 
 ```
-                                    Docker Compose Profiles
-+--------------------------------------------------------------------+
-|                                                                    |
-|   main profile          effects profile       workers profile      |
-|   +---------------+     +---------------+     +---------------+    |
-|   |               |     |               |     |               |    |
-|   | runtime-main  |     | runtime-      |     | runtime-      |    |
-|   | (core kernel) |     | effects       |     | worker x N    |    |
-|   |               |     | (ext. I/O)    |     | (parallel)    |    |
-|   +-------+-------+     +-------+-------+     +-------+-------+    |
-|           |                     |                     |            |
-|           +---------------------+---------------------+            |
-|                                 |                                  |
-|                    +------------+------------+                     |
-|                    |                         |                     |
-|                    | omnibase-infra-network  |                     |
-|                    |    (bridge network)     |                     |
-|                    |                         |                     |
-|                    +------------+------------+                     |
-|                                 |                                  |
-|                    +------------+------------+                     |
-|                    |    External Services    |                     |
-|                    |  (via extra_hosts or    |                     |
-|                    |   external network)     |                     |
-|                    +-------------------------+                     |
-|                                                                    |
-+--------------------------------------------------------------------+
+                              Docker Compose Profiles
++------------------------------------------------------------------------+
+|                                                                        |
+|   Default Profile (Infrastructure)                                     |
+|   +---------------+  +---------------+  +---------------+              |
+|   |   postgres    |  |   redpanda    |  |    valkey     |              |
+|   |   (storage)   |  |   (events)    |  |   (cache)     |              |
+|   +-------+-------+  +-------+-------+  +-------+-------+              |
+|           |                  |                  |                      |
+|           +------------------+------------------+                      |
+|                              |                                         |
+|   +--------------------------------------------------------------+     |
+|   |              omnibase-infra-network (bridge)                 |     |
+|   +--------------------------------------------------------------+     |
+|                              |                                         |
+|   Runtime Profile (--profile runtime)                                  |
+|   +---------------+  +---------------+  +---------------+              |
+|   | omninode-     |  |  runtime-     |  |  runtime-     |              |
+|   | runtime       |  |  effects      |  |  worker x N   |              |
+|   | (kernel)      |  |  (ext. I/O)   |  |  (parallel)   |              |
+|   +---------------+  +---------------+  +---------------+              |
+|                                                                        |
+|   Optional Profiles:                                                   |
+|   +---------------+  +---------------+                                 |
+|   |    consul     |  |  infisical    |                                 |
+|   |  (discovery)  |  |  (secrets)    |                                 |
+|   | --profile     |  | --profile     |                                 |
+|   |   consul      |  |   secrets     |                                 |
+|   +---------------+  +---------------+                                 |
+|                                                                        |
++------------------------------------------------------------------------+
 ```
 
 ### Service Communication Flow
@@ -140,54 +144,75 @@ External Request
 
 ## Profiles
 
-| Profile   | Services                  | Use Case                                   | Command                                                        |
-|-----------|---------------------------|--------------------------------------------|----------------------------------------------------------------|
-| `main`    | runtime-main              | Core kernel only                           | `docker compose -f docker-compose.runtime.yml --profile main up -d` |
-| `effects` | runtime-main + effects    | Main + external service interactions       | `docker compose -f docker-compose.runtime.yml --profile effects up -d` |
-| `workers` | runtime-main + workers x2 | Main + parallel compute processing         | `docker compose -f docker-compose.runtime.yml --profile workers up -d` |
-| `all`     | All services              | Full deployment with all profiles          | `docker compose -f docker-compose.runtime.yml --profile all up -d` |
+| Profile    | Services                                      | Use Case                                   | Command                                                          |
+|------------|-----------------------------------------------|--------------------------------------------|------------------------------------------------------------------|
+| (default)  | postgres, redpanda, valkey, topic-manager     | Core infrastructure only                   | `docker compose -f docker-compose.infra.yml up -d`               |
+| `runtime`  | (default) + runtime, effects, workers, consumer | Full ONEX runtime with observability     | `docker compose -f docker-compose.infra.yml --profile runtime up -d` |
+| `consul`   | (default) + consul                            | Infrastructure + service discovery         | `docker compose -f docker-compose.infra.yml --profile consul up -d` |
+| `secrets`  | (default) + infisical                         | Infrastructure + secrets management        | `docker compose -f docker-compose.infra.yml --profile secrets up -d` |
+| `full`     | All services                                  | Complete stack with all features           | `docker compose -f docker-compose.infra.yml --profile full up -d` |
 
 ### Profile Details
 
-#### Main Profile (Core Kernel)
+#### Default Profile (Core Infrastructure)
 
-The primary runtime service that handles kernel bootstrap:
+Core infrastructure services required by all deployments:
 
-- Listens on configurable input topic (default: `requests`)
-- Publishes to configurable output topic (default: `responses`)
-- Exposes health endpoint on port 8085
-- Must be healthy before effects/workers can start
+- **PostgreSQL** (port 5436): Primary data store for projections and state
+- **Redpanda** (port 29092): Kafka-compatible event streaming
+- **Valkey** (port 16379): Redis-compatible cache and pub/sub
+- **Topic Manager**: Automatic Kafka topic creation on startup
 
 ```bash
-docker compose -f docker-compose.runtime.yml --profile main up -d --build
+docker compose -f docker-compose.infra.yml up -d
 ```
 
-#### Effects Profile (External Interactions)
+#### Runtime Profile (ONEX Services)
 
-Handles effect nodes that interact with external services:
+Full ONEX runtime services with observability:
 
-- Consul for service discovery
-- Kafka for event streaming
-- Infisical for secret management
-- PostgreSQL for persistence
-
-```bash
-docker compose -f docker-compose.runtime.yml --profile effects up -d --build
-```
-
-#### Workers Profile (Parallel Processing)
-
-Scalable worker containers for parallel compute:
+- **omninode-runtime** (port 8085): Core kernel handling requests
+- **runtime-effects** (port 8086): External service interactions
+- **runtime-worker** (x2): Scalable parallel compute workers
+- **agent-actions-consumer** (port 8087): Observability event persistence
 
 ```bash
-# Start with default replicas (2)
-docker compose -f docker-compose.runtime.yml --profile workers up -d --build
+docker compose -f docker-compose.infra.yml --profile runtime up -d --build
 
 # Scale workers manually
-docker compose -f docker-compose.runtime.yml --profile workers up -d --scale runtime-worker=4
+docker compose -f docker-compose.infra.yml --profile runtime up -d --scale runtime-worker=4
 
 # Or set via environment variable
-WORKER_REPLICAS=8 docker compose -f docker-compose.runtime.yml --profile workers up -d
+WORKER_REPLICAS=8 docker compose -f docker-compose.infra.yml --profile runtime up -d
+```
+
+#### Consul Profile (Service Discovery)
+
+Adds HashiCorp Consul for service registration and discovery:
+
+- **Consul** (port 28500): Service discovery UI and API
+
+```bash
+docker compose -f docker-compose.infra.yml --profile consul up -d
+```
+
+#### Secrets Profile (Secrets Management)
+
+Adds Infisical for centralized secrets management:
+
+- **Infisical** (port 8880): Secrets management UI and API
+- Requires `INFISICAL_ENCRYPTION_KEY` and `INFISICAL_AUTH_SECRET` in `.env`
+
+```bash
+docker compose -f docker-compose.infra.yml --profile secrets up -d
+```
+
+#### Full Profile (All Services)
+
+Complete stack with infrastructure, runtime, consul, and secrets:
+
+```bash
+docker compose -f docker-compose.infra.yml --profile full up -d --build
 ```
 
 ## Security
@@ -436,10 +461,10 @@ The Dockerfile uses several techniques for efficient builds:
 
 ```bash
 # Standard build (with BuildKit - enabled by default in Docker 23.0+)
-docker compose -f docker-compose.runtime.yml build
+docker compose -f docker-compose.infra.yml build
 
 # Force rebuild without cache
-docker compose -f docker-compose.runtime.yml build --no-cache
+docker compose -f docker-compose.infra.yml build --no-cache
 
 # Build with version labels
 docker build \
@@ -450,7 +475,7 @@ docker build \
   -t omnibase-infra-runtime:$(git describe --tags --always) .
 
 # Build with GitHub token for private repos
-GITHUB_TOKEN=$(cat ~/.github_token) docker compose -f docker-compose.runtime.yml build
+GITHUB_TOKEN=$(cat ~/.github_token) docker compose -f docker-compose.infra.yml build
 ```
 
 ### Resource Configuration
@@ -470,7 +495,7 @@ Default resource limits in docker-compose:
 docker stats
 
 # Override resources via environment (if supported)
-# Or modify docker-compose.runtime.yml deploy section
+# Or modify docker-compose.infra.yml deploy section
 ```
 
 ## Environment Variables
@@ -547,7 +572,7 @@ docker volume inspect omnibase-infra-runtime-logs
 docker run --rm -v omnibase-infra-runtime-logs:/logs alpine ls -la /logs
 
 # Remove all volumes (WARNING: destroys data)
-docker compose -f docker-compose.runtime.yml down -v
+docker compose -f docker-compose.infra.yml down -v
 ```
 
 ### Bind Mounts
@@ -562,16 +587,16 @@ docker compose -f docker-compose.runtime.yml down -v
 
 ```bash
 # Check container status
-docker compose -f docker-compose.runtime.yml ps -a
+docker compose -f docker-compose.infra.yml ps -a
 
 # View startup logs
-docker compose -f docker-compose.runtime.yml logs runtime-main
+docker compose -f docker-compose.infra.yml logs runtime-main
 
 # View last N lines
-docker compose -f docker-compose.runtime.yml logs --tail 50 runtime-main
+docker compose -f docker-compose.infra.yml logs --tail 50 runtime-main
 
 # Follow logs in real-time
-docker compose -f docker-compose.runtime.yml logs -f runtime-main
+docker compose -f docker-compose.infra.yml logs -f runtime-main
 ```
 
 #### Common Startup Issues
@@ -629,16 +654,16 @@ docker inspect --format='{{range .State.Health.Log}}{{.Output}}{{end}}' omnibase
 
 ```bash
 # Rebuild without cache
-docker compose -f docker-compose.runtime.yml build --no-cache
+docker compose -f docker-compose.infra.yml build --no-cache
 
 # Build with verbose output
-docker compose -f docker-compose.runtime.yml build --progress=plain
+docker compose -f docker-compose.infra.yml build --progress=plain
 
 # Check Dockerfile syntax
 docker build --check -f docker/Dockerfile.runtime .
 
 # Build with GitHub token for private repos
-GITHUB_TOKEN=$(cat ~/.github_token) docker compose -f docker-compose.runtime.yml build
+GITHUB_TOKEN=$(cat ~/.github_token) docker compose -f docker-compose.infra.yml build
 ```
 
 #### Common Build Issues
@@ -675,7 +700,7 @@ docker network inspect omnibase-infra-network
 
 ```bash
 # Start with debug logging
-ONEX_LOG_LEVEL=DEBUG docker compose -f docker-compose.runtime.yml up
+ONEX_LOG_LEVEL=DEBUG docker compose -f docker-compose.infra.yml up
 
 # Shell into running container
 docker exec -it omnibase-infra-runtime-main /bin/bash
@@ -781,7 +806,7 @@ build-runtime:
       sleep 5
     done
     echo "Runtime failed to become healthy"
-    docker compose -f docker-compose.runtime.yml logs
+    docker compose -f docker-compose.infra.yml logs
     exit 1
 ```
 
@@ -793,16 +818,16 @@ build-runtime:
 # 1. Make code changes in src/
 
 # 2. Rebuild and restart (picks up code changes)
-docker compose -f docker-compose.runtime.yml up -d --build
+docker compose -f docker-compose.infra.yml up -d --build
 
 # 3. View logs
-docker compose -f docker-compose.runtime.yml logs -f
+docker compose -f docker-compose.infra.yml logs -f
 
 # 4. Test changes
 curl http://localhost:8085/health
 
 # 5. Stop when done
-docker compose -f docker-compose.runtime.yml down
+docker compose -f docker-compose.infra.yml down
 ```
 
 ### Running Tests in Container
@@ -968,11 +993,11 @@ CONSUL_PORT = 8500
 | File                        | Purpose                                            |
 |-----------------------------|----------------------------------------------------|
 | `Dockerfile.runtime`        | Multi-stage Dockerfile for runtime image           |
-| `docker-compose.runtime.yml`| Service orchestration with profiles                |
+| `docker-compose.infra.yml`  | Infrastructure + runtime orchestration with profiles |
 | `docker-compose.e2e.yml`    | E2E testing with infrastructure services           |
 | `.env.example`              | Environment variable template (copy to `.env`)     |
 | `.env.e2e`                  | E2E testing environment template                   |
-| `migrations/`               | PostgreSQL schema files for init                   |
+| `init-scripts/`             | PostgreSQL initialization scripts                  |
 | `README.md`                 | This documentation                                 |
 
 ## Related Documentation
