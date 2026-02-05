@@ -9,7 +9,7 @@ event emission and maintaining clean architectural boundaries.
 
 Design Principles:
     - **Contract-Driven Access Control**: Topics must be declared in contract
-    - **Environment-Aware Routing**: Topic suffixes are prefixed with environment
+    - **Realm-Agnostic Topics**: Topics passed through unchanged (no env prefix)
     - **Fail-Fast Validation**: Invalid topics raise immediately, not at delivery
     - **Duck-Typed Protocol**: Implements publisher protocol without explicit inheritance
 
@@ -95,7 +95,7 @@ class PublisherTopicScoped:
 
     Features:
         - Contract-driven topic access control
-        - Environment-aware topic resolution
+        - Realm-agnostic topics (no environment prefix)
         - Fail-fast validation on disallowed topics
         - JSON serialization for payloads
         - Correlation ID propagation for distributed tracing
@@ -103,7 +103,7 @@ class PublisherTopicScoped:
     Attributes:
         _event_bus: The underlying event bus for publishing
         _allowed_topics: Set of topic suffixes allowed by contract
-        _environment: Environment prefix for topic resolution
+        _environment: Environment identifier (retained for future use)
 
     Example:
         >>> publisher = PublisherTopicScoped(
@@ -132,8 +132,8 @@ class PublisherTopicScoped:
                 Must implement publish(topic, key, value) method. Duck typed per ONEX.
             allowed_topics: Set of topic suffixes from contract's publish_topics.
                 These are the ONLY topics this publisher can publish to.
-            environment: Environment prefix (e.g., 'dev', 'staging', 'prod').
-                Used to construct full topic names.
+            environment: Environment identifier (e.g., 'dev', 'staging', 'prod').
+                Retained for future use; topics are realm-agnostic (no prefix).
 
         Example:
             >>> publisher = PublisherTopicScoped(

@@ -504,10 +504,10 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
             # Use shared validation utility (SINGLE SOURCE OF TRUTH)
             validated_enum = validate_policy_type_value(policy_type)
             return validated_enum.value
-        except ValueError as e:
+        except ValueError as exc:
             # Convert ValueError from shared utility to PolicyRegistryError
             # for consistent error handling in the registry
-            valid_types = {e.value for e in EnumPolicyType}
+            valid_types = {pt.value for pt in EnumPolicyType}
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="normalize_policy_type",
@@ -518,7 +518,7 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
                 policy_id=None,
                 policy_type=str(policy_type),
                 context=context,
-            ) from e
+            ) from exc
 
     @staticmethod
     def _normalize_version(version: str) -> str:

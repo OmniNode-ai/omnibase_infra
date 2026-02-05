@@ -27,7 +27,7 @@ class ModelDiscoveredCapabilities(BaseModel):
         ... )
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, from_attributes=True)
 
     operations: tuple[str, ...] = Field(
         default=(),

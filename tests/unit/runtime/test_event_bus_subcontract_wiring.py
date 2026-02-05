@@ -160,6 +160,129 @@ class TestTopicResolution:
 
 
 # =============================================================================
+# Input Validation Tests
+# =============================================================================
+
+
+class TestInputValidation:
+    """Tests for constructor input validation (fail-fast on empty inputs)."""
+
+    def test_empty_environment_raises_value_error(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+    ) -> None:
+        """Test that empty environment raises ValueError."""
+        with pytest.raises(ValueError, match="environment must be a non-empty string"):
+            EventBusSubcontractWiring(
+                event_bus=mock_event_bus,
+                dispatch_engine=mock_dispatch_engine,
+                environment="",
+                node_name="test-handler",
+                service="test-service",
+                version="v1",
+            )
+
+    def test_whitespace_environment_raises_value_error(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+    ) -> None:
+        """Test that whitespace-only environment raises ValueError."""
+        with pytest.raises(ValueError, match="environment must be a non-empty string"):
+            EventBusSubcontractWiring(
+                event_bus=mock_event_bus,
+                dispatch_engine=mock_dispatch_engine,
+                environment="   ",
+                node_name="test-handler",
+                service="test-service",
+                version="v1",
+            )
+
+    def test_empty_service_raises_value_error(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+    ) -> None:
+        """Test that empty service raises ValueError."""
+        with pytest.raises(ValueError, match="service must be a non-empty string"):
+            EventBusSubcontractWiring(
+                event_bus=mock_event_bus,
+                dispatch_engine=mock_dispatch_engine,
+                environment="dev",
+                node_name="test-handler",
+                service="",
+                version="v1",
+            )
+
+    def test_whitespace_service_raises_value_error(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+    ) -> None:
+        """Test that whitespace-only service raises ValueError."""
+        with pytest.raises(ValueError, match="service must be a non-empty string"):
+            EventBusSubcontractWiring(
+                event_bus=mock_event_bus,
+                dispatch_engine=mock_dispatch_engine,
+                environment="dev",
+                node_name="test-handler",
+                service="\t\n",
+                version="v1",
+            )
+
+    def test_empty_version_raises_value_error(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+    ) -> None:
+        """Test that empty version raises ValueError."""
+        with pytest.raises(ValueError, match="version must be a non-empty string"):
+            EventBusSubcontractWiring(
+                event_bus=mock_event_bus,
+                dispatch_engine=mock_dispatch_engine,
+                environment="dev",
+                node_name="test-handler",
+                service="test-service",
+                version="",
+            )
+
+    def test_whitespace_version_raises_value_error(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+    ) -> None:
+        """Test that whitespace-only version raises ValueError."""
+        with pytest.raises(ValueError, match="version must be a non-empty string"):
+            EventBusSubcontractWiring(
+                event_bus=mock_event_bus,
+                dispatch_engine=mock_dispatch_engine,
+                environment="dev",
+                node_name="test-handler",
+                service="test-service",
+                version="   ",
+            )
+
+    def test_valid_inputs_construct_successfully(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+    ) -> None:
+        """Test that valid inputs construct successfully."""
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="dev",
+            node_name="test-handler",
+            service="test-service",
+            version="v1",
+        )
+        assert wiring._environment == "dev"
+        assert wiring._service == "test-service"
+        assert wiring._version == "v1"
+
+
+# =============================================================================
 # Wire Subscriptions Tests
 # =============================================================================
 
@@ -216,6 +339,60 @@ class TestWireSubscriptions:
             assert (
                 identity.service == "test-service"
             )  # From wiring fixture's service param
+
+    @pytest.mark.asyncio
+    async def test_wire_subscriptions_uses_compute_consumer_group_id_helper(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+        sample_subcontract: ModelEventBusSubcontract,
+    ) -> None:
+        """Test wiring uses compute_consumer_group_id for consistent consumer group derivation.
+
+        The consumer_group passed to _create_dispatch_callback should match
+        the format produced by compute_consumer_group_id(), ensuring consistency
+        across the codebase.
+        """
+        from omnibase_infra.enums import EnumConsumerGroupPurpose
+        from omnibase_infra.models import ModelNodeIdentity
+        from omnibase_infra.utils import compute_consumer_group_id
+
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="prod",
+            node_name="test-handler",
+            service="omniintelligence",
+            version="v2.0.0",
+        )
+
+        # Mock _create_dispatch_callback to capture consumer_group argument
+        original_create_callback = wiring._create_dispatch_callback
+        captured_consumer_groups: list[str] = []
+
+        def capture_callback(topic: str, consumer_group: str):
+            captured_consumer_groups.append(consumer_group)
+            return original_create_callback(topic, consumer_group)
+
+        wiring._create_dispatch_callback = capture_callback  # type: ignore[method-assign]
+
+        await wiring.wire_subscriptions(sample_subcontract, node_name="my-handler")
+
+        # Build expected consumer group using the helper
+        expected_identity = ModelNodeIdentity(
+            env="prod",
+            service="omniintelligence",
+            node_name="my-handler",
+            version="v2.0.0",
+        )
+        expected_consumer_group = compute_consumer_group_id(
+            expected_identity, EnumConsumerGroupPurpose.CONSUME
+        )
+
+        # Verify all captured consumer groups match expected format
+        assert len(captured_consumer_groups) == 2  # 2 topics in sample_subcontract
+        for consumer_group in captured_consumer_groups:
+            assert consumer_group == expected_consumer_group
 
     @pytest.mark.asyncio
     async def test_wire_subscriptions_stores_unsubscribe_callables(

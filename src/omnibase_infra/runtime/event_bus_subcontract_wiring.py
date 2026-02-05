@@ -9,7 +9,7 @@ all Kafka plumbing - nodes/handlers never create consumers or producers directly
 Architecture:
     The EventBusSubcontractWiring class is responsible for:
     1. Reading `subscribe_topics` from ModelEventBusSubcontract
-    2. Resolving topic suffixes to full topic names with environment prefix
+    2. Passing topic suffixes through unchanged (topics are realm-agnostic)
     3. Creating Kafka subscriptions with appropriate consumer groups
     4. Bridging received messages to the MessageDispatchEngine
     5. Managing subscription lifecycle (creation and cleanup)
@@ -98,7 +98,7 @@ from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
 from omnibase_core.protocols.event_bus.protocol_event_message import (
     ProtocolEventMessage,
 )
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
 from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
@@ -112,6 +112,7 @@ from omnibase_infra.models.event_bus import (
     ModelOffsetPolicyConfig,
 )
 from omnibase_infra.protocols import ProtocolDispatchEngine, ProtocolIdempotencyStore
+from omnibase_infra.utils import compute_consumer_group_id
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
@@ -130,7 +131,7 @@ class EventBusSubcontractWiring:
 
     Responsibilities:
         - Parse subscribe_topics from ModelEventBusSubcontract
-        - Resolve topic suffixes to full topic names with environment prefix
+        - Pass topic suffixes through unchanged (topics are realm-agnostic)
         - Create Kafka subscriptions with appropriate consumer groups
         - Deserialize incoming messages to ModelEventEnvelope
         - Check idempotency and skip duplicate messages (if enabled)
@@ -200,7 +201,7 @@ class EventBusSubcontractWiring:
     Attributes:
         _event_bus: The event bus implementation (Kafka or in-memory)
         _dispatch_engine: Engine to dispatch received messages to handlers
-        _environment: Environment prefix for topics (e.g., 'dev', 'prod')
+        _environment: Environment identifier for consumer groups (e.g., 'dev', 'prod')
         _node_name: Name of the node/handler for consumer group and logging
         _idempotency_store: Optional store for tracking processed messages
         _idempotency_config: Configuration for idempotency behavior
@@ -240,8 +241,9 @@ class EventBusSubcontractWiring:
             dispatch_engine: Engine to dispatch received messages to handlers.
                 Must implement ProtocolDispatchEngine interface.
                 Must be frozen (registrations complete) before wiring subscriptions.
-            environment: Environment prefix for topics (e.g., 'dev', 'prod').
-                Used to resolve topic suffixes to full topic names.
+            environment: Environment identifier (e.g., 'dev', 'prod').
+                Used for consumer group naming and node identity. Topics are
+                realm-agnostic and do not include environment prefixes.
             node_name: Name of the node/handler for consumer group identification and logging.
             service: Service name for node identity (e.g., 'omniintelligence', 'omnibridge').
                 Used to derive consumer group ID.
@@ -266,10 +268,14 @@ class EventBusSubcontractWiring:
             Attempting to dispatch to an unfrozen engine will raise an error.
 
         Raises:
-            ValueError: If environment is empty or whitespace-only.
+            ValueError: If environment, service, or version is empty or whitespace-only.
         """
         if not environment or not environment.strip():
             raise ValueError("environment must be a non-empty string")
+        if not service or not service.strip():
+            raise ValueError("service must be a non-empty string")
+        if not version or not version.strip():
+            raise ValueError("version must be a non-empty string")
 
         self._event_bus = event_bus
         self._dispatch_engine = dispatch_engine
@@ -381,8 +387,10 @@ class EventBusSubcontractWiring:
             )
 
             # Consumer group for logging and DLQ traceability
-            # Matches the pattern derived by the event bus
-            consumer_group = f"{self._environment}.{self._service}.{node_name}.consume.{self._version}"
+            # Use shared helper for consistent derivation across codebase
+            consumer_group = compute_consumer_group_id(
+                node_identity, EnumConsumerGroupPurpose.CONSUME
+            )
 
             # Create dispatch callback for this topic, capturing the consumer_group
             # used for this subscription to ensure DLQ messages have consistent

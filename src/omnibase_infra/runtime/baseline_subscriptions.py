@@ -117,8 +117,9 @@ def get_baseline_topics(*, include_heartbeat: bool = True) -> frozenset[str]:
             registration/deregistration topics.
 
     Returns:
-        A frozenset of topic suffix strings. These are suffixes that should
-        be prefixed with the environment name to form complete topic names.
+        A frozenset of topic suffix strings. Topics are realm-agnostic in ONEX;
+        subscribe directly to these suffixes without environment prefix.
+        The environment/realm is enforced via envelope identity, not topic naming.
 
     Example:
         >>> # For full platform observability

@@ -58,7 +58,7 @@ class ModelContractPublisherConfig(BaseModel):
         package_module: Module name for package resource discovery
         fail_fast: If True, raise immediately on infrastructure errors
         allow_zero_contracts: If True, allow empty publish results
-        environment: Environment prefix for topics (defaults via resolve_environment)
+        environment: Environment identifier (used for consumer groups, not topic naming)
 
     Example:
         >>> config = ModelContractPublisherConfig(
@@ -67,8 +67,8 @@ class ModelContractPublisherConfig(BaseModel):
         ...     fail_fast=True,
         ...     allow_zero_contracts=False,
         ... )
-        >>> env = config.resolve_environment()
-        >>> print(f"Publishing to {env}.onex.evt.contract-registered.v1")
+        >>> # Topics are realm-agnostic (no environment prefix)
+        >>> print("Publishing to onex.evt.contract-registered.v1")
 
     .. versionadded:: 0.3.0
     """
@@ -96,7 +96,7 @@ class ModelContractPublisherConfig(BaseModel):
     )
     environment: str | None = Field(
         default=None,
-        description="Environment prefix for topics (resolved via resolve_environment)",
+        description="Environment identifier for consumer groups (resolved via resolve_environment)",
     )
 
     @model_validator(mode="after")

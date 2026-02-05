@@ -145,19 +145,23 @@ class ModelIntrospectionConfig(BaseModel):
 
     node_name: str = Field(  # pattern-ok: canonical identifier, not a foreign key reference
         ...,
-        description="Node name for consumer group identification (e.g., 'claude_hook_effect').",
+        min_length=1,
+        description="Node name for consumer group identification (e.g., 'claude_hook_effect'). "
+        "Cannot be empty.",
     )
 
     env: str = Field(
         default="dev",
+        min_length=1,
         description="Environment identifier (e.g., 'dev', 'staging', 'prod'). "
-        "Used for node identity in event bus subscriptions.",
+        "Used for node identity in event bus subscriptions. Cannot be empty.",
     )
 
     service: str = Field(
         default="onex",
+        min_length=1,
         description="Service name (e.g., 'omniintelligence', 'omnibridge'). "
-        "Used for node identity in event bus subscriptions.",
+        "Used for node identity in event bus subscriptions. Cannot be empty.",
     )
 
     # Event bus for publishing introspection events.
@@ -174,7 +178,8 @@ class ModelIntrospectionConfig(BaseModel):
 
     version: str = Field(
         default="1.0.0",
-        description="Node version string",
+        min_length=1,
+        description="Node version string. Cannot be empty.",
     )
 
     cache_ttl: float = Field(
@@ -303,6 +308,7 @@ class ModelIntrospectionConfig(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        from_attributes=True,  # ORM/pytest-xdist compatibility
         arbitrary_types_allowed=True,  # Allow arbitrary types for event_bus
         json_schema_extra={
             "examples": [

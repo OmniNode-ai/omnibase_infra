@@ -209,7 +209,6 @@ from typing import TYPE_CHECKING, ClassVar, TypedDict, cast
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumNodeKind
-from omnibase_core.models.envelope.model_emitter_identity import ModelEmitterIdentity
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.capabilities import ContractCapabilityExtractor
@@ -2098,7 +2097,7 @@ class MixinNodeIntrospection:
             return False
 
         request_topic = self._request_introspection_topic
-        node_identity = ModelEmitterIdentity(
+        node_identity = ModelNodeIdentity(
             env=self._introspection_env,
             service=self._introspection_service,
             node_name=self._introspection_node_name,

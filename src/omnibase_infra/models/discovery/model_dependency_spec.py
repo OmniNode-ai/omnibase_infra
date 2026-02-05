@@ -89,6 +89,7 @@ class ModelDependencySpec(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        from_attributes=True,  # ORM/pytest-xdist compatibility
     )
 
     # Identity
