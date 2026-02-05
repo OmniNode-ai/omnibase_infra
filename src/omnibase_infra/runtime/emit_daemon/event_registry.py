@@ -250,13 +250,13 @@ class EventRegistry:
                 event_type="notification.blocked",
                 topic_template="onex.evt.omniclaude.notification-blocked.v1",
                 partition_key_field="session_id",
-                required_fields=["ticket_id", "reason", "repo", "session_id"],
+                required_fields=["ticket_identifier", "reason", "repo", "session_id"],
             ),
             ModelEventRegistration(
                 event_type="notification.completed",
                 topic_template="onex.evt.omniclaude.notification-completed.v1",
                 partition_key_field="session_id",
-                required_fields=["ticket_id", "summary", "repo", "session_id"],
+                required_fields=["ticket_identifier", "summary", "repo", "session_id"],
             ),
         ]
         for registration in defaults:

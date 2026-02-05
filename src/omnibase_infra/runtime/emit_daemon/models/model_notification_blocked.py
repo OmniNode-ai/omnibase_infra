@@ -57,7 +57,7 @@ class ModelNotificationBlocked(BaseModel):
         ... )
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     ticket_identifier: str = Field(
         ...,

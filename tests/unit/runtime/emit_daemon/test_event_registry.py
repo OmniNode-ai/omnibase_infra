@@ -742,11 +742,11 @@ class TestEventRegistryDefaultRegistrationDetails:
         assert reg.partition_key_field == "session_id"
 
     def test_notification_blocked_required_fields(self) -> None:
-        """notification.blocked should require ticket_id, reason, repo, session_id."""
+        """notification.blocked should require ticket_identifier, reason, repo, session_id."""
         registry = EventRegistry()
         reg = registry.get_registration("notification.blocked")
         assert reg is not None
-        assert "ticket_id" in reg.required_fields
+        assert "ticket_identifier" in reg.required_fields
         assert "reason" in reg.required_fields
         assert "repo" in reg.required_fields
         assert "session_id" in reg.required_fields
@@ -765,11 +765,11 @@ class TestEventRegistryDefaultRegistrationDetails:
         assert topic == "onex.evt.omniclaude.notification-blocked.v1"
 
     def test_notification_completed_required_fields(self) -> None:
-        """notification.completed should require ticket_id, summary, repo, session_id."""
+        """notification.completed should require ticket_identifier, summary, repo, session_id."""
         registry = EventRegistry()
         reg = registry.get_registration("notification.completed")
         assert reg is not None
-        assert "ticket_id" in reg.required_fields
+        assert "ticket_identifier" in reg.required_fields
         assert "summary" in reg.required_fields
         assert "repo" in reg.required_fields
         assert "session_id" in reg.required_fields
