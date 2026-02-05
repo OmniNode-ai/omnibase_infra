@@ -33,7 +33,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
-from omnibase_infra.protocols.protocol_ledger_sink import EnumLedgerSinkDropPolicy
+from omnibase_infra.enums import EnumLedgerSinkDropPolicy
 from omnibase_infra.sinks.sink_ledger_inmemory import (
     LedgerSinkClosedError,
     LedgerSinkError,
@@ -164,7 +164,11 @@ class FileSpoolLedgerSink:
 
             self._buffer.append(event)
 
-            # Start background flush task if not running (inside lock to prevent race)
+            # Start background flush task if not running.
+            # Race safety: This check-and-create is protected by self._lock, which is
+            # held for the entire emit() operation. The lock prevents concurrent emit()
+            # calls from creating duplicate tasks. The background task also acquires
+            # the lock before checking _closed, ensuring clean shutdown coordination.
             if self._flush_task is None or self._flush_task.done():
                 self._flush_task = asyncio.create_task(self._background_flush_loop())
 
@@ -218,9 +222,10 @@ class FileSpoolLedgerSink:
                 self._current_file_size += len(line_bytes)
                 flushed += 1
 
-            # Ensure data is written to OS buffer
+            # Ensure data is durably written to disk (not just OS buffer)
             if self._file_handle is not None:
                 self._file_handle.flush()
+                os.fsync(self._file_handle.fileno())
 
             # Phase 3: Only clear buffer after successful write
             # Remove exactly the events we flushed (not any new ones added during flush)

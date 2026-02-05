@@ -357,10 +357,12 @@ class PostgresRepositoryRuntime:
             >>> users = await runtime.call("find_by_status", "active")
         """
         start_time = time.monotonic()
-        context = self._create_error_context(op_name)
 
-        # Generate or use provided correlation_id
+        # Generate or use provided correlation_id (must be before context creation)
         corr_id = correlation_id or uuid4()
+
+        # Create error context with correlation_id for distributed tracing
+        context = self._create_error_context(op_name, correlation_id=corr_id)
 
         # Lookup operation in contract
         operation = self._get_operation(op_name, context)
@@ -484,9 +486,21 @@ class PostgresRepositoryRuntime:
 
         return result
 
-    def _create_error_context(self, op_name: str) -> ModelInfraErrorContext:
-        """Create error context for infrastructure errors."""
+    def _create_error_context(
+        self, op_name: str, correlation_id: UUID | None = None
+    ) -> ModelInfraErrorContext:
+        """Create error context for infrastructure errors.
+
+        Args:
+            op_name: Operation name for context.
+            correlation_id: Optional correlation ID for distributed tracing.
+                If provided, uses this ID. If None, auto-generates one.
+
+        Returns:
+            Error context with correlation ID for tracing.
+        """
         return ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
             transport_type=EnumInfraTransportType.DATABASE,
             operation=f"repository.{op_name}",
             target_name=self._contract.name,

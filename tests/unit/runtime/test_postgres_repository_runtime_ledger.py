@@ -75,6 +75,7 @@ def ledger_sink() -> InMemoryLedgerSink:
     return InMemoryLedgerSink()
 
 
+@pytest.mark.unit
 class TestPostgresRepositoryRuntimeLedger:
     """Tests for PostgresRepositoryRuntime ledger emission."""
 
@@ -372,6 +373,7 @@ class TestPostgresRepositoryRuntimeLedger:
         assert failed.duration_ms >= 0
 
 
+@pytest.mark.unit
 class TestRetriableErrorClassification:
     """Tests for _is_retriable_error() error classification."""
 

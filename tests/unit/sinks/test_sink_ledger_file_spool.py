@@ -38,6 +38,7 @@ def _make_test_event(op_name: str = "test_op") -> ModelDbQueryRequested:
     )
 
 
+@pytest.mark.unit
 class TestFileSpoolLedgerSink:
     """Tests for FileSpoolLedgerSink."""
 

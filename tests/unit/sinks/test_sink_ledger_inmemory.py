@@ -35,6 +35,7 @@ def _make_test_event(op_name: str = "test_op") -> ModelDbQueryRequested:
     )
 
 
+@pytest.mark.unit
 class TestInMemoryLedgerSink:
     """Tests for InMemoryLedgerSink."""
 
@@ -171,6 +172,7 @@ class TestInMemoryLedgerSink:
             await sink.emit(_make_test_event("op_1"))
 
 
+@pytest.mark.unit
 class TestIdempotencyKey:
     """Tests for idempotency key generation."""
 

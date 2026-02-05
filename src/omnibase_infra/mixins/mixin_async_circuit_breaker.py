@@ -433,7 +433,7 @@ class MixinAsyncCircuitBreaker:
                 raise InfraUnavailableError(
                     f"Circuit breaker is open - {self.service_name} temporarily unavailable",
                     context=context,
-                    circuit_state="open",
+                    circuit_state=EnumCircuitState.OPEN.value,
                     retry_after_seconds=retry_after,
                 )
 
@@ -644,9 +644,13 @@ class MixinAsyncCircuitBreaker:
 
         # Log state transition if circuit was open or had failures
         if self._circuit_breaker_open or self._circuit_breaker_failures > 0:
-            previous_state = "open" if self._circuit_breaker_open else "closed"
+            previous_state = (
+                EnumCircuitState.OPEN.value
+                if self._circuit_breaker_open
+                else EnumCircuitState.CLOSED.value
+            )
             logger.info(
-                f"Circuit breaker reset from {previous_state} to closed for {self.service_name}",
+                f"Circuit breaker reset from {previous_state} to {EnumCircuitState.CLOSED.value} for {self.service_name}",
                 extra={
                     "service": self.service_name,
                     "previous_state": previous_state,
@@ -715,16 +719,16 @@ class MixinAsyncCircuitBreaker:
         current_time = time.time()
         if cb_open:
             if current_time >= cb_open_until:
-                cb_state = "half_open"
+                cb_state = EnumCircuitState.HALF_OPEN.value
                 seconds_until_half_open: float | None = None
             else:
-                cb_state = "open"
+                cb_state = EnumCircuitState.OPEN.value
                 seconds_until_half_open = round(cb_open_until - current_time, 2)
         elif cb_half_open:
-            cb_state = "half_open"
+            cb_state = EnumCircuitState.HALF_OPEN.value
             seconds_until_half_open = None
         else:
-            cb_state = "closed"
+            cb_state = EnumCircuitState.CLOSED.value
             seconds_until_half_open = None
 
         result: dict[str, JsonType] = {
@@ -739,7 +743,7 @@ class MixinAsyncCircuitBreaker:
         if seconds_until_half_open is not None:
             result["seconds_until_half_open"] = seconds_until_half_open
 
-        if cb_state == "half_open":
+        if cb_state == EnumCircuitState.HALF_OPEN.value:
             result["half_open_success_count"] = cb_half_open_success_count
 
         return result
