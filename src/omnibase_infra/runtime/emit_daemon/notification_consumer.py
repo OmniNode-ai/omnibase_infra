@@ -131,10 +131,19 @@ class NotificationConsumer:
 
         Raises:
             TypeError: If the event bus does not implement consume() method.
+                This is checked immediately on start, before any async work begins.
         """
         if self._running:
             logger.warning("NotificationConsumer already running")
             return
+
+        # Fail fast: verify event bus supports consume() before starting
+        if not hasattr(self._event_bus, "consume"):
+            raise TypeError(
+                f"Event bus {type(self._event_bus).__name__} does not implement "
+                f"consume() method. NotificationConsumer requires an event bus "
+                f"with consume() support (e.g., EventBusKafka)."
+            )
 
         self._running = True
         self._shutdown_event.clear()
@@ -208,35 +217,32 @@ class NotificationConsumer:
             # Subscribe to the topic
             # NOTE: The actual subscription mechanism depends on the event bus
             # implementation. This is a simplified version that polls for messages.
+            # NOTE: consume() support is verified in start() via fail-fast check.
             while self._running:
                 try:
-                    # NOTE: ProtocolEventBusLike may not have a consume method.
-                    # For now, we use a simplified approach where we check if
-                    # the event bus supports consuming.
-                    if hasattr(self._event_bus, "consume"):
-                        async for message in self._event_bus.consume(topic):  # type: ignore[union-attr]
-                            if not self._running:
-                                break
-                            try:
-                                await self._process_message(message, handler)  # type: ignore[arg-type]
-                            except Exception as e:
-                                logger.warning(
-                                    f"Error processing message from {topic}: {e}",
-                                    exc_info=True,
-                                )
-                    else:
-                        # Event bus doesn't support consume - fail fast
-                        raise TypeError(
-                            f"Event bus {type(self._event_bus).__name__} does not "
-                            f"implement consume() method. NotificationConsumer requires "
-                            f"an event bus with consume() support (e.g., EventBusKafka)."
-                        )
+                    async for message in self._event_bus.consume(topic):  # type: ignore[attr-defined]
+                        if not self._running:
+                            break
+                        try:
+                            await self._process_message(message, handler)  # type: ignore[arg-type]
+                        except Exception as e:
+                            # Generate correlation_id for traceability (message may not
+                            # have been parsed successfully to extract its correlation_id)
+                            error_correlation_id = uuid4()
+                            logger.warning(
+                                f"Error processing message from {topic}: {e}",
+                                extra={"correlation_id": str(error_correlation_id)},
+                                exc_info=True,
+                            )
 
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
+                    # Generate correlation_id for consumer-level errors
+                    error_correlation_id = uuid4()
                     logger.warning(
                         f"Consumer error for topic {topic}: {e}",
+                        extra={"correlation_id": str(error_correlation_id)},
                         exc_info=True,
                     )
                     # Brief pause before retrying
