@@ -13,7 +13,7 @@ Test Coverage:
 Related:
     - OMN-1930: Phase 1 - Fix Auto-Introspection (P0)
     - src/omnibase_infra/runtime/service_runtime_host_process.py
-    - src/omnibase_infra/protocols/protocol_introspection_service.py
+    - src/omnibase_infra/protocols/protocol_node_introspection.py
     - src/omnibase_infra/models/runtime/model_runtime_introspection_config.py
 """
 

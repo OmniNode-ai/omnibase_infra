@@ -1410,6 +1410,18 @@ class RuntimeHostProcess:
                 },
             )
 
+        # Step 2.4.5: Stop heartbeat task if introspection was started (OMN-1930)
+        # Must be called before closing event bus to avoid publish attempts on closed bus.
+        if self._introspection_service is not None:
+            try:
+                await self._introspection_service.stop_heartbeat_task()
+                logger.debug("Introspection heartbeat task stopped")
+            except Exception as e:
+                logger.warning(
+                    "Failed to stop heartbeat task",
+                    extra={"error": str(e)},
+                )
+
         # Step 2.5: Cleanup idempotency store if initialized (OMN-945)
         await self._cleanup_idempotency_store()
 
