@@ -112,20 +112,74 @@ class TestEventRegistryDefaultRegistrations:
         topic = registry.resolve_topic("tool.executed")
         assert topic == "onex.evt.omniclaude.tool-executed.v1"
 
+    def test_routing_decision_default(self) -> None:
+        """Should register routing.decision with correct topic template."""
+        registry = EventRegistry(environment="dev")
+        topic = registry.resolve_topic("routing.decision")
+        assert topic == "agent-routing-decisions"
+
+    def test_session_outcome_default(self) -> None:
+        """Should register session.outcome with correct topic template."""
+        registry = EventRegistry(environment="dev")
+        topic = registry.resolve_topic("session.outcome")
+        assert topic == "onex.evt.omniclaude.session-outcome.v1"
+
+    def test_injection_recorded_default(self) -> None:
+        """Should register injection.recorded with correct topic template."""
+        registry = EventRegistry(environment="dev")
+        topic = registry.resolve_topic("injection.recorded")
+        assert topic == "onex.evt.omniclaude.injection-recorded.v1"
+
+    def test_context_utilization_default(self) -> None:
+        """Should register context.utilization with correct topic template."""
+        registry = EventRegistry(environment="dev")
+        topic = registry.resolve_topic("context.utilization")
+        assert topic == "onex.evt.omniclaude.context-utilization.v1"
+
+    def test_agent_match_default(self) -> None:
+        """Should register agent.match with correct topic template."""
+        registry = EventRegistry(environment="dev")
+        topic = registry.resolve_topic("agent.match")
+        assert topic == "onex.evt.omniclaude.agent-match.v1"
+
+    def test_latency_breakdown_default(self) -> None:
+        """Should register latency.breakdown with correct topic template."""
+        registry = EventRegistry(environment="dev")
+        topic = registry.resolve_topic("latency.breakdown")
+        assert topic == "onex.evt.omniclaude.latency-breakdown.v1"
+
+    def test_notification_blocked_default(self) -> None:
+        """Should register notification.blocked with correct topic template."""
+        registry = EventRegistry(environment="dev")
+        topic = registry.resolve_topic("notification.blocked")
+        assert topic == "onex.evt.omniclaude.notification-blocked.v1"
+
+    def test_notification_completed_default(self) -> None:
+        """Should register notification.completed with correct topic template."""
+        registry = EventRegistry(environment="dev")
+        topic = registry.resolve_topic("notification.completed")
+        assert topic == "onex.evt.omniclaude.notification-completed.v1"
+
     def test_all_defaults_registered(self) -> None:
         """Should register all default event types."""
         registry = EventRegistry()
         event_types = registry.list_event_types()
         expected = [
+            # Core session events
             "prompt.submitted",
             "session.started",
             "session.ended",
             "session.outcome",
             "tool.executed",
+            # Routing observability (PR #92)
+            "routing.decision",
+            # Injection tracking (OMN-1673)
             "injection.recorded",
+            # Observability metrics (OMN-1889)
             "context.utilization",
             "agent.match",
             "latency.breakdown",
+            # Slack notifications (OMN-1831)
             "notification.blocked",
             "notification.completed",
         ]
@@ -750,6 +804,25 @@ class TestEventRegistryDefaultRegistrationDetails:
         reg = registry.get_registration("tool.executed")
         assert reg is not None
         assert reg.partition_key_field == "session_id"
+
+    # Routing decision tests (PR #92)
+
+    def test_routing_decision_partition_key(self) -> None:
+        """routing.decision should use correlation_id as partition key."""
+        registry = EventRegistry()
+        reg = registry.get_registration("routing.decision")
+        assert reg is not None
+        assert reg.partition_key_field == "correlation_id"
+
+    def test_routing_decision_required_fields(self) -> None:
+        """routing.decision should require correlation_id and selected_agent."""
+        registry = EventRegistry()
+        reg = registry.get_registration("routing.decision")
+        assert reg is not None
+        assert "correlation_id" in reg.required_fields
+        assert "selected_agent" in reg.required_fields
+
+    # Notification tests (OMN-1831)
 
     def test_notification_blocked_required_fields(self) -> None:
         """notification.blocked should require ticket_identifier, reason, repo, session_id."""

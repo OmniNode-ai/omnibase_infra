@@ -182,14 +182,16 @@ class EventRegistry:
         - session.ended: Session termination events
         - session.outcome: Session outcome events
         - tool.executed: Tool execution events
-        - injection.recorded: Manifest injection events
-        - context.utilization: Context window utilization events
-        - agent.match: Agent routing match events
-        - latency.breakdown: Latency breakdown events
-        - notification.blocked: Agent blocked waiting for human input
-        - notification.completed: Ticket work completion events
+        - routing.decision: Agent routing decision events (PR #92)
+        - injection.recorded: Manifest injection events (OMN-1673)
+        - context.utilization: Context window utilization events (OMN-1889)
+        - agent.match: Agent routing match events (OMN-1889)
+        - latency.breakdown: Latency breakdown events (OMN-1889)
+        - notification.blocked: Agent blocked waiting for human input (OMN-1831)
+        - notification.completed: Ticket work completion events (OMN-1831)
         """
         defaults = [
+            # Core session events
             ModelEventRegistration(
                 event_type="prompt.submitted",
                 topic_template="onex.evt.omniclaude.prompt-submitted.v1",
@@ -220,12 +222,21 @@ class EventRegistry:
                 partition_key_field="session_id",
                 required_fields=["tool_name"],
             ),
+            # Routing observability (omniclaude3 PR #92)
+            ModelEventRegistration(
+                event_type="routing.decision",
+                topic_template="agent-routing-decisions",
+                partition_key_field="correlation_id",
+                required_fields=["correlation_id", "selected_agent"],
+            ),
+            # Injection tracking (OMN-1673)
             ModelEventRegistration(
                 event_type="injection.recorded",
                 topic_template="onex.evt.omniclaude.injection-recorded.v1",
                 partition_key_field="session_id",
                 required_fields=["session_id"],
             ),
+            # Observability metrics (OMN-1889)
             ModelEventRegistration(
                 event_type="context.utilization",
                 topic_template="onex.evt.omniclaude.context-utilization.v1",
