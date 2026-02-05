@@ -185,7 +185,7 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
     # Python path for module resolution
     PYTHONPATH=/app/src \
-    # Runtime profile selection (all | minimal | kafka | consul | vault)
+    # Runtime profile selection (all | minimal | kafka | consul | secrets)
     RUNTIME_PROFILE=all \
     # Contract configuration directory
     ONEX_CONTRACTS_DIR=/app/contracts \

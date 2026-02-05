@@ -18,9 +18,9 @@ import re
 
 import pytest
 
-# Import shared constant from conftest for backward compatibility.
-# New tests should prefer using the docker_dir fixture instead.
-from tests.unit.docker.conftest import DOCKER_DIR
+# Import shared constants from conftest for backward compatibility.
+# New tests should prefer using the docker_dir or compose_file_path fixtures instead.
+from tests.unit.docker.conftest import COMPOSE_FILE_PATH, DOCKER_DIR
 
 
 class TestEnvExampleSecurity:
@@ -119,7 +119,6 @@ class TestEnvExampleSecurity:
         # Find password-related variables
         password_vars = [
             "POSTGRES_PASSWORD",
-            "VAULT_TOKEN",
             "REDIS_PASSWORD",
         ]
 
@@ -320,9 +319,8 @@ class TestDockerComposeSecurity:
     """
 
     def test_file_exists(self) -> None:
-        """Verify docker-compose.runtime.yml exists."""
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
-        assert compose_file.exists(), "Missing docker-compose.runtime.yml"
+        """Verify docker-compose.infra.yml exists."""
+        assert COMPOSE_FILE_PATH.exists(), "Missing docker-compose.infra.yml"
 
     def test_postgres_password_requires_explicit_value(self) -> None:
         """Verify POSTGRES_PASSWORD requires explicit value without default.
@@ -330,7 +328,7 @@ class TestDockerComposeSecurity:
         The compose file should use ${POSTGRES_PASSWORD} without a default
         value (:-default syntax), forcing users to set it explicitly.
         """
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Should have POSTGRES_PASSWORD
@@ -346,45 +344,35 @@ class TestDockerComposeSecurity:
             "POSTGRES_PASSWORD should NOT have default value (security risk)"
         )
 
-    def test_vault_token_requires_explicit_value(self) -> None:
-        """Verify VAULT_TOKEN requires explicit value without default.
+    def test_valkey_password_configuration(self) -> None:
+        """Verify Valkey password (REDIS_PASSWORD env var) is properly configured.
 
-        The compose file should use ${VAULT_TOKEN} without a default value,
-        forcing users to set it explicitly.
+        For local development, Valkey runs WITHOUT authentication (no --requirepass),
+        accessible only within the Docker network. The REDIS_PASSWORD env var is
+        provided for runtime services to use when connecting, with an empty default
+        since the server doesn't require auth.
+
+        Note: The env var name REDIS_PASSWORD is retained for backwards compatibility
+        with existing Redis client libraries and infrastructure.
+
+        Security rationale:
+        - Valkey is only accessible within omnibase-infra-network (not exposed to host)
+        - Local development does not require auth complexity
+        - Production deployments should override via environment variables
         """
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
-        # Should have VAULT_TOKEN
-        assert "VAULT_TOKEN" in content, "Missing VAULT_TOKEN configuration"
-
-        # Should use ${VAULT_TOKEN} pattern (explicit, no default)
-        assert "${VAULT_TOKEN}" in content, "VAULT_TOKEN should use ${VAR} syntax"
-
-        # Should NOT have default value pattern
-        assert "VAULT_TOKEN:-" not in content, (
-            "VAULT_TOKEN should NOT have default value (security risk)"
-        )
-
-    def test_valkey_password_requires_explicit_value(self) -> None:
-        """Verify Valkey password (REDIS_PASSWORD env var) requires explicit value without default.
-
-        The compose file should use ${REDIS_PASSWORD} without a default value,
-        forcing users to set it explicitly. Note: The env var name REDIS_PASSWORD
-        is retained for backwards compatibility with existing infrastructure.
-        """
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
-        content = compose_file.read_text()
-
-        # Should have REDIS_PASSWORD (env var name retained for compatibility)
+        # Should have REDIS_PASSWORD configuration for client applications
         assert "REDIS_PASSWORD" in content, "Missing REDIS_PASSWORD configuration"
 
-        # Should use ${REDIS_PASSWORD} pattern (explicit, no default)
-        assert "${REDIS_PASSWORD}" in content, "REDIS_PASSWORD should use ${VAR} syntax"
+        # Should use ${REDIS_PASSWORD} pattern with environment variable substitution
+        assert "${REDIS_PASSWORD" in content, "REDIS_PASSWORD should use ${VAR} syntax"
 
-        # Should NOT have default value pattern
-        assert "REDIS_PASSWORD:-" not in content, (
-            "REDIS_PASSWORD should NOT have default value (security risk)"
+        # Verify Valkey service exists and uses secure network isolation
+        assert "valkey:" in content, "Missing Valkey service definition"
+        assert "omnibase-infra-network" in content, (
+            "Valkey should be isolated to internal network"
         )
 
     def test_no_hardcoded_credentials(self) -> None:
@@ -393,7 +381,7 @@ class TestDockerComposeSecurity:
         All sensitive values should be parameterized through environment
         variables, not hardcoded in the compose file.
         """
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Should not have literal password assignments
@@ -413,7 +401,7 @@ class TestDockerComposeSecurity:
 
         Docker Compose should define secrets for build-time credential handling.
         """
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Should have secrets section
@@ -428,7 +416,7 @@ class TestDockerComposeSecurity:
         The compose file should document security requirements for passwords
         and tokens, explaining why they require explicit values.
         """
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Should have security-related comments
@@ -447,7 +435,7 @@ class TestDockerComposeSecurity:
         Only necessary ports should be exposed, and they should be
         configurable through environment variables.
         """
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Find all port mappings
@@ -471,7 +459,7 @@ class TestDockerComposeSecurity:
         Services should have resource limits to prevent resource exhaustion
         attacks and ensure stable operation.
         """
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Should have deploy resource limits
@@ -485,11 +473,13 @@ class TestDockerComposeSecurity:
         Services should use 'unless-stopped' or 'on-failure' restart policies,
         not 'always', to prevent resource exhaustion from failing containers.
         """
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Find all restart directives
-        restart_pattern = r"restart:\s*(\S+)"
+        # Note: The pattern handles both quoted and unquoted values because YAML
+        # requires "no" to be quoted (otherwise it's interpreted as boolean false)
+        restart_pattern = r'restart:\s*["\']?([^"\'\s]+)["\']?'
         restart_policies = re.findall(restart_pattern, content)
 
         # Should use safe restart policies
@@ -532,7 +522,7 @@ class TestDockerSecretsManagement:
 
         The compose file should map environment variables to build secrets.
         """
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Should have build secrets configuration
@@ -549,7 +539,7 @@ class TestDockerSecretsManagement:
         Build args are baked into image metadata and should not contain secrets.
         Check that GITHUB_TOKEN is not passed as a build arg.
         """
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Should NOT have GITHUB_TOKEN as build arg
@@ -576,7 +566,7 @@ class TestDockerNetworkSecurity:
 
         Services should use isolated networks rather than the default bridge.
         """
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Should have networks section
@@ -585,26 +575,51 @@ class TestDockerNetworkSecurity:
         # Should define custom network
         assert "omnibase-infra-network" in content, "Missing custom network definition"
 
-    def test_external_hosts_properly_configured(self) -> None:
-        """Verify extra_hosts configuration uses environment variables.
+    def test_self_contained_infrastructure(self) -> None:
+        """Verify infrastructure compose is self-contained without external host dependencies.
 
-        External host mappings should be configurable and not hardcoded.
+        The consolidated docker-compose.infra.yml provides all services locally,
+        using internal Docker service names for communication. This is more secure
+        than depending on external hosts because:
+        - No hardcoded external IP addresses
+        - Services communicate via isolated Docker network
+        - External access only through configurable published ports
         """
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
-        # Should have extra_hosts configuration
-        assert "extra_hosts:" in content, "Missing extra_hosts configuration"
+        # Should NOT have hardcoded external IP addresses (192.168.x.x pattern)
+        # Allow IP addresses in comments (lines starting with #)
+        hardcoded_ip_pattern = re.compile(
+            r"^\s*[^#\n]*192\.168\.\d+\.\d+", re.MULTILINE
+        )
+        matches = hardcoded_ip_pattern.findall(content)
+        assert not matches, f"Found hardcoded IP addresses: {matches}"
 
-        # Should use REMOTE_HOST environment variable
-        assert "${REMOTE_HOST" in content, "extra_hosts should use REMOTE_HOST env var"
+        # Services should use internal Docker service names, not external hosts
+        # These patterns indicate proper internal service communication
+        internal_service_patterns = [
+            "postgres:5432",  # Internal PostgreSQL
+            "redpanda:9092",  # Internal Redpanda/Kafka
+            "valkey:6379",  # Internal Valkey/Redis
+            "consul:8500",  # Internal Consul (optional profile)
+        ]
+
+        # Verify at least some internal service references exist
+        internal_refs_found = sum(
+            1 for pattern in internal_service_patterns if pattern in content
+        )
+        assert internal_refs_found >= 2, (
+            f"Expected internal service name references (e.g., postgres:5432), "
+            f"found {internal_refs_found}"
+        )
 
     def test_network_isolation_per_service(self) -> None:
         """Verify services specify network membership explicitly.
 
         Each service should explicitly declare which networks it connects to.
         """
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Should have network references in services

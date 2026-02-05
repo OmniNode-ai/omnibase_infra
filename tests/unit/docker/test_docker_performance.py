@@ -14,9 +14,9 @@ import re
 
 import yaml
 
-# Import shared constant from conftest for backward compatibility.
-# New tests should prefer using the docker_dir fixture instead.
-from tests.unit.docker.conftest import DOCKER_DIR
+# Import shared constants from conftest for backward compatibility.
+# New tests should prefer using the docker_dir or compose_file_path fixtures instead.
+from tests.unit.docker.conftest import COMPOSE_FILE_PATH, DOCKER_DIR
 
 
 class TestDockerfilePerformance:
@@ -80,7 +80,7 @@ class TestDockerComposePerformance:
 
     def test_resource_limits_configured(self) -> None:
         """Verify docker-compose has resource limits."""
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Should have resource limits defined
@@ -90,7 +90,7 @@ class TestDockerComposePerformance:
 
     def test_health_check_intervals_reasonable(self) -> None:
         """Verify health check intervals are not too aggressive."""
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Parse health check intervals
@@ -108,7 +108,7 @@ class TestDockerComposePerformance:
 
     def test_worker_replicas_reasonable(self) -> None:
         """Verify default worker replicas is reasonable."""
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = yaml.safe_load(compose_file.read_text())
 
         # Check if runtime-worker service exists
@@ -131,7 +131,7 @@ class TestDockerComposePerformance:
 
     def test_resource_reservations_configured(self) -> None:
         """Verify docker-compose has resource reservations."""
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Should have resource reservations for better orchestration
@@ -226,7 +226,7 @@ class TestDockerHealthChecks:
         dockerfile = DOCKER_DIR / "Dockerfile.runtime"
         dockerfile_content = dockerfile.read_text()
 
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         compose_content = compose_file.read_text()
 
         # Both should have health checks

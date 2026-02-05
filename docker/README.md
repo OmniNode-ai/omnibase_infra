@@ -64,7 +64,7 @@ echo $GITHUB_TOKEN | head -c 10
 cp .env.example .env
 
 # 2. CRITICAL: Edit .env and replace ALL placeholder values
-#    Look for: __REPLACE_WITH_SECURE_PASSWORD__, __REPLACE_WITH_VAULT_TOKEN__
+#    Look for: __REPLACE_WITH_SECURE_PASSWORD__, __REPLACE_WITH_INFISICAL_TOKEN__
 #    Generate secure passwords: openssl rand -base64 32
 
 # 3. Build and start (main profile)
@@ -133,7 +133,7 @@ External Request
 | External Services|     | Parallel Jobs  |
 | - PostgreSQL     |     | - Compute      |
 | - Consul         |     | - Transform    |
-| - Vault          |     | - Aggregate    |
+| - Infisical      |     | - Aggregate    |
 | - Kafka          |     +----------------+
 +------------------+
 ```
@@ -168,7 +168,7 @@ Handles effect nodes that interact with external services:
 
 - Consul for service discovery
 - Kafka for event streaming
-- Vault for secret management
+- Infisical for secret management
 - PostgreSQL for persistence
 
 ```bash
@@ -209,7 +209,7 @@ for i in {1..3}; do echo "Password $i: $(openssl rand -base64 32)"; done
 | Credential         | Environment Variable  | Notes                                      |
 |--------------------|-----------------------|--------------------------------------------|
 | PostgreSQL         | `POSTGRES_PASSWORD`   | Database access password                   |
-| Vault              | `VAULT_TOKEN`         | HashiCorp Vault access token               |
+| Infisical          | `INFISICAL_TOKEN`     | Infisical access token                     |
 | Redis/Valkey       | `REDIS_PASSWORD`      | Cache access password                      |
 | GitHub (build)     | `GITHUB_TOKEN`        | For private package installation           |
 
@@ -246,8 +246,8 @@ docker inspect omnibase-infra-runtime-main --format='{{json .Config.Env}}' | gre
 ### Security Best Practices
 
 1. **Never commit `.env` files** - Already in `.gitignore`
-2. **Rotate credentials regularly** - Use vault or secret manager
-3. **Use minimal permissions** - Vault tokens should have scoped policies
+2. **Rotate credentials regularly** - Use Infisical or secret manager
+3. **Use minimal permissions** - Infisical tokens should have scoped policies
 4. **Enable audit logging** - Track credential access
 5. **Network isolation** - Use internal Docker networks
 
@@ -482,7 +482,7 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | Variable           | Description                       | Security Level |
 |--------------------|-----------------------------------|----------------|
 | `POSTGRES_PASSWORD`| PostgreSQL database password      | Secret         |
-| `VAULT_TOKEN`      | HashiCorp Vault access token      | Secret         |
+| `INFISICAL_TOKEN`  | Infisical access token            | Secret         |
 | `REDIS_PASSWORD`   | Redis/Valkey cache password       | Secret         |
 
 ### Optional Variables (With Defaults)
@@ -502,8 +502,8 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | `CONSUL_HOST`                | `localhost`                        | Consul agent hostname                  |
 | `CONSUL_PORT`                | `8500`                             | Consul HTTP port                       |
 | `CONSUL_SCHEME`              | `http`                             | Consul connection scheme               |
-| **Vault**                    |                                    |                                        |
-| `VAULT_ADDR`                 | `http://localhost:8200`            | Vault server address                   |
+| **Infisical**                |                                    |                                        |
+| `INFISICAL_API_URL`          | `https://app.infisical.com`        | Infisical API URL                      |
 | **Redis**                    |                                    |                                        |
 | `REDIS_HOST`                 | `localhost`                        | Redis hostname                         |
 | `REDIS_PORT`                 | `6379`                             | Redis port                             |
