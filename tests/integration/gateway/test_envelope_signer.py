@@ -17,6 +17,8 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 import pytest
+
+pytestmark = pytest.mark.integration
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from omnibase_core.crypto.crypto_blake3_hasher import hash_canonical_json
@@ -386,3 +388,155 @@ class TestEnvelopeSignerProperties:
     ) -> None:
         """Runtime ID property returns the configured runtime_id."""
         assert envelope_signer.runtime_id == "test-runtime-001"
+
+
+class TestEnvelopeSignerSignDict:
+    """Tests for sign_dict method (dict payload signing).
+
+    Related Tickets:
+        - OMN-1899: Runtime gateway envelope signing for dict payloads
+    """
+
+    def test_sign_dict_returns_model_message_envelope(
+        self,
+        envelope_signer: ServiceEnvelopeSigner,
+    ) -> None:
+        """Signing a dict payload produces a valid ModelMessageEnvelope."""
+        # Arrange
+        bus_id = "test-bus-001"
+        payload = {"action": "created", "resource_id": "123", "value": 42}
+
+        # Act
+        envelope = envelope_signer.sign_dict(
+            payload=payload,
+            bus_id=bus_id,
+        )
+
+        # Assert
+        assert isinstance(envelope, ModelMessageEnvelope)
+        assert envelope.payload == payload
+        assert envelope.signature is not None
+
+    def test_sign_dict_sets_realm_correctly(
+        self,
+        envelope_signer: ServiceEnvelopeSigner,
+    ) -> None:
+        """Dict signature contains correct realm from signer configuration."""
+        # Arrange
+        bus_id = "test-bus-001"
+        payload = {"key": "value"}
+
+        # Act
+        envelope = envelope_signer.sign_dict(
+            payload=payload,
+            bus_id=bus_id,
+        )
+
+        # Assert
+        assert envelope.realm == envelope_signer.realm
+        assert envelope.realm == "test"
+
+    def test_sign_dict_generates_trace_id_when_not_provided(
+        self,
+        envelope_signer: ServiceEnvelopeSigner,
+    ) -> None:
+        """Trace ID is auto-generated when not provided."""
+        # Arrange
+        bus_id = "test-bus"
+        payload = {"key": "value"}
+
+        # Act
+        envelope = envelope_signer.sign_dict(
+            payload=payload,
+            bus_id=bus_id,
+        )
+
+        # Assert
+        assert envelope.trace_id is not None
+        assert isinstance(envelope.trace_id, UUID)
+
+    def test_sign_dict_uses_provided_trace_id(
+        self,
+        envelope_signer: ServiceEnvelopeSigner,
+    ) -> None:
+        """Trace ID is set correctly when provided."""
+        # Arrange
+        bus_id = "test-bus"
+        trace_id = uuid4()
+        payload = {"key": "value"}
+
+        # Act
+        envelope = envelope_signer.sign_dict(
+            payload=payload,
+            bus_id=bus_id,
+            trace_id=trace_id,
+        )
+
+        # Assert
+        assert envelope.trace_id == trace_id
+
+    def test_sign_dict_hash_is_deterministic(
+        self,
+        envelope_signer: ServiceEnvelopeSigner,
+    ) -> None:
+        """Same dict payload produces same hash (deterministic)."""
+        # Arrange
+        bus_id = "test-bus"
+        payload = {"action": "test", "id": 123}
+
+        # Act
+        envelope1 = envelope_signer.sign_dict(payload=payload, bus_id=bus_id)
+        envelope2 = envelope_signer.sign_dict(payload=payload, bus_id=bus_id)
+
+        # Assert - hashes should be identical
+        assert envelope1.signature is not None
+        assert envelope2.signature is not None
+        assert envelope1.signature.payload_hash == envelope2.signature.payload_hash
+
+    def test_sign_dict_signature_verifiable(
+        self,
+        envelope_signer: ServiceEnvelopeSigner,
+        ed25519_public_key: Ed25519PublicKey,
+    ) -> None:
+        """Dict signature is verifiable with matching public key."""
+        # Arrange
+        bus_id = "test-bus"
+        payload = {"action": "verify", "data": [1, 2, 3]}
+
+        # Act
+        envelope = envelope_signer.sign_dict(
+            payload=payload,
+            bus_id=bus_id,
+        )
+
+        # Verify signature
+        assert envelope.signature is not None
+        public_key_bytes = ed25519_public_key.public_bytes_raw()
+        message = envelope.signature.payload_hash.encode("utf-8")
+        signature_b64 = envelope.signature.signature
+
+        # Assert - verification should succeed
+        is_valid = verify_base64(public_key_bytes, message, signature_b64)
+        assert is_valid is True
+
+    def test_sign_dict_matches_canonical_json_hash(
+        self,
+        envelope_signer: ServiceEnvelopeSigner,
+    ) -> None:
+        """Dict payload hash matches direct Blake3 canonical JSON hash."""
+        # Arrange
+        bus_id = "test-bus"
+        payload = {"name": "test", "value": 42}
+
+        # Act
+        envelope = envelope_signer.sign_dict(
+            payload=payload,
+            bus_id=bus_id,
+        )
+
+        # Calculate expected hash directly
+        expected_hash = hash_canonical_json(payload)
+
+        # Assert
+        assert envelope.signature is not None
+        assert envelope.signature.payload_hash == expected_hash

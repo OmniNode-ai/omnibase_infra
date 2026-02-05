@@ -2400,7 +2400,9 @@ class RuntimeHostProcess:
                     response["correlation_id"] = correlation_id
                 await self._publish_envelope_safe(response, self._output_topic)
             elif isinstance(response, BaseModel):
-                await self._publish_model_safe(response, self._output_topic)
+                await self._publish_model_safe(
+                    response, self._output_topic, correlation_id=correlation_id
+                )
             else:
                 # Fallback: convert to dict
                 await self._publish_envelope_safe(
@@ -2498,19 +2500,34 @@ class RuntimeHostProcess:
     async def _publish_envelope_safe(
         self, envelope: dict[str, object], topic: str
     ) -> None:
-        """Publish envelope with UUID serialization.
+        """Publish envelope with UUID serialization and optional signing.
 
         Converts any UUID objects to strings before publishing to ensure
-        JSON serialization works correctly.
+        JSON serialization works correctly. If gateway signing is configured,
+        signs the envelope before publishing.
 
-        Note:
-            For signing support, use _publish_model_safe() which handles
-            BaseModel payloads with optional envelope signing.
+        Gateway Integration (OMN-1899):
+            When gateway is configured with signing enabled, this method:
+            1. Extracts correlation_id from envelope for tracing
+            2. Checks outbound policy before publishing
+            3. Signs the dict payload with Ed25519 signature
+            4. Wraps signed envelope for transmission
 
         Args:
             envelope: Envelope dict (may contain UUID objects).
             topic: Target topic to publish to.
         """
+        # Extract correlation_id from envelope for logging
+        correlation_id: UUID | None = None
+        cid = envelope.get("correlation_id")
+        if isinstance(cid, UUID):
+            correlation_id = cid
+        elif isinstance(cid, str):
+            try:
+                correlation_id = UUID(cid)
+            except (ValueError, TypeError):
+                pass
+
         # Check outbound policy (if policy engine configured)
         if self._policy_engine is not None:
             decision = self._policy_engine.evaluate_outbound(topic)
@@ -2520,15 +2537,71 @@ class RuntimeHostProcess:
                     extra={
                         "topic": topic,
                         "reason": decision.reason,
+                        "correlation_id": str(correlation_id)
+                        if correlation_id
+                        else None,
                     },
                 )
                 return
 
+        # Sign envelope if signer available (consistent with _publish_model_safe)
+        final_envelope: dict[str, object]
+        if self._envelope_signer is not None:
+            try:
+                # Get bus_id from event bus if available
+                bus_id = (
+                    self._event_bus.bus_id
+                    if hasattr(self._event_bus, "bus_id")
+                    else "default"
+                )
+
+                # Sign the dict envelope using sign_dict method
+                signed_envelope = self._envelope_signer.sign_dict(
+                    payload=envelope,
+                    bus_id=bus_id,
+                    trace_id=correlation_id,
+                )
+                final_envelope = signed_envelope.model_dump(mode="python")
+
+                logger.debug(
+                    "Signed outbound dict envelope",
+                    extra={
+                        "topic": topic,
+                        "realm": self._envelope_signer.realm,
+                        "runtime_id": self._envelope_signer.runtime_id,
+                        "correlation_id": str(correlation_id)
+                        if correlation_id
+                        else None,
+                    },
+                )
+            except Exception as e:
+                # Signing failure is non-fatal - log and publish unsigned
+                logger.warning(
+                    "Failed to sign outbound dict envelope, publishing unsigned",
+                    extra={
+                        "topic": topic,
+                        "error": str(e),
+                        "correlation_id": str(correlation_id)
+                        if correlation_id
+                        else None,
+                    },
+                )
+                final_envelope = envelope
+        else:
+            # No signer configured - use envelope directly
+            final_envelope = envelope
+
         # Serialize and publish
-        json_safe_envelope = self._serialize_envelope(envelope)
+        json_safe_envelope = self._serialize_envelope(final_envelope)
         await self._event_bus.publish_envelope(json_safe_envelope, topic)
 
-    async def _publish_model_safe(self, model: BaseModel, topic: str) -> None:
+    async def _publish_model_safe(
+        self,
+        model: BaseModel,
+        topic: str,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> None:
         """Publish a BaseModel with optional signing and UUID serialization.
 
         If gateway signing is configured, signs the model payload with Ed25519.
@@ -2546,7 +2619,16 @@ class RuntimeHostProcess:
         Args:
             model: Pydantic BaseModel to publish (may contain UUID objects).
             topic: Target topic to publish to.
+            correlation_id: Optional correlation ID for tracing. If not provided,
+                attempts to extract from model.correlation_id attribute.
         """
+        # Determine trace_id for logging early (before signing)
+        trace_id: UUID | None = correlation_id
+        if trace_id is None and hasattr(model, "correlation_id"):
+            cid = getattr(model, "correlation_id", None)
+            if isinstance(cid, UUID):
+                trace_id = cid
+
         # Check outbound policy (if policy engine configured)
         if self._policy_engine is not None:
             decision = self._policy_engine.evaluate_outbound(topic)
@@ -2556,6 +2638,7 @@ class RuntimeHostProcess:
                     extra={
                         "topic": topic,
                         "reason": decision.reason,
+                        "correlation_id": str(trace_id) if trace_id else None,
                     },
                 )
                 return
@@ -2564,12 +2647,7 @@ class RuntimeHostProcess:
         envelope_dict: dict[str, object]
         if self._envelope_signer is not None:
             try:
-                # Extract trace_id if present in model for correlation
-                trace_id: UUID | None = None
-                if hasattr(model, "correlation_id"):
-                    cid = getattr(model, "correlation_id", None)
-                    if isinstance(cid, UUID):
-                        trace_id = cid
+                # trace_id already extracted above for logging
 
                 # Get bus_id from event bus if available
                 bus_id = (
@@ -3832,19 +3910,23 @@ class RuntimeHostProcess:
                     # The payload could be a dict or a BaseModel
                     payload = msg_envelope.payload
                     if isinstance(payload, dict):
-                        extracted_envelope = payload
+                        extracted_envelope = dict(payload)  # Copy to avoid mutation
                     elif hasattr(payload, "model_dump"):
                         extracted_envelope = payload.model_dump(mode="json")
                     else:
                         # Unknown payload type, use as-is
                         extracted_envelope = {"payload": payload}
 
+                    # Preserve trace_id as correlation_id for downstream tracking
+                    if msg_envelope.trace_id is not None:
+                        extracted_envelope["correlation_id"] = msg_envelope.trace_id
+
                     logger.debug(
                         "Signed envelope validated successfully",
                         extra={
                             "topic": topic,
                             "runtime_id": msg_envelope.runtime_id,
-                            "trace_id": str(msg_envelope.trace_id)
+                            "correlation_id": str(msg_envelope.trace_id)
                             if msg_envelope.trace_id
                             else None,
                         },
@@ -3869,12 +3951,21 @@ class RuntimeHostProcess:
                     self._gateway_config is not None
                     and self._gateway_config.reject_unsigned
                 ):
+                    # Extract correlation_id from envelope for logging
+                    cid = envelope.get("correlation_id")
+                    cid_str: str | None = None
+                    if isinstance(cid, UUID):
+                        cid_str = str(cid)
+                    elif isinstance(cid, str):
+                        cid_str = cid
+
                     logger.warning(
                         "Unsigned envelope rejected (reject_unsigned=True)",
                         extra={
                             "topic": topic,
                             "has_signature": has_signature,
                             "has_required_fields": has_required_fields,
+                            "correlation_id": cid_str,
                         },
                     )
                     return None

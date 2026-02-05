@@ -2132,6 +2132,15 @@ pattern_exemptions:
     documentation:
       - OMN-1898 (ModelMessageEnvelope design)
     ticket: OMN-1899
+  - file_pattern: 'gateway/services/service_envelope_signer\.py'
+    method_pattern: "Function 'sign_dict'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      sign_dict is a variant of sign_envelope that accepts dict payloads directly. Uses identical envelope metadata parameters for consistency. Enables signing of dict envelopes in runtime host publish flow.
+
+    documentation:
+      - OMN-1898 (ModelMessageEnvelope design)
+    ticket: OMN-1899
   # ==========================================================================
   # Gateway Config Exemptions (OMN-1899)
   # ==========================================================================

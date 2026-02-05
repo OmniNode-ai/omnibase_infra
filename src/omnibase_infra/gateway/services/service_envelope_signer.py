@@ -265,6 +265,101 @@ class ServiceEnvelopeSigner:
 
         return envelope
 
+    def sign_dict(  # noqa: ONEX-PATTERN-PARAMS - Optional params with defaults are acceptable
+        self,
+        payload: dict[str, object],
+        bus_id: str,
+        trace_id: UUID | None = None,
+        causality_id: UUID | None = None,
+        tenant_id: str | None = None,
+        emitter_identity: ModelEmitterIdentity | None = None,
+    ) -> ModelMessageEnvelope[dict[str, object]]:
+        """Sign a dict payload and wrap in ModelMessageEnvelope.
+
+        This is a variant of sign_envelope() that accepts raw dict payloads
+        instead of Pydantic BaseModel instances. Useful for signing envelope
+        dicts that don't have a corresponding model.
+
+        Signing Process:
+            1. Hash the dict using canonical JSON serialization with Blake3
+            2. Sign the hash bytes with Ed25519 private key
+            3. Build ModelEnvelopeSignature with algorithm, signer, hash, signature
+            4. Construct ModelMessageEnvelope with all fields
+
+        Args:
+            payload: Dict payload to sign and wrap. The payload is serialized
+                to canonical JSON for hashing.
+            bus_id: Identifier for the event bus this envelope is destined for.
+            trace_id: Optional trace identifier for distributed tracing. If not
+                provided, a new UUID is generated.
+            causality_id: Optional causality chain identifier for event correlation.
+            tenant_id: Optional tenant identifier for multi-tenant routing.
+            emitter_identity: Optional emitter identity for attribution.
+
+        Returns:
+            ModelMessageEnvelope containing the dict payload and cryptographic
+            signature.
+
+        Example:
+            >>> envelope = signer.sign_dict(
+            ...     payload={"action": "created", "resource_id": "123"},
+            ...     bus_id="main-bus",
+            ...     trace_id=UUID("12345678-1234-5678-1234-567812345678"),
+            ... )
+            >>> print(envelope.signature.algorithm)
+            'ed25519'
+
+        .. versionadded:: OMN-1899
+            Added to support signing dict envelopes in runtime host.
+        """
+        # Generate trace_id if not provided
+        effective_trace_id = trace_id if trace_id is not None else uuid4()
+
+        # Step 1: Hash with Blake3 using canonical JSON
+        # payload is already a dict, no need to call model_dump()
+        payload_hash = hash_canonical_json(payload)
+
+        # Step 2: Sign the hash with Ed25519
+        signature_b64 = sign_base64(
+            self._private_key_bytes,
+            payload_hash.encode("utf-8"),
+        )
+
+        # Step 3: Build ModelEnvelopeSignature
+        envelope_signature = ModelEnvelopeSignature(
+            algorithm="ed25519",
+            signer=self._runtime_id,
+            payload_hash=payload_hash,
+            signature=signature_b64,
+        )
+
+        # Step 4: Build and return ModelMessageEnvelope
+        envelope: ModelMessageEnvelope[dict[str, object]] = ModelMessageEnvelope(
+            realm=self._realm,
+            runtime_id=self._runtime_id,
+            bus_id=bus_id,
+            trace_id=effective_trace_id,
+            emitted_at=datetime.now(UTC),
+            signature=envelope_signature,
+            payload=payload,
+            causality_id=causality_id,
+            tenant_id=tenant_id,
+            emitter_identity=emitter_identity,
+        )
+
+        logger.debug(
+            "Signed dict envelope",
+            extra={
+                "trace_id": str(effective_trace_id),
+                "realm": self._realm,
+                "runtime_id": self._runtime_id,
+                "bus_id": bus_id,
+                "payload_hash": payload_hash[:16] + "...",  # Truncate for logging
+            },
+        )
+
+        return envelope
+
 
 __all__: list[str] = [
     "ServiceEnvelopeSigner",

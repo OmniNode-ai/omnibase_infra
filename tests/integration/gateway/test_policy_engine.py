@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 from omnibase_infra.gateway import (
     EnumPolicyDecision,
     PolicyDecision,

@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
@@ -98,6 +99,16 @@ def load_private_key_from_pem(path: Path) -> Ed25519PrivateKey:
 
     try:
         private_key = load_pem_private_key(key_bytes, password=None)
+    except UnsupportedAlgorithm as e:
+        logger.exception(
+            "Unsupported key algorithm in private key file (correlation_id=%s)",
+            context.correlation_id,
+            extra={"path": str(path)},
+        )
+        raise ProtocolConfigurationError(
+            f"Unsupported key algorithm in private key file: {path}",
+            context=context,
+        ) from e
     except (ValueError, TypeError) as e:
         logger.exception(
             "Failed to parse PEM private key (correlation_id=%s)",
@@ -173,6 +184,16 @@ def load_public_key_from_pem(path: Path) -> Ed25519PublicKey:
 
     try:
         public_key = load_pem_public_key(key_bytes)
+    except UnsupportedAlgorithm as e:
+        logger.exception(
+            "Unsupported key algorithm in public key file (correlation_id=%s)",
+            context.correlation_id,
+            extra={"path": str(path)},
+        )
+        raise ProtocolConfigurationError(
+            f"Unsupported key algorithm in public key file: {path}",
+            context=context,
+        ) from e
     except (ValueError, TypeError) as e:
         logger.exception(
             "Failed to parse PEM public key (correlation_id=%s)",

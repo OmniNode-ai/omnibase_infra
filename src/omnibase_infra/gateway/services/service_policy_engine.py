@@ -46,6 +46,7 @@ import fnmatch
 import logging
 from dataclasses import dataclass
 from enum import Enum
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +225,7 @@ class ServicePolicyEngine:
         self,
         topic: str,
         realm: str | None = None,
+        correlation_id: UUID | None = None,
     ) -> PolicyDecision:
         """Evaluate inbound message policy.
 
@@ -238,6 +240,8 @@ class ServicePolicyEngine:
             topic: The topic the message is arriving on.
             realm: The realm identifier from the message metadata.
                 Required if expected_realm is configured.
+            correlation_id: Optional correlation ID for request tracing.
+                Included in rejection logs for debugging and audit trails.
 
         Returns:
             PolicyDecision with decision (ALLOW/DENY) and reason.
@@ -258,7 +262,7 @@ class ServicePolicyEngine:
         # Check 1: Topic allowlist
         if not self.is_topic_allowed(topic):
             reason = f"Topic '{topic}' not in allowlist"
-            self._log_rejection("inbound", topic, reason)
+            self._log_rejection("inbound", topic, reason, correlation_id)
             return PolicyDecision(
                 decision=EnumPolicyDecision.DENY,
                 reason=reason,
@@ -270,7 +274,7 @@ class ServicePolicyEngine:
                 reason = (
                     f"Realm mismatch: expected '{self._expected_realm}', got '{realm}'"
                 )
-                self._log_rejection("inbound", topic, reason)
+                self._log_rejection("inbound", topic, reason, correlation_id)
                 return PolicyDecision(
                     decision=EnumPolicyDecision.DENY,
                     reason=reason,
@@ -385,6 +389,7 @@ class ServicePolicyEngine:
         direction: str,
         topic: str,
         reason: str,
+        correlation_id: UUID | None = None,
     ) -> None:
         """Log rejected message for audit/debugging.
 
@@ -396,6 +401,7 @@ class ServicePolicyEngine:
             direction: Message direction ("inbound" or "outbound").
             topic: The topic of the rejected message.
             reason: The reason for rejection.
+            correlation_id: Optional correlation ID for request tracing.
 
         Note:
             Logging can be disabled via log_rejections=False in constructor
@@ -415,6 +421,7 @@ class ServicePolicyEngine:
                 "topic": topic,
                 "reason": reason,
                 "policy_engine": "ServicePolicyEngine",
+                "correlation_id": str(correlation_id) if correlation_id else None,
             },
         )
 
