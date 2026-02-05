@@ -5,7 +5,7 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.3] - 2026-02-04
+## [0.4.0] - 2026-02-05
 
 ### Breaking Changes
 
@@ -48,6 +48,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **New**: `policy.register(ModelPolicyRegistration(policy_type, priority, handler))`
   - **Migration**: Replace `register_policy()` calls with `register(ModelPolicyRegistration(...))`
   - **Warning**: Emits `DeprecationWarning` at call site
+
+### Added
+
+#### Slack Webhook Handler (OMN-1905)
+- **HandlerSlackWebhook**: Async handler with Block Kit formatting, retry with exponential backoff, and 429 rate limit handling
+- **NodeSlackAlerterEffect**: Pure declarative effect node for Slack alerts
+- **EnumAlertSeverity**: Severity levels (critical/error/warning/info)
+- **ModelSlackAlert/ModelSlackAlertResult**: Type-safe frozen Pydantic models
+- Features: Correlation ID tracking, exponential backoff retry (1s → 2s → 4s), 429 rate limit handling
+
+#### Contract Dependency Resolution (OMN-1903, OMN-1732)
+- **ContractDependencyResolver**: Reads protocol dependencies from `contract.yaml` and resolves from container
+- **ModelResolvedDependencies**: Pydantic model for resolved protocol instances
+- **ProtocolDependencyResolutionError**: Fail-fast error for missing protocols
+- **RuntimeHostProcess integration**: Automatic dependency resolution during node discovery
+- Zero-code nodes can now receive injected dependencies via constructor
+
+#### Event Ledger Integration Tests (OMN-1649)
+- Added comprehensive integration tests for Event Ledger runtime wiring
 
 ### Changed
 
