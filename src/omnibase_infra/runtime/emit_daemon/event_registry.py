@@ -180,15 +180,15 @@ class EventRegistry:
         - prompt.submitted: User prompt submission events
         - session.started: Session initialization events
         - session.ended: Session termination events
+        - session.outcome: Session outcome events
         - tool.executed: Tool execution events
         - routing.decision: Agent routing decision events (PR #92)
-        - session.outcome: Session outcome events (OMN-1735)
-        - injection.recorded: Manifest injection tracking (OMN-1673)
-        - context.utilization: Context utilization metrics (OMN-1889)
-        - agent.match: Agent match events (OMN-1889)
-        - latency.breakdown: Latency breakdown metrics (OMN-1889)
-        - notification.blocked: Blocked notification events (OMN-1831)
-        - notification.completed: Completed notification events (OMN-1831)
+        - injection.recorded: Manifest injection events (OMN-1673)
+        - context.utilization: Context window utilization events (OMN-1889)
+        - agent.match: Agent routing match events (OMN-1889)
+        - latency.breakdown: Latency breakdown events (OMN-1889)
+        - notification.blocked: Agent blocked waiting for human input (OMN-1831)
+        - notification.completed: Ticket work completion events (OMN-1831)
         """
         defaults = [
             # Core session events
@@ -211,6 +211,12 @@ class EventRegistry:
                 required_fields=["session_id"],
             ),
             ModelEventRegistration(
+                event_type="session.outcome",
+                topic_template="onex.evt.omniclaude.session-outcome.v1",
+                partition_key_field="session_id",
+                required_fields=["session_id"],
+            ),
+            ModelEventRegistration(
                 event_type="tool.executed",
                 topic_template="onex.evt.omniclaude.tool-executed.v1",
                 partition_key_field="session_id",
@@ -223,13 +229,6 @@ class EventRegistry:
                 partition_key_field="correlation_id",
                 required_fields=["correlation_id", "selected_agent"],
             ),
-            # Session outcome (OMN-1735)
-            ModelEventRegistration(
-                event_type="session.outcome",
-                topic_template="onex.cmd.omniintelligence.session-outcome.v1",
-                partition_key_field="session_id",
-                required_fields=["session_id"],
-            ),
             # Injection tracking (OMN-1673)
             ModelEventRegistration(
                 event_type="injection.recorded",
@@ -237,7 +236,7 @@ class EventRegistry:
                 partition_key_field="session_id",
                 required_fields=["session_id"],
             ),
-            # Injection metrics (OMN-1889)
+            # Observability metrics (OMN-1889)
             ModelEventRegistration(
                 event_type="context.utilization",
                 topic_template="onex.evt.omniclaude.context-utilization.v1",
@@ -256,18 +255,19 @@ class EventRegistry:
                 partition_key_field="session_id",
                 required_fields=["session_id"],
             ),
-            # Slack notifications (OMN-1831)
+            # Notification events for Slack integration (OMN-1831)
+            # These events are consumed by the notification consumer and routed to Slack
             ModelEventRegistration(
                 event_type="notification.blocked",
                 topic_template="onex.evt.omniclaude.notification-blocked.v1",
                 partition_key_field="session_id",
-                required_fields=["session_id"],
+                required_fields=["ticket_identifier", "reason", "repo", "session_id"],
             ),
             ModelEventRegistration(
                 event_type="notification.completed",
                 topic_template="onex.evt.omniclaude.notification-completed.v1",
                 partition_key_field="session_id",
-                required_fields=["session_id"],
+                required_fields=["ticket_identifier", "summary", "repo", "session_id"],
             ),
         ]
         for registration in defaults:

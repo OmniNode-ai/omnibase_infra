@@ -2095,6 +2095,27 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Contract-Driven)
     ticket: OMN-1845
+  # ==========================================================================
+  # Ledger Event Model Exemptions (OMN-1837)
+  # ==========================================================================
+  # The ledger event base model uses contract_id and operation_name as semantic
+  # identifiers for tracing, not entity references requiring UUIDs.
+  - file_pattern: 'models/ledger/model_ledger_event_base\.py'
+    violation_pattern: "Field 'contract_id' should use UUID"
+    reason: >
+      contract_id is the repository/contract name (e.g., "users", "orders") used for ledger event correlation and filtering. It is NOT a UUID reference but a semantic identifier for the contract being traced.
+
+    documentation:
+      - CLAUDE.md (Intent Model Architecture)
+    ticket: OMN-1837
+  - file_pattern: 'models/ledger/model_ledger_event_base\.py'
+    violation_pattern: "Field 'operation_name' might reference an entity"
+    reason: >
+      operation_name is the name of the database operation being traced (e.g., "get_user", "update_order"). It is a simple string label for audit/replay purposes, not a foreign key to an entity.
+
+    documentation:
+      - CLAUDE.md (Handler System)
+    ticket: OMN-1837
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
