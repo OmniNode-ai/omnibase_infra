@@ -5,6 +5,74 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-05
+
+### Breaking Changes
+
+#### EventBusSubcontractWiring API Change
+- **`EventBusSubcontractWiring.__init__()`** now requires two new parameters: `service` and `version`
+  - **Old**: `EventBusSubcontractWiring(event_bus, contract)`
+  - **New**: `EventBusSubcontractWiring(event_bus, contract, service="my-service", version="1.0.0")`
+  - **Migration**: Add `service` and `version` parameters to all `EventBusSubcontractWiring` instantiations
+
+#### Realm-Agnostic Topics
+- **Topics no longer include environment prefix**: The `resolve_topic()` function now returns topic suffixes unchanged
+  - **Old**: `resolve_topic("events.v1")` returned `"dev.events.v1"` (with env prefix)
+  - **New**: `resolve_topic("events.v1")` returns `"events.v1"` (no prefix)
+  - **Impact**: Cross-environment event routing now possible; isolation maintained through envelope identity
+
+#### Subscribe Signature Change (omnibase-core 0.14.0)
+- **`ProtocolEventBus.subscribe()`** parameter changed from `group_id: str` to `node_identity: ProtocolNodeIdentity`
+  - **Old**: `event_bus.subscribe(topic, group_id="my-group", on_message=handler)`
+  - **New**: `event_bus.subscribe(topic, node_identity=ModelEmitterIdentity(...), on_message=handler)`
+  - **Migration**: Replace `group_id` with `ModelEmitterIdentity(env, service, node_name, version)`
+
+#### ModelIntrospectionConfig Requires node_name
+- **`ModelIntrospectionConfig`** now requires `node_name` as a mandatory field
+  - **Old**: Could instantiate with only `node_id` and `node_type`
+  - **New**: Must also provide `node_name` parameter
+  - **Migration**: Add `node_name=<your_node_name>` to all `ModelIntrospectionConfig` instantiations
+  - **Failure**: Omitting `node_name` raises `ValidationError`
+
+#### ModelPostgresIntentPayload.endpoints Validation
+- **`ModelPostgresIntentPayload.endpoints`** validator now raises `ValueError` for empty Mapping
+  - **Old**: Empty `{}` logged a warning and returned empty tuple
+  - **New**: Empty `{}` raises `ValueError("endpoints cannot be an empty Mapping")`
+  - **Migration**: Ensure `endpoints` is either `None` or a non-empty Mapping
+
+### Deprecated
+
+#### RegistryPolicy.register_policy()
+- **`RegistryPolicy.register_policy()`** method is deprecated
+  - **Old**: `policy.register_policy(policy_type, priority, handler)`
+  - **New**: `policy.register(ModelPolicyRegistration(policy_type, priority, handler))`
+  - **Migration**: Replace `register_policy()` calls with `register(ModelPolicyRegistration(...))`
+  - **Warning**: Emits `DeprecationWarning` at call site
+
+### Added
+
+#### Slack Webhook Handler (OMN-1905)
+- **HandlerSlackWebhook**: Async handler with Block Kit formatting, retry with exponential backoff, and 429 rate limit handling
+- **NodeSlackAlerterEffect**: Pure declarative effect node for Slack alerts
+- **EnumAlertSeverity**: Severity levels (critical/error/warning/info)
+- **ModelSlackAlert/ModelSlackAlertResult**: Type-safe frozen Pydantic models
+- Features: Correlation ID tracking, exponential backoff retry (1s → 2s → 4s), 429 rate limit handling
+
+#### Contract Dependency Resolution (OMN-1903, OMN-1732)
+- **ContractDependencyResolver**: Reads protocol dependencies from `contract.yaml` and resolves from container
+- **ModelResolvedDependencies**: Pydantic model for resolved protocol instances
+- **ProtocolDependencyResolutionError**: Fail-fast error for missing protocols
+- **RuntimeHostProcess integration**: Automatic dependency resolution during node discovery
+- Zero-code nodes can now receive injected dependencies via constructor
+
+#### Event Ledger Integration Tests (OMN-1649)
+- Added comprehensive integration tests for Event Ledger runtime wiring
+
+### Changed
+
+#### Dependencies
+- Update `omnibase-core` from `^0.13.1` to `^0.14.0`
+
 ## [0.3.3] - 2026-02-04
 
 ### Breaking Changes
