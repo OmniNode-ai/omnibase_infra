@@ -358,6 +358,62 @@ def get_dlq_topic_for_original(
     return build_dlq_topic(environment, category.topic_suffix)
 
 
+# ==============================================================================
+# Wiring Health Monitoring Topics
+# ==============================================================================
+# Topics monitored for emission/consumption health checks.
+#
+# NOTE: session-outcome currently uses 'cmd' prefix but should semantically be 'evt'
+# (it's a fact/outcome, not a command requesting action). A migration ticket should
+# be created to fix this in omniclaude and omniintelligence.
+#
+# See: OMN-1895 - Wiring health monitor implementation
+
+TOPIC_SESSION_OUTCOME_CURRENT: Final[str] = (
+    "onex.cmd.omniintelligence.session-outcome.v1"
+)
+"""Current session-outcome topic (pre-migration).
+
+WARNING: Uses 'cmd' prefix but should be 'evt' - session outcomes are facts,
+not commands. Kept for compatibility until migration completes.
+
+Producer: omniclaude (SessionEnd hook)
+Consumer: omniintelligence/node_pattern_feedback_effect
+"""
+
+TOPIC_SESSION_OUTCOME_CANONICAL: Final[str] = (
+    "onex.evt.omniintelligence.session-outcome.v1"
+)
+"""Canonical session-outcome topic (post-migration).
+
+This is the correct semantic name. Use TOPIC_SESSION_OUTCOME_CURRENT until
+migration ticket completes the rename in omniclaude and omniintelligence.
+"""
+
+# Injection effectiveness topics (already correctly named with 'evt')
+TOPIC_INJECTION_CONTEXT_UTILIZATION: Final[str] = (
+    "onex.evt.omniclaude.context-utilization.v1"
+)
+"""Context utilization metrics from omniclaude injection hooks."""
+
+TOPIC_INJECTION_AGENT_MATCH: Final[str] = "onex.evt.omniclaude.agent-match.v1"
+"""Agent match metrics from omniclaude injection hooks."""
+
+TOPIC_INJECTION_LATENCY_BREAKDOWN: Final[str] = (
+    "onex.evt.omniclaude.latency-breakdown.v1"
+)
+"""Latency breakdown metrics from omniclaude injection hooks."""
+
+# Grouped constants for wiring health monitoring
+WIRING_HEALTH_MONITORED_TOPICS: Final[tuple[str, ...]] = (
+    TOPIC_SESSION_OUTCOME_CURRENT,
+    TOPIC_INJECTION_CONTEXT_UTILIZATION,
+    TOPIC_INJECTION_AGENT_MATCH,
+    TOPIC_INJECTION_LATENCY_BREAKDOWN,
+)
+"""Topics monitored by wiring health for emission/consumption comparison."""
+
+
 __all__ = [
     "DLQ_CATEGORY_SUFFIXES",
     "DLQ_COMMAND_TOPIC_SUFFIX",
@@ -368,6 +424,13 @@ __all__ = [
     # Constants
     "DLQ_TOPIC_VERSION",
     "ENV_PATTERN",
+    # Wiring Health Topics
+    "TOPIC_INJECTION_AGENT_MATCH",
+    "TOPIC_INJECTION_CONTEXT_UTILIZATION",
+    "TOPIC_INJECTION_LATENCY_BREAKDOWN",
+    "TOPIC_SESSION_OUTCOME_CANONICAL",
+    "TOPIC_SESSION_OUTCOME_CURRENT",
+    "WIRING_HEALTH_MONITORED_TOPICS",
     # Functions
     "build_dlq_topic",
     "get_dlq_topic_for_original",
