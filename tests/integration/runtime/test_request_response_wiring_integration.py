@@ -269,9 +269,10 @@ class TestRequestResponseWiringIntegration:
                 published_requests.append(request_data)
 
                 # Simulate responder: inject response to mock consumer
+                # Topics are realm-agnostic (no environment prefix)
                 correlation_id = request_data.get("correlation_id")
                 response = MockConsumerRecord(
-                    topic=f"{environment}.onex.evt.test.completed.v1",
+                    topic="onex.evt.test.completed.v1",
                     value=json.dumps(
                         {
                             "correlation_id": correlation_id,
@@ -282,6 +283,7 @@ class TestRequestResponseWiringIntegration:
                 await mock_consumer.inject_message(response)
 
             # Subscribe to request topic to capture and respond
+            # Topics are realm-agnostic; env is in identity, not topic
             from omnibase_infra.models import ModelNodeIdentity
 
             identity = ModelNodeIdentity(
@@ -290,7 +292,7 @@ class TestRequestResponseWiringIntegration:
                 node_name="test-responder",
                 version="v1",
             )
-            request_topic = f"{environment}.onex.cmd.test.request.v1"
+            request_topic = "onex.cmd.test.request.v1"
             await event_bus.subscribe(request_topic, identity, capture_request)
 
             # Send request
@@ -365,9 +367,9 @@ class TestRequestResponseWiringIntegration:
                 request_data = json.loads(value.decode("utf-8"))
                 correlation_id = request_data.get("correlation_id")
 
-                # Inject error response on failed topic
+                # Inject error response on failed topic (realm-agnostic)
                 error_response = MockConsumerRecord(
-                    topic=f"{environment}.onex.evt.test.failed.v1",
+                    topic="onex.evt.test.failed.v1",
                     value=json.dumps(
                         {
                             "correlation_id": correlation_id,
@@ -385,7 +387,7 @@ class TestRequestResponseWiringIntegration:
                 node_name="error-responder",
                 version="v1",
             )
-            request_topic = f"{environment}.onex.cmd.test.request.v1"
+            request_topic = "onex.cmd.test.request.v1"
             await event_bus.subscribe(request_topic, identity, capture_and_fail)
 
             # Send request and expect error
@@ -449,9 +451,9 @@ class TestRequestResponseWiringIntegration:
                 delay = 0.01 * (3 - int(str(request_id)))
                 await asyncio.sleep(delay)
 
-                # Respond with request_id included for verification
+                # Respond with request_id included for verification (realm-agnostic topic)
                 response = MockConsumerRecord(
-                    topic=f"{environment}.onex.evt.test.completed.v1",
+                    topic="onex.evt.test.completed.v1",
                     value=json.dumps(
                         {
                             "correlation_id": correlation_id,
@@ -472,7 +474,7 @@ class TestRequestResponseWiringIntegration:
                 node_name="concurrent-responder",
                 version="v1",
             )
-            request_topic = f"{environment}.onex.cmd.test.request.v1"
+            request_topic = "onex.cmd.test.request.v1"
             await event_bus.subscribe(
                 request_topic, identity, capture_and_respond_with_delay
             )
@@ -554,7 +556,7 @@ class TestRequestResponseWiringIntegration:
                 captured_correlation_id = request_data.get("correlation_id")
 
                 response = MockConsumerRecord(
-                    topic=f"{environment}.onex.evt.test.completed.v1",
+                    topic="onex.evt.test.completed.v1",
                     value=json.dumps(
                         {
                             "correlation_id": captured_correlation_id,
@@ -572,7 +574,7 @@ class TestRequestResponseWiringIntegration:
                 node_name="correlation-verifier",
                 version="v1",
             )
-            request_topic = f"{environment}.onex.cmd.test.request.v1"
+            request_topic = "onex.cmd.test.request.v1"
             await event_bus.subscribe(
                 request_topic, identity, capture_and_verify_correlation
             )
@@ -820,18 +822,21 @@ class TestRequestResponseWiringIntegration:
 
             await wiring.cleanup()
 
-    async def test_topic_resolution_includes_environment(
+    async def test_topic_resolution_is_realm_agnostic(
         self,
         event_bus: EventBusInmemory,
         environment: str,
         app_name: str,
         request_response_config: ModelRequestResponseConfig,
     ) -> None:
-        """Test that topics are resolved with environment prefix.
+        """Test that topics are realm-agnostic (no environment prefix).
+
+        Topics no longer include environment prefix per architectural change.
+        Environment/realm is enforced via envelope/identity, not topic prefix.
 
         Verifies:
-        1. Request topic includes environment prefix
-        2. Reply topics include environment prefix
+        1. Request topic does NOT include environment prefix
+        2. Reply topics do NOT include environment prefix
         """
         mock_consumer: MockAIOKafkaConsumer | None = None
         subscribed_topics: tuple[str, ...] = ()
@@ -855,13 +860,13 @@ class TestRequestResponseWiringIntegration:
 
             await wiring.wire_request_response(request_response_config)
 
-            # Verify resolve_topic method
+            # Verify resolve_topic returns topic unchanged (realm-agnostic)
             resolved = wiring.resolve_topic("onex.cmd.test.request.v1")
-            assert resolved == f"{environment}.onex.cmd.test.request.v1"
+            assert resolved == "onex.cmd.test.request.v1"
 
-            # Verify consumer subscribed to resolved topics
-            assert f"{environment}.onex.evt.test.completed.v1" in subscribed_topics
-            assert f"{environment}.onex.evt.test.failed.v1" in subscribed_topics
+            # Verify consumer subscribed to realm-agnostic topics
+            assert "onex.evt.test.completed.v1" in subscribed_topics
+            assert "onex.evt.test.failed.v1" in subscribed_topics
 
             await wiring.cleanup()
 
@@ -926,8 +931,9 @@ class TestRequestResponseWiringEdgeCases:
             assert mock_consumer is not None
 
             # Inject empty message (should be skipped, not crash)
+            # Topic is realm-agnostic (no environment prefix)
             empty_response = MockConsumerRecord(
-                topic=f"{environment}.onex.evt.test.empty-completed.v1",
+                topic="onex.evt.test.empty-completed.v1",
                 value=None,
             )
             await mock_consumer.inject_message(empty_response)
@@ -989,8 +995,9 @@ class TestRequestResponseWiringEdgeCases:
             assert mock_consumer is not None
 
             # Inject response with unknown correlation_id (orphan)
+            # Topic is realm-agnostic (no environment prefix)
             orphan_response = MockConsumerRecord(
-                topic=f"{environment}.onex.evt.test.orphan-completed.v1",
+                topic="onex.evt.test.orphan-completed.v1",
                 value=json.dumps(
                     {
                         "correlation_id": str(uuid4()),  # No matching request
