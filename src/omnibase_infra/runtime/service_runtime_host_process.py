@@ -2392,14 +2392,21 @@ class RuntimeHostProcess:
             # TODO(OMN-40): Migrate handlers to new protocol signature execute(request, operation_config)
             response = await handler.execute(envelope)  # type: ignore[call-arg]  # NOTE: legacy signature
 
-            # Ensure response has correlation_id
-            # Make a copy to avoid mutating handler's internal state
+            # Ensure response has correlation_id and publish
+            # Handle both dict and BaseModel responses from handlers
             if isinstance(response, dict):
-                response = dict(response)
+                response = dict(response)  # Copy to avoid mutating handler state
                 if "correlation_id" not in response:
                     response["correlation_id"] = correlation_id
-
-            await self._publish_envelope_safe(response, self._output_topic)
+                await self._publish_envelope_safe(response, self._output_topic)
+            elif isinstance(response, BaseModel):
+                await self._publish_model_safe(response, self._output_topic)
+            else:
+                # Fallback: convert to dict
+                await self._publish_envelope_safe(
+                    {"response": response, "correlation_id": correlation_id},
+                    self._output_topic,
+                )
 
             logger.debug(
                 "Handler executed successfully",
@@ -2466,23 +2473,16 @@ class RuntimeHostProcess:
             "correlation_id": final_correlation_id,
         }
 
-    def _serialize_envelope(
-        self, envelope: dict[str, object] | BaseModel
-    ) -> dict[str, object]:
+    def _serialize_envelope(self, envelope: dict[str, object]) -> dict[str, object]:
         """Recursively convert UUID objects to strings for JSON serialization.
 
-        Handles both dict envelopes and Pydantic models (e.g., ModelDuplicateResponse).
-
         Args:
-            envelope: Envelope dict or Pydantic model that may contain UUID objects.
+            envelope: Envelope dict that may contain UUID objects.
 
         Returns:
             New dict with all UUIDs converted to strings.
         """
-        # Convert Pydantic models to dict first, ensuring type safety
-        envelope_dict: JsonDict = (
-            envelope.model_dump() if isinstance(envelope, BaseModel) else envelope
-        )
+        envelope_dict: JsonDict = envelope
 
         def convert_value(value: object) -> object:
             if isinstance(value, UUID):
@@ -2496,28 +2496,22 @@ class RuntimeHostProcess:
         return {k: convert_value(v) for k, v in envelope_dict.items()}
 
     async def _publish_envelope_safe(
-        self, envelope: dict[str, object] | BaseModel, topic: str
+        self, envelope: dict[str, object], topic: str
     ) -> None:
-        """Publish envelope with UUID serialization and optional signing.
+        """Publish envelope with UUID serialization.
 
         Converts any UUID objects to strings before publishing to ensure
-        JSON serialization works correctly. If gateway signing is configured,
-        wraps the payload in a signed ModelMessageEnvelope.
+        JSON serialization works correctly.
 
-        Gateway Integration (OMN-1899):
-            When gateway is configured with signing enabled, this method:
-            1. Checks outbound policy before publishing
-            2. Signs BaseModel payloads with Ed25519 signature
-            3. Wraps signed envelope for transmission
-
-            When gateway is not configured or signing disabled, behavior is
-            unchanged (backwards compatible).
+        Note:
+            For signing support, use _publish_model_safe() which handles
+            BaseModel payloads with optional envelope signing.
 
         Args:
-            envelope: Envelope dict or Pydantic model (may contain UUID objects).
+            envelope: Envelope dict (may contain UUID objects).
             topic: Target topic to publish to.
         """
-        # Step 1: Check outbound policy (if policy engine configured)
+        # Check outbound policy (if policy engine configured)
         if self._policy_engine is not None:
             decision = self._policy_engine.evaluate_outbound(topic)
             if not decision:
@@ -2530,14 +2524,50 @@ class RuntimeHostProcess:
                 )
                 return
 
-        # Step 2: Sign envelope if signer available and envelope is a BaseModel
-        envelope_to_publish: dict[str, object] | BaseModel = envelope
-        if self._envelope_signer is not None and isinstance(envelope, BaseModel):
+        # Serialize and publish
+        json_safe_envelope = self._serialize_envelope(envelope)
+        await self._event_bus.publish_envelope(json_safe_envelope, topic)
+
+    async def _publish_model_safe(self, model: BaseModel, topic: str) -> None:
+        """Publish a BaseModel with optional signing and UUID serialization.
+
+        If gateway signing is configured, signs the model payload with Ed25519.
+        Then serializes to dict and publishes.
+
+        Gateway Integration (OMN-1899):
+            When gateway is configured with signing enabled, this method:
+            1. Checks outbound policy before publishing
+            2. Signs the BaseModel payload with Ed25519 signature
+            3. Wraps signed envelope for transmission
+
+            When gateway is not configured or signing disabled, converts
+            model to dict and publishes directly.
+
+        Args:
+            model: Pydantic BaseModel to publish (may contain UUID objects).
+            topic: Target topic to publish to.
+        """
+        # Check outbound policy (if policy engine configured)
+        if self._policy_engine is not None:
+            decision = self._policy_engine.evaluate_outbound(topic)
+            if not decision:
+                logger.warning(
+                    "Outbound message rejected by policy",
+                    extra={
+                        "topic": topic,
+                        "reason": decision.reason,
+                    },
+                )
+                return
+
+        # Sign envelope if signer available
+        envelope_dict: dict[str, object]
+        if self._envelope_signer is not None:
             try:
-                # Extract trace_id if present in envelope for correlation
+                # Extract trace_id if present in model for correlation
                 trace_id: UUID | None = None
-                if hasattr(envelope, "correlation_id"):
-                    cid = getattr(envelope, "correlation_id", None)
+                if hasattr(model, "correlation_id"):
+                    cid = getattr(model, "correlation_id", None)
                     if isinstance(cid, UUID):
                         trace_id = cid
 
@@ -2548,13 +2578,13 @@ class RuntimeHostProcess:
                     else "default"
                 )
 
-                # Sign the envelope
+                # Sign the model and convert to dict
                 signed_envelope = self._envelope_signer.sign_envelope(
-                    payload=envelope,
+                    payload=model,
                     bus_id=bus_id,
                     trace_id=trace_id,
                 )
-                envelope_to_publish = signed_envelope
+                envelope_dict = signed_envelope.model_dump(mode="python")
 
                 logger.debug(
                     "Signed outbound envelope",
@@ -2574,10 +2604,13 @@ class RuntimeHostProcess:
                         "error": str(e),
                     },
                 )
-                # Fall through to publish original envelope
+                envelope_dict = model.model_dump(mode="python")
+        else:
+            # No signer configured - convert model to dict directly
+            envelope_dict = model.model_dump(mode="python")
 
-        # Step 3: Serialize and publish
-        json_safe_envelope = self._serialize_envelope(envelope_to_publish)
+        # Serialize (UUID conversion) and publish
+        json_safe_envelope = self._serialize_envelope(envelope_dict)
         await self._event_bus.publish_envelope(json_safe_envelope, topic)
 
     async def health_check(self) -> dict[str, object]:
