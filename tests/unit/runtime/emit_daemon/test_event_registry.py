@@ -112,14 +112,21 @@ class TestEventRegistryDefaultRegistrations:
         assert topic == "onex.evt.omniclaude.tool-executed.v1"
 
     def test_all_defaults_registered(self) -> None:
-        """Should register all four default event types."""
+        """Should register all default event types."""
         registry = EventRegistry()
         event_types = registry.list_event_types()
         expected = [
             "prompt.submitted",
             "session.started",
             "session.ended",
+            "session.outcome",
             "tool.executed",
+            "injection.recorded",
+            "context.utilization",
+            "agent.match",
+            "latency.breakdown",
+            "notification.blocked",
+            "notification.completed",
         ]
         assert sorted(event_types) == sorted(expected)
 
@@ -733,3 +740,49 @@ class TestEventRegistryDefaultRegistrationDetails:
         reg = registry.get_registration("tool.executed")
         assert reg is not None
         assert reg.partition_key_field == "session_id"
+
+    def test_notification_blocked_required_fields(self) -> None:
+        """notification.blocked should require ticket_id, reason, repo, session_id."""
+        registry = EventRegistry()
+        reg = registry.get_registration("notification.blocked")
+        assert reg is not None
+        assert "ticket_id" in reg.required_fields
+        assert "reason" in reg.required_fields
+        assert "repo" in reg.required_fields
+        assert "session_id" in reg.required_fields
+
+    def test_notification_blocked_partition_key(self) -> None:
+        """notification.blocked should use session_id as partition key."""
+        registry = EventRegistry()
+        reg = registry.get_registration("notification.blocked")
+        assert reg is not None
+        assert reg.partition_key_field == "session_id"
+
+    def test_notification_blocked_topic(self) -> None:
+        """notification.blocked should have correct topic template."""
+        registry = EventRegistry()
+        topic = registry.resolve_topic("notification.blocked")
+        assert topic == "onex.evt.omniclaude.notification-blocked.v1"
+
+    def test_notification_completed_required_fields(self) -> None:
+        """notification.completed should require ticket_id, summary, repo, session_id."""
+        registry = EventRegistry()
+        reg = registry.get_registration("notification.completed")
+        assert reg is not None
+        assert "ticket_id" in reg.required_fields
+        assert "summary" in reg.required_fields
+        assert "repo" in reg.required_fields
+        assert "session_id" in reg.required_fields
+
+    def test_notification_completed_partition_key(self) -> None:
+        """notification.completed should use session_id as partition key."""
+        registry = EventRegistry()
+        reg = registry.get_registration("notification.completed")
+        assert reg is not None
+        assert reg.partition_key_field == "session_id"
+
+    def test_notification_completed_topic(self) -> None:
+        """notification.completed should have correct topic template."""
+        registry = EventRegistry()
+        topic = registry.resolve_topic("notification.completed")
+        assert topic == "onex.evt.omniclaude.notification-completed.v1"

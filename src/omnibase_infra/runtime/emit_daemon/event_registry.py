@@ -180,7 +180,14 @@ class EventRegistry:
         - prompt.submitted: User prompt submission events
         - session.started: Session initialization events
         - session.ended: Session termination events
+        - session.outcome: Session outcome events
         - tool.executed: Tool execution events
+        - injection.recorded: Manifest injection events
+        - context.utilization: Context window utilization events
+        - agent.match: Agent routing match events
+        - latency.breakdown: Latency breakdown events
+        - notification.blocked: Agent blocked waiting for human input
+        - notification.completed: Ticket work completion events
         """
         defaults = [
             ModelEventRegistration(
@@ -202,10 +209,54 @@ class EventRegistry:
                 required_fields=["session_id"],
             ),
             ModelEventRegistration(
+                event_type="session.outcome",
+                topic_template="onex.evt.omniclaude.session-outcome.v1",
+                partition_key_field="session_id",
+                required_fields=["session_id"],
+            ),
+            ModelEventRegistration(
                 event_type="tool.executed",
                 topic_template="onex.evt.omniclaude.tool-executed.v1",
                 partition_key_field="session_id",
                 required_fields=["tool_name"],
+            ),
+            ModelEventRegistration(
+                event_type="injection.recorded",
+                topic_template="onex.evt.omniclaude.injection-recorded.v1",
+                partition_key_field="session_id",
+                required_fields=["session_id"],
+            ),
+            ModelEventRegistration(
+                event_type="context.utilization",
+                topic_template="onex.evt.omniclaude.context-utilization.v1",
+                partition_key_field="session_id",
+                required_fields=["session_id"],
+            ),
+            ModelEventRegistration(
+                event_type="agent.match",
+                topic_template="onex.evt.omniclaude.agent-match.v1",
+                partition_key_field="session_id",
+                required_fields=["session_id"],
+            ),
+            ModelEventRegistration(
+                event_type="latency.breakdown",
+                topic_template="onex.evt.omniclaude.latency-breakdown.v1",
+                partition_key_field="session_id",
+                required_fields=["session_id"],
+            ),
+            # Notification events for Slack integration (OMN-1831)
+            # These events are consumed by the notification consumer and routed to Slack
+            ModelEventRegistration(
+                event_type="notification.blocked",
+                topic_template="onex.evt.omniclaude.notification-blocked.v1",
+                partition_key_field="session_id",
+                required_fields=["ticket_id", "reason", "repo", "session_id"],
+            ),
+            ModelEventRegistration(
+                event_type="notification.completed",
+                topic_template="onex.evt.omniclaude.notification-completed.v1",
+                partition_key_field="session_id",
+                required_fields=["ticket_id", "summary", "repo", "session_id"],
             ),
         ]
         for registration in defaults:

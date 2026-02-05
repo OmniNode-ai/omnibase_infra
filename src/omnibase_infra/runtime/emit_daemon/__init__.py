@@ -13,6 +13,9 @@ Components:
 - ModelEmitDaemonConfig: Configuration model for the daemon
 - BoundedEventQueue: In-memory queue with disk spool overflow
 - ModelQueuedEvent: Event model for queued events
+- NotificationConsumer: Consumes notification events and routes to Slack
+- ModelNotificationBlocked: Event model for blocked notifications
+- ModelNotificationCompleted: Event model for completion notifications
 
 Example Usage:
     ```python
@@ -22,6 +25,7 @@ Example Usage:
         EventRegistry,
         ModelEmitDaemonConfig,
         ModelEventRegistration,
+        NotificationConsumer,
         emit_event,
     )
 
@@ -43,6 +47,10 @@ Example Usage:
     # Or use the registry directly
     registry = EventRegistry(environment="dev")
     topic = registry.resolve_topic("prompt.submitted")
+
+    # Notification consumer usage
+    consumer = NotificationConsumer(event_bus=kafka_event_bus)
+    await consumer.start()
     ```
 """
 
@@ -70,6 +78,15 @@ from omnibase_infra.runtime.emit_daemon.model_daemon_response import (
     ModelDaemonQueuedResponse,
     parse_daemon_response,
 )
+from omnibase_infra.runtime.emit_daemon.models import (
+    ModelNotificationBlocked,
+    ModelNotificationCompleted,
+)
+from omnibase_infra.runtime.emit_daemon.notification_consumer import (
+    TOPIC_NOTIFICATION_BLOCKED,
+    TOPIC_NOTIFICATION_COMPLETED,
+    NotificationConsumer,
+)
 from omnibase_infra.runtime.emit_daemon.queue import (
     BoundedEventQueue,
     ModelQueuedEvent,
@@ -88,7 +105,12 @@ __all__: list[str] = [
     "ModelDaemonQueuedResponse",
     "ModelEmitDaemonConfig",
     "ModelEventRegistration",
+    "ModelNotificationBlocked",
+    "ModelNotificationCompleted",
     "ModelQueuedEvent",
+    "NotificationConsumer",
+    "TOPIC_NOTIFICATION_BLOCKED",
+    "TOPIC_NOTIFICATION_COMPLETED",
     "cli_main",
     "emit_event",
     "emit_event_with_fallback",
