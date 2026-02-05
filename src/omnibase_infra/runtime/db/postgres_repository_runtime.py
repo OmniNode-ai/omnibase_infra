@@ -256,6 +256,56 @@ class PostgresRepositoryRuntime:
         except Exception as e:
             logger.warning(f"Failed to emit ledger event: {e}", exc_info=True)
 
+    def _is_retriable_error(self, exc: Exception) -> bool:
+        """Determine if a database error is retriable.
+
+        Connection errors and transient failures are retriable.
+        Constraint violations, syntax errors, etc. are NOT retriable.
+
+        Args:
+            exc: The exception to classify.
+
+        Returns:
+            True if the error is transient and retriable, False otherwise.
+        """
+        error_type = type(exc).__name__
+        error_str = str(exc).lower()
+
+        # asyncpg connection-related exceptions (retriable)
+        retriable_types = {
+            "ConnectionDoesNotExistError",
+            "InterfaceError",
+            "InterfaceWarning",
+            "CannotConnectNowError",
+            "TooManyConnectionsError",
+            "ConnectionRefusedError",
+            "ConnectionResetError",
+            "BrokenPipeError",
+            "TimeoutError",
+            "OSError",
+        }
+
+        if error_type in retriable_types:
+            return True
+
+        # Check for connection-related error messages (fallback)
+        retriable_keywords = [
+            "connection",
+            "connect",
+            "network",
+            "timeout",
+            "temporarily unavailable",
+            "too many connections",
+            "server closed",
+            "broken pipe",
+        ]
+
+        if any(keyword in error_str for keyword in retriable_keywords):
+            return True
+
+        # Default: not retriable (constraint violations, syntax errors, etc.)
+        return False
+
     async def call(
         self, op_name: str, *args: object, correlation_id: UUID | None = None
     ) -> list[dict[str, object]] | dict[str, object] | None:
@@ -366,11 +416,8 @@ class PostgresRepositoryRuntime:
             # Emit failure event for any other exception
             elapsed_ms = (time.monotonic() - start_time) * 1000
             if self._ledger_sink is not None:
-                # Determine if retriable: most database errors (constraint violations,
-                # syntax errors) are NOT retriable. Only connection/transient errors
-                # warrant retry. RepositoryExecutionError wraps all DB errors, so
-                # default to False (safe; caller can override retry logic).
-                retriable = False
+                # Classify error as retriable based on error type/message
+                retriable = self._is_retriable_error(e)
                 failed_event = ModelDbQueryFailed(
                     event_id=uuid4(),
                     correlation_id=corr_id,

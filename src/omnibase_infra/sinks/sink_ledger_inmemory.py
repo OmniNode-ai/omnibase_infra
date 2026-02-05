@@ -87,12 +87,19 @@ class InMemoryLedgerSink:
 
         Returns:
             True if event was accepted.
-            False if event was dropped due to policy.
+            False if event was dropped due to DROP_NEWEST policy.
 
         Raises:
             LedgerSinkClosedError: If sink is closed.
             LedgerSinkFullError: If buffer is full and policy is RAISE.
             NotImplementedError: If drop_policy is BLOCK (not supported in test sink).
+
+        Note:
+            With DROP_OLDEST policy (default), this method always returns True
+            when the sink is open, but if the buffer is full, the oldest event
+            is silently evicted to make room for the new event. Callers cannot
+            detect when old events are dropped; use DROP_NEWEST or RAISE policies
+            if drop notification is required.
         """
         async with self._lock:
             # Check closed INSIDE lock to prevent race with close()

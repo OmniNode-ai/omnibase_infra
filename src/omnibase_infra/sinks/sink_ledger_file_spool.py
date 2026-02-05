@@ -130,11 +130,18 @@ class FileSpoolLedgerSink:
 
         Returns:
             True if event was accepted.
-            False if event was dropped due to policy.
+            False if event was dropped due to DROP_NEWEST policy.
 
         Raises:
             LedgerSinkClosedError: If sink is closed.
             LedgerSinkFullError: If buffer is full and policy is RAISE.
+
+        Note:
+            With DROP_OLDEST policy (default), this method always returns True
+            when the sink is open, but if the buffer is full, the oldest event
+            is silently evicted to make room for the new event. Callers cannot
+            detect when old events are dropped; use DROP_NEWEST or RAISE policies
+            if drop notification is required.
         """
         async with self._lock:
             # Check closed INSIDE lock to prevent race with close()
@@ -176,18 +183,29 @@ class FileSpoolLedgerSink:
             return await self._flush_buffer_locked()
 
     async def _flush_buffer_locked(self) -> int:
-        """Flush buffer while holding lock. Internal method."""
+        """Flush buffer while holding lock. Internal method.
+
+        Uses a two-phase approach to prevent data loss:
+        1. Snapshot events to flush (preserves buffer on failure)
+        2. Write events to disk
+        3. Remove written events from buffer only after successful flush
+
+        This ensures events are not lost if I/O fails mid-flush.
+        """
         if not self._buffer:
             return 0
 
+        # Phase 1: Snapshot events to flush (don't remove yet)
+        events_to_flush = list(self._buffer)
         flushed = 0
+
         try:
             # Ensure we have an open file
             if self._file_handle is None:
                 self._open_new_file()
 
-            while self._buffer:
-                event = self._buffer.popleft()
+            # Phase 2: Write all events
+            for event in events_to_flush:
                 line = self._serialize_event(event)
                 line_bytes = (line + "\n").encode("utf-8")
 
@@ -204,8 +222,15 @@ class FileSpoolLedgerSink:
             if self._file_handle is not None:
                 self._file_handle.flush()
 
+            # Phase 3: Only clear buffer after successful write
+            # Remove exactly the events we flushed (not any new ones added during flush)
+            for _ in range(flushed):
+                self._buffer.popleft()
+
         except Exception as e:
-            logger.exception("Failed to flush ledger events")
+            logger.exception(
+                f"Failed to flush ledger events (flushed {flushed} before error)"
+            )
             raise LedgerSinkError(f"Flush failed: {e}") from e
 
         return flushed
@@ -241,16 +266,24 @@ class FileSpoolLedgerSink:
         return json.dumps(data, separators=(",", ":"), sort_keys=True)
 
     async def _background_flush_loop(self) -> None:
-        """Background task that periodically flushes the buffer."""
-        while not self._closed:
+        """Background task that periodically flushes the buffer.
+
+        Checks `_closed` inside the lock to prevent race conditions
+        with close(). The task exits cleanly when the sink is closed.
+        """
+        while True:
             await asyncio.sleep(self._flush_interval)
-            if self._buffer:
-                try:
-                    count = await self.flush()
-                    if count > 0:
-                        logger.debug(f"Background flush: {count} events")
-                except Exception:
-                    logger.exception("Background flush failed")
+            # Check closed state inside lock to prevent race with close()
+            async with self._lock:
+                if self._closed:
+                    return
+                if self._buffer:
+                    try:
+                        count = await self._flush_buffer_locked()
+                        if count > 0:
+                            logger.debug(f"Background flush: {count} events")
+                    except Exception:
+                        logger.exception("Background flush failed")
 
     async def close(self) -> None:
         """Close the sink, flushing any pending events.
