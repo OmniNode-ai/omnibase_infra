@@ -81,10 +81,8 @@ logger = logging.getLogger(__name__)
 # Topic Configuration
 # =============================================================================
 # Get topic from environment or use docker-compose default
-# The runtime container expects: dev.onex.evt.node-introspection.v1 (from ONEX_INPUT_TOPIC)
-RUNTIME_INPUT_TOPIC = os.getenv(
-    "ONEX_INPUT_TOPIC", "dev.onex.evt.node-introspection.v1"
-)
+# The runtime container expects: onex.evt.node-introspection.v1 (from ONEX_INPUT_TOPIC)
+RUNTIME_INPUT_TOPIC = os.getenv("ONEX_INPUT_TOPIC", "onex.evt.node-introspection.v1")
 
 # =============================================================================
 # CI Environment Timing Configuration
@@ -448,7 +446,7 @@ class TestRuntimeE2EFlow:
 
         # Subscribe to completion topic (matches docker-compose.e2e.yml ONEX_OUTPUT_TOPIC)
         output_topic = os.getenv(
-            "ONEX_OUTPUT_TOPIC", "dev.onex.evt.registration-completed.v1"
+            "ONEX_OUTPUT_TOPIC", "onex.evt.registration-completed.v1"
         )
         group_id = f"e2e-runtime-{unique_node_id.hex[:8]}"
 

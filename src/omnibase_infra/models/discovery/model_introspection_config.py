@@ -108,6 +108,7 @@ class ModelIntrospectionConfig(BaseModel):
                 config = ModelIntrospectionConfig(
                     node_id=node_id,
                     node_type=EnumNodeKind.EFFECT,  # Use enum directly (preferred)
+                    node_name="my_effect_node",
                     event_bus=event_bus,
                     version="1.2.0",
                 )
@@ -119,6 +120,7 @@ class ModelIntrospectionConfig(BaseModel):
                 config = ModelIntrospectionConfig(
                     node_id=node_id or uuid4(),
                     node_type=EnumNodeKind.EFFECT,  # Use enum directly (preferred)
+                    node_name="my_custom_effect_node",
                     event_bus=event_bus,
                     operation_keywords=frozenset({"fetch", "upload", "download"}),
                 )
@@ -141,6 +143,27 @@ class ModelIntrospectionConfig(BaseModel):
         "Accepts EnumNodeKind directly (preferred) or string (deprecated, will be coerced).",
     )
 
+    node_name: str = Field(  # pattern-ok: canonical identifier, not a foreign key reference
+        ...,
+        min_length=1,
+        description="Node name for consumer group identification (e.g., 'claude_hook_effect'). "
+        "Cannot be empty.",
+    )
+
+    env: str = Field(
+        default="dev",
+        min_length=1,
+        description="Environment identifier (e.g., 'dev', 'staging', 'prod'). "
+        "Used for node identity in event bus subscriptions. Cannot be empty.",
+    )
+
+    service: str = Field(
+        default="onex",
+        min_length=1,
+        description="Service name (e.g., 'omniintelligence', 'omnibridge'). "
+        "Used for node identity in event bus subscriptions. Cannot be empty.",
+    )
+
     # Event bus for publishing introspection events.
     # Uses _EventBusType which provides:
     # - ProtocolEventBus | None during static analysis (TYPE_CHECKING)
@@ -155,7 +178,8 @@ class ModelIntrospectionConfig(BaseModel):
 
     version: str = Field(
         default="1.0.0",
-        description="Node version string",
+        min_length=1,
+        description="Node version string. Cannot be empty.",
     )
 
     cache_ttl: float = Field(
@@ -284,6 +308,7 @@ class ModelIntrospectionConfig(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        from_attributes=True,  # ORM/pytest-xdist compatibility
         arbitrary_types_allowed=True,  # Allow arbitrary types for event_bus
         json_schema_extra={
             "examples": [
@@ -291,6 +316,7 @@ class ModelIntrospectionConfig(BaseModel):
                 {
                     "node_id": "550e8400-e29b-41d4-a716-446655440000",
                     "node_type": "EFFECT",
+                    "node_name": "example_effect_node",
                     "event_bus": None,
                     "version": "1.0.0",
                     "cache_ttl": 300.0,
@@ -305,6 +331,7 @@ class ModelIntrospectionConfig(BaseModel):
                 {
                     "node_id": "550e8400-e29b-41d4-a716-446655440001",
                     "node_type": "COMPUTE",
+                    "node_name": "example_compute_node",
                     "event_bus": None,
                     "version": "2.1.0",
                     "cache_ttl": 120.0,

@@ -411,6 +411,7 @@ class TestBootstrap:
     async def test_bootstrap_creates_event_bus_with_environment(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -545,6 +546,7 @@ shutdown:
     async def test_bootstrap_uses_contracts_dir_from_env(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -605,6 +607,7 @@ shutdown:
     async def test_bootstrap_shutdown_timeout_logs_warning(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -666,6 +669,7 @@ shutdown:
     async def test_bootstrap_uses_config_grace_period(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
@@ -879,6 +883,7 @@ class TestIntegration:
     async def test_full_bootstrap_with_real_event_bus(
         self,
         mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
@@ -931,7 +936,10 @@ class TestIntegration:
         assert exit_code == 0
 
     async def test_bootstrap_passes_container_to_service_health_integration(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        mock_inmemory_runtime_config: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """Integration test verifying container is passed to ServiceHealth.
 

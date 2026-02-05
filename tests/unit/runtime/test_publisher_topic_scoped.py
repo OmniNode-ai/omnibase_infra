@@ -6,7 +6,7 @@ Tests the topic-scoped publisher that validates against contract-declared
 publish topics including:
 - Publishing to allowed topics
 - Rejection of disallowed topics
-- Topic resolution with environment prefix
+- Topic resolution (realm-agnostic)
 - JSON serialization and correlation ID handling
 
 Related:
@@ -87,7 +87,7 @@ class TestPublishSuccess:
         publisher: PublisherTopicScoped,
         mock_event_bus: AsyncMock,
     ) -> None:
-        """Test publish uses resolved topic with environment prefix."""
+        """Test publish uses resolved realm-agnostic topic."""
         await publisher.publish(
             event_type="test.event",
             payload={"key": "value"},
@@ -95,7 +95,7 @@ class TestPublishSuccess:
         )
 
         call_kwargs = mock_event_bus.publish.call_args.kwargs
-        assert call_kwargs["topic"] == "dev.onex.evt.allowed.v1"
+        assert call_kwargs["topic"] == "onex.evt.allowed.v1"
 
     async def test_publish_serializes_payload_to_json(
         self,
@@ -191,7 +191,7 @@ class TestPublishSuccess:
 
         assert result is True
         call_kwargs = mock_event_bus.publish.call_args.kwargs
-        assert call_kwargs["topic"] == "dev.onex.evt.another.v1"
+        assert call_kwargs["topic"] == "onex.evt.another.v1"
 
 
 # =============================================================================
@@ -267,36 +267,36 @@ class TestPublishFailure:
 
 
 class TestTopicResolution:
-    """Tests for topic suffix to full topic name resolution."""
+    """Tests for topic suffix to full topic name resolution (realm-agnostic)."""
 
-    def test_resolve_topic_adds_environment(
+    def test_resolve_topic_returns_topic_unchanged(
         self,
         publisher: PublisherTopicScoped,
     ) -> None:
-        """Test resolve_topic adds environment prefix."""
+        """Test resolve_topic returns topic unchanged (realm-agnostic)."""
         result = publisher.resolve_topic("onex.evt.test.v1")
-        assert result == "dev.onex.evt.test.v1"
+        assert result == "onex.evt.test.v1"
 
-    def test_resolve_topic_with_prod_environment(
+    def test_resolve_topic_with_prod_environment_unchanged(
         self,
         publisher_prod: PublisherTopicScoped,
     ) -> None:
-        """Test resolve_topic with production environment."""
+        """Test resolve_topic returns topic unchanged regardless of environment."""
         result = publisher_prod.resolve_topic("onex.evt.orders.v1")
-        assert result == "prod.onex.evt.orders.v1"
+        assert result == "onex.evt.orders.v1"
 
-    def test_resolve_topic_with_custom_environment(
+    def test_resolve_topic_with_custom_environment_unchanged(
         self,
         mock_event_bus: AsyncMock,
     ) -> None:
-        """Test resolve_topic with custom environment."""
+        """Test resolve_topic returns topic unchanged regardless of environment."""
         publisher = PublisherTopicScoped(
             event_bus=mock_event_bus,
             allowed_topics={"topic.v1"},
             environment="staging-eu",
         )
         result = publisher.resolve_topic("topic.v1")
-        assert result == "staging-eu.topic.v1"
+        assert result == "topic.v1"
 
 
 # =============================================================================
@@ -587,5 +587,5 @@ class TestMultiplePublications:
         assert mock_event_bus.publish.call_count == 2
         calls = mock_event_bus.publish.call_args_list
         topics = [c.kwargs["topic"] for c in calls]
-        assert "dev.onex.evt.allowed.v1" in topics
-        assert "dev.onex.evt.another.v1" in topics
+        assert "onex.evt.allowed.v1" in topics
+        assert "onex.evt.another.v1" in topics

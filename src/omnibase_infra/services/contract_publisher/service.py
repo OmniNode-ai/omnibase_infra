@@ -216,17 +216,18 @@ class ServiceContractPublisher:
                 )
 
     def resolve_topic(self, topic_suffix: str) -> str:
-        """Resolve topic suffix to full topic name with environment prefix.
+        """Resolve topic suffix to topic name (realm-agnostic, no environment prefix).
 
-        Uses the same pattern as EventBusSubcontractWiring.
+        Topics are realm-agnostic in ONEX. The environment/realm is enforced via
+        envelope identity, not topic naming.
 
         Args:
             topic_suffix: Topic suffix (e.g., "onex.evt.contract-registered.v1")
 
         Returns:
-            Full topic name (e.g., "dev.onex.evt.contract-registered.v1")
+            Topic name (same as suffix, no environment prefix)
         """
-        return f"{self._environment}.{topic_suffix}"
+        return topic_suffix
 
     async def publish_all(self) -> ModelPublishResult:
         """Discover and publish all contracts from configured source.

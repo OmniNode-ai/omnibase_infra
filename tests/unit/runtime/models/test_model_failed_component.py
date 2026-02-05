@@ -27,6 +27,9 @@ from pydantic import ValidationError
 
 from omnibase_infra.runtime.models.model_failed_component import ModelFailedComponent
 
+# Module-level marker for test discovery/filtering
+pytestmark = pytest.mark.unit
+
 
 class TestModelFailedComponentConstruction:
     """Tests for ModelFailedComponent valid construction."""

@@ -36,9 +36,9 @@ python = "^3.12"
 #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
 # Remember to switch back to PyPI versions before merging to main.
 #
-# omnibase-core v0.13.1: Latest core release
-# (v0.12.0 included: ModelDbRepositoryContract schema + validators)
-omnibase-core = "^0.13.1"
+# omnibase-core v0.14.0: Latest core release
+# (v0.13.1 included: Contract registration support)
+omnibase-core = "^0.14.0"
 # omnibase-spi v0.6.4: Version bump
 omnibase-spi = "^0.6.4"
 

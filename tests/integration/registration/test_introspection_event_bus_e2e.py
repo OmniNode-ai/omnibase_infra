@@ -140,6 +140,7 @@ class IntrospectionTestNode(MixinNodeIntrospection):
         config = ModelIntrospectionConfig(
             node_id=node_id,
             node_type=EnumNodeKind.EFFECT,
+            node_name="event_bus_test_node",
             event_bus=event_bus,
             version="1.0.0",
             introspection_topic="node.introspection",
@@ -187,11 +188,9 @@ class TestIntrospectionEventBusExtraction:
         assert len(data.event_bus.subscribe_topics) == 1
 
         # Topics should be resolved with environment prefix
-        assert data.event_bus.publish_topic_strings == [
-            "dev.onex.evt.node-registered.v1"
-        ]
+        assert data.event_bus.publish_topic_strings == ["onex.evt.node-registered.v1"]
         assert data.event_bus.subscribe_topic_strings == [
-            "dev.onex.evt.intent-classified.v1"
+            "onex.evt.intent-classified.v1"
         ]
 
     async def test_introspection_event_with_multiple_topics(self) -> None:
@@ -220,17 +219,10 @@ class TestIntrospectionEventBusExtraction:
         assert len(data.event_bus.subscribe_topics) == 2
 
         # Verify prod environment prefix
-        assert (
-            "prod.onex.evt.node-registered.v1" in data.event_bus.publish_topic_strings
-        )
-        assert "prod.onex.evt.node-heartbeat.v1" in data.event_bus.publish_topic_strings
-        assert (
-            "prod.onex.evt.intent-classified.v1"
-            in data.event_bus.subscribe_topic_strings
-        )
-        assert (
-            "prod.onex.cmd.introspect-node.v1" in data.event_bus.subscribe_topic_strings
-        )
+        assert "onex.evt.node-registered.v1" in data.event_bus.publish_topic_strings
+        assert "onex.evt.node-heartbeat.v1" in data.event_bus.publish_topic_strings
+        assert "onex.evt.intent-classified.v1" in data.event_bus.subscribe_topic_strings
+        assert "onex.cmd.introspect-node.v1" in data.event_bus.subscribe_topic_strings
 
     async def test_introspection_without_contract_has_no_event_bus(self) -> None:
         """Node without contract produces introspection event with event_bus=None."""
@@ -284,10 +276,10 @@ class TestIntrospectionEventBusExtraction:
         assert data_dev.event_bus is not None
         assert data_staging.event_bus is not None
         assert data_dev.event_bus.subscribe_topic_strings == [
-            "dev.onex.evt.intent-classified.v1"
+            "onex.evt.intent-classified.v1"
         ]
         assert data_staging.event_bus.subscribe_topic_strings == [
-            "staging.onex.evt.intent-classified.v1"
+            "onex.evt.intent-classified.v1"
         ]
 
 
@@ -302,20 +294,20 @@ class TestModelNodeEventBusConfig:
     def test_event_bus_topic_entry_creation(self) -> None:
         """ModelEventBusTopicEntry can be created with required and optional fields."""
         # With only required field
-        entry = ModelEventBusTopicEntry(topic="dev.onex.evt.test.v1")
-        assert entry.topic == "dev.onex.evt.test.v1"
+        entry = ModelEventBusTopicEntry(topic="onex.evt.test.v1")
+        assert entry.topic == "onex.evt.test.v1"
         assert entry.event_type is None
         assert entry.message_category == "EVENT"  # default
         assert entry.description is None
 
         # With all fields
         full_entry = ModelEventBusTopicEntry(
-            topic="dev.onex.cmd.test.v1",
+            topic="onex.cmd.test.v1",
             event_type="ModelTestCommand",
             message_category="COMMAND",
             description="Test command topic",
         )
-        assert full_entry.topic == "dev.onex.cmd.test.v1"
+        assert full_entry.topic == "onex.cmd.test.v1"
         assert full_entry.event_type == "ModelTestCommand"
         assert full_entry.message_category == "COMMAND"
         assert full_entry.description == "Test command topic"
@@ -324,20 +316,20 @@ class TestModelNodeEventBusConfig:
         """ModelNodeEventBusConfig extracts topic strings correctly."""
         config = ModelNodeEventBusConfig(
             subscribe_topics=[
-                ModelEventBusTopicEntry(topic="dev.onex.evt.input.v1"),
-                ModelEventBusTopicEntry(topic="dev.onex.evt.input2.v1"),
+                ModelEventBusTopicEntry(topic="onex.evt.input.v1"),
+                ModelEventBusTopicEntry(topic="onex.evt.input2.v1"),
             ],
             publish_topics=[
-                ModelEventBusTopicEntry(topic="dev.onex.evt.output.v1"),
+                ModelEventBusTopicEntry(topic="onex.evt.output.v1"),
             ],
         )
 
         # Property methods extract only topic strings
         assert config.subscribe_topic_strings == [
-            "dev.onex.evt.input.v1",
-            "dev.onex.evt.input2.v1",
+            "onex.evt.input.v1",
+            "onex.evt.input2.v1",
         ]
-        assert config.publish_topic_strings == ["dev.onex.evt.output.v1"]
+        assert config.publish_topic_strings == ["onex.evt.output.v1"]
 
     def test_event_bus_config_immutability(self) -> None:
         """ModelNodeEventBusConfig is frozen (immutable)."""
@@ -377,16 +369,16 @@ class TestConsulEventBusStorage:
         return ModelNodeEventBusConfig(
             subscribe_topics=[
                 ModelEventBusTopicEntry(
-                    topic="dev.onex.evt.intent-classified.v1",
+                    topic="onex.evt.intent-classified.v1",
                     event_type="ModelIntentClassified",
                 ),
                 ModelEventBusTopicEntry(
-                    topic="dev.onex.evt.node-heartbeat.v1",
+                    topic="onex.evt.node-heartbeat.v1",
                 ),
             ],
             publish_topics=[
                 ModelEventBusTopicEntry(
-                    topic="dev.onex.evt.node-registered.v1",
+                    topic="onex.evt.node-registered.v1",
                     event_type="ModelNodeRegistered",
                 ),
             ],
@@ -519,7 +511,7 @@ class TestConsulEventBusStorage:
         """Multiple nodes subscribing to same topic all appear in index."""
         handler = initialized_consul_handler
         correlation_id = uuid4()
-        topic = "dev.onex.evt.shared-topic.v1"
+        topic = "onex.evt.shared-topic.v1"
 
         node_ids = [f"test-node-{uuid4().hex[:8]}" for _ in range(3)]
         config = ModelNodeEventBusConfig(
@@ -608,7 +600,7 @@ class TestIdempotencyE2E:
         """Re-registering same node doesn't create duplicate index entries."""
         handler = initialized_consul_handler
         correlation_id = uuid4()
-        topic = "dev.onex.evt.idempotent-test.v1"
+        topic = "onex.evt.idempotent-test.v1"
 
         config = ModelNodeEventBusConfig(
             subscribe_topics=[ModelEventBusTopicEntry(topic=topic)],
@@ -665,8 +657,8 @@ class TestIdempotencyE2E:
         """Changing contract topics updates index correctly."""
         handler = initialized_consul_handler
         correlation_id = uuid4()
-        old_topic = "dev.onex.evt.old-topic.v1"
-        new_topic = "dev.onex.evt.new-topic.v1"
+        old_topic = "onex.evt.old-topic.v1"
+        new_topic = "onex.evt.new-topic.v1"
 
         # Initial config
         config_v1 = ModelNodeEventBusConfig(
@@ -780,8 +772,8 @@ class TestIntrospectionEventPublishing:
 
         assert isinstance(event, ModelNodeIntrospectionEvent)
         assert event.event_bus is not None
-        assert "dev.onex.evt.test-input.v1" in event.event_bus.subscribe_topic_strings
-        assert "dev.onex.evt.test-output.v1" in event.event_bus.publish_topic_strings
+        assert "onex.evt.test-input.v1" in event.event_bus.subscribe_topic_strings
+        assert "onex.evt.test-output.v1" in event.event_bus.publish_topic_strings
 
 
 __all__ = [

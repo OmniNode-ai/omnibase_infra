@@ -24,6 +24,9 @@ from omnibase_infra.runtime.models.model_health_check_response import (
     ModelHealthCheckResponse,
 )
 
+# Module-level marker for test discovery/filtering
+pytestmark = pytest.mark.unit
+
 
 class TestModelHealthCheckResponseSuccess:
     """Tests for ModelHealthCheckResponse.success() factory method."""

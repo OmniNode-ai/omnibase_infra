@@ -11,10 +11,10 @@ The router:
     - Routes to ContractRegistryReducer.reduce() for state transitions
     - Emits intents for Effect layer execution (PostgreSQL operations)
 
-Topics Handled:
-    - {env}.onex.evt.platform.contract-registered.v1 -> ModelContractRegisteredEvent
-    - {env}.onex.evt.platform.contract-deregistered.v1 -> ModelContractDeregisteredEvent
-    - {env}.onex.evt.platform.node-heartbeat.v1 -> ModelNodeHeartbeatEvent
+Topics Handled (realm-agnostic, no environment prefix):
+    - onex.evt.platform.contract-registered.v1 -> ModelContractRegisteredEvent
+    - onex.evt.platform.contract-deregistered.v1 -> ModelContractDeregisteredEvent
+    - onex.evt.platform.node-heartbeat.v1 -> ModelNodeHeartbeatEvent
 
 Design:
     This class encapsulates the message routing logic for contract registration
@@ -69,7 +69,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Topic suffix patterns for event type matching
-# These match the topic suffix after the environment prefix
+# Topics are realm-agnostic (no environment prefix)
 TOPIC_SUFFIX_CONTRACT_REGISTERED = "onex.evt.platform.contract-registered.v1"
 TOPIC_SUFFIX_CONTRACT_DEREGISTERED = "onex.evt.platform.contract-deregistered.v1"
 TOPIC_SUFFIX_NODE_HEARTBEAT = "onex.evt.platform.node-heartbeat.v1"

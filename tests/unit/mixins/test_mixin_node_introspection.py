@@ -78,6 +78,37 @@ PublishedEventDict = dict[
 ]
 
 
+# -----------------------------------------------------------------------------
+# Module-level fixtures for shared test infrastructure
+# -----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_node_standard() -> "MockNode":
+    """Module-level fixture for initialized MockNode with standard configuration.
+
+    This fixture is shared across multiple test classes that need a standard
+    MockNode instance with default configuration. Previously duplicated in:
+    - TestMixinNodeIntrospectionCapabilities
+    - TestMixinNodeIntrospectionEndpoints
+    - TestMixinNodeIntrospectionState
+    - TestMixinNodeIntrospectionPerformance
+
+    Returns:
+        Initialized MockNode instance with standard config (EnumNodeKind.EFFECT,
+        no event bus, default cache TTL).
+    """
+    node = MockNode()
+    config = ModelIntrospectionConfig(
+        node_id=TEST_NODE_UUID_1,
+        node_type=EnumNodeKind.EFFECT,
+        node_name="test_introspection_node",
+        event_bus=None,
+    )
+    node.initialize_introspection(config)
+    return node
+
+
 class MockEventBus:
     """Mock event bus for testing introspection publishing.
 
@@ -269,6 +300,7 @@ class TestMixinNodeIntrospectionInit:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -287,6 +319,7 @@ class TestMixinNodeIntrospectionInit:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_2,
             node_type=EnumNodeKind.COMPUTE,
+            node_name="test_introspection_node",
             event_bus=event_bus,
         )
         node.initialize_introspection(config)
@@ -299,6 +332,7 @@ class TestMixinNodeIntrospectionInit:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_3,
             node_type=EnumNodeKind.REDUCER,
+            node_name="test_introspection_node",
             event_bus=None,
             cache_ttl=120.0,
         )
@@ -312,6 +346,7 @@ class TestMixinNodeIntrospectionInit:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.ORCHESTRATOR,
+            node_name="test_introspection_node",
             event_bus=None,
             version="2.1.0",
         )
@@ -325,6 +360,7 @@ class TestMixinNodeIntrospectionInit:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -350,6 +386,7 @@ class TestMixinNodeIntrospectionInit:
             config = ModelIntrospectionConfig(
                 node_id="",  # Empty string is not a valid UUID format
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_introspection_node",
             )
             node.initialize_introspection(config)
 
@@ -361,6 +398,7 @@ class TestMixinNodeIntrospectionInit:
             config = ModelIntrospectionConfig(
                 node_id=TEST_NODE_UUID_1,
                 node_type="",
+                node_name="test_introspection_node",
             )
             node.initialize_introspection(config)
 
@@ -368,29 +406,16 @@ class TestMixinNodeIntrospectionInit:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestMixinNodeIntrospectionCapabilities:
-    """Tests for capability extraction."""
+    """Tests for capability extraction.
 
-    @pytest.fixture
-    def mock_node(self) -> MockNode:
-        """Create initialized mock node fixture.
-
-        Returns:
-            Initialized MockNode instance.
-        """
-        node = MockNode()
-        config = ModelIntrospectionConfig(
-            node_id=TEST_NODE_UUID_1,
-            node_type=EnumNodeKind.EFFECT,
-            event_bus=None,
-        )
-        node.initialize_introspection(config)
-        return node
+    Note: Uses module-level mock_node_standard fixture to avoid duplication.
+    """
 
     async def test_get_capabilities_extracts_operations(
-        self, mock_node: MockNode
+        self, mock_node_standard: MockNode
     ) -> None:
         """Test that get_capabilities extracts operation methods."""
-        capabilities = await mock_node.get_capabilities()
+        capabilities = await mock_node_standard.get_capabilities()
 
         # Should discover methods with operation keywords
         assert isinstance(capabilities.operations, tuple)
@@ -399,25 +424,27 @@ class TestMixinNodeIntrospectionCapabilities:
         assert "process_batch" in capabilities.operations
 
     async def test_get_capabilities_excludes_private_methods(
-        self, mock_node: MockNode
+        self, mock_node_standard: MockNode
     ) -> None:
         """Test that get_capabilities excludes private methods."""
-        capabilities = await mock_node.get_capabilities()
+        capabilities = await mock_node_standard.get_capabilities()
 
         # Private methods should not be in operations
         assert isinstance(capabilities.operations, tuple)
         for op in capabilities.operations:
             assert not op.startswith("_")
 
-    async def test_get_capabilities_detects_fsm(self, mock_node: MockNode) -> None:
+    async def test_get_capabilities_detects_fsm(
+        self, mock_node_standard: MockNode
+    ) -> None:
         """Test that get_capabilities detects FSM state management."""
-        capabilities = await mock_node.get_capabilities()
+        capabilities = await mock_node_standard.get_capabilities()
 
         # MockNode has _state attribute
         assert capabilities.has_fsm is True
 
     async def test_get_capabilities_is_discoverable_via_reflection(
-        self, mock_node: MockNode
+        self, mock_node_standard: MockNode
     ) -> None:
         """Test that capabilities are discoverable via class introspection.
 
@@ -426,21 +453,23 @@ class TestMixinNodeIntrospectionCapabilities:
         the node mixin is still in the class hierarchy.
         """
         # Validate that MixinNodeIntrospection is in the class hierarchy
-        assert issubclass(type(mock_node), MixinNodeIntrospection)
+        assert issubclass(type(mock_node_standard), MixinNodeIntrospection)
 
     async def test_get_capabilities_includes_method_signatures(
-        self, mock_node: MockNode
+        self, mock_node_standard: MockNode
     ) -> None:
         """Test that get_capabilities captures method signatures."""
-        capabilities = await mock_node.get_capabilities()
+        capabilities = await mock_node_standard.get_capabilities()
 
         # Should have method signatures
         assert isinstance(capabilities.method_signatures, dict)
         assert len(capabilities.method_signatures) > 0
 
-    async def test_get_capabilities_returns_model(self, mock_node: MockNode) -> None:
+    async def test_get_capabilities_returns_model(
+        self, mock_node_standard: MockNode
+    ) -> None:
         """Test that get_capabilities returns a ModelDiscoveredCapabilities."""
-        capabilities = await mock_node.get_capabilities()
+        capabilities = await mock_node_standard.get_capabilities()
 
         assert isinstance(capabilities, ModelDiscoveredCapabilities)
         assert isinstance(capabilities.operations, tuple)
@@ -451,34 +480,25 @@ class TestMixinNodeIntrospectionCapabilities:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestMixinNodeIntrospectionEndpoints:
-    """Tests for endpoint discovery."""
+    """Tests for endpoint discovery.
 
-    @pytest.fixture
-    def mock_node(self) -> MockNode:
-        """Create initialized mock node fixture.
+    Note: Uses module-level mock_node_standard fixture to avoid duplication.
+    """
 
-        Returns:
-            Initialized MockNode instance.
-        """
-        node = MockNode()
-        config = ModelIntrospectionConfig(
-            node_id=TEST_NODE_UUID_1,
-            node_type=EnumNodeKind.EFFECT,
-            event_bus=None,
-        )
-        node.initialize_introspection(config)
-        return node
-
-    async def test_get_endpoints_discovers_health(self, mock_node: MockNode) -> None:
+    async def test_get_endpoints_discovers_health(
+        self, mock_node_standard: MockNode
+    ) -> None:
         """Test that get_endpoints discovers health endpoint."""
-        endpoints = await mock_node.get_endpoints()
+        endpoints = await mock_node_standard.get_endpoints()
 
         assert "health" in endpoints
         assert endpoints["health"] == "http://localhost:8080/health"
 
-    async def test_get_endpoints_discovers_metrics(self, mock_node: MockNode) -> None:
+    async def test_get_endpoints_discovers_metrics(
+        self, mock_node_standard: MockNode
+    ) -> None:
         """Test that get_endpoints discovers metrics endpoint."""
-        endpoints = await mock_node.get_endpoints()
+        endpoints = await mock_node_standard.get_endpoints()
 
         assert "metrics" in endpoints
         assert endpoints["metrics"] == "http://localhost:8080/metrics"
@@ -489,6 +509,7 @@ class TestMixinNodeIntrospectionEndpoints:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -499,9 +520,11 @@ class TestMixinNodeIntrospectionEndpoints:
         assert isinstance(endpoints, dict)
         assert len(endpoints) == 0
 
-    async def test_get_endpoints_returns_dict(self, mock_node: MockNode) -> None:
+    async def test_get_endpoints_returns_dict(
+        self, mock_node_standard: MockNode
+    ) -> None:
         """Test that get_endpoints returns a dictionary."""
-        endpoints = await mock_node.get_endpoints()
+        endpoints = await mock_node_standard.get_endpoints()
 
         assert isinstance(endpoints, dict)
         for key, value in endpoints.items():
@@ -512,36 +535,25 @@ class TestMixinNodeIntrospectionEndpoints:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestMixinNodeIntrospectionState:
-    """Tests for FSM state extraction."""
+    """Tests for FSM state extraction.
 
-    @pytest.fixture
-    def mock_node(self) -> MockNode:
-        """Create initialized mock node fixture.
+    Note: Uses module-level mock_node_standard fixture to avoid duplication.
+    """
 
-        Returns:
-            Initialized MockNode instance.
-        """
-        node = MockNode()
-        config = ModelIntrospectionConfig(
-            node_id=TEST_NODE_UUID_1,
-            node_type=EnumNodeKind.EFFECT,
-            event_bus=None,
-        )
-        node.initialize_introspection(config)
-        return node
-
-    async def test_get_current_state_returns_state(self, mock_node: MockNode) -> None:
+    async def test_get_current_state_returns_state(
+        self, mock_node_standard: MockNode
+    ) -> None:
         """Test that get_current_state returns the node's state."""
-        state = await mock_node.get_current_state()
+        state = await mock_node_standard.get_current_state()
 
         assert state == "idle"
 
     async def test_get_current_state_reflects_changes(
-        self, mock_node: MockNode
+        self, mock_node_standard: MockNode
     ) -> None:
         """Test that get_current_state reflects state changes."""
-        mock_node._state = "processing"
-        state = await mock_node.get_current_state()
+        mock_node_standard._state = "processing"
+        state = await mock_node_standard.get_current_state()
 
         assert state == "processing"
 
@@ -551,6 +563,7 @@ class TestMixinNodeIntrospectionState:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -565,6 +578,7 @@ class TestMixinNodeIntrospectionState:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -576,11 +590,15 @@ class TestMixinNodeIntrospectionState:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestMixinNodeIntrospectionCaching:
-    """Tests for caching behavior."""
+    """Tests for caching behavior.
+
+    Note: Uses a class-level fixture with short TTL (0.1s) specifically for
+    testing cache expiration. This is different from the module-level fixture.
+    """
 
     @pytest.fixture
-    def mock_node(self) -> MockNode:
-        """Create initialized mock node with short TTL.
+    def mock_node_short_ttl(self) -> MockNode:
+        """Create initialized mock node with short TTL for cache testing.
 
         Returns:
             Initialized MockNode instance with 0.1s cache TTL.
@@ -589,6 +607,7 @@ class TestMixinNodeIntrospectionCaching:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
             cache_ttl=0.1,  # Short TTL for testing
         )
@@ -596,39 +615,41 @@ class TestMixinNodeIntrospectionCaching:
         return node
 
     async def test_get_introspection_data_caches_result(
-        self, mock_node: MockNode
+        self, mock_node_short_ttl: MockNode
     ) -> None:
         """Test that get_introspection_data caches the result."""
         # First call - should compute
-        data1 = await mock_node.get_introspection_data()
+        data1 = await mock_node_short_ttl.get_introspection_data()
         timestamp1 = data1.timestamp
 
         # Immediate second call - should return cached
-        data2 = await mock_node.get_introspection_data()
+        data2 = await mock_node_short_ttl.get_introspection_data()
         timestamp2 = data2.timestamp
 
         # Same timestamp means cached result
         assert timestamp1 == timestamp2
 
-    async def test_cache_expires_after_ttl(self, mock_node: MockNode) -> None:
+    async def test_cache_expires_after_ttl(self, mock_node_short_ttl: MockNode) -> None:
         """Test that cache expires after TTL."""
         # First call - populates cache
-        data1 = await mock_node.get_introspection_data()
+        data1 = await mock_node_short_ttl.get_introspection_data()
         timestamp1 = data1.timestamp
 
         # Wait for TTL to expire (0.1s + buffer)
         await asyncio.sleep(0.15)
 
         # Next call should recompute
-        data2 = await mock_node.get_introspection_data()
+        data2 = await mock_node_short_ttl.get_introspection_data()
         timestamp2 = data2.timestamp
 
         # Different timestamp means cache was refreshed
         assert timestamp2 > timestamp1
 
-    async def test_get_introspection_data_structure(self, mock_node: MockNode) -> None:
+    async def test_get_introspection_data_structure(
+        self, mock_node_short_ttl: MockNode
+    ) -> None:
         """Test that get_introspection_data returns expected model."""
-        data = await mock_node.get_introspection_data()
+        data = await mock_node_short_ttl.get_introspection_data()
 
         assert isinstance(data, ModelNodeIntrospectionEvent)
         # node_id is a UUID passed via config
@@ -647,6 +668,7 @@ class TestMixinNodeIntrospectionCaching:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -654,17 +676,19 @@ class TestMixinNodeIntrospectionCaching:
         assert node._introspection_cache is None
         assert node._introspection_cached_at is None
 
-    async def test_invalidate_introspection_cache(self, mock_node: MockNode) -> None:
+    async def test_invalidate_introspection_cache(
+        self, mock_node_short_ttl: MockNode
+    ) -> None:
         """Test that invalidate_introspection_cache clears the cache."""
         # Populate cache
-        await mock_node.get_introspection_data()
-        assert mock_node._introspection_cache is not None
+        await mock_node_short_ttl.get_introspection_data()
+        assert mock_node_short_ttl._introspection_cache is not None
 
         # Invalidate
-        mock_node.invalidate_introspection_cache()
+        mock_node_short_ttl.invalidate_introspection_cache()
 
-        assert mock_node._introspection_cache is None
-        assert mock_node._introspection_cached_at is None
+        assert mock_node_short_ttl._introspection_cache is None
+        assert mock_node_short_ttl._introspection_cached_at is None
 
 
 @pytest.mark.unit
@@ -684,6 +708,7 @@ class TestMixinNodeIntrospectionPublishing:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=event_bus,
         )
         node.initialize_introspection(config)
@@ -700,6 +725,7 @@ class TestMixinNodeIntrospectionPublishing:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -771,6 +797,7 @@ class TestMixinNodeIntrospectionTasks:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=event_bus,
         )
         node.initialize_introspection(config)
@@ -802,6 +829,7 @@ class TestMixinNodeIntrospectionTasks:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=event_bus,
         )
         node.initialize_introspection(config)
@@ -825,6 +853,7 @@ class TestMixinNodeIntrospectionTasks:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -846,6 +875,7 @@ class TestMixinNodeIntrospectionTasks:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=event_bus,
         )
         node.initialize_introspection(config)
@@ -891,6 +921,7 @@ class TestMixinNodeIntrospectionGracefulDegradation:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=failing_event_bus,
         )
         node.initialize_introspection(config)
@@ -918,6 +949,7 @@ class TestMixinNodeIntrospectionGracefulDegradation:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=BrokenEventBus(),
         )
         node.initialize_introspection(config)
@@ -937,6 +969,7 @@ class TestMixinNodeIntrospectionGracefulDegradation:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=event_bus,
         )
         node.initialize_introspection(config)
@@ -978,44 +1011,32 @@ class TestMixinNodeIntrospectionGracefulDegradation:
 class TestMixinNodeIntrospectionPerformance:
     """Tests for performance requirements.
 
-    Note: Performance thresholds are multiplied by PERF_MULTIPLIER to account
-    for CI environments which may be slower than local development machines.
+    Note:
+        - Uses module-level mock_node_standard fixture to avoid duplication.
+        - Performance thresholds are multiplied by PERF_MULTIPLIER to account
+          for CI environments which may be slower than local development machines.
     """
 
-    @pytest.fixture
-    def mock_node(self) -> MockNode:
-        """Create initialized mock node fixture.
-
-        Returns:
-            Initialized MockNode instance.
-        """
-        node = MockNode()
-        config = ModelIntrospectionConfig(
-            node_id=TEST_NODE_UUID_1,
-            node_type=EnumNodeKind.EFFECT,
-            event_bus=None,
-        )
-        node.initialize_introspection(config)
-        return node
-
     async def test_introspection_extraction_under_50ms(
-        self, mock_node: MockNode
+        self, mock_node_standard: MockNode
     ) -> None:
         """Test that introspection data extraction completes within threshold."""
         # Clear cache to force full computation
-        mock_node._introspection_cache = None
-        mock_node._introspection_cached_at = None
+        mock_node_standard._introspection_cache = None
+        mock_node_standard._introspection_cached_at = None
 
         threshold_ms = 50 * PERF_MULTIPLIER
         start = time.perf_counter()
-        await mock_node.get_introspection_data()
+        await mock_node_standard.get_introspection_data()
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert elapsed_ms < threshold_ms, (
             f"Introspection took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
         )
 
-    async def test_cached_introspection_fast(self, mock_node: MockNode) -> None:
+    async def test_cached_introspection_fast(
+        self, mock_node_standard: MockNode
+    ) -> None:
         """Test that cached introspection returns significantly faster than uncached.
 
         Uses a relaxed threshold (10ms base) to avoid flaky failures in CI
@@ -1023,11 +1044,11 @@ class TestMixinNodeIntrospectionPerformance:
         speedup compared to uncached introspection (~50ms).
         """
         # Populate cache
-        await mock_node.get_introspection_data()
+        await mock_node_standard.get_introspection_data()
 
         threshold_ms = 10 * PERF_MULTIPLIER
         start = time.perf_counter()
-        await mock_node.get_introspection_data()
+        await mock_node_standard.get_introspection_data()
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert elapsed_ms < threshold_ms, (
@@ -1035,33 +1056,39 @@ class TestMixinNodeIntrospectionPerformance:
             f"Cache should provide significant speedup vs uncached (~50ms)."
         )
 
-    async def test_capability_extraction_under_10ms(self, mock_node: MockNode) -> None:
+    async def test_capability_extraction_under_10ms(
+        self, mock_node_standard: MockNode
+    ) -> None:
         """Test that capability extraction completes within threshold."""
         threshold_ms = 10 * PERF_MULTIPLIER
         start = time.perf_counter()
-        await mock_node.get_capabilities()
+        await mock_node_standard.get_capabilities()
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert elapsed_ms < threshold_ms, (
             f"Capability extraction took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
         )
 
-    async def test_endpoint_discovery_under_10ms(self, mock_node: MockNode) -> None:
+    async def test_endpoint_discovery_under_10ms(
+        self, mock_node_standard: MockNode
+    ) -> None:
         """Test that endpoint discovery completes within threshold."""
         threshold_ms = 10 * PERF_MULTIPLIER
         start = time.perf_counter()
-        await mock_node.get_endpoints()
+        await mock_node_standard.get_endpoints()
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert elapsed_ms < threshold_ms, (
             f"Endpoint discovery took {elapsed_ms:.2f}ms, expected <{threshold_ms:.0f}ms"
         )
 
-    async def test_state_extraction_under_1ms(self, mock_node: MockNode) -> None:
+    async def test_state_extraction_under_1ms(
+        self, mock_node_standard: MockNode
+    ) -> None:
         """Test that state extraction completes within threshold."""
         threshold_ms = 1 * PERF_MULTIPLIER
         start = time.perf_counter()
-        await mock_node.get_current_state()
+        await mock_node_standard.get_current_state()
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert elapsed_ms < threshold_ms, (
@@ -1069,18 +1096,18 @@ class TestMixinNodeIntrospectionPerformance:
         )
 
     async def test_multiple_introspection_calls_consistent_performance(
-        self, mock_node: MockNode
+        self, mock_node_standard: MockNode
     ) -> None:
         """Test that multiple introspection calls have consistent performance."""
         times: list[float] = []
 
         for _ in range(10):
             # Clear cache each time
-            mock_node._introspection_cache = None
-            mock_node._introspection_cached_at = None
+            mock_node_standard._introspection_cache = None
+            mock_node_standard._introspection_cached_at = None
 
             start = time.perf_counter()
-            await mock_node.get_introspection_data()
+            await mock_node_standard.get_introspection_data()
             elapsed_ms = (time.perf_counter() - start) * 1000
             times.append(elapsed_ms)
 
@@ -1116,6 +1143,7 @@ class TestMixinNodeIntrospectionBenchmark:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1184,6 +1212,7 @@ class TestMixinNodeIntrospectionBenchmark:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
             cache_ttl=0.001,  # Force cache misses
         )
@@ -1222,6 +1251,7 @@ class TestMixinNodeIntrospectionBenchmark:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1259,6 +1289,7 @@ class TestMixinNodeIntrospectionBenchmark:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1297,6 +1328,7 @@ class TestMixinNodeIntrospectionBenchmark:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1354,6 +1386,7 @@ class TestMixinNodeIntrospectionEdgeCases:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1403,6 +1436,7 @@ class TestMixinNodeIntrospectionEdgeCases:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_2,
             node_type=EnumNodeKind.COMPUTE,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1426,6 +1460,7 @@ class TestMixinNodeIntrospectionEdgeCases:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
             cache_ttl=0.001,  # Very short TTL
         )
@@ -1448,6 +1483,7 @@ class TestMixinNodeIntrospectionEdgeCases:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1461,6 +1497,7 @@ class TestMixinNodeIntrospectionEdgeCases:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1492,6 +1529,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1514,6 +1552,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         config1 = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node_1",
             event_bus=None,
         )
         node1.initialize_introspection(config1)
@@ -1522,6 +1561,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         config2 = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node_2",
             event_bus=None,
         )
         node2.initialize_introspection(config2)
@@ -1544,6 +1584,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1564,6 +1605,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1584,6 +1626,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1607,6 +1650,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1646,6 +1690,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         config1 = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.COMPUTE,
+            node_name="test_custom_node_1",
             event_bus=None,
         )
         node1.initialize_introspection(config1)
@@ -1654,6 +1699,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         config2 = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_2,
             node_type=EnumNodeKind.COMPUTE,
+            node_name="test_custom_node_2",
             event_bus=None,
         )
         node2.initialize_introspection(config2)
@@ -1690,6 +1736,7 @@ class TestMixinNodeIntrospectionClassLevelCache:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1711,6 +1758,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1725,6 +1773,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1740,6 +1789,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
             operation_keywords=custom_keywords,
         )
@@ -1753,6 +1803,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
             exclude_prefixes=custom_prefixes,
         )
@@ -1776,6 +1827,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
             operation_keywords={"fetch", "upload"},
         )
@@ -1804,6 +1856,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
             operation_keywords=set(),
         )
@@ -1826,6 +1879,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         config1 = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_multi_instance_node_1",
             event_bus=None,
             operation_keywords={"execute"},
         )
@@ -1834,6 +1888,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         config2 = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_2,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_multi_instance_node_2",
             event_bus=None,
             operation_keywords={"fetch"},
         )
@@ -1859,6 +1914,7 @@ class TestMixinNodeIntrospectionConfigurableKeywords:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1884,6 +1940,7 @@ class TestMixinNodeModelIntrospectionPerformanceMetrics:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1899,6 +1956,7 @@ class TestMixinNodeModelIntrospectionPerformanceMetrics:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1915,6 +1973,7 @@ class TestMixinNodeModelIntrospectionPerformanceMetrics:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1948,6 +2007,7 @@ class TestMixinNodeModelIntrospectionPerformanceMetrics:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1970,6 +2030,7 @@ class TestMixinNodeModelIntrospectionPerformanceMetrics:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -1988,6 +2049,7 @@ class TestMixinNodeModelIntrospectionPerformanceMetrics:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -2015,6 +2077,7 @@ class TestMixinNodeModelIntrospectionPerformanceMetrics:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
             cache_ttl=0.001,  # Very short TTL to force cache refresh
         )
@@ -2064,6 +2127,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.COMPUTE,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -2167,6 +2231,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.COMPUTE,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -2222,6 +2287,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.COMPUTE,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -2274,6 +2340,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.COMPUTE,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -2323,6 +2390,7 @@ class TestMixinNodeIntrospectionMethodCountBenchmark:
             config = ModelIntrospectionConfig(
                 node_id=TEST_NODE_UUID_1,
                 node_type=EnumNodeKind.COMPUTE,
+                node_name="test_introspection_node",
                 event_bus=None,
             )
             node.initialize_introspection(config)
@@ -2371,6 +2439,7 @@ class TestMixinNodeIntrospectionThresholdDetection:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -2393,6 +2462,7 @@ class TestMixinNodeIntrospectionThresholdDetection:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -2410,6 +2480,7 @@ class TestMixinNodeIntrospectionThresholdDetection:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -2480,6 +2551,7 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_introspection_node",
                 event_bus=None,
             )
         )
@@ -2535,6 +2607,7 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_introspection_node",
                 event_bus=None,
             )
         )
@@ -2591,6 +2664,7 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_introspection_node",
                 event_bus=None,
             )
         )
@@ -2668,6 +2742,7 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_introspection_node",
                 event_bus=None,
             )
         )
@@ -2714,6 +2789,7 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_introspection_node",
                 event_bus=None,
             )
         )
@@ -2796,6 +2872,7 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_introspection_node",
                 event_bus=None,
             )
         )
@@ -2856,6 +2933,7 @@ class TestMixinNodeIntrospectionComprehensiveBenchmark:
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_introspection_node",
                 event_bus=None,
             )
         )
@@ -2926,6 +3004,7 @@ class TestTopicVersionSuffixValidation:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             introspection_topic="onex.node.introspection.published.v1",
         )
         assert config.introspection_topic == "onex.node.introspection.published.v1"
@@ -2935,6 +3014,7 @@ class TestTopicVersionSuffixValidation:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             heartbeat_topic="onex.node.heartbeat.published.v2",
         )
         assert config.heartbeat_topic == "onex.node.heartbeat.published.v2"
@@ -2944,6 +3024,7 @@ class TestTopicVersionSuffixValidation:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             request_introspection_topic="onex.registry.introspection.requested.v10",
         )
         assert (
@@ -2957,6 +3038,7 @@ class TestTopicVersionSuffixValidation:
             ModelIntrospectionConfig(
                 node_id=TEST_NODE_UUID_1,
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_introspection_node",
                 introspection_topic="onex.node.introspection.published",
             )
 
@@ -2973,6 +3055,7 @@ class TestTopicVersionSuffixValidation:
                 ModelIntrospectionConfig(
                     node_id=TEST_NODE_UUID_1,
                     node_type=EnumNodeKind.EFFECT,
+                    node_name="test_introspection_node",
                     introspection_topic=topic,
                 )
 
@@ -2981,6 +3064,7 @@ class TestTopicVersionSuffixValidation:
             ModelIntrospectionConfig(
                 node_id=TEST_NODE_UUID_1,
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_introspection_node",
                 introspection_topic="onex.node.topic.V1",  # Uppercase V
             )
 
@@ -2992,6 +3076,7 @@ class TestTopicVersionSuffixValidation:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             introspection_topic="custom.legacy.topic",
         )
         assert config.introspection_topic == "custom.legacy.topic"
@@ -3001,6 +3086,7 @@ class TestTopicVersionSuffixValidation:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             introspection_topic="custom.legacy.topic.v1",
         )
         assert config.introspection_topic == "custom.legacy.topic.v1"
@@ -3016,6 +3102,7 @@ class TestTopicInvalidNamesValidation:
             ModelIntrospectionConfig(
                 node_id=TEST_NODE_UUID_1,
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_introspection_node",
                 introspection_topic="",
             )
 
@@ -3036,6 +3123,7 @@ class TestTopicInvalidNamesValidation:
                 ModelIntrospectionConfig(
                     node_id=TEST_NODE_UUID_1,
                     node_type=EnumNodeKind.EFFECT,
+                    node_name="test_introspection_node",
                     introspection_topic=topic,
                 )
 
@@ -3045,6 +3133,7 @@ class TestTopicInvalidNamesValidation:
             ModelIntrospectionConfig(
                 node_id=TEST_NODE_UUID_1,
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_introspection_node",
                 introspection_topic="Onex.node.topic.v1",
             )
 
@@ -3054,6 +3143,7 @@ class TestTopicInvalidNamesValidation:
             ModelIntrospectionConfig(
                 node_id=TEST_NODE_UUID_1,
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_introspection_node",
                 introspection_topic="onex.",
             )
 
@@ -3071,6 +3161,7 @@ class TestTopicInvalidNamesValidation:
                 ModelIntrospectionConfig(
                     node_id=TEST_NODE_UUID_1,
                     node_type=EnumNodeKind.EFFECT,
+                    node_name="test_introspection_node",
                     introspection_topic=topic,
                 )
 
@@ -3086,6 +3177,7 @@ class TestTopicInvalidNamesValidation:
             config = ModelIntrospectionConfig(
                 node_id=TEST_NODE_UUID_1,
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_introspection_node",
                 introspection_topic=topic,
             )
             assert config.introspection_topic == topic
@@ -3101,6 +3193,7 @@ class TestCustomTopicParameters:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             introspection_topic=custom_topic,
         )
         assert config.introspection_topic == custom_topic
@@ -3111,6 +3204,7 @@ class TestCustomTopicParameters:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             heartbeat_topic=custom_topic,
         )
         assert config.heartbeat_topic == custom_topic
@@ -3121,6 +3215,7 @@ class TestCustomTopicParameters:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             request_introspection_topic=custom_topic,
         )
         assert config.request_introspection_topic == custom_topic
@@ -3130,6 +3225,7 @@ class TestCustomTopicParameters:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             introspection_topic="onex.tenant1.introspection.published.v1",
             heartbeat_topic="onex.tenant1.heartbeat.published.v1",
             request_introspection_topic="onex.tenant1.introspection.requested.v1",
@@ -3152,6 +3248,7 @@ class TestCustomTopicParameters:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
         )
         assert config.introspection_topic == DEFAULT_INTROSPECTION_TOPIC
         assert config.heartbeat_topic == DEFAULT_HEARTBEAT_TOPIC
@@ -3167,6 +3264,7 @@ class TestCustomTopicParameters:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             introspection_topic="onex.custom.introspection.published.v1",
             # heartbeat_topic and request_introspection_topic use defaults
         )
@@ -3182,6 +3280,7 @@ class TestCustomTopicParameters:
             config = ModelIntrospectionConfig(
                 node_id=TEST_NODE_UUID_1,
                 node_type=EnumNodeKind.COMPUTE,
+                node_name="test_introspection_node",
                 introspection_topic=f"onex.{domain}.introspection.published.v1",
                 heartbeat_topic=f"onex.{domain}.heartbeat.published.v1",
                 request_introspection_topic=f"onex.{domain}.introspection.requested.v1",
@@ -3206,6 +3305,7 @@ class TestIntrospectionCacheThreadSafety:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -3232,6 +3332,7 @@ class TestIntrospectionCacheThreadSafety:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -3263,6 +3364,7 @@ class TestIntrospectionCacheThreadSafety:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
             cache_ttl=0.01,  # Very short TTL to force refreshes
         )
@@ -3300,6 +3402,7 @@ class TestCacheHitPerformanceRobust:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -3322,6 +3425,7 @@ class TestCacheHitPerformanceRobust:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -3343,6 +3447,7 @@ class TestCacheHitPerformanceRobust:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -3371,6 +3476,7 @@ class TestCacheHitPerformanceRobust:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=None,
         )
         node.initialize_introspection(config)
@@ -3402,6 +3508,7 @@ class TestHeartbeatEventCounting:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=event_bus,
         )
         node.initialize_introspection(config)
@@ -3433,6 +3540,7 @@ class TestHeartbeatEventCounting:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=event_bus,
         )
         node.initialize_introspection(config)
@@ -3465,6 +3573,7 @@ class TestHeartbeatEventCounting:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.EFFECT,
+            node_name="test_introspection_node",
             event_bus=event_bus,
         )
         node.initialize_introspection(config)
@@ -3503,6 +3612,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3515,6 +3625,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3530,6 +3641,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3542,6 +3654,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3554,6 +3667,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3567,6 +3681,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3579,6 +3694,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3596,6 +3712,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3613,6 +3730,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3630,6 +3748,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3647,6 +3766,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3660,6 +3780,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3673,6 +3794,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3685,6 +3807,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3697,6 +3820,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3726,6 +3850,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3739,6 +3864,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3759,6 +3885,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3781,6 +3908,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3799,6 +3927,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3812,6 +3941,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3827,6 +3957,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
         node._introspection_stop_event = None
@@ -3840,6 +3971,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3857,6 +3989,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3873,6 +4006,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
             event_bus=MinimalEventBus(),  # type: ignore[arg-type]
         )
         node.initialize_introspection(config)
@@ -3886,6 +4020,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3904,6 +4039,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3922,6 +4058,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 

@@ -826,3 +826,428 @@ class TestEdgeCases:
 
         assert success.is_success() == bool(success) is True
         assert failure.is_success() == bool(failure) is False
+
+
+# -----------------------------------------------------------------------------
+# Additional models with custom __bool__ behavior
+# These were identified during PR #92 review as missing coverage.
+# -----------------------------------------------------------------------------
+
+
+class TestModelResolvedDependenciesBool:
+    """Tests for ModelResolvedDependencies.__bool__ behavior.
+
+    Warning:
+        This model overrides __bool__ to return True ONLY when at least one
+        protocol is resolved. This differs from standard Pydantic where
+        bool(model) is always True. A valid model with empty protocols dict
+        evaluates to False in boolean context!
+
+    The __bool__ returns len(protocols) > 0, enabling idiomatic checks:
+        if resolved:
+            # Has protocols to inject
+        else:
+            # No protocols resolved
+    """
+
+    def test_bool_true_when_has_protocols(self) -> None:
+        """Result evaluates to True when protocols dict is non-empty."""
+        from omnibase_infra.models.runtime.model_resolved_dependencies import (
+            ModelResolvedDependencies,
+        )
+
+        # Use a mock object as a "resolved protocol"
+        mock_protocol = object()
+        resolved = ModelResolvedDependencies(
+            protocols={"ProtocolSomething": mock_protocol}
+        )
+
+        assert bool(resolved) is True
+        assert len(resolved) == 1
+        assert resolved  # Direct conditional
+
+    def test_bool_false_when_no_protocols(self) -> None:
+        """Result evaluates to False when protocols dict is empty.
+
+        WARNING: This is non-standard Pydantic behavior!
+        A valid model instance returns False because there's nothing to inject.
+        """
+        from omnibase_infra.models.runtime.model_resolved_dependencies import (
+            ModelResolvedDependencies,
+        )
+
+        resolved = ModelResolvedDependencies(protocols={})
+
+        assert bool(resolved) is False
+        assert len(resolved) == 0
+        assert not resolved  # Direct conditional
+
+    def test_bool_false_for_default_construction(self) -> None:
+        """Default construction (no protocols) evaluates to False."""
+        from omnibase_infra.models.runtime.model_resolved_dependencies import (
+            ModelResolvedDependencies,
+        )
+
+        resolved = ModelResolvedDependencies()
+
+        assert bool(resolved) is False
+        assert len(resolved) == 0
+
+    def test_conditional_pattern_usage(self) -> None:
+        """Demonstrate the idiomatic conditional usage pattern."""
+        from omnibase_infra.models.runtime.model_resolved_dependencies import (
+            ModelResolvedDependencies,
+        )
+
+        # Pattern 1: With protocols
+        mock_protocol = object()
+        with_protocols = ModelResolvedDependencies(
+            protocols={"ProtocolA": mock_protocol}
+        )
+
+        injected = False
+        if with_protocols:
+            injected = True
+        assert injected is True
+
+        # Pattern 2: Without protocols
+        without_protocols = ModelResolvedDependencies()
+
+        skipped = False
+        if not without_protocols:
+            skipped = True
+        assert skipped is True
+
+
+class TestModelCaptureResultBool:
+    """Tests for ModelCaptureResult.__bool__ behavior.
+
+    Warning:
+        This model overrides __bool__ to return True ONLY when outcome is
+        CAPTURED. This differs from standard Pydantic where bool(model) is
+        always True. A valid model with outcome=SKIPPED_* or FAILED evaluates
+        to False in boolean context!
+
+    The __bool__ returns outcome == EnumCaptureOutcome.CAPTURED:
+        if capture_result:
+            # Capture was successful
+        else:
+            # Skipped or failed
+    """
+
+    def test_bool_true_when_captured(self) -> None:
+        """Result evaluates to True when outcome is CAPTURED."""
+        from datetime import datetime
+
+        from omnibase_infra.enums.enum_capture_outcome import EnumCaptureOutcome
+        from omnibase_infra.models.corpus.model_capture_result import ModelCaptureResult
+
+        result = ModelCaptureResult(
+            manifest_id=uuid4(),
+            outcome=EnumCaptureOutcome.CAPTURED,
+            captured_at=datetime.now(),
+            dedupe_hash="abc123",
+            duration_ms=10.5,
+        )
+
+        assert bool(result) is True
+        assert result.was_captured is True
+        assert result  # Direct conditional
+
+    def test_bool_false_when_skipped(self) -> None:
+        """Result evaluates to False when outcome is a SKIPPED_* variant.
+
+        WARNING: This is non-standard Pydantic behavior!
+        """
+        from omnibase_infra.enums.enum_capture_outcome import EnumCaptureOutcome
+        from omnibase_infra.models.corpus.model_capture_result import ModelCaptureResult
+
+        # Test various skip outcomes
+        skip_outcomes = [
+            EnumCaptureOutcome.SKIPPED_HANDLER_FILTER,
+            EnumCaptureOutcome.SKIPPED_TIME_WINDOW,
+            EnumCaptureOutcome.SKIPPED_SAMPLE_RATE,
+            EnumCaptureOutcome.SKIPPED_DUPLICATE,
+            EnumCaptureOutcome.SKIPPED_CORPUS_FULL,
+            EnumCaptureOutcome.SKIPPED_NOT_CAPTURING,
+            EnumCaptureOutcome.SKIPPED_TIMEOUT,
+        ]
+
+        for outcome in skip_outcomes:
+            result = ModelCaptureResult(
+                manifest_id=uuid4(),
+                outcome=outcome,
+                duration_ms=1.0,
+            )
+
+            assert bool(result) is False, f"Expected False for outcome={outcome}"
+            assert result.was_captured is False
+            assert result.was_skipped is True
+
+    def test_bool_false_when_failed(self) -> None:
+        """Result evaluates to False when outcome is FAILED."""
+        from omnibase_infra.enums.enum_capture_outcome import EnumCaptureOutcome
+        from omnibase_infra.models.corpus.model_capture_result import ModelCaptureResult
+
+        result = ModelCaptureResult(
+            manifest_id=uuid4(),
+            outcome=EnumCaptureOutcome.FAILED,
+            error_message="Database connection failed",
+            duration_ms=50.0,
+        )
+
+        assert bool(result) is False
+        assert result.was_captured is False
+        assert result.was_failed is True
+        assert not result  # Direct conditional
+
+    def test_was_captured_matches_bool(self) -> None:
+        """was_captured property should match __bool__ return value."""
+        from datetime import datetime
+
+        from omnibase_infra.enums.enum_capture_outcome import EnumCaptureOutcome
+        from omnibase_infra.models.corpus.model_capture_result import ModelCaptureResult
+
+        # Captured case
+        captured = ModelCaptureResult(
+            manifest_id=uuid4(),
+            outcome=EnumCaptureOutcome.CAPTURED,
+            captured_at=datetime.now(),
+        )
+        assert captured.was_captured == bool(captured)
+        assert captured.was_captured is True
+
+        # Skipped case
+        skipped = ModelCaptureResult(
+            manifest_id=uuid4(),
+            outcome=EnumCaptureOutcome.SKIPPED_DUPLICATE,
+        )
+        assert skipped.was_captured == bool(skipped)
+        assert skipped.was_captured is False
+
+
+class TestModelBindingResolutionResultBool:
+    """Tests for ModelBindingResolutionResult.__bool__ behavior.
+
+    Warning:
+        This model overrides __bool__ to return True ONLY when success is True.
+        This differs from standard Pydantic where bool(model) is always True.
+        A valid model with success=False evaluates to False in boolean context!
+
+    The __bool__ returns success, enabling idiomatic resolution checks:
+        result = resolver.resolve(envelope, "db.query")
+        if result:
+            # Resolution succeeded
+            execute_query(result.resolved_parameters)
+        else:
+            # Resolution failed
+            log_error(result.error)
+    """
+
+    def test_bool_true_when_succeeded(self) -> None:
+        """Result evaluates to True when resolution succeeded."""
+        from omnibase_infra.models.bindings.model_binding_resolution_result import (
+            ModelBindingResolutionResult,
+        )
+
+        result = ModelBindingResolutionResult(
+            operation_name="db.query",
+            resolved_parameters={"query": "SELECT 1", "timeout": 30},
+            resolved_from={
+                "query": "envelope.payload.sql",
+                "timeout": "config.timeout",
+            },
+            success=True,
+        )
+
+        assert bool(result) is True
+        assert result.success is True
+        assert result  # Direct conditional
+
+    def test_bool_false_when_failed(self) -> None:
+        """Result evaluates to False when resolution failed.
+
+        WARNING: This is non-standard Pydantic behavior!
+        """
+        from omnibase_infra.models.bindings.model_binding_resolution_result import (
+            ModelBindingResolutionResult,
+        )
+
+        result = ModelBindingResolutionResult(
+            operation_name="db.query",
+            resolved_parameters={},
+            success=False,
+            error="Required binding 'query' not found in envelope",
+        )
+
+        assert bool(result) is False
+        assert result.success is False
+        assert result.error is not None
+        assert not result  # Direct conditional
+
+    def test_conditional_pattern_usage(self) -> None:
+        """Demonstrate the idiomatic conditional usage pattern."""
+        from omnibase_infra.models.bindings.model_binding_resolution_result import (
+            ModelBindingResolutionResult,
+        )
+
+        # Pattern 1: Successful resolution
+        success = ModelBindingResolutionResult(
+            operation_name="api.call",
+            resolved_parameters={"url": "https://api.example.com"},
+            success=True,
+        )
+
+        executed = False
+        if success:
+            executed = True
+        assert executed is True
+
+        # Pattern 2: Failed resolution
+        failure = ModelBindingResolutionResult(
+            operation_name="api.call",
+            success=False,
+            error="Missing required parameter 'url'",
+        )
+
+        error_handled = False
+        if not failure:
+            error_handled = True
+        assert error_handled is True
+
+
+class TestModelDeclarativeNodeValidationResultBool:
+    """Tests for ModelDeclarativeNodeValidationResult.__bool__ behavior.
+
+    Warning:
+        This model overrides __bool__ to return True ONLY when passed is True.
+        This differs from standard Pydantic where bool(model) is always True.
+        A valid model with passed=False evaluates to False in boolean context!
+
+    The __bool__ returns passed, enabling idiomatic validation checks:
+        if result:
+            # Validation passed - all nodes are declarative
+        else:
+            # Has blocking violations
+            for line in result.format_for_ci():
+                print(line)
+    """
+
+    def test_bool_true_when_passed(self) -> None:
+        """Result evaluates to True when validation passed."""
+        from omnibase_infra.models.validation.model_declarative_node_validation_result import (
+            ModelDeclarativeNodeValidationResult,
+        )
+
+        result = ModelDeclarativeNodeValidationResult(
+            passed=True,
+            violations=[],
+            files_checked=10,
+            total_violations=0,
+            blocking_count=0,
+        )
+
+        assert bool(result) is True
+        assert result.passed is True
+        assert result  # Direct conditional
+
+    def test_bool_false_when_failed(self) -> None:
+        """Result evaluates to False when validation failed.
+
+        WARNING: This is non-standard Pydantic behavior!
+        """
+        from pathlib import Path
+
+        from omnibase_infra.enums import EnumValidationSeverity
+        from omnibase_infra.enums.enum_declarative_node_violation import (
+            EnumDeclarativeNodeViolation,
+        )
+        from omnibase_infra.models.validation.model_declarative_node_validation_result import (
+            ModelDeclarativeNodeValidationResult,
+        )
+        from omnibase_infra.models.validation.model_declarative_node_violation import (
+            ModelDeclarativeNodeViolation,
+        )
+
+        violation = ModelDeclarativeNodeViolation(
+            file_path=Path("src/nodes/bad_node/node.py"),
+            node_class_name="NodeBadEffect",
+            violation_type=EnumDeclarativeNodeViolation.CUSTOM_METHOD,
+            code_snippet="def custom_method(self): ...",
+            suggestion="Move logic to handler",
+            severity=EnumValidationSeverity.ERROR,
+            line_number=15,
+        )
+
+        result = ModelDeclarativeNodeValidationResult(
+            passed=False,
+            violations=[violation],
+            files_checked=10,
+            total_violations=1,
+            blocking_count=1,
+            imperative_nodes=["NodeBadEffect"],
+        )
+
+        assert bool(result) is False
+        assert result.passed is False
+        assert not result  # Direct conditional
+
+    def test_from_violations_factory_bool_behavior(self) -> None:
+        """Verify from_violations factory produces correct bool behavior."""
+        from pathlib import Path
+
+        from omnibase_infra.enums import EnumValidationSeverity
+        from omnibase_infra.enums.enum_declarative_node_violation import (
+            EnumDeclarativeNodeViolation,
+        )
+        from omnibase_infra.models.validation.model_declarative_node_validation_result import (
+            ModelDeclarativeNodeValidationResult,
+        )
+        from omnibase_infra.models.validation.model_declarative_node_violation import (
+            ModelDeclarativeNodeViolation,
+        )
+
+        # Empty violations -> passed=True -> bool=True
+        empty_result = ModelDeclarativeNodeValidationResult.from_violations(
+            violations=[],
+            files_checked=5,
+        )
+        assert bool(empty_result) is True
+        assert empty_result.passed is True
+
+        # Blocking violation -> passed=False -> bool=False
+        violation = ModelDeclarativeNodeViolation(
+            file_path=Path("test.py"),
+            node_class_name="BadNode",
+            violation_type=EnumDeclarativeNodeViolation.CUSTOM_METHOD,
+            code_snippet="def bad(): ...",
+            suggestion="Fix it",
+            severity=EnumValidationSeverity.ERROR,
+            line_number=1,
+        )
+        failed_result = ModelDeclarativeNodeValidationResult.from_violations(
+            violations=[violation],
+            files_checked=5,
+        )
+        assert bool(failed_result) is False
+        assert failed_result.passed is False
+
+    def test_passed_matches_bool(self) -> None:
+        """passed property should match __bool__ return value."""
+        from omnibase_infra.models.validation.model_declarative_node_validation_result import (
+            ModelDeclarativeNodeValidationResult,
+        )
+
+        # Passed case
+        passed = ModelDeclarativeNodeValidationResult(
+            passed=True, violations=[], files_checked=1
+        )
+        assert passed.passed == bool(passed)
+        assert passed.passed is True
+
+        # Failed case
+        failed = ModelDeclarativeNodeValidationResult(
+            passed=False, violations=[], blocking_count=1, files_checked=1
+        )
+        assert failed.passed == bool(failed)
+        assert failed.passed is False

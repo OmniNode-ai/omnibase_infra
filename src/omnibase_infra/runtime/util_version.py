@@ -14,6 +14,7 @@ ModelPolicyKey, and ModelPolicyRegistration.
 
 from __future__ import annotations
 
+from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.primitives import ModelSemVer
 
 
@@ -81,9 +82,12 @@ def normalize_version(version: str) -> str:
     expanded_version = ".".join(version_nums)
 
     # Parse with ModelSemVer for validation
+    # Note: ModelSemVer.parse() raises ModelOnexError for invalid versions,
+    # but we also catch ValueError for defensive programming against
+    # potential upstream changes.
     try:
         semver = ModelSemVer.parse(expanded_version)
-    except Exception as e:
+    except (ModelOnexError, ValueError) as e:
         raise ValueError(f"Invalid version format: {e}") from e
 
     result: str = semver.to_string()

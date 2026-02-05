@@ -54,7 +54,7 @@ class TestNormalizeTopicForStorage:
                 "onex.evt.platform.contract-registered.v1",
             ),
             (
-                "dev.onex.evt.platform.contract-registered.v1",
+                "onex.evt.platform.contract-registered.v1",
                 "onex.evt.platform.contract-registered.v1",
             ),
             (
@@ -236,7 +236,7 @@ class TestNormalizeTopicEdgeCases:
 
     def test_normalize_topic_with_numbers(self) -> None:
         """Test topics with version numbers are handled correctly."""
-        result = normalize_topic_for_storage("dev.onex.evt.v1.0.0")
+        result = normalize_topic_for_storage("onex.evt.v1.0.0")
         assert result == "onex.evt.v1.0.0"
 
     def test_normalize_topic_with_dashes(self) -> None:

@@ -280,7 +280,7 @@ class TestPartitionDuringConsume:
 
         await started_event_bus_with_partition.subscribe(
             topic="test-topic",
-            group="test-group",
+            node_identity="test-group",
             handler=handler,
         )
 
@@ -315,7 +315,7 @@ class TestPartitionDuringConsume:
 
         await started_event_bus_with_partition.subscribe(
             topic="test-topic",
-            group="test-group",
+            node_identity="test-group",
             handler=handler,
         )
 

@@ -266,7 +266,7 @@ class TestDetermineEventType:
         self, router: ContractRegistrationEventRouter
     ) -> None:
         """Should return None for unrecognized topic suffix."""
-        topic = "dev.onex.evt.platform.unknown-event.v1"
+        topic = "onex.evt.platform.unknown-event.v1"
 
         result = router._determine_event_type(topic)
 

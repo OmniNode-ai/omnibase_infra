@@ -7,7 +7,7 @@ validator to ensure invalid input is not silently masked.
 
 Edge Cases Tested:
     - None input: Should raise ValidationError
-    - Empty Mapping {}: Should warn and convert to empty tuple
+    - Empty Mapping {}: Should raise ValidationError (use default=() for no endpoints)
     - Empty tuple (): Should pass through (same as default)
     - Invalid types (list, int, str): Should raise ValidationError
     - Non-empty Mapping: Should convert to tuple of (key, value) pairs
@@ -108,72 +108,59 @@ class TestEndpointsValidatorEdgeCases:
     # Empty Mapping tests
     # ------------------------------------------------------------------------
 
-    def test_empty_dict_emits_warning(
+    def test_empty_dict_raises_validation_error(
         self, base_payload_kwargs: dict[str, object]
     ) -> None:
-        """Verify that empty dict {} emits a warning when coerced.
+        """Verify that empty dict {} raises ValidationError.
 
-        Empty Mapping coercion should not be silent - it should warn
-        to help detect cases where endpoints were expected but not populated.
+        Per PR #92 review: Empty Mapping should raise an error rather than
+        silently coercing to empty tuple. If no endpoints are needed, the
+        caller should omit the field to use the default=() instead.
         """
-        with warnings.catch_warnings(record=True) as caught_warnings:
-            warnings.simplefilter("always")
-
-            payload = ModelPostgresIntentPayload(
-                **base_payload_kwargs,
-                endpoints={},
-            )
-
-            # Verify warning was emitted
-            assert len(caught_warnings) >= 1
-            warning_messages = [str(w.message) for w in caught_warnings]
-            assert any(
-                "Empty Mapping provided for endpoints" in msg
-                for msg in warning_messages
-            )
-
-            # Verify the result is empty tuple
-            assert payload.endpoints == ()
-
-    def test_empty_dict_converts_to_empty_tuple(
-        self, base_payload_kwargs: dict[str, object]
-    ) -> None:
-        """Verify that empty dict {} is converted to empty tuple.
-
-        While a warning is emitted, the conversion should still succeed
-        for backwards compatibility.
-        """
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # Suppress warning for this test
-
-            payload = ModelPostgresIntentPayload(
-                **base_payload_kwargs,
-                endpoints={},
-            )
-
-            assert payload.endpoints == ()
-            assert isinstance(payload.endpoints, tuple)
-
-    def test_empty_dict_warning_is_user_warning(
-        self, base_payload_kwargs: dict[str, object]
-    ) -> None:
-        """Verify the warning category is UserWarning."""
-        with warnings.catch_warnings(record=True) as caught_warnings:
-            warnings.simplefilter("always")
-
+        with pytest.raises(ValidationError) as exc_info:
             ModelPostgresIntentPayload(
                 **base_payload_kwargs,
                 endpoints={},
             )
 
-            # Find the relevant warning
-            endpoint_warnings = [
-                w
-                for w in caught_warnings
-                if "Empty Mapping provided for endpoints" in str(w.message)
-            ]
-            assert len(endpoint_warnings) >= 1
-            assert endpoint_warnings[0].category is UserWarning
+        # Verify error message is descriptive
+        error_str = str(exc_info.value)
+        assert "endpoints" in error_str
+        assert "Empty Mapping" in error_str
+
+    def test_empty_dict_error_message_suggests_default(
+        self, base_payload_kwargs: dict[str, object]
+    ) -> None:
+        """Verify the error message for empty dict suggests using default.
+
+        The error should guide users to use default=() rather than passing
+        an explicit empty Mapping.
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            ModelPostgresIntentPayload(
+                **base_payload_kwargs,
+                endpoints={},
+            )
+
+        errors = exc_info.value.errors()
+        assert len(errors) == 1
+        assert errors[0]["loc"] == ("endpoints",)
+        # Error should mention using default
+        assert "default=()" in errors[0]["msg"] or "omit the field" in errors[0]["msg"]
+
+    def test_empty_dict_error_location_is_endpoints(
+        self, base_payload_kwargs: dict[str, object]
+    ) -> None:
+        """Verify the validation error location is correct."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelPostgresIntentPayload(
+                **base_payload_kwargs,
+                endpoints={},
+            )
+
+        errors = exc_info.value.errors()
+        assert len(errors) == 1
+        assert errors[0]["loc"] == ("endpoints",)
 
     # ------------------------------------------------------------------------
     # Empty tuple tests
@@ -495,27 +482,27 @@ class TestEndpointsImmutability:
 class TestEndpointsLogging:
     """Tests for logging behavior in the endpoints validator."""
 
-    def test_empty_dict_logs_warning(
+    def test_empty_dict_raises_error_not_logs(
         self,
         base_payload_kwargs: dict[str, object],
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Verify that empty dict logs a warning message."""
+        """Verify that empty dict raises ValidationError, not logs warning.
+
+        Per PR #92 review: Empty Mapping should fail fast with a ValidationError
+        rather than logging a warning and silently coercing.
+        """
         import logging
 
         with caplog.at_level(logging.WARNING):
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")  # Suppress UserWarning
+            with pytest.raises(ValidationError) as exc_info:
                 ModelPostgresIntentPayload(
                     **base_payload_kwargs,
                     endpoints={},
                 )
 
-        # Check log contains the warning
-        assert any(
-            "Empty Mapping provided for endpoints" in record.message
-            for record in caplog.records
-        )
+        # Verify error is raised
+        assert "Empty Mapping" in str(exc_info.value)
 
     def test_non_empty_dict_does_not_log_warning(
         self,

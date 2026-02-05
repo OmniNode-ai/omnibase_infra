@@ -203,12 +203,12 @@ class TestRequestResponseWiringInit:
 
         assert wiring._bootstrap_servers == "kafka.example.com:9092"
 
-    async def test_resolve_topic_adds_environment_prefix(
+    async def test_resolve_topic_returns_topic_unchanged(
         self, wiring: RequestResponseWiring
     ) -> None:
-        """Test that resolve_topic adds environment prefix correctly."""
+        """Test that resolve_topic returns topic unchanged (realm-agnostic)."""
         topic = wiring.resolve_topic("onex.cmd.routing.request.v1")
-        assert topic == "test.onex.cmd.routing.request.v1"
+        assert topic == "onex.cmd.routing.request.v1"
 
 
 # =============================================================================

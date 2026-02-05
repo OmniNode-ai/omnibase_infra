@@ -86,7 +86,6 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.enums import EnumInfraTransportType, EnumPolicyType
 from omnibase_infra.errors import PolicyRegistryError, ProtocolConfigurationError
 from omnibase_infra.models.errors.model_infra_error_context import (
@@ -97,6 +96,7 @@ from omnibase_infra.runtime.mixin_semver_cache import MixinSemverCache
 from omnibase_infra.runtime.models import ModelPolicyKey, ModelPolicyRegistration
 from omnibase_infra.runtime.util_version import normalize_version
 from omnibase_infra.types import PolicyTypeInput
+from omnibase_infra.utils import validate_policy_type_value
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
@@ -463,11 +463,13 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
         and string literals, normalizing them to their string representation while
         ensuring they match valid EnumPolicyType values.
 
+        Delegates validation to the shared ``validate_policy_type_value()`` utility,
+        which is the SINGLE SOURCE OF TRUTH for policy type validation in omnibase_infra.
+
         Validation Process:
-            1. If policy_type is EnumPolicyType instance, extract .value
-            2. If policy_type is string, validate against EnumPolicyType values
-            3. Raise PolicyRegistryError if string doesn't match any enum value
-            4. Return normalized string value
+            1. Delegate to validate_policy_type_value() for validation and coercion
+            2. Extract .value from the validated EnumPolicyType
+            3. Return normalized string value
 
         This centralized validation ensures consistent policy type handling across
         all registry operations (register, get, list_keys, is_registered, unregister).
@@ -498,12 +500,14 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
             PolicyRegistryError: Invalid policy_type: 'invalid'.
                                  Must be one of: ['orchestrator', 'reducer']
         """
-        if isinstance(policy_type, EnumPolicyType):
-            return policy_type.value
-
-        # Validate string against enum values
-        valid_types = {e.value for e in EnumPolicyType}
-        if policy_type not in valid_types:
+        try:
+            # Use shared validation utility (SINGLE SOURCE OF TRUTH)
+            validated_enum = validate_policy_type_value(policy_type)
+            return validated_enum.value
+        except ValueError as exc:
+            # Convert ValueError from shared utility to PolicyRegistryError
+            # for consistent error handling in the registry
+            valid_types = {pt.value for pt in EnumPolicyType}
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="normalize_policy_type",
@@ -512,11 +516,9 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
                 f"Invalid policy_type: {policy_type!r}. "
                 f"Must be one of: {sorted(valid_types)}",
                 policy_id=None,
-                policy_type=policy_type,
+                policy_type=str(policy_type),
                 context=context,
-            )
-
-        return policy_type
+            ) from exc
 
     @staticmethod
     def _normalize_version(version: str) -> str:
@@ -656,6 +658,10 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
         Partial version strings (e.g., "1", "1.0") are auto-normalized to
         "x.y.z" format by ModelPolicyRegistration.
 
+        .. deprecated::
+            This method is deprecated. Use ``register(ModelPolicyRegistration(...))``
+            directly for new code. This method will be removed in a future version.
+
         Note:
             For new code, prefer using register(ModelPolicyRegistration(...))
             directly. This is a convenience method for simple registrations.
@@ -684,6 +690,14 @@ class RegistryPolicy(MixinPolicyValidation, MixinSemverCache):
             ...     version="1.0.0",
             ... )
         """
+        # Emit deprecation warning at runtime
+        warnings.warn(
+            "register_policy() is deprecated. Use register(ModelPolicyRegistration(...)) "
+            "instead. This method will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         # Version normalization is handled by ModelPolicyRegistration validator
         # which normalizes partial versions and v-prefixed versions automatically
         try:

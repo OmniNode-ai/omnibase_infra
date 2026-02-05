@@ -130,7 +130,7 @@ class TestGetSubscribersForTopic:
         mock_consul_handler.execute.return_value = mock_response
 
         # Execute
-        topic = "dev.onex.evt.intent-classified.v1"
+        topic = "onex.evt.intent-classified.v1"
         result = await runtime.get_subscribers_for_topic(topic)
 
         # Verify
@@ -174,7 +174,7 @@ class TestGetSubscribersForTopic:
         # No handler registered - get_handler("consul") returns None
 
         # Execute
-        result = await runtime.get_subscribers_for_topic("dev.onex.evt.test.v1")
+        result = await runtime.get_subscribers_for_topic("onex.evt.test.v1")
 
         # Verify: Empty list, not an error
         assert result == []
@@ -197,7 +197,7 @@ class TestGetSubscribersForTopic:
         mock_consul_handler.execute.return_value = mock_response
 
         # Execute
-        result = await runtime.get_subscribers_for_topic("dev.onex.evt.multi.v1")
+        result = await runtime.get_subscribers_for_topic("onex.evt.multi.v1")
 
         # Verify
         assert len(result) == 5
@@ -217,7 +217,7 @@ class TestGetSubscribersForTopic:
         mock_consul_handler.execute.side_effect = Exception("Consul connection failed")
 
         # Execute
-        result = await runtime.get_subscribers_for_topic("dev.onex.evt.test.v1")
+        result = await runtime.get_subscribers_for_topic("onex.evt.test.v1")
 
         # Verify: Empty list (graceful degradation), not an exception
         assert result == []
@@ -238,7 +238,7 @@ class TestGetSubscribersForTopic:
         mock_consul_handler.execute.return_value = mock_response
 
         # Execute
-        result = await runtime.get_subscribers_for_topic("dev.onex.evt.test.v1")
+        result = await runtime.get_subscribers_for_topic("onex.evt.test.v1")
 
         # Verify: Empty list, not an error
         assert result == []
@@ -259,7 +259,7 @@ class TestGetSubscribersForTopic:
         mock_consul_handler.execute.return_value = mock_response
 
         # Execute
-        result = await runtime.get_subscribers_for_topic("dev.onex.evt.test.v1")
+        result = await runtime.get_subscribers_for_topic("onex.evt.test.v1")
 
         # Verify: Empty list due to invalid UUIDs
         assert result == []
@@ -281,7 +281,7 @@ class TestGetSubscribersForTopic:
         mock_consul_handler.execute.return_value = mock_response
 
         # Execute
-        result = await runtime.get_subscribers_for_topic("dev.onex.evt.test.v1")
+        result = await runtime.get_subscribers_for_topic("onex.evt.test.v1")
 
         # Verify: Empty list
         assert result == []
@@ -301,7 +301,7 @@ class TestGetSubscribersForTopic:
         mock_consul_handler.execute.return_value = mock_response
 
         # Execute
-        result = await runtime.get_subscribers_for_topic("dev.onex.evt.test.v1")
+        result = await runtime.get_subscribers_for_topic("onex.evt.test.v1")
 
         # Verify: Empty list
         assert result == []
@@ -322,7 +322,7 @@ class TestGetSubscribersForTopic:
         mock_consul_handler.execute.return_value = mock_response
 
         # Execute
-        result = await runtime.get_subscribers_for_topic("dev.onex.evt.test.v1")
+        result = await runtime.get_subscribers_for_topic("onex.evt.test.v1")
 
         # Verify: Empty list (not an array)
         assert result == []
@@ -341,7 +341,7 @@ class TestGetSubscribersForTopic:
         mock_consul_handler.execute.return_value = None
 
         # Execute
-        result = await runtime.get_subscribers_for_topic("dev.onex.evt.test.v1")
+        result = await runtime.get_subscribers_for_topic("onex.evt.test.v1")
 
         # Verify: Empty list
         assert result == []
@@ -362,7 +362,7 @@ class TestGetSubscribersForTopic:
         mock_consul_handler.execute.return_value = mock_response
 
         # Execute
-        result = await runtime.get_subscribers_for_topic("dev.onex.evt.single.v1")
+        result = await runtime.get_subscribers_for_topic("onex.evt.single.v1")
 
         # Verify
         assert len(result) == 1
@@ -383,7 +383,7 @@ class TestGetSubscribersForTopic:
         mock_consul_handler.execute.return_value = mock_response
 
         # Execute
-        await runtime.get_subscribers_for_topic("dev.onex.evt.test.v1")
+        await runtime.get_subscribers_for_topic("onex.evt.test.v1")
 
         # Verify: correlation_id is present and valid
         call_args = mock_consul_handler.execute.call_args[0][0]
@@ -415,7 +415,7 @@ class TestGetSubscribersForTopic:
         mock_consul_handler.execute.return_value = mock_response
 
         # Execute
-        result = await runtime.get_subscribers_for_topic("dev.onex.evt.test.v1")
+        result = await runtime.get_subscribers_for_topic("onex.evt.test.v1")
 
         # Verify: Only valid UUIDs returned (invalid skipped with warning)
         assert len(result) == 2
@@ -447,8 +447,8 @@ class TestGetSubscribersForTopicIntegration:
 
         # Test various topic formats
         topics = [
-            "dev.onex.evt.intent-classified.v1",
-            "prod.onex.cmd.register-node.v1",
+            "onex.evt.intent-classified.v1",
+            "onex.cmd.register-node.v1",
             "test.custom.domain.event.v2",
         ]
 

@@ -191,7 +191,7 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
 
     Attributes:
         _event_bus: Event bus for publishing requests
-        _environment: Environment prefix for topics (e.g., 'dev', 'prod')
+        _environment: Environment identifier for consumer groups (e.g., 'dev', 'prod')
         _app_name: Application name for consumer group identification
         _instances: Dict mapping instance names to their state
         _bootstrap_servers: Kafka bootstrap servers from event bus
@@ -211,8 +211,9 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
         Args:
             event_bus: Event bus for publishing requests. Must implement
                 ProtocolEventBusPublisher interface.
-            environment: Environment prefix for topics (e.g., 'dev', 'prod').
-                Used to resolve topic suffixes to full topic names.
+            environment: Environment identifier (e.g., 'dev', 'prod').
+                Used for consumer group naming. Topics are realm-agnostic and
+                do not include environment prefixes.
             app_name: Application name for logging and consumer group naming.
             bootstrap_servers: Kafka bootstrap servers. If not provided, attempts
                 to read from event_bus._bootstrap_servers or environment variable.
@@ -263,17 +264,24 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
         )
 
     def resolve_topic(self, topic_suffix: str) -> str:
-        """Resolve topic suffix to full topic name with environment prefix.
+        """Resolve topic suffix to topic name (realm-agnostic, no environment prefix).
+
+        Topics are realm-agnostic in ONEX. The environment/realm is enforced via
+        envelope identity, not topic naming. This enables cross-environment event
+        routing when needed while maintaining proper isolation through identity.
 
         Args:
             topic_suffix: ONEX format topic suffix
                 (e.g., 'onex.cmd.intelligence.analyze-code.v1')
 
         Returns:
-            Full topic name with environment prefix
-                (e.g., 'dev.onex.cmd.intelligence.analyze-code.v1')
+            Topic name (same as suffix, no environment prefix)
+                (e.g., 'onex.cmd.intelligence.analyze-code.v1')
+
+        Note:
+            Consumer groups still include environment for proper isolation.
         """
-        return f"{self._environment}.{topic_suffix}"
+        return topic_suffix
 
     async def wire_request_response(
         self,

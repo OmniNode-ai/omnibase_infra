@@ -32,6 +32,9 @@ from omnibase_infra.handlers.models.vault import ModelVaultRetryConfig
 
 T = TypeVar("T")
 
+# Module-level marker for test discovery/filtering
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Test Fixtures and Helper Classes

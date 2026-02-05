@@ -871,13 +871,14 @@ async def introspectable_test_node(
             self.api_url = f"http://localhost:8080/{node_id}/api"
 
             # Get topic from environment or use docker-compose default
-            # The runtime expects: dev.onex.evt.node-introspection.v1 (from ONEX_INPUT_TOPIC)
+            # The runtime expects: onex.evt.node-introspection.v1 (from ONEX_INPUT_TOPIC)
             introspection_topic = os.getenv(
-                "ONEX_INPUT_TOPIC", "dev.onex.evt.node-introspection.v1"
+                "ONEX_INPUT_TOPIC", "onex.evt.node-introspection.v1"
             )
             config = ModelIntrospectionConfig(
                 node_id=node_id,
                 node_type=node_type,
+                node_name="e2e_test_node",
                 event_bus=event_bus,
                 version=version,
                 cache_ttl=60.0,

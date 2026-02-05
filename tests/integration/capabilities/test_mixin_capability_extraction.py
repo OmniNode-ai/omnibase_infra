@@ -176,6 +176,7 @@ class EffectNodeWithContract(MixinNodeIntrospection):
         config = ModelIntrospectionConfig(
             node_id=node_id,
             node_type=EnumNodeKind.EFFECT,
+            node_name="effect_node_with_contract",
             version="1.0.0",
             contract=contract,
         )
@@ -198,6 +199,7 @@ class LegacyNodeWithoutContract(MixinNodeIntrospection):
         config = ModelIntrospectionConfig(
             node_id=node_id,
             node_type=EnumNodeKind.EFFECT,
+            node_name="legacy_node_without_contract",
             version="1.0.0",
             contract=None,  # No contract - legacy mode
         )
@@ -287,6 +289,7 @@ class TestMixinCapabilityExtraction:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.REDUCER,
+            node_name="test_reducer_node",
             version="2.0.0",
             contract=contract,
         )
@@ -365,6 +368,7 @@ class TestCapabilityInferenceIntegration:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.ORCHESTRATOR,
+            node_name="test_orchestrator_node",
             version="1.0.0",
             contract=contract,
         )
@@ -427,6 +431,7 @@ class TestCapabilityInferenceIntegration:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.COMPUTE,
+            node_name="test_compute_node",
             version="1.0.0",
             contract=contract,
         )
@@ -461,6 +466,7 @@ class TestCapabilityInferenceIntegration:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type=EnumNodeKind.ORCHESTRATOR,
+            node_name="test_orchestrator_node",
             version="1.0.0",
             contract=contract,
         )

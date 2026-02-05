@@ -16,7 +16,12 @@ Related Tickets:
 
 from __future__ import annotations
 
+import pytest
+
 from omnibase_infra.enums import EnumRegistrationState
+
+# Module-level marker for test discovery/filtering
+pytestmark = pytest.mark.unit
 
 
 class TestEnumRegistrationStateValues:

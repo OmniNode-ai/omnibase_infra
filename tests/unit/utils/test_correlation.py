@@ -20,6 +20,9 @@ from omnibase_infra.utils.correlation import (
     set_correlation_id,
 )
 
+# Module-level marker for test discovery/filtering
+pytestmark = pytest.mark.unit
+
 
 class TestGenerateCorrelationId:
     """Tests for generate_correlation_id function."""

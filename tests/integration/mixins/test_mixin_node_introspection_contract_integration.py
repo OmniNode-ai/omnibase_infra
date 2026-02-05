@@ -137,21 +137,29 @@ class MockEventBus:
     async def subscribe(
         self,
         topic: str,
-        group_id: str,
+        node_identity: object,
         on_message: Callable[[object], Awaitable[None]],
+        *,
+        purpose: str = "consume",
     ) -> Callable[[], Awaitable[None]]:
         """Mock subscribe method.
 
         Args:
             topic: Topic to subscribe to.
-            group_id: Consumer group ID.
+            node_identity: Node identity for consumer group derivation.
             on_message: Callback function for messages.
+            purpose: Consumer group purpose (default: "consume").
 
         Returns:
             An async unsubscribe function.
         """
         self.subscribed_topics.append(topic)
-        self.subscribed_groups.append(group_id)
+        # Derive group from node_identity for test verification
+        if hasattr(node_identity, "node_name"):
+            group = f"{getattr(node_identity, 'env', 'test')}.{getattr(node_identity, 'service', 'test')}.{node_identity.node_name}.{purpose}.{getattr(node_identity, 'version', '1.0.0')}"
+        else:
+            group = str(node_identity)
+        self.subscribed_groups.append(group)
 
         async def unsubscribe() -> None:
             pass
@@ -200,6 +208,7 @@ class ContractDrivenEffectNode(MixinNodeIntrospection):
         config_kwargs: dict[str, object] = {
             "node_id": uuid4(),  # Generate unique UUID for each node instance
             "node_type": metadata.get("node_type", EnumNodeKind.EFFECT),
+            "node_name": metadata.get("name", "contract_driven_node"),
             "event_bus": event_bus,
             "version": metadata.get("version", "1.0.0"),
         }
@@ -257,6 +266,7 @@ class ComputeNodeWithCustomTopics(MixinNodeIntrospection):
         config = ModelIntrospectionConfig(
             node_id=uuid4(),  # Generate unique UUID for each node instance
             node_type=EnumNodeKind.COMPUTE,
+            node_name=node_name,
             event_bus=event_bus,
             version="2.0.0",
             introspection_topic=f"onex.{domain}.introspection.published.v1",
@@ -610,9 +620,9 @@ class TestEndToEndIntrospectionWorkflow:
             assert len(event_bus.subscribed_topics) >= 1
             assert "onex.custom.registry.request.v1" in event_bus.subscribed_topics
 
-            # Verify group ID includes node ID (now a UUID)
-            node_id_str = str(node._introspection_node_id)
-            assert any(node_id_str in group for group in event_bus.subscribed_groups)
+            # Verify group ID includes node name (derived from contract metadata)
+            node_name = node._introspection_node_name
+            assert any(node_name in group for group in event_bus.subscribed_groups)
         finally:
             await node.stop_introspection_tasks()
 
@@ -944,6 +954,7 @@ class TestTopicValidation:
             config = ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_contract_node",
                 introspection_topic=topic,
             )
             assert config.introspection_topic == topic
@@ -955,6 +966,7 @@ class TestTopicValidation:
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_contract_node",
                 introspection_topic="Invalid.topic.v1",
             )
 
@@ -965,6 +977,7 @@ class TestTopicValidation:
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_contract_node",
                 introspection_topic="onex.invalid@topic.v1",
             )
 
@@ -976,6 +989,7 @@ class TestTopicValidation:
             ModelIntrospectionConfig(
                 node_id=uuid4(),
                 node_type=EnumNodeKind.EFFECT,
+                node_name="test_contract_node",
                 introspection_topic="onex.",
             )
 
@@ -1002,6 +1016,7 @@ class TestSubclassTopicOverrides:
                 config = ModelIntrospectionConfig(
                     node_id=node_id,
                     node_type=EnumNodeKind.EFFECT,
+                    node_name="tenant_specific_node",
                     introspection_topic="onex.tenant1.introspection.published.v1",
                     heartbeat_topic="onex.tenant1.heartbeat.published.v1",
                     request_introspection_topic="onex.tenant1.introspection.requested.v1",
@@ -1036,6 +1051,7 @@ class TestSubclassTopicOverrides:
                 config_kwargs: dict[str, object] = {
                     "node_id": node_id,
                     "node_type": EnumNodeKind.EFFECT,
+                    "node_name": "partial_config_node",
                 }
                 if introspection_topic is not None:
                     config_kwargs["introspection_topic"] = introspection_topic

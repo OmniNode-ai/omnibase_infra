@@ -22,6 +22,9 @@ from pydantic import ValidationError
 
 from omnibase_infra.models.projection import ModelSequenceInfo
 
+# Module-level marker for test discovery/filtering
+pytestmark = pytest.mark.unit
+
 
 class TestModelSequenceInfoInstantiation:
     """Tests for model instantiation with valid data."""

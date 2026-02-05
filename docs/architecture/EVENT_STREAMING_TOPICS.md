@@ -507,6 +507,7 @@ from omnibase_infra.models.discovery import ModelIntrospectionConfig
 onex_config = ModelIntrospectionConfig(
     node_id=uuid4(),
     node_type="EFFECT",
+    node_name="my_effect_node",
     event_bus=event_bus,
     introspection_topic="onex.node.introspection.published.v1",
     heartbeat_topic="onex.node.heartbeat.published.v1",
@@ -517,6 +518,7 @@ onex_config = ModelIntrospectionConfig(
 legacy_config = ModelIntrospectionConfig(
     node_id=uuid4(),
     node_type="EFFECT",
+    node_name="my_legacy_node",
     event_bus=event_bus,
     introspection_topic="node.introspection",
     heartbeat_topic="node.heartbeat",
@@ -753,6 +755,7 @@ from pydantic import ValidationError
 config = ModelIntrospectionConfig(
     node_id=uuid4(),
     node_type="EFFECT",
+    node_name="my_effect_node",
 )
 
 # Invalid - empty node_type raises ValidationError
@@ -760,6 +763,7 @@ try:
     config = ModelIntrospectionConfig(
         node_id=uuid4(),
         node_type="",  # Invalid: must have min_length=1
+        node_name="invalid_node",
     )
 except ValidationError as e:
     print(e)  # String should have at least 1 character
@@ -866,6 +870,7 @@ class RegistryEffectNode(MixinNodeIntrospection):
         config = ModelIntrospectionConfig(
             node_id=uuid4(),  # Generate unique node instance ID
             node_type=contract.metadata.node_type,
+            node_name=contract.metadata.name,
             version=contract.metadata.version,
             event_bus=event_bus,
         )

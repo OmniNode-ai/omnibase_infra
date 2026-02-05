@@ -546,6 +546,17 @@ pattern_exemptions:
       - CLAUDE.md (Registry Naming Conventions)
     ticket: OMN-1139
   # ==========================================================================
+  # ModelIntrospectionConfig node_name Exemption (omnibase-core 0.14.0 upgrade)
+  # ==========================================================================
+  # node_name is a canonical identifier for consumer group derivation, not an entity reference.
+  - file_pattern: 'model_introspection_config\.py'
+    violation_pattern: "Field 'node_name' might reference an entity"
+    reason: >
+      node_name is a canonical identifier string (e.g., "claude_hook_effect") used for consumer group derivation in event bus subscriptions. It is part of the node identity model (env.service.node_name.purpose.version) and does not reference an external entity.
+
+    documentation:
+      - CLAUDE.md (Node Identity Model)
+  # ==========================================================================
   # TransitionNotificationOutbox Method Count Exemption (OMN-1139)
   # ==========================================================================
   # Outbox pattern requires lifecycle (start/stop), storage (store/cleanup),

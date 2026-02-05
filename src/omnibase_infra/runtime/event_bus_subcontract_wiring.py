@@ -9,7 +9,7 @@ all Kafka plumbing - nodes/handlers never create consumers or producers directly
 Architecture:
     The EventBusSubcontractWiring class is responsible for:
     1. Reading `subscribe_topics` from ModelEventBusSubcontract
-    2. Resolving topic suffixes to full topic names with environment prefix
+    2. Passing topic suffixes through unchanged (topics are realm-agnostic)
     3. Creating Kafka subscriptions with appropriate consumer groups
     4. Bridging received messages to the MessageDispatchEngine
     5. Managing subscription lifecycle (creation and cleanup)
@@ -50,16 +50,21 @@ DLQ Consumer Group Alignment:
     3. Using it in all _publish_to_dlq calls within the callback closure
 
 Topic Resolution:
+    Topics are realm-agnostic and do NOT include environment prefixes.
+    The environment/realm is a routing boundary enforced via envelope identity,
+    not a topic prefix. This enables cross-environment event routing when needed.
+
     Topic suffixes from contracts follow the ONEX naming convention:
         onex.{kind}.{producer}.{event-name}.v{n}
 
-    The wiring resolves these to full topics by prepending the environment:
-        {environment}.onex.{kind}.{producer}.{event-name}.v{n}
+    The wiring passes these topic suffixes through unchanged:
+        onex.{kind}.{producer}.{event-name}.v{n}
 
     Example:
         - Contract declares: "onex.evt.omniintelligence.intent-classified.v1"
-        - Resolved (dev): "dev.onex.evt.omniintelligence.intent-classified.v1"
-        - Resolved (prod): "prod.onex.evt.omniintelligence.intent-classified.v1"
+        - Resolved: "onex.evt.omniintelligence.intent-classified.v1"
+
+    Note: Consumer groups still include environment for isolation.
 
 Related:
     - OMN-1621: Runtime consumes event_bus subcontract for contract-driven wiring
@@ -93,12 +98,13 @@ from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
 from omnibase_core.protocols.event_bus.protocol_event_message import (
     ProtocolEventMessage,
 )
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
 from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.event_bus import (
     ModelConsumerRetryConfig,
     ModelDlqConfig,
@@ -106,6 +112,7 @@ from omnibase_infra.models.event_bus import (
     ModelOffsetPolicyConfig,
 )
 from omnibase_infra.protocols import ProtocolDispatchEngine, ProtocolIdempotencyStore
+from omnibase_infra.utils import compute_consumer_group_id
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
@@ -124,7 +131,7 @@ class EventBusSubcontractWiring:
 
     Responsibilities:
         - Parse subscribe_topics from ModelEventBusSubcontract
-        - Resolve topic suffixes to full topic names with environment prefix
+        - Pass topic suffixes through unchanged (topics are realm-agnostic)
         - Create Kafka subscriptions with appropriate consumer groups
         - Deserialize incoming messages to ModelEventEnvelope
         - Check idempotency and skip duplicate messages (if enabled)
@@ -194,7 +201,7 @@ class EventBusSubcontractWiring:
     Attributes:
         _event_bus: The event bus implementation (Kafka or in-memory)
         _dispatch_engine: Engine to dispatch received messages to handlers
-        _environment: Environment prefix for topics (e.g., 'dev', 'prod')
+        _environment: Environment identifier for consumer groups (e.g., 'dev', 'prod')
         _node_name: Name of the node/handler for consumer group and logging
         _idempotency_store: Optional store for tracking processed messages
         _idempotency_config: Configuration for idempotency behavior
@@ -217,6 +224,8 @@ class EventBusSubcontractWiring:
         dispatch_engine: ProtocolDispatchEngine,
         environment: str,
         node_name: str,
+        service: str,
+        version: str,
         idempotency_store: ProtocolIdempotencyStore | None = None,
         idempotency_config: ModelIdempotencyConfig | None = None,
         dlq_config: ModelDlqConfig | None = None,
@@ -227,14 +236,19 @@ class EventBusSubcontractWiring:
 
         Args:
             event_bus: The event bus implementation (EventBusKafka or EventBusInmemory).
-                Must implement subscribe(topic, group_id, on_message) -> unsubscribe callable.
+                Must implement subscribe(topic, node_identity, on_message) -> unsubscribe callable.
                 Duck typed per ONEX patterns.
             dispatch_engine: Engine to dispatch received messages to handlers.
                 Must implement ProtocolDispatchEngine interface.
                 Must be frozen (registrations complete) before wiring subscriptions.
-            environment: Environment prefix for topics (e.g., 'dev', 'prod').
-                Used to resolve topic suffixes to full topic names.
+            environment: Environment identifier (e.g., 'dev', 'prod').
+                Used for consumer group naming and node identity. Topics are
+                realm-agnostic and do not include environment prefixes.
             node_name: Name of the node/handler for consumer group identification and logging.
+            service: Service name for node identity (e.g., 'omniintelligence', 'omnibridge').
+                Used to derive consumer group ID.
+            version: Version string for node identity (e.g., 'v1', 'v1.0.0').
+                Used to derive consumer group ID.
             idempotency_store: Optional idempotency store for message deduplication.
                 If provided with enabled config, messages are deduplicated by envelope_id.
             idempotency_config: Optional configuration for idempotency behavior.
@@ -254,15 +268,21 @@ class EventBusSubcontractWiring:
             Attempting to dispatch to an unfrozen engine will raise an error.
 
         Raises:
-            ValueError: If environment is empty or whitespace-only.
+            ValueError: If environment, service, or version is empty or whitespace-only.
         """
         if not environment or not environment.strip():
             raise ValueError("environment must be a non-empty string")
+        if not service or not service.strip():
+            raise ValueError("service must be a non-empty string")
+        if not version or not version.strip():
+            raise ValueError("version must be a non-empty string")
 
         self._event_bus = event_bus
         self._dispatch_engine = dispatch_engine
         self._environment = environment
         self._node_name = node_name
+        self._service = service
+        self._version = version
         self._idempotency_store = idempotency_store
         self._idempotency_config = idempotency_config or ModelIdempotencyConfig()
         self._dlq_config = dlq_config or ModelDlqConfig()
@@ -274,28 +294,36 @@ class EventBusSubcontractWiring:
         self._retry_counts: dict[UUID, int] = {}
 
     def resolve_topic(self, topic_suffix: str) -> str:
-        """Resolve topic suffix to full topic name with environment prefix.
+        """Resolve topic suffix to topic name (realm-agnostic, no environment prefix).
+
+        Topics are realm-agnostic in ONEX. The environment/realm is enforced via
+        envelope identity, not topic naming. This enables cross-environment event
+        routing when needed while maintaining proper isolation through identity.
 
         Topic suffixes from contracts follow the ONEX naming convention:
             onex.{kind}.{producer}.{event-name}.v{n}
 
-        This method prepends the environment to create the full topic name:
-            {environment}.onex.{kind}.{producer}.{event-name}.v{n}
+        This method returns the topic suffix unchanged:
+            onex.{kind}.{producer}.{event-name}.v{n}
 
         Args:
             topic_suffix: ONEX format topic suffix
                 (e.g., 'onex.evt.omniintelligence.intent-classified.v1')
 
         Returns:
-            Full topic name with environment prefix
-                (e.g., 'dev.onex.evt.omniintelligence.intent-classified.v1')
+            Topic name (same as suffix, no environment prefix)
+                (e.g., 'onex.evt.omniintelligence.intent-classified.v1')
 
         Example:
             >>> wiring = EventBusSubcontractWiring(bus, engine, "dev")
             >>> wiring.resolve_topic("onex.evt.user.created.v1")
-            'dev.onex.evt.user.created.v1'
+            'onex.evt.user.created.v1'
+
+        Note:
+            Consumer groups still include environment for proper isolation.
+            See wire_subscriptions() for consumer group naming.
         """
-        return f"{self._environment}.{topic_suffix}"
+        return topic_suffix
 
     async def wire_subscriptions(
         self,
@@ -348,9 +376,21 @@ class EventBusSubcontractWiring:
 
         for topic_suffix in subcontract.subscribe_topics:
             full_topic = self.resolve_topic(topic_suffix)
-            # Consumer group ID derived from environment and node_name
-            # This same group_id is passed to DLQ publishing for traceability
-            consumer_group = f"{self._environment}.{node_name}"
+
+            # Create typed node identity for consumer group derivation
+            # The event bus derives consumer group as: {env}.{service}.{node_name}.{purpose}.{version}
+            node_identity = ModelNodeIdentity(
+                env=self._environment,
+                service=self._service,
+                node_name=node_name,
+                version=self._version,
+            )
+
+            # Consumer group for logging and DLQ traceability
+            # Use shared helper for consistent derivation across codebase
+            consumer_group = compute_consumer_group_id(
+                node_identity, EnumConsumerGroupPurpose.CONSUME
+            )
 
             # Create dispatch callback for this topic, capturing the consumer_group
             # used for this subscription to ensure DLQ messages have consistent
@@ -360,7 +400,7 @@ class EventBusSubcontractWiring:
             # Subscribe and store unsubscribe callable
             unsubscribe = await self._event_bus.subscribe(
                 topic=full_topic,
-                group_id=consumer_group,
+                node_identity=node_identity,
                 on_message=callback,
             )
             self._unsubscribe_callables.append(unsubscribe)

@@ -82,7 +82,7 @@ class TestTopicNameValidation:
             "topic_with_many_underscores",
             "mixed-topic_name123",
             "topic.with.dots",  # Dots are valid per Kafka conventions
-            "dev.onex.evt.node-introspection.v1",  # ONEX topic naming
+            "onex.evt.node-introspection.v1",  # ONEX topic naming
         ],
     )
     def test_valid_topic_names(self, topic_name: str) -> None:

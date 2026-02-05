@@ -38,6 +38,9 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.handler_filesystem import HandlerFileSystem
 
+# Module-level marker for test discovery/filtering
+pytestmark = pytest.mark.integration
+
 # ============================================================================
 # Platform Detection
 # ============================================================================

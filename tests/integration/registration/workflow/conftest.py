@@ -246,6 +246,7 @@ class IntrospectableTestNode(MixinNodeIntrospection):
         config = ModelIntrospectionConfig(
             node_id=self._node_id,
             node_type=node_type,
+            node_name="workflow_test_node",
             event_bus=event_bus,
             version=version,
             cache_ttl=60.0,  # Short TTL for testing

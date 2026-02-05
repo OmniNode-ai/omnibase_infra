@@ -61,6 +61,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+# Module-level marker for test discovery/filtering
+pytestmark = pytest.mark.integration
+
+
 # =============================================================================
 # TestHandlerRoutingContract
 # =============================================================================

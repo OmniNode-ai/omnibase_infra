@@ -9,7 +9,7 @@ event emission and maintaining clean architectural boundaries.
 
 Design Principles:
     - **Contract-Driven Access Control**: Topics must be declared in contract
-    - **Environment-Aware Routing**: Topic suffixes are prefixed with environment
+    - **Realm-Agnostic Topics**: Topics passed through unchanged (no env prefix)
     - **Fail-Fast Validation**: Invalid topics raise immediately, not at delivery
     - **Duck-Typed Protocol**: Implements publisher protocol without explicit inheritance
 
@@ -95,7 +95,7 @@ class PublisherTopicScoped:
 
     Features:
         - Contract-driven topic access control
-        - Environment-aware topic resolution
+        - Realm-agnostic topics (no environment prefix)
         - Fail-fast validation on disallowed topics
         - JSON serialization for payloads
         - Correlation ID propagation for distributed tracing
@@ -103,7 +103,7 @@ class PublisherTopicScoped:
     Attributes:
         _event_bus: The underlying event bus for publishing
         _allowed_topics: Set of topic suffixes allowed by contract
-        _environment: Environment prefix for topic resolution
+        _environment: Environment identifier (retained for future use)
 
     Example:
         >>> publisher = PublisherTopicScoped(
@@ -132,8 +132,8 @@ class PublisherTopicScoped:
                 Must implement publish(topic, key, value) method. Duck typed per ONEX.
             allowed_topics: Set of topic suffixes from contract's publish_topics.
                 These are the ONLY topics this publisher can publish to.
-            environment: Environment prefix (e.g., 'dev', 'staging', 'prod').
-                Used to construct full topic names.
+            environment: Environment identifier (e.g., 'dev', 'staging', 'prod').
+                Retained for future use; topics are realm-agnostic (no prefix).
 
         Example:
             >>> publisher = PublisherTopicScoped(
@@ -174,22 +174,27 @@ class PublisherTopicScoped:
         return str(correlation_id).encode("utf-8")
 
     def resolve_topic(self, topic_suffix: str) -> str:
-        """Resolve topic suffix to full topic name with environment prefix.
+        """Resolve topic suffix to topic name (realm-agnostic, no environment prefix).
 
-        The full topic name follows the ONEX convention:
-        `{environment}.{topic_suffix}`
+        Topics are realm-agnostic in ONEX. The environment/realm is enforced via
+        envelope identity, not topic naming. This enables cross-environment event
+        routing when needed while maintaining proper isolation through identity.
 
         Args:
             topic_suffix: ONEX format topic suffix (e.g., 'onex.events.v1')
 
         Returns:
-            Full topic name with environment prefix (e.g., 'dev.onex.events.v1')
+            Topic name (same as suffix, no environment prefix)
 
         Example:
             >>> publisher.resolve_topic("onex.events.v1")
-            'dev.onex.events.v1'
+            'onex.events.v1'
+
+        Note:
+            The environment is still stored for potential consumer group derivation
+            in related components. Topics themselves are realm-agnostic.
         """
-        return f"{self._environment}.{topic_suffix}"
+        return topic_suffix
 
     async def publish(
         self,

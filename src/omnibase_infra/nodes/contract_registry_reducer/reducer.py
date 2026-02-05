@@ -632,30 +632,14 @@ class ContractRegistryReducer:
         Parses the contract_yaml for consumed_events and published_events,
         then creates postgres.update_topic intents for each topic suffix.
 
-        Environment Placeholder Handling:
-            Topic suffixes from contract_yaml may contain ``{env}.`` placeholders
-            (e.g., ``{env}.onex.evt.platform.contract-registered.v1``). This reducer
-            stores these values **as-is** without stripping the placeholder.
+        Realm-Agnostic Topics:
+            Topics in ONEX are realm-agnostic. The environment/realm is enforced via
+            envelope identity, not topic naming. Contract topics are stored without
+            any environment prefix (e.g., ``onex.evt.platform.contract-registered.v1``).
 
-            This is intentional for several reasons:
-
-            1. **Reducer Purity**: The reducer remains environment-agnostic and
-               deterministic - it doesn't need to know about deployment environments.
-
-            2. **Effect Layer Responsibility**: The PostgresAdapter (Effect layer)
-               is responsible for resolving or stripping the ``{env}.`` placeholder
-               at write time, when the actual environment context is available.
-
-            3. **Auditing**: Storing the raw contract value preserves the original
-               contract specification for debugging and auditing purposes.
-
-            4. **Query Flexibility**: Downstream consumers can query topics with
-               or without the placeholder depending on their needs.
-
-            The Effect layer should handle ``{env}.`` resolution via one of:
-            - Stripping the prefix before storage (simple)
-            - Replacing with actual environment (e.g., ``dev.``, ``prod.``)
-            - Storing as-is with environment-aware queries
+            The Effect layer (PostgresAdapter) may still encounter legacy topics with
+            ``{env}.`` placeholders and will strip them during storage normalization.
+            See ``normalize_topic_for_storage()`` in handler_postgres_topic_update.py.
 
         Args:
             event: Contract registered event with contract_yaml.
@@ -697,9 +681,8 @@ class ContractRegistryReducer:
         if isinstance(consumed_events, list):
             for consumed in consumed_events:
                 if isinstance(consumed, dict):
-                    # NOTE: topic_suffix may contain {env}. placeholder (e.g.,
-                    # "{env}.onex.evt.platform.contract-registered.v1").
-                    # We store it as-is; the Effect layer handles resolution.
+                    # Topics are realm-agnostic (e.g., "onex.evt.platform.contract-registered.v1").
+                    # Legacy topics with {env}. prefix are normalized by the Effect layer.
                     topic_suffix = consumed.get("topic")
                     if topic_suffix and isinstance(topic_suffix, str):
                         # Validate event_type is string (may be missing or wrong type in malformed YAML)

@@ -99,20 +99,20 @@ def sample_event_bus_config() -> ModelNodeEventBusConfig:
     return ModelNodeEventBusConfig(
         subscribe_topics=[
             ModelEventBusTopicEntry(
-                topic="dev.onex.evt.intent-classified.v1",
+                topic="onex.evt.intent-classified.v1",
                 event_type="ModelIntentClassified",
                 message_category="EVENT",
                 description="Intent classification events",
             ),
             ModelEventBusTopicEntry(
-                topic="dev.onex.evt.node-registered.v1",
+                topic="onex.evt.node-registered.v1",
                 event_type="ModelNodeRegistered",
                 message_category="EVENT",
             ),
         ],
         publish_topics=[
             ModelEventBusTopicEntry(
-                topic="dev.onex.evt.node-processed.v1",
+                topic="onex.evt.node-processed.v1",
                 event_type="ModelNodeProcessed",
                 message_category="EVENT",
             ),
@@ -186,15 +186,15 @@ class TestStoreEventBusInKV:
                 kv_store[f"onex/nodes/{node_id}/event_bus/subscribe_topics"].decode()
             )
             assert subscribe_topics == [
-                "dev.onex.evt.intent-classified.v1",
-                "dev.onex.evt.node-registered.v1",
+                "onex.evt.intent-classified.v1",
+                "onex.evt.node-registered.v1",
             ]
 
             # Verify publish topics
             publish_topics = json.loads(
                 kv_store[f"onex/nodes/{node_id}/event_bus/publish_topics"].decode()
             )
-            assert publish_topics == ["dev.onex.evt.node-processed.v1"]
+            assert publish_topics == ["onex.evt.node-processed.v1"]
 
     @pytest.mark.asyncio
     async def test_store_event_bus_full_entries(
@@ -227,7 +227,7 @@ class TestStoreEventBusInKV:
                 kv_store[f"onex/nodes/{node_id}/event_bus/subscribe_entries"].decode()
             )
             assert len(subscribe_entries) == 2
-            assert subscribe_entries[0]["topic"] == "dev.onex.evt.intent-classified.v1"
+            assert subscribe_entries[0]["topic"] == "onex.evt.intent-classified.v1"
             assert subscribe_entries[0]["event_type"] == "ModelIntentClassified"
             assert subscribe_entries[0]["description"] == "Intent classification events"
 
@@ -252,7 +252,7 @@ class TestTopicSubscriberIndex:
             await handler.initialize(consul_config)
 
             correlation_id = uuid4()
-            topic = "dev.onex.evt.test-topic.v1"
+            topic = "onex.evt.test-topic.v1"
             node_id = "subscriber-node-001"
 
             await handler._add_subscriber_to_topic(topic, node_id, correlation_id)
@@ -282,7 +282,7 @@ class TestTopicSubscriberIndex:
             await handler.initialize(consul_config)
 
             correlation_id = uuid4()
-            topic = "dev.onex.evt.test-topic.v1"
+            topic = "onex.evt.test-topic.v1"
             node_id = "subscriber-node-001"
 
             # Add same subscriber twice
@@ -313,7 +313,7 @@ class TestTopicSubscriberIndex:
             await handler.initialize(consul_config)
 
             correlation_id = uuid4()
-            topic = "dev.onex.evt.shared-topic.v1"
+            topic = "onex.evt.shared-topic.v1"
             node_ids = ["node-001", "node-002", "node-003"]
 
             for node_id in node_ids:
@@ -343,7 +343,7 @@ class TestTopicSubscriberIndex:
             await handler.initialize(consul_config)
 
             correlation_id = uuid4()
-            topic = "dev.onex.evt.test-topic.v1"
+            topic = "onex.evt.test-topic.v1"
             node_id = "subscriber-to-remove"
 
             # Add then remove
@@ -383,8 +383,8 @@ class TestTopicDeltaUpdates:
             # Create event bus config with new topics
             event_bus = ModelNodeEventBusConfig(
                 subscribe_topics=[
-                    ModelEventBusTopicEntry(topic="dev.onex.evt.topic-a.v1"),
-                    ModelEventBusTopicEntry(topic="dev.onex.evt.topic-b.v1"),
+                    ModelEventBusTopicEntry(topic="onex.evt.topic-a.v1"),
+                    ModelEventBusTopicEntry(topic="onex.evt.topic-b.v1"),
                 ],
             )
 
@@ -394,10 +394,10 @@ class TestTopicDeltaUpdates:
 
             # Verify node was added to both topic indexes
             subs_a = json.loads(
-                kv_store["onex/topics/dev.onex.evt.topic-a.v1/subscribers"].decode()
+                kv_store["onex/topics/onex.evt.topic-a.v1/subscribers"].decode()
             )
             subs_b = json.loads(
-                kv_store["onex/topics/dev.onex.evt.topic-b.v1/subscribers"].decode()
+                kv_store["onex/topics/onex.evt.topic-b.v1/subscribers"].decode()
             )
 
             assert node_id in subs_a
@@ -425,8 +425,8 @@ class TestTopicDeltaUpdates:
             # First registration with topic-a and topic-b
             initial_config = ModelNodeEventBusConfig(
                 subscribe_topics=[
-                    ModelEventBusTopicEntry(topic="dev.onex.evt.topic-a.v1"),
-                    ModelEventBusTopicEntry(topic="dev.onex.evt.topic-b.v1"),
+                    ModelEventBusTopicEntry(topic="onex.evt.topic-a.v1"),
+                    ModelEventBusTopicEntry(topic="onex.evt.topic-b.v1"),
                 ],
             )
 
@@ -438,7 +438,7 @@ class TestTopicDeltaUpdates:
             # Now update to only topic-a (removes topic-b)
             updated_config = ModelNodeEventBusConfig(
                 subscribe_topics=[
-                    ModelEventBusTopicEntry(topic="dev.onex.evt.topic-a.v1"),
+                    ModelEventBusTopicEntry(topic="onex.evt.topic-a.v1"),
                     # topic-b removed
                 ],
             )
@@ -450,13 +450,13 @@ class TestTopicDeltaUpdates:
 
             # Verify node still in topic-a
             subs_a = json.loads(
-                kv_store["onex/topics/dev.onex.evt.topic-a.v1/subscribers"].decode()
+                kv_store["onex/topics/onex.evt.topic-a.v1/subscribers"].decode()
             )
             assert node_id in subs_a
 
             # Verify node removed from topic-b
             subs_b = json.loads(
-                kv_store["onex/topics/dev.onex.evt.topic-b.v1/subscribers"].decode()
+                kv_store["onex/topics/onex.evt.topic-b.v1/subscribers"].decode()
             )
             assert node_id not in subs_b
 
@@ -486,7 +486,7 @@ class TestTopicStringsAndEntriesSeparation:
             event_bus = ModelNodeEventBusConfig(
                 subscribe_topics=[
                     ModelEventBusTopicEntry(
-                        topic="dev.onex.evt.test.v1",
+                        topic="onex.evt.test.v1",
                         event_type="ModelTest",
                         description="Test description",
                     ),
@@ -500,14 +500,14 @@ class TestTopicStringsAndEntriesSeparation:
             # Topic strings should be a simple array
             topics_key = f"onex/nodes/{node_id}/event_bus/subscribe_topics"
             topics = json.loads(kv_store[topics_key].decode())
-            assert topics == ["dev.onex.evt.test.v1"]
+            assert topics == ["onex.evt.test.v1"]
             assert isinstance(topics[0], str)  # Just strings, not objects
 
             # Full entries should contain all metadata
             entries_key = f"onex/nodes/{node_id}/event_bus/subscribe_entries"
             entries = json.loads(kv_store[entries_key].decode())
             assert len(entries) == 1
-            assert entries[0]["topic"] == "dev.onex.evt.test.v1"
+            assert entries[0]["topic"] == "onex.evt.test.v1"
             assert entries[0]["event_type"] == "ModelTest"
             assert entries[0]["description"] == "Test description"
 
@@ -540,13 +540,13 @@ class TestServiceRegistrationWithEventBus:
                     "event_bus_config": {
                         "subscribe_topics": [
                             {
-                                "topic": "dev.onex.evt.integration.v1",
+                                "topic": "onex.evt.integration.v1",
                                 "event_type": "ModelIntegrationEvent",
                             }
                         ],
                         "publish_topics": [
                             {
-                                "topic": "dev.onex.evt.output.v1",
+                                "topic": "onex.evt.output.v1",
                             }
                         ],
                     },
@@ -568,9 +568,9 @@ class TestServiceRegistrationWithEventBus:
             assert f"onex/nodes/{node_id}/event_bus/subscribe_topics" in kv_store
 
             # Topic index should be updated
-            assert "onex/topics/dev.onex.evt.integration.v1/subscribers" in kv_store
+            assert "onex/topics/onex.evt.integration.v1/subscribers" in kv_store
             subscribers = json.loads(
-                kv_store["onex/topics/dev.onex.evt.integration.v1/subscribers"].decode()
+                kv_store["onex/topics/onex.evt.integration.v1/subscribers"].decode()
             )
             assert node_id in subscribers
 
@@ -633,7 +633,7 @@ class TestGetTopicSubscribers:
             await handler.initialize(consul_config)
 
             correlation_id = uuid4()
-            topic = "dev.onex.evt.lookup-test.v1"
+            topic = "onex.evt.lookup-test.v1"
             node_ids = ["lookup-node-001", "lookup-node-002"]
 
             # Add subscribers
@@ -662,7 +662,7 @@ class TestGetTopicSubscribers:
             await handler.initialize(consul_config)
 
             correlation_id = uuid4()
-            topic = "dev.onex.evt.nonexistent-topic.v1"
+            topic = "onex.evt.nonexistent-topic.v1"
 
             subscribers = await handler._get_topic_subscribers(topic, correlation_id)
 

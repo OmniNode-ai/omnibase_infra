@@ -38,19 +38,20 @@ description: |
   are separated.
 # Event Consumption Configuration
 # ================================
-# Topics follow 5-segment naming: {env}.onex.{category}.{domain}.{event-name}.v{version}
+# Topics are realm-agnostic: onex.{category}.{domain}.{event-name}.v{version}
 # Categories: evt (external events), int (internal events), cmd (commands)
+# Note: Environment/realm is enforced via envelope identity, not topic naming.
 consumed_events:
-  - topic: "{env}.onex.evt.platform.contract-registered.v1"
+  - topic: "onex.evt.platform.contract-registered.v1"
     event_type: "ModelContractRegisteredEvent"
     description: "Contract registration from nodes on startup"
-  - topic: "{env}.onex.evt.platform.contract-deregistered.v1"
+  - topic: "onex.evt.platform.contract-deregistered.v1"
     event_type: "ModelContractDeregisteredEvent"
     description: "Explicit contract deregistration on graceful shutdown"
-  - topic: "{env}.onex.evt.platform.node-heartbeat.v1"
+  - topic: "onex.evt.platform.node-heartbeat.v1"
     event_type: "ModelNodeHeartbeatEvent"
     description: "Heartbeat for liveness tracking and last_seen_at updates"
-  - topic: "{env}.onex.int.platform.runtime-tick.v1"
+  - topic: "onex.int.platform.runtime-tick.v1"
     event_type: "ModelRuntimeTick"
     internal: true
     description: "Periodic tick for staleness computation - marks contracts as stale/inactive"

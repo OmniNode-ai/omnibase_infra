@@ -211,9 +211,9 @@ def sample_topics() -> list[str]:
         List of topic strings.
     """
     return [
-        "dev.onex.evt.intent-classified.v1",
-        "dev.onex.evt.registration-requested.v1",
-        "dev.onex.cmd.register-node.v1",
+        "onex.evt.intent-classified.v1",
+        "onex.evt.registration-requested.v1",
+        "onex.cmd.register-node.v1",
     ]
 
 
@@ -238,7 +238,7 @@ class TestTopicSubscriberIndex:
         3. Subscriber list is stored as sorted JSON array
         """
         node_id = str(uuid4())
-        topic = "dev.onex.evt.test-event.v1"
+        topic = "onex.evt.test-event.v1"
 
         # Create event bus config with single topic
         event_bus = ModelNodeEventBusConfig(
@@ -310,7 +310,7 @@ class TestTopicSubscriberIndex:
         2. All node IDs appear in the subscriber list
         3. Subscriber list is properly aggregated
         """
-        topic = "dev.onex.evt.shared-event.v1"
+        topic = "onex.evt.shared-event.v1"
 
         # Register each node with the same topic
         for node_id in sample_node_ids:
@@ -349,7 +349,7 @@ class TestTopicSubscriberIndex:
         """
         # Node A subscribes to topic A
         node_a = str(uuid4())
-        topic_a = "dev.onex.evt.topic-a.v1"
+        topic_a = "onex.evt.topic-a.v1"
         event_bus_a = ModelNodeEventBusConfig(
             subscribe_topics=[ModelEventBusTopicEntry(topic=topic_a)],
         )
@@ -361,7 +361,7 @@ class TestTopicSubscriberIndex:
 
         # Node B subscribes to topic B
         node_b = str(uuid4())
-        topic_b = "dev.onex.evt.topic-b.v1"
+        topic_b = "onex.evt.topic-b.v1"
         event_bus_b = ModelNodeEventBusConfig(
             subscribe_topics=[ModelEventBusTopicEntry(topic=topic_b)],
         )
@@ -400,7 +400,7 @@ class TestTopicSubscriberIndex:
         event_bus = ModelNodeEventBusConfig(
             subscribe_topics=[],
             publish_topics=[
-                ModelEventBusTopicEntry(topic="dev.onex.evt.output.v1"),
+                ModelEventBusTopicEntry(topic="onex.evt.output.v1"),
             ],
         )
 
@@ -412,7 +412,7 @@ class TestTopicSubscriberIndex:
 
         # Verify node is not in any subscriber lists (check a non-existent topic)
         subscribers = await topic_index_mixin._get_topic_subscribers(
-            "dev.onex.evt.output.v1", correlation_id
+            "onex.evt.output.v1", correlation_id
         )
         assert node_id not in subscribers
         assert subscribers == []
@@ -439,7 +439,7 @@ class TestTopicIndexIdempotency:
         3. Order is maintained (sorted)
         """
         node_id = str(uuid4())
-        topic = "dev.onex.evt.idempotent-test.v1"
+        topic = "onex.evt.idempotent-test.v1"
 
         # Add subscriber multiple times
         await topic_index_mixin._add_subscriber_to_topic(topic, node_id, correlation_id)
@@ -466,7 +466,7 @@ class TestTopicIndexIdempotency:
         3. Subscriber list remains consistent
         """
         node_id = str(uuid4())
-        topic = "dev.onex.evt.remove-test.v1"
+        topic = "onex.evt.remove-test.v1"
 
         # Remove subscriber that was never added (should not raise)
         await topic_index_mixin._remove_subscriber_from_topic(
@@ -501,9 +501,9 @@ class TestTopicIndexIdempotency:
         3. Re-registering with removed topics removes from index
         """
         node_id = str(uuid4())
-        topic_a = "dev.onex.evt.delta-a.v1"
-        topic_b = "dev.onex.evt.delta-b.v1"
-        topic_c = "dev.onex.evt.delta-c.v1"
+        topic_a = "onex.evt.delta-a.v1"
+        topic_b = "onex.evt.delta-b.v1"
+        topic_c = "onex.evt.delta-c.v1"
 
         # Initial registration with topics A and B
         # Update topic index FIRST, then store event bus config
@@ -574,7 +574,7 @@ class TestTopicIndexIdempotency:
         3. Index remains consistent after multiple updates
         """
         node_id = str(uuid4())
-        topic = "dev.onex.evt.reregister.v1"
+        topic = "onex.evt.reregister.v1"
 
         event_bus = ModelNodeEventBusConfig(
             subscribe_topics=[ModelEventBusTopicEntry(topic=topic)],
@@ -618,7 +618,7 @@ class TestTopicQueryRouting:
         2. List is complete (no missing entries)
         3. List is sorted for consistency
         """
-        topic = "dev.onex.evt.all-subscribers.v1"
+        topic = "onex.evt.all-subscribers.v1"
 
         # Register all nodes
         for node_id in sample_node_ids:
@@ -651,7 +651,7 @@ class TestTopicQueryRouting:
         2. Returns empty list (not None)
         3. Graceful handling of missing KV key
         """
-        unknown_topic = "dev.onex.evt.nonexistent-topic.v1"
+        unknown_topic = "onex.evt.nonexistent-topic.v1"
 
         subscribers = await topic_index_mixin._get_topic_subscribers(
             unknown_topic, correlation_id
@@ -673,7 +673,7 @@ class TestTopicQueryRouting:
         3. Format matches UUID string representation
         """
         node_id = str(uuid4())
-        topic = "dev.onex.evt.string-ids.v1"
+        topic = "onex.evt.string-ids.v1"
 
         await topic_index_mixin._add_subscriber_to_topic(topic, node_id, correlation_id)
 
@@ -700,7 +700,7 @@ class TestTopicQueryRouting:
         """
         node_a = str(uuid4())
         node_b = str(uuid4())
-        topic = "dev.onex.evt.removal-query.v1"
+        topic = "onex.evt.removal-query.v1"
 
         # Add both nodes
         await topic_index_mixin._add_subscriber_to_topic(topic, node_a, correlation_id)
@@ -740,7 +740,7 @@ class TestRegistrationToRouting:
         4. Multiple queries return consistent results
         """
         node_id = str(uuid4())
-        topic = "dev.onex.evt.full-flow.v1"
+        topic = "onex.evt.full-flow.v1"
 
         # Step 1: Create event bus configuration
         event_bus = ModelNodeEventBusConfig(
@@ -754,7 +754,7 @@ class TestRegistrationToRouting:
             ],
             publish_topics=[
                 ModelEventBusTopicEntry(
-                    topic="dev.onex.evt.output.v1",
+                    topic="onex.evt.output.v1",
                     event_type="ModelOutputEvent",
                 ),
             ],
@@ -796,7 +796,7 @@ class TestRegistrationToRouting:
         3. Query no longer returns the node
         """
         node_id = str(uuid4())
-        topic = "dev.onex.evt.deregister.v1"
+        topic = "onex.evt.deregister.v1"
 
         # Initial registration
         # Update topic index FIRST, then store event bus config
@@ -851,9 +851,9 @@ class TestRegistrationToRouting:
         node_b = str(uuid4())  # Processor
         node_c = str(uuid4())  # Logger
 
-        topic_input = "dev.onex.evt.input.v1"
-        topic_classified = "dev.onex.evt.classified.v1"
-        topic_processed = "dev.onex.evt.processed.v1"
+        topic_input = "onex.evt.input.v1"
+        topic_classified = "onex.evt.classified.v1"
+        topic_processed = "onex.evt.processed.v1"
 
         # Node A: Classifier
         # Update topic index FIRST, then store event bus config
@@ -931,7 +931,7 @@ class TestKVStorageFormat:
         3. Contains topic strings only (not full entry objects)
         """
         node_id = str(uuid4())
-        topics = ["dev.onex.evt.a.v1", "dev.onex.evt.b.v1"]
+        topics = ["onex.evt.a.v1", "onex.evt.b.v1"]
 
         event_bus = ModelNodeEventBusConfig(
             subscribe_topics=[ModelEventBusTopicEntry(topic=t) for t in topics],
@@ -963,7 +963,7 @@ class TestKVStorageFormat:
         2. Format is JSON array
         3. Array is sorted for consistent ordering
         """
-        topic = "dev.onex.evt.sorted-test.v1"
+        topic = "onex.evt.sorted-test.v1"
         node_ids = [str(uuid4()) for _ in range(3)]
 
         # Add in random order
