@@ -48,13 +48,25 @@ x-runtime-base: &runtime-base
       - github_token
   networks:
     - omnibase-infra-network
-  # Bridge hosts for external infrastructure services
+  # Bridge hosts for infrastructure services
+  # Supports both:
+  #   - Legacy names (omninode-bridge-*): for backward compatibility with 192.168.86.200
+  #   - New names (postgres, redpanda, etc.): for local docker-compose.infra.yml
+  #
+  # Set INFRA_HOST to switch between local (host-gateway) and remote (192.168.86.200)
   extra_hosts:
-    - "omninode-bridge-postgres:${REMOTE_HOST:-host-gateway}"
-    - "omninode-bridge-redpanda:${REMOTE_HOST:-host-gateway}"
-    - "omninode-bridge-consul:${REMOTE_HOST:-host-gateway}"
-    - "omninode-bridge-vault:${REMOTE_HOST:-host-gateway}"
-    - "omninode-bridge-redis:${REMOTE_HOST:-host-gateway}"
+    # Legacy service names (omninode_bridge deployment)
+    - "omninode-bridge-postgres:${INFRA_HOST:-${REMOTE_HOST:-host-gateway}}"
+    - "omninode-bridge-redpanda:${INFRA_HOST:-${REMOTE_HOST:-host-gateway}}"
+    - "omninode-bridge-consul:${INFRA_HOST:-${REMOTE_HOST:-host-gateway}}"
+    - "omninode-bridge-vault:${INFRA_HOST:-${REMOTE_HOST:-host-gateway}}"
+    - "omninode-bridge-redis:${INFRA_HOST:-${REMOTE_HOST:-host-gateway}}"
+    # New service names (docker-compose.infra.yml)
+    - "postgres:${INFRA_HOST:-${REMOTE_HOST:-host-gateway}}"
+    - "redpanda:${INFRA_HOST:-${REMOTE_HOST:-host-gateway}}"
+    - "valkey:${INFRA_HOST:-${REMOTE_HOST:-host-gateway}}"
+    - "consul:${INFRA_HOST:-${REMOTE_HOST:-host-gateway}}"
+    - "infisical:${INFRA_HOST:-${REMOTE_HOST:-host-gateway}}"
   restart: unless-stopped
   # Resource limits for container orchestration
   deploy:

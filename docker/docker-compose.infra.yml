@@ -1,0 +1,307 @@
+# docker-compose.infra.yml
+# ONEX Infrastructure Services - Core Dependencies
+#
+# This compose file provides the foundational infrastructure services for
+# the ONEX platform: PostgreSQL, Redpanda (Kafka), and Valkey (Redis-compatible).
+# Optional services (Consul, Infisical) are available via profiles.
+#
+# Usage:
+#   # Core infrastructure only (postgres, redpanda, valkey)
+#   docker compose -f docker/docker-compose.infra.yml up -d
+#
+#   # With Consul (service discovery for home/production environments)
+#   docker compose -f docker/docker-compose.infra.yml --profile consul up -d
+#
+#   # With secrets management (Infisical)
+#   docker compose -f docker/docker-compose.infra.yml --profile secrets up -d
+#
+#   # Full stack (all optional services)
+#   docker compose -f docker/docker-compose.infra.yml --profile full up -d
+#
+#   # Stop services
+#   docker compose -f docker/docker-compose.infra.yml down
+#
+#   # Stop and remove volumes (CAUTION: destroys data)
+#   docker compose -f docker/docker-compose.infra.yml down -v
+#
+# Profiles:
+#   - (default): Core services (postgres, redpanda, valkey, topic-manager)
+#   - consul: HashiCorp Consul for service discovery
+#   - secrets: Infisical for secrets management
+#   - full: All optional services (consul + secrets)
+#
+# Network:
+#   Uses omnibase-infra-network for service communication.
+#   Runtime containers can connect to this network for local infrastructure.
+#
+# External Ports:
+#   - PostgreSQL: 5436 (internal 5432)
+#   - Redpanda: 29092 (internal 9092)
+#   - Valkey: 16379 (internal 6379)
+#   - Consul: 28500 (internal 8500) [consul profile]
+#   - Infisical: 8880 (internal 8080) [secrets profile]
+name: omnibase-infra
+# ==========================================================================
+# Shared Configuration Templates (YAML Anchors)
+# ==========================================================================
+
+# Default healthcheck configuration
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 10s
+# Default logging configuration
+x-logging-defaults: &logging-defaults
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+# ==========================================================================
+# Services
+# ==========================================================================
+services:
+  # ==========================================================================
+  # PostgreSQL - Primary Data Store
+  # ==========================================================================
+  # PostgreSQL 16 with Alpine for minimal image size.
+  # Creates both omninode_bridge (ONEX) and infisical_db databases on init.
+  postgres:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-omninode_bridge}
+      # Additional databases created by init script
+      POSTGRES_MULTIPLE_DATABASES: "omninode_bridge,infisical_db"
+    ports:
+      - "${POSTGRES_EXTERNAL_PORT:-5436}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    networks:
+      - omnibase-infra-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DATABASE:-omninode_bridge}"]
+    logging: *logging-defaults
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=postgres"
+      - "com.omninode.layer=infrastructure"
+  # ==========================================================================
+  # Redpanda - Kafka-Compatible Event Streaming
+  # ==========================================================================
+  # Redpanda v24.2.7 configured for local development.
+  # Provides Kafka API on internal port 9092, external port 29092.
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:29092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --memory 1G
+      - --default-log-level=warn
+    ports:
+      - "${REDPANDA_EXTERNAL_PORT:-29092}:19092"
+      - "18082:18082"
+      - "18081:18081"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    networks:
+      - omnibase-infra-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true' || exit 1"]
+      start_period: 30s
+    logging: *logging-defaults
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=redpanda"
+      - "com.omninode.layer=infrastructure"
+  # ==========================================================================
+  # Redpanda Topic Manager - Automatic Topic Creation
+  # ==========================================================================
+  # Creates required Kafka topics on startup.
+  # Runs once and exits after topic creation.
+  redpanda-topic-manager:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-topic-manager
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        echo "Waiting for Redpanda to be ready..."
+        sleep 5
+
+        # Create core ONEX topics
+        echo "Creating ONEX topics..."
+        rpk topic create requests --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create responses --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create effect-requests --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create effect-responses --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create worker-requests --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create worker-responses --brokers redpanda:9092 -p 3 -r 1 || true
+
+        # Create observability topics
+        echo "Creating observability topics..."
+        rpk topic create agent-actions --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create agent-transformation-events --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create router-performance-metrics --brokers redpanda:9092 -p 3 -r 1 || true
+
+        # Create registration topics
+        echo "Creating registration topics..."
+        rpk topic create node-introspection-events --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create node-registration-events --brokers redpanda:9092 -p 3 -r 1 || true
+
+        # List all topics
+        echo "Topics created:"
+        rpk topic list --brokers redpanda:9092
+
+        echo "Topic manager completed successfully."
+    networks:
+      - omnibase-infra-network
+    logging: *logging-defaults
+    restart: "no"
+    labels:
+      - "com.omninode.service=topic-manager"
+      - "com.omninode.layer=infrastructure"
+  # ==========================================================================
+  # Valkey - Redis-Compatible Cache and Pub/Sub
+  # ==========================================================================
+  # Valkey 8.0 (Redis-compatible, open source fork).
+  # Used for caching, session storage, and pub/sub.
+  valkey:
+    image: valkey/valkey:8.0-alpine
+    container_name: omnibase-infra-valkey
+    command:
+      - valkey-server
+      - --appendonly yes
+      - --maxmemory 256mb
+      - --maxmemory-policy allkeys-lru
+    ports:
+      - "${VALKEY_EXTERNAL_PORT:-16379}:6379"
+    volumes:
+      - valkey_data:/data
+    networks:
+      - omnibase-infra-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD", "valkey-cli", "ping"]
+    logging: *logging-defaults
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=valkey"
+      - "com.omninode.layer=infrastructure"
+  # ==========================================================================
+  # Consul - Service Discovery (Optional)
+  # ==========================================================================
+  # HashiCorp Consul for service registration and discovery.
+  # Enable with: --profile consul or --profile full
+  consul:
+    image: hashicorp/consul:1.18
+    container_name: omnibase-infra-consul
+    profiles: ["consul", "full"]
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -data-dir=/consul/data
+    ports:
+      - "${CONSUL_EXTERNAL_PORT:-28500}:8500"
+      - "8600:8600/udp"
+    volumes:
+      - consul_data:/consul/data
+    networks:
+      - omnibase-infra-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD", "consul", "members"]
+    logging: *logging-defaults
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=consul"
+      - "com.omninode.layer=infrastructure"
+  # ==========================================================================
+  # Infisical - Secrets Management (Optional)
+  # ==========================================================================
+  # Infisical for centralized secrets management.
+  # Shares PostgreSQL (infisical_db) and Valkey with other services.
+  # Enable with: --profile secrets or --profile full
+  #
+  # Required environment variables:
+  #   - INFISICAL_ENCRYPTION_KEY: 32-byte hex key for encryption
+  #   - INFISICAL_AUTH_SECRET: JWT signing secret
+  #
+  # Generate keys:
+  #   openssl rand -hex 16  # for INFISICAL_ENCRYPTION_KEY
+  #   openssl rand -base64 32  # for INFISICAL_AUTH_SECRET
+  infisical:
+    image: infisical/infisical:latest-postgres
+    container_name: omnibase-infra-infisical
+    profiles: ["secrets", "full"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    environment:
+      # Database connection
+      DB_CONNECTION_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/infisical_db
+      # Redis connection (Valkey is Redis-compatible)
+      REDIS_URL: redis://valkey:6379
+      # Encryption and authentication
+      # NOTE: These are required when using secrets profile. Infisical will fail
+      # at runtime if not set. We use defaults to avoid parse-time errors when
+      # the profile is not active.
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-not-set-will-fail-at-runtime}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:-not-set-will-fail-at-runtime}
+      # Site configuration
+      SITE_URL: ${INFISICAL_SITE_URL:-http://localhost:8880}
+      # Telemetry
+      TELEMETRY_ENABLED: "false"
+    ports:
+      - "${INFISICAL_EXTERNAL_PORT:-8880}:8080"
+    networks:
+      - omnibase-infra-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/status"]
+      start_period: 60s
+    logging: *logging-defaults
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=infisical"
+      - "com.omninode.layer=infrastructure"
+# ==========================================================================
+# Network Configuration
+# ==========================================================================
+# Internal network for omnibase infrastructure services.
+# Runtime containers can connect to this network for local development.
+networks:
+  omnibase-infra-network:
+    name: omnibase-infra-network
+    driver: bridge
+# ==========================================================================
+# Volume Configuration
+# ==========================================================================
+# Named volumes with explicit names for predictable management.
+# Use 'docker compose down -v' to remove volumes (CAUTION: destroys data).
+volumes:
+  postgres_data:
+    name: omnibase-infra-postgres-data
+  redpanda_data:
+    name: omnibase-infra-redpanda-data
+  valkey_data:
+    name: omnibase-infra-valkey-data
+  consul_data:
+    name: omnibase-infra-consul-data
