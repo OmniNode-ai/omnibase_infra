@@ -2680,6 +2680,7 @@ class RuntimeHostProcess:
                     extra={
                         "topic": topic,
                         "error": str(e),
+                        "trace_id": str(trace_id) if trace_id else None,
                     },
                 )
                 envelope_dict = model.model_dump(mode="python")
@@ -3947,18 +3948,18 @@ class RuntimeHostProcess:
 
             else:
                 # Not a signed envelope - check reject_unsigned setting
+                # Extract correlation_id from envelope for logging (used in both paths)
+                cid = envelope.get("correlation_id")
+                cid_str: str | None = None
+                if isinstance(cid, UUID):
+                    cid_str = str(cid)
+                elif isinstance(cid, str):
+                    cid_str = cid
+
                 if (
                     self._gateway_config is not None
                     and self._gateway_config.reject_unsigned
                 ):
-                    # Extract correlation_id from envelope for logging
-                    cid = envelope.get("correlation_id")
-                    cid_str: str | None = None
-                    if isinstance(cid, UUID):
-                        cid_str = str(cid)
-                    elif isinstance(cid, str):
-                        cid_str = cid
-
                     logger.warning(
                         "Unsigned envelope rejected (reject_unsigned=True)",
                         extra={
@@ -3973,7 +3974,7 @@ class RuntimeHostProcess:
                 # Accept unsigned envelope (reject_unsigned=False)
                 logger.debug(
                     "Accepting unsigned envelope (reject_unsigned=False)",
-                    extra={"topic": topic},
+                    extra={"topic": topic, "correlation_id": cid_str},
                 )
 
         # Validation passed or no validator configured

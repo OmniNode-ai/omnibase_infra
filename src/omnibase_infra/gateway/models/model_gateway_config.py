@@ -21,6 +21,7 @@ Example:
     ... )
     >>> print(config.realm)
     'dev'
+
 """
 
 from __future__ import annotations
@@ -82,6 +83,7 @@ class ModelGatewayConfig(BaseModel):
         ...     allowed_topics=["events.*", "commands.*"],
         ...     reject_unsigned=True,
         ... )
+
     """
 
     model_config = ConfigDict(

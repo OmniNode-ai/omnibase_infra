@@ -27,6 +27,7 @@ class EnumValidationErrorCode(str, Enum):
         HASH_MISMATCH: Recomputed payload hash differs from signature's payload_hash.
         INVALID_SIGNATURE: Ed25519 signature verification failed.
         MISSING_SIGNATURE: Envelope has no signature and reject_unsigned is enabled.
+
     """
 
     REALM_MISMATCH = "REALM_MISMATCH"

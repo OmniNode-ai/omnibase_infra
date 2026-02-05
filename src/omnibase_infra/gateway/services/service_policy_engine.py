@@ -38,6 +38,7 @@ Example:
 Related:
     - OMN-1899: Runtime gateway policy engine implementation
     - OMN-1897: Infrastructure Docker Compose integration
+
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ import fnmatch
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from uuid import UUID
+from uuid import UUID, uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ class EnumPolicyDecision(str, Enum):
     Attributes:
         ALLOW: Message passes policy checks and should be processed.
         DENY: Message fails policy checks and should be rejected.
+
     """
 
     ALLOW = "allow"
@@ -86,6 +88,7 @@ class PolicyDecision:
         ... )
         >>> if decision.decision == EnumPolicyDecision.DENY:
         ...     logger.warning(f"Message rejected: {decision.reason}")
+
     """
 
     decision: EnumPolicyDecision
@@ -106,6 +109,7 @@ class PolicyDecision:
             >>> decision = PolicyDecision(decision=EnumPolicyDecision.ALLOW)
             >>> if decision:
             ...     process_message()
+
         """
         return self.decision == EnumPolicyDecision.ALLOW
 
@@ -158,6 +162,7 @@ class ServicePolicyEngine:
         >>> # Both topic AND realm must match
         >>> engine.evaluate_inbound("events.order", realm="tenant-123")
         PolicyDecision(decision=<EnumPolicyDecision.ALLOW>, reason=None)
+
     """
 
     def __init__(
@@ -181,6 +186,7 @@ class ServicePolicyEngine:
         Note:
             The allowed_topics list is converted to an immutable tuple internally
             to ensure thread safety and prevent accidental modification.
+
         """
         # Convert to tuple for immutability and thread safety
         self._allowed_topics: tuple[str, ...] | None = (
@@ -208,6 +214,7 @@ class ServicePolicyEngine:
         Returns:
             Immutable tuple of allowed topic patterns, or None if
             all topics are allowed.
+
         """
         return self._allowed_topics
 
@@ -218,6 +225,7 @@ class ServicePolicyEngine:
         Returns:
             The expected realm identifier, or None if realm checking
             is disabled.
+
         """
         return self._expected_realm
 
@@ -258,7 +266,12 @@ class ServicePolicyEngine:
             ... )
             >>> if not decision:
             ...     raise PermissionError(decision.reason)
+
         """
+        # Auto-generate correlation_id if not provided for rejection traceability
+        if correlation_id is None:
+            correlation_id = uuid4()
+
         # Check 1: Topic allowlist
         if not self.is_topic_allowed(topic):
             reason = f"Topic '{topic}' not in allowlist"
@@ -306,6 +319,7 @@ class ServicePolicyEngine:
             Outbound policy is intentionally permissive by default.
             Egress filtering should be implemented carefully to avoid
             breaking legitimate message flows.
+
         """
         # Currently always allow outbound messages
         # Future: Add egress filtering if needed
@@ -345,6 +359,7 @@ class ServicePolicyEngine:
             True
             >>> engine.is_topic_allowed("commands.user.create")
             False
+
         """
         # No allowlist = allow all
         if not self._allowed_topics:
@@ -379,6 +394,7 @@ class ServicePolicyEngine:
         Note:
             Pattern matching is case-sensitive. Topics and patterns
             should use consistent casing (typically lowercase).
+
         """
         # Use fnmatch for glob-style pattern matching
         # This handles *, ?, and [seq] patterns efficiently
@@ -407,6 +423,7 @@ class ServicePolicyEngine:
             Logging can be disabled via log_rejections=False in constructor
             for performance-critical scenarios, but this is not recommended
             for production as it reduces security visibility.
+
         """
         if not self._log_rejections:
             return

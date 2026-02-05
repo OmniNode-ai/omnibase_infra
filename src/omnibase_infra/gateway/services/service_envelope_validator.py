@@ -33,6 +33,7 @@ Example:
     ...     print("Envelope is valid")
     ... else:
     ...     print(f"Validation failed: {result.error_code} - {result.error_message}")
+
 """
 
 from __future__ import annotations
@@ -82,6 +83,7 @@ class ValidationResult:
         ...     error_message="Expected realm 'production', got 'staging'",
         ... )
         >>> bool(result)  # False
+
     """
 
     is_valid: bool
@@ -98,6 +100,7 @@ class ValidationResult:
 
         Returns:
             True if validation passed, False otherwise.
+
         """
         return self.is_valid
 
@@ -107,6 +110,7 @@ class ValidationResult:
 
         Returns:
             ValidationResult with is_valid=True and no error details.
+
         """
         return cls(is_valid=True)
 
@@ -124,6 +128,7 @@ class ValidationResult:
 
         Returns:
             ValidationResult with is_valid=False and error details.
+
         """
         return cls(
             is_valid=False,
@@ -166,6 +171,7 @@ class ServiceEnvelopeValidator:
         - Always enable reject_unsigned in production environments
         - Regularly rotate and audit trusted public keys
         - Log validation failures for security monitoring
+
     """
 
     def __init__(
@@ -190,6 +196,7 @@ class ServiceEnvelopeValidator:
             ...     expected_realm="production",
             ...     public_keys={"runtime-1": pub_key_1, "runtime-2": pub_key_2},
             ... )
+
         """
         self._expected_realm = expected_realm
         self._public_keys: dict[str, Ed25519PublicKey] = dict(public_keys or {})
@@ -210,6 +217,7 @@ class ServiceEnvelopeValidator:
 
         Returns:
             The realm string this gateway expects in inbound envelopes.
+
         """
         return self._expected_realm
 
@@ -219,6 +227,7 @@ class ServiceEnvelopeValidator:
 
         Returns:
             True if unsigned envelopes are rejected, False otherwise.
+
         """
         return self._reject_unsigned
 
@@ -228,6 +237,7 @@ class ServiceEnvelopeValidator:
 
         Returns:
             Count of runtime_ids in the trusted public keys registry.
+
         """
         return len(self._public_keys)
 
@@ -266,6 +276,7 @@ class ServiceEnvelopeValidator:
             ...     process_envelope(envelope)
             ... else:
             ...     log_validation_failure(result.error_code, result.error_message)
+
         """
         # Step 1: Check realm matches
         if envelope.realm != self._expected_realm:
@@ -462,6 +473,7 @@ class ServiceEnvelopeValidator:
         Note:
             If runtime_id already exists, the public key is replaced.
             This can be used for key rotation scenarios.
+
         """
         is_update = runtime_id in self._public_keys
         self._public_keys[runtime_id] = public_key
@@ -493,6 +505,7 @@ class ServiceEnvelopeValidator:
             >>> removed = validator.remove_trusted_signer("decommissioned-runtime")
             >>> if removed:
             ...     print("Signer removed successfully")
+
         """
         if runtime_id in self._public_keys:
             del self._public_keys[runtime_id]
@@ -515,6 +528,7 @@ class ServiceEnvelopeValidator:
 
         Returns:
             True if the runtime_id has a registered public key.
+
         """
         return runtime_id in self._public_keys
 

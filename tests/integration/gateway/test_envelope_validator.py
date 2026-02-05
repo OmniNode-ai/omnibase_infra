@@ -19,8 +19,6 @@ from __future__ import annotations
 import base64
 
 import pytest
-
-pytestmark = pytest.mark.integration
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
@@ -38,6 +36,8 @@ from omnibase_infra.gateway import (
 )
 
 from .conftest import ModelTestPayload
+
+pytestmark = pytest.mark.integration
 
 
 class TestEnvelopeValidatorValidEnvelope:

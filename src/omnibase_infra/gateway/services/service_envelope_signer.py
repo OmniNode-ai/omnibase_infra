@@ -38,6 +38,7 @@ Example:
     ...     payload=my_event,
     ...     bus_id="event-bus-main",
     ... )
+
 """
 
 from __future__ import annotations
@@ -107,6 +108,7 @@ class ServiceEnvelopeSigner:
         ...     trace_id=trace_id,
         ... )
         >>> print(envelope.signature.algorithm)  # 'ed25519'
+
     """
 
     def __init__(
@@ -129,6 +131,7 @@ class ServiceEnvelopeSigner:
             The private key bytes are extracted and stored internally. The
             original Ed25519PrivateKey object is not retained, minimizing
             the security surface.
+
         """
         self._realm = realm
         self._runtime_id = runtime_id
@@ -153,6 +156,7 @@ class ServiceEnvelopeSigner:
 
         Returns:
             The routing boundary identifier for this signer.
+
         """
         return self._realm
 
@@ -162,6 +166,7 @@ class ServiceEnvelopeSigner:
 
         Returns:
             The unique gateway instance identifier.
+
         """
         return self._runtime_id
 
@@ -212,6 +217,7 @@ class ServiceEnvelopeSigner:
             'ed25519'
             >>> print(envelope.realm)
             'dev'
+
         """
         # Generate trace_id if not provided
         effective_trace_id = trace_id if trace_id is not None else uuid4()
@@ -311,6 +317,7 @@ class ServiceEnvelopeSigner:
 
         .. versionadded:: OMN-1899
             Added to support signing dict envelopes in runtime host.
+
         """
         # Generate trace_id if not provided
         effective_trace_id = trace_id if trace_id is not None else uuid4()

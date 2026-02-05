@@ -17,8 +17,6 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 import pytest
-
-pytestmark = pytest.mark.integration
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from omnibase_core.crypto.crypto_blake3_hasher import hash_canonical_json
@@ -27,6 +25,8 @@ from omnibase_core.models.envelope.model_message_envelope import ModelMessageEnv
 from omnibase_infra.gateway import ServiceEnvelopeSigner
 
 from .conftest import ModelTestPayload
+
+pytestmark = pytest.mark.integration
 
 
 class TestEnvelopeSignerBasic:

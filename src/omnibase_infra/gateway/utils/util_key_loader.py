@@ -18,6 +18,7 @@ Example:
     >>> from pathlib import Path
     >>> private_key = load_private_key_from_pem(Path("/etc/onex/keys/private.pem"))
     >>> public_key = load_public_key_from_pem(Path("/etc/onex/keys/public.pem"))
+
 """
 
 from __future__ import annotations
@@ -71,6 +72,7 @@ def load_private_key_from_pem(path: Path) -> Ed25519PrivateKey:
         >>> from pathlib import Path
         >>> key = load_private_key_from_pem(Path("/etc/onex/keys/private.pem"))
         >>> # Key is ready for signing operations
+
     """
     context = ModelInfraErrorContext.with_correlation(
         transport_type=EnumInfraTransportType.RUNTIME,
@@ -156,6 +158,7 @@ def load_public_key_from_pem(path: Path) -> Ed25519PublicKey:
         >>> from pathlib import Path
         >>> key = load_public_key_from_pem(Path("/etc/onex/keys/public.pem"))
         >>> # Key is ready for signature verification
+
     """
     context = ModelInfraErrorContext.with_correlation(
         transport_type=EnumInfraTransportType.RUNTIME,
