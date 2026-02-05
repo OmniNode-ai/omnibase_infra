@@ -29,6 +29,12 @@ from omnibase_infra.models.event_bus import (
 )
 from omnibase_infra.models.handlers import ModelHandlerIdentifier
 from omnibase_infra.models.health import ModelHealthCheckResult
+from omnibase_infra.models.ledger import (
+    ModelDbQueryFailed,
+    ModelDbQueryRequested,
+    ModelDbQuerySucceeded,
+    ModelLedgerEventBase,
+)
 from omnibase_infra.models.logging import ModelLogContext
 from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.models.model_node_identity import ModelNodeIdentity
@@ -113,6 +119,11 @@ __all__: list[str] = [
     "ModelHandlerValidationError",
     # Handler models
     "ModelHandlerIdentifier",
+    # Ledger event models
+    "ModelDbQueryFailed",
+    "ModelDbQueryRequested",
+    "ModelDbQuerySucceeded",
+    "ModelLedgerEventBase",
     # Routing models
     "ModelRoutingEntry",
     "ModelRoutingSubcontract",

@@ -51,10 +51,14 @@ Usage Example:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import re
 import time
+from datetime import UTC, datetime, timezone
 from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors.repository import (
@@ -64,6 +68,12 @@ from omnibase_infra.errors.repository import (
     RepositoryValidationError,
 )
 from omnibase_infra.models.errors import ModelInfraErrorContext
+from omnibase_infra.models.ledger import (
+    ModelDbQueryFailed,
+    ModelDbQueryRequested,
+    ModelDbQuerySucceeded,
+    ModelLedgerEventBase,
+)
 from omnibase_infra.runtime.db.models import (
     ModelDbOperation,
     ModelDbRepositoryContract,
@@ -72,6 +82,8 @@ from omnibase_infra.runtime.db.models import (
 
 if TYPE_CHECKING:
     import asyncpg
+
+    from omnibase_infra.protocols import ProtocolLedgerSink
 
 logger = logging.getLogger(__name__)
 
@@ -153,13 +165,20 @@ class PostgresRepositoryRuntime:
         >>> results = await runtime.call("find_all")
     """
 
-    __slots__ = ("_config", "_contract", "_pool")
+    __slots__ = (
+        "_config",
+        "_contract",
+        "_contract_fingerprint",
+        "_ledger_sink",
+        "_pool",
+    )
 
     def __init__(
         self,
         pool: asyncpg.Pool,
         contract: ModelDbRepositoryContract,
         config: ModelRepositoryRuntimeConfig | None = None,
+        ledger_sink: ProtocolLedgerSink | None = None,
     ) -> None:
         """Initialize the repository runtime.
 
@@ -167,17 +186,22 @@ class PostgresRepositoryRuntime:
             pool: asyncpg connection pool for database access.
             contract: Repository contract defining available operations.
             config: Optional runtime configuration. If None, uses defaults.
+            ledger_sink: Optional ledger sink for emitting traceability events.
+                If provided, events are emitted on call() entry, success, and failure.
 
         Example:
             >>> runtime = PostgresRepositoryRuntime(
             ...     pool=pool,
             ...     contract=contract,
             ...     config=ModelRepositoryRuntimeConfig(max_row_limit=100),
+            ...     ledger_sink=FileSpoolLedgerSink("/var/log/ledger"),
             ... )
         """
         self._pool = pool
         self._contract = contract
         self._config = config or ModelRepositoryRuntimeConfig()
+        self._ledger_sink = ledger_sink
+        self._contract_fingerprint = self._compute_contract_fingerprint()
 
     @property
     def contract(self) -> ModelDbRepositoryContract:
@@ -189,8 +213,50 @@ class PostgresRepositoryRuntime:
         """Get the runtime configuration."""
         return self._config
 
+    @property
+    def contract_fingerprint(self) -> str:
+        """Get the SHA256 fingerprint of the contract."""
+        return self._contract_fingerprint
+
+    def _compute_contract_fingerprint(self) -> str:
+        """Compute SHA256 fingerprint of canonical contract JSON.
+
+        Uses sorted keys and stable serialization for determinism.
+        Does not hash raw YAML to avoid formatting churn.
+        """
+        # Serialize contract to canonical JSON (sorted keys)
+        contract_dict = self._contract.model_dump(mode="json")
+        canonical_json = json.dumps(
+            contract_dict, sort_keys=True, separators=(",", ":")
+        )
+        return f"sha256:{hashlib.sha256(canonical_json.encode()).hexdigest()}"
+
+    def _compute_query_fingerprint(self, op_name: str, args: tuple[object, ...]) -> str:
+        """Compute fingerprint of query (operation + param shape, NOT values).
+
+        Security: Does NOT include raw SQL or param values.
+        Only includes operation name and param type names for shape.
+        """
+        # Build param shape: list of type names (not values)
+        param_shape = [type(arg).__name__ for arg in args]
+        fingerprint_data = f"{op_name}:{param_shape}"
+        return f"sha256:{hashlib.sha256(fingerprint_data.encode()).hexdigest()[:16]}"
+
+    async def _emit_ledger_event(self, event: ModelLedgerEventBase) -> None:
+        """Emit a ledger event if sink is configured.
+
+        Errors during emission are logged but not propagated (ledger is
+        observability, not critical path).
+        """
+        if self._ledger_sink is None:
+            return
+        try:
+            await self._ledger_sink.emit(event)
+        except Exception as e:
+            logger.warning(f"Failed to emit ledger event: {e}", exc_info=True)
+
     async def call(
-        self, op_name: str, *args: object
+        self, op_name: str, *args: object, correlation_id: UUID | None = None
     ) -> list[dict[str, object]] | dict[str, object] | None:
         """Execute a named operation from the contract.
 
@@ -198,9 +264,16 @@ class PostgresRepositoryRuntime:
         validates argument count, applies determinism and limit
         constraints, and executes with timeout enforcement.
 
+        If a ledger_sink is configured, emits traceability events:
+        - db.query.requested: At entry, before execution
+        - db.query.succeeded: On successful completion
+        - db.query.failed: On any exception
+
         Args:
             op_name: Operation name as defined in contract.ops.
             *args: Positional arguments matching contract params order.
+            correlation_id: Optional correlation ID for distributed tracing.
+                If not provided, one is auto-generated.
 
         Returns:
             For many=True: list of dicts (possibly empty)
@@ -222,6 +295,9 @@ class PostgresRepositoryRuntime:
         start_time = time.monotonic()
         context = self._create_error_context(op_name)
 
+        # Generate or use provided correlation_id
+        corr_id = correlation_id or uuid4()
+
         # Lookup operation in contract
         operation = self._get_operation(op_name, context)
 
@@ -234,12 +310,48 @@ class PostgresRepositoryRuntime:
         # Build final SQL with determinism and limit constraints
         sql = self._build_sql(operation, op_name, context)
 
+        # Emit db.query.requested event
+        if self._ledger_sink is not None:
+            requested_event = ModelDbQueryRequested(
+                event_id=uuid4(),
+                correlation_id=corr_id,
+                idempotency_key=ModelLedgerEventBase.build_idempotency_key(
+                    corr_id, op_name, "db.query.requested"
+                ),
+                contract_id=self._contract.name,
+                contract_fingerprint=self._contract_fingerprint,
+                operation_name=op_name,
+                query_fingerprint=self._compute_query_fingerprint(op_name, args),
+                emitted_at=datetime.now(UTC),
+            )
+            await self._emit_ledger_event(requested_event)
+
         # Execute with timeout
         try:
             result = await self._execute_with_timeout(
                 sql, args, operation, op_name, context
             )
         except TimeoutError as e:
+            # Emit failure event before re-raising
+            elapsed_ms = (time.monotonic() - start_time) * 1000
+            if self._ledger_sink is not None:
+                failed_event = ModelDbQueryFailed(
+                    event_id=uuid4(),
+                    correlation_id=corr_id,
+                    idempotency_key=ModelLedgerEventBase.build_idempotency_key(
+                        corr_id, op_name, "db.query.failed"
+                    ),
+                    contract_id=self._contract.name,
+                    contract_fingerprint=self._contract_fingerprint,
+                    operation_name=op_name,
+                    emitted_at=datetime.now(UTC),
+                    duration_ms=elapsed_ms,
+                    error_type="RepositoryTimeoutError",
+                    error_message=f"Query exceeded timeout of {self._config.timeout_ms}ms",
+                    retriable=True,
+                )
+                await self._emit_ledger_event(failed_event)
+
             timeout_seconds = self._config.timeout_ms / 1000.0
             raise RepositoryTimeoutError(
                 f"Query '{op_name}' exceeded timeout of {timeout_seconds}s",
@@ -249,13 +361,53 @@ class PostgresRepositoryRuntime:
                 sql_fingerprint=self._fingerprint_sql(sql),
                 context=context,
             ) from e
+        except Exception as e:
+            # Emit failure event for any other exception
+            elapsed_ms = (time.monotonic() - start_time) * 1000
+            if self._ledger_sink is not None:
+                # Determine if retriable based on exception type
+                retriable = isinstance(e, RepositoryExecutionError)
+                failed_event = ModelDbQueryFailed(
+                    event_id=uuid4(),
+                    correlation_id=corr_id,
+                    idempotency_key=ModelLedgerEventBase.build_idempotency_key(
+                        corr_id, op_name, "db.query.failed"
+                    ),
+                    contract_id=self._contract.name,
+                    contract_fingerprint=self._contract_fingerprint,
+                    operation_name=op_name,
+                    emitted_at=datetime.now(UTC),
+                    duration_ms=elapsed_ms,
+                    error_type=type(e).__name__,
+                    error_message=str(e)[:200],  # Truncate for safety
+                    retriable=retriable,
+                )
+                await self._emit_ledger_event(failed_event)
+            raise
+
+        # Calculate metrics
+        elapsed_ms = (time.monotonic() - start_time) * 1000
+        row_count = len(result) if isinstance(result, list) else (1 if result else 0)
+
+        # Emit db.query.succeeded event
+        if self._ledger_sink is not None:
+            succeeded_event = ModelDbQuerySucceeded(
+                event_id=uuid4(),
+                correlation_id=corr_id,
+                idempotency_key=ModelLedgerEventBase.build_idempotency_key(
+                    corr_id, op_name, "db.query.succeeded"
+                ),
+                contract_id=self._contract.name,
+                contract_fingerprint=self._contract_fingerprint,
+                operation_name=op_name,
+                emitted_at=datetime.now(UTC),
+                duration_ms=elapsed_ms,
+                rows_returned=row_count,
+            )
+            await self._emit_ledger_event(succeeded_event)
 
         # Log metrics if enabled
         if self._config.emit_metrics:
-            elapsed_ms = (time.monotonic() - start_time) * 1000
-            row_count = (
-                len(result) if isinstance(result, list) else (1 if result else 0)
-            )
             logger.info(
                 "Repository operation completed",
                 extra={
