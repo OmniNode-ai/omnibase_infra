@@ -2530,7 +2530,9 @@ class RuntimeHostProcess:
 
         # Check outbound policy (if policy engine configured)
         if self._policy_engine is not None:
-            decision = self._policy_engine.evaluate_outbound(topic)
+            decision = self._policy_engine.evaluate_outbound(
+                topic, correlation_id=correlation_id
+            )
             if not decision:
                 logger.warning(
                     "Outbound message rejected by policy",
@@ -2631,7 +2633,9 @@ class RuntimeHostProcess:
 
         # Check outbound policy (if policy engine configured)
         if self._policy_engine is not None:
-            decision = self._policy_engine.evaluate_outbound(topic)
+            decision = self._policy_engine.evaluate_outbound(
+                topic, correlation_id=trace_id
+            )
             if not decision:
                 logger.warning(
                     "Outbound message rejected by policy",
@@ -3846,6 +3850,20 @@ class RuntimeHostProcess:
         ):
             return envelope
 
+        # Extract correlation_id early for consistent logging across all paths
+        # Try correlation_id first, then trace_id, finally generate one
+        correlation_id: UUID | None = None
+        cid = envelope.get("correlation_id") or envelope.get("trace_id")
+        if isinstance(cid, UUID):
+            correlation_id = cid
+        elif isinstance(cid, str):
+            try:
+                correlation_id = UUID(cid)
+            except (ValueError, TypeError):
+                pass
+        if correlation_id is None:
+            correlation_id = uuid4()
+
         # Step 1: Policy check (topic allowlist and realm boundary)
         if self._policy_engine is not None:
             # Extract realm from envelope if present
@@ -3855,6 +3873,7 @@ class RuntimeHostProcess:
             decision = self._policy_engine.evaluate_inbound(
                 topic=topic,
                 realm=realm_str,
+                correlation_id=correlation_id,
             )
             if not decision:
                 logger.warning(
@@ -3863,6 +3882,7 @@ class RuntimeHostProcess:
                         "topic": topic,
                         "realm": realm_str,
                         "reason": decision.reason,
+                        "correlation_id": str(correlation_id),
                     },
                 )
                 return None
@@ -3903,6 +3923,7 @@ class RuntimeHostProcess:
                                 else None,
                                 "error_message": result.error_message,
                                 "runtime_id": envelope.get("runtime_id"),
+                                "correlation_id": str(correlation_id),
                             },
                         )
                         return None
@@ -3942,6 +3963,7 @@ class RuntimeHostProcess:
                         extra={
                             "topic": topic,
                             "error": str(e),
+                            "correlation_id": str(correlation_id),
                         },
                     )
                     return None

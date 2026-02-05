@@ -41,6 +41,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from omnibase_core.crypto.crypto_blake3_hasher import hash_canonical_json
 from omnibase_core.crypto.crypto_ed25519_signer import InvalidSignature, verify_base64
@@ -278,6 +279,9 @@ class ServiceEnvelopeValidator:
             ...     log_validation_failure(result.error_code, result.error_message)
 
         """
+        # Extract correlation_id from envelope trace_id or auto-generate
+        correlation_id = str(envelope.trace_id) if envelope.trace_id else str(uuid4())
+
         # Step 1: Check realm matches
         if envelope.realm != self._expected_realm:
             error_msg = (
@@ -286,6 +290,7 @@ class ServiceEnvelopeValidator:
             logger.warning(
                 "Envelope realm mismatch",
                 extra={
+                    "correlation_id": correlation_id,
                     "expected_realm": self._expected_realm,
                     "actual_realm": envelope.realm,
                     "runtime_id": envelope.runtime_id,
@@ -304,6 +309,7 @@ class ServiceEnvelopeValidator:
                 logger.warning(
                     "Missing envelope signature",
                     extra={
+                        "correlation_id": correlation_id,
                         "runtime_id": envelope.runtime_id,
                         "trace_id": (
                             str(envelope.trace_id) if envelope.trace_id else None
@@ -318,6 +324,7 @@ class ServiceEnvelopeValidator:
             logger.debug(
                 "Accepting unsigned envelope (reject_unsigned=False)",
                 extra={
+                    "correlation_id": correlation_id,
                     "runtime_id": envelope.runtime_id,
                     "trace_id": str(envelope.trace_id) if envelope.trace_id else None,
                 },
@@ -332,6 +339,7 @@ class ServiceEnvelopeValidator:
             logger.warning(
                 "Unknown signer in envelope",
                 extra={
+                    "correlation_id": correlation_id,
                     "signer": signer,
                     "runtime_id": envelope.runtime_id,
                     "trace_id": str(envelope.trace_id) if envelope.trace_id else None,
@@ -362,6 +370,7 @@ class ServiceEnvelopeValidator:
             logger.warning(
                 "Envelope payload hash mismatch",
                 extra={
+                    "correlation_id": correlation_id,
                     "signer": signer,
                     "expected_hash": envelope.signature.payload_hash,
                     "computed_hash": computed_hash,
@@ -388,6 +397,7 @@ class ServiceEnvelopeValidator:
                 logger.warning(
                     "Envelope signature verification failed",
                     extra={
+                        "correlation_id": correlation_id,
                         "signer": signer,
                         "runtime_id": envelope.runtime_id,
                         "trace_id": (
@@ -404,6 +414,7 @@ class ServiceEnvelopeValidator:
             logger.warning(
                 "Envelope signature invalid",
                 extra={
+                    "correlation_id": correlation_id,
                     "signer": signer,
                     "runtime_id": envelope.runtime_id,
                     "trace_id": str(envelope.trace_id) if envelope.trace_id else None,
@@ -420,6 +431,7 @@ class ServiceEnvelopeValidator:
             logger.warning(
                 "Envelope signature verification error",
                 extra={
+                    "correlation_id": correlation_id,
                     "signer": signer,
                     "runtime_id": envelope.runtime_id,
                     "trace_id": str(envelope.trace_id) if envelope.trace_id else None,
@@ -436,6 +448,7 @@ class ServiceEnvelopeValidator:
         logger.debug(
             "Envelope validation successful",
             extra={
+                "correlation_id": correlation_id,
                 "signer": signer,
                 "runtime_id": envelope.runtime_id,
                 "trace_id": str(envelope.trace_id) if envelope.trace_id else None,

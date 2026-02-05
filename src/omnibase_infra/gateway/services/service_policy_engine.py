@@ -299,6 +299,7 @@ class ServicePolicyEngine:
     def evaluate_outbound(
         self,
         topic: str,
+        correlation_id: UUID | None = None,
     ) -> PolicyDecision:
         """Evaluate outbound message policy.
 
@@ -310,6 +311,8 @@ class ServicePolicyEngine:
 
         Args:
             topic: The topic the message is being sent to.
+            correlation_id: Optional correlation ID for request tracing.
+                Included in rejection logs for debugging and audit trails.
 
         Returns:
             PolicyDecision with ALLOW decision. Future versions may
@@ -321,9 +324,14 @@ class ServicePolicyEngine:
             breaking legitimate message flows.
 
         """
+        # Auto-generate correlation_id if not provided for future rejection traceability
+        if correlation_id is None:
+            correlation_id = uuid4()
+
         # Currently always allow outbound messages
         # Future: Add egress filtering if needed
         _ = topic  # Suppress unused argument warning
+        _ = correlation_id  # Reserved for future egress filtering
         return PolicyDecision(decision=EnumPolicyDecision.ALLOW)
 
     def is_topic_allowed(self, topic: str) -> bool:
@@ -405,7 +413,7 @@ class ServicePolicyEngine:
         direction: str,
         topic: str,
         reason: str,
-        correlation_id: UUID | None = None,
+        correlation_id: UUID,
     ) -> None:
         """Log rejected message for audit/debugging.
 
@@ -417,7 +425,8 @@ class ServicePolicyEngine:
             direction: Message direction ("inbound" or "outbound").
             topic: The topic of the rejected message.
             reason: The reason for rejection.
-            correlation_id: Optional correlation ID for request tracing.
+            correlation_id: Correlation ID for request tracing. Required
+                for all rejection logs to ensure traceability.
 
         Note:
             Logging can be disabled via log_rejections=False in constructor
@@ -429,7 +438,8 @@ class ServicePolicyEngine:
             return
 
         logger.warning(
-            "Policy rejection: %s message on topic '%s' - %s",
+            "Policy rejection [correlation_id=%s]: %s message on topic '%s' - %s",
+            correlation_id,
             direction,
             topic,
             reason,
@@ -438,7 +448,7 @@ class ServicePolicyEngine:
                 "topic": topic,
                 "reason": reason,
                 "policy_engine": "ServicePolicyEngine",
-                "correlation_id": str(correlation_id) if correlation_id else None,
+                "correlation_id": str(correlation_id),
             },
         )
 
