@@ -50,16 +50,21 @@ DLQ Consumer Group Alignment:
     3. Using it in all _publish_to_dlq calls within the callback closure
 
 Topic Resolution:
+    Topics are realm-agnostic and do NOT include environment prefixes.
+    The environment/realm is a routing boundary enforced via envelope identity,
+    not a topic prefix. This enables cross-environment event routing when needed.
+
     Topic suffixes from contracts follow the ONEX naming convention:
         onex.{kind}.{producer}.{event-name}.v{n}
 
-    The wiring resolves these to full topics by prepending the environment:
-        {environment}.onex.{kind}.{producer}.{event-name}.v{n}
+    The wiring passes these topic suffixes through unchanged:
+        onex.{kind}.{producer}.{event-name}.v{n}
 
     Example:
         - Contract declares: "onex.evt.omniintelligence.intent-classified.v1"
-        - Resolved (dev): "dev.onex.evt.omniintelligence.intent-classified.v1"
-        - Resolved (prod): "prod.onex.evt.omniintelligence.intent-classified.v1"
+        - Resolved: "onex.evt.omniintelligence.intent-classified.v1"
+
+    Note: Consumer groups still include environment for isolation.
 
 Related:
     - OMN-1621: Runtime consumes event_bus subcontract for contract-driven wiring
@@ -283,28 +288,36 @@ class EventBusSubcontractWiring:
         self._retry_counts: dict[UUID, int] = {}
 
     def resolve_topic(self, topic_suffix: str) -> str:
-        """Resolve topic suffix to full topic name with environment prefix.
+        """Resolve topic suffix to topic name (realm-agnostic, no environment prefix).
+
+        Topics are realm-agnostic in ONEX. The environment/realm is enforced via
+        envelope identity, not topic naming. This enables cross-environment event
+        routing when needed while maintaining proper isolation through identity.
 
         Topic suffixes from contracts follow the ONEX naming convention:
             onex.{kind}.{producer}.{event-name}.v{n}
 
-        This method prepends the environment to create the full topic name:
-            {environment}.onex.{kind}.{producer}.{event-name}.v{n}
+        This method returns the topic suffix unchanged:
+            onex.{kind}.{producer}.{event-name}.v{n}
 
         Args:
             topic_suffix: ONEX format topic suffix
                 (e.g., 'onex.evt.omniintelligence.intent-classified.v1')
 
         Returns:
-            Full topic name with environment prefix
-                (e.g., 'dev.onex.evt.omniintelligence.intent-classified.v1')
+            Topic name (same as suffix, no environment prefix)
+                (e.g., 'onex.evt.omniintelligence.intent-classified.v1')
 
         Example:
             >>> wiring = EventBusSubcontractWiring(bus, engine, "dev")
             >>> wiring.resolve_topic("onex.evt.user.created.v1")
-            'dev.onex.evt.user.created.v1'
+            'onex.evt.user.created.v1'
+
+        Note:
+            Consumer groups still include environment for proper isolation.
+            See wire_subscriptions() for consumer group naming.
         """
-        return f"{self._environment}.{topic_suffix}"
+        return topic_suffix
 
     async def wire_subscriptions(
         self,

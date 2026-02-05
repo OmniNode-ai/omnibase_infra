@@ -25,15 +25,15 @@ Example Usage:
     registry.register(
         ModelEventRegistration(
             event_type="custom.event",
-            topic_template="{env}.onex.evt.custom.event.v1",
+            topic_template="onex.evt.custom.event.v1",
             partition_key_field="session_id",
             required_fields=["session_id", "user_id"],
         )
     )
 
-    # Resolve topic for event type
+    # Resolve topic for event type (realm-agnostic, no env prefix)
     topic = registry.resolve_topic("prompt.submitted")
-    # Returns: "dev.onex.evt.omniclaude.prompt-submitted.v1"
+    # Returns: "onex.evt.omniclaude.prompt-submitted.v1"
 
     # Inject metadata into payload
     enriched = registry.inject_metadata(
@@ -70,8 +70,10 @@ class ModelEventRegistration(BaseModel):
     Attributes:
         event_type: Semantic event type identifier (e.g., "prompt.submitted").
             This is the logical name used by event emitters.
-        topic_template: Kafka topic name template with {env} placeholder.
-            Example: "{env}.onex.evt.omniclaude.prompt-submitted.v1"
+        topic_template: Kafka topic name (realm-agnostic, no environment prefix).
+            Example: "onex.evt.omniclaude.prompt-submitted.v1"
+            Note: Topics are realm-agnostic in ONEX. The environment/realm is
+            enforced via envelope identity, not topic naming.
         partition_key_field: Optional field name in payload to use as partition key.
             When set, ensures events with same key go to same partition for ordering.
         required_fields: List of field names that must be present in payload.
@@ -82,7 +84,7 @@ class ModelEventRegistration(BaseModel):
     Example:
         >>> reg = ModelEventRegistration(
         ...     event_type="prompt.submitted",
-        ...     topic_template="{env}.onex.evt.omniclaude.prompt-submitted.v1",
+        ...     topic_template="onex.evt.omniclaude.prompt-submitted.v1",
         ...     partition_key_field="session_id",
         ...     required_fields=["prompt", "session_id"],
         ...     schema_version="1.0.0",
@@ -99,7 +101,7 @@ class ModelEventRegistration(BaseModel):
         description="Semantic event type identifier (e.g., 'prompt.submitted')",
     )
     topic_template: str = Field(
-        description="Kafka topic name template with {env} placeholder",
+        description="Kafka topic name (realm-agnostic, no environment prefix)",
     )
     partition_key_field: str | None = Field(
         default=None,
@@ -133,7 +135,7 @@ class EventRegistry:
         >>> registry = EventRegistry(environment="dev")
         >>> topic = registry.resolve_topic("prompt.submitted")
         >>> print(topic)
-        'dev.onex.evt.omniclaude.prompt-submitted.v1'
+        'onex.evt.omniclaude.prompt-submitted.v1'
 
         >>> registry.validate_payload("prompt.submitted", {"prompt": "Hello"})
         True
@@ -144,6 +146,11 @@ class EventRegistry:
         ... )
         >>> "correlation_id" in enriched
         True
+
+    Note:
+        Topics are realm-agnostic in ONEX. The environment is stored for
+        potential use in consumer group derivation by related components,
+        but topics themselves do not include environment prefixes.
     """
 
     def __init__(self, environment: str = "dev") -> None:
@@ -156,7 +163,11 @@ class EventRegistry:
         Example:
             >>> registry = EventRegistry(environment="staging")
             >>> registry.resolve_topic("prompt.submitted")
-            'staging.onex.evt.omniclaude.prompt-submitted.v1'
+            'onex.evt.omniclaude.prompt-submitted.v1'
+
+        Note:
+            The environment is stored for potential consumer group derivation
+            in related components. Topics themselves are realm-agnostic.
         """
         self._environment = environment
         self._registrations: dict[str, ModelEventRegistration] = {}
@@ -174,25 +185,25 @@ class EventRegistry:
         defaults = [
             ModelEventRegistration(
                 event_type="prompt.submitted",
-                topic_template="{env}.onex.evt.omniclaude.prompt-submitted.v1",
+                topic_template="onex.evt.omniclaude.prompt-submitted.v1",
                 partition_key_field="session_id",
                 required_fields=["prompt"],
             ),
             ModelEventRegistration(
                 event_type="session.started",
-                topic_template="{env}.onex.evt.omniclaude.session-started.v1",
+                topic_template="onex.evt.omniclaude.session-started.v1",
                 partition_key_field="session_id",
                 required_fields=["session_id"],
             ),
             ModelEventRegistration(
                 event_type="session.ended",
-                topic_template="{env}.onex.evt.omniclaude.session-ended.v1",
+                topic_template="onex.evt.omniclaude.session-ended.v1",
                 partition_key_field="session_id",
                 required_fields=["session_id"],
             ),
             ModelEventRegistration(
                 event_type="tool.executed",
-                topic_template="{env}.onex.evt.omniclaude.tool-executed.v1",
+                topic_template="onex.evt.omniclaude.tool-executed.v1",
                 partition_key_field="session_id",
                 required_fields=["tool_name"],
             ),
@@ -214,25 +225,26 @@ class EventRegistry:
             >>> registry.register(
             ...     ModelEventRegistration(
             ...         event_type="custom.event",
-            ...         topic_template="{env}.onex.evt.custom.event.v1",
+            ...         topic_template="onex.evt.custom.event.v1",
             ...     )
             ... )
             >>> registry.resolve_topic("custom.event")
-            'dev.onex.evt.custom.event.v1'
+            'onex.evt.custom.event.v1'
         """
         self._registrations[registration.event_type] = registration
 
     def resolve_topic(self, event_type: str) -> str:
-        """Get the Kafka topic for an event type.
+        """Get the Kafka topic for an event type (realm-agnostic).
 
-        Resolves the topic template by substituting the {env} placeholder
-        with the configured environment name.
+        Topics are realm-agnostic in ONEX. The environment/realm is enforced via
+        envelope identity, not topic naming. This enables cross-environment event
+        routing when needed while maintaining proper isolation through identity.
 
         Args:
             event_type: Semantic event type identifier.
 
         Returns:
-            Fully resolved Kafka topic name.
+            Kafka topic name (no environment prefix).
 
         Raises:
             OnexError: If the event type is not registered.
@@ -240,7 +252,7 @@ class EventRegistry:
         Example:
             >>> registry = EventRegistry(environment="prod")
             >>> registry.resolve_topic("prompt.submitted")
-            'prod.onex.evt.omniclaude.prompt-submitted.v1'
+            'onex.evt.omniclaude.prompt-submitted.v1'
         """
         registration = self._registrations.get(event_type)
         if registration is None:
@@ -248,7 +260,7 @@ class EventRegistry:
             raise OnexError(
                 f"Unknown event type: '{event_type}'. Registered types: {registered}"
             )
-        return registration.topic_template.format(env=self._environment)
+        return registration.topic_template
 
     def get_partition_key(
         self,
@@ -452,7 +464,7 @@ class EventRegistry:
             >>> registry = EventRegistry()
             >>> reg = registry.get_registration("prompt.submitted")
             >>> reg.topic_template
-            '{env}.onex.evt.omniclaude.prompt-submitted.v1'
+            'onex.evt.omniclaude.prompt-submitted.v1'
         """
         return self._registrations.get(event_type)
 

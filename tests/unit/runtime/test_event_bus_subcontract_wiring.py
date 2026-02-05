@@ -69,6 +69,8 @@ def wiring(
         dispatch_engine=mock_dispatch_engine,
         environment="dev",
         node_name="test-handler",
+        service="test-service",
+        version="v1",
     )
 
 
@@ -94,7 +96,7 @@ def sample_event_message() -> ModelEventMessage:
         "payload": {"key": "value"},
     }
     return ModelEventMessage(
-        topic="dev.onex.evt.test.v1",
+        topic="onex.evt.test.v1",
         key=b"test-key",
         value=json.dumps(payload).encode("utf-8"),
         headers=ModelEventHeaders(
@@ -111,46 +113,50 @@ def sample_event_message() -> ModelEventMessage:
 
 
 class TestTopicResolution:
-    """Tests for topic suffix to full topic name resolution."""
+    """Tests for topic suffix to full topic name resolution (realm-agnostic)."""
 
-    def test_resolve_topic_adds_environment_prefix(
+    def test_resolve_topic_returns_topic_unchanged(
         self,
         wiring: EventBusSubcontractWiring,
     ) -> None:
-        """Test topic resolution adds environment prefix."""
+        """Test topic resolution returns topic unchanged (realm-agnostic)."""
         topic_suffix = "onex.evt.test-service.test-event.v1"
         result = wiring.resolve_topic(topic_suffix)
-        assert result == "dev.onex.evt.test-service.test-event.v1"
+        assert result == "onex.evt.test-service.test-event.v1"
 
     def test_resolve_topic_with_prod_environment(
         self,
         mock_event_bus: AsyncMock,
         mock_dispatch_engine: AsyncMock,
     ) -> None:
-        """Test topic resolution with production environment."""
+        """Test topic resolution is environment-agnostic (no prefix added)."""
         wiring = EventBusSubcontractWiring(
             event_bus=mock_event_bus,
             dispatch_engine=mock_dispatch_engine,
             environment="prod",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
         result = wiring.resolve_topic("onex.evt.node.registered.v1")
-        assert result == "prod.onex.evt.node.registered.v1"
+        assert result == "onex.evt.node.registered.v1"
 
     def test_resolve_topic_with_staging_environment(
         self,
         mock_event_bus: AsyncMock,
         mock_dispatch_engine: AsyncMock,
     ) -> None:
-        """Test topic resolution with staging environment."""
+        """Test topic resolution is environment-agnostic (no prefix added)."""
         wiring = EventBusSubcontractWiring(
             event_bus=mock_event_bus,
             dispatch_engine=mock_dispatch_engine,
             environment="staging",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
         result = wiring.resolve_topic("onex.cmd.process.v1")
-        assert result == "staging.onex.cmd.process.v1"
+        assert result == "onex.cmd.process.v1"
 
 
 # =============================================================================
@@ -186,8 +192,8 @@ class TestWireSubscriptions:
 
         calls = mock_event_bus.subscribe.call_args_list
         topics = [call.kwargs["topic"] for call in calls]
-        assert "dev.onex.evt.node.introspected.v1" in topics
-        assert "dev.onex.evt.node.registered.v1" in topics
+        assert "onex.evt.node.introspected.v1" in topics
+        assert "onex.evt.node.registered.v1" in topics
 
     @pytest.mark.asyncio
     async def test_wire_subscriptions_uses_correct_node_identity(
@@ -204,9 +210,12 @@ class TestWireSubscriptions:
         calls = mock_event_bus.subscribe.call_args_list
         node_identities = [call.kwargs["node_identity"] for call in calls]
         # Verify all node identities have correct env and service for consumer group
+        # Note: service comes from wiring constructor param, not wire_subscriptions node_name
         for identity in node_identities:
             assert identity.env == "dev"
-            assert identity.service == "registration-handler"
+            assert (
+                identity.service == "test-service"
+            )  # From wiring fixture's service param
 
     @pytest.mark.asyncio
     async def test_wire_subscriptions_stores_unsubscribe_callables(
@@ -270,7 +279,7 @@ class TestDispatchCallback:
     ) -> None:
         """Test callback dispatches to engine."""
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
 
         await callback(sample_event_message)
@@ -285,7 +294,7 @@ class TestDispatchCallback:
         sample_event_message: ModelEventMessage,
     ) -> None:
         """Test callback passes correct topic to dispatch engine."""
-        topic = "dev.onex.evt.test.v1"
+        topic = "onex.evt.test.v1"
         callback = wiring._create_dispatch_callback(topic, "dev.test-handler")
 
         await callback(sample_event_message)
@@ -302,7 +311,7 @@ class TestDispatchCallback:
     ) -> None:
         """Test callback passes deserialized envelope to dispatch engine."""
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
 
         await callback(sample_event_message)
@@ -333,15 +342,17 @@ class TestDispatchCallback:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             dlq_config=ModelDlqConfig(enabled=True, on_content_error="dlq_and_commit"),
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
 
         invalid_message = ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"key",
             value=b"not valid json",
             headers=ModelEventHeaders(
@@ -369,7 +380,7 @@ class TestDispatchCallback:
         """Test callback wraps dispatch engine errors in RuntimeHostError."""
         mock_dispatch_engine.dispatch.side_effect = RuntimeError("Dispatch failed")
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
 
         with pytest.raises(RuntimeHostError, match="Failed to dispatch"):
@@ -602,7 +613,7 @@ class TestDeserialization:
             "payload": {"node_id": "test-123"},
         }
         message = ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"key",
             value=json.dumps(payload).encode("utf-8"),
             headers=ModelEventHeaders(
@@ -622,7 +633,7 @@ class TestDeserialization:
     ) -> None:
         """Test deserialization raises on invalid JSON."""
         message = ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"key",
             value=b"not json",
             headers=ModelEventHeaders(
@@ -662,7 +673,7 @@ class TestIdempotencyGate:
             "payload": {"key": "value"},
         }
         return ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"test-key",
             value=json.dumps(payload).encode("utf-8"),
             headers=ModelEventHeaders(
@@ -681,7 +692,7 @@ class TestIdempotencyGate:
             "payload": {"key": "value"},
         }
         return ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"test-key",
             value=json.dumps(payload).encode("utf-8"),
             headers=ModelEventHeaders(
@@ -710,12 +721,14 @@ class TestIdempotencyGate:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             idempotency_store=mock_idempotency_store,
             idempotency_config=ModelIdempotencyConfig(enabled=True),
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
         await callback(sample_event_message_with_envelope_id)
 
@@ -743,12 +756,14 @@ class TestIdempotencyGate:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             idempotency_store=mock_idempotency_store,
             idempotency_config=ModelIdempotencyConfig(enabled=True),
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
         await callback(sample_event_message_with_envelope_id)
 
@@ -781,12 +796,14 @@ class TestIdempotencyGate:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             idempotency_store=mock_idempotency_store,
             idempotency_config=ModelIdempotencyConfig(enabled=True),
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
         await callback(sample_event_message_without_envelope_id)
 
@@ -815,12 +832,14 @@ class TestIdempotencyGate:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             idempotency_store=mock_idempotency_store,
             idempotency_config=ModelIdempotencyConfig(enabled=False),
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
         await callback(sample_event_message_with_envelope_id)
 
@@ -845,12 +864,14 @@ class TestIdempotencyGate:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             idempotency_store=None,  # No store
             idempotency_config=ModelIdempotencyConfig(enabled=True),
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
         await callback(sample_event_message_with_envelope_id)
 
@@ -887,6 +908,8 @@ class TestIdempotencyGate:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             idempotency_store=mock_idempotency_store,
             idempotency_config=ModelIdempotencyConfig(enabled=True),
             offset_policy=ModelOffsetPolicyConfig(
@@ -895,7 +918,7 @@ class TestIdempotencyGate:
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
         await callback(sample_event_message_with_envelope_id)
 
@@ -931,7 +954,7 @@ class TestErrorClassification:
 
         # Setup: invalid JSON in message
         invalid_message = ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"key",
             value=b"not valid json",
             headers=ModelEventHeaders(
@@ -949,6 +972,8 @@ class TestErrorClassification:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             dlq_config=ModelDlqConfig(
                 enabled=True,
                 on_content_error="dlq_and_commit",
@@ -956,7 +981,7 @@ class TestErrorClassification:
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
         await callback(invalid_message)  # Should not raise
 
@@ -976,7 +1001,7 @@ class TestErrorClassification:
 
         # Setup: valid JSON but invalid schema (missing required fields)
         invalid_schema_message = ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"key",
             value=json.dumps({"invalid": "schema"}).encode("utf-8"),
             headers=ModelEventHeaders(
@@ -993,6 +1018,8 @@ class TestErrorClassification:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             dlq_config=ModelDlqConfig(
                 enabled=True,
                 on_content_error="dlq_and_commit",
@@ -1000,7 +1027,7 @@ class TestErrorClassification:
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
         await callback(invalid_schema_message)  # Should not raise
 
@@ -1022,7 +1049,7 @@ class TestErrorClassification:
         mock_dispatch_engine.dispatch.side_effect = RuntimeHostError("Database timeout")
 
         valid_message = ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"key",
             value=json.dumps(
                 {
@@ -1043,11 +1070,13 @@ class TestErrorClassification:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             dlq_config=ModelDlqConfig(on_infra_exhausted="fail_fast"),
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
 
         # Verify: raises RuntimeHostError (fail-fast default)
@@ -1072,7 +1101,7 @@ class TestErrorClassification:
         mock_event_bus.commit_offset = AsyncMock()
 
         valid_message = ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"key",
             value=json.dumps(
                 {
@@ -1093,6 +1122,8 @@ class TestErrorClassification:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             dlq_config=ModelDlqConfig(
                 enabled=True,
                 on_infra_exhausted="dlq_and_commit",
@@ -1101,7 +1132,7 @@ class TestErrorClassification:
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
 
         # First attempt - should fail but not go to DLQ (retry budget not exhausted)
@@ -1126,7 +1157,7 @@ class TestErrorClassification:
         from omnibase_infra.models.event_bus import ModelDlqConfig
 
         invalid_message = ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"key",
             value=b"not valid json",
             headers=ModelEventHeaders(
@@ -1141,11 +1172,13 @@ class TestErrorClassification:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             dlq_config=ModelDlqConfig(on_content_error="fail_fast"),
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
 
         with pytest.raises(ProtocolConfigurationError, match="Content error"):
@@ -1162,7 +1195,7 @@ class TestErrorClassification:
         mock_dispatch_engine.dispatch.side_effect = ValueError("Unexpected error")
 
         valid_message = ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"key",
             value=json.dumps(
                 {
@@ -1183,10 +1216,12 @@ class TestErrorClassification:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
 
         # Verify: wrapped in RuntimeHostError
@@ -1209,7 +1244,7 @@ class TestErrorClassification:
 
         # Setup: invalid JSON to trigger DLQ
         invalid_message = ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"key",
             value=b"not valid json",
             headers=ModelEventHeaders(
@@ -1227,6 +1262,8 @@ class TestErrorClassification:
             dispatch_engine=mock_dispatch_engine,
             environment="prod",  # Different environment
             node_name="init-handler",  # Different node_name than callback
+            service="test-service",
+            version="v1",
             dlq_config=ModelDlqConfig(
                 enabled=True,
                 on_content_error="dlq_and_commit",
@@ -1237,7 +1274,7 @@ class TestErrorClassification:
         # the one used in DLQ publishing, NOT self._node_name from __init__
         callback_consumer_group = "prod.my-special-handler"
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", callback_consumer_group
+            "onex.evt.test.v1", callback_consumer_group
         )
         await callback(invalid_message)
 
@@ -1266,7 +1303,7 @@ class TestOffsetCommitPolicy:
             "payload": {"key": "value"},
         }
         return ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"test-key",
             value=json.dumps(payload).encode("utf-8"),
             headers=ModelEventHeaders(
@@ -1294,13 +1331,15 @@ class TestOffsetCommitPolicy:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             offset_policy=ModelOffsetPolicyConfig(
                 commit_strategy="commit_after_handler"
             ),
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
         await callback(sample_valid_message)
 
@@ -1327,13 +1366,15 @@ class TestOffsetCommitPolicy:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             offset_policy=ModelOffsetPolicyConfig(
                 commit_strategy="commit_after_handler"
             ),
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
 
         with pytest.raises(RuntimeHostError):
@@ -1355,7 +1396,7 @@ class TestOffsetCommitPolicy:
         )
 
         invalid_message = ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"key",
             value=b"not valid json",
             headers=ModelEventHeaders(
@@ -1373,6 +1414,8 @@ class TestOffsetCommitPolicy:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             offset_policy=ModelOffsetPolicyConfig(
                 commit_strategy="commit_after_handler"
             ),
@@ -1380,7 +1423,7 @@ class TestOffsetCommitPolicy:
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
         await callback(invalid_message)  # Should not raise
 
@@ -1407,13 +1450,15 @@ class TestOffsetCommitPolicy:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             offset_policy=ModelOffsetPolicyConfig(
                 commit_strategy="commit_after_handler"
             ),
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
         # Should not raise even without commit_offset method
         await callback(sample_valid_message)
@@ -1438,7 +1483,7 @@ class TestRetryTracking:
             "payload": {"key": "value"},
         }
         return ModelEventMessage(
-            topic="dev.onex.evt.test.v1",
+            topic="onex.evt.test.v1",
             key=b"test-key",
             value=json.dumps(payload).encode("utf-8"),
             headers=ModelEventHeaders(
@@ -1463,6 +1508,8 @@ class TestRetryTracking:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             retry_config=ModelConsumerRetryConfig(max_attempts=3),
         )
 
@@ -1471,7 +1518,7 @@ class TestRetryTracking:
         wiring._retry_counts[correlation_id] = 2
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
         await callback(sample_valid_message)
 
@@ -1502,6 +1549,8 @@ class TestRetryTracking:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             retry_config=ModelConsumerRetryConfig(
                 max_attempts=1
             ),  # Immediate exhaustion
@@ -1509,7 +1558,7 @@ class TestRetryTracking:
         )
 
         callback = wiring._create_dispatch_callback(
-            "dev.onex.evt.test.v1", "dev.test-handler"
+            "onex.evt.test.v1", "dev.test-handler"
         )
         await callback(sample_valid_message)  # Should not raise
 
@@ -1527,6 +1576,8 @@ class TestRetryTracking:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
 
         correlation_id = uuid4()
@@ -1555,6 +1606,8 @@ class TestRetryTracking:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             retry_config=ModelConsumerRetryConfig(max_attempts=3),
         )
 
@@ -1582,6 +1635,8 @@ class TestRetryTracking:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
 
         # Add some retry counts

@@ -26,9 +26,9 @@ class TestModelEventBusTopicEntry:
 
     def test_create_topic_entry_with_topic_only(self) -> None:
         """Test creating a topic entry with only the required topic field."""
-        entry = ModelEventBusTopicEntry(topic="dev.onex.evt.intent-classified.v1")
+        entry = ModelEventBusTopicEntry(topic="onex.evt.intent-classified.v1")
 
-        assert entry.topic == "dev.onex.evt.intent-classified.v1"
+        assert entry.topic == "onex.evt.intent-classified.v1"
         assert entry.event_type is None
         assert entry.message_category == "EVENT"
         assert entry.description is None
@@ -36,13 +36,13 @@ class TestModelEventBusTopicEntry:
     def test_create_topic_entry_with_all_fields(self) -> None:
         """Test creating a topic entry with all metadata fields."""
         entry = ModelEventBusTopicEntry(
-            topic="dev.onex.cmd.register-node.v1",
+            topic="onex.cmd.register-node.v1",
             event_type="ModelNodeRegistration",
             message_category="COMMAND",
             description="Node registration command topic",
         )
 
-        assert entry.topic == "dev.onex.cmd.register-node.v1"
+        assert entry.topic == "onex.cmd.register-node.v1"
         assert entry.event_type == "ModelNodeRegistration"
         assert entry.message_category == "COMMAND"
         assert entry.description == "Node registration command topic"
@@ -50,12 +50,12 @@ class TestModelEventBusTopicEntry:
     def test_topic_entry_serialization(self) -> None:
         """Test that topic entry serializes correctly to dict."""
         entry = ModelEventBusTopicEntry(
-            topic="dev.onex.evt.node-registered.v1",
+            topic="onex.evt.node-registered.v1",
             event_type="ModelNodeRegistered",
         )
 
         data = entry.model_dump()
-        assert data["topic"] == "dev.onex.evt.node-registered.v1"
+        assert data["topic"] == "onex.evt.node-registered.v1"
         assert data["event_type"] == "ModelNodeRegistered"
         assert data["message_category"] == "EVENT"
         assert data["description"] is None
@@ -63,30 +63,30 @@ class TestModelEventBusTopicEntry:
     def test_topic_entry_deserialization(self) -> None:
         """Test that topic entry deserializes correctly from dict."""
         data = {
-            "topic": "dev.onex.evt.heartbeat.v1",
+            "topic": "onex.evt.heartbeat.v1",
             "event_type": "ModelHeartbeat",
             "message_category": "EVENT",
             "description": "Heartbeat event topic",
         }
 
         entry = ModelEventBusTopicEntry.model_validate(data)
-        assert entry.topic == "dev.onex.evt.heartbeat.v1"
+        assert entry.topic == "onex.evt.heartbeat.v1"
         assert entry.event_type == "ModelHeartbeat"
         assert entry.message_category == "EVENT"
         assert entry.description == "Heartbeat event topic"
 
     def test_topic_entry_is_frozen(self) -> None:
         """Test that topic entry is immutable (frozen)."""
-        entry = ModelEventBusTopicEntry(topic="dev.onex.evt.test.v1")
+        entry = ModelEventBusTopicEntry(topic="onex.evt.test.v1")
 
         with pytest.raises(ValidationError):
-            entry.topic = "dev.onex.evt.modified.v1"  # type: ignore[misc]
+            entry.topic = "onex.evt.modified.v1"  # type: ignore[misc]
 
     def test_topic_entry_forbids_extra_fields(self) -> None:
         """Test that topic entry rejects unknown fields (extra='forbid')."""
         with pytest.raises(ValidationError) as exc_info:
             ModelEventBusTopicEntry(
-                topic="dev.onex.evt.test.v1",
+                topic="onex.evt.test.v1",
                 unknown_field="value",  # type: ignore[call-arg]
             )
 
@@ -106,22 +106,22 @@ class TestModelNodeEventBusConfig:
     def test_create_config_with_subscribe_topics(self) -> None:
         """Test creating config with subscribe topics only."""
         entries = [
-            ModelEventBusTopicEntry(topic="dev.onex.evt.intent-classified.v1"),
-            ModelEventBusTopicEntry(topic="dev.onex.evt.node-registered.v1"),
+            ModelEventBusTopicEntry(topic="onex.evt.intent-classified.v1"),
+            ModelEventBusTopicEntry(topic="onex.evt.node-registered.v1"),
         ]
 
         config = ModelNodeEventBusConfig(subscribe_topics=entries)
 
         assert len(config.subscribe_topics) == 2
-        assert config.subscribe_topics[0].topic == "dev.onex.evt.intent-classified.v1"
-        assert config.subscribe_topics[1].topic == "dev.onex.evt.node-registered.v1"
+        assert config.subscribe_topics[0].topic == "onex.evt.intent-classified.v1"
+        assert config.subscribe_topics[1].topic == "onex.evt.node-registered.v1"
         assert config.publish_topics == []
 
     def test_create_config_with_publish_topics(self) -> None:
         """Test creating config with publish topics only."""
         entries = [
             ModelEventBusTopicEntry(
-                topic="dev.onex.cmd.execute-effect.v1",
+                topic="onex.cmd.execute-effect.v1",
                 message_category="COMMAND",
             ),
         ]
@@ -130,16 +130,16 @@ class TestModelNodeEventBusConfig:
 
         assert config.subscribe_topics == []
         assert len(config.publish_topics) == 1
-        assert config.publish_topics[0].topic == "dev.onex.cmd.execute-effect.v1"
+        assert config.publish_topics[0].topic == "onex.cmd.execute-effect.v1"
 
     def test_create_config_with_both_topic_types(self) -> None:
         """Test creating config with both subscribe and publish topics."""
         subscribe_entries = [
-            ModelEventBusTopicEntry(topic="dev.onex.evt.input.v1"),
+            ModelEventBusTopicEntry(topic="onex.evt.input.v1"),
         ]
         publish_entries = [
-            ModelEventBusTopicEntry(topic="dev.onex.evt.output.v1"),
-            ModelEventBusTopicEntry(topic="dev.onex.cmd.notify.v1"),
+            ModelEventBusTopicEntry(topic="onex.evt.output.v1"),
+            ModelEventBusTopicEntry(topic="onex.cmd.notify.v1"),
         ]
 
         config = ModelNodeEventBusConfig(
@@ -164,24 +164,24 @@ class TestModelNodeEventBusConfigProperties:
         """Test subscribe_topic_strings returns list of topic strings."""
         entries = [
             ModelEventBusTopicEntry(
-                topic="dev.onex.evt.alpha.v1",
+                topic="onex.evt.alpha.v1",
                 event_type="ModelAlpha",
                 description="Alpha events",
             ),
             ModelEventBusTopicEntry(
-                topic="dev.onex.evt.beta.v1",
+                topic="onex.evt.beta.v1",
                 event_type="ModelBeta",
             ),
-            ModelEventBusTopicEntry(topic="dev.onex.evt.gamma.v1"),
+            ModelEventBusTopicEntry(topic="onex.evt.gamma.v1"),
         ]
 
         config = ModelNodeEventBusConfig(subscribe_topics=entries)
 
         result = config.subscribe_topic_strings
         assert result == [
-            "dev.onex.evt.alpha.v1",
-            "dev.onex.evt.beta.v1",
-            "dev.onex.evt.gamma.v1",
+            "onex.evt.alpha.v1",
+            "onex.evt.beta.v1",
+            "onex.evt.gamma.v1",
         ]
 
     def test_publish_topic_strings_empty(self) -> None:
@@ -194,11 +194,11 @@ class TestModelNodeEventBusConfigProperties:
         """Test publish_topic_strings returns list of topic strings."""
         entries = [
             ModelEventBusTopicEntry(
-                topic="dev.onex.cmd.action-one.v1",
+                topic="onex.cmd.action-one.v1",
                 message_category="COMMAND",
             ),
             ModelEventBusTopicEntry(
-                topic="dev.onex.evt.result-one.v1",
+                topic="onex.evt.result-one.v1",
                 message_category="EVENT",
             ),
         ]
@@ -207,8 +207,8 @@ class TestModelNodeEventBusConfigProperties:
 
         result = config.publish_topic_strings
         assert result == [
-            "dev.onex.cmd.action-one.v1",
-            "dev.onex.evt.result-one.v1",
+            "onex.cmd.action-one.v1",
+            "onex.evt.result-one.v1",
         ]
 
     def test_topic_strings_ignore_metadata(self) -> None:
@@ -216,13 +216,13 @@ class TestModelNodeEventBusConfigProperties:
         # Create entries with various metadata
         entries = [
             ModelEventBusTopicEntry(
-                topic="dev.onex.evt.first.v1",
+                topic="onex.evt.first.v1",
                 event_type="ModelFirst",
                 message_category="EVENT",
                 description="First event with full metadata",
             ),
             ModelEventBusTopicEntry(
-                topic="dev.onex.evt.second.v1",
+                topic="onex.evt.second.v1",
                 # Minimal metadata
             ),
         ]
@@ -234,12 +234,12 @@ class TestModelNodeEventBusConfigProperties:
 
         # Properties return only topic strings, not metadata
         assert config.subscribe_topic_strings == [
-            "dev.onex.evt.first.v1",
-            "dev.onex.evt.second.v1",
+            "onex.evt.first.v1",
+            "onex.evt.second.v1",
         ]
         assert config.publish_topic_strings == [
-            "dev.onex.evt.first.v1",
-            "dev.onex.evt.second.v1",
+            "onex.evt.first.v1",
+            "onex.evt.second.v1",
         ]
 
 
@@ -250,7 +250,7 @@ class TestModelNodeEventBusConfigImmutability:
         """Test that event bus config is immutable (frozen)."""
         config = ModelNodeEventBusConfig(
             subscribe_topics=[
-                ModelEventBusTopicEntry(topic="dev.onex.evt.test.v1"),
+                ModelEventBusTopicEntry(topic="onex.evt.test.v1"),
             ],
         )
 
@@ -286,13 +286,13 @@ class TestModelNodeEventBusConfigSerialization:
         config = ModelNodeEventBusConfig(
             subscribe_topics=[
                 ModelEventBusTopicEntry(
-                    topic="dev.onex.evt.in.v1",
+                    topic="onex.evt.in.v1",
                     event_type="ModelInput",
                 ),
             ],
             publish_topics=[
                 ModelEventBusTopicEntry(
-                    topic="dev.onex.evt.out.v1",
+                    topic="onex.evt.out.v1",
                     message_category="EVENT",
                     description="Output topic",
                 ),
@@ -302,11 +302,11 @@ class TestModelNodeEventBusConfigSerialization:
         data = config.model_dump()
 
         assert len(data["subscribe_topics"]) == 1
-        assert data["subscribe_topics"][0]["topic"] == "dev.onex.evt.in.v1"
+        assert data["subscribe_topics"][0]["topic"] == "onex.evt.in.v1"
         assert data["subscribe_topics"][0]["event_type"] == "ModelInput"
 
         assert len(data["publish_topics"]) == 1
-        assert data["publish_topics"][0]["topic"] == "dev.onex.evt.out.v1"
+        assert data["publish_topics"][0]["topic"] == "onex.evt.out.v1"
         assert data["publish_topics"][0]["description"] == "Output topic"
 
     def test_deserialize_from_dict(self) -> None:
@@ -314,7 +314,7 @@ class TestModelNodeEventBusConfigSerialization:
         data = {
             "subscribe_topics": [
                 {
-                    "topic": "dev.onex.evt.incoming.v1",
+                    "topic": "onex.evt.incoming.v1",
                     "event_type": "ModelIncoming",
                     "message_category": "EVENT",
                     "description": None,
@@ -322,7 +322,7 @@ class TestModelNodeEventBusConfigSerialization:
             ],
             "publish_topics": [
                 {
-                    "topic": "dev.onex.cmd.outgoing.v1",
+                    "topic": "onex.cmd.outgoing.v1",
                     "event_type": None,
                     "message_category": "COMMAND",
                     "description": "Outgoing command",
@@ -333,11 +333,11 @@ class TestModelNodeEventBusConfigSerialization:
         config = ModelNodeEventBusConfig.model_validate(data)
 
         assert len(config.subscribe_topics) == 1
-        assert config.subscribe_topics[0].topic == "dev.onex.evt.incoming.v1"
+        assert config.subscribe_topics[0].topic == "onex.evt.incoming.v1"
         assert config.subscribe_topics[0].event_type == "ModelIncoming"
 
         assert len(config.publish_topics) == 1
-        assert config.publish_topics[0].topic == "dev.onex.cmd.outgoing.v1"
+        assert config.publish_topics[0].topic == "onex.cmd.outgoing.v1"
         assert config.publish_topics[0].message_category == "COMMAND"
 
     def test_roundtrip_serialization(self) -> None:
@@ -345,7 +345,7 @@ class TestModelNodeEventBusConfigSerialization:
         original = ModelNodeEventBusConfig(
             subscribe_topics=[
                 ModelEventBusTopicEntry(
-                    topic="dev.onex.evt.alpha.v1",
+                    topic="onex.evt.alpha.v1",
                     event_type="ModelAlpha",
                     message_category="EVENT",
                     description="Alpha topic",
@@ -353,7 +353,7 @@ class TestModelNodeEventBusConfigSerialization:
             ],
             publish_topics=[
                 ModelEventBusTopicEntry(
-                    topic="dev.onex.cmd.beta.v1",
+                    topic="onex.cmd.beta.v1",
                     event_type="ModelBeta",
                     message_category="COMMAND",
                     description="Beta command",

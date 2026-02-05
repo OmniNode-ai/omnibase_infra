@@ -36,14 +36,14 @@ class TestModelPayloadConsulRegisterEventBus:
         event_bus_config = ModelNodeEventBusConfig(
             subscribe_topics=[
                 ModelEventBusTopicEntry(
-                    topic="dev.onex.evt.input.v1",
+                    topic="onex.evt.input.v1",
                     event_type="ModelInputEvent",
                     message_category="EVENT",
                 ),
             ],
             publish_topics=[
                 ModelEventBusTopicEntry(
-                    topic="dev.onex.evt.output.v1",
+                    topic="onex.evt.output.v1",
                     event_type="ModelOutputEvent",
                     message_category="EVENT",
                 ),
@@ -62,12 +62,8 @@ class TestModelPayloadConsulRegisterEventBus:
         # Assert
         assert payload.event_bus_config is not None
         assert payload.event_bus_config == event_bus_config
-        assert payload.event_bus_config.subscribe_topic_strings == [
-            "dev.onex.evt.input.v1"
-        ]
-        assert payload.event_bus_config.publish_topic_strings == [
-            "dev.onex.evt.output.v1"
-        ]
+        assert payload.event_bus_config.subscribe_topic_strings == ["onex.evt.input.v1"]
+        assert payload.event_bus_config.publish_topic_strings == ["onex.evt.output.v1"]
 
     def test_payload_without_event_bus_config(self) -> None:
         """Payload should work correctly when event_bus_config is None."""
@@ -112,7 +108,7 @@ class TestModelPayloadConsulRegisterEventBus:
         event_bus_config = ModelNodeEventBusConfig(
             subscribe_topics=[
                 ModelEventBusTopicEntry(
-                    topic="dev.onex.evt.commands.v1",
+                    topic="onex.evt.commands.v1",
                     event_type="ModelCommandEvent",
                     message_category="COMMAND",
                     description="Command input topic",
@@ -140,11 +136,11 @@ class TestModelPayloadConsulRegisterEventBus:
         assert len(json_data["event_bus_config"]["subscribe_topics"]) == 1
         assert (
             json_data["event_bus_config"]["subscribe_topics"][0]["topic"]
-            == "dev.onex.evt.commands.v1"
+            == "onex.evt.commands.v1"
         )
 
         # Verify JSON string contains the topic
-        assert "dev.onex.evt.commands.v1" in json_str
+        assert "onex.evt.commands.v1" in json_str
         assert "event_bus_config" in json_str
 
     def test_serialization_with_none_event_bus(self) -> None:

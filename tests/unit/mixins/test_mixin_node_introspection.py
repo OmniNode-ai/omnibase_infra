@@ -3610,6 +3610,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3622,6 +3623,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3637,6 +3639,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3649,6 +3652,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3661,6 +3665,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3674,6 +3679,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3686,6 +3692,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3703,6 +3710,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3720,6 +3728,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3737,6 +3746,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3754,6 +3764,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3767,6 +3778,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3780,6 +3792,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3792,6 +3805,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3804,6 +3818,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3833,6 +3848,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3846,6 +3862,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3866,6 +3883,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3888,6 +3906,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3906,6 +3925,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3919,6 +3939,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3934,6 +3955,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
         node._introspection_stop_event = None
@@ -3947,6 +3969,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3964,6 +3987,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -3980,6 +4004,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
             event_bus=MinimalEventBus(),  # type: ignore[arg-type]
         )
         node.initialize_introspection(config)
@@ -3993,6 +4018,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -4011,6 +4037,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 
@@ -4029,6 +4056,7 @@ class TestHelperMethods:
         config = ModelIntrospectionConfig(
             node_id=TEST_NODE_UUID_1,
             node_type="EFFECT",
+            node_name="test_helper_node",
         )
         node.initialize_introspection(config)
 

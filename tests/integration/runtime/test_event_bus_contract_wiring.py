@@ -114,6 +114,8 @@ class TestContractDrivenSubscription:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -132,27 +134,29 @@ class TestContractDrivenSubscription:
         topics_subscribed = [
             call.kwargs["topic"] for call in mock_event_bus.subscribe.call_args_list
         ]
-        assert "dev.onex.cmd.test-service.process.v1" in topics_subscribed
-        assert "dev.onex.evt.test-service.notify.v1" in topics_subscribed
+        assert "onex.cmd.test-service.process.v1" in topics_subscribed
+        assert "onex.evt.test-service.notify.v1" in topics_subscribed
 
     @pytest.mark.asyncio
-    async def test_consumer_group_id_derived_from_environment_and_node(
+    async def test_node_identity_derived_from_environment_and_node(
         self,
         mock_event_bus: AsyncMock,
         mock_dispatch_engine: AsyncMock,
         subcontract_version: ModelSemVer,
     ) -> None:
-        """Consumer group ID follows {environment}.{node_name} convention.
+        """Node identity is correctly populated for consumer group derivation.
 
         Verifies:
-        1. Consumer group ID is correctly formatted
-        2. Different nodes have different consumer groups
+        1. Node identity contains correct environment, service, node_name, version
+        2. Event bus receives node_identity for consumer group derivation
         """
         wiring = EventBusSubcontractWiring(
             event_bus=mock_event_bus,
             dispatch_engine=mock_dispatch_engine,
             environment="staging",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -163,9 +167,13 @@ class TestContractDrivenSubscription:
 
         await wiring.wire_subscriptions(subcontract, node_name="my-handler")
 
-        # Verify group_id is {environment}.{node_name}
+        # Verify node_identity is passed with correct values
         call_kwargs = mock_event_bus.subscribe.call_args.kwargs
-        assert call_kwargs["group_id"] == "staging.my-handler"
+        node_identity = call_kwargs["node_identity"]
+        assert node_identity.env == "staging"
+        assert node_identity.service == "test-service"
+        assert node_identity.node_name == "my-handler"
+        assert node_identity.version == "v1"
 
     @pytest.mark.asyncio
     async def test_empty_subscribe_topics_creates_no_consumers(
@@ -184,6 +192,8 @@ class TestContractDrivenSubscription:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -217,7 +227,7 @@ class TestMessageDispatchFlow:
 
         async def capture_subscribe(
             topic: str,
-            group_id: str,
+            node_identity: object,
             on_message: object,
         ) -> AsyncMock:
             bus.callbacks[topic] = on_message
@@ -257,6 +267,8 @@ class TestMessageDispatchFlow:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -278,7 +290,7 @@ class TestMessageDispatchFlow:
         ).encode()
 
         # Get the callback that was registered
-        topic_key = "dev.onex.evt.test-producer.test-event.v1"
+        topic_key = "onex.evt.test-producer.test-event.v1"
         callback = mock_event_bus_with_callback_capture.callbacks[topic_key]
         await callback(mock_message)
 
@@ -311,6 +323,8 @@ class TestMessageDispatchFlow:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             dlq_config=ModelDlqConfig(
                 enabled=False,
                 on_content_error="fail_fast",
@@ -330,7 +344,7 @@ class TestMessageDispatchFlow:
         mock_message.value = b"not valid json"
 
         # Get the callback and verify it raises ProtocolConfigurationError
-        topic_key = "dev.onex.evt.test-producer.test-event.v1"
+        topic_key = "onex.evt.test-producer.test-event.v1"
         callback = mock_event_bus_with_callback_capture.callbacks[topic_key]
         with pytest.raises(ProtocolConfigurationError):
             await callback(mock_message)
@@ -376,7 +390,7 @@ class TestPublisherContractValidation:
         assert result is True
         mock_event_bus.publish.assert_called_once()
         call_kwargs = mock_event_bus.publish.call_args.kwargs
-        assert call_kwargs["topic"] == "dev.onex.evt.allowed-output.v1"
+        assert call_kwargs["topic"] == "onex.evt.allowed-output.v1"
 
     @pytest.mark.asyncio
     async def test_publishing_to_forbidden_topic_raises_error(
@@ -481,6 +495,8 @@ class TestHandlerNoBusAccess:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
 
         # The deserialization happens in _deserialize_to_envelope
@@ -520,6 +536,8 @@ class TestHandlerNoBusAccess:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
 
         # Create a valid envelope JSON with proper UUID
@@ -676,6 +694,8 @@ class TestSubscriptionCleanup:
             dispatch_engine=AsyncMock(),
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -716,6 +736,8 @@ class TestSubscriptionCleanup:
             dispatch_engine=AsyncMock(),
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -758,6 +780,8 @@ class TestSubscriptionCleanup:
             dispatch_engine=AsyncMock(),
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
 
         subcontract = ModelEventBusSubcontract(
@@ -786,11 +810,11 @@ class TestTopicResolution:
     the environment prefix to topic suffixes.
     """
 
-    def test_resolve_topic_adds_environment_prefix(self) -> None:
-        """Test that resolve_topic prepends environment to topic suffix.
+    def test_resolve_topic_is_realm_agnostic(self) -> None:
+        """Test that resolve_topic returns topic suffix unchanged (realm-agnostic).
 
-        Verifies the ONEX topic naming convention:
-        {environment}.{topic_suffix}
+        Verifies the ONEX topic naming convention is realm-agnostic:
+        {topic_suffix} (no environment prefix)
         """
         mock_event_bus = AsyncMock()
         mock_dispatch_engine = AsyncMock()
@@ -800,36 +824,36 @@ class TestTopicResolution:
             dispatch_engine=mock_dispatch_engine,
             environment="dev",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
         )
 
         resolved = wiring.resolve_topic("onex.evt.user.created.v1")
 
-        assert resolved == "dev.onex.evt.user.created.v1"
+        assert resolved == "onex.evt.user.created.v1"
 
-    def test_resolve_topic_with_different_environments(self) -> None:
-        """Test resolve_topic with various environment values.
+    def test_resolve_topic_is_consistent_across_environments(self) -> None:
+        """Test resolve_topic returns same result regardless of environment.
 
         Verifies:
-        1. 'dev' environment prefix
-        2. 'staging' environment prefix
-        3. 'prod' environment prefix
+        1. Topic resolution is realm-agnostic
+        2. Same topic suffix regardless of environment
         """
         mock_event_bus = AsyncMock()
         mock_dispatch_engine = AsyncMock()
         topic_suffix = "onex.evt.test.v1"
 
-        for env, expected in [
-            ("dev", "dev.onex.evt.test.v1"),
-            ("staging", "staging.onex.evt.test.v1"),
-            ("prod", "prod.onex.evt.test.v1"),
-        ]:
+        for env in ["dev", "staging", "prod"]:
             wiring = EventBusSubcontractWiring(
                 event_bus=mock_event_bus,
                 dispatch_engine=mock_dispatch_engine,
                 environment=env,
                 node_name="test-handler",
+                service="test-service",
+                version="v1",
             )
-            assert wiring.resolve_topic(topic_suffix) == expected
+            # All environments should resolve to the same topic (realm-agnostic)
+            assert wiring.resolve_topic(topic_suffix) == "onex.evt.test.v1"
 
 
 class TestPublisherTopicScopedProperties:
@@ -922,7 +946,7 @@ class TestIdempotencyIntegration:
 
         async def capture_subscribe(
             topic: str,
-            group_id: str,
+            node_identity: object,
             on_message: object,
         ) -> AsyncMock:
             callbacks[topic] = on_message
@@ -935,6 +959,8 @@ class TestIdempotencyIntegration:
             dispatch_engine=mock_dispatch_engine,
             environment="test",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             idempotency_store=idempotency_store,
             idempotency_config=ModelIdempotencyConfig(enabled=True),
         )
@@ -962,7 +988,7 @@ class TestIdempotencyIntegration:
         mock_message.value = message_json.encode()
 
         # Get callback and deliver message TWICE
-        topic_key = "test.onex.evt.test.dedup.v1"
+        topic_key = "onex.evt.test.dedup.v1"
         callback = callbacks[topic_key]
         await callback(mock_message)  # First delivery
         await callback(mock_message)  # Duplicate delivery
@@ -1016,7 +1042,7 @@ class TestIdempotencyIntegration:
 
         async def capture_subscribe(
             topic: str,
-            group_id: str,
+            node_identity: object,
             on_message: object,
         ) -> AsyncMock:
             callbacks[topic] = on_message
@@ -1029,6 +1055,8 @@ class TestIdempotencyIntegration:
             dispatch_engine=mock_dispatch_engine,
             environment="test",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             idempotency_store=idempotency_store,
             idempotency_config=ModelIdempotencyConfig(enabled=True),
         )
@@ -1067,7 +1095,7 @@ class TestIdempotencyIntegration:
         ).encode()
 
         # Get callback and deliver both messages
-        topic_key = "test.onex.evt.test.dedup.v1"
+        topic_key = "onex.evt.test.dedup.v1"
         callback = callbacks[topic_key]
         await callback(message_1)
         await callback(message_2)
@@ -1106,7 +1134,7 @@ class TestIdempotencyIntegration:
 
         async def capture_subscribe(
             topic: str,
-            group_id: str,
+            node_identity: object,
             on_message: object,
         ) -> AsyncMock:
             callbacks[topic] = on_message
@@ -1119,6 +1147,8 @@ class TestIdempotencyIntegration:
             dispatch_engine=mock_dispatch_engine,
             environment="test",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             idempotency_store=idempotency_store,
             idempotency_config=ModelIdempotencyConfig(enabled=False),  # DISABLED
         )
@@ -1145,7 +1175,7 @@ class TestIdempotencyIntegration:
         mock_message.value = message_json.encode()
 
         # Get callback and deliver message TWICE
-        topic_key = "test.onex.evt.test.dedup.v1"
+        topic_key = "onex.evt.test.dedup.v1"
         callback = callbacks[topic_key]
         await callback(mock_message)
         await callback(mock_message)
@@ -1208,7 +1238,7 @@ class TestOffsetCommitOnFailure:
 
         async def capture_subscribe(
             topic: str,
-            group_id: str,
+            node_identity: object,
             on_message: object,
         ) -> AsyncMock:
             callbacks[topic] = on_message
@@ -1222,6 +1252,8 @@ class TestOffsetCommitOnFailure:
             dispatch_engine=mock_dispatch_engine,
             environment="test",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             offset_policy=ModelOffsetPolicyConfig(
                 commit_strategy="commit_after_handler"
             ),
@@ -1247,7 +1279,7 @@ class TestOffsetCommitOnFailure:
         mock_message.value = message_json.encode()
 
         # Deliver message - should raise RuntimeHostError
-        callback = callbacks["test.onex.evt.test.failure.v1"]
+        callback = callbacks["onex.evt.test.failure.v1"]
         with pytest.raises(RuntimeHostError):
             await callback(mock_message)
 
@@ -1285,7 +1317,7 @@ class TestOffsetCommitOnFailure:
 
         async def capture_subscribe(
             topic: str,
-            group_id: str,
+            node_identity: object,
             on_message: object,
         ) -> AsyncMock:
             callbacks[topic] = on_message
@@ -1299,6 +1331,8 @@ class TestOffsetCommitOnFailure:
             dispatch_engine=mock_dispatch_engine,
             environment="test",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             offset_policy=ModelOffsetPolicyConfig(
                 commit_strategy="commit_after_handler"
             ),
@@ -1324,7 +1358,7 @@ class TestOffsetCommitOnFailure:
         mock_message.value = message_json.encode()
 
         # Deliver message - should succeed
-        callback = callbacks["test.onex.evt.test.success.v1"]
+        callback = callbacks["onex.evt.test.success.v1"]
         await callback(mock_message)
 
         # Verify: commit_offset WAS called
@@ -1361,7 +1395,7 @@ class TestOffsetCommitOnFailure:
 
         async def capture_subscribe(
             topic: str,
-            group_id: str,
+            node_identity: object,
             on_message: object,
         ) -> AsyncMock:
             callbacks[topic] = on_message
@@ -1375,6 +1409,8 @@ class TestOffsetCommitOnFailure:
             dispatch_engine=mock_dispatch_engine,
             environment="test",
             node_name="test-handler",
+            service="test-service",
+            version="v1",
             offset_policy=ModelOffsetPolicyConfig(
                 commit_strategy="commit_after_handler"
             ),
@@ -1396,7 +1432,7 @@ class TestOffsetCommitOnFailure:
         mock_message.value = b"not valid json"
 
         # Deliver message - should raise ProtocolConfigurationError
-        callback = callbacks["test.onex.evt.test.malformed.v1"]
+        callback = callbacks["onex.evt.test.malformed.v1"]
         with pytest.raises(ProtocolConfigurationError):
             await callback(mock_message)
 

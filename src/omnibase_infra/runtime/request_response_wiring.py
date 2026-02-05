@@ -263,17 +263,24 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
         )
 
     def resolve_topic(self, topic_suffix: str) -> str:
-        """Resolve topic suffix to full topic name with environment prefix.
+        """Resolve topic suffix to topic name (realm-agnostic, no environment prefix).
+
+        Topics are realm-agnostic in ONEX. The environment/realm is enforced via
+        envelope identity, not topic naming. This enables cross-environment event
+        routing when needed while maintaining proper isolation through identity.
 
         Args:
             topic_suffix: ONEX format topic suffix
                 (e.g., 'onex.cmd.intelligence.analyze-code.v1')
 
         Returns:
-            Full topic name with environment prefix
-                (e.g., 'dev.onex.cmd.intelligence.analyze-code.v1')
+            Topic name (same as suffix, no environment prefix)
+                (e.g., 'onex.cmd.intelligence.analyze-code.v1')
+
+        Note:
+            Consumer groups still include environment for proper isolation.
         """
-        return f"{self._environment}.{topic_suffix}"
+        return topic_suffix
 
     async def wire_request_response(
         self,

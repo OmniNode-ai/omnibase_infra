@@ -1087,7 +1087,7 @@ class TestTopicNormalization:
         handler = HandlerPostgresTopicUpdate(pool)
         payload = ModelPayloadUpdateTopic(
             correlation_id=uuid4(),
-            topic_suffix="dev.onex.evt.test.topic.v1",
+            topic_suffix="onex.evt.test.topic.v1",
             direction="subscribe",
             contract_id="test-node:1.0.0",
             node_name="test-node",

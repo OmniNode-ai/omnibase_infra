@@ -4,7 +4,7 @@
 
 This test suite validates:
 - Event bus configuration extraction from contracts
-- Topic suffix resolution to full environment-qualified topics
+- Topic suffix resolution to full realm-agnostic topics
 - Fail-fast behavior on unresolved placeholders
 - Graceful handling of missing contract/event_bus configurations
 
@@ -109,8 +109,8 @@ class TestExtractEventBusConfig:
 
         assert result is None
 
-    def test_extracts_publish_topics_with_env_prefix(self) -> None:
-        """Resolves publish topic suffixes to full topics with env prefix."""
+    def test_extracts_publish_topics(self) -> None:
+        """Resolves publish topic suffixes to full realm-agnostic topics."""
         event_bus = MockEventBusSubcontract(
             publish_topics=["onex.evt.node-registered.v1"],
             subscribe_topics=[],
@@ -121,11 +121,11 @@ class TestExtractEventBusConfig:
 
         assert result is not None
         assert len(result.publish_topics) == 1
-        assert result.publish_topics[0].topic == "dev.onex.evt.node-registered.v1"
+        assert result.publish_topics[0].topic == "onex.evt.node-registered.v1"
         assert len(result.subscribe_topics) == 0
 
-    def test_extracts_subscribe_topics_with_env_prefix(self) -> None:
-        """Resolves subscribe topic suffixes to full topics with env prefix."""
+    def test_extracts_subscribe_topics(self) -> None:
+        """Resolves subscribe topic suffixes to full realm-agnostic topics."""
         event_bus = MockEventBusSubcontract(
             publish_topics=[],
             subscribe_topics=["onex.evt.intent-classified.v1"],
@@ -136,7 +136,7 @@ class TestExtractEventBusConfig:
 
         assert result is not None
         assert len(result.subscribe_topics) == 1
-        assert result.subscribe_topics[0].topic == "dev.onex.evt.intent-classified.v1"
+        assert result.subscribe_topics[0].topic == "onex.evt.intent-classified.v1"
         assert len(result.publish_topics) == 0
 
     def test_extracts_multiple_topics(self) -> None:
@@ -157,14 +157,14 @@ class TestExtractEventBusConfig:
 
         assert result is not None
         assert len(result.publish_topics) == 2
-        assert result.publish_topics[0].topic == "prod.onex.evt.node-registered.v1"
-        assert result.publish_topics[1].topic == "prod.onex.cmd.node-shutdown.v1"
+        assert result.publish_topics[0].topic == "onex.evt.node-registered.v1"
+        assert result.publish_topics[1].topic == "onex.cmd.node-shutdown.v1"
         assert len(result.subscribe_topics) == 2
-        assert result.subscribe_topics[0].topic == "prod.onex.evt.intent-classified.v1"
-        assert result.subscribe_topics[1].topic == "prod.onex.cmd.register-node.v1"
+        assert result.subscribe_topics[0].topic == "onex.evt.intent-classified.v1"
+        assert result.subscribe_topics[1].topic == "onex.cmd.register-node.v1"
 
-    def test_different_env_prefixes(self) -> None:
-        """Correctly applies different environment prefixes."""
+    def test_topics_are_realm_agnostic(self) -> None:
+        """Topics are the same regardless of environment parameter (realm-agnostic)."""
         event_bus = MockEventBusSubcontract(
             publish_topics=["onex.evt.test.v1"],
         )
@@ -174,9 +174,10 @@ class TestExtractEventBusConfig:
         staging_result = self.node._extract_event_bus_config("staging")
         prod_result = self.node._extract_event_bus_config("prod")
 
-        assert dev_result.publish_topics[0].topic == "dev.onex.evt.test.v1"
-        assert staging_result.publish_topics[0].topic == "staging.onex.evt.test.v1"
-        assert prod_result.publish_topics[0].topic == "prod.onex.evt.test.v1"
+        # All environments produce the same realm-agnostic topic
+        assert dev_result.publish_topics[0].topic == "onex.evt.test.v1"
+        assert staging_result.publish_topics[0].topic == "onex.evt.test.v1"
+        assert prod_result.publish_topics[0].topic == "onex.evt.test.v1"
 
     def test_fail_fast_on_unresolved_env_placeholder(self) -> None:
         """Raises ValueError on unresolved {env} placeholder."""
@@ -226,7 +227,7 @@ class TestExtractEventBusConfig:
         result = self.node._extract_event_bus_config("dev")
 
         entry = result.publish_topics[0]
-        assert entry.topic == "dev.onex.evt.test.v1"
+        assert entry.topic == "onex.evt.test.v1"
         assert entry.event_type is None  # Default
         assert entry.message_category == "EVENT"  # Default
         assert entry.description is None  # Default
@@ -299,13 +300,10 @@ class TestEventBusInGetIntrospectionData:
 
         assert event.event_bus is not None
         assert len(event.event_bus.publish_topics) == 1
-        assert (
-            event.event_bus.publish_topics[0].topic == "dev.onex.evt.node-registered.v1"
-        )
+        assert event.event_bus.publish_topics[0].topic == "onex.evt.node-registered.v1"
         assert len(event.event_bus.subscribe_topics) == 1
         assert (
-            event.event_bus.subscribe_topics[0].topic
-            == "dev.onex.evt.intent-classified.v1"
+            event.event_bus.subscribe_topics[0].topic == "onex.evt.intent-classified.v1"
         )
 
     @pytest.mark.asyncio
@@ -332,8 +330,8 @@ class TestEventBusInGetIntrospectionData:
         assert event.event_bus is None
 
     @pytest.mark.asyncio
-    async def test_uses_onex_env_environment_variable(self) -> None:
-        """get_introspection_data() uses ONEX_ENV for topic resolution."""
+    async def test_topics_are_realm_agnostic_regardless_of_onex_env(self) -> None:
+        """get_introspection_data() produces realm-agnostic topics regardless of ONEX_ENV."""
         event_bus = MockEventBusSubcontract(
             publish_topics=["onex.evt.test.v1"],
         )
@@ -343,11 +341,11 @@ class TestEventBusInGetIntrospectionData:
         with patch.dict(os.environ, {"ONEX_ENV": "production"}):
             event = await self.node.get_introspection_data()
 
-        assert event.event_bus.publish_topics[0].topic == "production.onex.evt.test.v1"
+        assert event.event_bus.publish_topics[0].topic == "onex.evt.test.v1"
 
     @pytest.mark.asyncio
-    async def test_defaults_to_dev_when_onex_env_not_set(self) -> None:
-        """get_introspection_data() defaults to 'dev' when ONEX_ENV not set."""
+    async def test_produces_realm_agnostic_topics_when_onex_env_not_set(self) -> None:
+        """get_introspection_data() produces realm-agnostic topics when ONEX_ENV not set."""
         event_bus = MockEventBusSubcontract(
             publish_topics=["onex.evt.test.v1"],
         )
@@ -360,7 +358,7 @@ class TestEventBusInGetIntrospectionData:
         with patch.dict(os.environ, env, clear=True):
             event = await self.node.get_introspection_data()
 
-        assert event.event_bus.publish_topics[0].topic == "dev.onex.evt.test.v1"
+        assert event.event_bus.publish_topics[0].topic == "onex.evt.test.v1"
 
     @pytest.mark.asyncio
     async def test_raises_on_unresolved_placeholder(self) -> None:
@@ -399,8 +397,8 @@ class TestEventBusInGetIntrospectionData:
         # Use the convenience property for routing lookups
         topic_strings = event.event_bus.publish_topic_strings
         assert topic_strings == [
-            "dev.onex.evt.node-registered.v1",
-            "dev.onex.cmd.node-shutdown.v1",
+            "onex.evt.node-registered.v1",
+            "onex.cmd.node-shutdown.v1",
         ]
 
 
@@ -425,8 +423,8 @@ class TestEventBusEdgeCases:
 
         assert result is None
 
-    def test_empty_string_env_prefix(self) -> None:
-        """Handles empty string env prefix (creates topics starting with dot)."""
+    def test_empty_string_env_produces_realm_agnostic_topic(self) -> None:
+        """Handles empty string env - produces realm-agnostic topic."""
         event_bus = MockEventBusSubcontract(
             publish_topics=["onex.evt.test.v1"],
         )
@@ -434,8 +432,8 @@ class TestEventBusEdgeCases:
 
         result = self.node._extract_event_bus_config("")
 
-        # Empty prefix still prepends the dot
-        assert result.publish_topics[0].topic == ".onex.evt.test.v1"
+        # Realm-agnostic topic without any prefix
+        assert result.publish_topics[0].topic == "onex.evt.test.v1"
 
     def test_topic_suffix_with_special_characters(self) -> None:
         """Handles topic suffixes with hyphens and underscores."""
@@ -446,7 +444,7 @@ class TestEventBusEdgeCases:
 
         result = self.node._extract_event_bus_config("dev")
 
-        assert result.publish_topics[0].topic == "dev.onex.evt.node-state_changed.v1"
+        assert result.publish_topics[0].topic == "onex.evt.node-state_changed.v1"
 
     def test_topic_suffix_with_numbers(self) -> None:
         """Handles topic suffixes with version numbers."""
@@ -457,8 +455,8 @@ class TestEventBusEdgeCases:
 
         result = self.node._extract_event_bus_config("dev")
 
-        assert result.publish_topics[0].topic == "dev.onex.evt.test.v2"
-        assert result.publish_topics[1].topic == "dev.onex.evt.test.v10"
+        assert result.publish_topics[0].topic == "onex.evt.test.v2"
+        assert result.publish_topics[1].topic == "onex.evt.test.v10"
 
 
 __all__ = [

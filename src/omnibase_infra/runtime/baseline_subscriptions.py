@@ -72,10 +72,13 @@ This subset excludes heartbeat topics and is appropriate when:
     - Heartbeat processing is handled separately
     - You want to minimize subscription overhead
 
+Note:
+    Topics are realm-agnostic in ONEX. The environment/realm is enforced via
+    envelope identity, not topic naming. Subscribe directly to the topic suffix.
+
 Example:
     >>> for topic_suffix in BASELINE_CONTRACT_TOPICS:
-    ...     full_topic = f"{environment}.{topic_suffix}"
-    ...     subscribe(full_topic)
+    ...     subscribe(topic_suffix)  # No environment prefix needed
 """
 
 # All platform baseline topics including heartbeat.
@@ -91,10 +94,13 @@ Includes:
     - Contract deregistered events
     - Node heartbeat events
 
+Note:
+    Topics are realm-agnostic in ONEX. The environment/realm is enforced via
+    envelope identity, not topic naming. Subscribe directly to the topic suffix.
+
 Example:
     >>> for topic_suffix in BASELINE_PLATFORM_TOPICS:
-    ...     full_topic = f"{environment}.{topic_suffix}"
-    ...     subscribe(full_topic)
+    ...     subscribe(topic_suffix)  # No environment prefix needed
 """
 
 

@@ -42,10 +42,10 @@ class TestModelEventRegistration:
         """Should create registration with only required fields."""
         reg = ModelEventRegistration(
             event_type="test.event",
-            topic_template="{env}.test.topic.v1",
+            topic_template="onex.evt.test.topic.v1",
         )
         assert reg.event_type == "test.event"
-        assert reg.topic_template == "{env}.test.topic.v1"
+        assert reg.topic_template == "onex.evt.test.topic.v1"
         assert reg.partition_key_field is None
         assert reg.required_fields == []
         assert reg.schema_version == "1.0.0"
@@ -54,13 +54,13 @@ class TestModelEventRegistration:
         """Should create registration with all fields specified."""
         reg = ModelEventRegistration(
             event_type="custom.event",
-            topic_template="{env}.custom.topic.v2",
+            topic_template="onex.evt.custom.topic.v2",
             partition_key_field="user_id",
             required_fields=["user_id", "action"],
             schema_version="2.0.0",
         )
         assert reg.event_type == "custom.event"
-        assert reg.topic_template == "{env}.custom.topic.v2"
+        assert reg.topic_template == "onex.evt.custom.topic.v2"
         assert reg.partition_key_field == "user_id"
         assert reg.required_fields == ["user_id", "action"]
         assert reg.schema_version == "2.0.0"
@@ -69,7 +69,7 @@ class TestModelEventRegistration:
         """Should raise when attempting to modify frozen model."""
         reg = ModelEventRegistration(
             event_type="test.event",
-            topic_template="{env}.test.topic.v1",
+            topic_template="onex.evt.test.topic.v1",
         )
         with pytest.raises(Exception):  # ValidationError for frozen model
             reg.event_type = "modified.event"  # type: ignore[misc]
@@ -79,7 +79,7 @@ class TestModelEventRegistration:
         with pytest.raises(Exception):  # ValidationError for extra fields
             ModelEventRegistration(
                 event_type="test.event",
-                topic_template="{env}.test.topic.v1",
+                topic_template="onex.evt.test.topic.v1",
                 unknown_field="value",  # type: ignore[call-arg]
             )
 
@@ -91,25 +91,25 @@ class TestEventRegistryDefaultRegistrations:
         """Should register prompt.submitted with correct topic template."""
         registry = EventRegistry(environment="dev")
         topic = registry.resolve_topic("prompt.submitted")
-        assert topic == "dev.onex.evt.omniclaude.prompt-submitted.v1"
+        assert topic == "onex.evt.omniclaude.prompt-submitted.v1"
 
     def test_session_started_default(self) -> None:
         """Should register session.started with correct topic template."""
         registry = EventRegistry(environment="dev")
         topic = registry.resolve_topic("session.started")
-        assert topic == "dev.onex.evt.omniclaude.session-started.v1"
+        assert topic == "onex.evt.omniclaude.session-started.v1"
 
     def test_session_ended_default(self) -> None:
         """Should register session.ended with correct topic template."""
         registry = EventRegistry(environment="dev")
         topic = registry.resolve_topic("session.ended")
-        assert topic == "dev.onex.evt.omniclaude.session-ended.v1"
+        assert topic == "onex.evt.omniclaude.session-ended.v1"
 
     def test_tool_executed_default(self) -> None:
         """Should register tool.executed with correct topic template."""
         registry = EventRegistry(environment="dev")
         topic = registry.resolve_topic("tool.executed")
-        assert topic == "dev.onex.evt.omniclaude.tool-executed.v1"
+        assert topic == "onex.evt.omniclaude.tool-executed.v1"
 
     def test_all_defaults_registered(self) -> None:
         """Should register all four default event types."""
@@ -131,19 +131,19 @@ class TestEventRegistryResolveTopic:
         """Should return correct topic with environment prefix."""
         registry = EventRegistry(environment="staging")
         topic = registry.resolve_topic("prompt.submitted")
-        assert topic == "staging.onex.evt.omniclaude.prompt-submitted.v1"
+        assert topic == "onex.evt.omniclaude.prompt-submitted.v1"
 
-    def test_resolve_topic_substitutes_env_placeholder(self) -> None:
-        """Should substitute {env} placeholder in topic template."""
+    def test_resolve_topic_returns_template_unchanged(self) -> None:
+        """Should return topic template unchanged (realm-agnostic)."""
         registry = EventRegistry(environment="production")
         registry.register(
             ModelEventRegistration(
                 event_type="custom.event",
-                topic_template="{env}.custom.namespace.topic.v1",
+                topic_template="onex.evt.custom.namespace.topic.v1",
             )
         )
         topic = registry.resolve_topic("custom.event")
-        assert topic == "production.custom.namespace.topic.v1"
+        assert topic == "onex.evt.custom.namespace.topic.v1"
 
     def test_resolve_topic_raises_for_unknown_event_type(self) -> None:
         """Should raise OnexError for unknown event type."""
@@ -169,12 +169,12 @@ class TestEventRegistryCustomRegistration:
         registry = EventRegistry()
         registration = ModelEventRegistration(
             event_type="custom.event",
-            topic_template="{env}.custom.topic.v1",
+            topic_template="onex.evt.custom.topic.v1",
         )
         registry.register(registration)
 
         topic = registry.resolve_topic("custom.event")
-        assert topic == "dev.custom.topic.v1"
+        assert topic == "onex.evt.custom.topic.v1"
         assert "custom.event" in registry.list_event_types()
 
     def test_register_can_override_default(self) -> None:
@@ -185,12 +185,12 @@ class TestEventRegistryCustomRegistration:
         registry.register(
             ModelEventRegistration(
                 event_type="prompt.submitted",
-                topic_template="{env}.custom.prompt.v2",
+                topic_template="onex.evt.custom.prompt.v2",
             )
         )
 
         topic = registry.resolve_topic("prompt.submitted")
-        assert topic == "dev.custom.prompt.v2"
+        assert topic == "onex.evt.custom.prompt.v2"
 
     def test_register_multiple_custom_types(self) -> None:
         """Should allow registering multiple custom event types."""
@@ -198,20 +198,20 @@ class TestEventRegistryCustomRegistration:
         registry.register(
             ModelEventRegistration(
                 event_type="custom.one",
-                topic_template="{env}.custom.one.v1",
+                topic_template="onex.evt.custom.one.v1",
             )
         )
         registry.register(
             ModelEventRegistration(
                 event_type="custom.two",
-                topic_template="{env}.custom.two.v1",
+                topic_template="onex.evt.custom.two.v1",
             )
         )
 
         assert "custom.one" in registry.list_event_types()
         assert "custom.two" in registry.list_event_types()
-        assert registry.resolve_topic("custom.one") == "dev.custom.one.v1"
-        assert registry.resolve_topic("custom.two") == "dev.custom.two.v1"
+        assert registry.resolve_topic("custom.one") == "onex.evt.custom.one.v1"
+        assert registry.resolve_topic("custom.two") == "onex.evt.custom.two.v1"
 
 
 class TestEventRegistryGetPartitionKey:
@@ -242,7 +242,7 @@ class TestEventRegistryGetPartitionKey:
         registry.register(
             ModelEventRegistration(
                 event_type="no.partition",
-                topic_template="{env}.no.partition.v1",
+                topic_template="onex.evt.no.partition.v1",
                 partition_key_field=None,
             )
         )
@@ -258,7 +258,7 @@ class TestEventRegistryGetPartitionKey:
         registry.register(
             ModelEventRegistration(
                 event_type="numeric.id",
-                topic_template="{env}.numeric.v1",
+                topic_template="onex.evt.numeric.v1",
                 partition_key_field="id",
             )
         )
@@ -318,7 +318,7 @@ class TestEventRegistryValidatePayload:
         registry.register(
             ModelEventRegistration(
                 event_type="multi.required",
-                topic_template="{env}.multi.v1",
+                topic_template="onex.evt.multi.v1",
                 required_fields=["field_a", "field_b", "field_c"],
             )
         )
@@ -340,7 +340,7 @@ class TestEventRegistryValidatePayload:
         registry.register(
             ModelEventRegistration(
                 event_type="optional.all",
-                topic_template="{env}.optional.v1",
+                topic_template="onex.evt.optional.v1",
                 required_fields=[],
             )
         )
@@ -452,7 +452,7 @@ class TestEventRegistryInjectMetadata:
         registry.register(
             ModelEventRegistration(
                 event_type="versioned.event",
-                topic_template="{env}.versioned.v2",
+                topic_template="onex.evt.versioned.v2",
                 schema_version="2.5.0",
             )
         )
@@ -562,38 +562,43 @@ class TestEventRegistryInjectMetadata:
             registry.inject_metadata("unknown.event", {"data": "value"})
 
 
-class TestEventRegistryEnvironmentPrefix:
-    """Tests for environment prefix configuration."""
+class TestEventRegistryRealmAgnostic:
+    """Tests for realm-agnostic topic resolution."""
 
-    def test_dev_environment_prefix(self) -> None:
-        """Should use dev prefix for dev environment."""
+    def test_dev_environment_topic_is_realm_agnostic(self) -> None:
+        """Topic should be realm-agnostic regardless of dev environment."""
         registry = EventRegistry(environment="dev")
         topic = registry.resolve_topic("prompt.submitted")
-        assert topic.startswith("dev.")
+        assert topic == "onex.evt.omniclaude.prompt-submitted.v1"
+        assert not topic.startswith("dev.")
 
-    def test_prod_environment_prefix(self) -> None:
-        """Should use prod prefix for prod environment."""
+    def test_prod_environment_topic_is_realm_agnostic(self) -> None:
+        """Topic should be realm-agnostic regardless of prod environment."""
         registry = EventRegistry(environment="prod")
         topic = registry.resolve_topic("prompt.submitted")
-        assert topic.startswith("prod.")
+        assert topic == "onex.evt.omniclaude.prompt-submitted.v1"
+        assert not topic.startswith("prod.")
 
-    def test_staging_environment_prefix(self) -> None:
-        """Should use staging prefix for staging environment."""
+    def test_staging_environment_topic_is_realm_agnostic(self) -> None:
+        """Topic should be realm-agnostic regardless of staging environment."""
         registry = EventRegistry(environment="staging")
         topic = registry.resolve_topic("prompt.submitted")
-        assert topic.startswith("staging.")
+        assert topic == "onex.evt.omniclaude.prompt-submitted.v1"
+        assert not topic.startswith("staging.")
 
-    def test_custom_environment_prefix(self) -> None:
-        """Should support custom environment names."""
+    def test_custom_environment_topic_is_realm_agnostic(self) -> None:
+        """Topic should be realm-agnostic regardless of custom environment."""
         registry = EventRegistry(environment="my-custom-env")
         topic = registry.resolve_topic("prompt.submitted")
-        assert topic.startswith("my-custom-env.")
+        assert topic == "onex.evt.omniclaude.prompt-submitted.v1"
+        assert not topic.startswith("my-custom-env.")
 
-    def test_default_environment_is_dev(self) -> None:
-        """Should default to dev environment when not specified."""
+    def test_default_environment_topic_is_realm_agnostic(self) -> None:
+        """Topic should be realm-agnostic even with default environment."""
         registry = EventRegistry()
         topic = registry.resolve_topic("prompt.submitted")
-        assert topic.startswith("dev.")
+        assert topic == "onex.evt.omniclaude.prompt-submitted.v1"
+        assert not topic.startswith("dev.")
 
 
 class TestEventRegistryListEventTypes:
@@ -614,7 +619,7 @@ class TestEventRegistryListEventTypes:
         registry.register(
             ModelEventRegistration(
                 event_type="custom.event",
-                topic_template="{env}.custom.v1",
+                topic_template="onex.evt.custom.v1",
             )
         )
         event_types = registry.list_event_types()
@@ -634,13 +639,13 @@ class TestEventRegistryListEventTypes:
         registry.register(
             ModelEventRegistration(
                 event_type="new.event.one",
-                topic_template="{env}.new.one.v1",
+                topic_template="onex.evt.new.one.v1",
             )
         )
         registry.register(
             ModelEventRegistration(
                 event_type="new.event.two",
-                topic_template="{env}.new.two.v1",
+                topic_template="onex.evt.new.two.v1",
             )
         )
 
@@ -670,7 +675,7 @@ class TestEventRegistryGetRegistration:
         registry = EventRegistry()
         custom = ModelEventRegistration(
             event_type="custom.event",
-            topic_template="{env}.custom.v1",
+            topic_template="onex.evt.custom.v1",
             partition_key_field="custom_key",
             required_fields=["a", "b"],
             schema_version="3.0.0",

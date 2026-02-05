@@ -174,22 +174,27 @@ class PublisherTopicScoped:
         return str(correlation_id).encode("utf-8")
 
     def resolve_topic(self, topic_suffix: str) -> str:
-        """Resolve topic suffix to full topic name with environment prefix.
+        """Resolve topic suffix to topic name (realm-agnostic, no environment prefix).
 
-        The full topic name follows the ONEX convention:
-        `{environment}.{topic_suffix}`
+        Topics are realm-agnostic in ONEX. The environment/realm is enforced via
+        envelope identity, not topic naming. This enables cross-environment event
+        routing when needed while maintaining proper isolation through identity.
 
         Args:
             topic_suffix: ONEX format topic suffix (e.g., 'onex.events.v1')
 
         Returns:
-            Full topic name with environment prefix (e.g., 'dev.onex.events.v1')
+            Topic name (same as suffix, no environment prefix)
 
         Example:
             >>> publisher.resolve_topic("onex.events.v1")
-            'dev.onex.events.v1'
+            'onex.events.v1'
+
+        Note:
+            The environment is still stored for potential consumer group derivation
+            in related components. Topics themselves are realm-agnostic.
         """
-        return f"{self._environment}.{topic_suffix}"
+        return topic_suffix
 
     async def publish(
         self,
