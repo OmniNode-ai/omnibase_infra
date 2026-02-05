@@ -168,8 +168,10 @@ services:
       - --default-log-level=warn
     ports:
       - "${REDPANDA_EXTERNAL_PORT:-29092}:19092"
-      - "18082:18082"
-      - "18081:18081"
+      # Pandaproxy (REST API for Kafka)
+      - "${REDPANDA_PANDAPROXY_PORT:-18082}:18082"
+      # Schema Registry
+      - "${REDPANDA_SCHEMA_REGISTRY_PORT:-18081}:18081"
     volumes:
       - redpanda_data:/var/lib/redpanda/data
     networks:
@@ -250,15 +252,23 @@ services:
       - --appendonly yes
       - --maxmemory 256mb
       - --maxmemory-policy allkeys-lru
+      # Enable password authentication when VALKEY_PASSWORD is set
+      # For local development without password, leave VALKEY_PASSWORD empty
+      - ${VALKEY_PASSWORD:+--requirepass}
+      - ${VALKEY_PASSWORD:-}
     ports:
       - "${VALKEY_EXTERNAL_PORT:-16379}:6379"
     volumes:
       - valkey_data:/data
     networks:
       - omnibase-infra-network
+    environment:
+      # Pass password for healthcheck authentication
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:-}
     healthcheck:
       !!merge <<: *healthcheck-defaults
-      test: ["CMD", "valkey-cli", "ping"]
+      # Use password for healthcheck if VALKEY_PASSWORD is set
+      test: ["CMD-SHELL", "valkey-cli ${VALKEY_PASSWORD:+-a $VALKEY_PASSWORD --no-auth-warning} ping | grep -q PONG"]
     logging: *logging-defaults
     restart: unless-stopped
     labels:
@@ -291,7 +301,7 @@ services:
   # Infisical - Secrets Management (Optional)
   # ==========================================================================
   infisical:
-    image: infisical/infisical:latest-postgres
+    image: infisical/infisical:v0.155.7-postgres
     container_name: omnibase-infra-infisical
     profiles: ["secrets", "full"]
     depends_on:

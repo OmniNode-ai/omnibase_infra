@@ -12,13 +12,18 @@ from __future__ import annotations
 
 import re
 
+import pytest
 import yaml
 
 # Import shared constants from conftest for backward compatibility.
 # New tests should prefer using the docker_dir or compose_file_path fixtures instead.
 from tests.unit.docker.conftest import COMPOSE_FILE_PATH, DOCKER_DIR
 
+# Explicit marker for documentation (also auto-applied by tests/unit/conftest.py)
+pytestmark = [pytest.mark.unit]
 
+
+@pytest.mark.unit
 class TestDockerfilePerformance:
     """Tests for Dockerfile performance best practices."""
 
@@ -75,6 +80,7 @@ class TestDockerfilePerformance:
                     )
 
 
+@pytest.mark.unit
 class TestDockerComposePerformance:
     """Tests for docker-compose performance configuration."""
 
@@ -140,6 +146,7 @@ class TestDockerComposePerformance:
         assert content.count("reservations:") > 0
 
 
+@pytest.mark.unit
 class TestDockerignorePerformance:
     """Tests for .dockerignore optimization."""
 
@@ -184,6 +191,7 @@ class TestDockerignorePerformance:
         assert "!README.md" in content
 
 
+@pytest.mark.unit
 class TestDockerHealthChecks:
     """Tests for Docker health check configuration."""
 
@@ -238,6 +246,7 @@ class TestDockerHealthChecks:
             assert "http://localhost:8085/health" in compose_content
 
 
+@pytest.mark.unit
 class TestDockerSecurityBestPractices:
     """Tests for Docker security best practices that impact performance."""
 
@@ -271,6 +280,7 @@ class TestDockerSecurityBestPractices:
             )
 
 
+@pytest.mark.unit
 class TestDockerBuildOptimization:
     """Tests for Docker build optimization."""
 

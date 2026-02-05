@@ -87,6 +87,7 @@ def extract_profiles_from_compose(compose_path: Path) -> set[str]:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerBuild:
     """Tests for Docker image build process."""
 
@@ -272,6 +273,7 @@ class TestDockerBuild:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerSecurity:
     """Tests for Docker security properties."""
 
@@ -437,6 +439,7 @@ class TestDockerSecurity:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerRuntime:
     """Tests for Docker container runtime behavior."""
 
@@ -683,6 +686,7 @@ class TestDockerRuntime:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerHealthCheck:
     """Tests for Docker health check functionality."""
 
@@ -914,6 +918,7 @@ class TestDockerHealthCheck:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerResourceLimits:
     """Tests for Docker resource limit configuration."""
 
@@ -960,6 +965,7 @@ class TestDockerResourceLimits:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerComposeProfiles:
     """Tests for docker-compose profile configurations.
 
@@ -1069,6 +1075,7 @@ class TestDockerComposeProfiles:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerImageLabels:
     """Tests for Docker image OCI labels."""
 

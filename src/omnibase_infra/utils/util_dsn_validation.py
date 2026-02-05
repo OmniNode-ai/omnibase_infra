@@ -10,6 +10,7 @@ Security:
     - Never logs credentials in error messages
     - Returns [REDACTED] in error messages for sensitive values
     - Validates structure without exposing DSN contents
+    - Validates database names to prevent injection attacks
 
 Edge Cases Handled:
     - IPv6 addresses: postgresql://user:pass@[::1]:5432/db
@@ -27,11 +28,120 @@ Limitations:
 
 from __future__ import annotations
 
+import re
 from typing import Literal, cast
 from urllib.parse import parse_qs, unquote, urlparse
 from uuid import uuid4
 
 from omnibase_infra.types import ModelParsedDSN
+
+# Database name validation pattern
+# PostgreSQL allows more characters in quoted identifiers, but for security
+# we restrict to a safe subset that prevents injection attacks.
+#
+# Allowed characters:
+# - Letters (a-z, A-Z)
+# - Numbers (0-9) - but not as first character
+# - Underscores (_)
+# - Hyphens (-) - commonly used but requires quoting in SQL
+#
+# Pattern explanation:
+# ^[a-zA-Z_]      - Must start with letter or underscore
+# [a-zA-Z0-9_-]*  - Followed by letters, numbers, underscores, or hyphens
+# $               - End of string
+#
+# Max length is 63 characters (PostgreSQL identifier limit)
+DATABASE_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$")
+
+# Characters that are explicitly forbidden in database names for security
+# These could be used in SQL injection attacks or path traversal
+FORBIDDEN_DATABASE_CHARS = frozenset("';\"\\`$(){}[]|&<>!@#%^*=+~/.")
+
+
+def validate_database_name(database: str) -> str:
+    """Validate database name for safety and correctness.
+
+    This function validates that a database name follows safe patterns
+    to prevent SQL injection attacks. It enforces PostgreSQL identifier
+    conventions while rejecting potentially dangerous characters.
+
+    Args:
+        database: The database name to validate.
+
+    Returns:
+        The validated database name if valid.
+
+    Raises:
+        ProtocolConfigurationError: If the database name contains
+            forbidden characters or doesn't match the safe pattern.
+
+    Security:
+        This validation is defense-in-depth. While parameterized queries
+        should prevent injection, validating identifiers at parse time
+        provides an additional security layer.
+
+    Valid names:
+        - mydb, my_database, MyDB, _private
+        - db123, test-db, prod_db_v2
+
+    Invalid names:
+        - 123db (starts with number)
+        - my;db (contains semicolon - SQL injection risk)
+        - my db (contains space)
+        - my'db (contains quote - SQL injection risk)
+        - empty string
+        - names longer than 63 characters
+
+    Example:
+        >>> validate_database_name("mydb")
+        'mydb'
+        >>> validate_database_name("my;db")  # Raises ProtocolConfigurationError
+    """
+    # Lazy imports to avoid circular dependency
+    from omnibase_infra.enums import EnumInfraTransportType
+    from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+
+    context = ModelInfraErrorContext(
+        transport_type=EnumInfraTransportType.DATABASE,
+        operation="validate_database_name",
+        target_name="dsn_validator",
+        correlation_id=uuid4(),
+    )
+
+    # Check for forbidden characters first (provides clearer error message)
+    forbidden_found = [char for char in database if char in FORBIDDEN_DATABASE_CHARS]
+    if forbidden_found:
+        # Don't expose the actual characters in production logs
+        raise ProtocolConfigurationError(
+            "Database name contains forbidden characters that could enable "
+            "SQL injection. Use only letters, numbers, underscores, and hyphens.",
+            context=context,
+            parameter="dsn.database",
+            value="[REDACTED]",
+        )
+
+    # Check for whitespace
+    if any(c.isspace() for c in database):
+        raise ProtocolConfigurationError(
+            "Database name contains whitespace characters. "
+            "Use only letters, numbers, underscores, and hyphens.",
+            context=context,
+            parameter="dsn.database",
+            value="[REDACTED]",
+        )
+
+    # Check against the safe pattern
+    if not DATABASE_NAME_PATTERN.match(database):
+        raise ProtocolConfigurationError(
+            "Database name must start with a letter or underscore, "
+            "contain only letters, numbers, underscores, and hyphens, "
+            "and be at most 63 characters long.",
+            context=context,
+            parameter="dsn.database",
+            value="[REDACTED]",
+        )
+
+    return database
 
 
 def _assert_postgres_scheme(scheme: str) -> Literal["postgresql", "postgres"]:
@@ -236,6 +346,10 @@ def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
             )
         # Unix socket case - database might be in query params or path
         # Allow empty database for now (will be validated at connection time)
+    else:
+        # Validate database name for security (prevent injection attacks)
+        # This raises ProtocolConfigurationError if invalid
+        validate_database_name(database)
 
     # Parse query parameters
     query_dict = {}
@@ -330,4 +444,11 @@ def sanitize_dsn(dsn: str) -> str:
         return "[INVALID_DSN]"
 
 
-__all__: list[str] = ["ModelParsedDSN", "parse_and_validate_dsn", "sanitize_dsn"]
+__all__: list[str] = [
+    "DATABASE_NAME_PATTERN",
+    "FORBIDDEN_DATABASE_CHARS",
+    "ModelParsedDSN",
+    "parse_and_validate_dsn",
+    "sanitize_dsn",
+    "validate_database_name",
+]

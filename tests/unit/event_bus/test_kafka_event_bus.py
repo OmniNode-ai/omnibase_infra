@@ -30,7 +30,7 @@ from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from tests.conftest import make_test_node_identity
 
-# Test fixture constants - use these for assertions to avoid hardcoded values
+# Test constants - use these for assertions to avoid hardcoded values
 TEST_BOOTSTRAP_SERVERS: str = "localhost:9092"
 TEST_ENVIRONMENT: str = "test"
 

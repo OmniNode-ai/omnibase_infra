@@ -7,6 +7,7 @@ These tests verify that Docker configuration follows security best practices:
 - Non-root user execution in containers
 - Proper secret handling without defaults
 - No sensitive information exposure
+- No hardcoded private IP addresses in non-comment lines
 
 This test suite addresses PR #32 reviewer feedback requesting security-focused
 tests for the Docker infrastructure implementation.
@@ -22,7 +23,89 @@ import pytest
 # New tests should prefer using the docker_dir or compose_file_path fixtures instead.
 from tests.unit.docker.conftest import COMPOSE_FILE_PATH, DOCKER_DIR
 
+# Explicit marker for documentation (also auto-applied by tests/unit/conftest.py)
+pytestmark = [pytest.mark.unit]
 
+
+# =============================================================================
+# Private IP Address Detection
+# =============================================================================
+#
+# RFC 1918 private address ranges:
+#   - 10.0.0.0/8       (10.0.0.0 - 10.255.255.255)
+#   - 172.16.0.0/12    (172.16.0.0 - 172.31.255.255)
+#   - 192.168.0.0/16   (192.168.0.0 - 192.168.255.255)
+#
+# Other private/special ranges:
+#   - 127.0.0.0/8      (127.0.0.0 - 127.255.255.255) - localhost/loopback
+#   - 169.254.0.0/16   (169.254.0.0 - 169.254.255.255) - link-local
+#
+# These patterns detect hardcoded private IPs in configuration files which
+# can cause portability issues and indicate configuration that should use
+# environment variables or Docker service names instead.
+#
+# Pattern explanation:
+# - ^\s*[^#\n]* : Line start, optional whitespace, then non-comment chars
+#   (ensures we don't match IPs in comment lines)
+# - IP patterns match the specific private ranges
+#
+# Note: 172.16-31.x.x requires checking the second octet is 16-31
+
+
+def build_private_ip_pattern() -> re.Pattern[str]:
+    """Build regex pattern to detect private IP addresses in non-comment lines.
+
+    This function builds a comprehensive regex pattern that matches all
+    RFC 1918 private IP address ranges plus localhost and link-local ranges.
+
+    Returns:
+        Compiled regex pattern for detecting private IPs.
+
+    Private ranges detected:
+        - 10.0.0.0/8 (Class A private)
+        - 172.16.0.0/12 (Class B private, 172.16.x.x - 172.31.x.x)
+        - 192.168.0.0/16 (Class C private)
+        - 127.0.0.0/8 (localhost/loopback)
+        - 169.254.0.0/16 (link-local/APIPA)
+
+    Note:
+        The pattern only matches IPs on non-comment lines. Lines starting
+        with '#' (after optional whitespace) are excluded to allow
+        documentation examples and commented-out configuration.
+    """
+    # Individual IP range patterns (without the non-comment prefix)
+    ip_10_pattern = r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}"  # 10.x.x.x
+    ip_127_pattern = r"127\.\d{1,3}\.\d{1,3}\.\d{1,3}"  # 127.x.x.x
+    ip_169_254_pattern = r"169\.254\.\d{1,3}\.\d{1,3}"  # 169.254.x.x
+    # 172.16.x.x to 172.31.x.x - need to match 16-19, 20-29, 30-31
+    ip_172_pattern = r"172\.(?:1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}"
+    ip_192_168_pattern = r"192\.168\.\d{1,3}\.\d{1,3}"  # 192.168.x.x
+
+    # Combine all patterns with OR
+    all_ip_patterns = "|".join(
+        [
+            ip_10_pattern,
+            ip_127_pattern,
+            ip_169_254_pattern,
+            ip_172_pattern,
+            ip_192_168_pattern,
+        ]
+    )
+
+    # Full pattern: non-comment line containing any private IP
+    # ^\s* - start of line, optional whitespace
+    # [^#\n]* - any chars except # and newline (ensures not in comment)
+    # (?:...) - non-capturing group for the IP patterns
+    full_pattern = rf"^\s*[^#\n]*(?:{all_ip_patterns})"
+
+    return re.compile(full_pattern, re.MULTILINE)
+
+
+# Compiled pattern for use in tests
+PRIVATE_IP_PATTERN = build_private_ip_pattern()
+
+
+@pytest.mark.unit
 class TestEnvExampleSecurity:
     """Security tests for .env.example file.
 
@@ -154,6 +237,7 @@ class TestEnvExampleSecurity:
             )
 
 
+@pytest.mark.unit
 class TestDockerfileSecurity:
     """Security tests for Dockerfile configuration.
 
@@ -309,6 +393,7 @@ class TestDockerfileSecurity:
         assert found_security_docs, "Dockerfile should document security practices"
 
 
+@pytest.mark.unit
 class TestDockerComposeSecurity:
     """Security tests for docker-compose.yml configuration.
 
@@ -491,6 +576,7 @@ class TestDockerComposeSecurity:
             )
 
 
+@pytest.mark.unit
 class TestDockerSecretsManagement:
     """Security tests for Docker secrets management.
 
@@ -552,6 +638,7 @@ class TestDockerSecretsManagement:
             )
 
 
+@pytest.mark.unit
 class TestDockerNetworkSecurity:
     """Security tests for Docker networking configuration.
 
@@ -584,17 +671,27 @@ class TestDockerNetworkSecurity:
         - No hardcoded external IP addresses
         - Services communicate via isolated Docker network
         - External access only through configurable published ports
+
+        Detects all RFC 1918 private IP ranges:
+        - 10.0.0.0/8 (Class A private)
+        - 172.16.0.0/12 (Class B private, 172.16.x.x - 172.31.x.x)
+        - 192.168.0.0/16 (Class C private)
+        Plus:
+        - 127.0.0.0/8 (localhost/loopback)
+        - 169.254.0.0/16 (link-local/APIPA)
         """
         compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
-        # Should NOT have hardcoded external IP addresses (192.168.x.x pattern)
-        # Allow IP addresses in comments (lines starting with #)
-        hardcoded_ip_pattern = re.compile(
-            r"^\s*[^#\n]*192\.168\.\d+\.\d+", re.MULTILINE
+        # Should NOT have hardcoded private IP addresses in non-comment lines
+        # Uses PRIVATE_IP_PATTERN which covers all RFC 1918 ranges plus
+        # localhost and link-local. See module-level docstring for details.
+        matches = PRIVATE_IP_PATTERN.findall(content)
+        assert not matches, (
+            f"Found hardcoded private IP addresses: {matches}\n"
+            "Configuration should use Docker service names or environment variables "
+            "instead of hardcoded IPs for portability."
         )
-        matches = hardcoded_ip_pattern.findall(content)
-        assert not matches, f"Found hardcoded IP addresses: {matches}"
 
         # Services should use internal Docker service names, not external hosts
         # These patterns indicate proper internal service communication
@@ -666,3 +763,149 @@ class TestDockerSecurityIntegration:
         endpoint response does not leak internal details.
         """
         pytest.skip("Integration test - requires running container and HTTP client")
+
+
+# =============================================================================
+# Private IP Pattern Unit Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestPrivateIpPatternDetection:
+    """Unit tests for the private IP address detection pattern.
+
+    These tests verify that PRIVATE_IP_PATTERN correctly identifies all
+    RFC 1918 private IP ranges plus localhost and link-local addresses,
+    while correctly ignoring IPs in comments.
+    """
+
+    def test_detects_10_range(self) -> None:
+        """Test detection of 10.x.x.x addresses (Class A private)."""
+        content = "server_address=10.0.0.1"
+        matches = PRIVATE_IP_PATTERN.findall(content)
+        assert len(matches) == 1, "Should detect 10.x.x.x address"
+
+    def test_detects_10_range_variations(self) -> None:
+        """Test detection of various 10.x.x.x addresses."""
+        test_cases = [
+            "host: 10.0.0.1",
+            "addr=10.255.255.255",
+            "ip: 10.100.50.25",
+        ]
+        for content in test_cases:
+            matches = PRIVATE_IP_PATTERN.findall(content)
+            assert len(matches) == 1, f"Should detect 10.x.x.x in: {content}"
+
+    def test_detects_127_range(self) -> None:
+        """Test detection of 127.x.x.x addresses (localhost)."""
+        content = "LOCALHOST=127.0.0.1"
+        matches = PRIVATE_IP_PATTERN.findall(content)
+        assert len(matches) == 1, "Should detect localhost address"
+
+    def test_detects_127_range_variations(self) -> None:
+        """Test detection of various 127.x.x.x addresses."""
+        test_cases = [
+            "host: 127.0.0.1",
+            "addr=127.0.0.2",
+            "ip: 127.255.255.255",
+        ]
+        for content in test_cases:
+            matches = PRIVATE_IP_PATTERN.findall(content)
+            assert len(matches) == 1, f"Should detect 127.x.x.x in: {content}"
+
+    def test_detects_169_254_range(self) -> None:
+        """Test detection of 169.254.x.x addresses (link-local)."""
+        content = "link_local=169.254.1.1"
+        matches = PRIVATE_IP_PATTERN.findall(content)
+        assert len(matches) == 1, "Should detect link-local address"
+
+    def test_detects_172_16_to_31_range(self) -> None:
+        """Test detection of 172.16.x.x - 172.31.x.x addresses (Class B private)."""
+        # Test boundary values
+        test_cases = [
+            ("host: 172.16.0.1", True, "172.16 lower bound"),
+            ("host: 172.31.255.255", True, "172.31 upper bound"),
+            ("host: 172.20.100.50", True, "172.20 middle range"),
+            ("host: 172.15.0.1", False, "172.15 below range"),
+            ("host: 172.32.0.1", False, "172.32 above range"),
+        ]
+        for content, should_match, desc in test_cases:
+            matches = PRIVATE_IP_PATTERN.findall(content)
+            if should_match:
+                assert len(matches) == 1, f"Should detect {desc}"
+            else:
+                assert len(matches) == 0, f"Should NOT detect {desc}"
+
+    def test_detects_192_168_range(self) -> None:
+        """Test detection of 192.168.x.x addresses (Class C private)."""
+        content = "server: 192.168.1.100"
+        matches = PRIVATE_IP_PATTERN.findall(content)
+        assert len(matches) == 1, "Should detect 192.168 address"
+
+    def test_detects_192_168_range_variations(self) -> None:
+        """Test detection of various 192.168.x.x addresses."""
+        test_cases = [
+            "host: 192.168.0.1",
+            "addr=192.168.255.255",
+            "ip: 192.168.86.200",
+        ]
+        for content in test_cases:
+            matches = PRIVATE_IP_PATTERN.findall(content)
+            assert len(matches) == 1, f"Should detect 192.168.x.x in: {content}"
+
+    def test_ignores_commented_lines(self) -> None:
+        """Test that IPs in comment lines are ignored."""
+        test_cases = [
+            "# server: 192.168.1.1",
+            "  # host=10.0.0.1",
+            "    # Example: 172.16.0.1",
+            "# 127.0.0.1 is localhost",
+        ]
+        for content in test_cases:
+            matches = PRIVATE_IP_PATTERN.findall(content)
+            assert len(matches) == 0, f"Should ignore comment: {content}"
+
+    def test_ignores_public_ips(self) -> None:
+        """Test that public IP addresses are not matched."""
+        test_cases = [
+            "server: 8.8.8.8",  # Google DNS
+            "addr=1.1.1.1",  # Cloudflare DNS
+            "ip: 104.16.0.1",  # Cloudflare
+            "host: 172.15.0.1",  # Below 172.16 range
+            "host: 172.32.0.1",  # Above 172.31 range
+            "host: 192.167.1.1",  # Not 192.168
+            "host: 192.169.1.1",  # Not 192.168
+        ]
+        for content in test_cases:
+            matches = PRIVATE_IP_PATTERN.findall(content)
+            assert len(matches) == 0, f"Should not match public IP in: {content}"
+
+    def test_multiline_content(self) -> None:
+        """Test pattern works correctly with multiline content."""
+        content = """
+# This is a comment with 192.168.1.1
+server_addr=10.0.0.1
+# Another comment 172.16.0.1
+redis_host=192.168.86.100
+"""
+        matches = PRIVATE_IP_PATTERN.findall(content)
+        # Should find 10.0.0.1 and 192.168.86.100, but not the commented ones
+        assert len(matches) == 2, "Should find exactly 2 non-commented IPs"
+
+    def test_inline_comments_after_ip(self) -> None:
+        """Test that IPs before inline comments are detected."""
+        content = "server: 192.168.1.1  # internal server"
+        matches = PRIVATE_IP_PATTERN.findall(content)
+        assert len(matches) == 1, "Should detect IP before inline comment"
+
+    def test_mixed_valid_and_invalid(self) -> None:
+        """Test content with mix of valid and commented IPs."""
+        content = """
+# Configuration
+# Use 192.168.86.200 for remote server
+database_host: postgres
+kafka_bootstrap: redpanda:9092
+# Do not hardcode: 10.0.0.1
+"""
+        matches = PRIVATE_IP_PATTERN.findall(content)
+        assert len(matches) == 0, "All IPs are in comments, should find none"

@@ -214,7 +214,7 @@ services:
   # Infisical (Secrets Management)
   # ==========================================================================
   infisical:
-    image: infisical/infisical:latest-postgres
+    image: infisical/infisical:v0.155.7-postgres
     container_name: omnibase-infra-infisical
     depends_on:
       postgres:
@@ -225,7 +225,8 @@ services:
       DB_CONNECTION_URI: postgresql://postgres:${POSTGRES_PASSWORD:-test-password}@postgres:5432/infisical_db
       REDIS_URL: redis://valkey:6379
       # E2E testing: use deterministic keys (NOT for production)
-      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-e2e-test-encryption-key-32chars!}
+      # Key must be exactly 64 hex characters (32 bytes for AES-256)
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       AUTH_SECRET: ${INFISICAL_AUTH_SECRET:-e2e-test-auth-secret-for-testing}
       SITE_URL: ${INFISICAL_SITE_URL:-http://localhost:8880}
       TELEMETRY_ENABLED: "false"

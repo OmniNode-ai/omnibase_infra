@@ -256,15 +256,24 @@ class TestDsnValidation:
         # Should see [REDACTED] instead
         assert "[REDACTED]" in error_msg or "database name" in error_msg.lower()
 
-    def test_edge_case_database_with_slash(self) -> None:
-        """Test database name parsing with complex path."""
-        # Some DSNs might have database names that look like paths
+    def test_edge_case_database_with_slash_rejected(self) -> None:
+        """Test that database names with slashes are rejected for security.
+
+        Database names like 'my/db' do not match the safe pattern and are
+        rejected to prevent potential path traversal or injection attacks.
+        """
         dsn = "postgresql://user:pass@localhost:5432/my/db"
 
-        result = parse_and_validate_dsn(dsn)
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            parse_and_validate_dsn(dsn)
 
-        # urllib.parse will parse full path as database
-        assert result.database == "my/db"
+        # Should be rejected - either as invalid pattern or forbidden chars
+        error_msg = str(exc_info.value).lower()
+        assert (
+            "forbidden" in error_msg
+            or "must start with" in error_msg
+            or "only letters" in error_msg
+        )
 
     def test_edge_case_empty_password(self) -> None:
         """Test DSN with empty password (user: format)."""
@@ -736,7 +745,181 @@ class TestModelParsedDSNValidation:
         assert result1 is not result2
 
 
+class TestDatabaseNameValidation:
+    """Tests for database name security validation.
+
+    This test class validates the database name validation function that
+    prevents SQL injection attacks by rejecting dangerous characters and
+    patterns in database names.
+    """
+
+    def test_valid_simple_name(self) -> None:
+        """Test simple lowercase database name."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        result = validate_database_name("mydb")
+        assert result == "mydb"
+
+    def test_valid_mixed_case(self) -> None:
+        """Test mixed case database name."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        result = validate_database_name("MyDatabase")
+        assert result == "MyDatabase"
+
+    def test_valid_with_underscore(self) -> None:
+        """Test database name with underscores."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        result = validate_database_name("my_database_v2")
+        assert result == "my_database_v2"
+
+    def test_valid_with_hyphen(self) -> None:
+        """Test database name with hyphens."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        result = validate_database_name("my-database")
+        assert result == "my-database"
+
+    def test_valid_with_numbers(self) -> None:
+        """Test database name with numbers (not first character)."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        result = validate_database_name("db123")
+        assert result == "db123"
+
+    def test_valid_starts_with_underscore(self) -> None:
+        """Test database name starting with underscore."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        result = validate_database_name("_private_db")
+        assert result == "_private_db"
+
+    def test_invalid_starts_with_number(self) -> None:
+        """Test that database names starting with numbers are rejected."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            validate_database_name("123db")
+
+        assert "must start with a letter or underscore" in str(exc_info.value)
+
+    def test_invalid_semicolon_injection(self) -> None:
+        """Test that semicolons are rejected (SQL injection risk)."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            validate_database_name("mydb;DROP TABLE users")
+
+        assert "forbidden characters" in str(exc_info.value).lower()
+
+    def test_invalid_single_quote_injection(self) -> None:
+        """Test that single quotes are rejected (SQL injection risk)."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            validate_database_name("my'db")
+
+        assert "forbidden characters" in str(exc_info.value).lower()
+
+    def test_invalid_double_quote_injection(self) -> None:
+        """Test that double quotes are rejected (SQL injection risk)."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            validate_database_name('my"db')
+
+        assert "forbidden characters" in str(exc_info.value).lower()
+
+    def test_invalid_backslash(self) -> None:
+        """Test that backslashes are rejected."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            validate_database_name("my\\db")
+
+        assert "forbidden characters" in str(exc_info.value).lower()
+
+    def test_invalid_dollar_sign(self) -> None:
+        """Test that dollar signs are rejected (shell injection risk)."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            validate_database_name("my$db")
+
+        assert "forbidden characters" in str(exc_info.value).lower()
+
+    def test_invalid_space(self) -> None:
+        """Test that spaces are rejected."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            validate_database_name("my db")
+
+        assert "whitespace" in str(exc_info.value).lower()
+
+    def test_invalid_slash(self) -> None:
+        """Test that forward slashes are rejected (path traversal risk)."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        # Note: Slashes are handled by the pattern check, not forbidden chars
+        with pytest.raises(ProtocolConfigurationError):
+            validate_database_name("my/db")
+
+    def test_invalid_too_long(self) -> None:
+        """Test that database names over 63 characters are rejected."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        long_name = "a" * 64  # Exceeds PostgreSQL 63-char limit
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            validate_database_name(long_name)
+
+        assert "63 characters" in str(exc_info.value)
+
+    def test_valid_max_length(self) -> None:
+        """Test that 63-character database names are accepted."""
+        from omnibase_infra.utils.util_dsn_validation import validate_database_name
+
+        max_name = "a" * 63
+        result = validate_database_name(max_name)
+        assert result == max_name
+
+    def test_dsn_with_injection_attempt_rejected(self) -> None:
+        """Test that DSNs with SQL injection attempts are rejected."""
+        # Attempt to inject SQL via database name
+        dsn = "postgresql://user:pass@localhost:5432/mydb;DROP TABLE users;--"
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            parse_and_validate_dsn(dsn)
+
+        assert (
+            "forbidden" in str(exc_info.value).lower()
+            or "injection" in str(exc_info.value).lower()
+        )
+
+    def test_dsn_with_valid_database_accepted(self) -> None:
+        """Test that DSNs with valid database names work correctly."""
+        dsn = "postgresql://user:pass@localhost:5432/prod_db_v2"
+
+        result = parse_and_validate_dsn(dsn)
+
+        assert result.database == "prod_db_v2"
+
+    def test_all_forbidden_chars_rejected(self) -> None:
+        """Test that all characters in FORBIDDEN_DATABASE_CHARS are rejected."""
+        from omnibase_infra.utils.util_dsn_validation import (
+            FORBIDDEN_DATABASE_CHARS,
+            validate_database_name,
+        )
+
+        for char in FORBIDDEN_DATABASE_CHARS:
+            with pytest.raises(ProtocolConfigurationError):
+                validate_database_name(f"test{char}db")
+
+
 __all__: list[str] = [
+    "TestDatabaseNameValidation",
     "TestDsnValidation",
     "TestDsnEdgeCasesIntegration",
     "TestModelParsedDSNValidation",

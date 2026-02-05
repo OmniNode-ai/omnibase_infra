@@ -64,11 +64,12 @@ echo $GITHUB_TOKEN | head -c 10
 cp .env.example .env
 
 # 2. CRITICAL: Edit .env and replace ALL placeholder values
-#    Look for: __REPLACE_WITH_SECURE_PASSWORD__, __REPLACE_WITH_INFISICAL_TOKEN__
+#    Look for: __REPLACE_WITH_SECURE_PASSWORD__
 #    Generate secure passwords: openssl rand -base64 32
+#    For Infisical (secrets profile): set INFISICAL_ENCRYPTION_KEY and INFISICAL_AUTH_SECRET
 
-# 3. Build and start (main profile)
-docker compose -f docker-compose.infra.yml --profile main up -d --build
+# 3. Build and start with runtime services
+docker compose -f docker-compose.infra.yml --profile runtime up -d --build
 
 # 4. View logs
 docker compose -f docker-compose.infra.yml logs -f
@@ -81,7 +82,7 @@ curl http://localhost:8085/health
 
 The deployment follows a multi-profile architecture designed for flexible scaling and separation of concerns:
 
-```
+```text
                               Docker Compose Profiles
 +------------------------------------------------------------------------+
 |                                                                        |
@@ -117,7 +118,7 @@ The deployment follows a multi-profile architecture designed for flexible scalin
 
 ### Service Communication Flow
 
-```
+```text
 External Request
        |
        v
@@ -231,12 +232,13 @@ for i in {1..3}; do echo "Password $i: $(openssl rand -base64 32)"; done
 
 ### Required Credentials
 
-| Credential         | Environment Variable  | Notes                                      |
-|--------------------|-----------------------|--------------------------------------------|
-| PostgreSQL         | `POSTGRES_PASSWORD`   | Database access password                   |
-| Infisical          | `INFISICAL_TOKEN`     | Infisical access token                     |
-| Redis/Valkey       | `REDIS_PASSWORD`      | Cache access password                      |
-| GitHub (build)     | `GITHUB_TOKEN`        | For private package installation           |
+| Credential              | Environment Variable       | Notes                                      |
+|-------------------------|----------------------------|--------------------------------------------|
+| PostgreSQL              | `POSTGRES_PASSWORD`        | Database access password                   |
+| Infisical Encryption    | `INFISICAL_ENCRYPTION_KEY` | 32-byte hex key for secrets encryption     |
+| Infisical Auth          | `INFISICAL_AUTH_SECRET`    | JWT signing secret for authentication      |
+| Redis/Valkey (optional) | `REDIS_PASSWORD`           | Cache access password (empty by default)   |
+| GitHub (build)          | `GITHUB_TOKEN`             | For private package installation           |
 
 ### Security Features
 
@@ -504,11 +506,11 @@ docker stats
 
 These variables must be set explicitly. The runtime will fail to start if they are missing or contain placeholder values.
 
-| Variable           | Description                       | Security Level |
-|--------------------|-----------------------------------|----------------|
-| `POSTGRES_PASSWORD`| PostgreSQL database password      | Secret         |
-| `INFISICAL_TOKEN`  | Infisical access token            | Secret         |
-| `REDIS_PASSWORD`   | Redis/Valkey cache password       | Secret         |
+| Variable                  | Description                            | Security Level | Profile    |
+|---------------------------|----------------------------------------|----------------|------------|
+| `POSTGRES_PASSWORD`       | PostgreSQL database password           | Secret         | (default)  |
+| `INFISICAL_ENCRYPTION_KEY`| 32-byte hex key for secrets encryption | Secret         | secrets    |
+| `INFISICAL_AUTH_SECRET`   | JWT signing secret for authentication  | Secret         | secrets    |
 
 ### Optional Variables (With Defaults)
 
@@ -919,7 +921,7 @@ The `test_runtime_e2e.py` tests will skip automatically if the runtime container
 
 ### E2E Service Architecture
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────┐
 │                    omnibase-infra-network                          │
 │                                                                    │
