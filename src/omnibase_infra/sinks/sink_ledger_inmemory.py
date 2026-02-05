@@ -92,6 +92,7 @@ class InMemoryLedgerSink:
         Raises:
             LedgerSinkClosedError: If sink is closed.
             LedgerSinkFullError: If buffer is full and policy is RAISE.
+            NotImplementedError: If drop_policy is BLOCK (not supported in test sink).
         """
         if self._closed:
             raise LedgerSinkClosedError("Cannot emit to closed sink")
@@ -104,11 +105,14 @@ class InMemoryLedgerSink:
                     raise LedgerSinkFullError(
                         f"Sink buffer full ({self._max_size} events)"
                     )
-                elif self._drop_policy == EnumLedgerSinkDropPolicy.DROP_OLDEST:
-                    # deque with maxlen handles this automatically
-                    pass
-                # BLOCK policy: we're async so this doesn't actually block
-                # In a real implementation, we'd wait on a condition variable
+                elif self._drop_policy == EnumLedgerSinkDropPolicy.BLOCK:
+                    # BLOCK policy requires proper condition variable implementation
+                    # which is not provided in this test-only sink
+                    raise NotImplementedError(
+                        "BLOCK policy is not supported in InMemoryLedgerSink. "
+                        "Use DROP_OLDEST, DROP_NEWEST, or RAISE for testing."
+                    )
+                # DROP_OLDEST: deque with maxlen handles this automatically
 
             self._events.append(event)
             return True

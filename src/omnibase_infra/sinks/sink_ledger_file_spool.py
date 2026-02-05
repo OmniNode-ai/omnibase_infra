@@ -147,15 +147,19 @@ class FileSpoolLedgerSink:
                     raise LedgerSinkFullError(
                         f"Sink buffer full ({self._max_buffer_size} events)"
                     )
-                elif self._drop_policy == EnumLedgerSinkDropPolicy.DROP_OLDEST:
-                    # deque with maxlen handles this automatically
-                    pass
+                elif self._drop_policy == EnumLedgerSinkDropPolicy.BLOCK:
+                    # BLOCK policy requires proper condition variable implementation
+                    raise NotImplementedError(
+                        "BLOCK policy is not yet implemented in FileSpoolLedgerSink. "
+                        "Use DROP_OLDEST, DROP_NEWEST, or RAISE."
+                    )
+                # DROP_OLDEST: deque with maxlen handles this automatically
 
             self._buffer.append(event)
 
-        # Start background flush task if not running
-        if self._flush_task is None or self._flush_task.done():
-            self._flush_task = asyncio.create_task(self._background_flush_loop())
+            # Start background flush task if not running (inside lock to prevent race)
+            if self._flush_task is None or self._flush_task.done():
+                self._flush_task = asyncio.create_task(self._background_flush_loop())
 
         return True
 
