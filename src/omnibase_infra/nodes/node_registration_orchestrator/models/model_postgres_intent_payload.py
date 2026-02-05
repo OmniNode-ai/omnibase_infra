@@ -26,7 +26,7 @@ Thread Safety:
 Edge Case Behavior:
     The ``endpoints`` field validator explicitly handles the following cases:
     - ``None``: Raises ValueError (invalid input, not silently ignored)
-    - Empty Mapping ``{}``: Logs warning and converts to empty tuple
+    - Empty Mapping ``{}``: Raises ValueError (use default=() for no endpoints)
     - Invalid types (int, str, list, etc.): Raises ValueError
     - Tuple: Passed through as-is
     - Non-empty Mapping: Converted to tuple of (key, value) pairs
@@ -36,7 +36,6 @@ Edge Case Behavior:
 from __future__ import annotations
 
 import logging
-import warnings
 from collections.abc import Mapping
 from types import MappingProxyType
 from uuid import UUID
@@ -153,7 +152,7 @@ class ModelPostgresIntentPayload(BaseModel):
 
         Edge Cases:
             - ``None``: Raises ValueError (explicit rejection)
-            - Empty Mapping ``{}``: Logs warning, returns empty tuple
+            - Empty Mapping ``{}``: Raises ValueError (use default=() for no endpoints)
             - Empty tuple ``()``: Passed through (same as default)
             - Invalid types (list, int, str): Raises ValueError
             - Non-string keys/values: Raises ValueError (strict mode)
@@ -192,16 +191,13 @@ class ModelPostgresIntentPayload(BaseModel):
             return v  # type: ignore[return-value]  # NOTE: runtime type validated by Pydantic
         if isinstance(v, Mapping):
             if len(v) == 0:
-                # Log warning for empty Mapping to help detect potentially missing data.
-                # This is different from the default empty tuple - it's an explicit
-                # empty Mapping input that gets coerced.
-                warning_msg = (
-                    "Empty Mapping provided for endpoints, coercing to empty tuple. "
-                    "If this is intentional, consider using default=() instead."
+                # Explicit empty Mapping is rejected - use default=() instead.
+                # This prevents silent coercion that could mask invalid input.
+                raise ValueError(
+                    "Empty Mapping provided for endpoints. "
+                    "If no endpoints are needed, omit the field to use default=() "
+                    "rather than passing an explicit empty Mapping."
                 )
-                logger.warning(warning_msg)
-                warnings.warn(warning_msg, UserWarning, stacklevel=2)
-                return ()
             # Validate and convert to tuple - strict mode requires string keys/values
             result: list[tuple[str, str]] = []
             for key, val in v.items():
