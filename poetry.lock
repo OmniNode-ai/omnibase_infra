@@ -2915,14 +2915,14 @@ files = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.14.0"
+version = "0.15.0"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_core-0.14.0-py3-none-any.whl", hash = "sha256:695ff9b45e8f7e3f235cb339995763f16e0b42fa0c70d811edb19315db515f1f"},
-    {file = "omnibase_core-0.14.0.tar.gz", hash = "sha256:8b51a3f14311f6a8d5bd4040be6e4920c7194d01ac6c03f3032d7f8e72511544"},
+    {file = "omnibase_core-0.15.0-py3-none-any.whl", hash = "sha256:c4146af9831706715f05144575a931e4dc6969a6d3f0ba3261a081c4143dd531"},
+    {file = "omnibase_core-0.15.0.tar.gz", hash = "sha256:6a8bb4b62a552d62770b1a8c1aae806b175aa4802719a37976a9f68170b982d4"},
 ]
 
 [package.dependencies]
@@ -2939,8 +2939,9 @@ pyyaml = ">=6.0.2,<7.0.0"
 [package.extras]
 cache = ["redis (>=5.0.0,<6.0.0)"]
 cli = ["psutil"]
-full = ["prometheus-client (>=0.21.0,<1.0.0)", "psutil", "redis (>=5.0.0,<6.0.0)"]
+full = ["prometheus-client (>=0.21.0,<1.0.0)", "psutil", "redis (>=5.0.0,<6.0.0)", "sqlglot (>=26.0.0,<27.0.0)"]
 metrics = ["prometheus-client (>=0.21.0,<1.0.0)"]
+sql-parser = ["sqlglot (>=26.0.0,<27.0.0)"]
 
 [[package]]
 name = "omnibase-spi"
@@ -5332,4 +5333,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "648ff3ae6d7222034e18fbbc59c3e173378e57ca9fe5236db58853ae05d5141d"
+content-hash = "8dbc6f7bfbe84860bab03abc20f48d81b3976ca9aeca8e267b8b320abf86b169"
