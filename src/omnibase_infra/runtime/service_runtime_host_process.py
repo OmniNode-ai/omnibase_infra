@@ -436,7 +436,8 @@ class RuntimeHostProcess:
         wire_infrastructure_services(container)
         process = RuntimeHostProcess(container=container)
         await process.start()
-        health = await process.health_check()
+        health = await process.health_check()      # liveness
+        readiness = await process.readiness_check() # Kafka consumer readiness
         await process.stop()
 
         # Direct initialization (without container)
@@ -2956,7 +2957,9 @@ class RuntimeHostProcess:
             "no_handlers_registered": no_handlers_registered,
         }
 
-    async def readiness_check(self) -> dict[str, object]:
+    async def readiness_check(
+        self, correlation_id: UUID | None = None
+    ) -> dict[str, object]:
         """Return readiness status for the ``/ready`` endpoint.
 
         Readiness is separate from liveness (health_check). A runtime is ready
@@ -2969,12 +2972,18 @@ class RuntimeHostProcess:
         This method delegates to ``event_bus.get_readiness_status()`` for the
         Kafka-specific readiness determination.
 
+        Args:
+            correlation_id: Optional correlation ID propagated from the caller
+                (e.g. the ``/ready`` HTTP handler). When ``None``, a new ID is
+                auto-generated via ``ModelInfraErrorContext.with_correlation()``.
+
         Returns:
             Dictionary with readiness status:
                 - ready: Overall readiness (True = safe to receive traffic)
                 - is_running: Process running status
                 - is_draining: Graceful shutdown drain state
                 - event_bus_readiness: Structured readiness from event bus
+                - correlation_id: Trace identifier (present when not ready)
         """
         event_bus_readiness: dict[str, object] = {}
         event_bus_ready = False
@@ -2993,6 +3002,7 @@ class RuntimeHostProcess:
                 event_bus_readiness = {"fallback": True, "healthy": event_bus_ready}
         except Exception as e:
             error_context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="readiness_check",
             )
@@ -3012,8 +3022,31 @@ class RuntimeHostProcess:
 
         ready = self._is_running and not self._is_draining and event_bus_ready
 
+        if not ready:
+            failure_context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="readiness_check",
+            )
+            logger.warning(
+                "Readiness check failed: runtime is not ready",
+                extra={
+                    "correlation_id": str(failure_context.correlation_id),
+                    "is_running": self._is_running,
+                    "is_draining": self._is_draining,
+                    "event_bus_ready": event_bus_ready,
+                },
+            )
+            return {
+                "ready": False,
+                "is_running": self._is_running,
+                "is_draining": self._is_draining,
+                "event_bus_readiness": event_bus_readiness,
+                "correlation_id": str(failure_context.correlation_id),
+            }
+
         return {
-            "ready": ready,
+            "ready": True,
             "is_running": self._is_running,
             "is_draining": self._is_draining,
             "event_bus_readiness": event_bus_readiness,

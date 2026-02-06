@@ -122,10 +122,13 @@ def _get_port_from_env(default: int) -> int:
 
 
 class ServiceHealth:
-    """Minimal HTTP server for health check endpoints.
+    """Minimal HTTP server for liveness and readiness endpoints.
 
-    This server provides health check endpoints for Docker and Kubernetes
-    liveness/readiness probes. It delegates health status to the RuntimeHostProcess.
+    This server provides separate liveness (``/health``) and readiness
+    (``/ready``) endpoints for Docker and Kubernetes probes. Liveness is
+    delegated to ``RuntimeHostProcess.health_check()``; readiness is
+    delegated to ``RuntimeHostProcess.readiness_check()``, which verifies
+    that all required Kafka consumers have active partition assignments.
 
     Attributes:
         runtime: The RuntimeHostProcess instance to query for health status.
@@ -176,7 +179,8 @@ class ServiceHealth:
     Example:
         >>> server = ServiceHealth(runtime=runtime, port=8085)
         >>> await server.start()
-        >>> # curl http://localhost:8085/health
+        >>> # Liveness:  curl http://localhost:8085/health
+        >>> # Readiness: curl http://localhost:8085/ready
         >>> await server.stop()
 
     See Also:
@@ -528,16 +532,19 @@ class ServiceHealth:
         Example:
             >>> server = ServiceHealth(runtime=runtime, port=8085)
             >>> await server.start()
-            >>> # Server now listening at http://0.0.0.0:8085/health
-            >>> # Docker can probe: curl http://localhost:8085/health
+            >>> # Liveness:  curl http://localhost:8085/health
+            >>> # Readiness: curl http://localhost:8085/ready
 
         Example Error (Port In Use):
             RuntimeHostError: Failed to start health server on 0.0.0.0:8085: [Errno 48] Address already in use
             (correlation_id: 123e4567-e89b-12d3-a456-426614174000)
 
-        Docker Integration:
+        Docker Integration (liveness):
             HEALTHCHECK --interval=30s --timeout=3s \\
                 CMD curl -f http://localhost:8085/health || exit 1
+
+            Kubernetes readiness probes should target ``/ready`` instead
+            of ``/health``.
         """
         if self._is_running:
             logger.debug("ServiceHealth already started, skipping")
@@ -947,7 +954,9 @@ class ServiceHealth:
             correlation_id = generate_correlation_id()
 
         try:
-            readiness_details = await self.runtime.readiness_check()
+            readiness_details = await self.runtime.readiness_check(
+                correlation_id=correlation_id,
+            )
 
             if not isinstance(readiness_details, dict):
                 context = ModelInfraErrorContext.with_correlation(
@@ -980,12 +989,21 @@ class ServiceHealth:
             )
 
         except Exception as e:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="readiness_check",
+                target_name="RuntimeHostProcess.readiness_check",
+            )
             logger.exception(
                 "Readiness check failed with exception (correlation_id=%s)",
                 correlation_id,
                 extra={
                     "error": str(e),
                     "error_type": type(e).__name__,
+                    "correlation_id": str(context.correlation_id),
+                    "transport_type": context.transport_type,
+                    "operation": context.operation,
                 },
             )
 

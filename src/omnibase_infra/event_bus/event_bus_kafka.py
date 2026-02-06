@@ -231,6 +231,7 @@ class EventBusKafka(
         - Dead letter queue (DLQ) for failed message processing
         - Environment-based message routing
         - Proper async producer/consumer lifecycle management
+        - Readiness checking with per-topic partition assignment tracking
 
     Attributes:
         environment: Environment identifier (e.g., "local", "dev", "prod")
@@ -248,7 +249,7 @@ class EventBusKafka(
         - Properties (3): config, adapter, environment
         - Lifecycle methods (4): start, initialize, shutdown, close
         - Pub/Sub methods (3): publish, subscribe, start_consuming
-        - Health check (1): health_check
+        - Health/Readiness (2): health_check, get_readiness_status
 
     Example:
         ```python

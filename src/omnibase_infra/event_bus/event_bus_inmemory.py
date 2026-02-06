@@ -104,6 +104,7 @@ class EventBusInmemory:
         - Environment and group-based message routing
         - Circuit breaker pattern for subscriber failure isolation
         - Debugging utilities for inspecting event flow
+        - Readiness checking (always ready when started, no external deps)
 
     Attributes:
         environment: Environment identifier (e.g., "local", "dev", "test")
