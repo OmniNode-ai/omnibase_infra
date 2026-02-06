@@ -1033,11 +1033,15 @@ class TestDockerComposeProfiles:
             pytest.skip("Docker daemon not available")
 
         # Set required environment variables for validation
+        # Includes Infisical vars because docker-compose.infra.yml uses
+        # fail-fast :? syntax that requires them even for config validation
         env = os.environ.copy()
         env.update(
             {
                 "POSTGRES_PASSWORD": "test",
                 "VALKEY_PASSWORD": "test",
+                "INFISICAL_ENCRYPTION_KEY": "0" * 64,
+                "INFISICAL_AUTH_SECRET": "test-auth-secret",
             }
         )
 
