@@ -340,6 +340,7 @@ services:
         condition: service_healthy
     environment:
       !!merge <<: *runtime-env
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omninode-runtime-main}
       RUNTIME_PROFILE: main
       ONEX_INPUT_TOPIC: ${ONEX_INPUT_TOPIC:-requests}
       ONEX_OUTPUT_TOPIC: ${ONEX_OUTPUT_TOPIC:-responses}
@@ -374,6 +375,7 @@ services:
         condition: service_healthy
     environment:
       !!merge <<: *runtime-env
+      OTEL_SERVICE_NAME: omninode-runtime-effects
       RUNTIME_PROFILE: effects
       ONEX_INPUT_TOPIC: ${ONEX_EFFECTS_INPUT_TOPIC:-effect-requests}
       ONEX_OUTPUT_TOPIC: ${ONEX_EFFECTS_OUTPUT_TOPIC:-effect-responses}
@@ -407,6 +409,7 @@ services:
         condition: service_healthy
     environment:
       !!merge <<: *runtime-env
+      OTEL_SERVICE_NAME: omninode-runtime-worker
       RUNTIME_PROFILE: workers
       ONEX_INPUT_TOPIC: ${ONEX_WORKER_INPUT_TOPIC:-worker-requests}
       ONEX_OUTPUT_TOPIC: ${ONEX_WORKER_OUTPUT_TOPIC:-worker-responses}
