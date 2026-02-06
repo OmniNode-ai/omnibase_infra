@@ -65,9 +65,9 @@ cp .env.example .env
 
 # 2. CRITICAL: Edit .env and replace ALL placeholder values
 #    Look for patterns: __REPLACE_WITH_*__
-#    - POSTGRES_PASSWORD: openssl rand -base64 32
+#    - POSTGRES_PASSWORD: openssl rand -hex 32
 #    - INFISICAL_ENCRYPTION_KEY (secrets profile): openssl rand -hex 32
-#    - INFISICAL_AUTH_SECRET (secrets profile): openssl rand -base64 32
+#    - INFISICAL_AUTH_SECRET (secrets profile): openssl rand -hex 32
 
 # 3. Start core infrastructure (default profile)
 docker compose -f docker-compose.infra.yml up -d
@@ -228,10 +228,10 @@ docker compose -f docker-compose.infra.yml --profile full up -d --build
 
 ```bash
 # Generate secure random passwords
-openssl rand -base64 32
+openssl rand -hex 32
 
 # Generate multiple passwords at once
-for i in {1..3}; do echo "Password $i: $(openssl rand -base64 32)"; done
+for i in {1..3}; do echo "Password $i: $(openssl rand -hex 32)"; done
 ```
 
 ### Required Credentials
@@ -258,19 +258,19 @@ for i in {1..3}; do echo "Password $i: $(openssl rand -base64 32)"; done
 
 ```bash
 # Verify non-root user
-docker exec omnibase-infra-runtime-main whoami
+docker exec omninode-runtime whoami
 # Expected output: omniinfra
 
 # Verify UID/GID
-docker exec omnibase-infra-runtime-main id
+docker exec omninode-runtime id
 # Expected: uid=1000(omniinfra) gid=1000(omniinfra) groups=1000(omniinfra)
 
 # Verify secrets not in image history
-docker history omnibase-infra-runtime --no-trunc | grep -iE "token|password|secret"
+docker history omninode-runtime --no-trunc | grep -iE "token|password|secret"
 # Expected: no output (empty result)
 
 # Verify no secrets in environment inspection
-docker inspect omnibase-infra-runtime-main --format='{{json .Config.Env}}' | grep -i password
+docker inspect omninode-runtime --format='{{json .Config.Env}}' | grep -i password
 # Should only show placeholder references, not actual values
 ```
 
@@ -369,13 +369,13 @@ readinessProbe:
 curl -s http://localhost:8085/health | jq .
 
 # Test from inside container network
-docker exec omnibase-infra-runtime-main curl -s http://localhost:8085/health
+docker exec omninode-runtime curl -s http://localhost:8085/health
 
 # Check container health status
-docker inspect --format='{{.State.Health.Status}}' omnibase-infra-runtime-main
+docker inspect --format='{{.State.Health.Status}}' omninode-runtime
 
 # View health check history
-docker inspect --format='{{json .State.Health}}' omnibase-infra-runtime-main | jq .
+docker inspect --format='{{json .State.Health}}' omninode-runtime | jq .
 ```
 
 ### Response Format
@@ -477,7 +477,7 @@ docker build \
   --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
   --build-arg VCS_REF=$(git rev-parse --short HEAD) \
   -f docker/Dockerfile.runtime \
-  -t omnibase-infra-runtime:$(git describe --tags --always) .
+  -t omninode-runtime:$(git describe --tags --always) .
 
 # Build with GitHub token for private repos
 GITHUB_TOKEN=$(cat ~/.github_token) docker compose -f docker-compose.infra.yml build
@@ -489,7 +489,7 @@ Default resource limits in docker-compose:
 
 | Service         | CPU Limit | Memory Limit | CPU Reserve | Memory Reserve |
 |-----------------|-----------|--------------|-------------|----------------|
-| runtime-main    | 1.0 cores | 512 MB       | 0.25 cores  | 128 MB         |
+| omninode-runtime| 1.0 cores | 512 MB       | 0.25 cores  | 128 MB         |
 | runtime-effects | 1.0 cores | 512 MB       | 0.25 cores  | 128 MB         |
 | runtime-worker  | 0.5 cores | 256 MB       | 0.1 cores   | 64 MB          |
 
@@ -548,7 +548,7 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | `ONEX_GROUP_ID`              | `onex-runtime-main`                | Consumer group for main runtime        |
 | **OpenTelemetry**            |                                    |                                        |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`| `http://localhost:4317`            | OTLP exporter endpoint                 |
-| `OTEL_SERVICE_NAME`          | `omnibase-infra-runtime`           | Service name for tracing               |
+| `OTEL_SERVICE_NAME`          | `omninode-runtime`                 | Service name for tracing               |
 
 ## Volume Management
 
@@ -556,11 +556,11 @@ These variables must be set explicitly. The runtime will fail to start if they a
 
 | Volume                          | Purpose                              | Service           |
 |---------------------------------|--------------------------------------|-------------------|
-| `omnibase-infra-runtime-logs`   | Main runtime logs                    | runtime-main      |
-| `omnibase-infra-runtime-data`   | Main runtime persistent state        | runtime-main      |
-| `omnibase-infra-effects-logs`   | Effects runtime logs                 | runtime-effects   |
-| `omnibase-infra-effects-data`   | Effects runtime persistent state     | runtime-effects   |
-| `omnibase-infra-worker-logs`    | Worker logs (shared across replicas) | runtime-worker    |
+| `omninode-runtime-logs`   | Main runtime logs                    | omninode-runtime  |
+| `omninode-runtime-data`   | Main runtime persistent state        | omninode-runtime  |
+| `omninode-effects-logs`   | Effects runtime logs                 | runtime-effects   |
+| `omninode-effects-data`   | Effects runtime persistent state     | runtime-effects   |
+| `omninode-worker-logs`    | Worker logs (shared across replicas) | runtime-worker    |
 
 ### Volume Commands
 
@@ -569,10 +569,10 @@ These variables must be set explicitly. The runtime will fail to start if they a
 docker volume ls | grep omnibase-infra
 
 # Inspect volume
-docker volume inspect omnibase-infra-runtime-logs
+docker volume inspect omninode-runtime-logs
 
 # View volume contents
-docker run --rm -v omnibase-infra-runtime-logs:/logs alpine ls -la /logs
+docker run --rm -v omninode-runtime-logs:/logs alpine ls -la /logs
 
 # Remove all volumes (WARNING: destroys data)
 docker compose -f docker-compose.infra.yml down -v
@@ -593,13 +593,13 @@ docker compose -f docker-compose.infra.yml down -v
 docker compose -f docker-compose.infra.yml ps -a
 
 # View startup logs
-docker compose -f docker-compose.infra.yml logs runtime-main
+docker compose -f docker-compose.infra.yml logs omninode-runtime
 
 # View last N lines
-docker compose -f docker-compose.infra.yml logs --tail 50 runtime-main
+docker compose -f docker-compose.infra.yml logs --tail 50 omninode-runtime
 
 # Follow logs in real-time
-docker compose -f docker-compose.infra.yml logs -f runtime-main
+docker compose -f docker-compose.infra.yml logs -f omninode-runtime
 ```
 
 #### Common Startup Issues
@@ -619,17 +619,17 @@ If you see "No handlers registered" error, follow these troubleshooting steps:
 
 ```bash
 # 1. Check ONEX_CONTRACTS_DIR is set correctly
-docker exec omnibase-infra-runtime-main printenv ONEX_CONTRACTS_DIR
+docker exec omninode-runtime printenv ONEX_CONTRACTS_DIR
 
 # 2. Verify contracts directory exists and contains handler contracts
-docker exec omnibase-infra-runtime-main ls -la /app/contracts
-docker exec omnibase-infra-runtime-main find /app/contracts -name "handler_contract.yaml" -o -name "contract.yaml"
+docker exec omninode-runtime ls -la /app/contracts
+docker exec omninode-runtime find /app/contracts -name "handler_contract.yaml" -o -name "contract.yaml"
 
 # 3. Validate handler contract syntax
-docker exec omnibase-infra-runtime-main cat /app/contracts/handlers/*/handler_contract.yaml
+docker exec omninode-runtime cat /app/contracts/handlers/*/handler_contract.yaml
 
 # 4. Check for import errors in logs
-docker logs omnibase-infra-runtime-main 2>&1 | grep -E "(MODULE_NOT_FOUND|CLASS_NOT_FOUND|IMPORT_ERROR)"
+docker logs omninode-runtime 2>&1 | grep -E "(MODULE_NOT_FOUND|CLASS_NOT_FOUND|IMPORT_ERROR)"
 ```
 
 **Required handler contract fields:**
@@ -644,13 +644,13 @@ docker logs omnibase-infra-runtime-main 2>&1 | grep -E "(MODULE_NOT_FOUND|CLASS_
 curl -v http://localhost:8085/health
 
 # Check from inside container
-docker exec omnibase-infra-runtime-main curl -s http://localhost:8085/health
+docker exec omninode-runtime curl -s http://localhost:8085/health
 
 # Check container health history
-docker inspect --format='{{json .State.Health}}' omnibase-infra-runtime-main | jq .
+docker inspect --format='{{json .State.Health}}' omninode-runtime | jq .
 
 # View health check logs
-docker inspect --format='{{range .State.Health.Log}}{{.Output}}{{end}}' omnibase-infra-runtime-main
+docker inspect --format='{{range .State.Health.Log}}{{.Output}}{{end}}' omninode-runtime
 ```
 
 ### Build Failures
@@ -684,15 +684,15 @@ Test connectivity from within the runtime container. Replace hostnames with your
 
 ```bash
 # Test connectivity to PostgreSQL (replace hostname with your POSTGRES_HOST value)
-docker exec omnibase-infra-runtime-main \
+docker exec omninode-runtime \
   curl -v telnet://localhost:5432
 
 # Test connectivity to Kafka (replace hostname with your KAFKA_BOOTSTRAP_SERVERS value)
-docker exec omnibase-infra-runtime-main \
+docker exec omninode-runtime \
   curl -v telnet://localhost:9092
 
 # Check DNS resolution (replace hostname with your configured service name)
-docker exec omnibase-infra-runtime-main \
+docker exec omninode-runtime \
   getent hosts localhost
 
 # Check network configuration
@@ -706,12 +706,12 @@ docker network inspect omnibase-infra-network
 ONEX_LOG_LEVEL=DEBUG docker compose -f docker-compose.infra.yml up
 
 # Shell into running container
-docker exec -it omnibase-infra-runtime-main /bin/bash
+docker exec -it omninode-runtime /bin/bash
 
 # Shell into new container for debugging
 docker run -it --rm \
   --network omnibase-infra-network \
-  omnibase-infra-runtime /bin/bash
+  omninode-runtime /bin/bash
 ```
 
 ## CI/CD Integration
@@ -840,7 +840,7 @@ docker compose -f docker-compose.infra.yml down
 docker run --rm \
   -v $(pwd)/src:/app/src \
   -v $(pwd)/tests:/app/tests \
-  omnibase-infra-runtime \
+  omninode-runtime \
   python -m pytest tests/ -v
 ```
 
@@ -848,20 +848,20 @@ docker run --rm \
 
 ```bash
 # View running processes
-docker exec omnibase-infra-runtime-main ps aux
+docker exec omninode-runtime ps aux
 
 # Check Python environment
-docker exec omnibase-infra-runtime-main python --version
-docker exec omnibase-infra-runtime-main pip list
+docker exec omninode-runtime python --version
+docker exec omninode-runtime pip list
 
 # View environment variables (careful: may show secrets)
-docker exec omnibase-infra-runtime-main env | grep -v PASSWORD | grep -v TOKEN
+docker exec omninode-runtime env | grep -v PASSWORD | grep -v TOKEN
 
 # Check disk usage
-docker exec omnibase-infra-runtime-main df -h
+docker exec omninode-runtime df -h
 
 # View memory usage
-docker exec omnibase-infra-runtime-main free -h
+docker exec omninode-runtime free -h
 ```
 
 ## E2E Testing with Infrastructure
