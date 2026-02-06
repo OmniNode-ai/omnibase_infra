@@ -2647,6 +2647,11 @@ class RuntimeHostProcess:
                     else "default"
                 )
 
+                # Serialize envelope before signing to convert UUID objects
+                # to strings.  hash_canonical_json inside sign_dict uses
+                # json.dumps(sort_keys=True) which raises TypeError on UUIDs.
+                envelope = self._serialize_envelope(envelope)
+
                 # Sign the dict envelope using sign_dict method
                 signed_envelope = self._envelope_signer.sign_dict(
                     payload=envelope,

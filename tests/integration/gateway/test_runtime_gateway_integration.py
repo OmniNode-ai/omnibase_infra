@@ -208,14 +208,14 @@ class TestPublishEnvelopeSafeSigning:
         assert published_dict["status"] == "ok"
 
     @pytest.mark.asyncio
-    async def test_publish_envelope_safe_graceful_degradation_uuid_in_dict(
+    async def test_publish_envelope_safe_signs_uuid_containing_dict(
         self,
     ) -> None:
-        """UUID objects in dict cause signing to fail gracefully (publishes unsigned).
+        """UUID objects in dict are serialized before signing so signing succeeds.
 
         This tests the real-world scenario where _make_error_response creates
-        dicts with UUID objects. hash_canonical_json uses json.dumps which cannot
-        serialize UUID objects, so signing fails and degrades to unsigned publish.
+        dicts with UUID objects. _serialize_envelope converts UUIDs to strings
+        before sign_dict is called, preventing TypeError in hash_canonical_json.
         """
         # Arrange
         bus = EventBusInmemory()
@@ -225,7 +225,7 @@ class TestPublishEnvelopeSafeSigning:
         signer = _make_signer()
         runtime._envelope_signer = signer
 
-        # Envelope with raw UUID object (not JSON-serializable for signing)
+        # Envelope with raw UUID object (would fail without pre-serialization)
         envelope = {
             "success": True,
             "status": "ok",
@@ -235,14 +235,17 @@ class TestPublishEnvelopeSafeSigning:
         # Act
         await runtime._publish_envelope_safe(envelope, "test-topic")
 
-        # Assert - signing fails, publishes unsigned but UUID still serialized
+        # Assert - signing succeeds because UUIDs are serialized first
         bus.publish_envelope.assert_called_once()
         published_dict = bus.publish_envelope.call_args[0][0]
-        assert published_dict["success"] is True
-        # UUID should be serialized to string by _serialize_envelope
-        assert isinstance(published_dict["correlation_id"], str)
-        # No signing wrapper present (graceful degradation)
-        assert "signature" not in published_dict
+        # Signed envelope has signing wrapper fields
+        assert "signature" in published_dict
+        assert "realm" in published_dict
+        assert "payload" in published_dict
+        # Inner payload preserves the original data with serialized UUID
+        payload = published_dict["payload"]
+        assert payload["success"] is True
+        assert isinstance(payload["correlation_id"], str)
 
 
 # =============================================================================
