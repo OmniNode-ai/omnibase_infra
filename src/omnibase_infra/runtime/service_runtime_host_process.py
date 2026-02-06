@@ -2613,6 +2613,13 @@ class RuntimeHostProcess:
             except (ValueError, TypeError):
                 pass
 
+        # Auto-generate correlation_id if missing to ensure policy rejection
+        # logs and signing always have a correlation_id for tracing
+        if correlation_id is None:
+            correlation_id = uuid4()
+            envelope = dict(envelope)  # Copy to avoid mutation
+            envelope["correlation_id"] = str(correlation_id)
+
         # Check outbound policy (if policy engine configured)
         if self._policy_engine is not None:
             decision = self._policy_engine.evaluate_outbound(
@@ -3934,12 +3941,14 @@ class RuntimeHostProcess:
         except Exception as e:
             # Gateway initialization failure is non-fatal - log and continue
             # The system will operate without signing/validation
+            init_correlation_id = uuid4()
             logger.warning(
                 "Failed to initialize gateway, proceeding without",
                 extra={
                     "error": str(e),
                     "realm": config.realm,
                     "runtime_id": config.runtime_id,
+                    "correlation_id": str(init_correlation_id),
                 },
             )
             # Clear any partially initialized components
@@ -3994,7 +4003,10 @@ class RuntimeHostProcess:
             else:
                 logger.warning(
                     "Invalid gateway config type",
-                    extra={"type": type(gateway_raw).__name__},
+                    extra={
+                        "type": type(gateway_raw).__name__,
+                        "correlation_id": str(uuid4()),
+                    },
                 )
                 return
 
@@ -4004,7 +4016,10 @@ class RuntimeHostProcess:
         except Exception as e:
             logger.warning(
                 "Failed to parse gateway config, proceeding without",
-                extra={"error": str(e)},
+                extra={
+                    "error": str(e),
+                    "correlation_id": str(uuid4()),
+                },
             )
 
     async def _validate_gateway_envelope(
@@ -4084,111 +4099,115 @@ class RuntimeHostProcess:
                 )
                 return None
 
-        # Step 2: Try to parse as signed envelope and validate
-        if self._envelope_validator is not None:
-            # Check if this looks like a signed ModelMessageEnvelope
-            # Signed envelopes have: realm, runtime_id, bus_id, signature, payload
-            # The signature field must be a dict containing an "algorithm" key
-            # to distinguish from business payloads that coincidentally share
-            # the same top-level field names.
-            sig = envelope.get("signature")
-            has_signature = isinstance(sig, dict) and "algorithm" in sig
-            has_required_fields = all(
-                field in envelope
-                for field in ("realm", "runtime_id", "bus_id", "payload")
+        # Step 2: Check signature shape once (outside validator block)
+        # Signed envelopes have: realm, runtime_id, bus_id, signature, payload
+        # The signature field must be a dict containing an "algorithm" key
+        # to distinguish from business payloads that coincidentally share
+        # the same top-level field names.
+        sig = envelope.get("signature")
+        has_signature = isinstance(sig, dict) and "algorithm" in sig
+        has_required_fields = all(
+            field in envelope for field in ("realm", "runtime_id", "bus_id", "payload")
+        )
+
+        # Enforce reject_unsigned REGARDLESS of validator availability.
+        # This fixes a bug where reject_unsigned=True had no effect when
+        # public_key_path was not configured (making _envelope_validator None).
+        if (
+            self._gateway_config is not None
+            and self._gateway_config.reject_unsigned
+            and not (has_signature and has_required_fields)
+        ):
+            logger.warning(
+                "Unsigned envelope rejected (reject_unsigned=True)",
+                extra={
+                    "topic": topic,
+                    "has_signature": has_signature,
+                    "has_required_fields": has_required_fields,
+                    "correlation_id": str(correlation_id),
+                },
             )
+            return None
 
-            if has_signature and has_required_fields:
-                # Attempt to validate as signed envelope
-                try:
-                    from omnibase_core.models.envelope.model_message_envelope import (
-                        ModelMessageEnvelope,
-                    )
-
-                    # Parse as ModelMessageEnvelope
-                    msg_envelope: ModelMessageEnvelope[object] = (
-                        ModelMessageEnvelope.model_validate(envelope)
-                    )
-
-                    # Validate signature
-                    result = self._envelope_validator.validate_envelope(msg_envelope)
-                    if not result:
-                        logger.warning(
-                            "Envelope signature validation failed",
-                            extra={
-                                "topic": topic,
-                                "error_code": result.error_code.value
-                                if result.error_code
-                                else None,
-                                "error_message": result.error_message,
-                                "runtime_id": envelope.get("runtime_id"),
-                                "correlation_id": str(correlation_id),
-                            },
-                        )
-                        return None
-
-                    # Validation passed - extract inner payload
-                    # The payload could be a dict or a BaseModel
-                    payload = msg_envelope.payload
-                    if isinstance(payload, dict):
-                        extracted_envelope = dict(payload)  # Copy to avoid mutation
-                    elif hasattr(payload, "model_dump"):
-                        extracted_envelope = payload.model_dump(mode="json")
-                    else:
-                        # Unknown payload type, use as-is
-                        extracted_envelope = {"payload": payload}
-
-                    # Preserve trace_id as correlation_id for downstream tracking
-                    if msg_envelope.trace_id is not None:
-                        extracted_envelope["correlation_id"] = msg_envelope.trace_id
-
-                    logger.debug(
-                        "Signed envelope validated successfully",
-                        extra={
-                            "topic": topic,
-                            "runtime_id": msg_envelope.runtime_id,
-                            "correlation_id": str(msg_envelope.trace_id)
-                            if msg_envelope.trace_id
-                            else None,
-                        },
-                    )
-
-                    return extracted_envelope
-
-                except Exception as e:
-                    # Failed to parse or validate signed envelope
-                    logger.warning(
-                        "Failed to validate signed envelope",
-                        extra={
-                            "topic": topic,
-                            "error": str(e),
-                            "correlation_id": str(correlation_id),
-                        },
-                    )
-                    return None
-
-            else:
-                # Not a signed envelope - check reject_unsigned setting
-                if (
-                    self._gateway_config is not None
-                    and self._gateway_config.reject_unsigned
-                ):
-                    logger.warning(
-                        "Unsigned envelope rejected (reject_unsigned=True)",
-                        extra={
-                            "topic": topic,
-                            "has_signature": has_signature,
-                            "has_required_fields": has_required_fields,
-                            "correlation_id": str(correlation_id),
-                        },
-                    )
-                    return None
-
-                # Accept unsigned envelope (reject_unsigned=False)
-                logger.debug(
-                    "Accepting unsigned envelope (reject_unsigned=False)",
-                    extra={"topic": topic, "correlation_id": str(correlation_id)},
+        # Step 3: Validate signed envelopes (only if validator available AND signed)
+        if (
+            self._envelope_validator is not None
+            and has_signature
+            and has_required_fields
+        ):
+            try:
+                from omnibase_core.models.envelope.model_message_envelope import (
+                    ModelMessageEnvelope,
                 )
+
+                # Parse as ModelMessageEnvelope
+                msg_envelope: ModelMessageEnvelope[object] = (
+                    ModelMessageEnvelope.model_validate(envelope)
+                )
+
+                # Validate signature
+                result = self._envelope_validator.validate_envelope(msg_envelope)
+                if not result:
+                    logger.warning(
+                        "Envelope signature validation failed",
+                        extra={
+                            "topic": topic,
+                            "error_code": result.error_code.value
+                            if result.error_code
+                            else None,
+                            "error_message": result.error_message,
+                            "runtime_id": envelope.get("runtime_id"),
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+                    return None
+
+                # Validation passed - extract inner payload
+                # The payload could be a dict or a BaseModel
+                payload = msg_envelope.payload
+                if isinstance(payload, dict):
+                    extracted_envelope = dict(payload)  # Copy to avoid mutation
+                elif hasattr(payload, "model_dump"):
+                    extracted_envelope = payload.model_dump(mode="json")
+                else:
+                    # Unknown payload type, use as-is
+                    extracted_envelope = {"payload": payload}
+
+                # Preserve trace_id as correlation_id for downstream tracking
+                if msg_envelope.trace_id is not None:
+                    extracted_envelope["correlation_id"] = msg_envelope.trace_id
+
+                logger.debug(
+                    "Signed envelope validated successfully",
+                    extra={
+                        "topic": topic,
+                        "runtime_id": msg_envelope.runtime_id,
+                        "correlation_id": str(msg_envelope.trace_id)
+                        if msg_envelope.trace_id
+                        else None,
+                    },
+                )
+
+                return extracted_envelope
+
+            except Exception as e:
+                # Failed to parse or validate signed envelope
+                logger.warning(
+                    "Failed to validate signed envelope",
+                    extra={
+                        "topic": topic,
+                        "error": str(e),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                return None
+
+        # Unsigned envelope accepted (reject_unsigned=False or not configured)
+        if not (has_signature and has_required_fields):
+            logger.debug(
+                "Accepting unsigned envelope (reject_unsigned=False)",
+                extra={"topic": topic, "correlation_id": str(correlation_id)},
+            )
 
         # Validation passed or no validator configured
         return envelope

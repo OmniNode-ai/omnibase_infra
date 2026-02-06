@@ -36,8 +36,7 @@ python = "^3.12"
 #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
 # Remember to switch back to PyPI versions before merging to main.
 #
-# omnibase-core v0.15.0: Adds ModelMessageEnvelope for gateway signing
-# (v0.14.0 included: Contract registration support)
+# omnibase-core v0.15.0: Adds ModelMessageEnvelope, EnvelopeSignature, and crypto utils for gateway signing
 omnibase-core = "^0.15.0"
 # omnibase-spi v0.6.4: Version bump
 omnibase-spi = "^0.6.4"
