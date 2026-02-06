@@ -390,7 +390,7 @@ The event_bus section in `contract.yaml` is the source of truth for runtime subs
 
 | Topic | Event Type | Purpose |
 |-------|------------|---------|
-| `onex.evt.platform.node-registration-result.v1` | `NodeRegistrationResultEvent` | Final outcome |
+| `onex.evt.platform.node-registration-result.v1` | `NodeRegistrationResultEvent` | Outcome |
 | `onex.evt.platform.node-registration-initiated.v1` | `NodeRegistrationInitiated` | Workflow started |
 | `onex.evt.platform.node-registration-accepted.v1` | `NodeRegistrationAccepted` | Registration succeeded |
 | `onex.evt.platform.node-registration-rejected.v1` | `NodeRegistrationRejected` | Registration failed |

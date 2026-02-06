@@ -468,7 +468,7 @@ class TestConsumedEventHandlers:
         # Remove template placeholders and split by dots
         parts = topic.split(".")
         # The slug is typically the second-to-last part (before version)
-        # Pattern: onex.(evt|internal).platform.<slug>.v1
+        # Pattern: onex.(evt|cmd|intent|snapshot|dlq).platform.<slug>.v1
         if len(parts) >= 2:
             return parts[-2]  # e.g., 'node-introspection', 'runtime-tick'
         return topic
