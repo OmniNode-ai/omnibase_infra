@@ -97,7 +97,7 @@ aiofiles = "^23.2.1"
 dependency-injector = "^4.48.1"  # Enhanced dependency injection
 
 # Tracing and observability dependencies
-sqlparse = "^0.4.4"  # For secure SQL query sanitization in tracing
+sqlparse = ">=0.4.4,<0.6.0"  # For secure SQL query sanitization in tracing
 structlog = "^23.2.0"  # Structured logging
 prometheus-client = "^0.19.0"  # Metrics collection
 opentelemetry-api = "^1.27.0"  # OpenTelemetry API
