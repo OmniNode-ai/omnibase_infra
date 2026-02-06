@@ -22,6 +22,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from uuid import UUID, uuid4
 
 import yaml
 
@@ -80,6 +81,12 @@ class DependencyMaterializer:
         self,
         config: ModelMaterializerConfig | None = None,
     ) -> None:
+        """Initialize the dependency materializer.
+
+        Args:
+            config: Materializer configuration with provider-specific settings.
+                Falls back to environment-driven defaults when None.
+        """
         self._config = config or ModelMaterializerConfig.from_env()
         self._lock = asyncio.Lock()
 
@@ -114,8 +121,11 @@ class DependencyMaterializer:
         Raises:
             ProtocolConfigurationError: If a required resource fails to create.
         """
+        # Single correlation_id for the entire materialization pass
+        correlation_id = uuid4()
+
         # Collect all infrastructure dependencies from contracts
-        infra_deps = self._collect_infra_deps(contract_paths)
+        infra_deps = self._collect_infra_deps(contract_paths, correlation_id)
 
         if not infra_deps:
             logger.debug("No infrastructure dependencies found in contracts")
@@ -149,7 +159,7 @@ class DependencyMaterializer:
 
                 # Create new resource via provider
                 try:
-                    resource = await self._create_resource(dep_type)
+                    resource = await self._create_resource(dep_type, correlation_id)
 
                     self._resource_by_type[dep_type] = resource
                     self._name_to_type[dep_name] = dep_type
@@ -164,15 +174,16 @@ class DependencyMaterializer:
                 except ProtocolConfigurationError:
                     # Contract/configuration errors always propagate
                     raise
-                except (TypeError, AttributeError, ImportError) as e:
+                except (TypeError, AttributeError) as e:
                     # Programming errors propagate immediately
                     raise
                 except Exception as e:
-                    # Infrastructure errors: OSError, TimeoutError, and
-                    # library-specific errors (KafkaConnectionError,
-                    # asyncpg.PostgresError, etc.)
+                    # Infrastructure errors: OSError, TimeoutError, ImportError
+                    # (missing optional package), and library-specific errors
+                    # (KafkaConnectionError, asyncpg.PostgresError, etc.)
                     if dep_required:
                         context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.RUNTIME,
                             operation="materialize_dependency",
                             target_name=dep_name,
@@ -238,11 +249,13 @@ class DependencyMaterializer:
     def _collect_infra_deps(
         self,
         contract_paths: list[Path],
+        correlation_id: UUID,
     ) -> list[SimpleNamespace]:
         """Extract infrastructure-type dependencies from contracts.
 
         Args:
             contract_paths: Paths to scan for contract YAML files.
+            correlation_id: Correlation ID for distributed tracing.
 
         Returns:
             List of dependency objects with name, type, required fields.
@@ -252,7 +265,7 @@ class DependencyMaterializer:
 
         for path in contract_paths:
             try:
-                contract_data = self._load_contract_yaml(path)
+                contract_data = self._load_contract_yaml(path, correlation_id)
             except (OSError, yaml.YAMLError, ProtocolConfigurationError) as e:
                 logger.warning(
                     "Failed to load contract for dependency scanning",
@@ -285,6 +298,7 @@ class DependencyMaterializer:
                 if dep_name in seen_names:
                     if seen_names[dep_name] != dep_type:
                         context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.RUNTIME,
                             operation="collect_infra_deps",
                             target_name=dep_name,
@@ -310,11 +324,12 @@ class DependencyMaterializer:
         return deps
 
     # ONEX_EXCLUDE: any_type - returns heterogeneous resource instance
-    async def _create_resource(self, resource_type: str) -> Any:
+    async def _create_resource(self, resource_type: str, correlation_id: UUID) -> Any:
         """Create a resource using the appropriate provider.
 
         Args:
             resource_type: The resource type string (e.g., "postgres_pool").
+            correlation_id: Correlation ID for distributed tracing.
 
         Returns:
             The created resource instance.
@@ -338,6 +353,7 @@ class DependencyMaterializer:
             return await provider_http.create()
 
         context = ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="create_resource",
             target_name=resource_type,
@@ -349,11 +365,12 @@ class DependencyMaterializer:
         )
 
     # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict
-    def _load_contract_yaml(self, path: Path) -> dict[str, Any]:
+    def _load_contract_yaml(self, path: Path, correlation_id: UUID) -> dict[str, Any]:
         """Load and parse a contract YAML file.
 
         Args:
             path: Path to the contract YAML file.
+            correlation_id: Correlation ID for distributed tracing.
 
         Returns:
             Parsed YAML content as a dictionary.
@@ -363,6 +380,7 @@ class DependencyMaterializer:
         """
         if not path.exists():
             context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.FILESYSTEM,
                 operation="load_contract_yaml",
                 target_name=str(path),
@@ -382,6 +400,7 @@ class DependencyMaterializer:
                 return data
         except yaml.YAMLError as e:
             context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.FILESYSTEM,
                 operation="load_contract_yaml",
                 target_name=str(path),

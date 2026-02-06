@@ -34,6 +34,11 @@ class ModelPostgresPoolConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_pool_size_bounds(self) -> ModelPostgresPoolConfig:
+        """Validate that min_size does not exceed max_size.
+
+        Raises:
+            ValueError: If min_size is greater than max_size.
+        """
         if self.min_size > self.max_size:
             msg = (
                 f"min_size ({self.min_size}) must not exceed max_size ({self.max_size})"

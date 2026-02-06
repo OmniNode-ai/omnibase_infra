@@ -15,7 +15,15 @@ _TRUTHY_VALUES = frozenset({"true", "1", "yes", "on"})
 
 
 class ModelHttpClientConfig(BaseModel):
-    """HTTP client configuration."""
+    """HTTP client configuration for dependency materialization.
+
+    Sources configuration from HTTP_CLIENT_* environment variables.
+    Used by ProviderHttpClient to create shared httpx.AsyncClient instances.
+
+    Attributes:
+        timeout_seconds: Request timeout in seconds (1--300, default 30).
+        follow_redirects: Whether to follow HTTP redirects (default True).
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 

@@ -21,7 +21,17 @@ from omnibase_infra.runtime.models.model_postgres_pool_config import (
 
 
 class ModelMaterializerConfig(BaseModel):
-    """Top-level configuration for the DependencyMaterializer."""
+    """Top-level configuration for the DependencyMaterializer.
+
+    Aggregates provider-specific configurations for all supported
+    infrastructure resource types. Each sub-config defaults to
+    environment-driven values via its own ``from_env()`` factory.
+
+    Attributes:
+        postgres: PostgreSQL connection pool configuration.
+        kafka: Kafka producer configuration.
+        http: HTTP client configuration.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
@@ -37,7 +47,17 @@ class ModelMaterializerConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> ModelMaterializerConfig:
-        """Create full config from environment."""
+        """Create full configuration from environment variables.
+
+        Delegates to each sub-config's ``from_env()`` factory to resolve
+        POSTGRES_*, KAFKA_*, and HTTP_CLIENT_* environment variables.
+
+        Returns:
+            Fully populated materializer configuration.
+
+        Raises:
+            ValueError: If any sub-config encounters invalid environment values.
+        """
         return cls(
             postgres=ModelPostgresPoolConfig.from_env(),
             kafka=ModelKafkaProducerConfig.from_env(),

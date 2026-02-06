@@ -29,6 +29,11 @@ class ProviderPostgresPool:
     """
 
     def __init__(self, config: ModelPostgresPoolConfig) -> None:
+        """Initialize the PostgreSQL pool provider.
+
+        Args:
+            config: PostgreSQL pool configuration (host, port, credentials, pool sizes).
+        """
         self._config = config
 
     # ONEX_EXCLUDE: any_type - returns asyncpg.Pool which is not a standard type

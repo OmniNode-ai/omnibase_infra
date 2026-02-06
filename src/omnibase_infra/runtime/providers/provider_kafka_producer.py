@@ -32,6 +32,11 @@ class ProviderKafkaProducer:
     """
 
     def __init__(self, config: ModelKafkaProducerConfig) -> None:
+        """Initialize the Kafka producer provider.
+
+        Args:
+            config: Kafka producer configuration (bootstrap servers, acks, timeout).
+        """
         self._config = config
 
     # ONEX_EXCLUDE: any_type - returns AIOKafkaProducer which varies by runtime
@@ -59,10 +64,18 @@ class ProviderKafkaProducer:
             acks=self._config.acks.to_aiokafka(),
         )
 
-        await asyncio.wait_for(
-            producer.start(),
-            timeout=self._config.timeout_seconds,
-        )
+        try:
+            await asyncio.wait_for(
+                producer.start(),
+                timeout=self._config.timeout_seconds,
+            )
+        except TimeoutError:
+            # Best-effort cleanup to prevent resource leak
+            try:
+                await producer.stop()
+            except Exception:
+                pass
+            raise
 
         logger.info("Kafka producer created and started successfully")
         return producer

@@ -9,8 +9,10 @@ Part of OMN-1976: Contract dependency materialization.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 import yaml
@@ -36,6 +38,9 @@ from omnibase_infra.runtime.models.model_materializer_config import (
 )
 from omnibase_infra.runtime.models.model_postgres_pool_config import (
     ModelPostgresPoolConfig,
+)
+from omnibase_infra.runtime.providers.provider_kafka_producer import (
+    ProviderKafkaProducer,
 )
 
 # ---------------------------------------------------------------------------
@@ -201,6 +206,27 @@ class TestModelPostgresPoolConfig:
         with pytest.raises(Exception):
             config.host = "other"  # type: ignore[misc]
 
+    def test_min_exceeds_max_raises(self) -> None:
+        """Pool config rejects min_size > max_size."""
+        with pytest.raises(ValueError, match="must not exceed"):
+            ModelPostgresPoolConfig(
+                host="localhost",
+                port=5432,
+                database="test",
+                user="user",
+                password="pass",  # noqa: S106
+                min_size=20,
+                max_size=5,
+            )
+
+    def test_from_env_invalid_port(self) -> None:
+        """Non-numeric POSTGRES_PORT raises ValueError."""
+        with patch.dict("os.environ", {"POSTGRES_PORT": "not_a_number"}):
+            with pytest.raises(
+                ValueError, match="Invalid PostgreSQL pool configuration"
+            ):
+                ModelPostgresPoolConfig.from_env()
+
 
 class TestModelKafkaProducerConfig:
     """Tests for Kafka producer configuration."""
@@ -222,6 +248,17 @@ class TestModelKafkaProducerConfig:
             config = ModelKafkaProducerConfig.from_env()
             assert config.bootstrap_servers == "broker:29092"
             assert config.timeout_seconds == 5.0
+
+    def test_from_env_invalid_timeout(self) -> None:
+        """Non-numeric KAFKA_REQUEST_TIMEOUT_MS raises ValueError."""
+        with patch.dict(
+            "os.environ",
+            {"KAFKA_REQUEST_TIMEOUT_MS": "not_a_number"},
+        ):
+            with pytest.raises(
+                ValueError, match="Invalid Kafka producer configuration"
+            ):
+                ModelKafkaProducerConfig.from_env()
 
 
 class TestModelHttpClientConfig:
@@ -278,7 +315,7 @@ class TestDependencyMaterializerCollectDeps:
         materializer: DependencyMaterializer,
         tmp_contract: Path,
     ) -> None:
-        deps = materializer._collect_infra_deps([tmp_contract])
+        deps = materializer._collect_infra_deps([tmp_contract], uuid4())
         assert len(deps) == 1
         assert deps[0].name == "pattern_store"
         assert deps[0].type == "postgres_pool"
@@ -289,7 +326,7 @@ class TestDependencyMaterializerCollectDeps:
         materializer: DependencyMaterializer,
         tmp_contract_protocol_only: Path,
     ) -> None:
-        deps = materializer._collect_infra_deps([tmp_contract_protocol_only])
+        deps = materializer._collect_infra_deps([tmp_contract_protocol_only], uuid4())
         assert len(deps) == 0
 
     def test_collect_multi_deps(
@@ -297,7 +334,7 @@ class TestDependencyMaterializerCollectDeps:
         materializer: DependencyMaterializer,
         tmp_contract_multi: Path,
     ) -> None:
-        deps = materializer._collect_infra_deps([tmp_contract_multi])
+        deps = materializer._collect_infra_deps([tmp_contract_multi], uuid4())
         assert len(deps) == 3
         names = {d.name for d in deps}
         assert names == {"my_db", "my_kafka", "my_http"}
@@ -340,7 +377,7 @@ class TestDependencyMaterializerCollectDeps:
             )
         )
 
-        deps = materializer._collect_infra_deps([contract1, contract2])
+        deps = materializer._collect_infra_deps([contract1, contract2], uuid4())
         assert len(deps) == 1
         assert deps[0].name == "shared_db"
         # First declaration wins
@@ -385,13 +422,15 @@ class TestDependencyMaterializerCollectDeps:
         )
 
         with pytest.raises(ProtocolConfigurationError, match="conflicting"):
-            materializer._collect_infra_deps([contract1, contract2])
+            materializer._collect_infra_deps([contract1, contract2], uuid4())
 
     def test_collect_skips_missing_files(
         self,
         materializer: DependencyMaterializer,
     ) -> None:
-        deps = materializer._collect_infra_deps([Path("/nonexistent/contract.yaml")])
+        deps = materializer._collect_infra_deps(
+            [Path("/nonexistent/contract.yaml")], uuid4()
+        )
         assert len(deps) == 0
 
     def test_collect_handles_no_dependencies_section(
@@ -401,7 +440,7 @@ class TestDependencyMaterializerCollectDeps:
     ) -> None:
         contract = tmp_path / "contract.yaml"
         contract.write_text(yaml.dump({"name": "bare_node"}))
-        deps = materializer._collect_infra_deps([contract])
+        deps = materializer._collect_infra_deps([contract], uuid4())
         assert len(deps) == 0
 
 
@@ -621,3 +660,31 @@ class TestDependencyMaterializerProtocolOnlyContracts:
     ) -> None:
         result = await materializer.materialize([tmp_contract_protocol_only])
         assert not result
+
+
+# ---------------------------------------------------------------------------
+# Provider tests
+# ---------------------------------------------------------------------------
+
+
+class TestProviderKafkaProducerTimeout:
+    """Tests for Kafka producer timeout and cleanup behavior."""
+
+    @pytest.mark.asyncio
+    async def test_kafka_producer_timeout_cleanup(self) -> None:
+        """Kafka producer is cleaned up on start timeout."""
+        mock_producer = AsyncMock()
+        mock_producer.start = AsyncMock(side_effect=TimeoutError())
+        mock_producer.stop = AsyncMock()
+
+        with patch("aiokafka.AIOKafkaProducer", return_value=mock_producer):
+            config = ModelKafkaProducerConfig(
+                bootstrap_servers="localhost:9092",
+                timeout_seconds=1.0,
+            )
+            provider = ProviderKafkaProducer(config)
+
+            with pytest.raises(asyncio.TimeoutError):
+                await provider.create()
+
+            mock_producer.stop.assert_awaited_once()

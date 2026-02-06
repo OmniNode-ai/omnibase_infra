@@ -29,6 +29,11 @@ class ProviderHttpClient:
     """
 
     def __init__(self, config: ModelHttpClientConfig) -> None:
+        """Initialize the HTTP client provider.
+
+        Args:
+            config: HTTP client configuration (timeout, redirects).
+        """
         self._config = config
 
     # ONEX_EXCLUDE: any_type - returns httpx.AsyncClient
