@@ -16,8 +16,8 @@ Part of OMN-1976: Contract dependency materialization.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import threading
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -81,7 +81,7 @@ class DependencyMaterializer:
         config: ModelMaterializerConfig | None = None,
     ) -> None:
         self._config = config or ModelMaterializerConfig.from_env()
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
 
         # Resource cache: type -> resource instance (deduplication)
         # ONEX_EXCLUDE: any_type - heterogeneous resource instances
@@ -135,7 +135,7 @@ class DependencyMaterializer:
             dep_required = getattr(dep, "required", True)
 
             # Check if resource type already created (deduplication)
-            with self._lock:
+            async with self._lock:
                 if dep_type in self._resource_by_type:
                     resources[dep_name] = self._resource_by_type[dep_type]
                     self._name_to_type[dep_name] = dep_type
@@ -149,7 +149,7 @@ class DependencyMaterializer:
             try:
                 resource = await self._create_resource(dep_type)
 
-                with self._lock:
+                async with self._lock:
                     self._resource_by_type[dep_type] = resource
                     self._name_to_type[dep_name] = dep_type
                     self._creation_order.append(dep_type)
@@ -160,7 +160,10 @@ class DependencyMaterializer:
                     extra={"dep_name": dep_name, "dep_type": dep_type},
                 )
 
-            except Exception as e:
+            except ProtocolConfigurationError:
+                # Contract/configuration errors always propagate
+                raise
+            except (OSError, TimeoutError) as e:
                 if dep_required:
                     context = ModelInfraErrorContext.with_correlation(
                         transport_type=EnumInfraTransportType.RUNTIME,
@@ -189,11 +192,11 @@ class DependencyMaterializer:
 
         Errors during shutdown are logged but do not propagate.
         """
-        with self._lock:
+        async with self._lock:
             types_to_close = list(reversed(self._creation_order))
 
         for resource_type in types_to_close:
-            with self._lock:
+            async with self._lock:
                 resource = self._resource_by_type.get(resource_type)
                 close_func = self._close_funcs.get(resource_type)
 
@@ -212,7 +215,7 @@ class DependencyMaterializer:
                     extra={"type": resource_type, "error": str(e)},
                 )
 
-        with self._lock:
+        async with self._lock:
             self._resource_by_type.clear()
             self._name_to_type.clear()
             self._close_funcs.clear()
@@ -290,7 +293,7 @@ class DependencyMaterializer:
             The created resource instance.
 
         Raises:
-            ValueError: If the resource type has no registered provider.
+            ProtocolConfigurationError: If the resource type has no registered provider.
         """
         if resource_type == EnumInfraResourceType.POSTGRES_POOL:
             provider = ProviderPostgresPool(self._config.postgres)
@@ -307,9 +310,15 @@ class DependencyMaterializer:
             self._close_funcs[resource_type] = ProviderHttpClient.close
             return await provider_http.create()
 
-        raise ValueError(
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="create_resource",
+            target_name=resource_type,
+        )
+        raise ProtocolConfigurationError(
             f"No provider registered for resource type '{resource_type}'. "
-            f"Supported types: {list(INFRA_RESOURCE_TYPES)}"
+            f"Supported types: {list(INFRA_RESOURCE_TYPES)}",
+            context=context,
         )
 
     # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict

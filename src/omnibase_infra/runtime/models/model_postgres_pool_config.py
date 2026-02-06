@@ -23,7 +23,11 @@ class ModelPostgresPoolConfig(BaseModel):
     host: str = Field(default="localhost", description="PostgreSQL host")
     port: int = Field(default=5432, ge=1, le=65535, description="PostgreSQL port")
     user: str = Field(default="postgres", description="PostgreSQL user")
-    password: str = Field(default="", description="PostgreSQL password")
+    password: str = Field(
+        default="",
+        repr=False,
+        description="PostgreSQL password (never logged or included in repr)",
+    )
     database: str = Field(default="omninode_bridge", description="PostgreSQL database")
     min_size: int = Field(default=2, ge=1, le=100, description="Minimum pool size")
     max_size: int = Field(default=10, ge=1, le=100, description="Maximum pool size")

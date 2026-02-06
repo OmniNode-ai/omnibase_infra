@@ -53,7 +53,11 @@ class ProviderPostgresPool:
         )
 
         pool = await asyncpg.create_pool(
-            self._config.dsn,
+            host=self._config.host,
+            port=self._config.port,
+            user=self._config.user,
+            password=self._config.password,
+            database=self._config.database,
             min_size=self._config.min_size,
             max_size=self._config.max_size,
         )
