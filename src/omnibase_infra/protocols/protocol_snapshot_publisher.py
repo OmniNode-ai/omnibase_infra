@@ -99,9 +99,14 @@ See Also:
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from omnibase_infra.models.projection import ModelRegistrationProjection
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from omnibase_infra.models.projection import ModelRegistrationSnapshot
 
 __all__ = [
     "ProtocolSnapshotPublisher",
@@ -392,5 +397,33 @@ class ProtocolSnapshotPublisher(Protocol):
             - Compaction runs periodically (Kafka config)
             - Until compaction, consumers may still see old snapshot
             - After compaction, key is removed from topic
+        """
+        ...
+
+    async def publish_from_projection(
+        self,
+        projection: ModelRegistrationProjection,
+        *,
+        node_name: str | None = None,
+        correlation_id: UUID | None = None,
+    ) -> ModelRegistrationSnapshot:
+        """Create and publish a snapshot from a projection.
+
+        Convenience method that handles snapshot creation and version tracking.
+        Converts the projection to a snapshot model, assigns the next version
+        number, and publishes to Kafka.
+
+        Args:
+            projection: The projection to convert and publish.
+            node_name: Optional human-readable node name for the snapshot.
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            The published snapshot model with assigned version.
+
+        Raises:
+            InfraConnectionError: If Kafka/transport is unavailable
+            InfraTimeoutError: If publish operation times out
+            InfraUnavailableError: If circuit breaker is open
         """
         ...

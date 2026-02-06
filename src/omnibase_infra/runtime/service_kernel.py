@@ -437,6 +437,7 @@ async def bootstrap() -> int:
     contract_unsub_registered: Callable[[], Awaitable[None]] | None = None
     contract_unsub_deregistered: Callable[[], Awaitable[None]] | None = None
     contract_unsub_heartbeat: Callable[[], Awaitable[None]] | None = None
+    snapshot_publisher: SnapshotPublisherRegistration | None = None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 
@@ -1903,10 +1904,7 @@ async def bootstrap() -> int:
         # the case where an exception occurs AFTER the publisher is started but
         # OUTSIDE those two cleanup paths (e.g., during RuntimeHostProcess
         # creation, health server start, or introspection subscription setup).
-        # Use locals().get() because snapshot_publisher is only assigned after
-        # the postgres_host check (line ~686); early failures (e.g., config
-        # load) would leave it unbound.
-        if locals().get("snapshot_publisher") is not None:
+        if snapshot_publisher is not None:
             try:
                 await snapshot_publisher.stop()
             except Exception as cleanup_error:
