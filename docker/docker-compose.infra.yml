@@ -308,8 +308,8 @@ services:
       # with credentials (e.g., redis://:password@valkey:6379) or Infisical will
       # fail to connect. See docker/.env.example for details.
       REDIS_URL: ${INFISICAL_REDIS_URL:-redis://valkey:6379}
-      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:?INFISICAL_ENCRYPTION_KEY is required for secrets profile}
-      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:?INFISICAL_AUTH_SECRET is required for secrets profile}
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:-}
       SITE_URL: ${INFISICAL_SITE_URL:-http://localhost:8880}
       TELEMETRY_ENABLED: "false"
     ports:

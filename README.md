@@ -44,8 +44,8 @@ Self-contained infrastructure via `docker-compose.infra.yml`:
 
 | Service | Profile | Port | Description |
 |---------|---------|------|-------------|
-| **PostgreSQL** | default | 15432 | Persistence (always starts) |
-| **Redpanda** | default | 19092 | Event bus (always starts) |
+| **PostgreSQL** | default | 5436 | Persistence (always starts) |
+| **Redpanda** | default | 29092 | Event bus (always starts) |
 | **Valkey** | default | 16379 | Caching (always starts) |
 | **Consul** | `consul` | 28500 | Service discovery (optional) |
 | **Infisical** | `secrets` | 8880 | Secrets management (optional) |

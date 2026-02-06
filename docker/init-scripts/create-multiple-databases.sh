@@ -23,6 +23,11 @@ create_database() {
     local database="$1"
 
     # Validate database name: only alphanumeric, underscore, and hyphen allowed
+    # Length limit matches PostgreSQL NAMEDATALEN (63 bytes)
+    if [ ${#database} -gt 63 ]; then
+        echo "ERROR: Database name '$database' exceeds 63-character limit" >&2
+        return 1
+    fi
     if ! echo "$database" | grep -qE '^[a-zA-Z_][a-zA-Z0-9_-]*$'; then
         echo "ERROR: Invalid database name '$database' - must match ^[a-zA-Z_][a-zA-Z0-9_-]*$" >&2
         return 1
