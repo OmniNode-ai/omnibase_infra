@@ -2716,11 +2716,22 @@ class RuntimeHostProcess:
                 attempts to extract from model.correlation_id attribute.
         """
         # Determine trace_id for logging early (before signing)
+        # Resolution order: explicit param > model.correlation_id > auto-generate
         trace_id: UUID | None = correlation_id
         if trace_id is None and hasattr(model, "correlation_id"):
             cid = getattr(model, "correlation_id", None)
             if isinstance(cid, UUID):
                 trace_id = cid
+            elif isinstance(cid, str):
+                try:
+                    trace_id = UUID(cid)
+                except (ValueError, TypeError):
+                    pass
+
+        # Auto-generate trace_id if still missing to ensure policy rejection
+        # logs and signing always have a correlation_id for tracing
+        if trace_id is None:
+            trace_id = uuid4()
 
         # Check outbound policy (if policy engine configured)
         if self._policy_engine is not None:
@@ -4075,6 +4086,9 @@ class RuntimeHostProcess:
                 pass
         if correlation_id is None:
             correlation_id = uuid4()
+            # Inject generated correlation_id into envelope for downstream tracking
+            envelope = dict(envelope)  # Copy to avoid mutating caller's dict
+            envelope["correlation_id"] = str(correlation_id)
 
         # Step 1: Policy check (topic allowlist and realm boundary)
         if self._policy_engine is not None:
@@ -4129,7 +4143,21 @@ class RuntimeHostProcess:
             )
             return None
 
-        # Step 3: Validate signed envelopes (only if validator available AND signed)
+        # Step 3a: Reject signed envelopes when no validator is configured.
+        # Accepting a signed envelope without validation is a security risk:
+        # a forged signature would be silently trusted. Fail-closed here.
+        if self._envelope_validator is None and has_signature and has_required_fields:
+            logger.warning(
+                "Signed envelope rejected: no validator configured to verify signature",
+                extra={
+                    "topic": topic,
+                    "runtime_id": envelope.get("runtime_id"),
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return None
+
+        # Step 3b: Validate signed envelopes (validator available AND signed)
         if (
             self._envelope_validator is not None
             and has_signature
