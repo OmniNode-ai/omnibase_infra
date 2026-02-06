@@ -185,12 +185,12 @@ class ProtocolSnapshotPublisher(Protocol):
                 self,
                 entity_id: str,
                 domain: str,
-            ) -> ModelRegistrationProjection | None:
+            ) -> ModelRegistrationSnapshot | None:
                 key = entity_id  # entity_id only; domain at topic level
                 value = await self._consumer.get_latest(self._topic, key)
                 if value is None:
                     return None
-                return ModelRegistrationProjection.model_validate_json(value)
+                return ModelRegistrationSnapshot.model_validate_json(value)
 
             async def delete_snapshot(
                 self,
@@ -295,7 +295,7 @@ class ProtocolSnapshotPublisher(Protocol):
         self,
         entity_id: str,
         domain: str,
-    ) -> ModelRegistrationProjection | None:
+    ) -> ModelRegistrationSnapshot | None:
         """Retrieve the latest snapshot for an entity.
 
         Reads the latest snapshot from the compacted topic. This is the
