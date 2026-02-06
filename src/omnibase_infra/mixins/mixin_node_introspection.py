@@ -1638,13 +1638,15 @@ class MixinNodeIntrospection:
 
         # Track this operation for heartbeat reporting
         async with self.track_operation("publish_introspection"):
+            # Resolve correlation_id before the try block so it is always
+            # available in the except handler for structured logging.
+            final_correlation_id = correlation_id or uuid4()
             try:
                 # Get introspection data
                 event = await self.get_introspection_data()
 
                 # Create publish event with updated reason and correlation_id
                 # Use model_copy for clean field updates (Pydantic v2)
-                final_correlation_id = correlation_id or uuid4()
                 publish_event = event.model_copy(
                     update={
                         "reason": reason_enum,

@@ -29,7 +29,12 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.errors import EnvelopeValidationError, ModelInfraErrorContext
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +51,13 @@ class HandlerValidationLedgerProjection:
 
     CRITICAL INVARIANTS:
     - NEVER drop events due to metadata extraction failure
-    - Raw bytes (value) are REQUIRED (raises ValueError if None/empty)
+    - Raw bytes (value) are REQUIRED (raises EnvelopeValidationError if None/empty)
     - All other metadata uses best-effort extraction with fallbacks
     - No I/O operations - pure COMPUTE handler
 
     Attributes:
         handler_type: EnumHandlerType.INFRA_HANDLER
-        handler_category: EnumHandlerTypeCategory.COMPUTE
+        handler_category: EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE
 
     Example:
         >>> handler = HandlerValidationLedgerProjection()
@@ -81,10 +86,11 @@ class HandlerValidationLedgerProjection:
         """Return the behavioral classification of this handler.
 
         Returns:
-            EnumHandlerTypeCategory.COMPUTE - This handler performs pure,
-            deterministic transformations without side effects.
+            EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE - This handler
+            performs transformations that use nondeterministic operations
+            (uuid4, datetime.now) for fallback metadata values.
         """
-        return EnumHandlerTypeCategory.COMPUTE
+        return EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE
 
     def project(
         self,
@@ -123,7 +129,7 @@ class HandlerValidationLedgerProjection:
                 - envelope_hash: str (SHA-256 hex digest)
 
         Raises:
-            ValueError: If ``value`` is None or empty bytes.
+            EnvelopeValidationError: If ``value`` is None or empty bytes.
 
         Field Extraction Strategy:
             | Field          | Primary Source        | Fallback              |
@@ -135,9 +141,14 @@ class HandlerValidationLedgerProjection:
             | occurred_at    | payload["timestamp"]  | datetime.now(utc)     |
         """
         if not value:
-            raise ValueError(
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="project_validation_event",
+            )
+            raise EnvelopeValidationError(
                 "Cannot create validation ledger entry: value is None or empty. "
-                "Raw event bytes are required for ledger persistence."
+                "Raw event bytes are required for ledger persistence.",
+                context=context,
             )
 
         # Base64-encode raw bytes for transport safety

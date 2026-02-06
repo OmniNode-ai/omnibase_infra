@@ -377,20 +377,20 @@ class TestPublisherContractValidation:
         """
         publisher = PublisherTopicScoped(
             event_bus=mock_event_bus,
-            allowed_topics={"onex.evt.allowed-output.v1"},
+            allowed_topics={"onex.evt.test.allowed-output.v1"},
             environment="dev",
         )
 
         result = await publisher.publish(
             event_type="output.event",
             payload={"result": "success"},
-            topic="onex.evt.allowed-output.v1",
+            topic="onex.evt.test.allowed-output.v1",
         )
 
         assert result is True
         mock_event_bus.publish.assert_called_once()
         call_kwargs = mock_event_bus.publish.call_args.kwargs
-        assert call_kwargs["topic"] == "onex.evt.allowed-output.v1"
+        assert call_kwargs["topic"] == "onex.evt.test.allowed-output.v1"
 
     @pytest.mark.asyncio
     async def test_publishing_to_forbidden_topic_raises_error(
@@ -405,7 +405,7 @@ class TestPublisherContractValidation:
         """
         publisher = PublisherTopicScoped(
             event_bus=mock_event_bus,
-            allowed_topics={"onex.evt.allowed-output.v1"},
+            allowed_topics={"onex.evt.test.allowed-output.v1"},
             environment="dev",
         )
 
@@ -415,7 +415,7 @@ class TestPublisherContractValidation:
             await publisher.publish(
                 event_type="output.event",
                 payload={"result": "success"},
-                topic="onex.evt.forbidden.v1",
+                topic="onex.evt.test.forbidden.v1",
             )
 
         # Verify publish was not called
@@ -431,7 +431,7 @@ class TestPublisherContractValidation:
         """
         publisher = PublisherTopicScoped(
             event_bus=mock_event_bus,
-            allowed_topics={"onex.evt.allowed-output.v1"},
+            allowed_topics={"onex.evt.test.allowed-output.v1"},
             environment="dev",
         )
 
@@ -454,14 +454,14 @@ class TestPublisherContractValidation:
         """
         publisher = PublisherTopicScoped(
             event_bus=mock_event_bus,
-            allowed_topics={"onex.evt.output.v1"},
+            allowed_topics={"onex.evt.test.output.v1"},
             environment="dev",
         )
 
         await publisher.publish(
             event_type="output.event",
             payload={"result": "success"},
-            topic="onex.evt.output.v1",
+            topic="onex.evt.test.output.v1",
             correlation_id="corr-abc-123",
         )
 
@@ -841,7 +841,7 @@ class TestTopicResolution:
         """
         mock_event_bus = AsyncMock()
         mock_dispatch_engine = AsyncMock()
-        topic_suffix = "onex.evt.test.v1"
+        topic_suffix = "onex.evt.test.test-event.v1"
 
         for env in ["dev", "staging", "prod"]:
             wiring = EventBusSubcontractWiring(
@@ -853,7 +853,7 @@ class TestTopicResolution:
                 version="v1",
             )
             # All environments should resolve to the same topic (realm-agnostic)
-            assert wiring.resolve_topic(topic_suffix) == "onex.evt.test.v1"
+            assert wiring.resolve_topic(topic_suffix) == "onex.evt.test.test-event.v1"
 
 
 class TestPublisherTopicScopedProperties:
@@ -874,14 +874,16 @@ class TestPublisherTopicScopedProperties:
 
         publisher = PublisherTopicScoped(
             event_bus=mock_event_bus,
-            allowed_topics={"onex.evt.a.v1", "onex.evt.b.v1"},
+            allowed_topics={"onex.evt.test.topic-a.v1", "onex.evt.test.topic-b.v1"},
             environment="dev",
         )
 
         topics = publisher.allowed_topics
 
         assert isinstance(topics, frozenset)
-        assert topics == frozenset({"onex.evt.a.v1", "onex.evt.b.v1"})
+        assert topics == frozenset(
+            {"onex.evt.test.topic-a.v1", "onex.evt.test.topic-b.v1"}
+        )
 
     def test_environment_property(self) -> None:
         """Test that environment property returns configured value."""
@@ -889,7 +891,7 @@ class TestPublisherTopicScopedProperties:
 
         publisher = PublisherTopicScoped(
             event_bus=mock_event_bus,
-            allowed_topics={"onex.evt.test.v1"},
+            allowed_topics={"onex.evt.test.test-event.v1"},
             environment="staging",
         )
 

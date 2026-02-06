@@ -5,7 +5,7 @@
 Tests validate:
 - Valid JSON event processing (metadata extraction, base64, SHA-256)
 - Malformed JSON best-effort fallback behaviour
-- Empty/None value rejection (ValueError)
+- Empty/None value rejection (EnvelopeValidationError)
 - Event version extraction from topic/event_type
 - Handler property classification (handler_type, handler_category)
 """
@@ -46,11 +46,13 @@ class TestHandlerProperties:
         """Test that handler_type returns INFRA_HANDLER."""
         assert handler.handler_type == EnumHandlerType.INFRA_HANDLER
 
-    def test_handler_category_is_compute(
+    def test_handler_category_is_nondeterministic_compute(
         self, handler: HandlerValidationLedgerProjection
     ) -> None:
-        """Test that handler_category returns COMPUTE."""
-        assert handler.handler_category == EnumHandlerTypeCategory.COMPUTE
+        """Test that handler_category returns NONDETERMINISTIC_COMPUTE."""
+        assert (
+            handler.handler_category == EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE
+        )
 
 
 # ===========================================================================
@@ -390,13 +392,15 @@ class TestMalformedJsonFallback:
 
 
 class TestEmptyValueRejection:
-    """Tests for ValueError on None or empty value."""
+    """Tests for EnvelopeValidationError on None or empty value."""
 
-    def test_none_value_raises_value_error(
+    def test_none_value_raises_envelope_validation_error(
         self, handler: HandlerValidationLedgerProjection
     ) -> None:
-        """Test that None value raises ValueError."""
-        with pytest.raises(ValueError, match="value is None or empty"):
+        """Test that None value raises EnvelopeValidationError."""
+        from omnibase_infra.errors import EnvelopeValidationError
+
+        with pytest.raises(EnvelopeValidationError, match="value is None or empty"):
             handler.project(
                 topic="t",
                 partition=0,
@@ -404,11 +408,13 @@ class TestEmptyValueRejection:
                 value=None,  # type: ignore[arg-type]
             )
 
-    def test_empty_bytes_raises_value_error(
+    def test_empty_bytes_raises_envelope_validation_error(
         self, handler: HandlerValidationLedgerProjection
     ) -> None:
-        """Test that empty bytes raises ValueError."""
-        with pytest.raises(ValueError, match="value is None or empty"):
+        """Test that empty bytes raises EnvelopeValidationError."""
+        from omnibase_infra.errors import EnvelopeValidationError
+
+        with pytest.raises(EnvelopeValidationError, match="value is None or empty"):
             handler.project(
                 topic="t",
                 partition=0,

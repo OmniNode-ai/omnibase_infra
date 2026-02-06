@@ -57,9 +57,9 @@ COMMAND_TOPIC_PATTERN = r"\.cmd\."  # Commands: directives to take action
 INTENT_TOPIC_PATTERN = r"\.int\."  # Intents: desired state changes
 
 # ONEX event naming convention regex
-# Full pattern: {env}.{namespace}.onex.evt.<kebab-case-name>.v<version>
+# Full pattern: {env}.{namespace}.onex.evt.<producer>.<kebab-case-name>.v<version>
 ONEX_EVENT_TOPIC_REGEX = re.compile(
-    r"^\{env\}\.\{namespace\}\.onex\.evt\.[a-z][a-z0-9-]*\.v[0-9]+$"
+    r"^\{env\}\.\{namespace\}\.onex\.evt\.[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.v[0-9]+$"
 )
 
 

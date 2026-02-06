@@ -264,15 +264,15 @@ workflow_coordination:
       # Rollback configuration
       rollback_enabled: true
 consumed_events:
-  - topic: "{env}.{namespace}.onex.evt.node-introspection.v1"
+  - topic: "{env}.{namespace}.onex.evt.platform.node-introspection.v1"
     event_type: "NodeIntrospectionEvent"
-  - topic: "{env}.{namespace}.onex.evt.registry-request-introspection.v1"
+  - topic: "{env}.{namespace}.onex.evt.platform.registry-request-introspection.v1"
     event_type: "RegistryRequestIntrospectionEvent"
-  - topic: "{env}.{namespace}.onex.internal.runtime-tick.v1"
+  - topic: "{env}.{namespace}.onex.intent.platform.runtime-tick.v1"
     event_type: "RuntimeTick"
     internal: true
     description: "Internal tick for timeout evaluation"
-  - topic: "{env}.{namespace}.onex.cmd.node-registration-acked.v1"
+  - topic: "{env}.{namespace}.onex.cmd.platform.node-registration-acked.v1"
     event_type: "NodeRegistrationAcked"
     message_category: "COMMAND"
     description: "Node acknowledges registration acceptance"
@@ -281,7 +281,7 @@ consumed_events:
   # registration projection. The HandlerNodeHeartbeat processes these events.
   # Note: direct_handler=true indicates this event bypasses the workflow and is
   # handled by a dedicated handler (HandlerNodeHeartbeat) via handle_heartbeat().
-  - topic: "{env}.{namespace}.onex.evt.node-heartbeat.v1"
+  - topic: "{env}.{namespace}.onex.evt.platform.node-heartbeat.v1"
     event_type: "NodeHeartbeatEvent"
     description: "Periodic heartbeat from active nodes for liveness tracking"
     direct_handler: true
@@ -406,21 +406,21 @@ handler_routing:
       shared: true
       description: "Shared projection reader for all handlers"
 published_events:
-  - topic: "{env}.{namespace}.onex.evt.node-registration-result.v1"
+  - topic: "{env}.{namespace}.onex.evt.platform.node-registration-result.v1"
     event_type: "NodeRegistrationResultEvent"
-  - topic: "{env}.{namespace}.onex.evt.node-registration-initiated.v1"
+  - topic: "{env}.{namespace}.onex.evt.platform.node-registration-initiated.v1"
     event_type: "NodeRegistrationInitiated"
-  - topic: "{env}.{namespace}.onex.evt.node-registration-accepted.v1"
+  - topic: "{env}.{namespace}.onex.evt.platform.node-registration-accepted.v1"
     event_type: "NodeRegistrationAccepted"
-  - topic: "{env}.{namespace}.onex.evt.node-registration-rejected.v1"
+  - topic: "{env}.{namespace}.onex.evt.platform.node-registration-rejected.v1"
     event_type: "NodeRegistrationRejected"
-  - topic: "{env}.{namespace}.onex.evt.node-registration-ack-timed-out.v1"
+  - topic: "{env}.{namespace}.onex.evt.platform.node-registration-ack-timed-out.v1"
     event_type: "NodeRegistrationAckTimedOut"
-  - topic: "{env}.{namespace}.onex.evt.node-registration-ack-received.v1"
+  - topic: "{env}.{namespace}.onex.evt.platform.node-registration-ack-received.v1"
     event_type: "NodeRegistrationAckReceived"
-  - topic: "{env}.{namespace}.onex.evt.node-became-active.v1"
+  - topic: "{env}.{namespace}.onex.evt.platform.node-became-active.v1"
     event_type: "NodeBecameActive"
-  - topic: "{env}.{namespace}.onex.evt.node-liveness-expired.v1"
+  - topic: "{env}.{namespace}.onex.evt.platform.node-liveness-expired.v1"
     event_type: "NodeLivenessExpired"
 intent_consumption:
   subscribed_intents:

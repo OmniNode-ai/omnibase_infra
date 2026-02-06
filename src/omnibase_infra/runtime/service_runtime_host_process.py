@@ -142,7 +142,7 @@ from omnibase_infra.runtime.handler_identity import (
 from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
-from omnibase_infra.topics import TopicResolver
+from omnibase_infra.topics import TopicResolutionError, TopicResolver
 
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
 # Tests patch "omnibase_infra.runtime.service_runtime_host_process.wire_handlers"
@@ -3235,12 +3235,22 @@ class RuntimeHostProcess:
         # Topics are realm-agnostic in ONEX; the environment/realm is enforced
         # via envelope identity and consumer group naming, not topic names.
         topic_resolver = TopicResolver()
-        registration_topic = topic_resolver.resolve(
-            "onex.evt.platform.contract-registered.v1"
-        )
-        deregistration_topic = topic_resolver.resolve(
-            "onex.evt.platform.contract-deregistered.v1"
-        )
+        try:
+            registration_topic = topic_resolver.resolve(
+                "onex.evt.platform.contract-registered.v1"
+            )
+            deregistration_topic = topic_resolver.resolve(
+                "onex.evt.platform.contract-deregistered.v1"
+            )
+        except TopicResolutionError as e:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="resolve_topic",
+            )
+            raise ProtocolConfigurationError(
+                f"Invalid topic suffix in runtime configuration: {e}",
+                context=context,
+            ) from e
 
         # Import ModelEventMessage type for handler signature
         from omnibase_infra.event_bus.models.model_event_message import (

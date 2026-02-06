@@ -32,8 +32,8 @@ Additionally, there is one result event:
     - NodeRegistrationResultEvent - Contains the final outcome of the workflow.
 
 Topic Convention:
-    All events follow the pattern: {env}.{namespace}.onex.evt.<event-slug>.v1
-    Example: dev.myapp.onex.evt.node-registration-initiated.v1
+    All events follow the pattern: {env}.{namespace}.onex.evt.platform.<event-slug>.v1
+    Example: dev.myapp.onex.evt.platform.node-registration-initiated.v1
 
 Running Tests:
     # Run all decision path tests:
@@ -80,7 +80,7 @@ RESULT_EVENT_TYPE = "NodeRegistrationResultEvent"
 # All published event types (7 decision + 1 result = 8 total)
 ALL_PUBLISHED_EVENT_TYPES = DECISION_PATH_EVENT_TYPES + [RESULT_EVENT_TYPE]
 
-# Topic pattern regex: {env}.{namespace}.onex.evt.<slug>.v1
+# Topic pattern regex: {env}.{namespace}.onex.evt.platform.<slug>.v1
 # The placeholders {env} and {namespace} are variable, followed by literal pattern
 #
 # Kebab-case slug validation rules:
@@ -94,7 +94,7 @@ ALL_PUBLISHED_EVENT_TYPES = DECISION_PATH_EVENT_TYPES + [RESULT_EVENT_TYPE]
 # Valid examples: "node-registration-initiated", "node-became-active", "a1b2c3"
 # Invalid examples: "--double", "-leading", "trailing-", "has--double-hyphen"
 TOPIC_PATTERN_REGEX = re.compile(
-    r"^\{env\}\.\{namespace\}\.onex\.evt\.[a-z][a-z0-9]*(-[a-z0-9]+)*\.v1$"
+    r"^\{env\}\.\{namespace\}\.onex\.evt\.platform\.[a-z][a-z0-9]*(-[a-z0-9]+)*\.v1$"
 )
 
 # Event type to expected topic mapping for parametrized tests
@@ -103,37 +103,37 @@ TOPIC_PATTERN_REGEX = re.compile(
 DECISION_EVENT_TOPIC_MAPPING = [
     (
         "NodeRegistrationInitiated",
-        "{env}.{namespace}.onex.evt.node-registration-initiated.v1",
+        "{env}.{namespace}.onex.evt.platform.node-registration-initiated.v1",
         "Emitted when a registration workflow starts (introspection event received)",
     ),
     (
         "NodeRegistrationAccepted",
-        "{env}.{namespace}.onex.evt.node-registration-accepted.v1",
+        "{env}.{namespace}.onex.evt.platform.node-registration-accepted.v1",
         "Emitted when registration is successfully accepted (Consul + PostgreSQL success)",
     ),
     (
         "NodeRegistrationRejected",
-        "{env}.{namespace}.onex.evt.node-registration-rejected.v1",
+        "{env}.{namespace}.onex.evt.platform.node-registration-rejected.v1",
         "Emitted when registration is rejected (validation/policy failures)",
     ),
     (
         "NodeRegistrationAckTimedOut",
-        "{env}.{namespace}.onex.evt.node-registration-ack-timed-out.v1",
+        "{env}.{namespace}.onex.evt.platform.node-registration-ack-timed-out.v1",
         "Emitted when acknowledgment times out (node unresponsive)",
     ),
     (
         "NodeRegistrationAckReceived",
-        "{env}.{namespace}.onex.evt.node-registration-ack-received.v1",
+        "{env}.{namespace}.onex.evt.platform.node-registration-ack-received.v1",
         "Emitted when acknowledgment is received (node confirmed registration)",
     ),
     (
         "NodeBecameActive",
-        "{env}.{namespace}.onex.evt.node-became-active.v1",
+        "{env}.{namespace}.onex.evt.platform.node-became-active.v1",
         "Emitted when node transitions to active state (ready to participate)",
     ),
     (
         "NodeLivenessExpired",
-        "{env}.{namespace}.onex.evt.node-liveness-expired.v1",
+        "{env}.{namespace}.onex.evt.platform.node-liveness-expired.v1",
         "Emitted when liveness check fails (heartbeat/health timeout)",
     ),
 ]
@@ -203,7 +203,7 @@ class TestDecisionPathEvents:
 
         Each event must:
         1. Be defined in published_events
-        2. Have a topic matching the ONEX pattern: {env}.{namespace}.onex.evt.<slug>.v1
+        2. Have a topic matching the ONEX pattern: {env}.{namespace}.onex.evt.platform.<slug>.v1
 
         Args:
             event_types_map: Mapping of event_type -> event definition from contract.
@@ -267,8 +267,8 @@ class TestDecisionPathEvents:
             + "\n".join(f"  - {e}" for e in non_conforming_events)
             + "\n\n"
             + "HOW TO FIX: Update topics in contract.yaml to follow ONEX convention:\n"
-            + "  {env}.{namespace}.onex.evt.<kebab-case-slug>.v1\n"
-            + "  Example: {env}.{namespace}.onex.evt.node-registration-initiated.v1"
+            + "  {env}.{namespace}.onex.evt.platform.<kebab-case-slug>.v1\n"
+            + "  Example: {env}.{namespace}.onex.evt.platform.node-registration-initiated.v1"
         )
 
     def test_decision_event_count_is_exactly_8(
@@ -335,7 +335,7 @@ class TestResultEvent:
         registration workflow, including success/failure status, applied
         registrations, and any error information.
 
-        Topic pattern: {env}.{namespace}.onex.evt.node-registration-result.v1
+        Topic pattern: {env}.{namespace}.onex.evt.platform.node-registration-result.v1
         """
         event_type = RESULT_EVENT_TYPE
         assert event_type in event_types_map, (
@@ -343,11 +343,13 @@ class TestResultEvent:
             f"Found event types: {list(event_types_map.keys())}\n\n"
             f"HOW TO FIX: Add {event_type} to contract.yaml published_events section:\n"
             f"  - event_type: {event_type}\n"
-            f"    topic: {{env}}.{{namespace}}.onex.evt.node-registration-result.v1"
+            f"    topic: {{env}}.{{namespace}}.onex.evt.platform.node-registration-result.v1"
         )
 
         event = event_types_map[event_type]
-        expected_topic = "{env}.{namespace}.onex.evt.node-registration-result.v1"
+        expected_topic = (
+            "{env}.{namespace}.onex.evt.platform.node-registration-result.v1"
+        )
         assert event["topic"] == expected_topic, (
             f"{event_type} topic mismatch.\n"
             f"Expected: '{expected_topic}'\n"
@@ -372,7 +374,7 @@ class TestResultEvent:
             f"Expected pattern: '{{env}}.{{namespace}}.onex.evt.<slug>.v1'\n\n"
             f"HOW TO FIX: Update the topic in contract.yaml to follow the pattern:\n"
             f"  {{env}}.{{namespace}}.onex.evt.<kebab-case-slug>.v1\n"
-            f"  Example: {{env}}.{{namespace}}.onex.evt.node-registration-result.v1"
+            f"  Example: {{env}}.{{namespace}}.onex.evt.platform.node-registration-result.v1"
         )
 
 
@@ -411,7 +413,7 @@ class TestEventStructure:
             + "\n".join(f"  - {e}" for e in events_missing_fields)
             + "\n\n"
             + "HOW TO FIX: Each event in contract.yaml published_events must include:\n"
-            + "  - topic: The Kafka topic pattern (e.g., {env}.{namespace}.onex.evt.<slug>.v1)\n"
+            + "  - topic: The Kafka topic pattern (e.g., {env}.{namespace}.onex.evt.platform.<slug>.v1)\n"
             + "  - event_type: The event type name (e.g., NodeRegistrationAccepted)"
         )
 
@@ -458,7 +460,7 @@ class TestConsumedEventHandlers:
     def _extract_topic_slug(topic: str) -> str:
         """Extract the event slug from a topic pattern.
 
-        Topic patterns follow: {env}.{namespace}.onex.evt.<slug>.v1
+        Topic patterns follow: {env}.{namespace}.onex.evt.platform.<slug>.v1
         or: {env}.{namespace}.onex.internal.<slug>.v1
 
         Args:
@@ -590,7 +592,7 @@ class TestConsumedEventHandlers:
             "HOW TO FIX: Add a consumed_events section to contract.yaml:\n"
             "  consumed_events:\n"
             "    - event_type: <EventTypeName>\n"
-            "      topic: {env}.{namespace}.onex.evt.<slug>.v1"
+            "      topic: {env}.{namespace}.onex.evt.platform.<slug>.v1"
         )
 
     def test_consumed_events_have_required_fields(self, contract_data: dict) -> None:
