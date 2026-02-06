@@ -441,7 +441,7 @@ class PostgresValidationLedgerRepository:
                 # Execute main query
                 rows = await conn.fetch(select_sql, *select_parameters)
 
-            entries = [self._row_to_entry(row) for row in rows]
+            entries = tuple(self._row_to_entry(row) for row in rows)
             has_more = query.offset + query.limit < total_count
 
             return ModelValidationLedgerReplayBatch(

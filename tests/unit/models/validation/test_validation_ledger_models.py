@@ -392,15 +392,16 @@ class TestModelValidationLedgerReplayBatch:
             )
         assert "total_count" in str(exc_info.value)
 
-    def test_default_entries_is_empty_list(self) -> None:
-        """Test that entries defaults to an empty list."""
+    def test_default_entries_is_empty_tuple(self) -> None:
+        """Test that entries defaults to an empty tuple."""
         query = ModelValidationLedgerQuery()
         batch = ModelValidationLedgerReplayBatch(
             total_count=0,
             has_more=False,
             query=query,
         )
-        assert batch.entries == []
+        assert batch.entries == ()
+        assert isinstance(batch.entries, tuple)
 
 
 # ===========================================================================

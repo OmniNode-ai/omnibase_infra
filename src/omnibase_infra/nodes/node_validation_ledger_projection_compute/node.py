@@ -17,6 +17,7 @@ Ticket: OMN-1908
 
 from __future__ import annotations
 
+from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 from omnibase_core.nodes.node_compute import NodeCompute
 
 
@@ -31,7 +32,8 @@ class NodeValidationLedgerProjectionCompute(NodeCompute):
         - contract.yaml: Node subscription and I/O configuration
     """
 
-    # Declarative node - all behavior defined in contract.yaml
+    def __init__(self, container: ModelONEXContainer) -> None:
+        super().__init__(container)
 
 
 __all__ = ["NodeValidationLedgerProjectionCompute"]

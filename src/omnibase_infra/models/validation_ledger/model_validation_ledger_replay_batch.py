@@ -23,7 +23,7 @@ class ModelValidationLedgerReplayBatch(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    entries: list[ModelValidationLedgerEntry] = Field(default_factory=list)
+    entries: tuple[ModelValidationLedgerEntry, ...] = Field(default_factory=tuple)
     total_count: int = Field(..., ge=0, description="Total matching entries")
     has_more: bool = Field(
         ..., description="Whether more entries exist beyond this page"
