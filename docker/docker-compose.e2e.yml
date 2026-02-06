@@ -47,7 +47,7 @@ services:
   # PostgreSQL Database
   # ==========================================================================
   postgres:
-    image: postgres:15
+    image: postgres:16-alpine
     container_name: omnibase-infra-postgres
     environment:
       POSTGRES_USER: postgres
@@ -171,7 +171,7 @@ services:
   # Consul (Service Discovery)
   # ==========================================================================
   consul:
-    image: hashicorp/consul:1.17
+    image: hashicorp/consul:1.18
     container_name: omnibase-infra-consul
     command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -datacenter=omnibase-infra
     ports:
@@ -194,7 +194,7 @@ services:
   # Check for updates: https://hub.docker.com/r/valkey/valkey/tags
   # ==========================================================================
   valkey:
-    image: valkey/valkey:9.0.1
+    image: valkey/valkey:8.0-alpine
     container_name: omnibase-infra-valkey
     ports:
       - "${VALKEY_PORT:-6379}:6379"

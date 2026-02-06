@@ -156,9 +156,9 @@ services:
       - redpanda
       - start
       - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
-      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:29092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:${REDPANDA_EXTERNAL_PORT:-29092}
       - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
-      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:${REDPANDA_PANDAPROXY_PORT:-18082}
       - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
       - --rpc-addr redpanda:33145
       - --advertise-rpc-addr redpanda:33145
@@ -278,7 +278,7 @@ services:
     command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -data-dir=/consul/data
     ports:
       - "${CONSUL_EXTERNAL_PORT:-28500}:8500"
-      - "8600:8600/udp"
+      - "${CONSUL_DNS_PORT:-8600}:8600/udp"
     volumes:
       - consul_data:/consul/data
     networks:
