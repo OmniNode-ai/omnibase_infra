@@ -69,8 +69,6 @@ x-runtime-base: &runtime-base
   build:
     context: ..
     dockerfile: docker/Dockerfile.runtime
-    secrets:
-      - github_token
   networks:
     - omnibase-infra-network
   logging: *logging-defaults
@@ -480,12 +478,6 @@ services:
       - "com.omninode.service=agent-actions-consumer"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
-# ==========================================================================
-# Secrets Configuration (for runtime builds)
-# ==========================================================================
-secrets:
-  github_token:
-    environment: "GITHUB_TOKEN"
 # ==========================================================================
 # Network Configuration
 # ==========================================================================

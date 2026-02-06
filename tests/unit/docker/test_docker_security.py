@@ -164,32 +164,6 @@ class TestEnvExampleSecurity:
             f"Missing security warnings (found: {found_keywords})"
         )
 
-    def test_placeholder_patterns_for_secrets(self) -> None:
-        """Verify placeholder patterns are used for GitHub tokens and sensitive values.
-
-        GitHub tokens and other secrets should use obvious placeholder patterns
-        that prevent accidental use.
-        """
-        env_file = DOCKER_DIR / ".env.example"
-        content = env_file.read_text()
-
-        # GitHub token line should exist and be commented or use placeholder
-        github_token_lines = [
-            line for line in content.split("\n") if "GITHUB_TOKEN" in line
-        ]
-
-        assert len(github_token_lines) > 0, "Missing GITHUB_TOKEN configuration"
-
-        # At least one line should be commented out or use placeholder
-        has_safe_pattern = any(
-            line.strip().startswith("#") or "xxxx" in line.lower()
-            for line in github_token_lines
-        )
-
-        assert has_safe_pattern, (
-            "GITHUB_TOKEN should be commented or use placeholder pattern"
-        )
-
     def test_passwords_require_explicit_values(self) -> None:
         """Verify password variables are clearly marked as requiring explicit values.
 
@@ -480,20 +454,6 @@ class TestDockerComposeSecurity:
             matches = re.findall(pattern, content, re.IGNORECASE)
             assert not matches, f"Found potential hardcoded credential: {matches}"
 
-    def test_uses_secrets_configuration(self) -> None:
-        """Verify docker-compose uses secrets configuration for build secrets.
-
-        Docker Compose should define secrets for build-time credential handling.
-        """
-        compose_file = COMPOSE_FILE_PATH
-        content = compose_file.read_text()
-
-        # Should have secrets section
-        assert "secrets:" in content, "Missing secrets configuration section"
-
-        # Should reference github_token secret for private repo access
-        assert "github_token" in content, "Missing github_token secret configuration"
-
     def test_security_comments_present(self) -> None:
         """Verify docker-compose includes security-related comments.
 
@@ -572,68 +532,6 @@ class TestDockerComposeSecurity:
         for policy in restart_policies:
             assert policy in safe_policies, (
                 f"Unsafe restart policy: {policy} (use unless-stopped or on-failure)"
-            )
-
-
-@pytest.mark.unit
-class TestDockerSecretsManagement:
-    """Security tests for Docker secrets management.
-
-    Verifies that:
-    - BuildKit secrets are used for build-time credentials
-    - No secrets are baked into images
-    - Secret handling follows best practices
-    """
-
-    def test_dockerfile_uses_secret_mounts(self) -> None:
-        """Verify Dockerfile uses BuildKit secret mounts for credentials.
-
-        GitHub token should be provided via secret mount, not build args,
-        to prevent secrets from being baked into image layers.
-        """
-        dockerfile = DOCKER_DIR / "Dockerfile.runtime"
-        content = dockerfile.read_text()
-
-        # Should use secret mount syntax
-        assert "mount=type=secret" in content, (
-            "Dockerfile should use BuildKit secret mounts"
-        )
-
-        # Should reference github_token secret
-        assert "github_token" in content, "Missing github_token secret reference"
-
-    def test_compose_defines_build_secrets(self) -> None:
-        """Verify docker-compose defines secrets for build process.
-
-        The compose file should map environment variables to build secrets.
-        """
-        compose_file = COMPOSE_FILE_PATH
-        content = compose_file.read_text()
-
-        # Should have build secrets configuration
-        assert "secrets:" in content, "Missing secrets section in docker-compose"
-
-        # Should map GITHUB_TOKEN from environment
-        assert 'environment: "GITHUB_TOKEN"' in content, (
-            "Missing GITHUB_TOKEN environment mapping"
-        )
-
-    def test_no_secrets_in_build_args(self) -> None:
-        """Verify secrets are not passed via build args.
-
-        Build args are baked into image metadata and should not contain secrets.
-        Check that GITHUB_TOKEN is not passed as a build arg.
-        """
-        compose_file = COMPOSE_FILE_PATH
-        content = compose_file.read_text()
-
-        # Should NOT have GITHUB_TOKEN as build arg
-        build_args_pattern = r"args:\s*\n(?:\s*-?\s*\w+:.*\n)*"
-        build_args_sections = re.findall(build_args_pattern, content)
-
-        for section in build_args_sections:
-            assert "GITHUB_TOKEN" not in section, (
-                "GITHUB_TOKEN should use secret mount, not build arg"
             )
 
 

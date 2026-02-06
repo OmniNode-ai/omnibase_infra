@@ -9,7 +9,6 @@
 #   - Non-root user execution
 #   - Minimal runtime dependencies
 #   - BuildKit cache mounts for efficient builds
-#   - Secret mounts for private repository access
 #
 # Build:
 #   docker build -f docker/Dockerfile.runtime -t omnibase-infra-runtime .
@@ -19,11 +18,6 @@
 #     --build-arg RUNTIME_VERSION=1.0.0 \
 #     --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
 #     --build-arg VCS_REF=$(git rev-parse --short HEAD) \
-#     -f docker/Dockerfile.runtime -t omnibase-infra-runtime .
-#
-# Build with private repo access:
-#   GITHUB_TOKEN=$(cat ~/.github_token) docker build \
-#     --secret id=github_token,env=GITHUB_TOKEN \
 #     -f docker/Dockerfile.runtime -t omnibase-infra-runtime .
 #
 # Run:
@@ -134,17 +128,10 @@ COPY poetry.lock ./poetry.lock* ./
 # Install dependencies with Poetry (BEFORE copying source code)
 # - Uses BuildKit cache mount for Poetry cache directory (shared across builds)
 # - Uses BuildKit cache mount for pip cache (faster package downloads)
-# - Uses BuildKit secret mount for GitHub token (private repos)
 # - Installs only main dependencies (no dev dependencies)
 # - --no-root flag installs dependencies without installing the package itself
 RUN --mount=type=cache,target=/tmp/poetry_cache \
     --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=secret,id=github_token \
-    if [ -f /run/secrets/github_token ]; then \
-        export GITHUB_TOKEN=$(cat /run/secrets/github_token); \
-        git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; \
-    fi && \
-    # Install dependencies without root package for better caching
     poetry install --only=main --no-root
 
 # Copy source code (required for local package install with poetry)

@@ -92,26 +92,24 @@ class TestDockerBuild:
     """Tests for Docker image build process."""
 
     @pytest.mark.slow
-    def test_build_succeeds_without_github_token(
+    def test_build_succeeds_with_public_deps(
         self,
         docker_available: bool,
         project_root: Path,
         dockerfile_path: Path,
     ) -> None:
-        """Verify Docker build succeeds without GitHub token.
+        """Verify Docker build succeeds with public dependencies.
 
-        This test validates that the Dockerfile can build successfully
-        when only public dependencies are required. The GitHub token
-        should only be needed for private repository access.
+        This test validates that the Dockerfile can build successfully.
+        All dependencies are installed from public repositories.
         """
         if not docker_available:
             pytest.skip("Docker daemon not available")
 
         # Use unique image name for this test
-        image_name = f"{TEST_CONTAINER_PREFIX}-no-token:{os.getpid()}"
+        image_name = f"{TEST_CONTAINER_PREFIX}-build:{os.getpid()}"
 
         try:
-            # Build without GITHUB_TOKEN secret
             build_cmd = [
                 "docker",
                 "build",
@@ -120,14 +118,12 @@ class TestDockerBuild:
                 "-t",
                 image_name,
                 "--build-arg",
-                "RUNTIME_VERSION=test-no-token",
+                "RUNTIME_VERSION=test-build",
                 str(project_root),
             ]
 
             env = os.environ.copy()
             env["DOCKER_BUILDKIT"] = "1"
-            # Explicitly unset GITHUB_TOKEN
-            env.pop("GITHUB_TOKEN", None)
 
             result = subprocess.run(
                 build_cmd,
@@ -139,9 +135,8 @@ class TestDockerBuild:
                 shell=False,
             )
 
-            # Build should succeed for public dependencies
             assert result.returncode == 0, (
-                f"Build failed without GitHub token.\n"
+                f"Docker build failed.\n"
                 f"STDOUT: {result.stdout[-2000:]}\n"
                 f"STDERR: {result.stderr[-2000:]}"
             )
@@ -357,8 +352,7 @@ class TestDockerSecurity:
     ) -> None:
         """Verify secrets are not exposed in docker history.
 
-        BuildKit secret mounts should ensure that GITHUB_TOKEN and
-        other secrets are never baked into image layers.
+        Checks that no credentials or tokens are baked into image layers.
         """
         if not docker_available:
             pytest.skip("Docker daemon not available")

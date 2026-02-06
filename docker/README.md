@@ -26,13 +26,11 @@ Before deploying, ensure you have:
 | Docker             | 20.10+          | `docker --version`               |
 | Docker Compose     | 2.0+ (V2)       | `docker compose version`         |
 | BuildKit           | Enabled         | `docker buildx version`          |
-| GITHUB_TOKEN       | With repo scope | `echo $GITHUB_TOKEN`             |
 
 ### Docker BuildKit
 
 BuildKit is required for:
 - Multi-stage build optimization
-- Build-time secret mounts (for GITHUB_TOKEN)
 - Cache mount optimizations
 
 BuildKit is enabled by default in Docker 23.0+. For older versions:
@@ -43,18 +41,6 @@ export DOCKER_BUILDKIT=1
 
 # Option 2: Enable permanently in Docker daemon config
 # Add to /etc/docker/daemon.json: {"features": {"buildkit": true}}
-```
-
-### GitHub Token
-
-A GitHub Personal Access Token (PAT) with `repo` scope is required to install private packages:
-
-```bash
-# Set the token for builds
-export GITHUB_TOKEN=ghp_your_token_here
-
-# Verify token is set
-echo $GITHUB_TOKEN | head -c 10
 ```
 
 ## Quick Start
@@ -242,14 +228,13 @@ for i in {1..3}; do echo "Password $i: $(openssl rand -hex 32)"; done
 | Infisical Encryption    | `INFISICAL_ENCRYPTION_KEY` | secrets  | 32-byte key (64 hex characters for AES-256 encryption)   |
 | Infisical Auth          | `INFISICAL_AUTH_SECRET`    | secrets  | JWT signing secret for authentication                    |
 | Valkey (optional)       | `VALKEY_PASSWORD`          | (default)| Cache access password (empty for local dev)              |
-| GitHub (build-time)     | `GITHUB_TOKEN`             | N/A      | For private package installation during Docker build     |
 
 ### Security Features
 
 | Feature                  | Description                                          | Verification                              |
 |--------------------------|------------------------------------------------------|-------------------------------------------|
 | Non-root execution       | Container runs as `omniinfra` user (UID 1000)        | `docker exec <container> whoami`          |
-| BuildKit secrets         | GitHub tokens passed via secret mounts               | `docker history --no-trunc`               |
+| BuildKit secrets         | Sensitive values passed via secret mounts             | `docker history --no-trunc`               |
 | No hardcoded credentials | All secrets via environment variables                | Review Dockerfile                         |
 | Resource limits          | CPU and memory limits prevent exhaustion             | `docker stats`                            |
 | Read-only contracts      | Contract volume mounted read-only                    | `:ro` in docker-compose                   |
@@ -460,7 +445,6 @@ The Dockerfile uses several techniques for efficient builds:
 | First build (cold cache)      | 3-5 minutes      | Downloads all dependencies      |
 | Code change (cached deps)     | 30-60 seconds    | Only rebuilds source layer      |
 | No changes (full cache)       | 5-10 seconds     | Cache hit on all layers         |
-| With GitHub token             | +10-20 seconds   | Private repo authentication     |
 
 ### Build Commands
 
@@ -478,9 +462,6 @@ docker build \
   --build-arg VCS_REF=$(git rev-parse --short HEAD) \
   -f docker/Dockerfile.runtime \
   -t omninode-runtime:$(git describe --tags --always) .
-
-# Build with GitHub token for private repos
-GITHUB_TOKEN=$(cat ~/.github_token) docker compose -f docker-compose.infra.yml build
 ```
 
 ### Resource Configuration
@@ -669,16 +650,12 @@ docker compose -f docker-compose.infra.yml build --progress=plain
 
 # Check Dockerfile syntax
 docker build --check -f docker/Dockerfile.runtime .
-
-# Build with GitHub token for private repos
-GITHUB_TOKEN=$(cat ~/.github_token) docker compose -f docker-compose.infra.yml build
 ```
 
 #### Common Build Issues
 
 | Issue                              | Cause                                  | Solution                                      |
 |------------------------------------|----------------------------------------|-----------------------------------------------|
-| "Could not find omnibase-core"    | Private repo access denied             | Set GITHUB_TOKEN with repo access             |
 | "No space left on device"          | Docker disk full                       | `docker system prune -a`                      |
 | "Network timeout"                  | Slow network during pip install        | Retry or use mirror                           |
 | "Failed to fetch"                  | apt repository issues                  | Update base image or retry                    |
@@ -769,8 +746,6 @@ jobs:
             RUNTIME_VERSION=${{ github.ref_name }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             VCS_REF=${{ github.sha }}
-          secrets: |
-            github_token=${{ secrets.GITHUB_TOKEN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 ```
@@ -790,7 +765,6 @@ build-runtime:
         --build-arg RUNTIME_VERSION=${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}
         --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
         --build-arg VCS_REF=$CI_COMMIT_SHA
-        --secret id=github_token,env=GITHUB_TOKEN
         -f docker/Dockerfile.runtime
         -t $CI_REGISTRY_IMAGE/runtime:$CI_COMMIT_SHA .
     - docker push $CI_REGISTRY_IMAGE/runtime:$CI_COMMIT_SHA
