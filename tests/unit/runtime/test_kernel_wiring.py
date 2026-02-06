@@ -25,6 +25,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.introspection_event_rou
 from tests.conftest import make_test_node_identity
 
 
+@pytest.mark.unit
 class TestKernelIntrospectionWiring:
     """Test that IntrospectionEventRouter is correctly wired to the event bus."""
 
@@ -108,6 +109,7 @@ class TestKernelIntrospectionWiring:
         await bus.close()
 
 
+@pytest.mark.unit
 class TestKernelSubscriptionConfiguration:
     """Test that kernel subscriptions use correct required_for_readiness flags."""
 

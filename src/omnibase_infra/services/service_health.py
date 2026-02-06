@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Literal, cast
+from uuid import UUID
 
 from aiohttp import web
 
@@ -485,17 +486,28 @@ class ServiceHealth:
             7. Mark server as running and log startup with correlation tracking
 
         Health Endpoints:
-            - GET /health: Primary health check endpoint
-            - GET /ready: Readiness probe (alias for /health)
+            - GET /health: Liveness probe -- reports whether the process is alive.
+              Delegates to ``RuntimeHostProcess.health_check()`` and returns
+              healthy / degraded / unhealthy status.
+            - GET /ready: Readiness probe -- reports whether the runtime can
+              serve traffic that depends on Kafka-driven orchestration. Checks
+              that all required Kafka subscriptions have active partition
+              assignments. This is an independent check, **not** an alias for
+              ``/health``.
 
-        Both endpoints return JSON with:
+        Response Format (both endpoints):
+            JSON with:
             - status: "healthy" | "degraded" | "unhealthy"
             - version: Runtime kernel version
-            - details: Full health check details from RuntimeHostProcess
+            - details: Endpoint-specific check details
 
         HTTP Status Codes:
-            - 200: Healthy or degraded (container operational)
-            - 503: Unhealthy (container should be restarted)
+            /health:
+                - 200: Healthy or degraded (container operational)
+                - 503: Unhealthy (container should be restarted)
+            /ready:
+                - 200: Ready (all consumers subscribed with partition assignments)
+                - 503: Not ready (starting up or lost assignments)
 
         This method is idempotent - calling start() on an already running
         server is safe and has no effect. This prevents double-start errors
@@ -915,20 +927,31 @@ class ServiceHealth:
         from service rotation but does not restart it.
 
         Args:
-            request: Incoming HTTP request (unused, required by aiohttp signature).
+            request: Incoming HTTP request. The ``X-Correlation-ID`` header, if
+                present and a valid UUID, is propagated into error responses so
+                callers can correlate failures with their original request.
 
         Returns:
             JSON response with readiness status:
                 - HTTP 200: Runtime is ready to serve traffic
                 - HTTP 503: Runtime is not ready (starting up or lost assignments)
         """
-        _ = request
+        # Extract correlation ID from request header, or generate a new one.
+        # This ensures the caller's trace context is propagated into error responses.
+        raw_correlation = request.headers.get("X-Correlation-ID")
+        try:
+            correlation_id: UUID = (
+                UUID(raw_correlation) if raw_correlation else generate_correlation_id()
+            )
+        except ValueError:
+            correlation_id = generate_correlation_id()
 
         try:
             readiness_details = await self.runtime.readiness_check()
 
             if not isinstance(readiness_details, dict):
                 context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.HTTP,
                     operation="validate_readiness_check_response",
                     target_name="RuntimeHostProcess.readiness_check",
@@ -957,7 +980,6 @@ class ServiceHealth:
             )
 
         except Exception as e:
-            correlation_id = generate_correlation_id()
             logger.exception(
                 "Readiness check failed with exception (correlation_id=%s)",
                 correlation_id,

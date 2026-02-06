@@ -2992,12 +2992,22 @@ class RuntimeHostProcess:
                 event_bus_ready = bool(health.get("healthy", False))
                 event_bus_readiness = {"fallback": True, "healthy": event_bus_ready}
         except Exception as e:
+            error_context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="readiness_check",
+            )
             logger.warning(
                 "Event bus readiness check failed",
-                extra={"error": str(e)},
+                extra={
+                    "error": str(e),
+                    "correlation_id": str(error_context.correlation_id),
+                },
                 exc_info=True,
             )
-            event_bus_readiness = {"error": str(e)}
+            event_bus_readiness = {
+                "error": str(e),
+                "correlation_id": str(error_context.correlation_id),
+            }
             event_bus_ready = False
 
         ready = self._is_running and not self._is_draining and event_bus_ready

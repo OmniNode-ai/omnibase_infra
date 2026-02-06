@@ -18,6 +18,8 @@ from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventBusReadiness
 from tests.conftest import make_test_node_identity
 
+pytestmark = pytest.mark.unit
+
 
 class TestModelEventBusReadiness:
     """Test the ModelEventBusReadiness Pydantic model."""

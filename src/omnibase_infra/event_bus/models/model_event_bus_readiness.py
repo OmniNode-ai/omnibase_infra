@@ -28,7 +28,7 @@ class ModelEventBusReadiness(BaseModel):
     required consumer assignments flips readiness to False.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     is_ready: bool = Field(
         ...,
