@@ -64,17 +64,21 @@ echo $GITHUB_TOKEN | head -c 10
 cp .env.example .env
 
 # 2. CRITICAL: Edit .env and replace ALL placeholder values
-#    Look for: __REPLACE_WITH_SECURE_PASSWORD__
-#    Generate secure passwords: openssl rand -base64 32
-#    For Infisical (secrets profile): set INFISICAL_ENCRYPTION_KEY and INFISICAL_AUTH_SECRET
+#    Look for patterns: __REPLACE_WITH_*__
+#    - POSTGRES_PASSWORD: openssl rand -base64 32
+#    - INFISICAL_ENCRYPTION_KEY (secrets profile): openssl rand -hex 32
+#    - INFISICAL_AUTH_SECRET (secrets profile): openssl rand -base64 32
 
-# 3. Build and start with runtime services
+# 3. Start core infrastructure (default profile)
+docker compose -f docker-compose.infra.yml up -d
+
+# 4. Or start with full runtime services
 docker compose -f docker-compose.infra.yml --profile runtime up -d --build
 
-# 4. View logs
+# 5. View logs
 docker compose -f docker-compose.infra.yml logs -f
 
-# 5. Verify health
+# 6. Verify health (runtime profile only)
 curl http://localhost:8085/health
 ```
 
@@ -232,13 +236,13 @@ for i in {1..3}; do echo "Password $i: $(openssl rand -base64 32)"; done
 
 ### Required Credentials
 
-| Credential              | Environment Variable       | Notes                                      |
-|-------------------------|----------------------------|--------------------------------------------|
-| PostgreSQL              | `POSTGRES_PASSWORD`        | Database access password                   |
-| Infisical Encryption    | `INFISICAL_ENCRYPTION_KEY` | 32-byte hex key for secrets encryption     |
-| Infisical Auth          | `INFISICAL_AUTH_SECRET`    | JWT signing secret for authentication      |
-| Redis/Valkey (optional) | `REDIS_PASSWORD`           | Cache access password (empty by default)   |
-| GitHub (build)          | `GITHUB_TOKEN`             | For private package installation           |
+| Credential              | Environment Variable       | Profile  | Notes                                                    |
+|-------------------------|----------------------------|----------|----------------------------------------------------------|
+| PostgreSQL              | `POSTGRES_PASSWORD`        | (default)| Database access password                                 |
+| Infisical Encryption    | `INFISICAL_ENCRYPTION_KEY` | secrets  | 32-byte key (64 hex characters for AES-256 encryption)   |
+| Infisical Auth          | `INFISICAL_AUTH_SECRET`    | secrets  | JWT signing secret for authentication                    |
+| Valkey (optional)       | `VALKEY_PASSWORD`          | (default)| Cache access password (empty for local dev)              |
+| GitHub (build-time)     | `GITHUB_TOKEN`             | N/A      | For private package installation during Docker build     |
 
 ### Security Features
 
@@ -297,10 +301,9 @@ ports:
 #### Network Isolation Guidelines
 
 1. **Use internal networks** - The `omnibase-infra-network` is bridge-mode by default
-2. **External service access** - Use `extra_hosts` with `REMOTE_HOST` for controlled external access
-3. **Reverse proxy** - In production, place containers behind nginx/traefik with TLS termination
-4. **Firewall rules** - Restrict access to Docker ports at the host firewall level
-5. **Docker socket** - Never expose Docker socket to containers
+2. **Reverse proxy** - In production, place containers behind nginx/traefik with TLS termination
+3. **Firewall rules** - Restrict access to Docker ports at the host firewall level
+4. **Docker socket** - Never expose Docker socket to containers
 
 #### Environment-Specific Binding
 
@@ -506,18 +509,16 @@ docker stats
 
 These variables must be set explicitly. The runtime will fail to start if they are missing or contain placeholder values.
 
-| Variable                  | Description                            | Security Level | Profile    |
-|---------------------------|----------------------------------------|----------------|------------|
-| `POSTGRES_PASSWORD`       | PostgreSQL database password           | Secret         | (default)  |
-| `INFISICAL_ENCRYPTION_KEY`| 32-byte hex key for secrets encryption | Secret         | secrets    |
-| `INFISICAL_AUTH_SECRET`   | JWT signing secret for authentication  | Secret         | secrets    |
+| Variable                  | Description                                         | Security Level | Profile    |
+|---------------------------|-----------------------------------------------------|----------------|------------|
+| `POSTGRES_PASSWORD`       | PostgreSQL database password                        | Secret         | (default)  |
+| `INFISICAL_ENCRYPTION_KEY`| 32-byte key (64 hex characters for AES-256)         | Secret         | secrets    |
+| `INFISICAL_AUTH_SECRET`   | JWT signing secret for authentication               | Secret         | secrets    |
 
 ### Optional Variables (With Defaults)
 
 | Variable                     | Default                            | Description                            |
 |------------------------------|------------------------------------|----------------------------------------|
-| **Network Configuration**    |                                    |                                        |
-| `REMOTE_HOST`                | `host-gateway`                     | Override for extra_hosts mapping       |
 | **Kafka/Redpanda**           |                                    |                                        |
 | `KAFKA_BOOTSTRAP_SERVERS`    | `localhost:9092`                   | Kafka/Redpanda broker addresses        |
 | **PostgreSQL**               |                                    |                                        |
@@ -531,9 +532,9 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | `CONSUL_SCHEME`              | `http`                             | Consul connection scheme               |
 | **Infisical**                |                                    |                                        |
 | `INFISICAL_API_URL`          | `https://app.infisical.com`        | Infisical API URL                      |
-| **Redis**                    |                                    |                                        |
-| `REDIS_HOST`                 | `localhost`                        | Redis hostname                         |
-| `REDIS_PORT`                 | `6379`                             | Redis port                             |
+| **Valkey**                   |                                    |                                        |
+| `VALKEY_HOST`                | `valkey`                           | Valkey hostname                        |
+| `VALKEY_PORT`                | `6379`                             | Valkey port                            |
 | **ONEX Runtime**             |                                    |                                        |
 | `ONEX_LOG_LEVEL`             | `INFO`                             | Logging level (DEBUG, INFO, etc.)      |
 | `ONEX_ENVIRONMENT`           | `development`                      | Environment name                       |

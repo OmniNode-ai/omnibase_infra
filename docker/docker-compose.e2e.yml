@@ -224,7 +224,8 @@ services:
     environment:
       DB_CONNECTION_URI: postgresql://postgres:${POSTGRES_PASSWORD:-test-password}@postgres:5432/infisical_db
       REDIS_URL: redis://valkey:6379
-      # E2E testing: use deterministic keys (NOT for production)
+      # E2E TESTING ONLY: deterministic keys for reproducible test runs.
+      # WARNING: These are NOT valid production keys. Never reuse outside tests.
       # Key must be exactly 64 hex characters (32 bytes for AES-256)
       ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       AUTH_SECRET: ${INFISICAL_AUTH_SECRET:-e2e-test-auth-secret-for-testing}
@@ -280,8 +281,8 @@ services:
       # Infisical (internal address)
       INFISICAL_ADDR: http://infisical:8080
       # Valkey (internal address)
-      REDIS_HOST: valkey
-      REDIS_PORT: 6379
+      VALKEY_HOST: valkey
+      VALKEY_PORT: 6379
       # Runtime configuration
       ONEX_ENVIRONMENT: test
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-DEBUG}
