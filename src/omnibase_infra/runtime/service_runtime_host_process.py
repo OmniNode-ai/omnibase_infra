@@ -2956,6 +2956,59 @@ class RuntimeHostProcess:
             "no_handlers_registered": no_handlers_registered,
         }
 
+    async def readiness_check(self) -> dict[str, object]:
+        """Return readiness status for the ``/ready`` endpoint.
+
+        Readiness is separate from liveness (health_check). A runtime is ready
+        when it can actually process incoming events:
+
+        - Process is running and not draining
+        - Event bus reports all required topics have active consumers with
+          partition assignments
+
+        This method delegates to ``event_bus.get_readiness_status()`` for the
+        Kafka-specific readiness determination.
+
+        Returns:
+            Dictionary with readiness status:
+                - ready: Overall readiness (True = safe to receive traffic)
+                - is_running: Process running status
+                - is_draining: Graceful shutdown drain state
+                - event_bus_readiness: Structured readiness from event bus
+        """
+        event_bus_readiness: dict[str, object] = {}
+        event_bus_ready = False
+
+        try:
+            if hasattr(self._event_bus, "get_readiness_status") and callable(
+                getattr(self._event_bus, "get_readiness_status", None)
+            ):
+                readiness = await self._event_bus.get_readiness_status()
+                event_bus_readiness = readiness.model_dump()
+                event_bus_ready = readiness.is_ready
+            else:
+                # Event bus doesn't support readiness (treat as ready if healthy)
+                health = await self._event_bus.health_check()
+                event_bus_ready = bool(health.get("healthy", False))
+                event_bus_readiness = {"fallback": True, "healthy": event_bus_ready}
+        except Exception as e:
+            logger.warning(
+                "Event bus readiness check failed",
+                extra={"error": str(e)},
+                exc_info=True,
+            )
+            event_bus_readiness = {"error": str(e)}
+            event_bus_ready = False
+
+        ready = self._is_running and not self._is_draining and event_bus_ready
+
+        return {
+            "ready": ready,
+            "is_running": self._is_running,
+            "is_draining": self._is_draining,
+            "event_bus_readiness": event_bus_readiness,
+        }
+
     def register_handler(
         self, handler_type: str, handler: ProtocolContainerAware
     ) -> None:

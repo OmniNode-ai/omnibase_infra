@@ -65,7 +65,11 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
 )
-from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
+from omnibase_infra.event_bus.models import (
+    ModelEventBusReadiness,
+    ModelEventHeaders,
+    ModelEventMessage,
+)
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.utils import compute_consumer_group_id
 
@@ -470,6 +474,7 @@ class EventBusInmemory:
         on_message: Callable[[ModelEventMessage], Awaitable[None]],
         *,
         purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
+        required_for_readiness: bool = False,
     ) -> Callable[[], Awaitable[None]]:
         """Subscribe to topic with callback handler.
 
@@ -490,6 +495,9 @@ class EventBusInmemory:
             on_message: Async callback invoked for each message
             purpose: Consumer group purpose classification. Defaults to CONSUME.
                 Used in the consumer group ID derivation for disambiguation.
+            required_for_readiness: Whether this subscription must be active for
+                the runtime to report as ready. Ignored by the in-memory
+                implementation (always ready). Defaults to False.
 
         Returns:
             Async unsubscribe function to remove this subscription
@@ -666,6 +674,23 @@ class EventBusInmemory:
             "topic_count": topic_count,
             "history_size": history_size,
         }
+
+    async def get_readiness_status(self) -> ModelEventBusReadiness:
+        """Check event bus readiness for serving traffic.
+
+        The in-memory event bus is always ready once started, since there are
+        no external dependencies (no Kafka broker, no partition assignments).
+
+        Returns:
+            Structured readiness status. Always ready when started.
+        """
+        started = self._started
+        return ModelEventBusReadiness(
+            is_ready=started,
+            consumers_started=started,
+            required_topics=(),
+            required_topics_ready=started,
+        )
 
     # =========================================================================
     # Debugging/Observability Methods

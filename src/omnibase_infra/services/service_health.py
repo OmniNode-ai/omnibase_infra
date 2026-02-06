@@ -9,8 +9,8 @@ It is designed to run alongside the ONEX runtime kernel to satisfy Docker/K8s
 health check requirements.
 
 The service exposes:
-    - GET /health: Returns runtime health status as JSON
-    - GET /ready: Returns readiness status as JSON (alias for /health)
+    - GET /health: Returns runtime liveness status as JSON (process alive)
+    - GET /ready: Returns runtime readiness status as JSON (can serve traffic)
 
 Configuration:
     ONEX_HTTP_PORT: Port to listen on (default: 8085)
@@ -543,9 +543,9 @@ class ServiceHealth:
             # Create aiohttp application
             self._app = web.Application()
 
-            # Register routes
+            # Register routes (OMN-1931: /ready has its own handler)
             self._app.router.add_get("/health", self._handle_health)
-            self._app.router.add_get("/ready", self._handle_health)  # Alias
+            self._app.router.add_get("/ready", self._handle_readiness)
 
             # Create and start runner
             self._runner = web.AppRunner(self._app)
@@ -703,12 +703,16 @@ class ServiceHealth:
         )
 
     async def _handle_health(self, request: web.Request) -> web.Response:
-        """Handle GET /health and GET /ready requests.
+        """Handle GET /health requests (liveness probe).
 
-        This is the main health check endpoint handler for Docker/Kubernetes
-        health probes. It delegates to RuntimeHostProcess.health_check() for
-        actual health status determination and returns a standardized JSON
-        response with status information and diagnostics.
+        This is the liveness endpoint handler for Docker/Kubernetes health
+        probes. It delegates to RuntimeHostProcess.health_check() for actual
+        health status determination and returns a standardized JSON response
+        with status information and diagnostics.
+
+        Note:
+            Readiness checking is handled separately by ``_handle_readiness()``
+            which serves the ``/ready`` endpoint (OMN-1931).
 
         Health Status Logic:
             1. Query RuntimeHostProcess for current health state
@@ -874,6 +878,88 @@ class ServiceHealth:
             correlation_id = generate_correlation_id()
             logger.exception(
                 "Health check failed with exception (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+            )
+
+            error_response = ModelHealthCheckResponse.failure(
+                version=self._version,
+                error=str(e),
+                error_type=type(e).__name__,
+                correlation_id=str(correlation_id),
+            )
+
+            return web.Response(
+                text=error_response.model_dump_json(exclude_none=True),
+                status=503,
+                content_type="application/json",
+            )
+
+    async def _handle_readiness(self, request: web.Request) -> web.Response:
+        """Handle GET /ready requests (readiness probe).
+
+        Readiness indicates whether the runtime can serve traffic that depends
+        on Kafka-driven orchestration. Unlike ``/health`` (liveness), this
+        checks that all required Kafka subscriptions have active partition
+        assignments.
+
+        Readiness is continuously evaluated:
+            - Returns 200 when all required consumers are subscribed and assigned
+            - Returns 503 when starting up or when required consumers lose assignments
+            - ``/health`` remains independent (process health only)
+
+        This matches Kubernetes semantics: loss of readiness removes the pod
+        from service rotation but does not restart it.
+
+        Args:
+            request: Incoming HTTP request (unused, required by aiohttp signature).
+
+        Returns:
+            JSON response with readiness status:
+                - HTTP 200: Runtime is ready to serve traffic
+                - HTTP 503: Runtime is not ready (starting up or lost assignments)
+        """
+        _ = request
+
+        try:
+            readiness_details = await self.runtime.readiness_check()
+
+            if not isinstance(readiness_details, dict):
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="validate_readiness_check_response",
+                    target_name="RuntimeHostProcess.readiness_check",
+                )
+                raise ProtocolConfigurationError(
+                    f"readiness_check() must return dict, got {type(readiness_details).__name__}",
+                    context=context,
+                )
+
+            is_ready = bool(readiness_details.get("ready", False))
+            status: Literal["healthy", "degraded", "unhealthy"] = (
+                "healthy" if is_ready else "unhealthy"
+            )
+            http_status = 200 if is_ready else 503
+
+            response = ModelHealthCheckResponse.success(
+                status=status,
+                version=self._version,
+                details=cast("dict[str, JsonType]", readiness_details),
+            )
+
+            return web.Response(
+                text=response.model_dump_json(exclude_none=True),
+                status=http_status,
+                content_type="application/json",
+            )
+
+        except Exception as e:
+            correlation_id = generate_correlation_id()
+            logger.exception(
+                "Readiness check failed with exception (correlation_id=%s)",
                 correlation_id,
                 extra={
                     "error": str(e),
