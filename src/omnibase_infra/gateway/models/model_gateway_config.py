@@ -57,7 +57,10 @@ class ModelGatewayConfig(BaseModel):
             means all topics are allowed. Supports glob patterns (e.g., "events.*").
         reject_unsigned: Whether to reject inbound messages that lack a valid
             signature. When True (default), unsigned messages are rejected.
-            Set to False during migration periods or for development.
+            Only effective when ``public_key_path`` is configured; without a
+            public key the envelope validator is not created and this setting
+            is silently ignored. Set to False during migration periods or for
+            development.
 
     Security Considerations:
         - Private keys should have restricted file permissions (0600)
@@ -125,7 +128,12 @@ class ModelGatewayConfig(BaseModel):
     )
     reject_unsigned: bool = Field(
         default=True,
-        description="Whether to reject inbound messages lacking valid signatures",
+        description=(
+            "Whether to reject inbound messages lacking valid signatures. "
+            "Only effective when public_key_path is configured; without a "
+            "public key, the envelope validator is not created and this "
+            "setting is silently ignored."
+        ),
     )
 
     @field_validator("private_key_path", "public_key_path", mode="before")

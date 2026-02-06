@@ -3889,9 +3889,11 @@ class RuntimeHostProcess:
         if self._envelope_validator is not None:
             # Check if this looks like a signed ModelMessageEnvelope
             # Signed envelopes have: realm, runtime_id, bus_id, signature, payload
-            has_signature = (
-                "signature" in envelope and envelope.get("signature") is not None
-            )
+            # The signature field must be a dict containing an "algorithm" key
+            # to distinguish from business payloads that coincidentally share
+            # the same top-level field names.
+            sig = envelope.get("signature")
+            has_signature = isinstance(sig, dict) and "algorithm" in sig
             has_required_fields = all(
                 field in envelope
                 for field in ("realm", "runtime_id", "bus_id", "payload")
