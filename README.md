@@ -27,53 +27,44 @@ Built on `omnibase-core` ^0.8.0 and `omnibase-spi` ^0.5.0.
 git clone https://github.com/OmniNode-ai/omnibase_infra.git
 cd omnibase_infra
 
-# Start the runtime with Docker
+# Start infrastructure services with Docker
 cd docker
 cp .env.example .env
-# Edit .env - set POSTGRES_PASSWORD, VAULT_TOKEN, REDIS_PASSWORD
+# Edit .env - set POSTGRES_PASSWORD (required)
 
-docker compose -f docker-compose.runtime.yml --profile main up -d --build
+docker compose -f docker-compose.infra.yml up -d
 
-# Verify it's running
-curl http://localhost:8085/health
+# Verify services are running
+docker compose -f docker-compose.infra.yml ps
 ```
 
 ## Docker Services
 
-The runtime deploys as containerized services connecting to your infrastructure:
+Self-contained infrastructure via `docker-compose.infra.yml`:
 
 | Service | Profile | Port | Description |
 |---------|---------|------|-------------|
-| **runtime-main** | `main` | 8085 | Core kernel - request/response handling |
-| **runtime-effects** | `effects` | 8086 | External service I/O (DB, HTTP, messaging) |
-| **runtime-worker** | `workers` | — | Scalable compute workers (default: 2 replicas) |
+| **PostgreSQL** | default | 5436 | Persistence (always starts) |
+| **Redpanda** | default | 29092 | Event bus (always starts) |
+| **Valkey** | default | 16379 | Caching (always starts) |
+| **Consul** | `consul` | 28500 | Service discovery (optional) |
+| **Infisical** | `secrets` | 8880 | Secrets management (optional) |
+| **Runtime** | `runtime` | 8085 | ONEX runtime services (optional) |
 
 **Profiles:**
 ```bash
-# Core only
-docker compose -f docker-compose.runtime.yml --profile main up -d
+# Infrastructure only (default)
+docker compose -f docker-compose.infra.yml up -d
 
-# Core + effects
-docker compose -f docker-compose.runtime.yml --profile effects up -d
+# With service discovery
+docker compose -f docker-compose.infra.yml --profile consul up -d
 
-# Core + workers (parallel compute)
-docker compose -f docker-compose.runtime.yml --profile workers up -d
+# With secrets management
+docker compose -f docker-compose.infra.yml --profile secrets up -d
 
 # Everything
-docker compose -f docker-compose.runtime.yml --profile all up -d
+docker compose -f docker-compose.infra.yml --profile full up -d
 ```
-
-## Infrastructure Dependencies
-
-The runtime connects to external services (not included in compose):
-
-| Service | Purpose | Default Host | Environment Variable |
-|---------|---------|--------------|---------------------|
-| **PostgreSQL** | Persistence | `localhost:5432` | `POSTGRES_HOST`, `POSTGRES_PORT` |
-| **Kafka/Redpanda** | Event bus | `localhost:9092` | `KAFKA_BOOTSTRAP_SERVERS` |
-| **Consul** | Service discovery | `localhost:8500` | `CONSUL_HOST`, `CONSUL_PORT` |
-| **Vault** | Secrets management | `localhost:8200` | `VAULT_ADDR` |
-| **Redis/Valkey** | Caching | `localhost:6379` | `REDIS_HOST`, `REDIS_PORT` |
 
 Configure via `.env` file - see [docker/README.md](docker/README.md) for details.
 

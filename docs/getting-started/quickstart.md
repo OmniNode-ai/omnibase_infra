@@ -292,11 +292,11 @@ cd docker
 cp .env.example .env
 # Edit .env with your settings
 
-# Start core runtime
-docker compose -f docker-compose.runtime.yml --profile main up -d
+# Start infrastructure services
+docker compose -f docker-compose.infra.yml up -d
 
-# Check health
-curl http://localhost:8085/health
+# Check service status
+docker compose -f docker-compose.infra.yml ps
 ```
 
 ## Project Structure
@@ -399,9 +399,9 @@ poetry run python scripts/validate.py all      # All validators
 poetry run pre-commit run --all-files          # Pre-commit hooks
 
 # Docker
-docker compose -f docker-compose.runtime.yml --profile main up -d
-docker compose -f docker-compose.runtime.yml logs -f
-docker compose -f docker-compose.runtime.yml down
+docker compose -f docker-compose.infra.yml up -d
+docker compose -f docker-compose.infra.yml logs -f
+docker compose -f docker-compose.infra.yml down
 ```
 
 ## Common Mistakes

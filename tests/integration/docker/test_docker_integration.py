@@ -36,6 +36,7 @@ import yaml
 # =============================================================================
 
 pytestmark = [
+    pytest.mark.integration,
     pytest.mark.infrastructure,
 ]
 
@@ -87,30 +88,29 @@ def extract_profiles_from_compose(compose_path: Path) -> set[str]:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerBuild:
     """Tests for Docker image build process."""
 
     @pytest.mark.slow
-    def test_build_succeeds_without_github_token(
+    def test_build_succeeds_with_public_deps(
         self,
         docker_available: bool,
         project_root: Path,
         dockerfile_path: Path,
     ) -> None:
-        """Verify Docker build succeeds without GitHub token.
+        """Verify Docker build succeeds with public dependencies.
 
-        This test validates that the Dockerfile can build successfully
-        when only public dependencies are required. The GitHub token
-        should only be needed for private repository access.
+        This test validates that the Dockerfile can build successfully.
+        All dependencies are installed from public repositories.
         """
         if not docker_available:
             pytest.skip("Docker daemon not available")
 
         # Use unique image name for this test
-        image_name = f"{TEST_CONTAINER_PREFIX}-no-token:{os.getpid()}"
+        image_name = f"{TEST_CONTAINER_PREFIX}-build:{os.getpid()}"
 
         try:
-            # Build without GITHUB_TOKEN secret
             build_cmd = [
                 "docker",
                 "build",
@@ -119,14 +119,12 @@ class TestDockerBuild:
                 "-t",
                 image_name,
                 "--build-arg",
-                "RUNTIME_VERSION=test-no-token",
+                "RUNTIME_VERSION=test-build",
                 str(project_root),
             ]
 
             env = os.environ.copy()
             env["DOCKER_BUILDKIT"] = "1"
-            # Explicitly unset GITHUB_TOKEN
-            env.pop("GITHUB_TOKEN", None)
 
             result = subprocess.run(
                 build_cmd,
@@ -138,9 +136,8 @@ class TestDockerBuild:
                 shell=False,
             )
 
-            # Build should succeed for public dependencies
             assert result.returncode == 0, (
-                f"Build failed without GitHub token.\n"
+                f"Docker build failed.\n"
                 f"STDOUT: {result.stdout[-2000:]}\n"
                 f"STDERR: {result.stderr[-2000:]}"
             )
@@ -272,6 +269,7 @@ class TestDockerBuild:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerSecurity:
     """Tests for Docker security properties."""
 
@@ -355,8 +353,7 @@ class TestDockerSecurity:
     ) -> None:
         """Verify secrets are not exposed in docker history.
 
-        BuildKit secret mounts should ensure that GITHUB_TOKEN and
-        other secrets are never baked into image layers.
+        Checks that no credentials or tokens are baked into image layers.
         """
         if not docker_available:
             pytest.skip("Docker daemon not available")
@@ -437,6 +434,7 @@ class TestDockerSecurity:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerRuntime:
     """Tests for Docker container runtime behavior."""
 
@@ -472,9 +470,7 @@ class TestDockerRuntime:
                     "-e",
                     "POSTGRES_PASSWORD=test_password",
                     "-e",
-                    "VAULT_TOKEN=test_token",
-                    "-e",
-                    "REDIS_PASSWORD=test_password",
+                    "VALKEY_PASSWORD=test_password",
                     "-e",
                     "ONEX_LOG_LEVEL=DEBUG",
                     "-e",
@@ -597,9 +593,7 @@ class TestDockerRuntime:
                     "-e",
                     "POSTGRES_PASSWORD=test",
                     "-e",
-                    "VAULT_TOKEN=test",
-                    "-e",
-                    "REDIS_PASSWORD=test",
+                    "VALKEY_PASSWORD=test",
                     "-e",
                     "ONEX_EVENT_BUS_TYPE=inmemory",
                     built_test_image,
@@ -683,6 +677,7 @@ class TestDockerRuntime:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerHealthCheck:
     """Tests for Docker health check functionality."""
 
@@ -717,9 +712,7 @@ class TestDockerHealthCheck:
                     "-e",
                     "POSTGRES_PASSWORD=test",
                     "-e",
-                    "VAULT_TOKEN=test",
-                    "-e",
-                    "REDIS_PASSWORD=test",
+                    "VALKEY_PASSWORD=test",
                     "-e",
                     "ONEX_EVENT_BUS_TYPE=inmemory",
                     built_test_image,
@@ -808,9 +801,7 @@ class TestDockerHealthCheck:
                     "-e",
                     "POSTGRES_PASSWORD=test",
                     "-e",
-                    "VAULT_TOKEN=test",
-                    "-e",
-                    "REDIS_PASSWORD=test",
+                    "VALKEY_PASSWORD=test",
                     "-e",
                     "ONEX_EVENT_BUS_TYPE=inmemory",
                     built_test_image,
@@ -914,6 +905,7 @@ class TestDockerHealthCheck:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerResourceLimits:
     """Tests for Docker resource limit configuration."""
 
@@ -960,6 +952,7 @@ class TestDockerResourceLimits:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerComposeProfiles:
     """Tests for docker-compose profile configurations.
 
@@ -967,49 +960,56 @@ class TestDockerComposeProfiles:
     to validate profile definitions. This approach is more robust than string
     matching because it correctly handles different YAML quoting styles and
     formatting variations.
+
+    Profile Architecture (docker-compose.infra.yml):
+    - (default): Core infrastructure - postgres, redpanda, valkey, topic-manager
+    - runtime: ONEX runtime services with observability
+    - consul: Service discovery (optional)
+    - secrets: Secrets management with Infisical (optional)
+    - full: All services including optional profiles
     """
 
-    def test_main_profile_defined(
+    def test_runtime_profile_defined(
         self,
         compose_file_path: Path,
     ) -> None:
-        """Verify main profile is defined in docker-compose."""
+        """Verify runtime profile is defined in docker-compose."""
         profiles = extract_profiles_from_compose(compose_file_path)
-        assert "main" in profiles, (
-            f"docker-compose should define 'main' profile. "
+        assert "runtime" in profiles, (
+            f"docker-compose should define 'runtime' profile. "
             f"Found profiles: {sorted(profiles)}"
         )
 
-    def test_effects_profile_defined(
+    def test_consul_profile_defined(
         self,
         compose_file_path: Path,
     ) -> None:
-        """Verify effects profile is defined in docker-compose."""
+        """Verify consul profile is defined in docker-compose."""
         profiles = extract_profiles_from_compose(compose_file_path)
-        assert "effects" in profiles, (
-            f"docker-compose should define 'effects' profile. "
+        assert "consul" in profiles, (
+            f"docker-compose should define 'consul' profile. "
             f"Found profiles: {sorted(profiles)}"
         )
 
-    def test_workers_profile_defined(
+    def test_secrets_profile_defined(
         self,
         compose_file_path: Path,
     ) -> None:
-        """Verify workers profile is defined in docker-compose."""
+        """Verify secrets profile is defined in docker-compose."""
         profiles = extract_profiles_from_compose(compose_file_path)
-        assert "workers" in profiles, (
-            f"docker-compose should define 'workers' profile. "
+        assert "secrets" in profiles, (
+            f"docker-compose should define 'secrets' profile. "
             f"Found profiles: {sorted(profiles)}"
         )
 
-    def test_all_profile_defined(
+    def test_full_profile_defined(
         self,
         compose_file_path: Path,
     ) -> None:
-        """Verify all profile is defined in docker-compose."""
+        """Verify full profile is defined in docker-compose."""
         profiles = extract_profiles_from_compose(compose_file_path)
-        assert "all" in profiles, (
-            f"docker-compose should define 'all' profile. "
+        assert "full" in profiles, (
+            f"docker-compose should define 'full' profile. "
             f"Found profiles: {sorted(profiles)}"
         )
 
@@ -1028,12 +1028,15 @@ class TestDockerComposeProfiles:
             pytest.skip("Docker daemon not available")
 
         # Set required environment variables for validation
+        # Includes Infisical vars because docker-compose.infra.yml uses
+        # fail-fast :? syntax that requires them even for config validation
         env = os.environ.copy()
         env.update(
             {
                 "POSTGRES_PASSWORD": "test",
-                "VAULT_TOKEN": "test",
-                "REDIS_PASSWORD": "test",
+                "VALKEY_PASSWORD": "test",
+                "INFISICAL_ENCRYPTION_KEY": "0" * 64,
+                "INFISICAL_AUTH_SECRET": "test-auth-secret",
             }
         )
 
@@ -1062,6 +1065,7 @@ class TestDockerComposeProfiles:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerImageLabels:
     """Tests for Docker image OCI labels."""
 

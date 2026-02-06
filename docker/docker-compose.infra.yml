@@ -1,0 +1,526 @@
+# docker-compose.infra.yml
+# ONEX Infrastructure & Runtime Services
+#
+# This compose file provides the complete ONEX platform: infrastructure services
+# (PostgreSQL, Redpanda, Valkey) and runtime services (kernel, effects, workers).
+#
+# Usage:
+#   # Core infrastructure only (postgres, redpanda, valkey)
+#   docker compose -f docker/docker-compose.infra.yml up -d
+#
+#   # With runtime services
+#   docker compose -f docker/docker-compose.infra.yml --profile runtime up -d
+#
+#   # With Consul (service discovery)
+#   docker compose -f docker/docker-compose.infra.yml --profile consul up -d
+#
+#   # With secrets management (Infisical)
+#   docker compose -f docker/docker-compose.infra.yml --profile secrets up -d
+#
+#   # Full stack (all services)
+#   docker compose -f docker/docker-compose.infra.yml --profile full up -d
+#
+#   # Build runtime and start
+#   docker compose -f docker/docker-compose.infra.yml --profile runtime up -d --build
+#
+#   # Stop services
+#   docker compose -f docker/docker-compose.infra.yml down
+#
+#   # Stop and remove volumes (CAUTION: destroys data)
+#   docker compose -f docker/docker-compose.infra.yml down -v
+#
+# Profiles:
+#   - (default): Core infrastructure (postgres, redpanda, valkey, topic-manager)
+#   - runtime: ONEX runtime services (omninode-runtime, effects, workers, observability)
+#   - consul: HashiCorp Consul for service discovery
+#   - secrets: Infisical for secrets management
+#   - full: All services (infrastructure + runtime + consul + secrets)
+#
+# External Ports:
+#   Infrastructure:
+#     - PostgreSQL: 5436 (internal 5432)
+#     - Redpanda: 29092 (internal 9092)
+#     - Valkey: 16379 (internal 6379)
+#     - Consul: 28500 (internal 8500) [consul profile]
+#     - Infisical: 8880 (internal 8080) [secrets profile]
+#   Runtime:
+#     - omninode-runtime: 8085 [runtime profile]
+#     - runtime-effects: 8086 [runtime profile]
+#     - agent-actions-consumer: 8087 [runtime profile]
+name: omnibase-infra
+# ==========================================================================
+# Shared Configuration Templates (YAML Anchors)
+# ==========================================================================
+
+# Default healthcheck configuration
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 10s
+# Default logging configuration
+x-logging-defaults: &logging-defaults
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+# Runtime service base configuration
+x-runtime-base: &runtime-base
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile.runtime
+  networks:
+    - omnibase-infra-network
+  logging: *logging-defaults
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        cpus: '1.0'
+        memory: 512M
+      reservations:
+        cpus: '0.25'
+        memory: 128M
+# Runtime environment variables
+x-runtime-env: &runtime-env
+  # Kafka/Redpanda - use internal service name
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+  # PostgreSQL - use internal service name
+  POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+  POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+  POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omninode_bridge}
+  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  # Consul - use internal service name
+  CONSUL_HOST: ${CONSUL_HOST:-consul}
+  CONSUL_PORT: ${CONSUL_PORT:-8500}
+  CONSUL_SCHEME: ${CONSUL_SCHEME:-http}
+  # Infisical - Secrets Management (optional, via secrets profile)
+  INFISICAL_ADDR: ${INFISICAL_ADDR:-http://infisical:8080}
+  # Valkey (Redis-compatible cache)
+  VALKEY_HOST: ${VALKEY_HOST:-valkey}
+  VALKEY_PORT: ${VALKEY_PORT:-6379}
+  # SECURITY: Set VALKEY_PASSWORD in .env for production. Default is for local dev only.
+  VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
+  # ONEX Runtime
+  ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+  ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-development}
+  ONEX_CONTRACTS_DIR: /app/contracts
+  # OpenTelemetry
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4317}
+  OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omninode-runtime}
+  OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-otlp}
+  OTEL_METRICS_EXPORTER: ${OTEL_METRICS_EXPORTER:-otlp}
+# ==========================================================================
+# Services
+# ==========================================================================
+services:
+  # ==========================================================================
+  # PostgreSQL - Primary Data Store
+  # ==========================================================================
+  # SECURITY: Database credentials require explicit configuration.
+  # Never use default passwords in production environments.
+  # Set POSTGRES_PASSWORD in .env or environment before starting.
+  postgres:
+    image: postgres:16-alpine
+    container_name: omnibase-infra-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      # SECURITY: Password is required and must be explicitly set (no default)
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-omninode_bridge}
+      POSTGRES_MULTIPLE_DATABASES: "omninode_bridge,infisical_db"
+    ports:
+      - "${POSTGRES_EXTERNAL_PORT:-5436}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    networks:
+      - omnibase-infra-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DATABASE:-omninode_bridge}"]
+    logging: *logging-defaults
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=postgres"
+      - "com.omninode.layer=infrastructure"
+  # ==========================================================================
+  # Redpanda - Kafka-Compatible Event Streaming
+  # ==========================================================================
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:${REDPANDA_EXTERNAL_PORT:-29092}
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:${REDPANDA_PANDAPROXY_PORT:-18082}
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --memory 1G
+      - --default-log-level=warn
+    ports:
+      - "${REDPANDA_EXTERNAL_PORT:-29092}:19092"
+      # Pandaproxy (REST API for Kafka)
+      - "${REDPANDA_PANDAPROXY_PORT:-18082}:18082"
+      # Schema Registry
+      - "${REDPANDA_SCHEMA_REGISTRY_PORT:-18081}:18081"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    networks:
+      - omnibase-infra-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true' || exit 1"]
+      start_period: 30s
+    logging: *logging-defaults
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=redpanda"
+      - "com.omninode.layer=infrastructure"
+  # ==========================================================================
+  # Redpanda Topic Manager - Automatic Topic Creation
+  # ==========================================================================
+  redpanda-topic-manager:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omnibase-infra-topic-manager
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        echo "Waiting for Redpanda to be ready..."
+        sleep 5
+
+        # Create core ONEX topics
+        echo "Creating ONEX topics..."
+        rpk topic create requests --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create responses --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create effect-requests --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create effect-responses --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create worker-requests --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create worker-responses --brokers redpanda:9092 -p 3 -r 1 || true
+
+        # Create observability topics
+        echo "Creating observability topics..."
+        rpk topic create agent-actions --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create agent-transformation-events --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create router-performance-metrics --brokers redpanda:9092 -p 3 -r 1 || true
+
+        # Create registration topics
+        echo "Creating registration topics..."
+        rpk topic create node-introspection-events --brokers redpanda:9092 -p 3 -r 1 || true
+        rpk topic create node-registration-events --brokers redpanda:9092 -p 3 -r 1 || true
+
+        # List all topics
+        echo "Topics created:"
+        rpk topic list --brokers redpanda:9092
+
+        echo "Topic manager completed successfully."
+    networks:
+      - omnibase-infra-network
+    logging: *logging-defaults
+    restart: "no"
+    labels:
+      - "com.omninode.service=topic-manager"
+      - "com.omninode.layer=infrastructure"
+  # ==========================================================================
+  # Valkey - Redis-Compatible Cache and Pub/Sub
+  # ==========================================================================
+  # SECURITY NOTE: Port 16379 is intentionally exposed for local development.
+  # This allows host-based tools and tests to connect directly to Valkey.
+  # The default binding to 0.0.0.0 is acceptable for development environments
+  # where localhost isolation via host firewall provides sufficient security.
+  # Password authentication is enabled by default (VALKEY_PASSWORD=valkey-dev-password).
+  # For production, either:
+  #   - Remove port exposure and use internal Docker networking only
+  #   - Bind to 127.0.0.1: "127.0.0.1:16379:6379"
+  #   - Set a strong VALKEY_PASSWORD in .env
+  valkey:
+    image: valkey/valkey:8.0-alpine
+    container_name: omnibase-infra-valkey
+    # Shell form avoids passing empty string arguments when VALKEY_PASSWORD is unset
+    # $$ escapes prevent Docker Compose from interpolating; the container's
+    # shell expands VALKEY_PASSWORD from the environment block below.
+    command: >-
+      sh -c 'valkey-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru $${VALKEY_PASSWORD:+--requirepass "$$VALKEY_PASSWORD"}'
+    ports:
+      - "${VALKEY_EXTERNAL_PORT:-16379}:6379"
+    volumes:
+      - valkey_data:/data
+    networks:
+      - omnibase-infra-network
+    environment:
+      # Pass password for healthcheck authentication
+      # SECURITY: Set VALKEY_PASSWORD in .env for production. Default is for local dev only.
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      # Use password for healthcheck if VALKEY_PASSWORD is set
+      test: ["CMD-SHELL", "valkey-cli $${VALKEY_PASSWORD:+-a \"$$VALKEY_PASSWORD\" --no-auth-warning} ping | grep -q PONG"]
+    logging: *logging-defaults
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=valkey"
+      - "com.omninode.layer=infrastructure"
+  # ==========================================================================
+  # Consul - Service Discovery (Optional)
+  # ==========================================================================
+  consul:
+    image: hashicorp/consul:1.18
+    container_name: omnibase-infra-consul
+    profiles: ["consul", "full"]
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -data-dir=/consul/data
+    ports:
+      - "${CONSUL_EXTERNAL_PORT:-28500}:8500"
+      - "${CONSUL_DNS_PORT:-8600}:8600/udp"
+    volumes:
+      - consul_data:/consul/data
+    networks:
+      - omnibase-infra-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD", "consul", "members"]
+    logging: *logging-defaults
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=consul"
+      - "com.omninode.layer=infrastructure"
+  # ==========================================================================
+  # Infisical - Secrets Management (Optional)
+  # ==========================================================================
+  infisical:
+    image: infisical/infisical:v0.146.0-postgres
+    container_name: omnibase-infra-infisical
+    profiles: ["secrets", "full"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    environment:
+      DB_CONNECTION_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/infisical_db
+      # Redis URL for Infisical's cache backend (Valkey is Redis-compatible)
+      # NOTE: Default includes the dev password matching VALKEY_PASSWORD default.
+      # If you change VALKEY_PASSWORD, update INFISICAL_REDIS_URL to match.
+      # See docker/.env.example for details.
+      REDIS_URL: ${INFISICAL_REDIS_URL:-redis://:valkey-dev-password@valkey:6379}
+      # SECURITY: Set INFISICAL_ENCRYPTION_KEY and INFISICAL_AUTH_SECRET in .env
+      # for production. Defaults below are for local development only.
+      # Generate with: openssl rand -hex 16 (encryption) / openssl rand -hex 32 (auth)
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2}
+      SITE_URL: ${INFISICAL_SITE_URL:-http://localhost:8880}
+      TELEMETRY_ENABLED: "false"
+    ports:
+      - "${INFISICAL_EXTERNAL_PORT:-8880}:8080"
+    networks:
+      - omnibase-infra-network
+    healthcheck:
+      !!merge <<: *healthcheck-defaults
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/status"]
+      start_period: 60s
+    logging: *logging-defaults
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=infisical"
+      - "com.omninode.layer=infrastructure"
+  # ==========================================================================
+  # ONEX Runtime - Main Kernel (Runtime Profile)
+  # ==========================================================================
+  # Primary runtime service that handles the kernel bootstrap process.
+  omninode-runtime:
+    !!merge <<: *runtime-base
+    container_name: omninode-runtime
+    profiles: ["runtime", "full"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    environment:
+      !!merge <<: *runtime-env
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omninode-runtime-main}
+      RUNTIME_PROFILE: main
+      ONEX_INPUT_TOPIC: ${ONEX_INPUT_TOPIC:-requests}
+      ONEX_OUTPUT_TOPIC: ${ONEX_OUTPUT_TOPIC:-responses}
+      ONEX_GROUP_ID: ${ONEX_GROUP_ID:-onex-runtime-main}
+    ports:
+      - "${RUNTIME_MAIN_PORT:-8085}:8085"
+    stop_grace_period: 90s
+    volumes:
+      - runtime_logs:/app/logs
+      - runtime_data:/app/data
+      - ../contracts:/app/contracts:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "com.omninode.service=runtime-main"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+  # ==========================================================================
+  # ONEX Runtime - Effects Handler (Runtime Profile)
+  # ==========================================================================
+  # Handles effect nodes for external service interactions.
+  runtime-effects:
+    !!merge <<: *runtime-base
+    container_name: omninode-runtime-effects
+    profiles: ["runtime", "full"]
+    depends_on:
+      omninode-runtime:
+        condition: service_healthy
+    environment:
+      !!merge <<: *runtime-env
+      OTEL_SERVICE_NAME: omninode-runtime-effects
+      RUNTIME_PROFILE: effects
+      ONEX_INPUT_TOPIC: ${ONEX_EFFECTS_INPUT_TOPIC:-effect-requests}
+      ONEX_OUTPUT_TOPIC: ${ONEX_EFFECTS_OUTPUT_TOPIC:-effect-responses}
+      ONEX_GROUP_ID: ${ONEX_EFFECTS_GROUP_ID:-onex-runtime-effects}
+    ports:
+      - "${RUNTIME_EFFECTS_PORT:-8086}:8085"
+    stop_grace_period: 90s
+    volumes:
+      - effects_logs:/app/logs
+      - effects_data:/app/data
+      - ../contracts:/app/contracts:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "com.omninode.service=runtime-effects"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+  # ==========================================================================
+  # ONEX Runtime - Workers (Runtime Profile)
+  # ==========================================================================
+  # Scalable worker containers for parallel compute operations.
+  runtime-worker:
+    !!merge <<: *runtime-base
+    profiles: ["runtime", "full"]
+    depends_on:
+      omninode-runtime:
+        condition: service_healthy
+    environment:
+      !!merge <<: *runtime-env
+      OTEL_SERVICE_NAME: omninode-runtime-worker
+      RUNTIME_PROFILE: workers
+      ONEX_INPUT_TOPIC: ${ONEX_WORKER_INPUT_TOPIC:-worker-requests}
+      ONEX_OUTPUT_TOPIC: ${ONEX_WORKER_OUTPUT_TOPIC:-worker-responses}
+      ONEX_GROUP_ID: ${ONEX_WORKER_GROUP_ID:-onex-runtime-workers}
+    stop_grace_period: 90s
+    volumes:
+      - worker_logs:/app/logs
+      - ../contracts:/app/contracts:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      mode: replicated
+      replicas: ${WORKER_REPLICAS:-2}
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    labels:
+      - "com.omninode.service=runtime-worker"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+  # ==========================================================================
+  # Agent Actions Consumer - Observability (Runtime Profile)
+  # ==========================================================================
+  # Consumes agent action events from Kafka and persists to PostgreSQL.
+  agent-actions-consumer:
+    !!merge <<: *runtime-base
+    container_name: omninode-agent-actions-consumer
+    profiles: ["runtime", "full"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    command: ["python", "-m", "omnibase_infra.services.observability.agent_actions.consumer"]
+    environment:
+      OMNIBASE_INFRA_AGENT_ACTIONS_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DATABASE:-omninode_bridge}
+      OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_SIZE: ${AGENT_ACTIONS_BATCH_SIZE:-100}
+      OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_TIMEOUT_MS: ${AGENT_ACTIONS_BATCH_TIMEOUT_MS:-1000}
+      OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_PORT: "8087"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-development}
+    ports:
+      - "${AGENT_ACTIONS_CONSUMER_PORT:-8087}:8087"
+    stop_grace_period: 60s
+    volumes:
+      - agent_actions_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8087/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    labels:
+      - "com.omninode.service=agent-actions-consumer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+# ==========================================================================
+# Network Configuration
+# ==========================================================================
+networks:
+  omnibase-infra-network:
+    name: omnibase-infra-network
+    driver: bridge
+# ==========================================================================
+# Volume Configuration
+# ==========================================================================
+volumes:
+  # Infrastructure volumes
+  postgres_data:
+    name: omnibase-infra-postgres-data
+  redpanda_data:
+    name: omnibase-infra-redpanda-data
+  valkey_data:
+    name: omnibase-infra-valkey-data
+  consul_data:
+    name: omnibase-infra-consul-data
+  # Runtime volumes
+  runtime_logs:
+    name: omninode-runtime-logs
+  runtime_data:
+    name: omninode-runtime-data
+  effects_logs:
+    name: omninode-effects-logs
+  effects_data:
+    name: omninode-effects-data
+  worker_logs:
+    name: omninode-worker-logs
+  agent_actions_logs:
+    name: omninode-agent-actions-logs

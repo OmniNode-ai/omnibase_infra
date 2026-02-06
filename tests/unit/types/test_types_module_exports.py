@@ -13,7 +13,10 @@ Related:
 
 from __future__ import annotations
 
+import pytest
 
+
+@pytest.mark.unit
 class TestTypesModuleExports:
     """Tests for types module export availability."""
 
@@ -105,6 +108,7 @@ class TestTypesModuleExports:
         assert "method_signatures" in annotations
 
 
+@pytest.mark.unit
 class TestTypesModuleSubmoduleAccess:
     """Tests for accessing types from submodules directly."""
 
@@ -141,6 +145,7 @@ class TestTypesModuleSubmoduleAccess:
         assert TypedDictCapabilities is not None
 
 
+@pytest.mark.unit
 class TestTypeAliasMyPyCompatibility:
     """Verify type aliases work with strict type checking.
 
@@ -323,6 +328,7 @@ class TestTypeAliasMyPyCompatibility:
         assert result2 == "async_func"
 
 
+@pytest.mark.unit
 class TestTypesModuleExportConsistency:
     """Tests verifying export consistency between top-level and submodules."""
 

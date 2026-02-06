@@ -2,7 +2,7 @@
 # ONEX Infrastructure E2E Testing Stack
 #
 # This compose file provides infrastructure services for E2E integration testing.
-# It includes PostgreSQL, Redpanda (Kafka), Consul, Vault, and Valkey - the core
+# It includes PostgreSQL, Redpanda (Kafka), Consul, Infisical, and Valkey - the core
 # infrastructure needed to run the ONEX runtime in a realistic environment.
 #
 # Usage:
@@ -27,7 +27,7 @@
 #   - Redpanda Kafka: 29092 (external listener)
 #   - Redpanda Admin: 9644
 #   - Consul: 8500
-#   - Vault: 8200
+#   - Infisical: 8880
 #   - Valkey: 6379
 #   - Runtime Health: 8085 (when runtime profile enabled)
 name: omnibase-infra
@@ -47,20 +47,22 @@ services:
   # PostgreSQL Database
   # ==========================================================================
   postgres:
-    image: postgres:15
+    image: postgres:16-alpine
     container_name: omnibase-infra-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test-password}
       POSTGRES_DB: omninode_bridge
+      POSTGRES_MULTIPLE_DATABASES: "omninode_bridge,infisical_db"
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     networks:
       - omnibase-infra-network
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Initialize schema on first start
-      - ./migrations:/docker-entrypoint-initdb.d:ro
+      # Initialize databases (including infisical_db) on first start
+      # Note: For E2E tests, schema migrations may be applied separately during test setup
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
     # Performance optimizations for testing (faster, less durable)
     command: |
       postgres
@@ -106,9 +108,9 @@ services:
       # Admin API
       - "9644:9644"
       # Schema Registry (external)
-      - "18081:18081"
+      - "${REDPANDA_SCHEMA_REGISTRY_PORT:-18081}:18081"
       # Pandaproxy (external)
-      - "18082:18082"
+      - "${REDPANDA_PANDAPROXY_PORT:-18082}:18082"
     networks:
       - omnibase-infra-network
     volumes:
@@ -169,7 +171,7 @@ services:
   # Consul (Service Discovery)
   # ==========================================================================
   consul:
-    image: hashicorp/consul:1.17
+    image: hashicorp/consul:1.18
     container_name: omnibase-infra-consul
     command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -datacenter=omnibase-infra
     ports:
@@ -192,7 +194,7 @@ services:
   # Check for updates: https://hub.docker.com/r/valkey/valkey/tags
   # ==========================================================================
   valkey:
-    image: valkey/valkey:9.0.1
+    image: valkey/valkey:8.0-alpine
     container_name: omnibase-infra-valkey
     ports:
       - "${VALKEY_PORT:-6379}:6379"
@@ -209,28 +211,36 @@ services:
       - "com.omninode.service=valkey"
       - "com.omninode.role=infrastructure"
   # ==========================================================================
-  # Vault (Secrets Management)
+  # Infisical (Secrets Management)
   # ==========================================================================
-  vault:
-    image: hashicorp/vault:1.15
-    container_name: omnibase-infra-vault
-    # Dev mode: in-memory storage, auto-unsealed, root token set via env var
-    command: server -dev -dev-root-token-id=${VAULT_DEV_ROOT_TOKEN:-test-token} -dev-listen-address=0.0.0.0:8200
+  infisical:
+    image: infisical/infisical:v0.146.0-postgres
+    container_name: omnibase-infra-infisical
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    environment:
+      DB_CONNECTION_URI: postgresql://postgres:${POSTGRES_PASSWORD:-test-password}@postgres:5432/infisical_db
+      REDIS_URL: redis://valkey:6379
+      # E2E TESTING ONLY: deterministic keys for reproducible test runs.
+      # WARNING: These are NOT valid production keys. Never reuse outside tests.
+      # Key must be exactly 64 hex characters (32 bytes for AES-256)
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:-e2e-test-auth-secret-for-testing}
+      SITE_URL: ${INFISICAL_SITE_URL:-http://localhost:8880}
+      TELEMETRY_ENABLED: "false"
     ports:
-      - "${VAULT_PORT:-8200}:8200"
+      - "${INFISICAL_PORT:-8880}:8080"
     networks:
       - omnibase-infra-network
-    environment:
-      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN:-test-token}
-      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
-      VAULT_ADDR: http://127.0.0.1:8200
-    cap_add:
-      - IPC_LOCK
     healthcheck:
       !!merge <<: *healthcheck-defaults
-      test: ["CMD", "vault", "status"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/status"]
+      start_period: 60s
     labels:
-      - "com.omninode.service=vault"
+      - "com.omninode.service=infisical"
       - "com.omninode.role=infrastructure"
   # ==========================================================================
   # ONEX Runtime (profile: runtime)
@@ -249,7 +259,7 @@ services:
         condition: service_healthy
       consul:
         condition: service_healthy
-      vault:
+      infisical:
         condition: service_healthy
       valkey:
         condition: service_healthy
@@ -268,12 +278,11 @@ services:
       CONSUL_HOST: consul
       CONSUL_PORT: 8500
       CONSUL_SCHEME: http
-      # Vault (internal address)
-      VAULT_ADDR: http://vault:8200
-      VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:-test-token}
+      # Infisical (internal address)
+      INFISICAL_ADDR: http://infisical:8080
       # Valkey (internal address)
-      REDIS_HOST: valkey
-      REDIS_PORT: 6379
+      VALKEY_HOST: valkey
+      VALKEY_PORT: 6379
       # Runtime configuration
       ONEX_ENVIRONMENT: test
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-DEBUG}

@@ -10,7 +10,7 @@ Module-Level Constants
 Shared path constants available via fixtures:
     - docker_dir: Path to docker/ directory
     - dockerfile_path: Path to Dockerfile.runtime
-    - compose_file_path: Path to docker-compose.runtime.yml
+    - compose_file_path: Path to docker-compose.infra.yml
     - env_example_path: Path to .env.example
     - dockerignore_path: Path to .dockerignore
 """
@@ -38,7 +38,7 @@ _DOCKER_DIR = _PROJECT_ROOT / "docker"
 
 # Docker configuration file paths
 _DOCKERFILE_PATH = _DOCKER_DIR / "Dockerfile.runtime"
-_COMPOSE_FILE_PATH = _DOCKER_DIR / "docker-compose.runtime.yml"
+_COMPOSE_FILE_PATH = _DOCKER_DIR / "docker-compose.infra.yml"
 _ENV_EXAMPLE_PATH = _DOCKER_DIR / ".env.example"
 _DOCKERIGNORE_PATH = _DOCKER_DIR / ".dockerignore"
 
@@ -83,7 +83,7 @@ def compose_file_path() -> Path:
     """Return docker-compose file path.
 
     Returns:
-        Path: Absolute path to docker-compose.runtime.yml.
+        Path: Absolute path to docker-compose.infra.yml.
     """
     return _COMPOSE_FILE_PATH
 
@@ -138,7 +138,7 @@ def compose_file_content(compose_file_path: Path) -> str:
         compose_file_path: Path fixture for docker-compose file.
 
     Returns:
-        str: Content of docker-compose.runtime.yml.
+        str: Content of docker-compose.infra.yml.
     """
     return compose_file_path.read_text()
 
@@ -179,5 +179,6 @@ def dockerignore_content(dockerignore_path: Path) -> str:
 
 # Export constants for direct import in test files that need module-level access.
 # Prefer using fixtures where possible for better test isolation.
+COMPOSE_FILE_PATH = _COMPOSE_FILE_PATH
 DOCKER_DIR = _DOCKER_DIR
 PROJECT_ROOT = _PROJECT_ROOT
