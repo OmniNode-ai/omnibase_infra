@@ -164,7 +164,13 @@ class DependencyMaterializer:
                 except ProtocolConfigurationError:
                     # Contract/configuration errors always propagate
                     raise
-                except (OSError, TimeoutError) as e:
+                except (TypeError, AttributeError, ImportError) as e:
+                    # Programming errors propagate immediately
+                    raise
+                except Exception as e:
+                    # Infrastructure errors: OSError, TimeoutError, and
+                    # library-specific errors (KafkaConnectionError,
+                    # asyncpg.PostgresError, etc.)
                     if dep_required:
                         context = ModelInfraErrorContext.with_correlation(
                             transport_type=EnumInfraTransportType.RUNTIME,
@@ -242,7 +248,7 @@ class DependencyMaterializer:
             List of dependency objects with name, type, required fields.
         """
         deps: list[SimpleNamespace] = []
-        seen_names: set[str] = set()
+        seen_names: dict[str, str] = {}  # name -> type for conflict detection
 
         for path in contract_paths:
             try:
@@ -277,8 +283,18 @@ class DependencyMaterializer:
 
                 # Deduplicate by name (first declaration wins)
                 if dep_name in seen_names:
+                    if seen_names[dep_name] != dep_type:
+                        logger.warning(
+                            "Duplicate dependency name with conflicting types",
+                            extra={
+                                "dep_name": dep_name,
+                                "existing_type": seen_names[dep_name],
+                                "conflicting_type": dep_type,
+                                "path": str(path),
+                            },
+                        )
                     continue
-                seen_names.add(dep_name)
+                seen_names[dep_name] = dep_type
 
                 deps.append(
                     SimpleNamespace(
