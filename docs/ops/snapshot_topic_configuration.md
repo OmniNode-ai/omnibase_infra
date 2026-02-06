@@ -36,7 +36,7 @@ Kafka compaction uses the message **key** to determine which records to retain. 
 
 Example key:
 
-```
+```text
 550e8400-e29b-41d4-a716-446655440000
 ```
 
@@ -256,7 +256,7 @@ config = ModelSnapshotTopicConfig.from_yaml(Path("config/snapshot_topic.yaml"))
 
 ## Compaction Timing
 
-```
+```text
 |--- min_compaction_lag_ms (60s) ---|--- max_compaction_lag_ms (300s) ---|
 |<-- Cannot compact here -->|<-- May compact -->|<-- Must compact -->|
 ```

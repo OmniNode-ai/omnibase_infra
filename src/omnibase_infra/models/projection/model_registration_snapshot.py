@@ -60,7 +60,7 @@ class ModelRegistrationSnapshot(BaseModel):
         - Frozen (immutable): Snapshots are point-in-time captures
         - No timeout fields: Snapshots don't track ack/liveness deadlines
         - No event tracking: No last_applied_event_id/offset (use source_projection_sequence)
-        - Compaction key: to_kafka_key() for topic compaction
+        - Compaction key: entity_id UUID string via to_kafka_key() (not domain:entity_id)
 
     Primary Key:
         (entity_id, domain) - same composite key as projection
@@ -262,13 +262,18 @@ class ModelRegistrationSnapshot(BaseModel):
         """Generate Kafka compaction key for this snapshot.
 
         Returns a key suitable for Kafka topic compaction. The key is the
-        node_id (entity_id) as a UUID string, which ensures:
+        entity_id as a plain UUID string (e.g., "550e8400-..."), which ensures:
         - Per-node compaction (only latest snapshot retained per node)
         - Simple cross-language consumer compatibility
         - Aligns with "node_id is the partition key" principle
 
+        Note:
+            The key is entity_id ONLY. It does NOT include domain or any
+            other prefix (e.g., NOT "domain:entity_id"). Domain isolation
+            is handled at the topic level, not the key level.
+
         Returns:
-            Node UUID as string
+            Entity UUID as string (e.g., "550e8400-e29b-41d4-a716-446655440000")
 
         Example:
             >>> from uuid import UUID

@@ -78,8 +78,8 @@ if TYPE_CHECKING:
         HandlerRuntimeTick,
     )
     from omnibase_infra.projectors import ProjectionReaderRegistration
-    from omnibase_infra.projectors.snapshot_publisher_registration import (
-        SnapshotPublisherRegistration,
+    from omnibase_infra.protocols.protocol_snapshot_publisher import (
+        ProtocolSnapshotPublisher,
     )
     from omnibase_infra.runtime import MessageDispatchEngine, ProjectorShell
 
@@ -381,7 +381,7 @@ async def wire_registration_handlers(
     liveness_interval_seconds: int | None = None,
     projector: ProjectorShell | None = None,
     consul_handler: HandlerConsul | None = None,
-    snapshot_publisher: SnapshotPublisherRegistration | None = None,
+    snapshot_publisher: ProtocolSnapshotPublisher | None = None,
     correlation_id: UUID | None = None,
 ) -> WiringResult:
     """Register registration orchestrator handlers with the container.
@@ -400,7 +400,7 @@ async def wire_registration_handlers(
             If None, uses ONEX_LIVENESS_INTERVAL_SECONDS env var or default (60s).
         projector: Optional ProjectorShell for persisting state transitions.
         consul_handler: Optional HandlerConsul for dual registration with Consul.
-        snapshot_publisher: Optional SnapshotPublisherRegistration for publishing
+        snapshot_publisher: Optional ProtocolSnapshotPublisher for publishing
             compacted snapshots to Kafka. If provided, handlers will publish
             snapshots after state transitions (best-effort, non-blocking).
         correlation_id: Optional correlation ID for error tracking. If not provided,

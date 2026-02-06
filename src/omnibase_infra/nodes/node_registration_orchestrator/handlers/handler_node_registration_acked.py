@@ -62,11 +62,14 @@ from omnibase_infra.models.registration.events.model_node_registration_ack_recei
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
-from omnibase_infra.utils import validate_timezone_aware_with_context
+from omnibase_infra.utils import (
+    sanitize_error_message,
+    validate_timezone_aware_with_context,
+)
 
 if TYPE_CHECKING:
-    from omnibase_infra.projectors.snapshot_publisher_registration import (
-        SnapshotPublisherRegistration,
+    from omnibase_infra.protocols.protocol_snapshot_publisher import (
+        ProtocolSnapshotPublisher,
     )
 
 logger = logging.getLogger(__name__)
@@ -192,7 +195,7 @@ class HandlerNodeRegistrationAcked:
         self,
         projection_reader: ProjectionReaderRegistration,
         liveness_interval_seconds: int | None = None,
-        snapshot_publisher: SnapshotPublisherRegistration | None = None,
+        snapshot_publisher: ProtocolSnapshotPublisher | None = None,
     ) -> None:
         """Initialize the handler with a projection reader.
 
@@ -201,7 +204,7 @@ class HandlerNodeRegistrationAcked:
             liveness_interval_seconds: Interval for liveness deadline calculation.
                 Pass None to use environment variable ONEX_LIVENESS_INTERVAL_SECONDS
                 or default (60 seconds).
-            snapshot_publisher: Optional SnapshotPublisherRegistration for publishing
+            snapshot_publisher: Optional ProtocolSnapshotPublisher for publishing
                 compacted snapshots to Kafka after ACTIVE transition. If None,
                 snapshot publishing is skipped. Snapshot publishing is always
                 best-effort and non-blocking.
@@ -312,11 +315,11 @@ class HandlerNodeRegistrationAcked:
                 projection=projection,
             )
 
-            # Publish snapshot after ACTIVE transition (best-effort, non-blocking)
-            # NOTE: We must construct a projection with the post-transition state
-            # (ACTIVE), because `projection` still holds the pre-transition state
-            # (AWAITING_ACK/ACCEPTED). The emitted events will transition the state
-            # in the reducer, but the snapshot must reflect the target state.
+            # Publish snapshot after ACTIVE transition (best-effort, non-blocking).
+            # We construct a synthetic projection with the post-transition state
+            # (ACTIVE) because `projection` still holds the pre-transition state
+            # (AWAITING_ACK/ACCEPTED). The emitted events will transition the
+            # state in the reducer, but the snapshot must reflect the target state.
             if self._snapshot_publisher is not None:
                 try:
                     active_projection = projection.model_copy(
@@ -325,13 +328,18 @@ class HandlerNodeRegistrationAcked:
                             "updated_at": now,
                         }
                     )
+                    # node_name is None because neither the ack command nor the
+                    # registration projection carries a human-readable node name.
+                    # The introspection event that originally provided the name is
+                    # not available in this handler's scope.  The snapshot consumer
+                    # can resolve it via entity_id if needed.
                     await self._snapshot_publisher.publish_from_projection(
                         active_projection, node_name=None
                     )
                 except Exception as snap_err:
                     logger.warning(
                         "Snapshot publish failed (non-blocking): %s",
-                        snap_err,
+                        sanitize_error_message(snap_err),
                         extra={
                             "node_id": str(node_id),
                             "correlation_id": str(correlation_id),

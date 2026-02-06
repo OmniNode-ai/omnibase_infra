@@ -68,8 +68,8 @@ from omnibase_infra.errors import ModelInfraErrorContext
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers import HandlerConsul
-    from omnibase_infra.projectors.snapshot_publisher_registration import (
-        SnapshotPublisherRegistration,
+    from omnibase_infra.protocols.protocol_snapshot_publisher import (
+        ProtocolSnapshotPublisher,
     )
     from omnibase_infra.runtime.projector_shell import ProjectorShell
 from omnibase_infra.models.registration.events.model_node_registration_initiated import (
@@ -191,7 +191,7 @@ class HandlerNodeIntrospected:
         projector: ProjectorShell | None = None,
         ack_timeout_seconds: float | None = None,
         consul_handler: HandlerConsul | None = None,
-        snapshot_publisher: SnapshotPublisherRegistration | None = None,
+        snapshot_publisher: ProtocolSnapshotPublisher | None = None,
     ) -> None:
         """Initialize the handler with a projection reader and optional components.
 
@@ -488,7 +488,7 @@ class HandlerNodeIntrospected:
                 except Exception as snap_err:
                     logger.warning(
                         "Snapshot publish failed (non-blocking): %s",
-                        snap_err,
+                        sanitize_error_message(snap_err),
                         extra={
                             "node_id": str(node_id),
                             "correlation_id": str(correlation_id),

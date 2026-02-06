@@ -96,7 +96,9 @@ class ModelSnapshotTopicConfig(BaseModel):
 
     Key Semantics:
         Kafka compaction uses message keys to determine which records to retain.
-        For snapshot topics, the key is the entity_id (UUID string).
+        For snapshot topics, the key is the entity_id as a plain UUID string
+        (NOT ``domain:entity_id``). Domain isolation is handled at the topic
+        level, not the key level.
 
         For example: "550e8400-e29b-41d4-a716-446655440000"
 
@@ -566,9 +568,13 @@ class ModelSnapshotTopicConfig(BaseModel):
     def get_snapshot_key(self, entity_id: str) -> str:
         """Generate a snapshot key for Kafka compaction.
 
-        Keys are the node_id (entity_id) as a UUID string. This ensures
+        Keys are the entity_id as a plain UUID string. This ensures
         compaction retains only the latest snapshot per node and simplifies
         cross-language consumer compatibility.
+
+        Note:
+            The key is entity_id ONLY. It does NOT include domain or any
+            other prefix (e.g., NOT "domain:entity_id").
 
         Args:
             entity_id: Entity UUID as string

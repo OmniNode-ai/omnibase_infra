@@ -1897,6 +1897,25 @@ async def bootstrap() -> int:
                     correlation_id,
                 )
 
+        # Stop snapshot publisher if still running.
+        # The graceful shutdown path and the inner pool_error except block both
+        # clean up the snapshot publisher and set it to None. This guard catches
+        # the case where an exception occurs AFTER the publisher is started but
+        # OUTSIDE those two cleanup paths (e.g., during RuntimeHostProcess
+        # creation, health server start, or introspection subscription setup).
+        # Use locals().get() because snapshot_publisher is only assigned after
+        # the postgres_host check (line ~686); early failures (e.g., config
+        # load) would leave it unbound.
+        if locals().get("snapshot_publisher") is not None:
+            try:
+                await snapshot_publisher.stop()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Failed to stop snapshot publisher during cleanup: %s (correlation_id=%s)",
+                    sanitize_error_message(cleanup_error),
+                    correlation_id,
+                )
+
         if postgres_pool is not None:
             try:
                 await postgres_pool.close()

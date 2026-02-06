@@ -58,11 +58,14 @@ from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
-from omnibase_infra.utils import validate_timezone_aware_with_context
+from omnibase_infra.utils import (
+    sanitize_error_message,
+    validate_timezone_aware_with_context,
+)
 
 if TYPE_CHECKING:
-    from omnibase_infra.projectors.snapshot_publisher_registration import (
-        SnapshotPublisherRegistration,
+    from omnibase_infra.protocols.protocol_snapshot_publisher import (
+        ProtocolSnapshotPublisher,
     )
 
 logger = logging.getLogger(__name__)
@@ -120,13 +123,13 @@ class HandlerRuntimeTick:
     def __init__(
         self,
         projection_reader: ProjectionReaderRegistration,
-        snapshot_publisher: SnapshotPublisherRegistration | None = None,
+        snapshot_publisher: ProtocolSnapshotPublisher | None = None,
     ) -> None:
         """Initialize the handler with a projection reader.
 
         Args:
             projection_reader: Reader for querying registration projection state.
-            snapshot_publisher: Optional SnapshotPublisherRegistration for publishing
+            snapshot_publisher: Optional ProtocolSnapshotPublisher for publishing
                 tombstones when nodes expire. If None, tombstone publishing is skipped.
                 Tombstone publishing is always best-effort and non-blocking.
         """
@@ -381,7 +384,7 @@ class HandlerRuntimeTick:
                 except Exception as snap_err:
                     logger.warning(
                         "Snapshot tombstone publish failed (non-blocking): %s",
-                        snap_err,
+                        sanitize_error_message(snap_err),
                         extra={
                             "node_id": str(projection.entity_id),
                             "correlation_id": str(correlation_id),
