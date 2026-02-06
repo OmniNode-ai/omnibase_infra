@@ -524,7 +524,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
 
         Args:
             snapshot: The projection to publish as a snapshot. Must contain
-                valid entity_id and domain for key construction.
+                valid entity_id for key construction (domain isolation at topic level).
 
         Raises:
             InfraConnectionError: If Kafka connection fails
