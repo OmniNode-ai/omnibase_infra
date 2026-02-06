@@ -554,13 +554,18 @@ These variables must be set explicitly. The runtime will fail to start if they a
 
 ### Named Volumes
 
-| Volume                          | Purpose                              | Service           |
-|---------------------------------|--------------------------------------|-------------------|
-| `omninode-runtime-logs`   | Main runtime logs                    | omninode-runtime  |
-| `omninode-runtime-data`   | Main runtime persistent state        | omninode-runtime  |
-| `omninode-effects-logs`   | Effects runtime logs                 | runtime-effects   |
-| `omninode-effects-data`   | Effects runtime persistent state     | runtime-effects   |
-| `omninode-worker-logs`    | Worker logs (shared across replicas) | runtime-worker    |
+| Volume                          | Purpose                              | Service                |
+|---------------------------------|--------------------------------------|------------------------|
+| `omnibase-infra-postgres-data`  | PostgreSQL data                      | postgres               |
+| `omnibase-infra-redpanda-data`  | Redpanda event streaming data        | redpanda               |
+| `omnibase-infra-valkey-data`    | Valkey cache data                    | valkey                 |
+| `omnibase-infra-consul-data`    | Consul service discovery data        | consul                 |
+| `omninode-runtime-logs`         | Main runtime logs                    | omninode-runtime       |
+| `omninode-runtime-data`         | Main runtime persistent state        | omninode-runtime       |
+| `omninode-effects-logs`         | Effects runtime logs                 | runtime-effects        |
+| `omninode-effects-data`         | Effects runtime persistent state     | runtime-effects        |
+| `omninode-worker-logs`          | Worker logs (shared across replicas) | runtime-worker         |
+| `omninode-agent-actions-logs`   | Agent actions consumer logs          | agent-actions-consumer |
 
 ### Volume Commands
 

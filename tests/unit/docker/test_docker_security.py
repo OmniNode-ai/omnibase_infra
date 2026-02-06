@@ -200,9 +200,9 @@ class TestEnvExampleSecurity:
         content = env_file.read_text()
 
         # Find password-related variables
+        # Only check required credentials (VALKEY_PASSWORD is optional for local dev)
         password_vars = [
             "POSTGRES_PASSWORD",
-            "REDIS_PASSWORD",
         ]
 
         for var in password_vars:
@@ -430,15 +430,12 @@ class TestDockerComposeSecurity:
         )
 
     def test_valkey_password_configuration(self) -> None:
-        """Verify Valkey password (REDIS_PASSWORD env var) is properly configured.
+        """Verify Valkey password (VALKEY_PASSWORD env var) is properly configured.
 
         For local development, Valkey runs WITHOUT authentication (no --requirepass),
-        accessible only within the Docker network. The REDIS_PASSWORD env var is
+        accessible only within the Docker network. The VALKEY_PASSWORD env var is
         provided for runtime services to use when connecting, with an empty default
         since the server doesn't require auth.
-
-        Note: The env var name REDIS_PASSWORD is retained for backwards compatibility
-        with existing Redis client libraries and infrastructure.
 
         Security rationale:
         - Valkey is only accessible within omnibase-infra-network (not exposed to host)
@@ -448,11 +445,13 @@ class TestDockerComposeSecurity:
         compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
-        # Should have REDIS_PASSWORD configuration for client applications
-        assert "REDIS_PASSWORD" in content, "Missing REDIS_PASSWORD configuration"
+        # Should have VALKEY_PASSWORD configuration for client applications
+        assert "VALKEY_PASSWORD" in content, "Missing VALKEY_PASSWORD configuration"
 
-        # Should use ${REDIS_PASSWORD} pattern with environment variable substitution
-        assert "${REDIS_PASSWORD" in content, "REDIS_PASSWORD should use ${VAR} syntax"
+        # Should use ${VALKEY_PASSWORD} pattern with environment variable substitution
+        assert "${VALKEY_PASSWORD" in content, (
+            "VALKEY_PASSWORD should use ${VAR} syntax"
+        )
 
         # Verify Valkey service exists and uses secure network isolation
         assert "valkey:" in content, "Missing Valkey service definition"
