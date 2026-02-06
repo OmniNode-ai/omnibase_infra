@@ -48,9 +48,12 @@ from omnibase_infra.runtime.providers.provider_kafka_producer import (
 from omnibase_infra.runtime.providers.provider_postgres_pool import (
     ProviderPostgresPool,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
+# Maximum contract file size (10 MB) - consistent with HandlerPluginLoader
+_MAX_CONTRACT_SIZE = 10 * 1024 * 1024
 
 # Type alias for provider close functions
 _CloseFunc = Callable[[Any], Awaitable[None]]
@@ -188,9 +191,10 @@ class DependencyMaterializer:
                             operation="materialize_dependency",
                             target_name=dep_name,
                         )
+                        safe_msg = sanitize_error_message(e)
                         raise ProtocolConfigurationError(
                             f"Failed to materialize required dependency "
-                            f"'{dep_name}' (type={dep_type}): {e}",
+                            f"'{dep_name}' (type={dep_type}): {safe_msg}",
                             context=context,
                         ) from e
 
@@ -199,7 +203,7 @@ class DependencyMaterializer:
                         extra={
                             "dep_name": dep_name,
                             "dep_type": dep_type,
-                            "error": str(e),
+                            "error": sanitize_error_message(e),
                         },
                     )
 
@@ -339,18 +343,21 @@ class DependencyMaterializer:
         """
         if resource_type == EnumInfraResourceType.POSTGRES_POOL:
             provider = ProviderPostgresPool(self._config.postgres)
+            resource = await provider.create()
             self._close_funcs[resource_type] = ProviderPostgresPool.close
-            return await provider.create()
+            return resource
 
         if resource_type == EnumInfraResourceType.KAFKA_PRODUCER:
             provider_kafka = ProviderKafkaProducer(self._config.kafka)
+            resource = await provider_kafka.create()
             self._close_funcs[resource_type] = ProviderKafkaProducer.close
-            return await provider_kafka.create()
+            return resource
 
         if resource_type == EnumInfraResourceType.HTTP_CLIENT:
             provider_http = ProviderHttpClient(self._config.http)
+            resource = await provider_http.create()
             self._close_funcs[resource_type] = ProviderHttpClient.close
-            return await provider_http.create()
+            return resource
 
         context = ModelInfraErrorContext.with_correlation(
             correlation_id=correlation_id,
@@ -390,12 +397,30 @@ class DependencyMaterializer:
                 context=context,
             )
 
+        file_size = path.stat().st_size
+        if file_size > _MAX_CONTRACT_SIZE:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.FILESYSTEM,
+                operation="load_contract_yaml",
+                target_name=str(path),
+            )
+            raise ProtocolConfigurationError(
+                f"Contract file too large: {file_size} bytes "
+                f"(max: {_MAX_CONTRACT_SIZE} bytes)",
+                context=context,
+            )
+
         try:
             with open(path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
                 if data is None:
                     return {}
                 if not isinstance(data, dict):
+                    logger.warning(
+                        "Contract YAML parsed to non-dict type, treating as empty",
+                        extra={"path": str(path), "type": type(data).__name__},
+                    )
                     return {}
                 return data
         except yaml.YAMLError as e:

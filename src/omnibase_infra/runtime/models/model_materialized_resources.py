@@ -30,7 +30,7 @@ class ModelMaterializedResources(BaseModel):
         ... )
         >>> pool = resources.get("pattern_store")
 
-    .. versionadded:: 0.x.x
+    .. versionadded:: 0.4.1
         Part of OMN-1976 contract dependency materialization.
     """
 

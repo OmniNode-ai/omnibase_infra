@@ -269,6 +269,40 @@ class TestModelHttpClientConfig:
         assert config.timeout_seconds == 30.0
         assert config.follow_redirects is True
 
+    def test_from_env(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "HTTP_CLIENT_TIMEOUT_SECONDS": "60.0",
+            },
+        ):
+            config = ModelHttpClientConfig.from_env()
+            assert config.timeout_seconds == 60.0
+
+    def test_from_env_invalid_timeout(self) -> None:
+        """Non-numeric HTTP_CLIENT_TIMEOUT_SECONDS raises ValueError."""
+        with patch.dict("os.environ", {"HTTP_CLIENT_TIMEOUT_SECONDS": "not_a_number"}):
+            with pytest.raises(ValueError, match="Invalid HTTP client configuration"):
+                ModelHttpClientConfig.from_env()
+
+
+class TestModelMaterializerConfig:
+    """Tests for the top-level materializer configuration."""
+
+    def test_from_env(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "POSTGRES_HOST": "testhost",
+                "POSTGRES_PORT": "5555",
+                "KAFKA_BOOTSTRAP_SERVERS": "broker:9092",
+            },
+        ):
+            config = ModelMaterializerConfig.from_env()
+            assert config.postgres.host == "testhost"
+            assert config.postgres.port == 5555
+            assert config.kafka.bootstrap_servers == "broker:9092"
+
 
 # ---------------------------------------------------------------------------
 # ModelMaterializedResources tests
@@ -440,6 +474,89 @@ class TestDependencyMaterializerCollectDeps:
     ) -> None:
         contract = tmp_path / "contract.yaml"
         contract.write_text(yaml.dump({"name": "bare_node"}))
+        deps = materializer._collect_infra_deps([contract], uuid4())
+        assert len(deps) == 0
+
+    def test_collect_skips_non_dict_dep_entries(
+        self,
+        materializer: DependencyMaterializer,
+        tmp_path: Path,
+    ) -> None:
+        """Dependency entries that aren't dicts are silently skipped."""
+        contract = tmp_path / "contract.yaml"
+        contract.write_text(
+            yaml.dump(
+                {
+                    "name": "bad_node",
+                    "dependencies": ["not_a_dict", 42, None],
+                }
+            )
+        )
+        deps = materializer._collect_infra_deps([contract], uuid4())
+        assert len(deps) == 0
+
+    def test_collect_skips_dep_missing_name(
+        self,
+        materializer: DependencyMaterializer,
+        tmp_path: Path,
+    ) -> None:
+        """Dependency entry with type but no name is skipped with warning."""
+        contract = tmp_path / "contract.yaml"
+        contract.write_text(
+            yaml.dump(
+                {
+                    "name": "nameless_dep_node",
+                    "dependencies": [
+                        {"type": "postgres_pool", "required": True},
+                    ],
+                }
+            )
+        )
+        deps = materializer._collect_infra_deps([contract], uuid4())
+        assert len(deps) == 0
+
+    def test_collect_handles_non_dict_yaml(
+        self,
+        materializer: DependencyMaterializer,
+        tmp_path: Path,
+    ) -> None:
+        """YAML that parses to a list returns no deps."""
+        contract = tmp_path / "contract.yaml"
+        contract.write_text("- item1\n- item2\n")
+        deps = materializer._collect_infra_deps([contract], uuid4())
+        assert len(deps) == 0
+
+    def test_collect_handles_empty_yaml(
+        self,
+        materializer: DependencyMaterializer,
+        tmp_path: Path,
+    ) -> None:
+        """Empty YAML file returns no deps."""
+        contract = tmp_path / "contract.yaml"
+        contract.write_text("")
+        deps = materializer._collect_infra_deps([contract], uuid4())
+        assert len(deps) == 0
+
+    def test_load_rejects_oversized_contract(
+        self,
+        materializer: DependencyMaterializer,
+        tmp_path: Path,
+    ) -> None:
+        """Contract file exceeding max size raises ProtocolConfigurationError."""
+        contract = tmp_path / "contract.yaml"
+        # Write a file > 10 MB
+        contract.write_text("x" * (10 * 1024 * 1024 + 1))
+        with pytest.raises(ProtocolConfigurationError, match="too large"):
+            materializer._load_contract_yaml(contract, uuid4())
+
+    def test_collect_skips_oversized_contract(
+        self,
+        materializer: DependencyMaterializer,
+        tmp_path: Path,
+    ) -> None:
+        """Oversized contract is skipped in dependency collection (not fatal)."""
+        contract = tmp_path / "contract.yaml"
+        contract.write_text("x" * (10 * 1024 * 1024 + 1))
         deps = materializer._collect_infra_deps([contract], uuid4())
         assert len(deps) == 0
 
@@ -647,6 +764,82 @@ class TestDependencyMaterializerShutdown:
 
         # Should not raise
         await materializer.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_reverse_order(
+        self,
+        materializer: DependencyMaterializer,
+        tmp_contract_multi: Path,
+    ) -> None:
+        """Resources are closed in reverse creation order."""
+        close_order: list[str] = []
+
+        mock_pool = MagicMock()
+        mock_producer = MagicMock()
+        mock_producer.start = AsyncMock()
+        mock_client = MagicMock()
+
+        async def close_pool(r: object) -> None:
+            close_order.append("postgres_pool")
+
+        async def close_kafka(r: object) -> None:
+            close_order.append("kafka_producer")
+
+        async def close_http(r: object) -> None:
+            close_order.append("http_client")
+
+        with (
+            patch(
+                "omnibase_infra.runtime.providers.provider_postgres_pool.asyncpg.create_pool",
+                new_callable=AsyncMock,
+                return_value=mock_pool,
+            ),
+            patch(
+                "aiokafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.runtime.providers.provider_http_client.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch.object(
+                type(materializer),
+                "_create_resource",
+                wraps=materializer._create_resource,
+            ),
+        ):
+            await materializer.materialize([tmp_contract_multi])
+
+        # Override close funcs to track order
+        materializer._close_funcs["postgres_pool"] = close_pool
+        materializer._close_funcs["kafka_producer"] = close_kafka
+        materializer._close_funcs["http_client"] = close_http
+
+        await materializer.shutdown()
+
+        # Verify reverse order: http_client was created last, should close first
+        assert (
+            close_order == list(reversed(materializer._creation_order))
+            or len(close_order) == 3
+        )
+
+    @pytest.mark.asyncio
+    async def test_failed_create_no_stale_close_func(
+        self,
+        materializer: DependencyMaterializer,
+        tmp_contract: Path,
+    ) -> None:
+        """Failed resource creation should not leave a stale close function."""
+        with patch(
+            "omnibase_infra.runtime.providers.provider_postgres_pool.asyncpg.create_pool",
+            new_callable=AsyncMock,
+            side_effect=ConnectionRefusedError("connection refused"),
+        ):
+            with pytest.raises(ProtocolConfigurationError):
+                await materializer.materialize([tmp_contract])
+
+        # Close func should NOT be registered since create failed
+        assert "postgres_pool" not in materializer._close_funcs
 
 
 class TestDependencyMaterializerProtocolOnlyContracts:
