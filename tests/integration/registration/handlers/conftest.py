@@ -64,9 +64,11 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
 #   - Ensures consistent schema initialization across projector and handler tests
 #   - Provides test isolation via TRUNCATE in pg_pool fixture teardown
 #
-# Imported fixtures:
+# Imported constants:
 #   - DOCKER_AVAILABLE: Module constant - True if Docker is running
 #   - SCHEMA_FILE: Path to registration_projections schema SQL
+#
+# Imported fixtures:
 #   - docker_available: Session fixture - Docker availability check
 #   - event_loop_policy: Session fixture - asyncio event loop policy
 #   - postgres_container: Session fixture - PostgreSQL testcontainer (expensive)

@@ -15,9 +15,11 @@ See: pyproject.toml cryptography comment for upgrade rationale.
 import hashlib
 from uuid import UUID
 
+import pytest
 from packaging.version import Version
 
 
+@pytest.mark.unit
 class TestCryptographyCompatibility:
     """Verify cryptography package functions correctly after upgrade."""
 
@@ -71,6 +73,7 @@ class TestCryptographyCompatibility:
         assert decrypted == plaintext
 
 
+@pytest.mark.unit
 class TestHashlibCompatibility:
     """Verify hashlib operations used in codebase work correctly.
 
@@ -137,6 +140,7 @@ class TestHashlibCompatibility:
         assert uuid_str == uuid_str2, "Content-derived UUIDs should be deterministic"
 
 
+@pytest.mark.unit
 class TestSecretsModuleAvailable:
     """Verify secrets module is available for secure random operations.
 
