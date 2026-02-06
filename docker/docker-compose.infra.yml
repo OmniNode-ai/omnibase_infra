@@ -260,7 +260,7 @@ services:
     healthcheck:
       !!merge <<: *healthcheck-defaults
       # Use password for healthcheck if VALKEY_PASSWORD is set
-      test: ["CMD-SHELL", "valkey-cli ${VALKEY_PASSWORD:+-a $VALKEY_PASSWORD --no-auth-warning} ping | grep -q PONG"]
+      test: ["CMD-SHELL", "valkey-cli ${VALKEY_PASSWORD:+-a \"$VALKEY_PASSWORD\" --no-auth-warning} ping | grep -q PONG"]
     logging: *logging-defaults
     restart: unless-stopped
     labels:
@@ -303,8 +303,10 @@ services:
         condition: service_healthy
     environment:
       DB_CONNECTION_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/infisical_db
-      # Redis URL with optional password authentication
-      # When VALKEY_PASSWORD is set, configure INFISICAL_REDIS_URL with password
+      # Redis URL for Infisical's cache backend (Valkey is Redis-compatible)
+      # WARNING: If VALKEY_PASSWORD is set, you MUST also set INFISICAL_REDIS_URL
+      # with credentials (e.g., redis://:password@valkey:6379) or Infisical will
+      # fail to connect. See docker/.env.example for details.
       REDIS_URL: ${INFISICAL_REDIS_URL:-redis://valkey:6379}
       ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:?INFISICAL_ENCRYPTION_KEY is required for secrets profile}
       AUTH_SECRET: ${INFISICAL_AUTH_SECRET:?INFISICAL_AUTH_SECRET is required for secrets profile}
