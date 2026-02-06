@@ -2116,6 +2116,45 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Handler System)
     ticket: OMN-1837
+  # ==========================================================================
+  # Gateway Envelope Signer Exemptions (OMN-1899)
+  # ==========================================================================
+  # sign_envelope requires multiple parameters for envelope metadata:
+  # payload (required), bus_id (required), and optional trace_id, causality_id,
+  # tenant_id, emitter_identity. All are per-message attributes from ModelMessageEnvelope.
+  # Using a separate input model would add complexity without benefit.
+  - file_pattern: 'gateway/services/service_envelope_signer\.py'
+    method_pattern: "Function 'sign_envelope'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      sign_envelope takes per-message envelope metadata (trace_id, causality_id, tenant_id, emitter_identity). These are all optional with sensible defaults. The method signature mirrors ModelMessageEnvelope fields for clarity.
+
+    documentation:
+      - OMN-1898 (ModelMessageEnvelope design)
+    ticket: OMN-1899
+  - file_pattern: 'gateway/services/service_envelope_signer\.py'
+    method_pattern: "Function 'sign_dict'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      sign_dict is a variant of sign_envelope that accepts dict payloads directly. Uses identical envelope metadata parameters for consistency. Enables signing of dict envelopes in runtime host publish flow.
+
+    documentation:
+      - OMN-1898 (ModelMessageEnvelope design)
+    ticket: OMN-1899
+  # ==========================================================================
+  # Gateway Config Exemptions (OMN-1899)
+  # ==========================================================================
+  # runtime_id is intentionally str (not UUID) per OMN-1898 design decision.
+  # It's a human-readable gateway identifier like "runtime-dev-001", not a UUID.
+  # This aligns with ModelMessageEnvelope.runtime_id in omnibase_core.
+  - file_pattern: 'gateway/models/model_gateway_config\.py'
+    violation_pattern: "Field 'runtime_id' should use UUID"
+    reason: >
+      runtime_id is intentionally str per OMN-1898 design. It's a human-readable gateway identifier (e.g., "runtime-dev-001") for debugging and attribution, not a UUID. This matches ModelMessageEnvelope.runtime_id in omnibase_core.
+
+    documentation:
+      - OMN-1898 ticket description (Identity Alignment section)
+    ticket: OMN-1899
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
