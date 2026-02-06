@@ -127,6 +127,27 @@ class ModelGatewayConfig(BaseModel):
         default_factory=tuple,
         description="Topic patterns allowed for publishing (empty = allow all)",
     )
+
+    @field_validator("allowed_topics", mode="before")
+    @classmethod
+    def _coerce_allowed_topics(cls, v: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+        """Coerce list inputs to tuple for ``strict=True`` compatibility.
+
+        With ``strict=True``, Pydantic refuses to coerce a ``list`` into a
+        ``tuple`` automatically. This validator accepts either type so that
+        callers can pass ``["events.*"]`` without triggering a validation
+        error.
+
+        Args:
+            v: The raw allowed_topics value (list or tuple of strings).
+
+        Returns:
+            A tuple of topic pattern strings.
+        """
+        if isinstance(v, list):
+            return tuple(v)
+        return v
+
     reject_unsigned: bool = Field(
         default=True,
         description=(
@@ -139,14 +160,19 @@ class ModelGatewayConfig(BaseModel):
 
     @field_validator("private_key_path", "public_key_path", mode="before")
     @classmethod
-    def _validate_key_path_is_absolute(cls, v: Path | None) -> Path | None:
+    def _validate_key_path_is_absolute(cls, v: str | Path | None) -> Path | None:
         """Validate that key paths are absolute to prevent path traversal.
 
+        With ``strict=True``, Pydantic refuses to coerce a ``str`` into a
+        ``Path`` automatically. This validator accepts both types, converts
+        to ``Path``, and validates that the path is absolute.
+
         Args:
-            v: The path value to validate, or None if not provided.
+            v: The path value to validate (str or Path), or None if not
+                provided.
 
         Returns:
-            The validated path value (unchanged if valid).
+            The validated ``Path`` object, or ``None`` if not provided.
 
         Raises:
             ValueError: If the path is not absolute.
@@ -159,6 +185,7 @@ class ModelGatewayConfig(BaseModel):
                     f"got relative path: {path}"
                 )
                 raise ValueError(msg)
+            return path
         return v
 
 
