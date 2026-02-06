@@ -889,17 +889,18 @@ handler_routing:
 ### Consumed Events
 
 ```yaml
+# Topics use realm-agnostic 5-segment ONEX format: onex.<kind>.<producer>.<event-name>.v<version>
 consumed_events:
-  - topic: "{env}.{namespace}.onex.evt.node-introspection.v1"
+  - topic: "onex.evt.platform.node-introspection.v1"
     event_type: "NodeIntrospectionEvent"
     description: "Node startup introspection"
     consumer_group: "registration-orchestrator"
 
-  - topic: "{env}.{namespace}.onex.cmd.node-registration-acked.v1"
+  - topic: "onex.cmd.platform.node-registration-acked.v1"
     event_type: "NodeRegistrationAcked"
     description: "Node acknowledges registration"
 
-  - topic: "{env}.{namespace}.onex.internal.runtime-tick.v1"
+  - topic: "onex.intent.platform.runtime-tick.v1"
     event_type: "RuntimeTick"
     description: "Periodic tick for timeout evaluation"
 ```
@@ -908,15 +909,15 @@ consumed_events:
 
 ```yaml
 published_events:
-  - topic: "{env}.{namespace}.onex.evt.node-registration-initiated.v1"
+  - topic: "onex.evt.platform.node-registration-initiated.v1"
     event_type: "NodeRegistrationInitiated"
     description: "Registration workflow started"
 
-  - topic: "{env}.{namespace}.onex.evt.node-became-active.v1"
+  - topic: "onex.evt.platform.node-became-active.v1"
     event_type: "NodeBecameActive"
     description: "Node transitioned to ACTIVE"
 
-  - topic: "{env}.{namespace}.onex.evt.node-liveness-expired.v1"
+  - topic: "onex.evt.platform.node-liveness-expired.v1"
     event_type: "NodeLivenessExpired"
     description: "Heartbeat deadline passed"
 ```

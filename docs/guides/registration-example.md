@@ -187,8 +187,9 @@ The Registration Orchestrator subscribes to introspection events:
 
 ```yaml
 # contract.yaml (orchestrator)
+# Topics use realm-agnostic 5-segment ONEX format: onex.<kind>.<producer>.<event-name>.v<version>
 consumed_events:
-  - topic: "{env}.{namespace}.onex.evt.node-introspection.v1"
+  - topic: "onex.evt.platform.node-introspection.v1"
     event_type: "NodeIntrospectionEvent"
 ```
 

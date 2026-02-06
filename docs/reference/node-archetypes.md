@@ -724,24 +724,25 @@ handler_routing:
         queries_pending_entities: true
 
 # Events consumed from Kafka
+# Topics use realm-agnostic 5-segment ONEX format: onex.<kind>.<producer>.<event-name>.v<version>
 consumed_events:
-  - topic: "{env}.{namespace}.onex.evt.node-introspection.v1"
+  - topic: "onex.evt.platform.node-introspection.v1"
     event_type: "NodeIntrospectionEvent"
     description: "Node startup introspection"
-  - topic: "{env}.{namespace}.onex.cmd.node-registration-acked.v1"
+  - topic: "onex.cmd.platform.node-registration-acked.v1"
     event_type: "NodeRegistrationAcked"
     description: "Node acknowledges registration"
-  - topic: "{env}.{namespace}.onex.internal.runtime-tick.v1"
+  - topic: "onex.intent.platform.runtime-tick.v1"
     event_type: "RuntimeTick"
     description: "Periodic tick for timeout evaluation"
 
 # Events published to Kafka
 published_events:
-  - topic: "{env}.{namespace}.onex.evt.node-registration-initiated.v1"
+  - topic: "onex.evt.platform.node-registration-initiated.v1"
     event_type: "NodeRegistrationInitiated"
-  - topic: "{env}.{namespace}.onex.evt.node-became-active.v1"
+  - topic: "onex.evt.platform.node-became-active.v1"
     event_type: "NodeBecameActive"
-  - topic: "{env}.{namespace}.onex.evt.node-liveness-expired.v1"
+  - topic: "onex.evt.platform.node-liveness-expired.v1"
     event_type: "NodeLivenessExpired"
 
 # Intent routing to effect nodes

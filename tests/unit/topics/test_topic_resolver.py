@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 OmniNode Team
+# Copyright (c) 2026 OmniNode Team
 """Unit tests for canonical TopicResolver.
 
 Regression tests for OMN-1972: Ensure TopicResolver validates and resolves
@@ -159,3 +159,40 @@ class TestTopicResolver:
         with pytest.raises(TopicResolutionError, match="bad-topic") as exc_info:
             resolver.resolve("bad-topic", correlation_id=None)
         assert "correlation_id" not in str(exc_info.value)
+
+    def test_error_is_protocol_configuration_error(self) -> None:
+        """TopicResolutionError inherits from ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        assert issubclass(TopicResolutionError, ProtocolConfigurationError)
+
+    def test_error_always_has_infra_context_without_correlation_id(self) -> None:
+        """infra_context is present even when no correlation_id is provided."""
+        from omnibase_infra.enums import EnumInfraTransportType
+
+        resolver = TopicResolver()
+        with pytest.raises(TopicResolutionError) as exc_info:
+            resolver.resolve("bad-topic")
+        err = exc_info.value
+        assert err.infra_context is not None
+        assert err.infra_context.correlation_id is not None
+        assert err.infra_context.transport_type == EnumInfraTransportType.KAFKA
+        assert err.infra_context.operation == "resolve_topic"
+
+    def test_error_always_has_infra_context_with_correlation_id(self) -> None:
+        """infra_context preserves the caller-supplied correlation_id."""
+        resolver = TopicResolver()
+        cid = uuid4()
+        with pytest.raises(TopicResolutionError) as exc_info:
+            resolver.resolve("bad-topic", correlation_id=cid)
+        err = exc_info.value
+        assert err.infra_context is not None
+        assert err.infra_context.correlation_id == cid
+
+    def test_error_catchable_as_protocol_configuration_error(self) -> None:
+        """TopicResolutionError can be caught as ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        resolver = TopicResolver()
+        with pytest.raises(ProtocolConfigurationError):
+            resolver.resolve("bad-topic")

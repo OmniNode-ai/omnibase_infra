@@ -37,29 +37,33 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from omnibase_core.errors import OnexError
 from omnibase_core.validation import validate_topic_suffix
 from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
 
 
-class TopicResolutionError(OnexError):
+class TopicResolutionError(ProtocolConfigurationError):
     """Raised when a topic suffix cannot be resolved to a concrete topic.
 
     This error indicates that the provided topic suffix does not conform to the
     ONEX topic naming convention and therefore cannot be mapped to a Kafka topic.
 
-    Extends OnexError to follow ONEX error handling conventions. When a
-    ``correlation_id`` is provided at resolution time, it is propagated both in
-    the error message and as a structured ``ModelInfraErrorContext`` accessible
-    via the ``infra_context`` attribute.
+    Extends ``ProtocolConfigurationError`` so that all TopicResolver failures
+    are automatically instances of the canonical infrastructure configuration
+    error type. This ensures consistent error taxonomy across the codebase
+    without requiring callers to manually wrap topic errors.
+
+    A ``ModelInfraErrorContext`` is always attached (auto-generated when not
+    explicitly provided), guaranteeing that every ``TopicResolutionError``
+    carries a ``correlation_id`` for distributed tracing.
 
     Attributes:
-        infra_context: Optional ``ModelInfraErrorContext`` carrying the
-            correlation_id, transport type, and operation for callers that
-            need structured error context without re-wrapping.
+        infra_context: ``ModelInfraErrorContext`` carrying the correlation_id,
+            transport type, and operation. Always present -- callers can rely
+            on structured error context without parsing the message.
     """
 
     def __init__(
@@ -69,18 +73,30 @@ class TopicResolutionError(OnexError):
         correlation_id: UUID | None = None,
         infra_context: ModelInfraErrorContext | None = None,
     ) -> None:
-        """Initialize TopicResolutionError with optional correlation tracking.
+        """Initialize TopicResolutionError with correlation tracking.
+
+        If ``infra_context`` is not provided, one is auto-generated with
+        transport_type=KAFKA and operation="resolve_topic". If neither
+        ``infra_context`` nor ``correlation_id`` is provided, a fresh
+        correlation_id is auto-generated so every error is traceable.
 
         Args:
             message: Human-readable error message.
             correlation_id: Optional correlation ID for distributed tracing.
-                Passed to the ``OnexError`` base class for structured tracking.
+                Used to build an ``infra_context`` when one is not explicitly
+                provided.
             infra_context: Optional infrastructure error context with transport
-                type, operation, and correlation_id. Stored as an attribute so
-                callers can extract structured context without parsing the message.
+                type, operation, and correlation_id. When provided, takes
+                precedence over ``correlation_id``.
         """
-        super().__init__(message, correlation_id=correlation_id)
+        if infra_context is None:
+            infra_context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="resolve_topic",
+            )
         self.infra_context = infra_context
+        super().__init__(message, context=infra_context)
 
 
 class TopicResolver:
@@ -137,14 +153,19 @@ class TopicResolver:
         """
         result = validate_topic_suffix(topic_suffix)
         if not result.is_valid:
-            # Build structured infra context when correlation_id is available
-            infra_context: ModelInfraErrorContext | None = None
+            # Always build structured infra context with a correlation_id.
+            # When the caller provides a correlation_id it is propagated;
+            # otherwise ModelInfraErrorContext.with_correlation() auto-generates
+            # one so every error is traceable via distributed tracing.
+            infra_context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="resolve_topic",
+            )
+            # Include correlation_id in the human-readable message only when
+            # the caller explicitly provided one; auto-generated IDs are
+            # available via the structured infra_context attribute.
             if correlation_id is not None:
-                infra_context = ModelInfraErrorContext.with_correlation(
-                    correlation_id=correlation_id,
-                    transport_type=EnumInfraTransportType.KAFKA,
-                    operation="resolve_topic",
-                )
                 raise TopicResolutionError(
                     f"Invalid topic suffix '{topic_suffix}' "
                     f"(correlation_id={correlation_id}): {result.error}",
@@ -152,6 +173,7 @@ class TopicResolver:
                     infra_context=infra_context,
                 )
             raise TopicResolutionError(
-                f"Invalid topic suffix '{topic_suffix}': {result.error}"
+                f"Invalid topic suffix '{topic_suffix}': {result.error}",
+                infra_context=infra_context,
             )
         return topic_suffix

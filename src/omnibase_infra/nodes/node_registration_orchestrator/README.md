@@ -463,6 +463,8 @@ payload: ModelPostgresIntentPayload
 | `onex.evt.platform.node-introspection.v1` | `NodeIntrospectionEvent` | Node introspection data |
 | `onex.evt.platform.registry-request-introspection.v1` | `RegistryRequestIntrospectionEvent` | Registry request |
 | `onex.intent.platform.runtime-tick.v1` | `RuntimeTick` | Internal tick for timeout evaluation |
+| `onex.cmd.platform.node-registration-acked.v1` | `NodeRegistrationAcked` | Node acknowledges registration acceptance |
+| `onex.evt.platform.node-heartbeat.v1` | `NodeHeartbeatEvent` | Periodic heartbeat for liveness tracking |
 
 ### Published Events
 

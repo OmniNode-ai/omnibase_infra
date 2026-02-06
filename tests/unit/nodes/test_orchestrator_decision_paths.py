@@ -456,8 +456,8 @@ class TestConsumedEventHandlers:
     def _extract_topic_slug(topic: str) -> str:
         """Extract the event slug from a topic pattern.
 
-        Topic patterns follow: onex.evt.platform.<slug>.v1
-        or: onex.internal.<slug>.v1
+        Topic patterns follow 5-segment ONEX format: onex.<kind>.platform.<slug>.v<version>
+        Examples: onex.evt.platform.<slug>.v1, onex.intent.platform.<slug>.v1
 
         Args:
             topic: The full topic pattern string.

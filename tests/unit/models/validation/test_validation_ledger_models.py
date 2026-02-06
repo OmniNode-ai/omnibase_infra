@@ -17,6 +17,8 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+pytestmark = [pytest.mark.unit]
+
 from omnibase_infra.models.validation_ledger import (
     ModelValidationLedgerAppendResult,
     ModelValidationLedgerEntry,

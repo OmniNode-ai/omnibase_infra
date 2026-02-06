@@ -21,7 +21,7 @@ from omnibase_infra.models.validation_ledger.model_validation_ledger_query impor
 class ModelValidationLedgerReplayBatch(BaseModel):
     """Paginated result set from a validation ledger query."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     entries: tuple[ModelValidationLedgerEntry, ...] = Field(default_factory=tuple)
     total_count: int = Field(..., ge=0, description="Total matching entries")

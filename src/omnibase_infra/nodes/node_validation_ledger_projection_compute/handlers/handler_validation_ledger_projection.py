@@ -13,28 +13,29 @@ Design Rationale - Best-Effort Metadata Extraction:
     result in fallback values, not exceptions.
 
 Bytes Encoding:
-    Kafka event values are bytes. They are base64-encoded at this transform layer
-    for safe transport. A SHA-256 hash of the raw bytes is also computed for
-    integrity verification and deterministic replay.
+    Kafka event values are bytes. Raw bytes are passed through for BYTEA storage
+    in PostgreSQL. A SHA-256 hash of the raw bytes is also computed for integrity
+    verification and deterministic replay. Base64 encoding for the read path is
+    handled at the SQL layer via encode(envelope_bytes, 'base64').
 
 Ticket: OMN-1908
 """
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import logging
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
 )
-from omnibase_infra.errors import EnvelopeValidationError, ModelInfraErrorContext
+from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ class HandlerValidationLedgerProjection:
 
     CRITICAL INVARIANTS:
     - NEVER drop events due to metadata extraction failure
-    - Raw bytes (value) are REQUIRED (raises EnvelopeValidationError if None/empty)
+    - Raw bytes (value) are REQUIRED (raises RuntimeHostError if None/empty)
     - All other metadata uses best-effort extraction with fallbacks
     - No I/O operations - pure COMPUTE handler
 
@@ -99,24 +100,26 @@ class HandlerValidationLedgerProjection:
         partition: int,
         offset: int,
         value: bytes,
-        headers: dict[str, bytes] | None = None,
+        _headers: dict[str, bytes] | None = None,
     ) -> dict[str, object]:
         """Project a Kafka message into validation ledger entry fields.
 
-        Extracts metadata from the raw Kafka message and computes base64
-        encoding and SHA-256 hash of the raw bytes. Uses best-effort
-        metadata extraction from the JSON payload.
+        Extracts metadata from the raw Kafka message and computes a SHA-256
+        hash of the raw bytes. Raw bytes are passed through as envelope_bytes
+        for BYTEA storage in PostgreSQL. Uses best-effort metadata extraction
+        from the JSON payload.
 
         Args:
             topic: Kafka topic the message was consumed from.
             partition: Kafka partition number.
             offset: Kafka offset within the partition.
             value: Raw Kafka message value (bytes). REQUIRED.
-            headers: Optional Kafka message headers as key-value byte pairs.
+            _headers: Optional Kafka message headers (currently unused, reserved
+                for future header-based routing).
 
         Returns:
-            Dict with keys matching ModelValidationLedgerEntry fields
-            (excluding ``id`` and ``created_at`` which are DB-generated):
+            Dict with keys matching the write-path parameters of
+            ProtocolValidationLedgerRepository.append():
                 - run_id: UUID (extracted or generated)
                 - repo_id: str (extracted or "unknown")
                 - event_type: str (extracted or from topic)
@@ -125,11 +128,12 @@ class HandlerValidationLedgerProjection:
                 - kafka_topic: str
                 - kafka_partition: int
                 - kafka_offset: int
-                - envelope_bytes: str (base64-encoded)
+                - envelope_bytes: bytes (raw Kafka value for BYTEA storage)
                 - envelope_hash: str (SHA-256 hex digest)
 
         Raises:
-            EnvelopeValidationError: If ``value`` is None or empty bytes.
+            RuntimeHostError: If ``value`` is None or empty bytes
+                (with error_code=INVALID_INPUT).
 
         Field Extraction Strategy:
             | Field          | Primary Source        | Fallback              |
@@ -145,14 +149,12 @@ class HandlerValidationLedgerProjection:
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="project_validation_event",
             )
-            raise EnvelopeValidationError(
+            raise RuntimeHostError(
                 "Cannot create validation ledger entry: value is None or empty. "
                 "Raw event bytes are required for ledger persistence.",
+                error_code=EnumCoreErrorCode.INVALID_INPUT,
                 context=context,
             )
-
-        # Base64-encode raw bytes for transport safety
-        envelope_bytes = base64.b64encode(value).decode("ascii")
 
         # Compute SHA-256 hash for integrity verification
         envelope_hash = hashlib.sha256(value).hexdigest()
@@ -171,7 +173,7 @@ class HandlerValidationLedgerProjection:
             "kafka_topic": topic,
             "kafka_partition": partition,
             "kafka_offset": offset,
-            "envelope_bytes": envelope_bytes,
+            "envelope_bytes": value,
             "envelope_hash": envelope_hash,
         }
 

@@ -1468,19 +1468,24 @@ async def bootstrap() -> int:
                     correlation_id=correlation_id,
                 )
             except TopicResolutionError as e:
-                # Re-use infra_context from TopicResolutionError if available,
-                # otherwise build a fresh one. This preserves the correlation
-                # chain established by the resolver.
-                infra_ctx: ModelInfraErrorContext | None = e.infra_context
-                if infra_ctx is None:
-                    infra_ctx = ModelInfraErrorContext.with_correlation(
-                        correlation_id=correlation_id,
-                        transport_type=EnumInfraTransportType.KAFKA,
-                        operation="resolve_topic",
-                    )
+                # TopicResolutionError is a ProtocolConfigurationError with a
+                # guaranteed infra_context (including correlation_id). Log at
+                # warning level so operators can diagnose configuration issues,
+                # then re-raise with kernel-specific context message.
+                logger.warning(
+                    "TopicResolver rejected topic suffix during kernel bootstrap "
+                    "(correlation_id=%s): %s",
+                    e.infra_context.correlation_id,
+                    e,
+                    extra={
+                        "correlation_id": str(e.infra_context.correlation_id),
+                        "transport_type": "kafka",
+                        "operation": "resolve_topic",
+                    },
+                )
                 raise ProtocolConfigurationError(
                     f"Invalid topic suffix in runtime configuration: {e}",
-                    context=infra_ctx,
+                    context=e.infra_context,
                 ) from e
 
             logger.info(

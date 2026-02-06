@@ -3,22 +3,23 @@
 """Unit tests for HandlerValidationLedgerProjection.
 
 Tests validate:
-- Valid JSON event processing (metadata extraction, base64, SHA-256)
+- Valid JSON event processing (metadata extraction, raw bytes, SHA-256)
 - Malformed JSON best-effort fallback behaviour
-- Empty/None value rejection (EnvelopeValidationError)
+- Empty/None value rejection (RuntimeHostError with INVALID_INPUT)
 - Event version extraction from topic/event_type
 - Handler property classification (handler_type, handler_category)
 """
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
+
+pytestmark = [pytest.mark.unit]
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection import (
@@ -124,12 +125,11 @@ class TestValidJsonProcessing:
 
         assert result["event_type"] == "custom.event.type.v2"
 
-    def test_envelope_bytes_is_base64_encoded(
+    def test_envelope_bytes_is_raw_bytes(
         self, handler: HandlerValidationLedgerProjection
     ) -> None:
-        """Test that envelope_bytes is the base64-encoded form of raw value."""
+        """Test that envelope_bytes is the raw value bytes for BYTEA storage."""
         raw = b'{"run_id": "abc"}'
-        expected_b64 = base64.b64encode(raw).decode("ascii")
 
         result = handler.project(
             topic="t",
@@ -138,7 +138,8 @@ class TestValidJsonProcessing:
             value=raw,
         )
 
-        assert result["envelope_bytes"] == expected_b64
+        assert result["envelope_bytes"] == raw
+        assert isinstance(result["envelope_bytes"], bytes)
 
     def test_envelope_hash_is_sha256_hex(
         self, handler: HandlerValidationLedgerProjection
@@ -339,10 +340,10 @@ class TestMalformedJsonFallback:
         )
         assert result["event_type"] == "my.topic.v1"
 
-    def test_invalid_json_still_produces_base64_and_hash(
+    def test_invalid_json_still_produces_raw_bytes_and_hash(
         self, handler: HandlerValidationLedgerProjection
     ) -> None:
-        """Test that malformed JSON still produces valid base64 and hash."""
+        """Test that malformed JSON still produces raw bytes and valid hash."""
         raw = b"not-json"
         result = handler.project(
             topic="t.v1",
@@ -350,7 +351,8 @@ class TestMalformedJsonFallback:
             offset=0,
             value=raw,
         )
-        assert result["envelope_bytes"] == base64.b64encode(raw).decode("ascii")
+        assert result["envelope_bytes"] == raw
+        assert isinstance(result["envelope_bytes"], bytes)
         assert result["envelope_hash"] == hashlib.sha256(raw).hexdigest()
 
     def test_non_dict_json_uses_fallback(
@@ -392,15 +394,15 @@ class TestMalformedJsonFallback:
 
 
 class TestEmptyValueRejection:
-    """Tests for EnvelopeValidationError on None or empty value."""
+    """Tests for RuntimeHostError on None or empty value."""
 
-    def test_none_value_raises_envelope_validation_error(
+    def test_none_value_raises_runtime_host_error(
         self, handler: HandlerValidationLedgerProjection
     ) -> None:
-        """Test that None value raises EnvelopeValidationError."""
-        from omnibase_infra.errors import EnvelopeValidationError
+        """Test that None value raises RuntimeHostError with INVALID_INPUT."""
+        from omnibase_infra.errors import RuntimeHostError
 
-        with pytest.raises(EnvelopeValidationError, match="value is None or empty"):
+        with pytest.raises(RuntimeHostError, match="value is None or empty"):
             handler.project(
                 topic="t",
                 partition=0,
@@ -408,13 +410,13 @@ class TestEmptyValueRejection:
                 value=None,  # type: ignore[arg-type]
             )
 
-    def test_empty_bytes_raises_envelope_validation_error(
+    def test_empty_bytes_raises_runtime_host_error(
         self, handler: HandlerValidationLedgerProjection
     ) -> None:
-        """Test that empty bytes raises EnvelopeValidationError."""
-        from omnibase_infra.errors import EnvelopeValidationError
+        """Test that empty bytes raises RuntimeHostError with INVALID_INPUT."""
+        from omnibase_infra.errors import RuntimeHostError
 
-        with pytest.raises(EnvelopeValidationError, match="value is None or empty"):
+        with pytest.raises(RuntimeHostError, match="value is None or empty"):
             handler.project(
                 topic="t",
                 partition=0,
