@@ -667,9 +667,9 @@ class TestVersionTracking:
         entity_id = str(uuid4())
 
         # Call _get_next_version multiple times (now async)
-        v1 = await publisher._get_next_version(entity_id, "registration")
-        v2 = await publisher._get_next_version(entity_id, "registration")
-        v3 = await publisher._get_next_version(entity_id, "registration")
+        v1 = await publisher._get_next_version(entity_id)
+        v2 = await publisher._get_next_version(entity_id)
+        v3 = await publisher._get_next_version(entity_id)
 
         assert v1 == 1
         assert v2 == 2
@@ -685,34 +685,16 @@ class TestVersionTracking:
         entity_b = str(uuid4())
 
         # Get versions for entity A (now async)
-        v_a1 = await publisher._get_next_version(entity_a, "registration")
-        v_a2 = await publisher._get_next_version(entity_a, "registration")
+        v_a1 = await publisher._get_next_version(entity_a)
+        v_a2 = await publisher._get_next_version(entity_a)
 
         # Get versions for entity B
-        v_b1 = await publisher._get_next_version(entity_b, "registration")
+        v_b1 = await publisher._get_next_version(entity_b)
 
         # Entity A should be at version 2, entity B should be at version 1
         assert v_a1 == 1
         assert v_a2 == 2
         assert v_b1 == 1
-
-    async def test_version_tracked_by_entity_id_regardless_of_domain(
-        self,
-        publisher: SnapshotPublisherRegistration,
-        mock_producer: AsyncMock,
-    ) -> None:
-        """Test version counter is keyed by entity_id, not domain.
-
-        Since Kafka key is node_id (entity_id) only, version tracking
-        is per-entity regardless of domain parameter.
-        """
-        entity_id = str(uuid4())
-
-        v_reg = await publisher._get_next_version(entity_id, "registration")
-        v_disc = await publisher._get_next_version(entity_id, "discovery")
-
-        assert v_reg == 1
-        assert v_disc == 2  # Same entity, increments
 
     async def test_version_cleared_after_delete(
         self,
@@ -723,15 +705,15 @@ class TestVersionTracking:
         entity_id = str(uuid4())
 
         # Build up version (now async)
-        await publisher._get_next_version(entity_id, "registration")
-        await publisher._get_next_version(entity_id, "registration")
+        await publisher._get_next_version(entity_id)
+        await publisher._get_next_version(entity_id)
         assert publisher._version_tracker[entity_id] == 2
 
         # Delete clears the version
         await publisher.delete_snapshot(entity_id, "registration")
 
         # Next version should be 1 again
-        v_new = await publisher._get_next_version(entity_id, "registration")
+        v_new = await publisher._get_next_version(entity_id)
         assert v_new == 1
 
 

@@ -143,7 +143,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
     is expected.
 
     Compaction Semantics:
-        - Key: "{domain}:{entity_id}" (e.g., "registration:uuid-here")
+        - Key: entity_id (UUID string, e.g., "550e8400-e29b-41d4-a716-446655440000")
         - Value: JSON-serialized ModelRegistrationSnapshot
         - Tombstone: null value deletes the key during compaction
         - After compaction: only latest snapshot per key survives
@@ -251,7 +251,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         self._consumer_started = False
 
         # In-memory cache for O(1) snapshot lookups
-        # Key: "{domain}:{entity_id}", Value: ModelRegistrationSnapshot
+        # Key: entity_id (UUID string), Value: ModelRegistrationSnapshot
         #
         # Cache Size Expectations:
         #   - Typical deployment: 100-1000 registered nodes
@@ -465,7 +465,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             self._snapshot_cache.clear()
             self._cache_loaded = False
 
-    async def _get_next_version(self, entity_id: str, domain: str) -> int:
+    async def _get_next_version(self, entity_id: str) -> int:
         """Get the next snapshot version for an entity.
 
         Increments and returns the version counter for the given entity.
@@ -478,7 +478,6 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
 
         Args:
             entity_id: The entity identifier
-            domain: The domain namespace
 
         Returns:
             Next version number (starting from 1)
@@ -1279,7 +1278,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             ... )
         """
         entity_id_str = str(projection.entity_id)
-        version = await self._get_next_version(entity_id_str, projection.domain)
+        version = await self._get_next_version(entity_id_str)
 
         # Create snapshot from projection (returned immediately to caller)
         snapshot = ModelRegistrationSnapshot.from_projection(

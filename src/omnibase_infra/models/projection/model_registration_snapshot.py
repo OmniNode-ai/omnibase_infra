@@ -52,7 +52,7 @@ class ModelRegistrationSnapshot(BaseModel):
 
     Design Notes (per F2 requirements):
         - Compacted representation: Only essential fields, no timeout tracking
-        - Kafka topic compaction: Uses domain:entity_id as key for log compaction
+        - Kafka topic compaction: Uses entity_id as key for log compaction
         - Version-based ordering: snapshot_version for conflict resolution
         - Traceability: source_projection_sequence links back to source projection
 
@@ -66,7 +66,7 @@ class ModelRegistrationSnapshot(BaseModel):
         (entity_id, domain) - same composite key as projection
 
     Compaction Strategy:
-        Kafka topic compaction with key = "{domain}:{entity_id}"
+        Kafka topic compaction with key = entity_id (UUID string).
         Only the latest snapshot per entity is retained after compaction.
 
     Attributes:
@@ -96,8 +96,8 @@ class ModelRegistrationSnapshot(BaseModel):
         ...     snapshot_version=1,
         ...     snapshot_created_at=now,
         ... )
-        >>> snapshot.to_kafka_key()  # Returns 'registration:<uuid>'
-        'registration:...'
+        >>> snapshot.to_kafka_key()  # Returns '<uuid>'
+        '550e8400-...'
 
     Note:
         When serialized to JSON via ``model_dump(mode="json")``, the ``node_type``

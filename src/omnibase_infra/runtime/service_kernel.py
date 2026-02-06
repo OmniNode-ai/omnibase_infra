@@ -1144,6 +1144,15 @@ async def bootstrap() -> int:
                     postgres_pool = None
                 projector = None
                 introspection_dispatcher = None
+                if snapshot_publisher is not None:
+                    try:
+                        await snapshot_publisher.stop()
+                    except Exception as snap_cleanup_error:
+                        logger.warning(
+                            "Cleanup failed for snapshot publisher stop: %s (correlation_id=%s)",
+                            sanitize_error_message(snap_cleanup_error),
+                            correlation_id,
+                        )
                 snapshot_publisher = None
         else:
             logger.debug(

@@ -263,9 +263,9 @@ class TestSnapshotStateTransitions:
         snapshot_data = json.loads(value.decode("utf-8"))
         assert snapshot_data["entity_id"] == str(node_id)
         assert snapshot_data["domain"] == "registration"
-        # The snapshot contains the projection data at the time of ack
-        # (AWAITING_ACK is the state passed to publish_from_projection)
-        assert "current_state" in snapshot_data
+        # The snapshot should reflect the post-transition state (ACTIVE),
+        # not the pre-transition state (AWAITING_ACK)
+        assert snapshot_data["current_state"] == EnumRegistrationState.ACTIVE.value
 
         # Cleanup
         await publisher.stop()

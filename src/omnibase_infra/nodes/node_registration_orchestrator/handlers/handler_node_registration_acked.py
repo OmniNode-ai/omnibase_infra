@@ -313,10 +313,20 @@ class HandlerNodeRegistrationAcked:
             )
 
             # Publish snapshot after ACTIVE transition (best-effort, non-blocking)
+            # NOTE: We must construct a projection with the post-transition state
+            # (ACTIVE), because `projection` still holds the pre-transition state
+            # (AWAITING_ACK/ACCEPTED). The emitted events will transition the state
+            # in the reducer, but the snapshot must reflect the target state.
             if self._snapshot_publisher is not None:
                 try:
+                    active_projection = projection.model_copy(
+                        update={
+                            "current_state": EnumRegistrationState.ACTIVE,
+                            "updated_at": now,
+                        }
+                    )
                     await self._snapshot_publisher.publish_from_projection(
-                        projection, node_name=None
+                        active_projection, node_name=None
                     )
                 except Exception as snap_err:
                     logger.warning(
