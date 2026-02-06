@@ -26,13 +26,11 @@ Before deploying, ensure you have:
 | Docker             | 20.10+          | `docker --version`               |
 | Docker Compose     | 2.0+ (V2)       | `docker compose version`         |
 | BuildKit           | Enabled         | `docker buildx version`          |
-| GITHUB_TOKEN       | With repo scope | `echo $GITHUB_TOKEN`             |
 
 ### Docker BuildKit
 
 BuildKit is required for:
 - Multi-stage build optimization
-- Build-time secret mounts (for GITHUB_TOKEN)
 - Cache mount optimizations
 
 BuildKit is enabled by default in Docker 23.0+. For older versions:
@@ -45,18 +43,6 @@ export DOCKER_BUILDKIT=1
 # Add to /etc/docker/daemon.json: {"features": {"buildkit": true}}
 ```
 
-### GitHub Token
-
-A GitHub Personal Access Token (PAT) with `repo` scope is required to install private packages:
-
-```bash
-# Set the token for builds
-export GITHUB_TOKEN=ghp_your_token_here
-
-# Verify token is set
-echo $GITHUB_TOKEN | head -c 10
-```
-
 ## Quick Start
 
 ```bash
@@ -64,56 +50,65 @@ echo $GITHUB_TOKEN | head -c 10
 cp .env.example .env
 
 # 2. CRITICAL: Edit .env and replace ALL placeholder values
-#    Look for: __REPLACE_WITH_SECURE_PASSWORD__, __REPLACE_WITH_VAULT_TOKEN__
-#    Generate secure passwords: openssl rand -base64 32
+#    Look for patterns: __REPLACE_WITH_*__
+#    - POSTGRES_PASSWORD: openssl rand -hex 32
+#    - INFISICAL_ENCRYPTION_KEY (secrets profile): openssl rand -hex 32
+#    - INFISICAL_AUTH_SECRET (secrets profile): openssl rand -hex 32
 
-# 3. Build and start (main profile)
-docker compose -f docker-compose.runtime.yml --profile main up -d --build
+# 3. Start core infrastructure (default profile)
+docker compose -f docker-compose.infra.yml up -d
 
-# 4. View logs
-docker compose -f docker-compose.runtime.yml logs -f
+# 4. Or start with full runtime services
+docker compose -f docker-compose.infra.yml --profile runtime up -d --build
 
-# 5. Verify health
+# 5. View logs
+docker compose -f docker-compose.infra.yml logs -f
+
+# 6. Verify health (runtime profile only)
 curl http://localhost:8085/health
 ```
 
 ## Architecture
 
-The runtime deployment follows a multi-profile architecture designed for flexible scaling and separation of concerns:
+The deployment follows a multi-profile architecture designed for flexible scaling and separation of concerns:
 
-```
-                                    Docker Compose Profiles
-+--------------------------------------------------------------------+
-|                                                                    |
-|   main profile          effects profile       workers profile      |
-|   +---------------+     +---------------+     +---------------+    |
-|   |               |     |               |     |               |    |
-|   | runtime-main  |     | runtime-      |     | runtime-      |    |
-|   | (core kernel) |     | effects       |     | worker x N    |    |
-|   |               |     | (ext. I/O)    |     | (parallel)    |    |
-|   +-------+-------+     +-------+-------+     +-------+-------+    |
-|           |                     |                     |            |
-|           +---------------------+---------------------+            |
-|                                 |                                  |
-|                    +------------+------------+                     |
-|                    |                         |                     |
-|                    | omnibase-infra-network  |                     |
-|                    |    (bridge network)     |                     |
-|                    |                         |                     |
-|                    +------------+------------+                     |
-|                                 |                                  |
-|                    +------------+------------+                     |
-|                    |    External Services    |                     |
-|                    |  (via extra_hosts or    |                     |
-|                    |   external network)     |                     |
-|                    +-------------------------+                     |
-|                                                                    |
-+--------------------------------------------------------------------+
+```text
+                              Docker Compose Profiles
++------------------------------------------------------------------------+
+|                                                                        |
+|   Default Profile (Infrastructure)                                     |
+|   +---------------+  +---------------+  +---------------+              |
+|   |   postgres    |  |   redpanda    |  |    valkey     |              |
+|   |   (storage)   |  |   (events)    |  |   (cache)     |              |
+|   +-------+-------+  +-------+-------+  +-------+-------+              |
+|           |                  |                  |                      |
+|           +------------------+------------------+                      |
+|                              |                                         |
+|   +--------------------------------------------------------------+     |
+|   |              omnibase-infra-network (bridge)                 |     |
+|   +--------------------------------------------------------------+     |
+|                              |                                         |
+|   Runtime Profile (--profile runtime)                                  |
+|   +---------------+  +---------------+  +---------------+              |
+|   | omninode-     |  |  runtime-     |  |  runtime-     |              |
+|   | runtime       |  |  effects      |  |  worker x N   |              |
+|   | (kernel)      |  |  (ext. I/O)   |  |  (parallel)   |              |
+|   +---------------+  +---------------+  +---------------+              |
+|                                                                        |
+|   Optional Profiles:                                                   |
+|   +---------------+  +---------------+                                 |
+|   |    consul     |  |  infisical    |                                 |
+|   |  (discovery)  |  |  (secrets)    |                                 |
+|   | --profile     |  | --profile     |                                 |
+|   |   consul      |  |   secrets     |                                 |
+|   +---------------+  +---------------+                                 |
+|                                                                        |
++------------------------------------------------------------------------+
 ```
 
 ### Service Communication Flow
 
-```
+```text
 External Request
        |
        v
@@ -133,61 +128,82 @@ External Request
 | External Services|     | Parallel Jobs  |
 | - PostgreSQL     |     | - Compute      |
 | - Consul         |     | - Transform    |
-| - Vault          |     | - Aggregate    |
+| - Infisical      |     | - Aggregate    |
 | - Kafka          |     +----------------+
 +------------------+
 ```
 
 ## Profiles
 
-| Profile   | Services                  | Use Case                                   | Command                                                        |
-|-----------|---------------------------|--------------------------------------------|----------------------------------------------------------------|
-| `main`    | runtime-main              | Core kernel only                           | `docker compose -f docker-compose.runtime.yml --profile main up -d` |
-| `effects` | runtime-main + effects    | Main + external service interactions       | `docker compose -f docker-compose.runtime.yml --profile effects up -d` |
-| `workers` | runtime-main + workers x2 | Main + parallel compute processing         | `docker compose -f docker-compose.runtime.yml --profile workers up -d` |
-| `all`     | All services              | Full deployment with all profiles          | `docker compose -f docker-compose.runtime.yml --profile all up -d` |
+| Profile    | Services                                      | Use Case                                   | Command                                                          |
+|------------|-----------------------------------------------|--------------------------------------------|------------------------------------------------------------------|
+| (default)  | postgres, redpanda, valkey, topic-manager     | Core infrastructure only                   | `docker compose -f docker-compose.infra.yml up -d`               |
+| `runtime`  | (default) + runtime, effects, workers, consumer | Full ONEX runtime with observability     | `docker compose -f docker-compose.infra.yml --profile runtime up -d` |
+| `consul`   | (default) + consul                            | Infrastructure + service discovery         | `docker compose -f docker-compose.infra.yml --profile consul up -d` |
+| `secrets`  | (default) + infisical                         | Infrastructure + secrets management        | `docker compose -f docker-compose.infra.yml --profile secrets up -d` |
+| `full`     | All services                                  | Complete stack with all features           | `docker compose -f docker-compose.infra.yml --profile full up -d` |
 
 ### Profile Details
 
-#### Main Profile (Core Kernel)
+#### Default Profile (Core Infrastructure)
 
-The primary runtime service that handles kernel bootstrap:
+Core infrastructure services required by all deployments:
 
-- Listens on configurable input topic (default: `requests`)
-- Publishes to configurable output topic (default: `responses`)
-- Exposes health endpoint on port 8085
-- Must be healthy before effects/workers can start
+- **PostgreSQL** (port 5436): Primary data store for projections and state
+- **Redpanda** (port 29092): Kafka-compatible event streaming
+- **Valkey** (port 16379): Redis-compatible cache and pub/sub
+- **Topic Manager**: Automatic Kafka topic creation on startup
 
 ```bash
-docker compose -f docker-compose.runtime.yml --profile main up -d --build
+docker compose -f docker-compose.infra.yml up -d
 ```
 
-#### Effects Profile (External Interactions)
+#### Runtime Profile (ONEX Services)
 
-Handles effect nodes that interact with external services:
+Full ONEX runtime services with observability:
 
-- Consul for service discovery
-- Kafka for event streaming
-- Vault for secret management
-- PostgreSQL for persistence
-
-```bash
-docker compose -f docker-compose.runtime.yml --profile effects up -d --build
-```
-
-#### Workers Profile (Parallel Processing)
-
-Scalable worker containers for parallel compute:
+- **omninode-runtime** (port 8085): Core kernel handling requests
+- **runtime-effects** (port 8086): External service interactions
+- **runtime-worker** (x2): Scalable parallel compute workers
+- **agent-actions-consumer** (port 8087): Observability event persistence
 
 ```bash
-# Start with default replicas (2)
-docker compose -f docker-compose.runtime.yml --profile workers up -d --build
+docker compose -f docker-compose.infra.yml --profile runtime up -d --build
 
 # Scale workers manually
-docker compose -f docker-compose.runtime.yml --profile workers up -d --scale runtime-worker=4
+docker compose -f docker-compose.infra.yml --profile runtime up -d --scale runtime-worker=4
 
 # Or set via environment variable
-WORKER_REPLICAS=8 docker compose -f docker-compose.runtime.yml --profile workers up -d
+WORKER_REPLICAS=8 docker compose -f docker-compose.infra.yml --profile runtime up -d
+```
+
+#### Consul Profile (Service Discovery)
+
+Adds HashiCorp Consul for service registration and discovery:
+
+- **Consul** (port 28500): Service discovery UI and API
+
+```bash
+docker compose -f docker-compose.infra.yml --profile consul up -d
+```
+
+#### Secrets Profile (Secrets Management)
+
+Adds Infisical for centralized secrets management:
+
+- **Infisical** (port 8880): Secrets management UI and API
+- Requires `INFISICAL_ENCRYPTION_KEY` and `INFISICAL_AUTH_SECRET` in `.env`
+
+```bash
+docker compose -f docker-compose.infra.yml --profile secrets up -d
+```
+
+#### Full Profile (All Services)
+
+Complete stack with infrastructure, runtime, consul, and secrets:
+
+```bash
+docker compose -f docker-compose.infra.yml --profile full up -d --build
 ```
 
 ## Security
@@ -198,27 +214,27 @@ WORKER_REPLICAS=8 docker compose -f docker-compose.runtime.yml --profile workers
 
 ```bash
 # Generate secure random passwords
-openssl rand -base64 32
+openssl rand -hex 32
 
 # Generate multiple passwords at once
-for i in {1..3}; do echo "Password $i: $(openssl rand -base64 32)"; done
+for i in {1..3}; do echo "Password $i: $(openssl rand -hex 32)"; done
 ```
 
 ### Required Credentials
 
-| Credential         | Environment Variable  | Notes                                      |
-|--------------------|-----------------------|--------------------------------------------|
-| PostgreSQL         | `POSTGRES_PASSWORD`   | Database access password                   |
-| Vault              | `VAULT_TOKEN`         | HashiCorp Vault access token               |
-| Redis/Valkey       | `REDIS_PASSWORD`      | Cache access password                      |
-| GitHub (build)     | `GITHUB_TOKEN`        | For private package installation           |
+| Credential              | Environment Variable       | Profile  | Notes                                                    |
+|-------------------------|----------------------------|----------|----------------------------------------------------------|
+| PostgreSQL              | `POSTGRES_PASSWORD`        | (default)| Database access password                                 |
+| Infisical Encryption    | `INFISICAL_ENCRYPTION_KEY` | secrets  | Hex-encoded key: 16-byte (`openssl rand -hex 16`) or 32-byte (`openssl rand -hex 32`) |
+| Infisical Auth          | `INFISICAL_AUTH_SECRET`    | secrets  | JWT signing secret (`openssl rand -hex 32`)              |
+| Valkey (optional)       | `VALKEY_PASSWORD`          | (default)| Cache password (defaults to `valkey-dev-password` in dev) |
 
 ### Security Features
 
 | Feature                  | Description                                          | Verification                              |
 |--------------------------|------------------------------------------------------|-------------------------------------------|
 | Non-root execution       | Container runs as `omniinfra` user (UID 1000)        | `docker exec <container> whoami`          |
-| BuildKit secrets         | GitHub tokens passed via secret mounts               | `docker history --no-trunc`               |
+| BuildKit secrets         | Sensitive values passed via secret mounts             | `docker history --no-trunc`               |
 | No hardcoded credentials | All secrets via environment variables                | Review Dockerfile                         |
 | Resource limits          | CPU and memory limits prevent exhaustion             | `docker stats`                            |
 | Read-only contracts      | Contract volume mounted read-only                    | `:ro` in docker-compose                   |
@@ -227,27 +243,27 @@ for i in {1..3}; do echo "Password $i: $(openssl rand -base64 32)"; done
 
 ```bash
 # Verify non-root user
-docker exec omnibase-infra-runtime-main whoami
+docker exec omninode-runtime whoami
 # Expected output: omniinfra
 
 # Verify UID/GID
-docker exec omnibase-infra-runtime-main id
+docker exec omninode-runtime id
 # Expected: uid=1000(omniinfra) gid=1000(omniinfra) groups=1000(omniinfra)
 
 # Verify secrets not in image history
-docker history omnibase-infra-runtime --no-trunc | grep -iE "token|password|secret"
+docker history omninode-runtime --no-trunc | grep -iE "token|password|secret"
 # Expected: no output (empty result)
 
 # Verify no secrets in environment inspection
-docker inspect omnibase-infra-runtime-main --format='{{json .Config.Env}}' | grep -i password
+docker inspect omninode-runtime --format='{{json .Config.Env}}' | grep -i password
 # Should only show placeholder references, not actual values
 ```
 
 ### Security Best Practices
 
 1. **Never commit `.env` files** - Already in `.gitignore`
-2. **Rotate credentials regularly** - Use vault or secret manager
-3. **Use minimal permissions** - Vault tokens should have scoped policies
+2. **Rotate credentials regularly** - Use Infisical or secret manager
+3. **Use minimal permissions** - Infisical tokens should have scoped policies
 4. **Enable audit logging** - Track credential access
 5. **Network isolation** - Use internal Docker networks
 
@@ -270,10 +286,9 @@ ports:
 #### Network Isolation Guidelines
 
 1. **Use internal networks** - The `omnibase-infra-network` is bridge-mode by default
-2. **External service access** - Use `extra_hosts` with `REMOTE_HOST` for controlled external access
-3. **Reverse proxy** - In production, place containers behind nginx/traefik with TLS termination
-4. **Firewall rules** - Restrict access to Docker ports at the host firewall level
-5. **Docker socket** - Never expose Docker socket to containers
+2. **Reverse proxy** - In production, place containers behind nginx/traefik with TLS termination
+3. **Firewall rules** - Restrict access to Docker ports at the host firewall level
+4. **Docker socket** - Never expose Docker socket to containers
 
 #### Environment-Specific Binding
 
@@ -339,13 +354,13 @@ readinessProbe:
 curl -s http://localhost:8085/health | jq .
 
 # Test from inside container network
-docker exec omnibase-infra-runtime-main curl -s http://localhost:8085/health
+docker exec omninode-runtime curl -s http://localhost:8085/health
 
 # Check container health status
-docker inspect --format='{{.State.Health.Status}}' omnibase-infra-runtime-main
+docker inspect --format='{{.State.Health.Status}}' omninode-runtime
 
 # View health check history
-docker inspect --format='{{json .State.Health}}' omnibase-infra-runtime-main | jq .
+docker inspect --format='{{json .State.Health}}' omninode-runtime | jq .
 ```
 
 ### Response Format
@@ -430,16 +445,15 @@ The Dockerfile uses several techniques for efficient builds:
 | First build (cold cache)      | 3-5 minutes      | Downloads all dependencies      |
 | Code change (cached deps)     | 30-60 seconds    | Only rebuilds source layer      |
 | No changes (full cache)       | 5-10 seconds     | Cache hit on all layers         |
-| With GitHub token             | +10-20 seconds   | Private repo authentication     |
 
 ### Build Commands
 
 ```bash
 # Standard build (with BuildKit - enabled by default in Docker 23.0+)
-docker compose -f docker-compose.runtime.yml build
+docker compose -f docker-compose.infra.yml build
 
 # Force rebuild without cache
-docker compose -f docker-compose.runtime.yml build --no-cache
+docker compose -f docker-compose.infra.yml build --no-cache
 
 # Build with version labels
 docker build \
@@ -447,10 +461,7 @@ docker build \
   --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
   --build-arg VCS_REF=$(git rev-parse --short HEAD) \
   -f docker/Dockerfile.runtime \
-  -t omnibase-infra-runtime:$(git describe --tags --always) .
-
-# Build with GitHub token for private repos
-GITHUB_TOKEN=$(cat ~/.github_token) docker compose -f docker-compose.runtime.yml build
+  -t omninode-runtime:$(git describe --tags --always) .
 ```
 
 ### Resource Configuration
@@ -459,7 +470,7 @@ Default resource limits in docker-compose:
 
 | Service         | CPU Limit | Memory Limit | CPU Reserve | Memory Reserve |
 |-----------------|-----------|--------------|-------------|----------------|
-| runtime-main    | 1.0 cores | 512 MB       | 0.25 cores  | 128 MB         |
+| omninode-runtime| 1.0 cores | 512 MB       | 0.25 cores  | 128 MB         |
 | runtime-effects | 1.0 cores | 512 MB       | 0.25 cores  | 128 MB         |
 | runtime-worker  | 0.5 cores | 256 MB       | 0.1 cores   | 64 MB          |
 
@@ -470,7 +481,7 @@ Default resource limits in docker-compose:
 docker stats
 
 # Override resources via environment (if supported)
-# Or modify docker-compose.runtime.yml deploy section
+# Or modify docker-compose.infra.yml deploy section
 ```
 
 ## Environment Variables
@@ -479,18 +490,16 @@ docker stats
 
 These variables must be set explicitly. The runtime will fail to start if they are missing or contain placeholder values.
 
-| Variable           | Description                       | Security Level |
-|--------------------|-----------------------------------|----------------|
-| `POSTGRES_PASSWORD`| PostgreSQL database password      | Secret         |
-| `VAULT_TOKEN`      | HashiCorp Vault access token      | Secret         |
-| `REDIS_PASSWORD`   | Redis/Valkey cache password       | Secret         |
+| Variable                  | Description                                         | Security Level | Profile    |
+|---------------------------|-----------------------------------------------------|----------------|------------|
+| `POSTGRES_PASSWORD`       | PostgreSQL database password                        | Secret         | (default)  |
+| `INFISICAL_ENCRYPTION_KEY`| Hex-encoded AES key (32 or 64 hex chars)            | Secret         | secrets    |
+| `INFISICAL_AUTH_SECRET`   | JWT signing secret for authentication               | Secret         | secrets    |
 
 ### Optional Variables (With Defaults)
 
 | Variable                     | Default                            | Description                            |
 |------------------------------|------------------------------------|----------------------------------------|
-| **Network Configuration**    |                                    |                                        |
-| `REMOTE_HOST`                | `host-gateway`                     | Override for extra_hosts mapping       |
 | **Kafka/Redpanda**           |                                    |                                        |
 | `KAFKA_BOOTSTRAP_SERVERS`    | `localhost:9092`                   | Kafka/Redpanda broker addresses        |
 | **PostgreSQL**               |                                    |                                        |
@@ -502,11 +511,14 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | `CONSUL_HOST`                | `localhost`                        | Consul agent hostname                  |
 | `CONSUL_PORT`                | `8500`                             | Consul HTTP port                       |
 | `CONSUL_SCHEME`              | `http`                             | Consul connection scheme               |
-| **Vault**                    |                                    |                                        |
-| `VAULT_ADDR`                 | `http://localhost:8200`            | Vault server address                   |
-| **Redis**                    |                                    |                                        |
-| `REDIS_HOST`                 | `localhost`                        | Redis hostname                         |
-| `REDIS_PORT`                 | `6379`                             | Redis port                             |
+| **Infisical**                |                                    |                                        |
+| `INFISICAL_ADDR`             | `http://infisical:8080`            | Infisical service address              |
+| `INFISICAL_SITE_URL`         | `http://localhost:8880`            | Infisical web UI URL                   |
+| `INFISICAL_REDIS_URL`        | `redis://:valkey-dev-password@valkey:6379` | Redis URL for Infisical cache (must match `VALKEY_PASSWORD`) |
+| **Valkey**                   |                                    |                                        |
+| `VALKEY_HOST`                | `valkey`                           | Valkey hostname                        |
+| `VALKEY_PORT`                | `6379`                             | Valkey port                            |
+| `VALKEY_PASSWORD`            | `valkey-dev-password`              | Cache auth password (optional for local dev) |
 | **ONEX Runtime**             |                                    |                                        |
 | `ONEX_LOG_LEVEL`             | `INFO`                             | Logging level (DEBUG, INFO, etc.)      |
 | `ONEX_ENVIRONMENT`           | `development`                      | Environment name                       |
@@ -520,19 +532,24 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | `ONEX_GROUP_ID`              | `onex-runtime-main`                | Consumer group for main runtime        |
 | **OpenTelemetry**            |                                    |                                        |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`| `http://localhost:4317`            | OTLP exporter endpoint                 |
-| `OTEL_SERVICE_NAME`          | `omnibase-infra-runtime`           | Service name for tracing               |
+| `OTEL_SERVICE_NAME`          | `omninode-runtime`                 | Service name for tracing               |
 
 ## Volume Management
 
 ### Named Volumes
 
-| Volume                          | Purpose                              | Service           |
-|---------------------------------|--------------------------------------|-------------------|
-| `omnibase-infra-runtime-logs`   | Main runtime logs                    | runtime-main      |
-| `omnibase-infra-runtime-data`   | Main runtime persistent state        | runtime-main      |
-| `omnibase-infra-effects-logs`   | Effects runtime logs                 | runtime-effects   |
-| `omnibase-infra-effects-data`   | Effects runtime persistent state     | runtime-effects   |
-| `omnibase-infra-worker-logs`    | Worker logs (shared across replicas) | runtime-worker    |
+| Volume                          | Purpose                              | Service                |
+|---------------------------------|--------------------------------------|------------------------|
+| `omnibase-infra-postgres-data`  | PostgreSQL data                      | postgres               |
+| `omnibase-infra-redpanda-data`  | Redpanda event streaming data        | redpanda               |
+| `omnibase-infra-valkey-data`    | Valkey cache data                    | valkey                 |
+| `omnibase-infra-consul-data`    | Consul service discovery data        | consul                 |
+| `omninode-runtime-logs`         | Main runtime logs                    | omninode-runtime       |
+| `omninode-runtime-data`         | Main runtime persistent state        | omninode-runtime       |
+| `omninode-effects-logs`         | Effects runtime logs                 | runtime-effects        |
+| `omninode-effects-data`         | Effects runtime persistent state     | runtime-effects        |
+| `omninode-worker-logs`          | Worker logs (shared across replicas) | runtime-worker         |
+| `omninode-agent-actions-logs`   | Agent actions consumer logs          | agent-actions-consumer |
 
 ### Volume Commands
 
@@ -541,13 +558,13 @@ These variables must be set explicitly. The runtime will fail to start if they a
 docker volume ls | grep omnibase-infra
 
 # Inspect volume
-docker volume inspect omnibase-infra-runtime-logs
+docker volume inspect omninode-runtime-logs
 
 # View volume contents
-docker run --rm -v omnibase-infra-runtime-logs:/logs alpine ls -la /logs
+docker run --rm -v omninode-runtime-logs:/logs alpine ls -la /logs
 
 # Remove all volumes (WARNING: destroys data)
-docker compose -f docker-compose.runtime.yml down -v
+docker compose -f docker-compose.infra.yml down -v
 ```
 
 ### Bind Mounts
@@ -562,16 +579,16 @@ docker compose -f docker-compose.runtime.yml down -v
 
 ```bash
 # Check container status
-docker compose -f docker-compose.runtime.yml ps -a
+docker compose -f docker-compose.infra.yml ps -a
 
 # View startup logs
-docker compose -f docker-compose.runtime.yml logs runtime-main
+docker compose -f docker-compose.infra.yml logs omninode-runtime
 
 # View last N lines
-docker compose -f docker-compose.runtime.yml logs --tail 50 runtime-main
+docker compose -f docker-compose.infra.yml logs --tail 50 omninode-runtime
 
 # Follow logs in real-time
-docker compose -f docker-compose.runtime.yml logs -f runtime-main
+docker compose -f docker-compose.infra.yml logs -f omninode-runtime
 ```
 
 #### Common Startup Issues
@@ -591,17 +608,17 @@ If you see "No handlers registered" error, follow these troubleshooting steps:
 
 ```bash
 # 1. Check ONEX_CONTRACTS_DIR is set correctly
-docker exec omnibase-infra-runtime-main printenv ONEX_CONTRACTS_DIR
+docker exec omninode-runtime printenv ONEX_CONTRACTS_DIR
 
 # 2. Verify contracts directory exists and contains handler contracts
-docker exec omnibase-infra-runtime-main ls -la /app/contracts
-docker exec omnibase-infra-runtime-main find /app/contracts -name "handler_contract.yaml" -o -name "contract.yaml"
+docker exec omninode-runtime ls -la /app/contracts
+docker exec omninode-runtime find /app/contracts -name "handler_contract.yaml" -o -name "contract.yaml"
 
 # 3. Validate handler contract syntax
-docker exec omnibase-infra-runtime-main cat /app/contracts/handlers/*/handler_contract.yaml
+docker exec omninode-runtime cat /app/contracts/handlers/*/handler_contract.yaml
 
 # 4. Check for import errors in logs
-docker logs omnibase-infra-runtime-main 2>&1 | grep -E "(MODULE_NOT_FOUND|CLASS_NOT_FOUND|IMPORT_ERROR)"
+docker logs omninode-runtime 2>&1 | grep -E "(MODULE_NOT_FOUND|CLASS_NOT_FOUND|IMPORT_ERROR)"
 ```
 
 **Required handler contract fields:**
@@ -616,36 +633,32 @@ docker logs omnibase-infra-runtime-main 2>&1 | grep -E "(MODULE_NOT_FOUND|CLASS_
 curl -v http://localhost:8085/health
 
 # Check from inside container
-docker exec omnibase-infra-runtime-main curl -s http://localhost:8085/health
+docker exec omninode-runtime curl -s http://localhost:8085/health
 
 # Check container health history
-docker inspect --format='{{json .State.Health}}' omnibase-infra-runtime-main | jq .
+docker inspect --format='{{json .State.Health}}' omninode-runtime | jq .
 
 # View health check logs
-docker inspect --format='{{range .State.Health.Log}}{{.Output}}{{end}}' omnibase-infra-runtime-main
+docker inspect --format='{{range .State.Health.Log}}{{.Output}}{{end}}' omninode-runtime
 ```
 
 ### Build Failures
 
 ```bash
 # Rebuild without cache
-docker compose -f docker-compose.runtime.yml build --no-cache
+docker compose -f docker-compose.infra.yml build --no-cache
 
 # Build with verbose output
-docker compose -f docker-compose.runtime.yml build --progress=plain
+docker compose -f docker-compose.infra.yml build --progress=plain
 
 # Check Dockerfile syntax
 docker build --check -f docker/Dockerfile.runtime .
-
-# Build with GitHub token for private repos
-GITHUB_TOKEN=$(cat ~/.github_token) docker compose -f docker-compose.runtime.yml build
 ```
 
 #### Common Build Issues
 
 | Issue                              | Cause                                  | Solution                                      |
 |------------------------------------|----------------------------------------|-----------------------------------------------|
-| "Could not find omnibase-core"    | Private repo access denied             | Set GITHUB_TOKEN with repo access             |
 | "No space left on device"          | Docker disk full                       | `docker system prune -a`                      |
 | "Network timeout"                  | Slow network during pip install        | Retry or use mirror                           |
 | "Failed to fetch"                  | apt repository issues                  | Update base image or retry                    |
@@ -656,15 +669,15 @@ Test connectivity from within the runtime container. Replace hostnames with your
 
 ```bash
 # Test connectivity to PostgreSQL (replace hostname with your POSTGRES_HOST value)
-docker exec omnibase-infra-runtime-main \
+docker exec omninode-runtime \
   curl -v telnet://localhost:5432
 
 # Test connectivity to Kafka (replace hostname with your KAFKA_BOOTSTRAP_SERVERS value)
-docker exec omnibase-infra-runtime-main \
+docker exec omninode-runtime \
   curl -v telnet://localhost:9092
 
 # Check DNS resolution (replace hostname with your configured service name)
-docker exec omnibase-infra-runtime-main \
+docker exec omninode-runtime \
   getent hosts localhost
 
 # Check network configuration
@@ -675,15 +688,15 @@ docker network inspect omnibase-infra-network
 
 ```bash
 # Start with debug logging
-ONEX_LOG_LEVEL=DEBUG docker compose -f docker-compose.runtime.yml up
+ONEX_LOG_LEVEL=DEBUG docker compose -f docker-compose.infra.yml up
 
 # Shell into running container
-docker exec -it omnibase-infra-runtime-main /bin/bash
+docker exec -it omninode-runtime /bin/bash
 
 # Shell into new container for debugging
 docker run -it --rm \
   --network omnibase-infra-network \
-  omnibase-infra-runtime /bin/bash
+  omninode-runtime /bin/bash
 ```
 
 ## CI/CD Integration
@@ -736,8 +749,6 @@ jobs:
             RUNTIME_VERSION=${{ github.ref_name }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             VCS_REF=${{ github.sha }}
-          secrets: |
-            github_token=${{ secrets.GITHUB_TOKEN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 ```
@@ -757,7 +768,6 @@ build-runtime:
         --build-arg RUNTIME_VERSION=${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}
         --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
         --build-arg VCS_REF=$CI_COMMIT_SHA
-        --secret id=github_token,env=GITHUB_TOKEN
         -f docker/Dockerfile.runtime
         -t $CI_REGISTRY_IMAGE/runtime:$CI_COMMIT_SHA .
     - docker push $CI_REGISTRY_IMAGE/runtime:$CI_COMMIT_SHA
@@ -781,7 +791,7 @@ build-runtime:
       sleep 5
     done
     echo "Runtime failed to become healthy"
-    docker compose -f docker-compose.runtime.yml logs
+    docker compose -f docker-compose.infra.yml logs
     exit 1
 ```
 
@@ -793,16 +803,16 @@ build-runtime:
 # 1. Make code changes in src/
 
 # 2. Rebuild and restart (picks up code changes)
-docker compose -f docker-compose.runtime.yml up -d --build
+docker compose -f docker-compose.infra.yml up -d --build
 
 # 3. View logs
-docker compose -f docker-compose.runtime.yml logs -f
+docker compose -f docker-compose.infra.yml logs -f
 
 # 4. Test changes
 curl http://localhost:8085/health
 
 # 5. Stop when done
-docker compose -f docker-compose.runtime.yml down
+docker compose -f docker-compose.infra.yml down
 ```
 
 ### Running Tests in Container
@@ -812,7 +822,7 @@ docker compose -f docker-compose.runtime.yml down
 docker run --rm \
   -v $(pwd)/src:/app/src \
   -v $(pwd)/tests:/app/tests \
-  omnibase-infra-runtime \
+  omninode-runtime \
   python -m pytest tests/ -v
 ```
 
@@ -820,20 +830,20 @@ docker run --rm \
 
 ```bash
 # View running processes
-docker exec omnibase-infra-runtime-main ps aux
+docker exec omninode-runtime ps aux
 
 # Check Python environment
-docker exec omnibase-infra-runtime-main python --version
-docker exec omnibase-infra-runtime-main pip list
+docker exec omninode-runtime python --version
+docker exec omninode-runtime pip list
 
 # View environment variables (careful: may show secrets)
-docker exec omnibase-infra-runtime-main env | grep -v PASSWORD | grep -v TOKEN
+docker exec omninode-runtime env | grep -v PASSWORD | grep -v TOKEN
 
 # Check disk usage
-docker exec omnibase-infra-runtime-main df -h
+docker exec omninode-runtime df -h
 
 # View memory usage
-docker exec omnibase-infra-runtime-main free -h
+docker exec omninode-runtime free -h
 ```
 
 ## E2E Testing with Infrastructure
@@ -894,7 +904,7 @@ The `test_runtime_e2e.py` tests will skip automatically if the runtime container
 
 ### E2E Service Architecture
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────┐
 │                    omnibase-infra-network                          │
 │                                                                    │
@@ -968,11 +978,11 @@ CONSUL_PORT = 8500
 | File                        | Purpose                                            |
 |-----------------------------|----------------------------------------------------|
 | `Dockerfile.runtime`        | Multi-stage Dockerfile for runtime image           |
-| `docker-compose.runtime.yml`| Service orchestration with profiles                |
+| `docker-compose.infra.yml`  | Infrastructure + runtime orchestration with profiles |
 | `docker-compose.e2e.yml`    | E2E testing with infrastructure services           |
 | `.env.example`              | Environment variable template (copy to `.env`)     |
 | `.env.e2e`                  | E2E testing environment template                   |
-| `migrations/`               | PostgreSQL schema files for init                   |
+| `init-scripts/`             | PostgreSQL initialization scripts                  |
 | `README.md`                 | This documentation                                 |
 
 ## Related Documentation

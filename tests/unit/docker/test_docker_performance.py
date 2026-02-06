@@ -12,13 +12,18 @@ from __future__ import annotations
 
 import re
 
+import pytest
 import yaml
 
-# Import shared constant from conftest for backward compatibility.
-# New tests should prefer using the docker_dir fixture instead.
-from tests.unit.docker.conftest import DOCKER_DIR
+# Import shared path constants from conftest (required for module-level access).
+# New tests should prefer using the docker_dir or compose_file_path fixtures instead.
+from tests.unit.docker.conftest import COMPOSE_FILE_PATH, DOCKER_DIR
+
+# Explicit marker for documentation (also auto-applied by tests/unit/conftest.py)
+pytestmark = [pytest.mark.unit]
 
 
+@pytest.mark.unit
 class TestDockerfilePerformance:
     """Tests for Dockerfile performance best practices."""
 
@@ -75,12 +80,13 @@ class TestDockerfilePerformance:
                     )
 
 
+@pytest.mark.unit
 class TestDockerComposePerformance:
     """Tests for docker-compose performance configuration."""
 
     def test_resource_limits_configured(self) -> None:
         """Verify docker-compose has resource limits."""
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Should have resource limits defined
@@ -90,7 +96,7 @@ class TestDockerComposePerformance:
 
     def test_health_check_intervals_reasonable(self) -> None:
         """Verify health check intervals are not too aggressive."""
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Parse health check intervals
@@ -108,7 +114,7 @@ class TestDockerComposePerformance:
 
     def test_worker_replicas_reasonable(self) -> None:
         """Verify default worker replicas is reasonable."""
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = yaml.safe_load(compose_file.read_text())
 
         # Check if runtime-worker service exists
@@ -131,7 +137,7 @@ class TestDockerComposePerformance:
 
     def test_resource_reservations_configured(self) -> None:
         """Verify docker-compose has resource reservations."""
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
 
         # Should have resource reservations for better orchestration
@@ -140,6 +146,7 @@ class TestDockerComposePerformance:
         assert content.count("reservations:") > 0
 
 
+@pytest.mark.unit
 class TestDockerignorePerformance:
     """Tests for .dockerignore optimization."""
 
@@ -184,6 +191,7 @@ class TestDockerignorePerformance:
         assert "!README.md" in content
 
 
+@pytest.mark.unit
 class TestDockerHealthChecks:
     """Tests for Docker health check configuration."""
 
@@ -226,7 +234,7 @@ class TestDockerHealthChecks:
         dockerfile = DOCKER_DIR / "Dockerfile.runtime"
         dockerfile_content = dockerfile.read_text()
 
-        compose_file = DOCKER_DIR / "docker-compose.runtime.yml"
+        compose_file = COMPOSE_FILE_PATH
         compose_content = compose_file.read_text()
 
         # Both should have health checks
@@ -238,6 +246,7 @@ class TestDockerHealthChecks:
             assert "http://localhost:8085/health" in compose_content
 
 
+@pytest.mark.unit
 class TestDockerSecurityBestPractices:
     """Tests for Docker security best practices that impact performance."""
 
@@ -271,6 +280,7 @@ class TestDockerSecurityBestPractices:
             )
 
 
+@pytest.mark.unit
 class TestDockerBuildOptimization:
     """Tests for Docker build optimization."""
 

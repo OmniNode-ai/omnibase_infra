@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from omnibase_infra.enums import (
     EnumConsumerGroupPurpose,
@@ -75,6 +75,14 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+from omnibase_infra.gateway import (
+    ModelGatewayConfig,
+    ServiceEnvelopeSigner,
+    ServiceEnvelopeValidator,
+    ServicePolicyEngine,
+    load_private_key_from_pem,
+    load_public_key_from_pem,
+)
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.runtime.model_resolved_dependencies import (
     ModelResolvedDependencies,
@@ -101,6 +109,9 @@ from omnibase_infra.utils.util_env_parsing import parse_env_float
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
+    from omnibase_core.models.envelope.model_message_envelope import (
+        ModelMessageEnvelope,
+    )
     from omnibase_infra.event_bus.models import ModelEventMessage
     from omnibase_infra.idempotency import ModelIdempotencyGuardConfig
     from omnibase_infra.idempotency.protocol_idempotency_store import (
@@ -849,6 +860,14 @@ class RuntimeHostProcess:
         # None until loaded during start() via _load_contract_configs()
         self._contract_config: ModelRuntimeContractConfig | None = None
 
+        # Gateway components for envelope signing, validation, and policy (OMN-1899)
+        # These are initialized lazily during start() if gateway config is present.
+        # When None, gateway functionality is disabled (backwards compatible).
+        self._gateway_config: ModelGatewayConfig | None = None
+        self._envelope_signer: ServiceEnvelopeSigner | None = None
+        self._envelope_validator: ServiceEnvelopeValidator | None = None
+        self._policy_engine: ServicePolicyEngine | None = None
+
         # Introspection service for auto-introspection on startup (OMN-1930)
         # When provided with enabled config, publishes introspection event after handlers wired.
         self._introspection_service: ProtocolNodeIntrospection | None = (
@@ -1233,6 +1252,11 @@ class RuntimeHostProcess:
 
         # Step 4.5: Initialize idempotency store if configured (OMN-945)
         await self._initialize_idempotency_store()
+
+        # Step 4.6: Initialize gateway if configured (OMN-1899)
+        # Gateway provides envelope signing, validation, and policy enforcement.
+        # Non-fatal - system operates without gateway if initialization fails.
+        await self._initialize_gateway_from_config()
 
         # Step 5: Subscribe to input topic
         self._subscription = await self._event_bus.subscribe(
@@ -2311,15 +2335,36 @@ class RuntimeHostProcess:
         registered handler. Publishes the response to the output topic.
 
         Validation (performed before dispatch):
+        0. Gateway validation: policy check and signature validation (OMN-1899)
         1. Operation presence and type validation
         2. Handler prefix validation against registry
         3. Payload requirement validation for specific operations
         4. Correlation ID normalization to UUID
 
+        Gateway Integration (OMN-1899):
+            When gateway is configured, inbound messages are validated:
+            - Policy check: topic and realm must match configured policies
+            - Signature validation: if envelope is signed, verify signature
+            - Unsigned rejection: if reject_unsigned=True, reject unsigned messages
+
+            When gateway is not configured, validation is skipped (backwards
+            compatible).
+
         Args:
             envelope: Dict with 'operation', 'payload', optional 'correlation_id',
-                and 'handler_type'.
+                and 'handler_type'. May also be a signed ModelMessageEnvelope.
         """
+        # Step 0: Gateway validation (OMN-1899)
+        # Validate policy and signature before any other processing
+        validated_envelope = await self._validate_gateway_envelope(
+            envelope, self._input_topic
+        )
+        if validated_envelope is None:
+            # Validation failed - message rejected, already logged
+            return
+        # Use validated envelope for further processing
+        envelope = validated_envelope
+
         # Pre-validation: Get correlation_id for error responses if validation fails
         # This handles the case where validation itself throws before normalizing
         pre_validation_correlation_id = normalize_correlation_id(
@@ -2429,14 +2474,23 @@ class RuntimeHostProcess:
             # TODO(OMN-40): Migrate handlers to new protocol signature execute(request, operation_config)
             response = await handler.execute(envelope)  # type: ignore[call-arg]  # NOTE: legacy signature
 
-            # Ensure response has correlation_id
-            # Make a copy to avoid mutating handler's internal state
+            # Ensure response has correlation_id and publish
+            # Handle both dict and BaseModel responses from handlers
             if isinstance(response, dict):
-                response = dict(response)
+                response = dict(response)  # Copy to avoid mutating handler state
                 if "correlation_id" not in response:
                     response["correlation_id"] = correlation_id
-
-            await self._publish_envelope_safe(response, self._output_topic)
+                await self._publish_envelope_safe(response, self._output_topic)
+            elif isinstance(response, BaseModel):
+                await self._publish_model_safe(
+                    response, self._output_topic, correlation_id=correlation_id
+                )
+            else:
+                # Fallback: convert to dict
+                await self._publish_envelope_safe(
+                    {"response": response, "correlation_id": correlation_id},
+                    self._output_topic,
+                )
 
             logger.debug(
                 "Handler executed successfully",
@@ -2503,23 +2557,16 @@ class RuntimeHostProcess:
             "correlation_id": final_correlation_id,
         }
 
-    def _serialize_envelope(
-        self, envelope: dict[str, object] | BaseModel
-    ) -> dict[str, object]:
+    def _serialize_envelope(self, envelope: dict[str, object]) -> dict[str, object]:
         """Recursively convert UUID objects to strings for JSON serialization.
 
-        Handles both dict envelopes and Pydantic models (e.g., ModelDuplicateResponse).
-
         Args:
-            envelope: Envelope dict or Pydantic model that may contain UUID objects.
+            envelope: Envelope dict that may contain UUID objects.
 
         Returns:
             New dict with all UUIDs converted to strings.
         """
-        # Convert Pydantic models to dict first, ensuring type safety
-        envelope_dict: JsonDict = (
-            envelope.model_dump() if isinstance(envelope, BaseModel) else envelope
-        )
+        envelope_dict: JsonDict = envelope
 
         def convert_value(value: object) -> object:
             if isinstance(value, UUID):
@@ -2533,19 +2580,223 @@ class RuntimeHostProcess:
         return {k: convert_value(v) for k, v in envelope_dict.items()}
 
     async def _publish_envelope_safe(
-        self, envelope: dict[str, object] | BaseModel, topic: str
+        self, envelope: dict[str, object], topic: str
     ) -> None:
-        """Publish envelope with UUID serialization support.
+        """Publish envelope with UUID serialization and optional signing.
 
         Converts any UUID objects to strings before publishing to ensure
-        JSON serialization works correctly.
+        JSON serialization works correctly. If gateway signing is configured,
+        signs the envelope before publishing.
+
+        Gateway Integration (OMN-1899):
+            When gateway is configured with signing enabled, this method:
+            1. Extracts correlation_id from envelope for tracing
+            2. Checks outbound policy before publishing
+            3. Signs the dict payload with Ed25519 signature
+            4. Wraps signed envelope for transmission
 
         Args:
-            envelope: Envelope dict or Pydantic model (may contain UUID objects).
+            envelope: Envelope dict (may contain UUID objects).
             topic: Target topic to publish to.
         """
-        # Always serialize UUIDs upfront - single code path
-        json_safe_envelope = self._serialize_envelope(envelope)
+        # Extract correlation_id from envelope for logging
+        correlation_id: UUID | None = None
+        cid = envelope.get("correlation_id")
+        if isinstance(cid, UUID):
+            correlation_id = cid
+        elif isinstance(cid, str):
+            try:
+                correlation_id = UUID(cid)
+            except (ValueError, TypeError):
+                pass
+
+        # Auto-generate correlation_id if missing to ensure policy rejection
+        # logs and signing always have a correlation_id for tracing
+        if correlation_id is None:
+            correlation_id = uuid4()
+            envelope = dict(envelope)  # Copy to avoid mutation
+            envelope["correlation_id"] = str(correlation_id)
+
+        # Check outbound policy (if policy engine configured)
+        if self._policy_engine is not None:
+            decision = self._policy_engine.evaluate_outbound(
+                topic, correlation_id=correlation_id
+            )
+            if not decision:
+                logger.warning(
+                    "Outbound message rejected by policy",
+                    extra={
+                        "topic": topic,
+                        "reason": decision.reason,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                return
+
+        # Sign envelope if signer available (consistent with _publish_model_safe)
+        final_envelope: dict[str, object]
+        if self._envelope_signer is not None:
+            try:
+                # Get bus_id from event bus if available
+                bus_id = (
+                    self._event_bus.bus_id
+                    if hasattr(self._event_bus, "bus_id")
+                    else "default"
+                )
+
+                # Serialize envelope before signing to convert UUID objects
+                # to strings.  hash_canonical_json inside sign_dict uses
+                # json.dumps(sort_keys=True) which raises TypeError on UUIDs.
+                envelope = self._serialize_envelope(envelope)
+
+                # Sign the dict envelope using sign_dict method
+                signed_envelope = self._envelope_signer.sign_dict(
+                    payload=envelope,
+                    bus_id=bus_id,
+                    trace_id=correlation_id,
+                )
+                final_envelope = signed_envelope.model_dump(mode="json")
+
+                logger.debug(
+                    "Signed outbound dict envelope",
+                    extra={
+                        "topic": topic,
+                        "realm": self._envelope_signer.realm,
+                        "runtime_id": self._envelope_signer.runtime_id,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+            except Exception:
+                # Signing failure is non-fatal - log and publish unsigned
+                logger.exception(
+                    "Failed to sign outbound dict envelope, publishing unsigned",
+                    extra={
+                        "topic": topic,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                final_envelope = envelope
+        else:
+            # No signer configured - use envelope directly
+            final_envelope = envelope
+
+        # Serialize and publish
+        json_safe_envelope = self._serialize_envelope(final_envelope)
+        await self._event_bus.publish_envelope(json_safe_envelope, topic)
+
+    async def _publish_model_safe(
+        self,
+        model: BaseModel,
+        topic: str,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> None:
+        """Publish a BaseModel with optional signing and UUID serialization.
+
+        If gateway signing is configured, signs the model payload with Ed25519.
+        Then serializes to dict and publishes.
+
+        Gateway Integration (OMN-1899):
+            When gateway is configured with signing enabled, this method:
+            1. Checks outbound policy before publishing
+            2. Signs the BaseModel payload with Ed25519 signature
+            3. Wraps signed envelope for transmission
+
+            When gateway is not configured or signing disabled, converts
+            model to dict and publishes directly.
+
+        Args:
+            model: Pydantic BaseModel to publish (may contain UUID objects).
+            topic: Target topic to publish to.
+            correlation_id: Optional correlation ID for tracing. If not provided,
+                attempts to extract from model.correlation_id attribute.
+        """
+        # Determine trace_id for logging early (before signing)
+        # Resolution order: explicit param > model.correlation_id > auto-generate
+        trace_id: UUID | None = correlation_id
+        if trace_id is None and hasattr(model, "correlation_id"):
+            cid = getattr(model, "correlation_id", None)
+            if isinstance(cid, UUID):
+                trace_id = cid
+            elif isinstance(cid, str):
+                try:
+                    trace_id = UUID(cid)
+                except (ValueError, TypeError):
+                    pass
+
+        # Auto-generate trace_id if still missing to ensure policy rejection
+        # logs and signing always have a correlation_id for tracing
+        if trace_id is None:
+            trace_id = uuid4()
+
+        # Check outbound policy (if policy engine configured)
+        if self._policy_engine is not None:
+            decision = self._policy_engine.evaluate_outbound(
+                topic, correlation_id=trace_id
+            )
+            if not decision:
+                logger.warning(
+                    "Outbound message rejected by policy",
+                    extra={
+                        "topic": topic,
+                        "reason": decision.reason,
+                        "correlation_id": str(trace_id),
+                    },
+                )
+                return
+
+        # Sign envelope if signer available
+        envelope_dict: dict[str, object]
+        if self._envelope_signer is not None:
+            try:
+                # trace_id already extracted above for logging
+
+                # Get bus_id from event bus if available
+                bus_id = (
+                    self._event_bus.bus_id
+                    if hasattr(self._event_bus, "bus_id")
+                    else "default"
+                )
+
+                # Sign the model and convert to dict
+                signed_envelope = self._envelope_signer.sign_envelope(
+                    payload=model,
+                    bus_id=bus_id,
+                    trace_id=trace_id,
+                )
+                envelope_dict = signed_envelope.model_dump(mode="json")
+
+                logger.debug(
+                    "Signed outbound envelope",
+                    extra={
+                        "topic": topic,
+                        "realm": self._envelope_signer.realm,
+                        "runtime_id": self._envelope_signer.runtime_id,
+                        "trace_id": str(trace_id),
+                        "correlation_id": str(trace_id),
+                    },
+                )
+            except Exception:
+                # Signing failure is non-fatal - log and publish unsigned
+                logger.exception(
+                    "Failed to sign outbound envelope, publishing unsigned",
+                    extra={
+                        "topic": topic,
+                        "trace_id": str(trace_id),
+                        "correlation_id": str(trace_id),
+                    },
+                )
+                envelope_dict = model.model_dump(mode="json")
+                if trace_id is not None and "correlation_id" not in envelope_dict:
+                    envelope_dict["correlation_id"] = str(trace_id)
+        else:
+            # No signer configured - convert model to dict directly
+            envelope_dict = model.model_dump(mode="json")
+            if trace_id is not None and "correlation_id" not in envelope_dict:
+                envelope_dict["correlation_id"] = str(trace_id)
+
+        # Serialize (UUID conversion) and publish
+        json_safe_envelope = self._serialize_envelope(envelope_dict)
         await self._event_bus.publish_envelope(json_safe_envelope, topic)
 
     async def health_check(self) -> dict[str, object]:
@@ -3598,6 +3849,430 @@ class RuntimeHostProcess:
                     "correlation_id": str(correlation_id),
                 },
             )
+
+    # =========================================================================
+    # Gateway Methods (OMN-1899)
+    # =========================================================================
+
+    def _initialize_gateway(self, config: ModelGatewayConfig) -> None:
+        """Initialize gateway components from configuration.
+
+        Called during start() if gateway config is provided. Sets up envelope
+        signing, validation, and policy engine for secure message routing.
+
+        The gateway provides:
+            - Outbound envelope signing with Ed25519 signatures
+            - Inbound envelope validation (signature and realm verification)
+            - Topic allowlisting and realm boundary enforcement
+
+        Args:
+            config: Gateway configuration containing realm, runtime_id, key paths,
+                and policy settings. If config.enabled is False, gateway
+                functionality is disabled.
+
+        Security:
+            - Private keys are loaded only when needed and not stored in memory
+              beyond the signer service
+            - Public keys are registered for trusted runtime signature verification
+            - Realm enforcement prevents cross-realm message routing
+
+        Note:
+            This method is synchronous as key loading is a filesystem operation.
+            Gateway initialization failures are logged but do not prevent runtime
+            startup - the system degrades gracefully to operating without signing.
+        """
+        if not config.enabled:
+            logger.info(
+                "Gateway disabled by configuration",
+                extra={
+                    "realm": config.realm,
+                    "runtime_id": config.runtime_id,
+                },
+            )
+            return
+
+        try:
+            # Load keys if paths provided
+            private_key = None
+            public_key = None
+
+            if config.private_key_path:
+                private_key = load_private_key_from_pem(config.private_key_path)
+                logger.debug(
+                    "Loaded private key for signing",
+                    extra={"path": str(config.private_key_path)},
+                )
+
+            if config.public_key_path:
+                public_key = load_public_key_from_pem(config.public_key_path)
+                logger.debug(
+                    "Loaded public key for validation",
+                    extra={"path": str(config.public_key_path)},
+                )
+
+            # Initialize signer (if we have private key)
+            if private_key is not None:
+                self._envelope_signer = ServiceEnvelopeSigner(
+                    realm=config.realm,
+                    runtime_id=config.runtime_id,
+                    private_key=private_key,
+                )
+                logger.debug(
+                    "Envelope signer initialized",
+                    extra={
+                        "realm": config.realm,
+                        "runtime_id": config.runtime_id,
+                    },
+                )
+
+            # Initialize validator (if we have public key for own runtime)
+            if public_key is not None:
+                self._envelope_validator = ServiceEnvelopeValidator(
+                    expected_realm=config.realm,
+                    public_keys={config.runtime_id: public_key},
+                    reject_unsigned=config.reject_unsigned,
+                )
+                logger.debug(
+                    "Envelope validator initialized",
+                    extra={
+                        "expected_realm": config.realm,
+                        "reject_unsigned": config.reject_unsigned,
+                        "trusted_signers": [config.runtime_id],
+                    },
+                )
+
+            # Initialize policy engine
+            self._policy_engine = ServicePolicyEngine(
+                allowed_topics=list(config.allowed_topics)
+                if config.allowed_topics
+                else None,
+                expected_realm=config.realm,
+            )
+            logger.debug(
+                "Policy engine initialized",
+                extra={
+                    "allowed_topics_count": len(config.allowed_topics)
+                    if config.allowed_topics
+                    else 0,
+                    "realm_enforcement": True,
+                },
+            )
+
+            self._gateway_config = config
+
+            logger.info(
+                "Gateway initialized",
+                extra={
+                    "realm": config.realm,
+                    "runtime_id": config.runtime_id,
+                    "signing_enabled": self._envelope_signer is not None,
+                    "validation_enabled": self._envelope_validator is not None,
+                    "policy_enabled": self._policy_engine is not None,
+                    "reject_unsigned": config.reject_unsigned,
+                    "allowed_topics_count": len(config.allowed_topics)
+                    if config.allowed_topics
+                    else 0,
+                },
+            )
+
+        except Exception as e:
+            # Gateway initialization failure is non-fatal - log and continue
+            # The system will operate without signing/validation
+            init_correlation_id = uuid4()
+            logger.warning(
+                "Failed to initialize gateway, proceeding without",
+                extra={
+                    "error": str(e),
+                    "realm": config.realm,
+                    "runtime_id": config.runtime_id,
+                    "correlation_id": str(init_correlation_id),
+                },
+            )
+            # Clear any partially initialized components
+            self._gateway_config = None
+            self._envelope_signer = None
+            self._envelope_validator = None
+            self._policy_engine = None
+
+    async def _initialize_gateway_from_config(self) -> None:
+        """Initialize gateway from runtime configuration.
+
+        Reads gateway configuration from the runtime config dict and initializes
+        gateway components. Called during start() to enable envelope signing,
+        validation, and policy enforcement.
+
+        Configuration keys:
+            - gateway.enabled: bool (default: True)
+            - gateway.realm: str (required if enabled)
+            - gateway.runtime_id: str (required if enabled)
+            - gateway.private_key_path: str | None (optional, enables signing)
+            - gateway.public_key_path: str | None (optional, enables validation)
+            - gateway.allowed_topics: list[str] (optional, topic allowlist)
+            - gateway.reject_unsigned: bool (default: True)
+
+        Example config:
+            {
+                "gateway": {
+                    "enabled": True,
+                    "realm": "dev",
+                    "runtime_id": "runtime-dev-001",
+                    "private_key_path": "/etc/onex/keys/private.pem",
+                    "public_key_path": "/etc/onex/keys/public.pem",
+                    "allowed_topics": ["events.*", "commands.*"],
+                    "reject_unsigned": True,
+                }
+            }
+        """
+        if self._config is None:
+            logger.debug("No runtime config provided, skipping gateway setup")
+            return
+
+        gateway_raw = self._config.get("gateway")
+        if gateway_raw is None:
+            logger.debug("Gateway not configured, skipping")
+            return
+
+        try:
+            if isinstance(gateway_raw, dict):
+                gateway_config = ModelGatewayConfig.model_validate(gateway_raw)
+            elif isinstance(gateway_raw, ModelGatewayConfig):
+                gateway_config = gateway_raw
+            else:
+                logger.warning(
+                    "Invalid gateway config type",
+                    extra={
+                        "type": type(gateway_raw).__name__,
+                        "correlation_id": str(uuid4()),
+                    },
+                )
+                return
+
+            # Call the synchronous initialization method
+            self._initialize_gateway(gateway_config)
+
+        except Exception as e:
+            logger.warning(
+                "Failed to parse gateway config, proceeding without",
+                extra={
+                    "error": str(e),
+                    "correlation_id": str(uuid4()),
+                },
+            )
+
+    async def _validate_gateway_envelope(
+        self,
+        envelope: dict[str, object],
+        topic: str,
+    ) -> dict[str, object] | None:
+        """Validate inbound envelope with gateway policy and signature checks.
+
+        Performs gateway validation on inbound envelopes:
+        1. Policy check: Verifies topic is allowed and realm matches (if configured)
+        2. Signature validation: If envelope is a signed ModelMessageEnvelope,
+           validates the Ed25519 signature
+        3. Unsigned handling: If reject_unsigned=True and envelope is not signed,
+           rejects the message
+
+        When gateway is not configured, returns the envelope unchanged (backwards
+        compatible behavior).
+
+        Args:
+            envelope: The inbound envelope dict. May be a signed ModelMessageEnvelope
+                or a plain dict.
+            topic: The topic the message arrived on.
+
+        Returns:
+            The validated envelope (possibly extracted from signed wrapper) if
+            validation passes, or None if validation fails (message should be
+            rejected).
+
+        Note:
+            This method does not publish error responses - it simply returns None
+            to indicate the message should be silently dropped. This is intentional
+            for security reasons (avoid revealing validation details to attackers).
+        """
+        # If no gateway configured, pass through unchanged
+        if (
+            self._policy_engine is None
+            and self._envelope_validator is None
+            and self._gateway_config is None
+        ):
+            return envelope
+
+        # Extract correlation_id early for consistent logging across all paths
+        # Try correlation_id first, then trace_id, finally generate one
+        correlation_id: UUID | None = None
+        cid = envelope.get("correlation_id") or envelope.get("trace_id")
+        if isinstance(cid, UUID):
+            correlation_id = cid
+        elif isinstance(cid, str):
+            try:
+                correlation_id = UUID(cid)
+            except (ValueError, TypeError):
+                pass
+        if correlation_id is None:
+            correlation_id = uuid4()
+            # Inject generated correlation_id into envelope for downstream tracking
+            envelope = dict(envelope)  # Copy to avoid mutating caller's dict
+            envelope["correlation_id"] = str(correlation_id)
+
+        # Step 1: Policy check (topic allowlist and realm boundary)
+        if self._policy_engine is not None:
+            # Extract realm from envelope if present
+            realm = envelope.get("realm")
+            realm_str = str(realm) if realm is not None else None
+
+            decision = self._policy_engine.evaluate_inbound(
+                topic=topic,
+                realm=realm_str,
+                correlation_id=correlation_id,
+            )
+            if not decision:
+                logger.warning(
+                    "Inbound message rejected by policy",
+                    extra={
+                        "topic": topic,
+                        "realm": realm_str,
+                        "reason": decision.reason,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                return None
+
+        # Step 2: Check signature shape once (outside validator block)
+        # Signed envelopes have: realm, runtime_id, bus_id, signature, payload
+        # The signature field must be a dict containing an "algorithm" key
+        # to distinguish from business payloads that coincidentally share
+        # the same top-level field names.
+        sig = envelope.get("signature")
+        has_signature = isinstance(sig, dict) and "algorithm" in sig
+        has_required_fields = all(
+            field in envelope for field in ("realm", "runtime_id", "bus_id", "payload")
+        )
+
+        # Enforce reject_unsigned REGARDLESS of validator availability.
+        # This fixes a bug where reject_unsigned=True had no effect when
+        # public_key_path was not configured (making _envelope_validator None).
+        if (
+            self._gateway_config is not None
+            and self._gateway_config.reject_unsigned
+            and not (has_signature and has_required_fields)
+        ):
+            logger.warning(
+                "Unsigned envelope rejected (reject_unsigned=True)",
+                extra={
+                    "topic": topic,
+                    "has_signature": has_signature,
+                    "has_required_fields": has_required_fields,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return None
+
+        # Step 3a: Reject signed envelopes when no validator is configured.
+        # Accepting a signed envelope without validation is a security risk:
+        # a forged signature would be silently trusted. Fail-closed here.
+        if self._envelope_validator is None and has_signature and has_required_fields:
+            logger.warning(
+                "Signed envelope rejected: no validator configured to verify signature",
+                extra={
+                    "topic": topic,
+                    "runtime_id": envelope.get("runtime_id"),
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return None
+
+        # Step 3b: Validate signed envelopes (validator available AND signed)
+        if (
+            self._envelope_validator is not None
+            and has_signature
+            and has_required_fields
+        ):
+            try:
+                from omnibase_core.models.envelope.model_message_envelope import (
+                    ModelMessageEnvelope,
+                )
+
+                # Parse as ModelMessageEnvelope
+                msg_envelope: ModelMessageEnvelope[object] = (
+                    ModelMessageEnvelope.model_validate(envelope)
+                )
+
+                # Validate signature
+                result = self._envelope_validator.validate_envelope(msg_envelope)
+                if not result:
+                    logger.warning(
+                        "Envelope signature validation failed",
+                        extra={
+                            "topic": topic,
+                            "error_code": result.error_code.value
+                            if result.error_code
+                            else None,
+                            "error_message": result.error_message,
+                            "runtime_id": envelope.get("runtime_id"),
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+                    return None
+
+                # Validation passed - extract inner payload
+                # The payload could be a dict or a BaseModel
+                payload = msg_envelope.payload
+                if isinstance(payload, dict):
+                    extracted_envelope = dict(payload)  # Copy to avoid mutation
+                elif hasattr(payload, "model_dump"):
+                    extracted_envelope = payload.model_dump(mode="json")
+                else:
+                    # Unknown payload type, use as-is
+                    extracted_envelope = {"payload": payload}
+
+                # Preserve trace_id as correlation_id for downstream tracking.
+                # Fall back to the context correlation_id when trace_id is absent.
+                if msg_envelope.trace_id is not None:
+                    extracted_envelope["correlation_id"] = str(msg_envelope.trace_id)
+                else:
+                    extracted_envelope["correlation_id"] = str(correlation_id)
+
+                logger.debug(
+                    "Signed envelope validated successfully",
+                    extra={
+                        "topic": topic,
+                        "runtime_id": msg_envelope.runtime_id,
+                        "correlation_id": str(msg_envelope.trace_id)
+                        if msg_envelope.trace_id
+                        else str(correlation_id),
+                    },
+                )
+
+                return extracted_envelope
+
+            except (ValidationError, ValueError, KeyError, TypeError) as e:
+                # Failed to parse or validate signed envelope.
+                # Catches expected failures: malformed data (ValidationError,
+                # ValueError), missing fields (KeyError), type mismatches
+                # (TypeError). Unexpected errors (ImportError, AttributeError)
+                # propagate to surface real bugs.
+                logger.warning(
+                    "Failed to validate signed envelope",
+                    extra={
+                        "topic": topic,
+                        "error_type": type(e).__name__,
+                        "error": str(e),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                return None
+
+        # Unsigned envelope accepted (reject_unsigned=False or not configured)
+        if not (has_signature and has_required_fields):
+            logger.debug(
+                "Accepting unsigned envelope (reject_unsigned=False)",
+                extra={"topic": topic, "correlation_id": str(correlation_id)},
+            )
+
+        # Validation passed or no validator configured
+        return envelope
 
     # =========================================================================
     # WARNING: FAIL-OPEN BEHAVIOR

@@ -62,7 +62,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 DOCKER_DIR = PROJECT_ROOT / "docker"
 DOCKERFILE_PATH = DOCKER_DIR / "Dockerfile.runtime"
-COMPOSE_FILE_PATH = DOCKER_DIR / "docker-compose.runtime.yml"
+COMPOSE_FILE_PATH = DOCKER_DIR / "docker-compose.infra.yml"
 
 
 def _is_docker_available() -> bool:
@@ -200,7 +200,7 @@ def compose_file_path() -> Path:
     """Return docker-compose file path.
 
     Returns:
-        Path: Absolute path to docker-compose.runtime.yml.
+        Path: Absolute path to docker-compose.infra.yml.
     """
     return COMPOSE_FILE_PATH
 

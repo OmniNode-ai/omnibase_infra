@@ -68,15 +68,15 @@ Environment Variables:
             Default: "runtime_scheduler"
             Example: "prod_runtime_scheduler"
 
-    Valkey (Redis-compatible) Settings:
-        REDIS_HOST: Valkey host for sequence number persistence
+    Valkey Settings:
+        VALKEY_HOST: Valkey host for sequence number persistence
             Default: "localhost"
-            Example: "omninode-bridge-valkey" or use REDIS_HOST env var
+            Example: "omninode-bridge-valkey" or use VALKEY_HOST env var
 
-        REDIS_PORT: Valkey port (integer, 1-65535)
+        VALKEY_PORT: Valkey port (integer, 1-65535)
             Default: 6379
 
-        REDIS_PASSWORD: Valkey password (optional)
+        VALKEY_PASSWORD: Valkey password (optional)
             Default: None (no authentication)
 
         ONEX_RUNTIME_SCHEDULER_VALKEY_TIMEOUT: Timeout for Valkey ops (float)
@@ -235,7 +235,7 @@ class ModelRuntimeSchedulerConfig(BaseModel):
     )
     valkey_password: str | None = Field(
         default=None,
-        description="Valkey password (optional, from REDIS_PASSWORD env var)",
+        description="Valkey password (optional, from VALKEY_PASSWORD env var)",
     )
     valkey_timeout_seconds: float = Field(
         default=5.0,
@@ -503,10 +503,10 @@ class ModelRuntimeSchedulerConfig(BaseModel):
             "ONEX_RUNTIME_SCHEDULER_CB_RESET_TIMEOUT": "circuit_breaker_reset_timeout_seconds",
             "ONEX_RUNTIME_SCHEDULER_ENABLE_METRICS": "enable_metrics",
             "ONEX_RUNTIME_SCHEDULER_METRICS_PREFIX": "metrics_prefix",
-            # Valkey configuration from Redis environment variables
-            "REDIS_HOST": "valkey_host",
-            "REDIS_PORT": "valkey_port",
-            "REDIS_PASSWORD": "valkey_password",
+            # Valkey configuration
+            "VALKEY_HOST": "valkey_host",
+            "VALKEY_PORT": "valkey_port",
+            "VALKEY_PASSWORD": "valkey_password",
             "ONEX_RUNTIME_SCHEDULER_VALKEY_TIMEOUT": "valkey_timeout_seconds",
             "ONEX_RUNTIME_SCHEDULER_VALKEY_RETRIES": "valkey_connection_retries",
         }
