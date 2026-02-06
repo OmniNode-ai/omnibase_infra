@@ -123,6 +123,7 @@ from omnibase_infra.models.projection import (
     ModelSnapshotTopicConfig,
 )
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
     from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
@@ -1438,12 +1439,12 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                     entity_id,
                     snapshot.snapshot_version,
                 )
-            except Exception:
+            except Exception as e:
                 logger.warning(
-                    "Failed to publish debounced snapshot for %s version %d",
+                    "Failed to publish debounced snapshot for %s version %d: %s",
                     entity_id,
                     snapshot.snapshot_version,
-                    exc_info=True,
+                    sanitize_error_message(e),
                 )
 
     async def _flush_pending_publishes(self) -> None:
@@ -1483,11 +1484,11 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                     entity_id,
                     snapshot.snapshot_version,
                 )
-            except Exception:
+            except Exception as e:
                 logger.warning(
-                    "Failed to flush debounced snapshot for %s during stop",
+                    "Failed to flush debounced snapshot for %s during stop: %s",
                     entity_id,
-                    exc_info=True,
+                    sanitize_error_message(e),
                 )
 
     async def publish_snapshot_batch(

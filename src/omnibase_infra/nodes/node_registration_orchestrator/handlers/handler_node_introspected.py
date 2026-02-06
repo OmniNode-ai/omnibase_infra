@@ -72,6 +72,7 @@ if TYPE_CHECKING:
         ProtocolSnapshotPublisher,
     )
     from omnibase_infra.runtime.projector_shell import ProjectorShell
+from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration.events.model_node_registration_initiated import (
     ModelNodeRegistrationInitiated,
 )
@@ -463,10 +464,6 @@ class HandlerNodeIntrospected:
             # so publishing is only meaningful when a projection was persisted above.
             if self._snapshot_publisher is not None:
                 try:
-                    from omnibase_infra.models.projection import (
-                        ModelRegistrationProjection,
-                    )
-
                     projection_as_model = ModelRegistrationProjection(
                         entity_id=node_id,
                         domain="registration",
