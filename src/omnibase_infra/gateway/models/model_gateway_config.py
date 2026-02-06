@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ModelGatewayConfig(BaseModel):
@@ -101,7 +101,7 @@ class ModelGatewayConfig(BaseModel):
     )
     # Note: runtime_id is intentionally str (not UUID) per OMN-1898 design.
     # It's a human-readable gateway identifier like "runtime-dev-001", not a UUID.
-    runtime_id: str = Field(  # noqa: ONEX-PATTERN-UUID
+    runtime_id: str = Field(
         ...,
         min_length=1,
         max_length=128,
@@ -127,6 +127,30 @@ class ModelGatewayConfig(BaseModel):
         default=True,
         description="Whether to reject inbound messages lacking valid signatures",
     )
+
+    @field_validator("private_key_path", "public_key_path", mode="before")
+    @classmethod
+    def _validate_key_path_is_absolute(cls, v: Path | None) -> Path | None:
+        """Validate that key paths are absolute to prevent path traversal.
+
+        Args:
+            v: The path value to validate, or None if not provided.
+
+        Returns:
+            The validated path value (unchanged if valid).
+
+        Raises:
+            ValueError: If the path is not absolute.
+        """
+        if v is not None:
+            path = Path(v) if not isinstance(v, Path) else v
+            if not path.is_absolute():
+                msg = (
+                    f"Key path must be absolute to prevent path traversal, "
+                    f"got relative path: {path}"
+                )
+                raise ValueError(msg)
+        return v
 
 
 __all__: list[str] = ["ModelGatewayConfig"]

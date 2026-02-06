@@ -86,6 +86,25 @@ def load_private_key_from_pem(path: Path) -> Ed25519PrivateKey:
             context=context,
         )
 
+    # Warn on overly permissive file permissions (group/other access).
+    # Private keys should be restricted to owner-only (0600 or stricter).
+    try:
+        file_mode = path.stat().st_mode
+        if file_mode & 0o077:
+            logger.warning(
+                "Private key file has overly permissive permissions "
+                "(mode=%s, correlation_id=%s). "
+                "Recommended: chmod 600 %s",
+                oct(file_mode),
+                context.correlation_id,
+                path,
+                extra={"path": str(path), "mode": oct(file_mode)},
+            )
+    except OSError:
+        # If we cannot stat the file, the subsequent read_bytes will fail
+        # with a proper error, so we do not raise here.
+        pass
+
     try:
         key_bytes = path.read_bytes()
     except OSError as e:

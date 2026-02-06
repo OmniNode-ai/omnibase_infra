@@ -39,6 +39,7 @@ Example:
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -201,6 +202,7 @@ class ServiceEnvelopeValidator:
         """
         self._expected_realm = expected_realm
         self._public_keys: dict[str, Ed25519PublicKey] = dict(public_keys or {})
+        self._public_keys_lock = threading.Lock()
         self._reject_unsigned = reject_unsigned
 
         logger.debug(
@@ -240,7 +242,8 @@ class ServiceEnvelopeValidator:
             Count of runtime_ids in the trusted public keys registry.
 
         """
-        return len(self._public_keys)
+        with self._public_keys_lock:
+            return len(self._public_keys)
 
     def validate_envelope(
         self,
@@ -333,7 +336,9 @@ class ServiceEnvelopeValidator:
 
         # Step 3: Look up signer's public key
         signer = envelope.signature.signer
-        public_key = self._public_keys.get(signer)
+        with self._public_keys_lock:
+            public_key = self._public_keys.get(signer)
+            trusted_signers_snapshot = list(self._public_keys.keys())
         if public_key is None:
             error_msg = f"Unknown signer '{signer}' not in trusted public keys"
             logger.warning(
@@ -343,7 +348,7 @@ class ServiceEnvelopeValidator:
                     "signer": signer,
                     "runtime_id": envelope.runtime_id,
                     "trace_id": str(envelope.trace_id) if envelope.trace_id else None,
-                    "trusted_signers": list(self._public_keys.keys()),
+                    "trusted_signers": trusted_signers_snapshot,
                 },
             )
             return ValidationResult.failure(
@@ -488,8 +493,10 @@ class ServiceEnvelopeValidator:
             This can be used for key rotation scenarios.
 
         """
-        is_update = runtime_id in self._public_keys
-        self._public_keys[runtime_id] = public_key
+        with self._public_keys_lock:
+            is_update = runtime_id in self._public_keys
+            self._public_keys[runtime_id] = public_key
+            total_signers = len(self._public_keys)
 
         logger.info(
             "Trusted signer %s: %s",
@@ -498,7 +505,7 @@ class ServiceEnvelopeValidator:
             extra={
                 "runtime_id": runtime_id,
                 "action": "update" if is_update else "add",
-                "total_signers": len(self._public_keys),
+                "total_signers": total_signers,
             },
         )
 
@@ -520,18 +527,24 @@ class ServiceEnvelopeValidator:
             ...     print("Signer removed successfully")
 
         """
-        if runtime_id in self._public_keys:
-            del self._public_keys[runtime_id]
+        with self._public_keys_lock:
+            if runtime_id in self._public_keys:
+                del self._public_keys[runtime_id]
+                total_signers = len(self._public_keys)
+                removed = True
+            else:
+                removed = False
+
+        if removed:
             logger.info(
                 "Trusted signer removed: %s",
                 runtime_id,
                 extra={
                     "runtime_id": runtime_id,
-                    "total_signers": len(self._public_keys),
+                    "total_signers": total_signers,
                 },
             )
-            return True
-        return False
+        return removed
 
     def is_trusted_signer(self, runtime_id: str) -> bool:
         """Check if a runtime_id is a trusted signer.
@@ -543,7 +556,8 @@ class ServiceEnvelopeValidator:
             True if the runtime_id has a registered public key.
 
         """
-        return runtime_id in self._public_keys
+        with self._public_keys_lock:
+            return runtime_id in self._public_keys
 
 
 __all__ = ["ServiceEnvelopeValidator", "ValidationResult"]

@@ -2563,7 +2563,7 @@ class RuntimeHostProcess:
                     bus_id=bus_id,
                     trace_id=correlation_id,
                 )
-                final_envelope = signed_envelope.model_dump(mode="python")
+                final_envelope = signed_envelope.model_dump(mode="json")
 
                 logger.debug(
                     "Signed outbound dict envelope",
@@ -2576,13 +2576,12 @@ class RuntimeHostProcess:
                         else None,
                     },
                 )
-            except Exception as e:
+            except Exception:
                 # Signing failure is non-fatal - log and publish unsigned
-                logger.warning(
+                logger.exception(
                     "Failed to sign outbound dict envelope, publishing unsigned",
                     extra={
                         "topic": topic,
-                        "error": str(e),
                         "correlation_id": str(correlation_id)
                         if correlation_id
                         else None,
@@ -2666,7 +2665,7 @@ class RuntimeHostProcess:
                     bus_id=bus_id,
                     trace_id=trace_id,
                 )
-                envelope_dict = signed_envelope.model_dump(mode="python")
+                envelope_dict = signed_envelope.model_dump(mode="json")
 
                 logger.debug(
                     "Signed outbound envelope",
@@ -2677,20 +2676,19 @@ class RuntimeHostProcess:
                         "trace_id": str(trace_id) if trace_id else None,
                     },
                 )
-            except Exception as e:
+            except Exception:
                 # Signing failure is non-fatal - log and publish unsigned
-                logger.warning(
+                logger.exception(
                     "Failed to sign outbound envelope, publishing unsigned",
                     extra={
                         "topic": topic,
-                        "error": str(e),
                         "trace_id": str(trace_id) if trace_id else None,
                     },
                 )
-                envelope_dict = model.model_dump(mode="python")
+                envelope_dict = model.model_dump(mode="json")
         else:
             # No signer configured - convert model to dict directly
-            envelope_dict = model.model_dump(mode="python")
+            envelope_dict = model.model_dump(mode="json")
 
         # Serialize (UUID conversion) and publish
         json_safe_envelope = self._serialize_envelope(envelope_dict)
