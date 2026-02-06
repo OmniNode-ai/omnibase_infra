@@ -36,6 +36,8 @@ from tests.conftest import make_runtime_config, seed_mock_handlers
 if TYPE_CHECKING:
     from omnibase_infra.protocols import ProtocolNodeIntrospection
 
+pytestmark = pytest.mark.integration
+
 
 # =============================================================================
 # Fixtures

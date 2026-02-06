@@ -2631,9 +2631,7 @@ class RuntimeHostProcess:
                     extra={
                         "topic": topic,
                         "reason": decision.reason,
-                        "correlation_id": str(correlation_id)
-                        if correlation_id
-                        else None,
+                        "correlation_id": str(correlation_id),
                     },
                 )
                 return
@@ -2663,9 +2661,7 @@ class RuntimeHostProcess:
                         "topic": topic,
                         "realm": self._envelope_signer.realm,
                         "runtime_id": self._envelope_signer.runtime_id,
-                        "correlation_id": str(correlation_id)
-                        if correlation_id
-                        else None,
+                        "correlation_id": str(correlation_id),
                     },
                 )
             except Exception:
@@ -2674,9 +2670,7 @@ class RuntimeHostProcess:
                     "Failed to sign outbound dict envelope, publishing unsigned",
                     extra={
                         "topic": topic,
-                        "correlation_id": str(correlation_id)
-                        if correlation_id
-                        else None,
+                        "correlation_id": str(correlation_id),
                     },
                 )
                 final_envelope = envelope
@@ -2744,7 +2738,7 @@ class RuntimeHostProcess:
                     extra={
                         "topic": topic,
                         "reason": decision.reason,
-                        "correlation_id": str(trace_id) if trace_id else None,
+                        "correlation_id": str(trace_id),
                     },
                 )
                 return
@@ -2776,7 +2770,8 @@ class RuntimeHostProcess:
                         "topic": topic,
                         "realm": self._envelope_signer.realm,
                         "runtime_id": self._envelope_signer.runtime_id,
-                        "trace_id": str(trace_id) if trace_id else None,
+                        "trace_id": str(trace_id),
+                        "correlation_id": str(trace_id),
                     },
                 )
             except Exception:
@@ -2785,7 +2780,8 @@ class RuntimeHostProcess:
                     "Failed to sign outbound envelope, publishing unsigned",
                     extra={
                         "topic": topic,
-                        "trace_id": str(trace_id) if trace_id else None,
+                        "trace_id": str(trace_id),
+                        "correlation_id": str(trace_id),
                     },
                 )
                 envelope_dict = model.model_dump(mode="json")
@@ -4201,9 +4197,12 @@ class RuntimeHostProcess:
                     # Unknown payload type, use as-is
                     extracted_envelope = {"payload": payload}
 
-                # Preserve trace_id as correlation_id for downstream tracking
+                # Preserve trace_id as correlation_id for downstream tracking.
+                # Fall back to the context correlation_id when trace_id is absent.
                 if msg_envelope.trace_id is not None:
                     extracted_envelope["correlation_id"] = msg_envelope.trace_id
+                else:
+                    extracted_envelope["correlation_id"] = str(correlation_id)
 
                 logger.debug(
                     "Signed envelope validated successfully",
@@ -4212,7 +4211,7 @@ class RuntimeHostProcess:
                         "runtime_id": msg_envelope.runtime_id,
                         "correlation_id": str(msg_envelope.trace_id)
                         if msg_envelope.trace_id
-                        else None,
+                        else str(correlation_id),
                     },
                 )
 

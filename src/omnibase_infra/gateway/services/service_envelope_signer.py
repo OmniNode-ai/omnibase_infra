@@ -315,8 +315,8 @@ class ServiceEnvelopeSigner:
             >>> print(envelope.signature.algorithm)
             'ed25519'
 
-        .. versionadded:: OMN-1899
-            Added to support signing dict envelopes in runtime host.
+        .. versionadded:: 0.4.1
+            Added to support signing dict envelopes in runtime host (OMN-1899).
 
         """
         # Generate trace_id if not provided
