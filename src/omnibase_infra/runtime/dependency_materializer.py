@@ -284,14 +284,17 @@ class DependencyMaterializer:
                 # Deduplicate by name (first declaration wins)
                 if dep_name in seen_names:
                     if seen_names[dep_name] != dep_type:
-                        logger.warning(
-                            "Duplicate dependency name with conflicting types",
-                            extra={
-                                "dep_name": dep_name,
-                                "existing_type": seen_names[dep_name],
-                                "conflicting_type": dep_type,
-                                "path": str(path),
-                            },
+                        context = ModelInfraErrorContext.with_correlation(
+                            transport_type=EnumInfraTransportType.RUNTIME,
+                            operation="collect_infra_deps",
+                            target_name=dep_name,
+                        )
+                        raise ProtocolConfigurationError(
+                            f"Dependency name '{dep_name}' declared with conflicting "
+                            f"types: '{seen_names[dep_name]}' vs '{dep_type}' "
+                            f"(in {path}). Each dependency name must resolve to a "
+                            f"single resource type.",
+                            context=context,
                         )
                     continue
                 seen_names[dep_name] = dep_type

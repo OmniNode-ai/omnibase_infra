@@ -19,6 +19,7 @@ from omnibase_infra.enums.enum_infra_resource_type import (
     INFRA_RESOURCE_TYPES,
     EnumInfraResourceType,
 )
+from omnibase_infra.enums.enum_kafka_acks import EnumKafkaAcks
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime.dependency_materializer import DependencyMaterializer
 from omnibase_infra.runtime.models.model_http_client_config import (
@@ -208,7 +209,7 @@ class TestModelKafkaProducerConfig:
         config = ModelKafkaProducerConfig()
         assert config.bootstrap_servers == "localhost:9092"
         assert config.timeout_seconds == 10.0
-        assert config.acks == "all"
+        assert config.acks == EnumKafkaAcks.ALL
 
     def test_from_env(self) -> None:
         with patch.dict(
@@ -306,7 +307,7 @@ class TestDependencyMaterializerCollectDeps:
         materializer: DependencyMaterializer,
         tmp_path: Path,
     ) -> None:
-        """Two contracts declaring same dependency name -> first wins."""
+        """Two contracts declaring same dependency name + same type -> first wins."""
         contract1 = tmp_path / "contract1.yaml"
         contract2 = tmp_path / "contract2.yaml"
 
@@ -344,6 +345,47 @@ class TestDependencyMaterializerCollectDeps:
         assert deps[0].name == "shared_db"
         # First declaration wins
         assert deps[0].required is True
+
+    def test_collect_raises_on_conflicting_types(
+        self,
+        materializer: DependencyMaterializer,
+        tmp_path: Path,
+    ) -> None:
+        """Same dependency name with different types -> ProtocolConfigurationError."""
+        contract1 = tmp_path / "contract1.yaml"
+        contract2 = tmp_path / "contract2.yaml"
+
+        contract1.write_text(
+            yaml.dump(
+                {
+                    "name": "node_a",
+                    "dependencies": [
+                        {
+                            "name": "shared_store",
+                            "type": "postgres_pool",
+                            "required": True,
+                        },
+                    ],
+                }
+            )
+        )
+        contract2.write_text(
+            yaml.dump(
+                {
+                    "name": "node_b",
+                    "dependencies": [
+                        {
+                            "name": "shared_store",
+                            "type": "kafka_producer",
+                            "required": True,
+                        },
+                    ],
+                }
+            )
+        )
+
+        with pytest.raises(ProtocolConfigurationError, match="conflicting"):
+            materializer._collect_infra_deps([contract1, contract2])
 
     def test_collect_skips_missing_files(
         self,

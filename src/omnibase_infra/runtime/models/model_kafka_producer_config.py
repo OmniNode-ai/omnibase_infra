@@ -11,6 +11,8 @@ import os
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.enums.enum_kafka_acks import EnumKafkaAcks
+
 
 class ModelKafkaProducerConfig(BaseModel):
     """Kafka producer configuration.
@@ -30,8 +32,8 @@ class ModelKafkaProducerConfig(BaseModel):
         le=120.0,
         description="Connection timeout in seconds",
     )
-    acks: str = Field(
-        default="all",
+    acks: EnumKafkaAcks = Field(
+        default=EnumKafkaAcks.ALL,
         description="Producer acknowledgment policy",
     )
 
@@ -40,7 +42,8 @@ class ModelKafkaProducerConfig(BaseModel):
         """Create config from KAFKA_* environment variables.
 
         Raises:
-            ValueError: If numeric env vars contain non-numeric values.
+            ValueError: If numeric env vars contain non-numeric values
+                or KAFKA_ACKS contains an invalid acks value.
         """
         try:
             return cls(
@@ -49,7 +52,7 @@ class ModelKafkaProducerConfig(BaseModel):
                 ),
                 timeout_seconds=float(os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "10000"))
                 / 1000.0,
-                acks=os.getenv("KAFKA_ACKS", "all"),
+                acks=EnumKafkaAcks(os.getenv("KAFKA_ACKS", "all")),
             )
         except (ValueError, TypeError) as e:
             msg = f"Invalid Kafka producer configuration: {e}"

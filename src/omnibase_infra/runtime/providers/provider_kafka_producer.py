@@ -56,7 +56,7 @@ class ProviderKafkaProducer:
 
         producer = AIOKafkaProducer(
             bootstrap_servers=self._config.bootstrap_servers,
-            acks=self._config.acks,
+            acks=self._config.acks.to_aiokafka(),
         )
 
         await asyncio.wait_for(
