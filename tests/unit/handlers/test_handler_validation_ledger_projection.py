@@ -15,7 +15,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
