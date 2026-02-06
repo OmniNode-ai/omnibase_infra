@@ -19,7 +19,7 @@ Design Notes:
        - Snapshots are derived, read-optimized views (can be rebuilt from events)
 
     3. **Key Format**:
-       - Snapshot keys: "{domain}:{entity_id}" (e.g., "registration:uuid-here")
+       - Snapshot keys: entity_id (UUID string, e.g., "550e8400-...")
        - This enables per-entity compaction where only the latest snapshot survives
 
     4. **Partition Strategy**:
@@ -96,14 +96,12 @@ class ModelSnapshotTopicConfig(BaseModel):
 
     Key Semantics:
         Kafka compaction uses message keys to determine which records to retain.
-        For snapshot topics, keys should follow the format:
+        For snapshot topics, the key is the entity_id (UUID string).
 
-            {domain}:{entity_id}
-
-        For example: "registration:550e8400-e29b-41d4-a716-446655440000"
+        For example: "550e8400-e29b-41d4-a716-446655440000"
 
         This ensures that only the latest snapshot for each entity survives
-        compaction, while maintaining domain isolation.
+        compaction with simple cross-language consumer compatibility.
 
     Compaction Timing:
         The min_compaction_lag_ms and max_compaction_lag_ms settings control

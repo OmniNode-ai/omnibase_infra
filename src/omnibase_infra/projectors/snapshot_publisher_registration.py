@@ -512,7 +512,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         """Publish a single snapshot to the snapshot topic.
 
         Publishes the projection as a snapshot to the compacted Kafka topic.
-        The key is derived from (entity_id, domain) for proper compaction.
+        The key is the entity_id (UUID string) for proper compaction.
 
         NOTE: This is a READ OPTIMIZATION. The event log remains source of truth.
 
