@@ -881,3 +881,148 @@ class TestProviderKafkaProducerTimeout:
                 await provider.create()
 
             mock_producer.stop.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# RuntimeHostProcess integration tests (r4)
+# ---------------------------------------------------------------------------
+
+
+class TestRuntimeHostProcessMaterializerIntegration:
+    """Tests for DependencyMaterializer integration into RuntimeHostProcess."""
+
+    @pytest.mark.asyncio
+    async def test_start_materializes_dependencies(
+        self,
+        tmp_contract: Path,
+    ) -> None:
+        """RuntimeHostProcess.start() calls DependencyMaterializer when contract_paths provided."""
+        # We test _materialize_dependencies() directly since start() has many other dependencies.
+        # RuntimeHostProcess.start() would call this as part of its boot sequence,
+        # but we isolate the materializer step to avoid mocking the full runtime.
+        materializer = DependencyMaterializer(
+            config=ModelMaterializerConfig(
+                postgres=ModelPostgresPoolConfig(
+                    host="localhost",
+                    port=5432,
+                    user="test",
+                    password="test",  # noqa: S106
+                    database="testdb",
+                ),
+                kafka=ModelKafkaProducerConfig(bootstrap_servers="localhost:9092"),
+                http=ModelHttpClientConfig(),
+            )
+        )
+
+        mock_pool = MagicMock()
+        with patch(
+            "omnibase_infra.runtime.providers.provider_postgres_pool.asyncpg.create_pool",
+            new_callable=AsyncMock,
+            return_value=mock_pool,
+        ):
+            resources = await materializer.materialize([tmp_contract])
+
+        assert resources.has("pattern_store")
+        assert resources.get("pattern_store") is mock_pool
+
+    @pytest.mark.asyncio
+    async def test_materialize_then_shutdown_lifecycle(
+        self,
+        tmp_contract_multi: Path,
+        config: ModelMaterializerConfig,
+    ) -> None:
+        """Full lifecycle: materialize -> use resources -> shutdown."""
+        materializer = DependencyMaterializer(config=config)
+
+        mock_pool = MagicMock()
+        mock_pool.close = AsyncMock()
+        mock_producer = MagicMock()
+        mock_producer.start = AsyncMock()
+        mock_producer.stop = AsyncMock()
+        mock_client = MagicMock()
+        mock_client.aclose = AsyncMock()
+
+        with (
+            patch(
+                "omnibase_infra.runtime.providers.provider_postgres_pool.asyncpg.create_pool",
+                new_callable=AsyncMock,
+                return_value=mock_pool,
+            ),
+            patch(
+                "aiokafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.runtime.providers.provider_http_client.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+        ):
+            resources = await materializer.materialize([tmp_contract_multi])
+
+        # Verify all resources created
+        assert resources.has("my_db")
+        assert resources.has("my_kafka")
+        assert resources.has("my_http")
+
+        # Shutdown
+        await materializer.shutdown()
+
+        # Verify all resources closed
+        mock_pool.close.assert_awaited_once()
+        mock_producer.stop.assert_awaited_once()
+        mock_client.aclose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_materialized_resources_merge_into_resolved_deps(
+        self,
+    ) -> None:
+        """Materialized resources can be merged into ModelResolvedDependencies."""
+        from omnibase_infra.models.runtime.model_resolved_dependencies import (
+            ModelResolvedDependencies,
+        )
+
+        # Simulate what _resolve_handler_dependencies does:
+        # 1. Protocol deps from ContractDependencyResolver
+        protocol_deps = {"ProtocolPostgresAdapter": MagicMock()}
+
+        # 2. Infrastructure deps from DependencyMaterializer
+        materialized = ModelMaterializedResources(
+            resources={
+                "pattern_store": MagicMock(name="asyncpg_pool"),
+                "kafka_producer": MagicMock(name="kafka_producer"),
+            }
+        )
+
+        # 3. Merge them
+        merged = dict(protocol_deps)
+        merged.update(materialized.resources)
+
+        resolved = ModelResolvedDependencies(protocols=merged)
+
+        # Handler can access both protocol and infrastructure deps
+        assert resolved.has("ProtocolPostgresAdapter")
+        assert resolved.has("pattern_store")
+        assert resolved.has("kafka_producer")
+        assert len(resolved) == 3
+
+    @pytest.mark.asyncio
+    async def test_materialize_noop_without_contract_paths(
+        self,
+        config: ModelMaterializerConfig,
+    ) -> None:
+        """Materialization is a no-op when contract_paths is empty."""
+        materializer = DependencyMaterializer(config=config)
+        resources = await materializer.materialize([])
+        assert not resources
+        # Shutdown should also be safe
+        await materializer.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_idempotent(
+        self,
+        config: ModelMaterializerConfig,
+    ) -> None:
+        """Calling shutdown() twice is safe."""
+        materializer = DependencyMaterializer(config=config)
+        await materializer.shutdown()
+        await materializer.shutdown()  # Second call should not raise

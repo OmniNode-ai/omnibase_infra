@@ -82,6 +82,7 @@ from omnibase_infra.models.runtime.model_resolved_dependencies import (
 from omnibase_infra.runtime.contract_dependency_resolver import (
     ContractDependencyResolver,
 )
+from omnibase_infra.runtime.dependency_materializer import DependencyMaterializer
 from omnibase_infra.runtime.envelope_validator import (
     normalize_correlation_id,
     validate_envelope,
@@ -90,6 +91,9 @@ from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.models import (
     ModelDuplicateResponse,
     ModelRuntimeContractConfig,
+)
+from omnibase_infra.runtime.models.model_materialized_resources import (
+    ModelMaterializedResources,
 )
 from omnibase_infra.runtime.protocol_lifecycle_executor import ProtocolLifecycleExecutor
 from omnibase_infra.runtime.runtime_contract_config_loader import (
@@ -870,6 +874,12 @@ class RuntimeHostProcess:
         # Uses time.monotonic() for reliable elapsed time measurement
         self._last_introspection_time: float | None = None
 
+        # Dependency materializer for infrastructure resources (OMN-1976)
+        # Created lazily during start() when contract_paths are provided.
+        # Materializes postgres_pool, kafka_producer, http_client from contracts.
+        self._dependency_materializer: DependencyMaterializer | None = None
+        self._materialized_resources: ModelMaterializedResources | None = None
+
         logger.debug(
             "RuntimeHostProcess initialized",
             extra={
@@ -1076,6 +1086,7 @@ class RuntimeHostProcess:
         3. Discover/wire handlers:
            - If contract_paths provided: Auto-discover handlers from contracts (OMN-1133)
            - Otherwise: Wire default handlers via wiring module
+        3.5. Materialize infrastructure dependencies from contracts (OMN-1976)
         4. Populate self._handlers from singleton registry (instantiate and initialize)
         5. Subscribe to input topic
 
@@ -1131,6 +1142,13 @@ class RuntimeHostProcess:
         # If contract_paths provided, use ContractHandlerDiscovery to auto-discover
         # handlers from contract files. Otherwise, fall back to wire_default_handlers().
         await self._discover_or_wire_handlers()
+
+        # Step 3.5: Materialize infrastructure dependencies (OMN-1976)
+        # Creates shared resource pools (asyncpg, Kafka producer, HTTP client)
+        # from contract.dependencies declarations. Must run after contract discovery
+        # (so contract_paths are known) and before handler population (so handlers
+        # can receive materialized resources via dependency injection).
+        await self._materialize_dependencies()
 
         # Step 4: Populate self._handlers from singleton registry
         # The wiring/discovery step registers handler classes, so we need to:
@@ -1272,6 +1290,7 @@ class RuntimeHostProcess:
         Performs the following steps:
         1. Unsubscribe from topics (stop receiving new messages)
         2. Wait for in-flight messages to drain (up to drain_timeout_seconds)
+        2.4. Close materialized infrastructure resources (OMN-1976)
         3. Shutdown all registered handlers by priority (release resources)
         4. Close event bus
 
@@ -1408,6 +1427,21 @@ class RuntimeHostProcess:
                     "failure_count": shutdown_result.failure_count,
                 },
             )
+
+        # Step 2.4: Close materialized infrastructure resources (OMN-1976)
+        # Must happen after handler shutdown (handlers released resource handles)
+        # but before event bus close (resources may use event bus internally).
+        if self._dependency_materializer is not None:
+            try:
+                await self._dependency_materializer.shutdown()
+                logger.info("Materialized infrastructure resources closed")
+            except Exception as e:
+                logger.warning(
+                    "Error closing materialized resources",
+                    extra={"error": str(e)},
+                )
+            self._dependency_materializer = None
+            self._materialized_resources = None
 
         # Step 2.4.5: Stop heartbeat task if introspection was started (OMN-1930)
         # Must be called before closing event bus to avoid publish attempts on closed bus.
@@ -2017,6 +2051,37 @@ class RuntimeHostProcess:
             },
         )
 
+    async def _materialize_dependencies(self) -> None:
+        """Materialize infrastructure resources from contract dependencies.
+
+        Part of OMN-1976: Contract dependency materialization.
+
+        Scans contract_paths for infrastructure-type dependencies (postgres_pool,
+        kafka_producer, http_client) and creates shared resource instances.
+        Results are stored in self._materialized_resources for merging into
+        handler dependency resolution.
+
+        This method is a no-op when no contract_paths are configured.
+        """
+        if not self._contract_paths:
+            return
+
+        self._dependency_materializer = DependencyMaterializer()
+        self._materialized_resources = await self._dependency_materializer.materialize(
+            self._contract_paths,
+        )
+
+        if self._materialized_resources:
+            logger.info(
+                "Infrastructure dependencies materialized",
+                extra={
+                    "resource_count": len(self._materialized_resources),
+                    "resource_names": list(
+                        self._materialized_resources.resources.keys()
+                    ),
+                },
+            )
+
     async def _resolve_handler_dependencies(
         self,
         descriptor: ModelHandlerDescriptor,
@@ -2088,7 +2153,16 @@ class RuntimeHostProcess:
                 },
             )
 
-        return resolved if resolved else None
+        # OMN-1976: Merge materialized infrastructure resources into resolved deps
+        # This allows handlers to access both protocol deps (from container) and
+        # infrastructure resources (from materializer) via the same interface.
+        merged_protocols = dict(resolved.protocols) if resolved else {}
+        if self._materialized_resources:
+            merged_protocols.update(self._materialized_resources.resources)
+
+        if merged_protocols:
+            return ModelResolvedDependencies(protocols=merged_protocols)
+        return None
 
     def _accepts_dependencies_param(self, handler_cls: type) -> bool:
         """Check if a handler class accepts 'dependencies' in its constructor.
