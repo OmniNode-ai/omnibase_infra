@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = [pytest.mark.unit]
+
 # Pattern matches: f"{environment}.onex." or f"{env}.onex." or "dev.onex." etc.
 ENV_PREFIX_PATTERNS: list[str] = [
     # f-string patterns with environment variable

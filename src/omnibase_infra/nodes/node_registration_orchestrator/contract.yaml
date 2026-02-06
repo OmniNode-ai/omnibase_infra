@@ -60,12 +60,12 @@ event_bus:
     patch: 0
   subscribe_topics:
     - "onex.evt.platform.node-introspection.v1"
-    - "onex.evt.platform.request-introspection.v1"
+    - "onex.evt.platform.registry-request-introspection.v1"
     - "onex.intent.platform.runtime-tick.v1"
     - "onex.cmd.platform.node-registration-acked.v1"
     - "onex.evt.platform.node-heartbeat.v1"
   publish_topics:
-    - "onex.evt.platform.node-registration.v1"
+    - "onex.evt.platform.node-registration-result.v1"
     - "onex.evt.platform.node-registration-initiated.v1"
     - "onex.evt.platform.node-registration-accepted.v1"
     - "onex.evt.platform.node-registration-rejected.v1"

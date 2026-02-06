@@ -33,6 +33,10 @@ See Also:
     omnibase_infra.topics.platform_topic_suffixes - Platform-reserved suffixes
 """
 
+from __future__ import annotations
+
+from uuid import UUID
+
 from omnibase_core.errors import OnexError
 from omnibase_core.validation import validate_topic_suffix
 
@@ -73,7 +77,12 @@ class TopicResolver:
         TopicResolutionError: Invalid topic suffix 'bad-topic': ...
     """
 
-    def resolve(self, topic_suffix: str) -> str:
+    def resolve(
+        self,
+        topic_suffix: str,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> str:
         """Resolve a topic suffix to a concrete Kafka topic name.
 
         Validates the suffix against the ONEX topic naming convention and
@@ -83,6 +92,9 @@ class TopicResolver:
         Args:
             topic_suffix: ONEX format topic suffix
                 (e.g., ``'onex.evt.platform.node-registration.v1'``)
+            correlation_id: Optional correlation ID for error traceability.
+                When provided, included in the ``TopicResolutionError`` message
+                so callers can correlate failures to specific request flows.
 
         Returns:
             Concrete Kafka topic name. Currently identical to the input suffix.
@@ -93,6 +105,11 @@ class TopicResolver:
         """
         result = validate_topic_suffix(topic_suffix)
         if not result.is_valid:
+            if correlation_id is not None:
+                raise TopicResolutionError(
+                    f"Invalid topic suffix '{topic_suffix}' "
+                    f"(correlation_id={correlation_id}): {result.error}"
+                )
             raise TopicResolutionError(
                 f"Invalid topic suffix '{topic_suffix}': {result.error}"
             )

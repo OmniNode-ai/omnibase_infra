@@ -3234,16 +3234,22 @@ class RuntimeHostProcess:
         # Resolve realm-agnostic topic names via TopicResolver (no env prefix).
         # Topics are realm-agnostic in ONEX; the environment/realm is enforced
         # via envelope identity and consumer group naming, not topic names.
+        # Generate a correlation_id for this wiring phase (no request-scoped
+        # correlation_id is available at startup time).
+        wiring_correlation_id = uuid4()
         topic_resolver = TopicResolver()
         try:
             registration_topic = topic_resolver.resolve(
-                "onex.evt.platform.contract-registered.v1"
+                "onex.evt.platform.contract-registered.v1",
+                correlation_id=wiring_correlation_id,
             )
             deregistration_topic = topic_resolver.resolve(
-                "onex.evt.platform.contract-deregistered.v1"
+                "onex.evt.platform.contract-deregistered.v1",
+                correlation_id=wiring_correlation_id,
             )
         except TopicResolutionError as e:
             context = ModelInfraErrorContext.with_correlation(
+                correlation_id=wiring_correlation_id,
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="resolve_topic",
             )

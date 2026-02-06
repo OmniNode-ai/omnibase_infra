@@ -11,9 +11,10 @@ Contract Structure Required:
     event_bus:
       subscribe_topics:
         - "onex.evt.platform.node-introspection.v1"
+        - "onex.evt.platform.registry-request-introspection.v1"
         - ...
       publish_topics:
-        - "onex.evt.platform.node-registration.v1"
+        - "onex.evt.platform.node-registration-result.v1"
         - ...
 
 Topics MUST:
@@ -25,6 +26,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+
+pytestmark = [pytest.mark.unit]
 
 
 class TestOrchestratorContractEventBus:

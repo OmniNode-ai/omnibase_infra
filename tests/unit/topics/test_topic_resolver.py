@@ -11,9 +11,13 @@ to concrete Kafka topic. All scattered resolve_topic() methods across the
 codebase MUST delegate to this class.
 """
 
+from uuid import UUID, uuid4
+
 import pytest
 
 from omnibase_infra.topics import TopicResolutionError, TopicResolver
+
+pytestmark = [pytest.mark.unit]
 
 
 class TestTopicResolver:
@@ -124,3 +128,34 @@ class TestTopicResolver:
         r2 = TopicResolver()
         topic = "onex.evt.platform.node-registration.v1"
         assert r1.resolve(topic) == r2.resolve(topic)
+
+    def test_resolve_with_correlation_id_succeeds(self) -> None:
+        """Valid topic resolves successfully when correlation_id is provided."""
+        resolver = TopicResolver()
+        cid = uuid4()
+        result = resolver.resolve(
+            "onex.evt.platform.node-registration.v1",
+            correlation_id=cid,
+        )
+        assert result == "onex.evt.platform.node-registration.v1"
+
+    def test_resolve_error_includes_correlation_id(self) -> None:
+        """Error message includes correlation_id when provided."""
+        resolver = TopicResolver()
+        cid = uuid4()
+        with pytest.raises(TopicResolutionError, match=str(cid)):
+            resolver.resolve("bad-topic", correlation_id=cid)
+
+    def test_resolve_error_without_correlation_id_omits_it(self) -> None:
+        """Error message does not contain 'correlation_id' when not provided."""
+        resolver = TopicResolver()
+        with pytest.raises(TopicResolutionError, match="bad-topic") as exc_info:
+            resolver.resolve("bad-topic")
+        assert "correlation_id" not in str(exc_info.value)
+
+    def test_resolve_with_none_correlation_id(self) -> None:
+        """Explicitly passing None behaves like omitting correlation_id."""
+        resolver = TopicResolver()
+        with pytest.raises(TopicResolutionError, match="bad-topic") as exc_info:
+            resolver.resolve("bad-topic", correlation_id=None)
+        assert "correlation_id" not in str(exc_info.value)
