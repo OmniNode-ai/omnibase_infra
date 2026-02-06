@@ -38,11 +38,11 @@ event_bus:
   # Subscribe to 3 cross-repo validation event topics
   subscribe_topics:
     # Validation run lifecycle
-    - "onex.validation.cross_repo.run.started.v1"
+    - "onex.evt.validation.cross-repo-run-started.v1"
     # Violation batches
-    - "onex.validation.cross_repo.violations.batch.v1"
+    - "onex.evt.validation.violations-batch.v1"
     # Validation run completion
-    - "onex.validation.cross_repo.run.completed.v1"
+    - "onex.evt.validation.cross-repo-run-completed.v1"
   # Projection consumer - read-only consumption for ledger persistence
   consumer_purpose: "projection"
   # Start from earliest offset to capture all historical validation events

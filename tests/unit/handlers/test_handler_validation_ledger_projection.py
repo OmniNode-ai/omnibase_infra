@@ -70,13 +70,13 @@ class TestValidJsonProcessing:
             {
                 "run_id": run_id,
                 "repo_id": "omnibase_core",
-                "event_type": "onex.validation.cross_repo.run.started.v1",
+                "event_type": "onex.evt.validation.cross-repo-run-started.v1",
                 "timestamp": "2026-01-15T12:00:00+00:00",
             }
         ).encode()
 
         result = handler.project(
-            topic="onex.validation.cross_repo.run.started.v1",
+            topic="onex.evt.validation.cross-repo-run-started.v1",
             partition=0,
             offset=42,
             value=payload,
@@ -90,12 +90,12 @@ class TestValidJsonProcessing:
             {
                 "run_id": str(uuid4()),
                 "repo_id": "omnibase_infra",
-                "event_type": "onex.validation.cross_repo.run.started.v1",
+                "event_type": "onex.evt.validation.cross-repo-run-started.v1",
             }
         ).encode()
 
         result = handler.project(
-            topic="onex.validation.cross_repo.run.started.v1",
+            topic="onex.evt.validation.cross-repo-run-started.v1",
             partition=1,
             offset=10,
             value=payload,
@@ -116,7 +116,7 @@ class TestValidJsonProcessing:
         ).encode()
 
         result = handler.project(
-            topic="onex.validation.cross_repo.run.started.v1",
+            topic="onex.evt.validation.cross-repo-run-started.v1",
             partition=0,
             offset=0,
             value=payload,
@@ -210,12 +210,12 @@ class TestEventVersionExtraction:
         """Test version extracted as 'v1' from event_type ending in .v1."""
         payload = json.dumps(
             {
-                "event_type": "onex.validation.cross_repo.run.started.v1",
+                "event_type": "onex.evt.validation.cross-repo-run-started.v1",
             }
         ).encode()
 
         result = handler.project(
-            topic="onex.validation.cross_repo.run.started.v1",
+            topic="onex.evt.validation.cross-repo-run-started.v1",
             partition=0,
             offset=0,
             value=payload,
@@ -268,7 +268,7 @@ class TestEventVersionExtraction:
         payload = json.dumps({"run_id": str(uuid4())}).encode()
 
         result = handler.project(
-            topic="onex.validation.cross_repo.run.started.v3",
+            topic="onex.evt.validation.cross-repo-run-started.v3",
             partition=0,
             offset=0,
             value=payload,

@@ -67,7 +67,7 @@ def _make_row(**overrides: object) -> dict[str, object]:
         "id": uuid4(),
         "run_id": uuid4(),
         "repo_id": "omnibase_core",
-        "event_type": "onex.validation.cross_repo.run.started.v1",
+        "event_type": "onex.evt.validation.cross-repo-run-started.v1",
         "event_version": "v1",
         "occurred_at": datetime.now(UTC),
         "kafka_topic": "validation.events",

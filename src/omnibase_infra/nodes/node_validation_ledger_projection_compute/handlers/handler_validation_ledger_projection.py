@@ -62,13 +62,13 @@ class HandlerValidationLedgerProjection:
     Example:
         >>> handler = HandlerValidationLedgerProjection()
         >>> result = handler.project(
-        ...     topic="onex.validation.cross_repo.run.started.v1",
+        ...     topic="onex.evt.validation.cross-repo-run-started.v1",
         ...     partition=0,
         ...     offset=42,
         ...     value=b'{"run_id": "abc-123", "repo_id": "omnibase_core"}',
         ... )
         >>> result["event_type"]
-        'onex.validation.cross_repo.run.started.v1'
+        'onex.evt.validation.cross-repo-run-started.v1'
     """
 
     @property
@@ -308,7 +308,7 @@ class HandlerValidationLedgerProjection:
 
         Args:
             topic: Topic or event_type string
-                (e.g., "onex.validation.cross_repo.run.started.v1").
+                (e.g., "onex.evt.validation.cross-repo-run-started.v1").
 
         Returns:
             Version string (e.g., "v1") or "unknown" if not found.

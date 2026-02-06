@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelValidationLedgerAppendResult(BaseModel):
     """Result of appending a validation event to the ledger."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     success: bool = Field(..., description="Whether append completed without error")
     ledger_entry_id: UUID | None = Field(

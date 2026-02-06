@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelValidationLedgerQuery(BaseModel):
     """Filter model for validation ledger queries. All fields optional."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     run_id: UUID | None = Field(default=None, description="Filter by validation run ID")
     repo_id: str | None = Field(default=None, description="Filter by repository ID")

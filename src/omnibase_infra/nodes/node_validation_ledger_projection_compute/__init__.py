@@ -18,9 +18,9 @@ Core Purpose:
     runs, violations, and completions.
 
 Subscribed Topics:
-    - onex.validation.cross_repo.run.started.v1
-    - onex.validation.cross_repo.violations.batch.v1
-    - onex.validation.cross_repo.run.completed.v1
+    - onex.evt.validation.cross-repo-run-started.v1
+    - onex.evt.validation.violations-batch.v1
+    - onex.evt.validation.cross-repo-run-completed.v1
 
 Consumer Configuration:
     - consumer_purpose: "projection" (non-processing, read-only)

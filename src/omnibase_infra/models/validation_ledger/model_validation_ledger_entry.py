@@ -30,7 +30,7 @@ class ModelValidationLedgerEntry(BaseModel):
     event_type: str = Field(
         ...,
         min_length=1,
-        description="Event type (e.g., onex.validation.cross_repo.run.started.v1)",
+        description="Event type (e.g., onex.evt.validation.cross-repo-run-started.v1)",
     )
     event_version: str = Field(..., min_length=1, description="Event schema version")
     occurred_at: datetime = Field(

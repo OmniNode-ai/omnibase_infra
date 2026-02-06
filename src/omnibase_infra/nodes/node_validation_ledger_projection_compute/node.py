@@ -8,9 +8,9 @@ into the validation_event_ledger for deterministic replay.
 All business logic is delegated to HandlerValidationLedgerProjection.
 
 Subscribed Topics (via contract.yaml):
-    - onex.validation.cross_repo.run.started.v1
-    - onex.validation.cross_repo.violations.batch.v1
-    - onex.validation.cross_repo.run.completed.v1
+    - onex.evt.validation.cross-repo-run-started.v1
+    - onex.evt.validation.violations-batch.v1
+    - onex.evt.validation.cross-repo-run-completed.v1
 
 Ticket: OMN-1908
 """

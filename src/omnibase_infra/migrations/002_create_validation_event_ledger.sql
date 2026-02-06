@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS validation_event_ledger (
     -- validation events are structurally well-defined.
     run_id              UUID            NOT NULL,       -- Validation run correlation ID
     repo_id             TEXT            NOT NULL,       -- Repository being validated
-    event_type          TEXT            NOT NULL,       -- Event type (e.g., onex.validation.cross_repo.run.started.v1)
+    event_type          TEXT            NOT NULL,       -- Event type (e.g., onex.evt.validation.cross-repo-run-started.v1)
     event_version       TEXT            NOT NULL,       -- Event schema version
 
     -- =========================================================================
@@ -125,7 +125,7 @@ COMMENT ON COLUMN validation_event_ledger.repo_id IS
     'Identifier of the repository being validated';
 
 COMMENT ON COLUMN validation_event_ledger.event_type IS
-    'Fully qualified event type (e.g., onex.validation.cross_repo.run.started.v1)';
+    'Fully qualified event type (e.g., onex.evt.validation.cross-repo-run-started.v1)';
 
 COMMENT ON COLUMN validation_event_ledger.event_version IS
     'Schema version of the event type for forward/backward compatibility';
