@@ -458,7 +458,9 @@ class HandlerNodeIntrospected:
                 },
             )
 
-            # Publish snapshot to compacted Kafka topic (best-effort, non-blocking)
+            # Publish snapshot to compacted Kafka topic (best-effort, non-blocking).
+            # Intentionally gated on projector: snapshots derive from projection data,
+            # so publishing is only meaningful when a projection was persisted above.
             if self._snapshot_publisher is not None:
                 try:
                     from omnibase_infra.models.projection import (
