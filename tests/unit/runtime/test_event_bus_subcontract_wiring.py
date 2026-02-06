@@ -155,8 +155,8 @@ class TestTopicResolution:
             service="test-service",
             version="v1",
         )
-        result = wiring.resolve_topic("onex.cmd.process.v1")
-        assert result == "onex.cmd.process.v1"
+        result = wiring.resolve_topic("onex.cmd.platform.process-event.v1")
+        assert result == "onex.cmd.platform.process-event.v1"
 
 
 # =============================================================================

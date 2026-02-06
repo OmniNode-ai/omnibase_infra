@@ -58,6 +58,7 @@ from omnibase_infra.services.contract_publisher.sources import (
     SourceContractFilesystem,
     SourceContractPackage,
 )
+from omnibase_infra.topics import TopicResolver
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -100,7 +101,7 @@ class ServiceContractPublisher:
     .. versionadded:: 0.3.0
     """
 
-    __slots__ = ("_config", "_environment", "_publisher", "_source")
+    __slots__ = ("_config", "_environment", "_publisher", "_source", "_topic_resolver")
 
     def __init__(
         self,
@@ -119,6 +120,7 @@ class ServiceContractPublisher:
         self._source = source
         self._config = config
         self._environment = config.resolve_environment()
+        self._topic_resolver = TopicResolver()
 
     @classmethod
     async def from_container(
@@ -218,8 +220,9 @@ class ServiceContractPublisher:
     def resolve_topic(self, topic_suffix: str) -> str:
         """Resolve topic suffix to topic name (realm-agnostic, no environment prefix).
 
-        Topics are realm-agnostic in ONEX. The environment/realm is enforced via
-        envelope identity, not topic naming.
+        Delegates to the canonical ``TopicResolver`` for centralized topic
+        resolution logic. Topics are realm-agnostic in ONEX. The environment/realm
+        is enforced via envelope identity, not topic naming.
 
         Args:
             topic_suffix: Topic suffix (e.g., "onex.evt.contract-registered.v1")
@@ -227,7 +230,7 @@ class ServiceContractPublisher:
         Returns:
             Topic name (same as suffix, no environment prefix)
         """
-        return topic_suffix
+        return self._topic_resolver.resolve(topic_suffix)
 
     async def publish_all(self) -> ModelPublishResult:
         """Discover and publish all contracts from configured source.

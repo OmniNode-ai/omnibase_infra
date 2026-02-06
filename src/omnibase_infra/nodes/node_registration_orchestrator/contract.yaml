@@ -43,6 +43,36 @@ mcp:
   tool_name: "register_node"
   description: "Register a new ONEX node with the cluster. Handles Consul service registration and PostgreSQL metadata storage. Returns registration status and assigned service ID."
   timeout_seconds: 30
+# Event Bus Subcontract
+# =====================
+# Canonical runtime-enforced declaration of event subscriptions and publications.
+# The runtime reads subscribe_topics to wire consumer subscriptions.
+# Topics are realm-agnostic (no environment prefix); the runtime composes
+# the full topic by prepending tenant/namespace at startup.
+#
+# Cross-reference: consumed_events / published_events sections below contain
+# the same topics with template placeholders. Those sections are metadata only;
+# this event_bus section is the source of truth for the runtime.
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.platform.node-introspection.v1"
+    - "onex.evt.platform.request-introspection.v1"
+    - "onex.intent.platform.runtime-tick.v1"
+    - "onex.cmd.platform.node-registration-acked.v1"
+    - "onex.evt.platform.node-heartbeat.v1"
+  publish_topics:
+    - "onex.evt.platform.node-registration.v1"
+    - "onex.evt.platform.node-registration-initiated.v1"
+    - "onex.evt.platform.node-registration-accepted.v1"
+    - "onex.evt.platform.node-registration-rejected.v1"
+    - "onex.evt.platform.node-registration-ack-timed-out.v1"
+    - "onex.evt.platform.node-registration-ack-received.v1"
+    - "onex.evt.platform.node-became-active.v1"
+    - "onex.evt.platform.node-liveness-expired.v1"
 input_model:
   name: "ModelOrchestratorInput"
   module: "omnibase_infra.nodes.node_registration_orchestrator.models"

@@ -9,6 +9,8 @@ Exports:
     ALL_PLATFORM_SUFFIXES: Complete tuple of all platform-reserved suffixes
     build_full_topic: Compose full topic from env, namespace, and suffix
     TopicCompositionError: Error raised when topic composition fails
+    TopicResolver: Canonical resolver for topic suffix -> concrete Kafka topic
+    TopicResolutionError: Error raised when topic resolution fails
 """
 
 from omnibase_infra.topics.platform_topic_suffixes import (
@@ -21,6 +23,7 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_REQUEST_INTROSPECTION,
     SUFFIX_RUNTIME_TICK,
 )
+from omnibase_infra.topics.topic_resolver import TopicResolutionError, TopicResolver
 from omnibase_infra.topics.util_topic_composition import (
     MAX_NAMESPACE_LENGTH,
     TopicCompositionError,
@@ -42,4 +45,7 @@ __all__: list[str] = [
     "build_full_topic",
     "TopicCompositionError",
     "MAX_NAMESPACE_LENGTH",
+    # Topic resolution
+    "TopicResolver",
+    "TopicResolutionError",
 ]

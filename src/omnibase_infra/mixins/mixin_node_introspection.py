@@ -235,6 +235,7 @@ from omnibase_infra.models.registration.model_node_event_bus_config import (
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
+from omnibase_infra.topics import TopicResolver
 
 if TYPE_CHECKING:
     from omnibase_core.models.contracts import ModelContractBase
@@ -1024,7 +1025,7 @@ class MixinNodeIntrospection:
         Example:
             >>> config = self._extract_event_bus_config("dev")
             >>> config.publish_topic_strings
-            ['onex.evt.node-registered.v1']
+            ['onex.evt.platform.node-registered.v1']
 
         See Also:
             - ModelEventBusSubcontract: Contract model with topics
@@ -1052,10 +1053,14 @@ class MixinNodeIntrospection:
         def resolve_topic(suffix: str) -> str:
             """Resolve topic suffix to topic name (realm-agnostic).
 
-            Topics are realm-agnostic in ONEX. The environment/realm is enforced via
-            envelope identity, not topic naming. This enables cross-environment event
-            routing when needed while maintaining proper isolation through identity.
+            Delegates to the canonical ``TopicResolver`` for centralized topic
+            resolution logic after performing mixin-specific pre-validation
+            (whitespace stripping, placeholder detection). Topics are realm-agnostic
+            in ONEX. The environment/realm is enforced via envelope identity, not
+            topic naming.
             """
+            topic_resolver = TopicResolver()
+
             # Strip whitespace from suffix to handle YAML formatting artifacts
             suffix = suffix.strip()
 
@@ -1082,8 +1087,8 @@ class MixinNodeIntrospection:
                     parameter="topic_suffix",
                 )
 
-            # Return topic unchanged - topics are realm-agnostic
-            return suffix
+            # Delegate to canonical TopicResolver for final resolution
+            return topic_resolver.resolve(suffix)
 
         def build_entry(suffix: str) -> ModelEventBusTopicEntry:
             """Build topic entry from suffix."""

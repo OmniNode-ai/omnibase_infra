@@ -112,7 +112,7 @@ class TestExtractEventBusConfig:
     def test_extracts_publish_topics(self) -> None:
         """Resolves publish topic suffixes to full realm-agnostic topics."""
         event_bus = MockEventBusSubcontract(
-            publish_topics=["onex.evt.node-registered.v1"],
+            publish_topics=["onex.evt.platform.node-registered.v1"],
             subscribe_topics=[],
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
@@ -121,14 +121,14 @@ class TestExtractEventBusConfig:
 
         assert result is not None
         assert len(result.publish_topics) == 1
-        assert result.publish_topics[0].topic == "onex.evt.node-registered.v1"
+        assert result.publish_topics[0].topic == "onex.evt.platform.node-registered.v1"
         assert len(result.subscribe_topics) == 0
 
     def test_extracts_subscribe_topics(self) -> None:
         """Resolves subscribe topic suffixes to full realm-agnostic topics."""
         event_bus = MockEventBusSubcontract(
             publish_topics=[],
-            subscribe_topics=["onex.evt.intent-classified.v1"],
+            subscribe_topics=["onex.evt.platform.intent-classified.v1"],
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
@@ -136,19 +136,21 @@ class TestExtractEventBusConfig:
 
         assert result is not None
         assert len(result.subscribe_topics) == 1
-        assert result.subscribe_topics[0].topic == "onex.evt.intent-classified.v1"
+        assert (
+            result.subscribe_topics[0].topic == "onex.evt.platform.intent-classified.v1"
+        )
         assert len(result.publish_topics) == 0
 
     def test_extracts_multiple_topics(self) -> None:
         """Handles multiple topics in both lists."""
         event_bus = MockEventBusSubcontract(
             publish_topics=[
-                "onex.evt.node-registered.v1",
-                "onex.cmd.node-shutdown.v1",
+                "onex.evt.platform.node-registered.v1",
+                "onex.cmd.platform.node-shutdown.v1",
             ],
             subscribe_topics=[
-                "onex.evt.intent-classified.v1",
-                "onex.cmd.register-node.v1",
+                "onex.evt.platform.intent-classified.v1",
+                "onex.cmd.platform.register-node.v1",
             ],
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
@@ -157,16 +159,18 @@ class TestExtractEventBusConfig:
 
         assert result is not None
         assert len(result.publish_topics) == 2
-        assert result.publish_topics[0].topic == "onex.evt.node-registered.v1"
-        assert result.publish_topics[1].topic == "onex.cmd.node-shutdown.v1"
+        assert result.publish_topics[0].topic == "onex.evt.platform.node-registered.v1"
+        assert result.publish_topics[1].topic == "onex.cmd.platform.node-shutdown.v1"
         assert len(result.subscribe_topics) == 2
-        assert result.subscribe_topics[0].topic == "onex.evt.intent-classified.v1"
-        assert result.subscribe_topics[1].topic == "onex.cmd.register-node.v1"
+        assert (
+            result.subscribe_topics[0].topic == "onex.evt.platform.intent-classified.v1"
+        )
+        assert result.subscribe_topics[1].topic == "onex.cmd.platform.register-node.v1"
 
     def test_topics_are_realm_agnostic(self) -> None:
         """Topics are the same regardless of environment parameter (realm-agnostic)."""
         event_bus = MockEventBusSubcontract(
-            publish_topics=["onex.evt.test.v1"],
+            publish_topics=["onex.evt.platform.test-event.v1"],
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
@@ -175,9 +179,11 @@ class TestExtractEventBusConfig:
         prod_result = self.node._extract_event_bus_config("prod")
 
         # All environments produce the same realm-agnostic topic
-        assert dev_result.publish_topics[0].topic == "onex.evt.test.v1"
-        assert staging_result.publish_topics[0].topic == "onex.evt.test.v1"
-        assert prod_result.publish_topics[0].topic == "onex.evt.test.v1"
+        assert dev_result.publish_topics[0].topic == "onex.evt.platform.test-event.v1"
+        assert (
+            staging_result.publish_topics[0].topic == "onex.evt.platform.test-event.v1"
+        )
+        assert prod_result.publish_topics[0].topic == "onex.evt.platform.test-event.v1"
 
     def test_fail_fast_on_unresolved_env_placeholder(self) -> None:
         """Raises ValueError on unresolved {env} placeholder."""
@@ -220,14 +226,14 @@ class TestExtractEventBusConfig:
     def test_topic_entry_has_correct_defaults(self) -> None:
         """Topic entries have correct default metadata values."""
         event_bus = MockEventBusSubcontract(
-            publish_topics=["onex.evt.test.v1"],
+            publish_topics=["onex.evt.platform.test-event.v1"],
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
         result = self.node._extract_event_bus_config("dev")
 
         entry = result.publish_topics[0]
-        assert entry.topic == "onex.evt.test.v1"
+        assert entry.topic == "onex.evt.platform.test-event.v1"
         assert entry.event_type is None  # Default
         assert entry.message_category == "EVENT"  # Default
         assert entry.description is None  # Default
@@ -235,7 +241,7 @@ class TestExtractEventBusConfig:
     def test_result_model_is_frozen(self) -> None:
         """Result ModelNodeEventBusConfig is immutable."""
         event_bus = MockEventBusSubcontract(
-            publish_topics=["onex.evt.test.v1"],
+            publish_topics=["onex.evt.platform.test-event.v1"],
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
@@ -289,8 +295,8 @@ class TestEventBusInGetIntrospectionData:
     async def test_event_bus_populated_from_contract(self) -> None:
         """get_introspection_data() populates event_bus from contract."""
         event_bus = MockEventBusSubcontract(
-            publish_topics=["onex.evt.node-registered.v1"],
-            subscribe_topics=["onex.evt.intent-classified.v1"],
+            publish_topics=["onex.evt.platform.node-registered.v1"],
+            subscribe_topics=["onex.evt.platform.intent-classified.v1"],
         )
         contract = MockContract(event_bus=event_bus)
         self._initialize_node(contract)
@@ -300,10 +306,14 @@ class TestEventBusInGetIntrospectionData:
 
         assert event.event_bus is not None
         assert len(event.event_bus.publish_topics) == 1
-        assert event.event_bus.publish_topics[0].topic == "onex.evt.node-registered.v1"
+        assert (
+            event.event_bus.publish_topics[0].topic
+            == "onex.evt.platform.node-registered.v1"
+        )
         assert len(event.event_bus.subscribe_topics) == 1
         assert (
-            event.event_bus.subscribe_topics[0].topic == "onex.evt.intent-classified.v1"
+            event.event_bus.subscribe_topics[0].topic
+            == "onex.evt.platform.intent-classified.v1"
         )
 
     @pytest.mark.asyncio
@@ -333,7 +343,7 @@ class TestEventBusInGetIntrospectionData:
     async def test_topics_are_realm_agnostic_regardless_of_onex_env(self) -> None:
         """get_introspection_data() produces realm-agnostic topics regardless of ONEX_ENV."""
         event_bus = MockEventBusSubcontract(
-            publish_topics=["onex.evt.test.v1"],
+            publish_topics=["onex.evt.platform.test-event.v1"],
         )
         contract = MockContract(event_bus=event_bus)
         self._initialize_node(contract)
@@ -341,13 +351,15 @@ class TestEventBusInGetIntrospectionData:
         with patch.dict(os.environ, {"ONEX_ENV": "production"}):
             event = await self.node.get_introspection_data()
 
-        assert event.event_bus.publish_topics[0].topic == "onex.evt.test.v1"
+        assert (
+            event.event_bus.publish_topics[0].topic == "onex.evt.platform.test-event.v1"
+        )
 
     @pytest.mark.asyncio
     async def test_produces_realm_agnostic_topics_when_onex_env_not_set(self) -> None:
         """get_introspection_data() produces realm-agnostic topics when ONEX_ENV not set."""
         event_bus = MockEventBusSubcontract(
-            publish_topics=["onex.evt.test.v1"],
+            publish_topics=["onex.evt.platform.test-event.v1"],
         )
         contract = MockContract(event_bus=event_bus)
         self._initialize_node(contract)
@@ -358,7 +370,9 @@ class TestEventBusInGetIntrospectionData:
         with patch.dict(os.environ, env, clear=True):
             event = await self.node.get_introspection_data()
 
-        assert event.event_bus.publish_topics[0].topic == "onex.evt.test.v1"
+        assert (
+            event.event_bus.publish_topics[0].topic == "onex.evt.platform.test-event.v1"
+        )
 
     @pytest.mark.asyncio
     async def test_raises_on_unresolved_placeholder(self) -> None:
@@ -384,8 +398,8 @@ class TestEventBusInGetIntrospectionData:
         """event_bus.publish_topic_strings returns list of topic strings."""
         event_bus = MockEventBusSubcontract(
             publish_topics=[
-                "onex.evt.node-registered.v1",
-                "onex.cmd.node-shutdown.v1",
+                "onex.evt.platform.node-registered.v1",
+                "onex.cmd.platform.node-shutdown.v1",
             ],
         )
         contract = MockContract(event_bus=event_bus)
@@ -397,8 +411,8 @@ class TestEventBusInGetIntrospectionData:
         # Use the convenience property for routing lookups
         topic_strings = event.event_bus.publish_topic_strings
         assert topic_strings == [
-            "onex.evt.node-registered.v1",
-            "onex.cmd.node-shutdown.v1",
+            "onex.evt.platform.node-registered.v1",
+            "onex.cmd.platform.node-shutdown.v1",
         ]
 
 
@@ -426,37 +440,42 @@ class TestEventBusEdgeCases:
     def test_empty_string_env_produces_realm_agnostic_topic(self) -> None:
         """Handles empty string env - produces realm-agnostic topic."""
         event_bus = MockEventBusSubcontract(
-            publish_topics=["onex.evt.test.v1"],
+            publish_topics=["onex.evt.platform.test-event.v1"],
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
         result = self.node._extract_event_bus_config("")
 
         # Realm-agnostic topic without any prefix
-        assert result.publish_topics[0].topic == "onex.evt.test.v1"
+        assert result.publish_topics[0].topic == "onex.evt.platform.test-event.v1"
 
     def test_topic_suffix_with_special_characters(self) -> None:
-        """Handles topic suffixes with hyphens and underscores."""
+        """Handles topic suffixes with hyphens in event name (kebab-case)."""
         event_bus = MockEventBusSubcontract(
-            publish_topics=["onex.evt.node-state_changed.v1"],
+            publish_topics=["onex.evt.platform.node-state-changed.v1"],
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
         result = self.node._extract_event_bus_config("dev")
 
-        assert result.publish_topics[0].topic == "onex.evt.node-state_changed.v1"
+        assert (
+            result.publish_topics[0].topic == "onex.evt.platform.node-state-changed.v1"
+        )
 
     def test_topic_suffix_with_numbers(self) -> None:
         """Handles topic suffixes with version numbers."""
         event_bus = MockEventBusSubcontract(
-            publish_topics=["onex.evt.test.v2", "onex.evt.test.v10"],
+            publish_topics=[
+                "onex.evt.platform.test-event.v2",
+                "onex.evt.platform.test-event.v10",
+            ],
         )
         self.node._introspection_contract = MockContract(event_bus=event_bus)
 
         result = self.node._extract_event_bus_config("dev")
 
-        assert result.publish_topics[0].topic == "onex.evt.test.v2"
-        assert result.publish_topics[1].topic == "onex.evt.test.v10"
+        assert result.publish_topics[0].topic == "onex.evt.platform.test-event.v2"
+        assert result.publish_topics[1].topic == "onex.evt.platform.test-event.v10"
 
 
 __all__ = [

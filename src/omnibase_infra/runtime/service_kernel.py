@@ -127,6 +127,7 @@ from omnibase_infra.runtime.util_container_wiring import (
 #
 # See also: omnibase_infra/services/__init__.py "ServiceHealth Import Guide" section
 from omnibase_infra.runtime.util_validation import validate_runtime_config
+from omnibase_infra.topics import SUFFIX_NODE_HEARTBEAT, TopicResolver
 from omnibase_infra.utils.correlation import generate_correlation_id
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
@@ -1445,14 +1446,17 @@ async def bootstrap() -> int:
             # Subscribe to 3 contract lifecycle topics with same identity
             contract_subscribe_start_time = time.time()
 
-            # Derive environment-aware topic names (avoid hardcoded "dev." prefix)
-            contract_registered_topic = (
-                f"{environment}.onex.evt.platform.contract-registered.v1"
+            # Resolve realm-agnostic topic names via TopicResolver (no env prefix).
+            # Topics are realm-agnostic in ONEX; the environment/realm is enforced
+            # via envelope identity and consumer group naming, not topic names.
+            topic_resolver = TopicResolver()
+            contract_registered_topic = topic_resolver.resolve(
+                "onex.evt.platform.contract-registered.v1"
             )
-            contract_deregistered_topic = (
-                f"{environment}.onex.evt.platform.contract-deregistered.v1"
+            contract_deregistered_topic = topic_resolver.resolve(
+                "onex.evt.platform.contract-deregistered.v1"
             )
-            node_heartbeat_topic = f"{environment}.onex.evt.platform.node-heartbeat.v1"
+            node_heartbeat_topic = topic_resolver.resolve(SUFFIX_NODE_HEARTBEAT)
 
             logger.info(
                 "Subscribing to contract registry events on event bus (correlation_id=%s)",
