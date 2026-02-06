@@ -548,3 +548,85 @@ class TestIntrospectionConfigValidation:
 
         with pytest.raises(Exception):  # ValidationError for frozen model
             config.enabled = False  # type: ignore[misc]
+
+
+# =============================================================================
+# Shutdown Lifecycle Tests
+# =============================================================================
+
+
+class TestShutdownHeartbeatCleanup:
+    """Tests for heartbeat cleanup during stop() (OMN-1930)."""
+
+    @pytest.mark.asyncio
+    async def test_stop_calls_stop_heartbeat_task(
+        self,
+        mock_introspection_service: MagicMock,
+        event_bus: EventBusInmemory,
+    ) -> None:
+        """Test that stop() invokes stop_heartbeat_task on the introspection service.
+
+        Verifies:
+        - stop_heartbeat_task is called during stop()
+        - Heartbeat is cleaned up before event bus closure
+        """
+        config = ModelRuntimeIntrospectionConfig(
+            enabled=True,
+            jitter_max_ms=0,
+            heartbeat_interval_s=30,
+            throttle_min_interval_s=10,
+        )
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            config=make_runtime_config(),
+            introspection_service=mock_introspection_service,
+            introspection_config=config,
+        )
+
+        seed_mock_handlers(process)
+
+        await process.start()
+        mock_introspection_service.stop_heartbeat_task.assert_not_called()
+
+        await process.stop()
+        mock_introspection_service.stop_heartbeat_task.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_stop_succeeds_when_stop_heartbeat_raises(
+        self,
+        mock_introspection_service: MagicMock,
+        event_bus: EventBusInmemory,
+    ) -> None:
+        """Test that stop() completes even if stop_heartbeat_task raises.
+
+        Verifies:
+        - stop() does not propagate the heartbeat stop error
+        - The process transitions to stopped state despite the error
+        """
+        mock_introspection_service.stop_heartbeat_task.side_effect = Exception(
+            "Heartbeat cleanup failed"
+        )
+
+        config = ModelRuntimeIntrospectionConfig(
+            enabled=True,
+            jitter_max_ms=0,
+            heartbeat_interval_s=30,
+            throttle_min_interval_s=10,
+        )
+
+        process = RuntimeHostProcess(
+            event_bus=event_bus,
+            config=make_runtime_config(),
+            introspection_service=mock_introspection_service,
+            introspection_config=config,
+        )
+
+        seed_mock_handlers(process)
+
+        await process.start()
+        assert process.is_running
+
+        # stop() should succeed despite heartbeat cleanup error
+        await process.stop()
+        assert not process.is_running

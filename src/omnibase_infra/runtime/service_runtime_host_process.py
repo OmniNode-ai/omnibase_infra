@@ -3540,10 +3540,7 @@ class RuntimeHostProcess:
                 correlation_id=correlation_id,
             )
 
-            # Start heartbeat task for periodic liveness announcements
-            await self._introspection_service.start_heartbeat_task()
-
-            # Record time for throttle tracking
+            # Record time for throttle tracking immediately after publish
             self._last_introspection_time = time.monotonic()
 
             logger.info(
@@ -3558,6 +3555,20 @@ class RuntimeHostProcess:
             # Log warning but don't fail startup - introspection is optional
             logger.warning(
                 "Failed to publish startup introspection",
+                extra={
+                    "error": str(e),
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return
+
+        # Start heartbeat task for periodic liveness announcements
+        # Separate try block: heartbeat failure shouldn't affect throttle tracking
+        try:
+            await self._introspection_service.start_heartbeat_task()
+        except Exception as e:
+            logger.warning(
+                "Failed to start heartbeat task",
                 extra={
                     "error": str(e),
                     "correlation_id": str(correlation_id),
