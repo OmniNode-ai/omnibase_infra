@@ -21,9 +21,16 @@ set -u
 # Function to create a database if it doesn't exist
 create_database() {
     local database="$1"
+
+    # Validate database name: only alphanumeric, underscore, and hyphen allowed
+    if ! echo "$database" | grep -qE '^[a-zA-Z_][a-zA-Z0-9_-]*$'; then
+        echo "ERROR: Invalid database name '$database' - must match ^[a-zA-Z_][a-zA-Z0-9_-]*$" >&2
+        return 1
+    fi
+
     echo "Creating database: $database"
     psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
-        SELECT 'CREATE DATABASE $database'
+        SELECT 'CREATE DATABASE "$database"'
         WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$database')\gexec
 EOSQL
     echo "Database '$database' created or already exists."

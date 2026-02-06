@@ -99,10 +99,10 @@ x-runtime-env: &runtime-env
   CONSUL_SCHEME: ${CONSUL_SCHEME:-http}
   # Infisical - Secrets Management (optional, via secrets profile)
   INFISICAL_ADDR: ${INFISICAL_ADDR:-http://infisical:8080}
-  # Valkey (Redis-compatible)
-  REDIS_HOST: ${REDIS_HOST:-valkey}
-  REDIS_PORT: ${REDIS_PORT:-6379}
-  REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+  # Valkey (Redis-compatible cache)
+  VALKEY_HOST: ${VALKEY_HOST:-valkey}
+  VALKEY_PORT: ${VALKEY_PORT:-6379}
+  VALKEY_PASSWORD: ${VALKEY_PASSWORD:-}
   # ONEX Runtime
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-development}
@@ -243,7 +243,7 @@ services:
   # For production, either:
   #   - Remove port exposure and use internal Docker networking only
   #   - Bind to 127.0.0.1: "127.0.0.1:16379:6379"
-  #   - Enable Valkey authentication with REDIS_PASSWORD
+  #   - Enable Valkey authentication with VALKEY_PASSWORD
   valkey:
     image: valkey/valkey:8.0-alpine
     container_name: omnibase-infra-valkey
@@ -311,9 +311,11 @@ services:
         condition: service_healthy
     environment:
       DB_CONNECTION_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/infisical_db
-      REDIS_URL: redis://valkey:6379
-      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-not-set-will-fail-at-runtime}
-      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:-not-set-will-fail-at-runtime}
+      # Redis URL with optional password authentication
+      # When VALKEY_PASSWORD is set, configure INFISICAL_REDIS_URL with password
+      REDIS_URL: ${INFISICAL_REDIS_URL:-redis://valkey:6379}
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:?INFISICAL_ENCRYPTION_KEY is required for secrets profile}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:?INFISICAL_AUTH_SECRET is required for secrets profile}
       SITE_URL: ${INFISICAL_SITE_URL:-http://localhost:8880}
       TELEMETRY_ENABLED: "false"
     ports:

@@ -475,9 +475,7 @@ class TestDockerRuntime:
                     "-e",
                     "POSTGRES_PASSWORD=test_password",
                     "-e",
-                    "VAULT_TOKEN=test_token",
-                    "-e",
-                    "REDIS_PASSWORD=test_password",
+                    "VALKEY_PASSWORD=test_password",
                     "-e",
                     "ONEX_LOG_LEVEL=DEBUG",
                     "-e",
@@ -600,9 +598,7 @@ class TestDockerRuntime:
                     "-e",
                     "POSTGRES_PASSWORD=test",
                     "-e",
-                    "VAULT_TOKEN=test",
-                    "-e",
-                    "REDIS_PASSWORD=test",
+                    "VALKEY_PASSWORD=test",
                     "-e",
                     "ONEX_EVENT_BUS_TYPE=inmemory",
                     built_test_image,
@@ -721,9 +717,7 @@ class TestDockerHealthCheck:
                     "-e",
                     "POSTGRES_PASSWORD=test",
                     "-e",
-                    "VAULT_TOKEN=test",
-                    "-e",
-                    "REDIS_PASSWORD=test",
+                    "VALKEY_PASSWORD=test",
                     "-e",
                     "ONEX_EVENT_BUS_TYPE=inmemory",
                     built_test_image,
@@ -812,9 +806,7 @@ class TestDockerHealthCheck:
                     "-e",
                     "POSTGRES_PASSWORD=test",
                     "-e",
-                    "VAULT_TOKEN=test",
-                    "-e",
-                    "REDIS_PASSWORD=test",
+                    "VALKEY_PASSWORD=test",
                     "-e",
                     "ONEX_EVENT_BUS_TYPE=inmemory",
                     built_test_image,
@@ -1045,8 +1037,7 @@ class TestDockerComposeProfiles:
         env.update(
             {
                 "POSTGRES_PASSWORD": "test",
-                "VAULT_TOKEN": "test",
-                "REDIS_PASSWORD": "test",
+                "VALKEY_PASSWORD": "test",
             }
         )
 
