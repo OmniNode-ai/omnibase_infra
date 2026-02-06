@@ -683,6 +683,7 @@ async def bootstrap() -> int:
         projector: ProjectorShell | None = None
         introspection_dispatcher: DispatcherNodeIntrospected | None = None
         consul_handler = None  # Will be initialized if Consul is configured
+        snapshot_publisher = None  # Will be initialized if Kafka is available
 
         postgres_host = os.getenv("POSTGRES_HOST")
         if postgres_host:
@@ -920,12 +921,65 @@ async def bootstrap() -> int:
                         correlation_id,
                     )
 
+                # 4.6.6. Create SnapshotPublisherRegistration if Kafka is available
+                # Snapshot publishing is best-effort - if creation or start fails,
+                # the system continues without snapshot publishing.
+                snapshot_publisher = None
+                if kafka_bootstrap_servers:
+                    try:
+                        from aiokafka import AIOKafkaProducer
+
+                        from omnibase_infra.models.projection import (
+                            ModelSnapshotTopicConfig,
+                        )
+                        from omnibase_infra.projectors.snapshot_publisher_registration import (
+                            SnapshotPublisherRegistration,
+                        )
+
+                        snapshot_config = ModelSnapshotTopicConfig.default()
+                        snapshot_producer = AIOKafkaProducer(
+                            bootstrap_servers=kafka_bootstrap_servers,
+                        )
+                        snapshot_publisher = SnapshotPublisherRegistration(
+                            snapshot_producer,
+                            snapshot_config,
+                            bootstrap_servers=kafka_bootstrap_servers,
+                        )
+                        await snapshot_publisher.start()
+                        logger.info(
+                            "SnapshotPublisherRegistration started for topic %s (correlation_id=%s)",
+                            snapshot_config.topic,
+                            correlation_id,
+                            extra={
+                                "topic": snapshot_config.topic,
+                                "bootstrap_servers": kafka_bootstrap_servers,
+                            },
+                        )
+                    except Exception as snap_pub_error:
+                        # Log warning but continue without snapshot publishing
+                        logger.warning(
+                            "Failed to start SnapshotPublisherRegistration, "
+                            "continuing without snapshot publishing: %s (correlation_id=%s)",
+                            sanitize_error_message(snap_pub_error),
+                            correlation_id,
+                            extra={
+                                "error_type": type(snap_pub_error).__name__,
+                            },
+                        )
+                        snapshot_publisher = None
+                else:
+                    logger.debug(
+                        "KAFKA_BOOTSTRAP_SERVERS not set, snapshot publishing disabled (correlation_id=%s)",
+                        correlation_id,
+                    )
+
                 # 4.7. Wire registration handlers with projector and consul_handler
                 registration_summary = await wire_registration_handlers(
                     container,
                     postgres_pool,
                     projector=projector,
                     consul_handler=consul_handler,
+                    snapshot_publisher=snapshot_publisher,
                 )
                 logger.info(
                     "Registration handlers wired (correlation_id=%s)",
@@ -1090,6 +1144,7 @@ async def bootstrap() -> int:
                     postgres_pool = None
                 projector = None
                 introspection_dispatcher = None
+                snapshot_publisher = None
         else:
             logger.debug(
                 "POSTGRES_HOST not set, skipping registration handler wiring (correlation_id=%s)",
@@ -1520,6 +1575,9 @@ async def bootstrap() -> int:
         else:
             registration_status = "disabled"
 
+        # Snapshot publisher status for banner
+        snapshot_status = "enabled" if snapshot_publisher is not None else "disabled"
+
         # Contract registry status for banner
         if contract_router is not None:
             contract_registry_status = (
@@ -1536,6 +1594,7 @@ async def bootstrap() -> int:
             f"Event Bus: {event_bus_type} (group: {config.consumer_group})",
             f"Topics: {config.input_topic} -> {config.output_topic}",
             f"Registration: {registration_status}",
+            f"Snapshot Publisher: {snapshot_status}",
             f"Contract Registry: {contract_registry_status}",
             f"Health endpoint: http://0.0.0.0:{http_port}/health",
             f"Bootstrap time: {bootstrap_duration:.3f}s",
@@ -1673,6 +1732,22 @@ async def bootstrap() -> int:
                 correlation_id,
             )
         runtime = None  # Mark as stopped to prevent double-stop in finally
+
+        # Stop snapshot publisher
+        if snapshot_publisher is not None:
+            try:
+                await snapshot_publisher.stop()
+                logger.debug(
+                    "Snapshot publisher stopped (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception as snap_stop_error:
+                logger.warning(
+                    "Failed to stop snapshot publisher: %s (correlation_id=%s)",
+                    sanitize_error_message(snap_stop_error),
+                    correlation_id,
+                )
+            snapshot_publisher = None
 
         # Close PostgreSQL pool
         if postgres_pool is not None:

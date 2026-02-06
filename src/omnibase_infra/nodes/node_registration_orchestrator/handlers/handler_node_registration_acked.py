@@ -37,7 +37,7 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Final
+from typing import TYPE_CHECKING, Final
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
@@ -63,6 +63,11 @@ from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
 from omnibase_infra.utils import validate_timezone_aware_with_context
+
+if TYPE_CHECKING:
+    from omnibase_infra.projectors.snapshot_publisher_registration import (
+        SnapshotPublisherRegistration,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +192,7 @@ class HandlerNodeRegistrationAcked:
         self,
         projection_reader: ProjectionReaderRegistration,
         liveness_interval_seconds: int | None = None,
+        snapshot_publisher: SnapshotPublisherRegistration | None = None,
     ) -> None:
         """Initialize the handler with a projection reader.
 
@@ -195,11 +201,16 @@ class HandlerNodeRegistrationAcked:
             liveness_interval_seconds: Interval for liveness deadline calculation.
                 Pass None to use environment variable ONEX_LIVENESS_INTERVAL_SECONDS
                 or default (60 seconds).
+            snapshot_publisher: Optional SnapshotPublisherRegistration for publishing
+                compacted snapshots to Kafka after ACTIVE transition. If None,
+                snapshot publishing is skipped. Snapshot publishing is always
+                best-effort and non-blocking.
         """
         self._projection_reader = projection_reader
         self._liveness_interval_seconds = get_liveness_interval_seconds(
             liveness_interval_seconds
         )
+        self._snapshot_publisher = snapshot_publisher
 
     @property
     def handler_id(self) -> str:
@@ -300,6 +311,24 @@ class HandlerNodeRegistrationAcked:
                 correlation_id=correlation_id,
                 projection=projection,
             )
+
+            # Publish snapshot after ACTIVE transition (best-effort, non-blocking)
+            if self._snapshot_publisher is not None:
+                try:
+                    await self._snapshot_publisher.publish_from_projection(
+                        projection, node_name=None
+                    )
+                except Exception as snap_err:
+                    logger.warning(
+                        "Snapshot publish failed (non-blocking): %s",
+                        snap_err,
+                        extra={
+                            "node_id": str(node_id),
+                            "correlation_id": str(correlation_id),
+                            "error_type": type(snap_err).__name__,
+                        },
+                    )
+
             return self._create_output(ctx=ctx, events=tuple(events))
 
         # Handle other states

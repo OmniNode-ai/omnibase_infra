@@ -25,9 +25,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.primitives import ModelSemVer
 from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.registration.model_node_capabilities import (
@@ -160,12 +161,47 @@ class ModelRegistrationSnapshot(BaseModel):
         description="When this snapshot was created",
     )
 
+    # Schema Versioning (wire-format compatibility marker)
+    schema_version: str = Field(
+        default="1.0.0",
+        description=(
+            "Schema format version for consumer compatibility. "
+            "Serialized as a plain string (e.g., '1.0.0') for cross-language consumers. "
+            "Validated as semver at construction time via ModelSemVer.parse()."
+        ),
+    )
+
     # Traceability
     source_projection_sequence: int | None = Field(
         default=None,
         ge=0,
         description="Source projection sequence for traceability to projection",
     )
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def validate_schema_version(cls, v: object) -> str:
+        """Validate schema_version is a valid semver string.
+
+        Uses ModelSemVer.parse() for structural validation while keeping
+        the wire format as a plain string for cross-language consumers.
+
+        Args:
+            v: Schema version value
+
+        Returns:
+            Validated semver string
+
+        Raises:
+            ValueError: If the value is not a valid semver string
+        """
+        if not isinstance(v, str):
+            msg = f"schema_version must be a string, got {type(v).__name__}"
+            raise ValueError(msg)
+        # Validate semver structure via ModelSemVer.parse()
+        # This raises ValueError if the string is not valid semver
+        ModelSemVer.parse(v)
+        return v
 
     @classmethod
     def from_projection(
@@ -225,25 +261,25 @@ class ModelRegistrationSnapshot(BaseModel):
     def to_kafka_key(self) -> str:
         """Generate Kafka compaction key for this snapshot.
 
-        Returns a key suitable for Kafka topic compaction. The key format
-        is "{domain}:{entity_id}" which ensures:
-        - Per-entity compaction (only latest snapshot retained per entity)
-        - Multi-domain support (entities in different domains are distinct)
+        Returns a key suitable for Kafka topic compaction. The key is the
+        node_id (entity_id) as a UUID string, which ensures:
+        - Per-node compaction (only latest snapshot retained per node)
+        - Simple cross-language consumer compatibility
+        - Aligns with "node_id is the partition key" principle
 
         Returns:
-            Compaction key in format "domain:entity_id"
+            Node UUID as string
 
         Example:
             >>> from uuid import UUID
             >>> snapshot = ModelRegistrationSnapshot(
             ...     entity_id=UUID("550e8400-e29b-41d4-a716-446655440000"),
-            ...     domain="registration",
             ...     ...
             ... )
             >>> snapshot.to_kafka_key()
-            'registration:550e8400-e29b-41d4-a716-446655440000'
+            '550e8400-e29b-41d4-a716-446655440000'
         """
-        return f"{self.domain}:{self.entity_id!s}"
+        return str(self.entity_id)
 
     def is_newer_than(self, other: ModelRegistrationSnapshot) -> bool:
         """Check if this snapshot is newer than another.

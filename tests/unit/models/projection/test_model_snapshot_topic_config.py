@@ -194,27 +194,25 @@ class TestModelSnapshotTopicConfigSnapshotKey:
     """Tests for snapshot key generation."""
 
     def test_get_snapshot_key_format(self) -> None:
-        """Test snapshot key follows domain:entity_id format."""
+        """Test snapshot key returns entity_id directly."""
         config = ModelSnapshotTopicConfig.default()
-        key = config.get_snapshot_key("registration", "node-123")
-        assert key == "registration:node-123"
+        key = config.get_snapshot_key("node-123")
+        assert key == "node-123"
 
     def test_get_snapshot_key_with_uuid(self) -> None:
         """Test snapshot key with UUID entity_id."""
         config = ModelSnapshotTopicConfig.default()
-        key = config.get_snapshot_key(
-            "registration", "550e8400-e29b-41d4-a716-446655440000"
-        )
-        assert key == "registration:550e8400-e29b-41d4-a716-446655440000"
+        key = config.get_snapshot_key("550e8400-e29b-41d4-a716-446655440000")
+        assert key == "550e8400-e29b-41d4-a716-446655440000"
 
-    def test_get_snapshot_key_different_domains(self) -> None:
-        """Test snapshot keys for different domains."""
+    def test_get_snapshot_key_different_entities(self) -> None:
+        """Test snapshot keys for different entities are distinct."""
         config = ModelSnapshotTopicConfig.default()
-        reg_key = config.get_snapshot_key("registration", "node-1")
-        disc_key = config.get_snapshot_key("discovery", "node-1")
-        assert reg_key == "registration:node-1"
-        assert disc_key == "discovery:node-1"
-        assert reg_key != disc_key
+        key_1 = config.get_snapshot_key("node-1")
+        key_2 = config.get_snapshot_key("node-2")
+        assert key_1 == "node-1"
+        assert key_2 == "node-2"
+        assert key_1 != key_2
 
 
 class TestModelSnapshotTopicConfigEnvironmentOverrides:

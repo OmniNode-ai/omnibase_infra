@@ -565,27 +565,25 @@ class ModelSnapshotTopicConfig(BaseModel):
             "min.insync.replicas": str(self.min_insync_replicas),
         }
 
-    def get_snapshot_key(self, domain: str, entity_id: str) -> str:
+    def get_snapshot_key(self, entity_id: str) -> str:
         """Generate a snapshot key for Kafka compaction.
 
-        Keys follow the format: {domain}:{entity_id}
-
-        This ensures that compaction retains only the latest snapshot
-        for each (domain, entity_id) combination.
+        Keys are the node_id (entity_id) as a UUID string. This ensures
+        compaction retains only the latest snapshot per node and simplifies
+        cross-language consumer compatibility.
 
         Args:
-            domain: Domain namespace (e.g., "registration", "discovery")
             entity_id: Entity UUID as string
 
         Returns:
-            Formatted snapshot key for Kafka message
+            Entity UUID string for Kafka message key
 
         Example:
             >>> config = ModelSnapshotTopicConfig.default()
-            >>> config.get_snapshot_key("registration", "550e8400-e29b-41d4-a716-446655440000")
-            'registration:550e8400-e29b-41d4-a716-446655440000'
+            >>> config.get_snapshot_key("550e8400-e29b-41d4-a716-446655440000")
+            '550e8400-e29b-41d4-a716-446655440000'
         """
-        return f"{domain}:{entity_id}"
+        return entity_id
 
 
 __all__: list[str] = ["ModelSnapshotTopicConfig"]

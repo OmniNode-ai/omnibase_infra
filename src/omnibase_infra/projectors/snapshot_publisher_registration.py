@@ -200,6 +200,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         snapshot_version_tracker: dict[str, int] | None = None,
         bootstrap_servers: str | None = None,
         consumer_timeout_ms: int = 5000,
+        debounce_ms: int = 500,
     ) -> None:
         """Initialize snapshot publisher.
 
@@ -217,6 +218,13 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 reads will attempt to extract from the producer configuration.
             consumer_timeout_ms: Timeout in milliseconds for consumer poll operations.
                 Default is 5000ms (5 seconds). Used when loading the snapshot cache.
+            debounce_ms: Debounce window in milliseconds for coalescing rapid
+                publishes per entity_id. When multiple publish requests arrive
+                for the same entity within this window, only the last snapshot
+                is published to Kafka (trailing-edge debounce). The snapshot
+                model is returned immediately to callers; only the Kafka send
+                is deferred. Set to 0 to disable debounce (useful for testing).
+                Default is 500ms.
 
         Example:
             >>> producer = AIOKafkaProducer(
@@ -259,6 +267,16 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         self._cache_lock = asyncio.Lock()
         self._cache_loaded = False
         self._cache_warming_in_progress = False
+
+        # Debounce configuration for coalescing rapid publishes per entity.
+        # When debounce_ms > 0, publish_from_projection schedules a deferred
+        # Kafka send instead of publishing immediately. If another publish
+        # arrives for the same entity within the window, the timer resets and
+        # only the latest snapshot is sent (trailing-edge debounce).
+        self._debounce_ms = debounce_ms
+        self._debounce_timers: dict[str, asyncio.TimerHandle] = {}
+        self._pending_snapshots: dict[str, ModelRegistrationSnapshot] = {}
+        self._debounce_lock = asyncio.Lock()
 
         # Initialize circuit breaker with Kafka-appropriate settings
         cb_config = ModelCircuitBreakerConfig.from_env(
@@ -421,6 +439,10 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 self._consumer_started = False
                 self._consumer = None
 
+        # Flush pending debounced publishes before stopping producer.
+        # This ensures no snapshots are silently discarded on shutdown.
+        await self._flush_pending_publishes()
+
         if not self._started:
             logger.debug("Snapshot publisher already stopped")
             return
@@ -461,7 +483,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         Returns:
             Next version number (starting from 1)
         """
-        key = f"{domain}:{entity_id}"
+        key = entity_id
         async with self._version_tracker_lock:
             current = self._version_tracker.get(key, 0)
             next_version = current + 1
@@ -734,7 +756,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             await self._load_cache_from_topic(correlation_id)
 
         # Lookup in cache (O(1))
-        key = f"{domain}:{entity_id}"
+        key = entity_id
         async with self._cache_lock:
             snapshot = self._snapshot_cache.get(key)
 
@@ -1169,8 +1191,8 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             await self._check_circuit_breaker("delete_snapshot", correlation_id)
 
         try:
-            # Build key for tombstone
-            key = f"{domain}:{entity_id}".encode()
+            # Build key for tombstone (node_id only, matches to_kafka_key())
+            key = entity_id.encode()
 
             # Publish tombstone (null value)
             await self._producer.send_and_wait(
@@ -1184,14 +1206,13 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 await self._reset_circuit_breaker()
 
             # Clear version tracker for this entity (thread-safe)
-            tracker_key = f"{domain}:{entity_id}"
             async with self._version_tracker_lock:
-                self._version_tracker.pop(tracker_key, None)
+                self._version_tracker.pop(entity_id, None)
 
             # Also remove from cache if loaded (for consistency)
             if self._cache_loaded:
                 async with self._cache_lock:
-                    self._snapshot_cache.pop(tracker_key, None)
+                    self._snapshot_cache.pop(entity_id, None)
 
             logger.info(
                 "Published tombstone for %s:%s",
@@ -1260,7 +1281,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         entity_id_str = str(projection.entity_id)
         version = await self._get_next_version(entity_id_str, projection.domain)
 
-        # Create snapshot from projection
+        # Create snapshot from projection (returned immediately to caller)
         snapshot = ModelRegistrationSnapshot.from_projection(
             projection=projection,
             snapshot_version=version,
@@ -1268,10 +1289,160 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             node_name=node_name,
         )
 
-        # Publish the snapshot model
-        await self._publish_snapshot_model(snapshot)
+        # Publish with optional debounce. When debounce is enabled, the Kafka
+        # send is deferred; only the latest snapshot per entity within the
+        # debounce window is actually published.
+        if self._debounce_ms > 0:
+            await self._schedule_debounced_publish(entity_id_str, snapshot)
+        else:
+            await self._publish_snapshot_model(snapshot)
 
         return snapshot
+
+    async def _schedule_debounced_publish(
+        self,
+        entity_id: str,
+        snapshot: ModelRegistrationSnapshot,
+    ) -> None:
+        """Schedule a debounced publish for an entity.
+
+        If a publish is already pending for this entity, cancel the existing
+        timer and replace with the new snapshot. Only the latest snapshot
+        within the debounce window will be published (trailing-edge debounce).
+
+        Concurrency Safety:
+            Uses _debounce_lock (asyncio.Lock) to ensure atomic access to
+            the timer and pending snapshot dictionaries.
+
+        Args:
+            entity_id: The entity identifier (node_id as string)
+            snapshot: The snapshot to publish after the debounce window expires
+        """
+        async with self._debounce_lock:
+            # Cancel existing timer if any (superseded by newer snapshot)
+            existing_timer = self._debounce_timers.get(entity_id)
+            if existing_timer is not None:
+                existing_timer.cancel()
+                logger.debug(
+                    "Cancelled pending debounce timer for %s "
+                    "(superseded by snapshot version %d)",
+                    entity_id,
+                    snapshot.snapshot_version,
+                )
+
+            # Store the latest snapshot for this entity
+            self._pending_snapshots[entity_id] = snapshot
+
+            # Schedule publish after debounce window expires
+            loop = asyncio.get_running_loop()
+            delay = self._debounce_ms / 1000.0
+            timer = loop.call_later(
+                delay,
+                self._debounce_timer_callback,
+                entity_id,
+                loop,
+            )
+            self._debounce_timers[entity_id] = timer
+
+            logger.debug(
+                "Scheduled debounced publish for %s version %d in %dms",
+                entity_id,
+                snapshot.snapshot_version,
+                self._debounce_ms,
+            )
+
+    def _debounce_timer_callback(
+        self,
+        entity_id: str,
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        """Callback for debounce timer expiry.
+
+        This is a synchronous callback scheduled by call_later(). It creates
+        an async task to execute the actual publish operation.
+
+        Args:
+            entity_id: The entity identifier to publish for
+            loop: The event loop to schedule the publish task on
+        """
+        loop.create_task(self._execute_debounced_publish(entity_id))
+
+    async def _execute_debounced_publish(self, entity_id: str) -> None:
+        """Execute a debounced publish for an entity.
+
+        Called by the timer callback after the debounce window expires.
+        Removes the entity from pending state and publishes the snapshot
+        to Kafka via _publish_snapshot_model.
+
+        If the snapshot was already flushed (e.g., by stop()), this is a
+        no-op since _pending_snapshots will not contain the entity.
+
+        Args:
+            entity_id: The entity identifier to publish for
+        """
+        async with self._debounce_lock:
+            snapshot = self._pending_snapshots.pop(entity_id, None)
+            self._debounce_timers.pop(entity_id, None)
+
+        if snapshot is not None:
+            try:
+                await self._publish_snapshot_model(snapshot)
+                logger.debug(
+                    "Published debounced snapshot for %s version %d",
+                    entity_id,
+                    snapshot.snapshot_version,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to publish debounced snapshot for %s version %d",
+                    entity_id,
+                    snapshot.snapshot_version,
+                    exc_info=True,
+                )
+
+    async def _flush_pending_publishes(self) -> None:
+        """Flush all pending debounced publishes immediately.
+
+        Cancels all debounce timers and publishes any pending snapshots
+        immediately. Called during stop() to ensure no data is lost when
+        the publisher is shutting down.
+
+        Each pending snapshot is published independently; failures for one
+        entity do not block others (best-effort flush).
+        """
+        async with self._debounce_lock:
+            # Cancel all pending timers
+            for timer in self._debounce_timers.values():
+                timer.cancel()
+            self._debounce_timers.clear()
+
+            # Take ownership of all pending snapshots
+            pending = dict(self._pending_snapshots)
+            self._pending_snapshots.clear()
+
+        if not pending:
+            return
+
+        logger.info(
+            "Flushing %d pending debounced publish(es) for topic %s",
+            len(pending),
+            self._config.topic,
+        )
+
+        for entity_id, snapshot in pending.items():
+            try:
+                await self._publish_snapshot_model(snapshot)
+                logger.debug(
+                    "Flushed debounced snapshot for %s version %d",
+                    entity_id,
+                    snapshot.snapshot_version,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to flush debounced snapshot for %s during stop",
+                    entity_id,
+                    exc_info=True,
+                )
 
     async def publish_snapshot_batch(
         self,

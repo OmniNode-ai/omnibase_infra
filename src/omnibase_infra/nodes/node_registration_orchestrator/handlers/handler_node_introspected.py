@@ -68,9 +68,15 @@ from omnibase_infra.errors import ModelInfraErrorContext
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers import HandlerConsul
+    from omnibase_infra.projectors.snapshot_publisher_registration import (
+        SnapshotPublisherRegistration,
+    )
     from omnibase_infra.runtime.projector_shell import ProjectorShell
 from omnibase_infra.models.registration.events.model_node_registration_initiated import (
     ModelNodeRegistrationInitiated,
+)
+from omnibase_infra.models.registration.model_node_capabilities import (
+    ModelNodeCapabilities,
 )
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
@@ -185,6 +191,7 @@ class HandlerNodeIntrospected:
         projector: ProjectorShell | None = None,
         ack_timeout_seconds: float | None = None,
         consul_handler: HandlerConsul | None = None,
+        snapshot_publisher: SnapshotPublisherRegistration | None = None,
     ) -> None:
         """Initialize the handler with a projection reader and optional components.
 
@@ -198,10 +205,15 @@ class HandlerNodeIntrospected:
             consul_handler: Optional HandlerConsul for Consul service registration.
                 If provided, nodes will be registered with Consul for service discovery.
                 If None or not initialized, Consul registration is skipped.
+            snapshot_publisher: Optional SnapshotPublisherRegistration for publishing
+                compacted snapshots to Kafka after projection persistence. If None,
+                snapshot publishing is skipped. Snapshot publishing is always
+                best-effort and non-blocking.
         """
         self._projection_reader = projection_reader
         self._projector = projector
         self._consul_handler = consul_handler
+        self._snapshot_publisher = snapshot_publisher
         self._ack_timeout_seconds = (
             ack_timeout_seconds
             if ack_timeout_seconds is not None
@@ -445,6 +457,44 @@ class HandlerNodeIntrospected:
                     "correlation_id": str(correlation_id),
                 },
             )
+
+            # Publish snapshot to compacted Kafka topic (best-effort, non-blocking)
+            if self._snapshot_publisher is not None:
+                try:
+                    from omnibase_infra.models.projection import (
+                        ModelRegistrationProjection,
+                    )
+
+                    projection_as_model = ModelRegistrationProjection(
+                        entity_id=node_id,
+                        domain="registration",
+                        current_state=EnumRegistrationState.PENDING_REGISTRATION,
+                        node_type=node_type,
+                        node_version=str(node_version) if node_version else "1.0.0",
+                        capabilities=capabilities
+                        if capabilities
+                        else ModelNodeCapabilities(),
+                        ack_deadline=ack_deadline,
+                        last_applied_event_id=registration_attempt_id,
+                        last_applied_offset=0,
+                        registered_at=now,
+                        updated_at=now,
+                        correlation_id=correlation_id,
+                    )
+                    node_name = event.metadata.description if event.metadata else None
+                    await self._snapshot_publisher.publish_from_projection(
+                        projection_as_model, node_name=node_name
+                    )
+                except Exception as snap_err:
+                    logger.warning(
+                        "Snapshot publish failed (non-blocking): %s",
+                        snap_err,
+                        extra={
+                            "node_id": str(node_id),
+                            "correlation_id": str(correlation_id),
+                            "error_type": type(snap_err).__name__,
+                        },
+                    )
         else:
             logger.debug(
                 "No projector configured, skipping projection persistence",
