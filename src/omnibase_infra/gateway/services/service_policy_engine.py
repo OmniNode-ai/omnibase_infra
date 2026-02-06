@@ -400,13 +400,15 @@ class ServicePolicyEngine:
             True if topic matches pattern, False otherwise.
 
         Note:
-            Pattern matching is case-sensitive. Topics and patterns
-            should use consistent casing (typically lowercase).
+            Pattern matching is case-sensitive on all platforms.
+            Topics and patterns should use consistent casing
+            (typically lowercase).
 
         """
-        # Use fnmatch for glob-style pattern matching
-        # This handles *, ?, and [seq] patterns efficiently
-        return fnmatch.fnmatch(topic, pattern)
+        # Use fnmatchcase for case-sensitive matching on all platforms.
+        # fnmatch.fnmatch() delegates to the OS and is case-insensitive
+        # on macOS/Windows, which would weaken the security boundary.
+        return fnmatch.fnmatchcase(topic, pattern)
 
     def _log_rejection(
         self,

@@ -4205,7 +4205,7 @@ class RuntimeHostProcess:
                 # Preserve trace_id as correlation_id for downstream tracking.
                 # Fall back to the context correlation_id when trace_id is absent.
                 if msg_envelope.trace_id is not None:
-                    extracted_envelope["correlation_id"] = msg_envelope.trace_id
+                    extracted_envelope["correlation_id"] = str(msg_envelope.trace_id)
                 else:
                     extracted_envelope["correlation_id"] = str(correlation_id)
 
