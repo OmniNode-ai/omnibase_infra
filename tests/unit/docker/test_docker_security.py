@@ -412,7 +412,8 @@ class TestDockerComposeSecurity:
         since the server doesn't require auth.
 
         Security rationale:
-        - Valkey is only accessible within omnibase-infra-network (not exposed to host)
+        - Valkey is exposed to host (port 16379) for local development convenience
+        - Host firewall provides sufficient isolation for local development
         - Local development does not require auth complexity
         - Production deployments should override via environment variables
         """
