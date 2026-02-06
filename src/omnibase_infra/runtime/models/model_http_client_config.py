@@ -11,11 +11,13 @@ import os
 
 from pydantic import BaseModel, ConfigDict, Field
 
+_TRUTHY_VALUES = frozenset({"true", "1", "yes", "on"})
+
 
 class ModelHttpClientConfig(BaseModel):
     """HTTP client configuration."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     timeout_seconds: float = Field(
         default=30.0,
@@ -30,12 +32,22 @@ class ModelHttpClientConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> ModelHttpClientConfig:
-        """Create config from HTTP_* environment variables."""
-        return cls(
-            timeout_seconds=float(os.getenv("HTTP_CLIENT_TIMEOUT_SECONDS", "30.0")),
-            follow_redirects=os.getenv("HTTP_CLIENT_FOLLOW_REDIRECTS", "true").lower()
-            == "true",
-        )
+        """Create config from HTTP_* environment variables.
+
+        Raises:
+            ValueError: If numeric env vars contain non-numeric values.
+        """
+        try:
+            return cls(
+                timeout_seconds=float(os.getenv("HTTP_CLIENT_TIMEOUT_SECONDS", "30.0")),
+                follow_redirects=os.getenv(
+                    "HTTP_CLIENT_FOLLOW_REDIRECTS", "true"
+                ).lower()
+                in _TRUTHY_VALUES,
+            )
+        except (ValueError, TypeError) as e:
+            msg = f"Invalid HTTP_CLIENT_* environment variable: {e}"
+            raise ValueError(msg) from e
 
 
 __all__ = ["ModelHttpClientConfig"]

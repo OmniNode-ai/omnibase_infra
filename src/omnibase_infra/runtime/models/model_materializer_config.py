@@ -23,7 +23,7 @@ from omnibase_infra.runtime.models.model_postgres_pool_config import (
 class ModelMaterializerConfig(BaseModel):
     """Top-level configuration for the DependencyMaterializer."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     postgres: ModelPostgresPoolConfig = Field(
         default_factory=ModelPostgresPoolConfig.from_env,

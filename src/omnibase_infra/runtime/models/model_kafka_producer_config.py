@@ -18,7 +18,7 @@ class ModelKafkaProducerConfig(BaseModel):
     Sources configuration from KAFKA_* environment variables.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     bootstrap_servers: str = Field(
         default="localhost:9092",
@@ -37,13 +37,23 @@ class ModelKafkaProducerConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> ModelKafkaProducerConfig:
-        """Create config from KAFKA_* environment variables."""
-        return cls(
-            bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
-            timeout_seconds=float(os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "10000"))
-            / 1000.0,
-            acks=os.getenv("KAFKA_ACKS", "all"),
-        )
+        """Create config from KAFKA_* environment variables.
+
+        Raises:
+            ValueError: If numeric env vars contain non-numeric values.
+        """
+        try:
+            return cls(
+                bootstrap_servers=os.getenv(
+                    "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
+                ),
+                timeout_seconds=float(os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "10000"))
+                / 1000.0,
+                acks=os.getenv("KAFKA_ACKS", "all"),
+            )
+        except (ValueError, TypeError) as e:
+            msg = f"Invalid KAFKA_* environment variable: {e}"
+            raise ValueError(msg) from e
 
 
 __all__ = ["ModelKafkaProducerConfig"]

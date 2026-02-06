@@ -177,16 +177,6 @@ class TestModelPostgresPoolConfig:
         assert config.min_size == 2
         assert config.max_size == 10
 
-    def test_dsn_generation(self) -> None:
-        config = ModelPostgresPoolConfig(
-            host="myhost",
-            port=5436,
-            user="myuser",
-            password="mypass",  # noqa: S106
-            database="mydb",
-        )
-        assert config.dsn == "postgresql://myuser:mypass@myhost:5436/mydb"
-
     def test_from_env(self) -> None:
         with patch.dict(
             "os.environ",

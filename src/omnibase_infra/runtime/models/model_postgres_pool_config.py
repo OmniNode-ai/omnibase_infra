@@ -18,7 +18,7 @@ class ModelPostgresPoolConfig(BaseModel):
     Sources configuration from POSTGRES_* environment variables.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     host: str = Field(default="localhost", description="PostgreSQL host")
     port: int = Field(default=5432, ge=1, le=65535, description="PostgreSQL port")
@@ -34,24 +34,24 @@ class ModelPostgresPoolConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> ModelPostgresPoolConfig:
-        """Create config from POSTGRES_* environment variables."""
-        return cls(
-            host=os.getenv("POSTGRES_HOST", "localhost"),
-            port=int(os.getenv("POSTGRES_PORT", "5432")),
-            user=os.getenv("POSTGRES_USER", "postgres"),
-            password=os.getenv("POSTGRES_PASSWORD", ""),
-            database=os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
-            min_size=int(os.getenv("POSTGRES_POOL_MIN_SIZE", "2")),
-            max_size=int(os.getenv("POSTGRES_POOL_MAX_SIZE", "10")),
-        )
+        """Create config from POSTGRES_* environment variables.
 
-    @property
-    def dsn(self) -> str:
-        """Build PostgreSQL DSN from configuration."""
-        return (
-            f"postgresql://{self.user}:{self.password}@"
-            f"{self.host}:{self.port}/{self.database}"
-        )
+        Raises:
+            ValueError: If numeric env vars contain non-numeric values.
+        """
+        try:
+            return cls(
+                host=os.getenv("POSTGRES_HOST", "localhost"),
+                port=int(os.getenv("POSTGRES_PORT", "5432")),
+                user=os.getenv("POSTGRES_USER", "postgres"),
+                password=os.getenv("POSTGRES_PASSWORD", ""),
+                database=os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
+                min_size=int(os.getenv("POSTGRES_POOL_MIN_SIZE", "2")),
+                max_size=int(os.getenv("POSTGRES_POOL_MAX_SIZE", "10")),
+            )
+        except (ValueError, TypeError) as e:
+            msg = f"Invalid POSTGRES_* environment variable: {e}"
+            raise ValueError(msg) from e
 
 
 __all__ = ["ModelPostgresPoolConfig"]

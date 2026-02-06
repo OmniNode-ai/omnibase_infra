@@ -129,13 +129,15 @@ class DependencyMaterializer:
         # ONEX_EXCLUDE: any_type - heterogeneous resource instances
         resources: dict[str, Any] = {}
 
-        for dep in infra_deps:
-            dep_name = dep.name
-            dep_type = dep.type
-            dep_required = getattr(dep, "required", True)
+        # Hold lock for entire materialization to prevent TOCTOU races
+        # when concurrent callers process the same resource types.
+        async with self._lock:
+            for dep in infra_deps:
+                dep_name = dep.name
+                dep_type = dep.type
+                dep_required = getattr(dep, "required", True)
 
-            # Check if resource type already created (deduplication)
-            async with self._lock:
+                # Check if resource type already created (deduplication)
                 if dep_type in self._resource_by_type:
                     resources[dep_name] = self._resource_by_type[dep_type]
                     self._name_to_type[dep_name] = dep_type
@@ -145,55 +147,62 @@ class DependencyMaterializer:
                     )
                     continue
 
-            # Create new resource via provider
-            try:
-                resource = await self._create_resource(dep_type)
+                # Create new resource via provider
+                try:
+                    resource = await self._create_resource(dep_type)
 
-                async with self._lock:
                     self._resource_by_type[dep_type] = resource
                     self._name_to_type[dep_name] = dep_type
                     self._creation_order.append(dep_type)
                     resources[dep_name] = resource
 
-                logger.info(
-                    "Materialized infrastructure resource",
-                    extra={"dep_name": dep_name, "dep_type": dep_type},
-                )
-
-            except ProtocolConfigurationError:
-                # Contract/configuration errors always propagate
-                raise
-            except (OSError, TimeoutError) as e:
-                if dep_required:
-                    context = ModelInfraErrorContext.with_correlation(
-                        transport_type=EnumInfraTransportType.RUNTIME,
-                        operation="materialize_dependency",
-                        target_name=dep_name,
+                    logger.info(
+                        "Materialized infrastructure resource",
+                        extra={"dep_name": dep_name, "dep_type": dep_type},
                     )
-                    raise ProtocolConfigurationError(
-                        f"Failed to materialize required dependency "
-                        f"'{dep_name}' (type={dep_type}): {e}",
-                        context=context,
-                    ) from e
 
-                logger.warning(
-                    "Optional dependency materialization failed, skipping",
-                    extra={
-                        "dep_name": dep_name,
-                        "dep_type": dep_type,
-                        "error": str(e),
-                    },
-                )
+                except ProtocolConfigurationError:
+                    # Contract/configuration errors always propagate
+                    raise
+                except (OSError, TimeoutError) as e:
+                    if dep_required:
+                        context = ModelInfraErrorContext.with_correlation(
+                            transport_type=EnumInfraTransportType.RUNTIME,
+                            operation="materialize_dependency",
+                            target_name=dep_name,
+                        )
+                        raise ProtocolConfigurationError(
+                            f"Failed to materialize required dependency "
+                            f"'{dep_name}' (type={dep_type}): {e}",
+                            context=context,
+                        ) from e
+
+                    logger.warning(
+                        "Optional dependency materialization failed, skipping",
+                        extra={
+                            "dep_name": dep_name,
+                            "dep_type": dep_type,
+                            "error": str(e),
+                        },
+                    )
 
         return ModelMaterializedResources(resources=resources)
 
     async def shutdown(self) -> None:
         """Close all materialized resources in reverse creation order.
 
-        Errors during shutdown are logged but do not propagate.
+        Falls back to _resource_by_type keys if a resource was registered
+        but not tracked in _creation_order. Errors during shutdown are
+        logged but do not propagate.
         """
         async with self._lock:
-            types_to_close = list(reversed(self._creation_order))
+            # Use _creation_order for deterministic reverse shutdown,
+            # but also include any resource types only in _resource_by_type
+            ordered = list(reversed(self._creation_order))
+            extra = [
+                rt for rt in self._resource_by_type if rt not in self._creation_order
+            ]
+            types_to_close = ordered + extra
 
         for resource_type in types_to_close:
             async with self._lock:
