@@ -485,7 +485,9 @@ class HandlerNodeIntrospected:
                     )
                     node_name = event.metadata.description if event.metadata else None
                     await self._snapshot_publisher.publish_from_projection(
-                        projection_as_model, node_name=node_name
+                        projection_as_model,
+                        node_name=node_name,
+                        correlation_id=correlation_id,
                     )
                 except Exception as snap_err:
                     logger.warning(

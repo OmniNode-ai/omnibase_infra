@@ -334,7 +334,9 @@ class HandlerNodeRegistrationAcked:
                     # not available in this handler's scope.  The snapshot consumer
                     # can resolve it via entity_id if needed.
                     await self._snapshot_publisher.publish_from_projection(
-                        active_projection, node_name=None
+                        active_projection,
+                        node_name=None,
+                        correlation_id=correlation_id,
                     )
                 except Exception as snap_err:
                     logger.warning(
