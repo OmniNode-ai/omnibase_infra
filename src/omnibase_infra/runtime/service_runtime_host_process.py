@@ -2686,9 +2686,13 @@ class RuntimeHostProcess:
                     },
                 )
                 envelope_dict = model.model_dump(mode="json")
+                if trace_id is not None and "correlation_id" not in envelope_dict:
+                    envelope_dict["correlation_id"] = str(trace_id)
         else:
             # No signer configured - convert model to dict directly
             envelope_dict = model.model_dump(mode="json")
+            if trace_id is not None and "correlation_id" not in envelope_dict:
+                envelope_dict["correlation_id"] = str(trace_id)
 
         # Serialize (UUID conversion) and publish
         json_safe_envelope = self._serialize_envelope(envelope_dict)
@@ -3970,14 +3974,6 @@ class RuntimeHostProcess:
 
             else:
                 # Not a signed envelope - check reject_unsigned setting
-                # Extract correlation_id from envelope for logging (used in both paths)
-                cid = envelope.get("correlation_id")
-                cid_str: str | None = None
-                if isinstance(cid, UUID):
-                    cid_str = str(cid)
-                elif isinstance(cid, str):
-                    cid_str = cid
-
                 if (
                     self._gateway_config is not None
                     and self._gateway_config.reject_unsigned
@@ -3988,7 +3984,7 @@ class RuntimeHostProcess:
                             "topic": topic,
                             "has_signature": has_signature,
                             "has_required_fields": has_required_fields,
-                            "correlation_id": cid_str,
+                            "correlation_id": str(correlation_id),
                         },
                     )
                     return None
@@ -3996,7 +3992,7 @@ class RuntimeHostProcess:
                 # Accept unsigned envelope (reject_unsigned=False)
                 logger.debug(
                     "Accepting unsigned envelope (reject_unsigned=False)",
-                    extra={"topic": topic, "correlation_id": cid_str},
+                    extra={"topic": topic, "correlation_id": str(correlation_id)},
                 )
 
         # Validation passed or no validator configured

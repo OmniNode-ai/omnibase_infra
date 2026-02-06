@@ -98,7 +98,11 @@ def load_private_key_from_pem(path: Path) -> Ed25519PrivateKey:
                 oct(file_mode),
                 context.correlation_id,
                 path,
-                extra={"path": str(path), "mode": oct(file_mode)},
+                extra={
+                    "path": str(path),
+                    "mode": oct(file_mode),
+                    "correlation_id": str(context.correlation_id),
+                },
             )
     except OSError:
         # If we cannot stat the file, the subsequent read_bytes will fail
@@ -111,7 +115,7 @@ def load_private_key_from_pem(path: Path) -> Ed25519PrivateKey:
         logger.exception(
             "Failed to read private key file (correlation_id=%s)",
             context.correlation_id,
-            extra={"path": str(path)},
+            extra={"path": str(path), "correlation_id": str(context.correlation_id)},
         )
         raise ProtocolConfigurationError(
             f"Failed to read private key file: {path}",
@@ -124,7 +128,7 @@ def load_private_key_from_pem(path: Path) -> Ed25519PrivateKey:
         logger.exception(
             "Unsupported key algorithm in private key file (correlation_id=%s)",
             context.correlation_id,
-            extra={"path": str(path)},
+            extra={"path": str(path), "correlation_id": str(context.correlation_id)},
         )
         raise ProtocolConfigurationError(
             f"Unsupported key algorithm in private key file: {path}",
@@ -134,7 +138,7 @@ def load_private_key_from_pem(path: Path) -> Ed25519PrivateKey:
         logger.exception(
             "Failed to parse PEM private key (correlation_id=%s)",
             context.correlation_id,
-            extra={"path": str(path)},
+            extra={"path": str(path), "correlation_id": str(context.correlation_id)},
         )
         raise ProtocolConfigurationError(
             f"Invalid PEM format for private key: {path}",
@@ -150,7 +154,7 @@ def load_private_key_from_pem(path: Path) -> Ed25519PrivateKey:
     logger.debug(
         "Loaded Ed25519 private key (correlation_id=%s)",
         context.correlation_id,
-        extra={"path": str(path)},
+        extra={"path": str(path), "correlation_id": str(context.correlation_id)},
     )
 
     return private_key
@@ -197,7 +201,7 @@ def load_public_key_from_pem(path: Path) -> Ed25519PublicKey:
         logger.exception(
             "Failed to read public key file (correlation_id=%s)",
             context.correlation_id,
-            extra={"path": str(path)},
+            extra={"path": str(path), "correlation_id": str(context.correlation_id)},
         )
         raise ProtocolConfigurationError(
             f"Failed to read public key file: {path}",
@@ -210,7 +214,7 @@ def load_public_key_from_pem(path: Path) -> Ed25519PublicKey:
         logger.exception(
             "Unsupported key algorithm in public key file (correlation_id=%s)",
             context.correlation_id,
-            extra={"path": str(path)},
+            extra={"path": str(path), "correlation_id": str(context.correlation_id)},
         )
         raise ProtocolConfigurationError(
             f"Unsupported key algorithm in public key file: {path}",
@@ -220,7 +224,7 @@ def load_public_key_from_pem(path: Path) -> Ed25519PublicKey:
         logger.exception(
             "Failed to parse PEM public key (correlation_id=%s)",
             context.correlation_id,
-            extra={"path": str(path)},
+            extra={"path": str(path), "correlation_id": str(context.correlation_id)},
         )
         raise ProtocolConfigurationError(
             f"Invalid PEM format for public key: {path}",
@@ -236,7 +240,7 @@ def load_public_key_from_pem(path: Path) -> Ed25519PublicKey:
     logger.debug(
         "Loaded Ed25519 public key (correlation_id=%s)",
         context.correlation_id,
-        extra={"path": str(path)},
+        extra={"path": str(path), "correlation_id": str(context.correlation_id)},
     )
 
     return public_key
