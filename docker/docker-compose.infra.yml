@@ -100,7 +100,8 @@ x-runtime-env: &runtime-env
   # Valkey (Redis-compatible cache)
   VALKEY_HOST: ${VALKEY_HOST:-valkey}
   VALKEY_PORT: ${VALKEY_PORT:-6379}
-  VALKEY_PASSWORD: ${VALKEY_PASSWORD:-}
+  # SECURITY: Set VALKEY_PASSWORD in .env for production. Default is for local dev only.
+  VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
   # ONEX Runtime
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-development}
@@ -238,16 +239,19 @@ services:
   # This allows host-based tools and tests to connect directly to Valkey.
   # The default binding to 0.0.0.0 is acceptable for development environments
   # where localhost isolation via host firewall provides sufficient security.
+  # Password authentication is enabled by default (VALKEY_PASSWORD=valkey-dev-password).
   # For production, either:
   #   - Remove port exposure and use internal Docker networking only
   #   - Bind to 127.0.0.1: "127.0.0.1:16379:6379"
-  #   - Enable Valkey authentication with VALKEY_PASSWORD
+  #   - Set a strong VALKEY_PASSWORD in .env
   valkey:
     image: valkey/valkey:8.0-alpine
     container_name: omnibase-infra-valkey
     # Shell form avoids passing empty string arguments when VALKEY_PASSWORD is unset
+    # $$ escapes prevent Docker Compose from interpolating; the container's
+    # shell expands VALKEY_PASSWORD from the environment block below.
     command: >-
-      sh -c 'valkey-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru ${VALKEY_PASSWORD:+--requirepass "$VALKEY_PASSWORD"}'
+      sh -c 'valkey-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru $${VALKEY_PASSWORD:+--requirepass "$$VALKEY_PASSWORD"}'
     ports:
       - "${VALKEY_EXTERNAL_PORT:-16379}:6379"
     volumes:
@@ -256,11 +260,12 @@ services:
       - omnibase-infra-network
     environment:
       # Pass password for healthcheck authentication
-      VALKEY_PASSWORD: ${VALKEY_PASSWORD:-}
+      # SECURITY: Set VALKEY_PASSWORD in .env for production. Default is for local dev only.
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
     healthcheck:
       !!merge <<: *healthcheck-defaults
       # Use password for healthcheck if VALKEY_PASSWORD is set
-      test: ["CMD-SHELL", "valkey-cli ${VALKEY_PASSWORD:+-a \"$VALKEY_PASSWORD\" --no-auth-warning} ping | grep -q PONG"]
+      test: ["CMD-SHELL", "valkey-cli $${VALKEY_PASSWORD:+-a \"$$VALKEY_PASSWORD\" --no-auth-warning} ping | grep -q PONG"]
     logging: *logging-defaults
     restart: unless-stopped
     labels:
@@ -293,7 +298,7 @@ services:
   # Infisical - Secrets Management (Optional)
   # ==========================================================================
   infisical:
-    image: infisical/infisical:v0.155.7-postgres
+    image: infisical/infisical:v0.146.0-postgres
     container_name: omnibase-infra-infisical
     profiles: ["secrets", "full"]
     depends_on:
@@ -304,12 +309,15 @@ services:
     environment:
       DB_CONNECTION_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/infisical_db
       # Redis URL for Infisical's cache backend (Valkey is Redis-compatible)
-      # WARNING: If VALKEY_PASSWORD is set, you MUST also set INFISICAL_REDIS_URL
-      # with credentials (e.g., redis://:password@valkey:6379) or Infisical will
-      # fail to connect. See docker/.env.example for details.
-      REDIS_URL: ${INFISICAL_REDIS_URL:-redis://valkey:6379}
-      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-}
-      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:-}
+      # NOTE: Default includes the dev password matching VALKEY_PASSWORD default.
+      # If you change VALKEY_PASSWORD, update INFISICAL_REDIS_URL to match.
+      # See docker/.env.example for details.
+      REDIS_URL: ${INFISICAL_REDIS_URL:-redis://:valkey-dev-password@valkey:6379}
+      # SECURITY: Set INFISICAL_ENCRYPTION_KEY and INFISICAL_AUTH_SECRET in .env
+      # for production. Defaults below are for local development only.
+      # Generate with: openssl rand -hex 16 (encryption) / openssl rand -hex 32 (auth)
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2}
       SITE_URL: ${INFISICAL_SITE_URL:-http://localhost:8880}
       TELEMETRY_ENABLED: "false"
     ports:

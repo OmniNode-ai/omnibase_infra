@@ -28,10 +28,11 @@ Limitations:
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from typing import Literal, cast
 from urllib.parse import parse_qs, unquote, urlparse
-from uuid import uuid4
+from uuid import UUID
 
 from omnibase_infra.types import ModelParsedDSN
 
@@ -58,7 +59,11 @@ DATABASE_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$")
 FORBIDDEN_DATABASE_CHARS = frozenset("';\"\\`$(){}[]|&<>!@#%^*=+~/.")
 
 
-def validate_database_name(database: str) -> str:
+def validate_database_name(
+    database: str,
+    *,
+    correlation_id: UUID | None = None,
+) -> str:
     """Validate database name for safety and correctness.
 
     This function validates that a database name follows safe patterns
@@ -67,6 +72,10 @@ def validate_database_name(database: str) -> str:
 
     Args:
         database: The database name to validate.
+        correlation_id: Optional correlation ID for distributed tracing.
+            If provided, the ID is propagated into error context for
+            end-to-end request tracing. If ``None``, a new UUID is
+            generated automatically.
 
     Returns:
         The validated database name if valid.
@@ -101,11 +110,11 @@ def validate_database_name(database: str) -> str:
     from omnibase_infra.enums import EnumInfraTransportType
     from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
-    context = ModelInfraErrorContext(
+    context = ModelInfraErrorContext.with_correlation(
+        correlation_id=correlation_id,
         transport_type=EnumInfraTransportType.DATABASE,
         operation="validate_database_name",
         target_name="dsn_validator",
-        correlation_id=uuid4(),
     )
 
     # Check for forbidden characters first (provides clearer error message)
@@ -144,17 +153,24 @@ def validate_database_name(database: str) -> str:
     return database
 
 
-def _assert_postgres_scheme(scheme: str) -> Literal["postgresql", "postgres"]:
+def _assert_postgres_scheme(
+    scheme: str,
+    *,
+    correlation_id: UUID | None = None,
+) -> Literal["postgresql", "postgres"]:
     """Type-safe scheme assertion for PostgreSQL DSN schemes.
 
     This helper enables proper type narrowing for the Literal type
     using typing.cast for explicit type assertion.
 
     Args:
-        scheme: The scheme string to validate
+        scheme: The scheme string to validate.
+        correlation_id: Optional correlation ID for distributed tracing.
+            If provided, the ID is propagated into error context. If
+            ``None``, a new UUID is generated automatically.
 
     Returns:
-        The scheme cast to the appropriate Literal type
+        The scheme cast to the appropriate Literal type.
 
     Raises:
         ProtocolConfigurationError: If scheme is not 'postgresql' or 'postgres'.
@@ -171,11 +187,11 @@ def _assert_postgres_scheme(scheme: str) -> Literal["postgresql", "postgres"]:
             ProtocolConfigurationError,
         )
 
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
             transport_type=EnumInfraTransportType.DATABASE,
             operation="validate_dsn_scheme",
             target_name="dsn_validator",
-            correlation_id=uuid4(),
         )
         raise ProtocolConfigurationError(
             f"Invalid scheme: expected 'postgresql' or 'postgres', got '{scheme}'",
@@ -186,7 +202,11 @@ def _assert_postgres_scheme(scheme: str) -> Literal["postgresql", "postgres"]:
     return cast("Literal['postgresql', 'postgres']", scheme)
 
 
-def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
+def parse_and_validate_dsn(
+    dsn: object,
+    *,
+    correlation_id: UUID | None = None,
+) -> ModelParsedDSN:
     """Parse and validate PostgreSQL DSN format using urllib.parse.
 
     This function provides comprehensive DSN validation that handles edge cases
@@ -194,7 +214,12 @@ def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
     urllib.parse for robust parsing instead of fragile regex patterns.
 
     Args:
-        dsn: PostgreSQL connection string (any type - validated)
+        dsn: PostgreSQL connection string (any type - validated).
+        correlation_id: Optional correlation ID for distributed tracing.
+            If provided, the ID is propagated into error context and
+            through to all sub-validation calls (database name validation,
+            scheme assertion) for end-to-end request tracing. If ``None``,
+            a new UUID is generated automatically.
 
     Returns:
         ModelParsedDSN with parsed components:
@@ -207,7 +232,7 @@ def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
             - query: Dict of query parameters (str keys, str | list[str] values)
 
     Raises:
-        ProtocolConfigurationError: If DSN format is invalid
+        ProtocolConfigurationError: If DSN format is invalid.
 
     Example:
         >>> result = parse_and_validate_dsn("postgresql://user:pass@localhost:5432/mydb")
@@ -218,16 +243,19 @@ def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
         Error messages never contain the actual DSN value. Sensitive information
         is replaced with [REDACTED] to prevent credential leakage in logs.
     """
-    # Lazy imports to avoid circular dependency (utils → errors → models → utils)
+    # Lazy imports to avoid circular dependency (utils -> errors -> models -> utils)
     from omnibase_infra.enums import EnumInfraTransportType
     from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 
-    context = ModelInfraErrorContext(
+    context = ModelInfraErrorContext.with_correlation(
+        correlation_id=correlation_id,
         transport_type=EnumInfraTransportType.DATABASE,
         operation="validate_dsn",
         target_name="dsn_validator",
-        correlation_id=uuid4(),
     )
+
+    # Capture the resolved correlation_id so sub-functions share the same trace
+    resolved_correlation_id = context.correlation_id
 
     # Type validation
     if dsn is None:
@@ -349,7 +377,7 @@ def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
     else:
         # Validate database name for security (prevent injection attacks)
         # This raises ProtocolConfigurationError if invalid
-        validate_database_name(database)
+        validate_database_name(database, correlation_id=resolved_correlation_id)
 
     # Parse query parameters
     query_dict = {}
@@ -362,7 +390,9 @@ def parse_and_validate_dsn(dsn: object) -> ModelParsedDSN:
     # Note: urlparse does NOT decode URL-encoded passwords, so we use unquote()
     # Important: Check 'is not None' instead of truthiness to preserve empty strings
     return ModelParsedDSN(
-        scheme=_assert_postgres_scheme(parsed.scheme),
+        scheme=_assert_postgres_scheme(
+            parsed.scheme, correlation_id=resolved_correlation_id
+        ),
         username=unquote(parsed.username) if parsed.username is not None else None,
         password=unquote(parsed.password) if parsed.password is not None else None,
         hostname=parsed.hostname,
@@ -444,10 +474,64 @@ def sanitize_dsn(dsn: str) -> str:
         return "[INVALID_DSN]"
 
 
+def is_private_ip(hostname: str) -> bool:
+    """Check whether a hostname is a private or non-routable IP address.
+
+    This function determines if a given hostname string represents a
+    private, loopback, link-local, or otherwise non-routable IP address.
+    It covers all standard RFC 1918 private ranges as well as additional
+    non-routable ranges.
+
+    Supported ranges:
+        - **RFC 1918 private**: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+        - **Loopback**: 127.0.0.0/8 (IPv4), ::1 (IPv6)
+        - **Link-local**: 169.254.0.0/16 (IPv4), fe80::/10 (IPv6)
+        - **IPv6 private**: fc00::/7 (unique local addresses)
+
+    If the hostname is not a valid IP address (e.g., a DNS hostname like
+    ``db.example.com``), the function returns ``False`` since it cannot
+    determine routability without DNS resolution.
+
+    Args:
+        hostname: The hostname or IP address string to check. May be an
+            IPv4 address, IPv6 address, or DNS hostname.
+
+    Returns:
+        ``True`` if the hostname is a recognized private or non-routable
+        IP address. ``False`` if it is a public IP address or if it is
+        not a valid IP address (e.g., a DNS hostname).
+
+    Example:
+        >>> is_private_ip("192.168.1.100")
+        True
+        >>> is_private_ip("10.0.0.1")
+        True
+        >>> is_private_ip("172.16.0.1")
+        True
+        >>> is_private_ip("8.8.8.8")
+        False
+        >>> is_private_ip("db.example.com")
+        False
+        >>> is_private_ip("127.0.0.1")
+        True
+        >>> is_private_ip("::1")
+        True
+    """
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        # Not a valid IP address (likely a DNS hostname) -- cannot determine
+        # routability without resolution, so return False conservatively.
+        return False
+
+    return addr.is_private or addr.is_loopback or addr.is_link_local
+
+
 __all__: list[str] = [
     "DATABASE_NAME_PATTERN",
     "FORBIDDEN_DATABASE_CHARS",
     "ModelParsedDSN",
+    "is_private_ip",
     "parse_and_validate_dsn",
     "sanitize_dsn",
     "validate_database_name",

@@ -225,9 +225,9 @@ for i in {1..3}; do echo "Password $i: $(openssl rand -hex 32)"; done
 | Credential              | Environment Variable       | Profile  | Notes                                                    |
 |-------------------------|----------------------------|----------|----------------------------------------------------------|
 | PostgreSQL              | `POSTGRES_PASSWORD`        | (default)| Database access password                                 |
-| Infisical Encryption    | `INFISICAL_ENCRYPTION_KEY` | secrets  | 32-byte key (64 hex characters for AES-256 encryption)   |
-| Infisical Auth          | `INFISICAL_AUTH_SECRET`    | secrets  | JWT signing secret for authentication                    |
-| Valkey (optional)       | `VALKEY_PASSWORD`          | (default)| Cache access password (empty for local dev)              |
+| Infisical Encryption    | `INFISICAL_ENCRYPTION_KEY` | secrets  | Hex-encoded key: 16-byte (`openssl rand -hex 16`) or 32-byte (`openssl rand -hex 32`) |
+| Infisical Auth          | `INFISICAL_AUTH_SECRET`    | secrets  | JWT signing secret (`openssl rand -hex 32`)              |
+| Valkey (optional)       | `VALKEY_PASSWORD`          | (default)| Cache password (defaults to `valkey-dev-password` in dev) |
 
 ### Security Features
 
@@ -493,7 +493,7 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | Variable                  | Description                                         | Security Level | Profile    |
 |---------------------------|-----------------------------------------------------|----------------|------------|
 | `POSTGRES_PASSWORD`       | PostgreSQL database password                        | Secret         | (default)  |
-| `INFISICAL_ENCRYPTION_KEY`| 32-byte key (64 hex characters for AES-256)         | Secret         | secrets    |
+| `INFISICAL_ENCRYPTION_KEY`| Hex-encoded AES key (32 or 64 hex chars)            | Secret         | secrets    |
 | `INFISICAL_AUTH_SECRET`   | JWT signing secret for authentication               | Secret         | secrets    |
 
 ### Optional Variables (With Defaults)
@@ -512,10 +512,13 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | `CONSUL_PORT`                | `8500`                             | Consul HTTP port                       |
 | `CONSUL_SCHEME`              | `http`                             | Consul connection scheme               |
 | **Infisical**                |                                    |                                        |
-| `INFISICAL_API_URL`          | `https://app.infisical.com`        | Infisical API URL                      |
+| `INFISICAL_ADDR`             | `http://infisical:8080`            | Infisical service address              |
+| `INFISICAL_SITE_URL`         | `http://localhost:8880`            | Infisical web UI URL                   |
+| `INFISICAL_REDIS_URL`        | `redis://:valkey-dev-password@valkey:6379` | Redis URL for Infisical cache (must match `VALKEY_PASSWORD`) |
 | **Valkey**                   |                                    |                                        |
 | `VALKEY_HOST`                | `valkey`                           | Valkey hostname                        |
 | `VALKEY_PORT`                | `6379`                             | Valkey port                            |
+| `VALKEY_PASSWORD`            | `valkey-dev-password`              | Cache auth password (optional for local dev) |
 | **ONEX Runtime**             |                                    |                                        |
 | `ONEX_LOG_LEVEL`             | `INFO`                             | Logging level (DEBUG, INFO, etc.)      |
 | `ONEX_ENVIRONMENT`           | `development`                      | Environment name                       |

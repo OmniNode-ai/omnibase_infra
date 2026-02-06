@@ -108,9 +108,9 @@ services:
       # Admin API
       - "9644:9644"
       # Schema Registry (external)
-      - "18081:18081"
+      - "${REDPANDA_SCHEMA_REGISTRY_PORT:-18081}:18081"
       # Pandaproxy (external)
-      - "18082:18082"
+      - "${REDPANDA_PANDAPROXY_PORT:-18082}:18082"
     networks:
       - omnibase-infra-network
     volumes:
@@ -214,7 +214,7 @@ services:
   # Infisical (Secrets Management)
   # ==========================================================================
   infisical:
-    image: infisical/infisical:v0.155.7-postgres
+    image: infisical/infisical:v0.146.0-postgres
     container_name: omnibase-infra-infisical
     depends_on:
       postgres:

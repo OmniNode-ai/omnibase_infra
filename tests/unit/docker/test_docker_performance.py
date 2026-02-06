@@ -15,7 +15,7 @@ import re
 import pytest
 import yaml
 
-# Import shared constants from conftest for backward compatibility.
+# Import shared path constants from conftest (required for module-level access).
 # New tests should prefer using the docker_dir or compose_file_path fixtures instead.
 from tests.unit.docker.conftest import COMPOSE_FILE_PATH, DOCKER_DIR
 

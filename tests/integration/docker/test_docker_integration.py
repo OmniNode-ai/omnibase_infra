@@ -36,6 +36,7 @@ import yaml
 # =============================================================================
 
 pytestmark = [
+    pytest.mark.integration,
     pytest.mark.infrastructure,
 ]
 

@@ -19,7 +19,7 @@ import re
 
 import pytest
 
-# Import shared constants from conftest for backward compatibility.
+# Import shared path constants from conftest (required for module-level access).
 # New tests should prefer using the docker_dir or compose_file_path fixtures instead.
 from tests.unit.docker.conftest import COMPOSE_FILE_PATH, DOCKER_DIR
 
@@ -384,8 +384,10 @@ class TestDockerComposeSecurity:
     def test_postgres_password_requires_explicit_value(self) -> None:
         """Verify POSTGRES_PASSWORD requires explicit value without default.
 
-        The compose file should use ${POSTGRES_PASSWORD} without a default
-        value (:-default syntax), forcing users to set it explicitly.
+        The compose file should use ``${POSTGRES_PASSWORD:?...}`` fail-fast syntax
+        for the postgres service, ensuring Docker Compose raises an error at
+        startup if the variable is unset. The ``:-default`` syntax must NOT be
+        used, as that would silently apply a weak default password.
         """
         compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
@@ -393,9 +395,10 @@ class TestDockerComposeSecurity:
         # Should have POSTGRES_PASSWORD
         assert "POSTGRES_PASSWORD" in content, "Missing POSTGRES_PASSWORD configuration"
 
-        # Should use ${POSTGRES_PASSWORD} pattern (explicit, no default)
-        assert "${POSTGRES_PASSWORD}" in content, (
-            "POSTGRES_PASSWORD should use ${VAR} syntax"
+        # Should use ${POSTGRES_PASSWORD:?...} fail-fast pattern for the postgres
+        # service definition, which causes docker compose to abort if unset.
+        assert "POSTGRES_PASSWORD:?" in content, (
+            "POSTGRES_PASSWORD should use ${VAR:?error} fail-fast syntax"
         )
 
         # Should NOT have default value pattern (${VAR:-default})
@@ -406,16 +409,17 @@ class TestDockerComposeSecurity:
     def test_valkey_password_configuration(self) -> None:
         """Verify Valkey password (VALKEY_PASSWORD env var) is properly configured.
 
-        For local development, Valkey runs WITHOUT authentication (no --requirepass),
-        accessible only within the Docker network. The VALKEY_PASSWORD env var is
-        provided for runtime services to use when connecting, with an empty default
-        since the server doesn't require auth.
+        Valkey is configured with password authentication enabled by default
+        using ``VALKEY_PASSWORD`` (default: ``valkey-dev-password``). The
+        ``--requirepass`` flag is conditionally applied via shell parameter
+        expansion (``${VALKEY_PASSWORD:+--requirepass ...}``).
 
         Security rationale:
-        - Valkey is exposed to host (port 16379) for local development convenience
-        - Host firewall provides sufficient isolation for local development
-        - Local development does not require auth complexity
-        - Production deployments should override via environment variables
+        - Valkey is exposed to host on configurable port (default 16379 via
+          ``VALKEY_EXTERNAL_PORT``) for local development convenience
+        - Password authentication is enabled by default with a dev password
+        - Host firewall provides additional isolation for local development
+        - Production deployments should set a strong ``VALKEY_PASSWORD`` in .env
         """
         compose_file = COMPOSE_FILE_PATH
         content = compose_file.read_text()
@@ -629,6 +633,7 @@ class TestDockerNetworkSecurity:
 # ============================================================================
 
 
+@pytest.mark.unit
 @pytest.mark.integration
 class TestDockerSecurityIntegration:
     """Integration tests for Docker security (require Docker daemon).
