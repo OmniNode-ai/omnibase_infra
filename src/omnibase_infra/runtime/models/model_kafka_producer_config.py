@@ -52,7 +52,7 @@ class ModelKafkaProducerConfig(BaseModel):
                 acks=os.getenv("KAFKA_ACKS", "all"),
             )
         except (ValueError, TypeError) as e:
-            msg = f"Invalid KAFKA_* environment variable: {e}"
+            msg = f"Invalid Kafka producer configuration: {e}"
             raise ValueError(msg) from e
 
 

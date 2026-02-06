@@ -191,40 +191,39 @@ class DependencyMaterializer:
     async def shutdown(self) -> None:
         """Close all materialized resources in reverse creation order.
 
-        Falls back to _resource_by_type keys if a resource was registered
-        but not tracked in _creation_order. Errors during shutdown are
-        logged but do not propagate.
+        Holds lock for entire shutdown to prevent concurrent materialize()
+        from adding resources mid-shutdown. Falls back to _resource_by_type
+        keys if a resource was registered but not tracked in _creation_order.
+        Errors during individual close operations are logged but do not
+        propagate or halt remaining closes.
         """
         async with self._lock:
-            # Use _creation_order for deterministic reverse shutdown,
-            # but also include any resource types only in _resource_by_type
+            # Build close list: _creation_order (reversed) + any untracked
             ordered = list(reversed(self._creation_order))
             extra = [
                 rt for rt in self._resource_by_type if rt not in self._creation_order
             ]
             types_to_close = ordered + extra
 
-        for resource_type in types_to_close:
-            async with self._lock:
+            for resource_type in types_to_close:
                 resource = self._resource_by_type.get(resource_type)
                 close_func = self._close_funcs.get(resource_type)
 
-            if resource is None or close_func is None:
-                continue
+                if resource is None or close_func is None:
+                    continue
 
-            try:
-                await close_func(resource)
-                logger.info(
-                    "Closed materialized resource",
-                    extra={"type": resource_type},
-                )
-            except Exception as e:
-                logger.warning(
-                    "Error closing materialized resource",
-                    extra={"type": resource_type, "error": str(e)},
-                )
+                try:
+                    await close_func(resource)
+                    logger.info(
+                        "Closed materialized resource",
+                        extra={"type": resource_type},
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Error closing materialized resource",
+                        extra={"type": resource_type, "error": str(e)},
+                    )
 
-        async with self._lock:
             self._resource_by_type.clear()
             self._name_to_type.clear()
             self._close_funcs.clear()
@@ -248,7 +247,7 @@ class DependencyMaterializer:
         for path in contract_paths:
             try:
                 contract_data = self._load_contract_yaml(path)
-            except Exception as e:
+            except (OSError, yaml.YAMLError, ProtocolConfigurationError) as e:
                 logger.warning(
                     "Failed to load contract for dependency scanning",
                     extra={"path": str(path), "error": str(e)},

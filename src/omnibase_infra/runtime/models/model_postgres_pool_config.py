@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ModelPostgresPoolConfig(BaseModel):
@@ -32,12 +32,21 @@ class ModelPostgresPoolConfig(BaseModel):
     min_size: int = Field(default=2, ge=1, le=100, description="Minimum pool size")
     max_size: int = Field(default=10, ge=1, le=100, description="Maximum pool size")
 
+    @model_validator(mode="after")
+    def _check_pool_size_bounds(self) -> ModelPostgresPoolConfig:
+        if self.min_size > self.max_size:
+            msg = (
+                f"min_size ({self.min_size}) must not exceed max_size ({self.max_size})"
+            )
+            raise ValueError(msg)
+        return self
+
     @classmethod
     def from_env(cls) -> ModelPostgresPoolConfig:
         """Create config from POSTGRES_* environment variables.
 
         Raises:
-            ValueError: If numeric env vars contain non-numeric values.
+            ValueError: If environment configuration is invalid.
         """
         try:
             return cls(
@@ -50,7 +59,7 @@ class ModelPostgresPoolConfig(BaseModel):
                 max_size=int(os.getenv("POSTGRES_POOL_MAX_SIZE", "10")),
             )
         except (ValueError, TypeError) as e:
-            msg = f"Invalid POSTGRES_* environment variable: {e}"
+            msg = f"Invalid PostgreSQL pool configuration: {e}"
             raise ValueError(msg) from e
 
 

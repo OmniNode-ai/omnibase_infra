@@ -46,7 +46,7 @@ class ModelHttpClientConfig(BaseModel):
                 in _TRUTHY_VALUES,
             )
         except (ValueError, TypeError) as e:
-            msg = f"Invalid HTTP_CLIENT_* environment variable: {e}"
+            msg = f"Invalid HTTP client configuration: {e}"
             raise ValueError(msg) from e
 
 
