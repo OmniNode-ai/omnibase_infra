@@ -35,7 +35,6 @@ class ModelRuntimeIntrospectionConfig(BaseModel):
       when many nodes restart simultaneously (e.g., cluster restart).
     - **Throttling**: Minimum interval between introspection events to prevent
       stampede on rapid restart cycles.
-    - **Heartbeat**: Configurable interval for periodic liveness announcements.
 
     Attributes:
         enabled: Whether to enable auto-introspection on startup. When False,
@@ -46,9 +45,6 @@ class ModelRuntimeIntrospectionConfig(BaseModel):
             introspection. A random delay between 0 and this value is applied.
             This prevents thundering herd when many nodes restart together.
             Default: 5000 (5 seconds). Range: 0-30000.
-        heartbeat_interval_s: Interval in seconds between heartbeat publications.
-            Lower values provide faster failure detection but increase network
-            traffic. Default: 30 seconds. Range: 1-300.
         throttle_min_interval_s: Minimum interval in seconds between introspection
             events. If a node restarts rapidly, subsequent introspection events
             within this interval are skipped to prevent stampede. Default: 10
@@ -62,7 +58,6 @@ class ModelRuntimeIntrospectionConfig(BaseModel):
         prod_config = ModelRuntimeIntrospectionConfig(
             enabled=True,
             jitter_max_ms=5000,
-            heartbeat_interval_s=30,
             throttle_min_interval_s=10,
         )
 
@@ -70,7 +65,6 @@ class ModelRuntimeIntrospectionConfig(BaseModel):
         dev_config = ModelRuntimeIntrospectionConfig(
             enabled=True,
             jitter_max_ms=500,
-            heartbeat_interval_s=10,
             throttle_min_interval_s=5,
         )
 
@@ -79,15 +73,14 @@ class ModelRuntimeIntrospectionConfig(BaseModel):
         ```
 
     Configuration Guidelines:
-        - **Production**: Use default values (5s jitter, 30s heartbeat, 10s throttle)
-        - **Development**: Lower jitter (500ms) and heartbeat (10s) for faster feedback
+        - **Production**: Use default values (5s jitter, 10s throttle)
+        - **Development**: Lower jitter (500ms) for faster feedback
         - **Testing**: Disable introspection or use minimal values
         - **Large Clusters**: Consider higher jitter (10-15s) to spread startup load
 
     See Also:
         RuntimeHostProcess: Uses this configuration for startup introspection.
         ProtocolNodeIntrospection: Protocol for introspection operations.
-        ModelIntrospectionTaskConfig: Background task configuration.
     """
 
     enabled: bool = Field(
@@ -100,13 +93,6 @@ class ModelRuntimeIntrospectionConfig(BaseModel):
         ge=0,
         le=30000,
         description="Maximum jitter in milliseconds before publishing startup introspection",
-    )
-
-    heartbeat_interval_s: int = Field(
-        default=30,
-        ge=1,
-        le=300,
-        description="Interval in seconds between heartbeat publications",
     )
 
     throttle_min_interval_s: int = Field(
@@ -125,19 +111,16 @@ class ModelRuntimeIntrospectionConfig(BaseModel):
                 {
                     "enabled": True,
                     "jitter_max_ms": 5000,
-                    "heartbeat_interval_s": 30,
                     "throttle_min_interval_s": 10,
                 },
                 {
                     "enabled": True,
                     "jitter_max_ms": 500,
-                    "heartbeat_interval_s": 10,
                     "throttle_min_interval_s": 5,
                 },
                 {
                     "enabled": False,
                     "jitter_max_ms": 0,
-                    "heartbeat_interval_s": 30,
                     "throttle_min_interval_s": 10,
                 },
             ]

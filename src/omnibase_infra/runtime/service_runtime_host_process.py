@@ -621,14 +621,13 @@ class RuntimeHostProcess:
                 Type: ModelRuntimeIntrospectionConfig | None
 
                 Purpose:
-                    Controls jitter, throttling, and heartbeat behavior for auto-introspection.
+                    Controls jitter and throttling behavior for auto-introspection.
                     If None and introspection_service is provided, defaults to
                     ModelRuntimeIntrospectionConfig() with default values.
 
                 Fields:
                     - enabled: Whether to enable auto-introspection (default: True)
                     - jitter_max_ms: Max jitter before publishing (default: 5000)
-                    - heartbeat_interval_s: Heartbeat publish interval (default: 30)
                     - throttle_min_interval_s: Min time between introspections (default: 10)
         """
         # Store container reference for dependency resolution

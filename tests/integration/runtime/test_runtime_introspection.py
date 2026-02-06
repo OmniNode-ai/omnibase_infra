@@ -91,7 +91,6 @@ class TestStartupIntrospectionWithJitter:
         config = ModelRuntimeIntrospectionConfig(
             enabled=True,
             jitter_max_ms=0,  # No jitter for deterministic test
-            heartbeat_interval_s=30,
             throttle_min_interval_s=10,
         )
 
@@ -140,7 +139,6 @@ class TestStartupIntrospectionWithJitter:
         config = ModelRuntimeIntrospectionConfig(
             enabled=True,
             jitter_max_ms=jitter_max_ms,
-            heartbeat_interval_s=30,
             throttle_min_interval_s=10,
         )
 
@@ -185,7 +183,6 @@ class TestStartupIntrospectionWithJitter:
         config = ModelRuntimeIntrospectionConfig(
             enabled=False,  # Disabled
             jitter_max_ms=0,
-            heartbeat_interval_s=30,
             throttle_min_interval_s=10,
         )
 
@@ -223,7 +220,6 @@ class TestStartupIntrospectionWithJitter:
         config = ModelRuntimeIntrospectionConfig(
             enabled=True,
             jitter_max_ms=0,
-            heartbeat_interval_s=30,
             throttle_min_interval_s=10,
         )
 
@@ -265,7 +261,6 @@ class TestStartupIntrospectionWithJitter:
         config = ModelRuntimeIntrospectionConfig(
             enabled=True,
             jitter_max_ms=0,
-            heartbeat_interval_s=30,
             throttle_min_interval_s=10,
         )
 
@@ -312,7 +307,6 @@ class TestThrottleOnRapidRestart:
         config = ModelRuntimeIntrospectionConfig(
             enabled=True,
             jitter_max_ms=0,  # No jitter for deterministic test
-            heartbeat_interval_s=30,
             throttle_min_interval_s=10,  # 10 second throttle
         )
 
@@ -366,7 +360,6 @@ class TestThrottleOnRapidRestart:
         config = ModelRuntimeIntrospectionConfig(
             enabled=True,
             jitter_max_ms=0,
-            heartbeat_interval_s=30,
             throttle_min_interval_s=1,  # Minimum allowed value
         )
 
@@ -436,12 +429,12 @@ class TestThrottleOnRapidRestart:
 
                 mock_service.publish_introspection = AsyncMock(side_effect=record_time)
                 mock_service.start_heartbeat_task = AsyncMock()
+                mock_service.stop_heartbeat_task = AsyncMock()
                 mock_services.append(mock_service)
 
                 config = ModelRuntimeIntrospectionConfig(
                     enabled=True,
                     jitter_max_ms=jitter_max_ms,
-                    heartbeat_interval_s=30,
                     throttle_min_interval_s=10,
                 )
 
@@ -491,7 +484,6 @@ class TestIntrospectionConfigValidation:
 
         assert config.enabled is True
         assert config.jitter_max_ms == 5000
-        assert config.heartbeat_interval_s == 30
         assert config.throttle_min_interval_s == 10
 
     def test_config_validates_jitter_bounds(self) -> None:
@@ -509,22 +501,6 @@ class TestIntrospectionConfigValidation:
 
         with pytest.raises(ValueError):
             ModelRuntimeIntrospectionConfig(jitter_max_ms=30001)
-
-    def test_config_validates_heartbeat_bounds(self) -> None:
-        """Test that heartbeat_interval_s validates bounds."""
-        # Valid values
-        config = ModelRuntimeIntrospectionConfig(heartbeat_interval_s=1)
-        assert config.heartbeat_interval_s == 1
-
-        config = ModelRuntimeIntrospectionConfig(heartbeat_interval_s=300)
-        assert config.heartbeat_interval_s == 300
-
-        # Invalid values should raise ValidationError
-        with pytest.raises(ValueError):
-            ModelRuntimeIntrospectionConfig(heartbeat_interval_s=0)
-
-        with pytest.raises(ValueError):
-            ModelRuntimeIntrospectionConfig(heartbeat_interval_s=301)
 
     def test_config_validates_throttle_bounds(self) -> None:
         """Test that throttle_min_interval_s validates bounds."""
@@ -573,7 +549,6 @@ class TestShutdownHeartbeatCleanup:
         config = ModelRuntimeIntrospectionConfig(
             enabled=True,
             jitter_max_ms=0,
-            heartbeat_interval_s=30,
             throttle_min_interval_s=10,
         )
 
@@ -611,7 +586,6 @@ class TestShutdownHeartbeatCleanup:
         config = ModelRuntimeIntrospectionConfig(
             enabled=True,
             jitter_max_ms=0,
-            heartbeat_interval_s=30,
             throttle_min_interval_s=10,
         )
 
