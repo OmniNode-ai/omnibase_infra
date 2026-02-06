@@ -73,6 +73,7 @@ from omnibase_infra.enums.enum_handler_source_mode import EnumHandlerSourceMode
 from omnibase_infra.enums.enum_handler_source_type import EnumHandlerSourceType
 from omnibase_infra.enums.enum_handler_type import EnumHandlerType
 from omnibase_infra.enums.enum_handler_type_category import EnumHandlerTypeCategory
+from omnibase_infra.enums.enum_infra_resource_type import EnumInfraResourceType
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.enums.enum_introspection_reason import EnumIntrospectionReason
 from omnibase_infra.enums.enum_kafka_acks import EnumKafkaAcks
@@ -118,6 +119,7 @@ __all__: list[str] = [
     "EnumHandlerSourceType",
     "EnumHandlerType",
     "EnumHandlerTypeCategory",
+    "EnumInfraResourceType",
     "EnumInfraTransportType",
     "EnumIntrospectionReason",
     "EnumKafkaAcks",
