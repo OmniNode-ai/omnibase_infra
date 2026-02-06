@@ -53,27 +53,28 @@ capabilities:
   - name: "intent.storage.query_distribution"
     description: "Get intent distribution statistics"
 # Event-driven topic configuration
-# Uses {env}.{namespace} placeholders for environment-aware topics
+# Topics use realm-agnostic 5-segment format: onex.<kind>.<producer>.<event-name>.v<N>
+# The runtime composes the full qualified topic by prepending env.namespace at startup.
 consumed_events:
-  - topic: "{env}.{namespace}.onex.evt.intent-classified.v1"
+  - topic: "onex.evt.platform.intent-classified.v1"
     event_type: "IntentClassifiedEvent"
     description: "Classified intent ready for storage"
-  - topic: "{env}.{namespace}.onex.cmd.intent-query-session.v1"
+  - topic: "onex.cmd.platform.intent-query-session.v1"
     event_type: "IntentQuerySessionCommand"
     message_category: "COMMAND"
     description: "Command to query intents by session"
-  - topic: "{env}.{namespace}.onex.cmd.intent-query-distribution.v1"
+  - topic: "onex.cmd.platform.intent-query-distribution.v1"
     event_type: "IntentQueryDistributionCommand"
     message_category: "COMMAND"
     description: "Command to get intent distribution statistics"
 published_events:
-  - topic: "{env}.{namespace}.onex.evt.intent-stored.v1"
+  - topic: "onex.evt.platform.intent-stored.v1"
     event_type: "IntentStoredEvent"
     description: "Confirmation that intent was stored successfully"
-  - topic: "{env}.{namespace}.onex.evt.intent-session-query-result.v1"
+  - topic: "onex.evt.platform.intent-session-query-result.v1"
     event_type: "IntentSessionQueryResultEvent"
     description: "Result of session-based intent query"
-  - topic: "{env}.{namespace}.onex.evt.intent-distribution-result.v1"
+  - topic: "onex.evt.platform.intent-distribution-result.v1"
     event_type: "IntentDistributionResultEvent"
     description: "Result of intent distribution statistics query"
 # IO operations (EFFECT node specific)

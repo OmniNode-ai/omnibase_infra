@@ -39,6 +39,10 @@ from uuid import UUID
 
 from omnibase_core.errors import OnexError
 from omnibase_core.validation import validate_topic_suffix
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 
 
 class TopicResolutionError(OnexError):
@@ -47,8 +51,36 @@ class TopicResolutionError(OnexError):
     This error indicates that the provided topic suffix does not conform to the
     ONEX topic naming convention and therefore cannot be mapped to a Kafka topic.
 
-    Extends OnexError to follow ONEX error handling conventions.
+    Extends OnexError to follow ONEX error handling conventions. When a
+    ``correlation_id`` is provided at resolution time, it is propagated both in
+    the error message and as a structured ``ModelInfraErrorContext`` accessible
+    via the ``infra_context`` attribute.
+
+    Attributes:
+        infra_context: Optional ``ModelInfraErrorContext`` carrying the
+            correlation_id, transport type, and operation for callers that
+            need structured error context without re-wrapping.
     """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        correlation_id: UUID | None = None,
+        infra_context: ModelInfraErrorContext | None = None,
+    ) -> None:
+        """Initialize TopicResolutionError with optional correlation tracking.
+
+        Args:
+            message: Human-readable error message.
+            correlation_id: Optional correlation ID for distributed tracing.
+                Passed to the ``OnexError`` base class for structured tracking.
+            infra_context: Optional infrastructure error context with transport
+                type, operation, and correlation_id. Stored as an attribute so
+                callers can extract structured context without parsing the message.
+        """
+        super().__init__(message, correlation_id=correlation_id)
+        self.infra_context = infra_context
 
 
 class TopicResolver:
@@ -105,10 +137,19 @@ class TopicResolver:
         """
         result = validate_topic_suffix(topic_suffix)
         if not result.is_valid:
+            # Build structured infra context when correlation_id is available
+            infra_context: ModelInfraErrorContext | None = None
             if correlation_id is not None:
+                infra_context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="resolve_topic",
+                )
                 raise TopicResolutionError(
                     f"Invalid topic suffix '{topic_suffix}' "
-                    f"(correlation_id={correlation_id}): {result.error}"
+                    f"(correlation_id={correlation_id}): {result.error}",
+                    correlation_id=correlation_id,
+                    infra_context=infra_context,
                 )
             raise TopicResolutionError(
                 f"Invalid topic suffix '{topic_suffix}': {result.error}"

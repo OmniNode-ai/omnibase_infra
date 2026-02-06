@@ -460,22 +460,22 @@ payload: ModelPostgresIntentPayload
 
 | Topic Pattern | Event Type | Description |
 |---------------|------------|-------------|
-| `{env}.{namespace}.onex.evt.node-introspection.v1` | `NodeIntrospectionEvent` | Node introspection data |
-| `{env}.{namespace}.onex.evt.registry-request-introspection.v1` | `RegistryRequestIntrospectionEvent` | Registry request |
-| `{env}.{namespace}.onex.internal.runtime-tick.v1` | `RuntimeTick` | Internal tick for timeout evaluation |
+| `onex.evt.platform.node-introspection.v1` | `NodeIntrospectionEvent` | Node introspection data |
+| `onex.evt.platform.registry-request-introspection.v1` | `RegistryRequestIntrospectionEvent` | Registry request |
+| `onex.intent.platform.runtime-tick.v1` | `RuntimeTick` | Internal tick for timeout evaluation |
 
 ### Published Events
 
 | Topic Pattern | Event Type | Description |
 |---------------|------------|-------------|
-| `{env}.{namespace}.onex.evt.node-registration-result.v1` | `NodeRegistrationResultEvent` | Final registration result |
-| `{env}.{namespace}.onex.evt.node-registration-initiated.v1` | `NodeRegistrationInitiated` | Registration started |
-| `{env}.{namespace}.onex.evt.node-registration-accepted.v1` | `NodeRegistrationAccepted` | Registration accepted |
-| `{env}.{namespace}.onex.evt.node-registration-rejected.v1` | `NodeRegistrationRejected` | Registration rejected |
-| `{env}.{namespace}.onex.evt.node-registration-ack-timed-out.v1` | `NodeRegistrationAckTimedOut` | ACK timeout |
-| `{env}.{namespace}.onex.evt.node-registration-ack-received.v1` | `NodeRegistrationAckReceived` | ACK received |
-| `{env}.{namespace}.onex.evt.node-became-active.v1` | `NodeBecameActive` | Node activated |
-| `{env}.{namespace}.onex.evt.node-liveness-expired.v1` | `NodeLivenessExpired` | Liveness expired |
+| `onex.evt.platform.node-registration-result.v1` | `NodeRegistrationResultEvent` | Final registration result |
+| `onex.evt.platform.node-registration-initiated.v1` | `NodeRegistrationInitiated` | Registration started |
+| `onex.evt.platform.node-registration-accepted.v1` | `NodeRegistrationAccepted` | Registration accepted |
+| `onex.evt.platform.node-registration-rejected.v1` | `NodeRegistrationRejected` | Registration rejected |
+| `onex.evt.platform.node-registration-ack-timed-out.v1` | `NodeRegistrationAckTimedOut` | ACK timeout |
+| `onex.evt.platform.node-registration-ack-received.v1` | `NodeRegistrationAckReceived` | ACK received |
+| `onex.evt.platform.node-became-active.v1` | `NodeBecameActive` | Node activated |
+| `onex.evt.platform.node-liveness-expired.v1` | `NodeLivenessExpired` | Liveness expired |
 
 ## Coroutine Safety
 

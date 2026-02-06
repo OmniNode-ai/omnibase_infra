@@ -51,15 +51,15 @@ import re
 # =============================================================================
 
 # ONEX topic patterns for message categorization
-# Pattern: {env}.{namespace}.onex.<category>.<event-name>.v<version>
+# Pattern: onex.<kind>.<producer>.<event-name>.v<version>
 EVENT_TOPIC_PATTERN = r"\.evt\."  # Events: facts about what happened
 COMMAND_TOPIC_PATTERN = r"\.cmd\."  # Commands: directives to take action
 INTENT_TOPIC_PATTERN = r"\.int\."  # Intents: desired state changes
 
-# ONEX event naming convention regex
-# Full pattern: {env}.{namespace}.onex.evt.<producer>.<kebab-case-name>.v<version>
+# ONEX event naming convention regex (5-segment realm-agnostic format)
+# Full pattern: onex.evt.<producer>.<kebab-case-name>.v<version>
 ONEX_EVENT_TOPIC_REGEX = re.compile(
-    r"^\{env\}\.\{namespace\}\.onex\.evt\.[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.v[0-9]+$"
+    r"^onex\.evt\.[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.v[0-9]+$"
 )
 
 
@@ -94,7 +94,7 @@ class TestOrchestratorEventPurity:
             commands (directives) or intents (desired state changes).
 
         ONEX Event Pattern:
-            {env}.{namespace}.onex.evt.<event-name>.v<version>
+            onex.evt.<producer>.<event-name>.v<version>
         """
         published_events = contract_data.get("published_events", [])
 
@@ -294,12 +294,12 @@ class TestOrchestratorEventPurity:
 
         This test validates that all published event types follow the ONEX
         naming conventions for events:
-        1. Topic pattern: {env}.{namespace}.onex.evt.<kebab-case-name>.v<version>
+        1. Topic pattern: onex.evt.<producer>.<kebab-case-name>.v<version>
         2. Event type naming: PascalCase, descriptive of the event
 
         Acceptance Criterion:
             All published_events must have:
-            - Topics matching ONEX event topic pattern
+            - Topics matching ONEX event topic pattern (5-segment realm-agnostic)
             - Event types in PascalCase format
             - Semantic names indicating facts (past tense or state)
 
@@ -318,7 +318,7 @@ class TestOrchestratorEventPurity:
             # Test 1: Topic matches ONEX event naming pattern
             assert ONEX_EVENT_TOPIC_REGEX.match(topic), (
                 f"Topic '{topic}' does not match ONEX event naming convention. "
-                f"Expected pattern: {{env}}.{{namespace}}.onex.evt.<kebab-case-name>.v<version>"
+                f"Expected pattern: onex.evt.<producer>.<kebab-case-name>.v<version>"
             )
 
             # Test 2: Event type is non-empty and properly formatted

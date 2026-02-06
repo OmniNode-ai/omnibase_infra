@@ -11,7 +11,7 @@ to concrete Kafka topic. All scattered resolve_topic() methods across the
 codebase MUST delegate to this class.
 """
 
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 

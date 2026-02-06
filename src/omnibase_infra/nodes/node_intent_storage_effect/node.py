@@ -25,13 +25,13 @@ Capabilities:
 
 Event Topics:
     Consumed:
-        - {env}.{namespace}.onex.evt.intent-classified.v1
-        - {env}.{namespace}.onex.cmd.intent-query-session.v1
-        - {env}.{namespace}.onex.cmd.intent-query-distribution.v1
+        - onex.evt.platform.intent-classified.v1
+        - onex.cmd.platform.intent-query-session.v1
+        - onex.cmd.platform.intent-query-distribution.v1
     Published:
-        - {env}.{namespace}.onex.evt.intent-stored.v1
-        - {env}.{namespace}.onex.evt.intent-session-query-result.v1
-        - {env}.{namespace}.onex.evt.intent-distribution-result.v1
+        - onex.evt.platform.intent-stored.v1
+        - onex.evt.platform.intent-session-query-result.v1
+        - onex.evt.platform.intent-distribution-result.v1
 
 Handler Stack:
     NodeIntentStorageEffect -> HandlerIntent -> HandlerGraph -> Memgraph

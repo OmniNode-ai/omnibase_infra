@@ -1456,21 +1456,31 @@ async def bootstrap() -> int:
             topic_resolver = TopicResolver()
             try:
                 contract_registered_topic = topic_resolver.resolve(
-                    "onex.evt.platform.contract-registered.v1"
+                    "onex.evt.platform.contract-registered.v1",
+                    correlation_id=correlation_id,
                 )
                 contract_deregistered_topic = topic_resolver.resolve(
-                    "onex.evt.platform.contract-deregistered.v1"
-                )
-                node_heartbeat_topic = topic_resolver.resolve(SUFFIX_NODE_HEARTBEAT)
-            except TopicResolutionError as e:
-                context = ModelInfraErrorContext.with_correlation(
+                    "onex.evt.platform.contract-deregistered.v1",
                     correlation_id=correlation_id,
-                    transport_type=EnumInfraTransportType.KAFKA,
-                    operation="resolve_topic",
                 )
+                node_heartbeat_topic = topic_resolver.resolve(
+                    SUFFIX_NODE_HEARTBEAT,
+                    correlation_id=correlation_id,
+                )
+            except TopicResolutionError as e:
+                # Re-use infra_context from TopicResolutionError if available,
+                # otherwise build a fresh one. This preserves the correlation
+                # chain established by the resolver.
+                infra_ctx: ModelInfraErrorContext | None = e.infra_context
+                if infra_ctx is None:
+                    infra_ctx = ModelInfraErrorContext.with_correlation(
+                        correlation_id=correlation_id,
+                        transport_type=EnumInfraTransportType.KAFKA,
+                        operation="resolve_topic",
+                    )
                 raise ProtocolConfigurationError(
                     f"Invalid topic suffix in runtime configuration: {e}",
-                    context=context,
+                    context=infra_ctx,
                 ) from e
 
             logger.info(

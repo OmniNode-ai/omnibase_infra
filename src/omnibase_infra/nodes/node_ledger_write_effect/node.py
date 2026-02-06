@@ -23,11 +23,11 @@ Capabilities:
 
 Event Topics:
     Consumed:
-        - {env}.{namespace}.onex.cmd.ledger-append.v1
-        - {env}.{namespace}.onex.cmd.ledger-query.v1
+        - onex.cmd.platform.ledger-append.v1
+        - onex.cmd.platform.ledger-query.v1
     Published:
-        - {env}.{namespace}.onex.evt.ledger-appended.v1
-        - {env}.{namespace}.onex.evt.ledger-query-result.v1
+        - onex.evt.platform.ledger-appended.v1
+        - onex.evt.platform.ledger-query-result.v1
 
 Design Decisions:
     - 100% Contract-Driven: All capabilities in YAML, not Python

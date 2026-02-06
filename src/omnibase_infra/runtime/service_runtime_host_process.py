@@ -3248,14 +3248,19 @@ class RuntimeHostProcess:
                 correlation_id=wiring_correlation_id,
             )
         except TopicResolutionError as e:
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=wiring_correlation_id,
-                transport_type=EnumInfraTransportType.KAFKA,
-                operation="resolve_topic",
-            )
+            # Re-use infra_context from TopicResolutionError if available,
+            # otherwise build a fresh one. This preserves the correlation
+            # chain established by the resolver.
+            infra_ctx: ModelInfraErrorContext | None = e.infra_context
+            if infra_ctx is None:
+                infra_ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=wiring_correlation_id,
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="resolve_topic",
+                )
             raise ProtocolConfigurationError(
                 f"Invalid topic suffix in runtime configuration: {e}",
-                context=context,
+                context=infra_ctx,
             ) from e
 
         # Import ModelEventMessage type for handler signature
