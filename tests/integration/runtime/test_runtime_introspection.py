@@ -279,6 +279,9 @@ class TestStartupIntrospectionWithJitter:
             await process.start()
             assert process.is_running
 
+            # Heartbeat should NOT be started when publish fails
+            mock_introspection_service.start_heartbeat_task.assert_not_called()
+
         finally:
             await process.stop()
 
