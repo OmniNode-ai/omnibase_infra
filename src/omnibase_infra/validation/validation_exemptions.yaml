@@ -2116,6 +2116,19 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Handler System)
     ticket: OMN-1837
+  # ==========================================================================
+  # Validation Ledger Exemptions (OMN-1908)
+  # ==========================================================================
+  # repo_id is a human-readable repository identifier string (e.g., 'omnibase_infra'),
+  # NOT a UUID. Matches omnibase_core ModelValidationEventBase.repo_id: str.
+  - file_pattern: 'model_validation_ledger_entry\.py'
+    violation_pattern: "Field 'repo_id' should use UUID"
+    reason: >
+      repo_id is a human-readable repository identifier (e.g., 'omnibase_infra'), not a UUID. This matches the upstream ModelValidationEventBase in omnibase_core which defines repo_id as str. The _id suffix triggers a false positive UUID suggestion.
+
+    documentation:
+      - omnibase_core/models/events/validation/model_validation_event_base.py
+    ticket: OMN-1908
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

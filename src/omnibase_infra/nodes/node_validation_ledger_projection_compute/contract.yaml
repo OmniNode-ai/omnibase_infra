@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeValidationLedgerProjectionCompute
+#
+# COMPUTE node that subscribes to 3 cross-repo validation event topics for
+# validation ledger persistence. This node projects validation events into
+# the validation_event_ledger for deterministic replay.
+#
+# The node subscribes with consumer_purpose="projection" and
+# auto_offset_reset="earliest" to ensure no validation events are missed
+# and all historical events are captured.
+#
+# Related Tickets:
+#   - OMN-1908: Cross-Repo Validation Ledger Persistence
+# Contract identifiers
+name: "node_validation_ledger_projection_compute"
+contract_name: "node_validation_ledger_projection_compute"
+node_name: "node_validation_ledger_projection_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "0.1.0"
+# Node type - COMPUTE for event projection logic
+node_type: "COMPUTE_GENERIC"
+# Description
+description: >
+  COMPUTE node that subscribes to 3 cross-repo validation event topics for validation ledger persistence. Projects validation events into the validation_event_ledger for deterministic replay. Uses consumer_purpose="projection" and auto_offset_reset="earliest" to capture all historical validation events.
+
+# Event bus configuration
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  # Subscribe to 3 cross-repo validation event topics
+  subscribe_topics:
+    # Validation run lifecycle
+    - "onex.validation.cross_repo.run.started.v1"
+    # Violation batches
+    - "onex.validation.cross_repo.violations.batch.v1"
+    # Validation run completion
+    - "onex.validation.cross_repo.run.completed.v1"
+  # Projection consumer - read-only consumption for ledger persistence
+  consumer_purpose: "projection"
+  # Start from earliest offset to capture all historical validation events
+  auto_offset_reset: "earliest"
+  # Consumer group for validation ledger projection
+  consumer_group: "onex-validation-ledger-projection-compute"
+# Strongly typed I/O models
+input_model:
+  name: "ModelEventMessage"
+  module: "omnibase_infra.event_bus.models.model_event_message"
+  description: >
+    Kafka event message containing raw bytes payload and headers. The compute node processes events from all 3 subscribed validation topics.
+
+output_model:
+  name: "ModelValidationLedgerEntry"
+  module: "omnibase_infra.models.validation_ledger.model_validation_ledger_entry"
+  description: >
+    Validation ledger entry containing extracted metadata, base64-encoded envelope bytes, and SHA-256 hash for deterministic replay.
+
+# Handler routing - delegates compute logic to handler
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "validation_ledger_projection"
+      handler:
+        name: "HandlerValidationLedgerProjection"
+        module: "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection"
+      supported_operations:
+        - "validation_ledger.project"
+# Capabilities provided by this node
+capabilities:
+  - name: "validation_ledger.projection"
+    description: "Project cross-repo validation events into the validation ledger"
+    version: "0.1.0"
+  - name: "validation_ledger.projection.multi_topic"
+    description: "Subscribe to multiple validation topics for comprehensive event capture"
+  - name: "validation_ledger.projection.replay"
+    description: "Support deterministic replay via base64 envelope storage and SHA-256 hashing"
+# Dependencies (protocols this node requires)
+dependencies:
+  - name: "protocol_event_envelope"
+    type: "protocol"
+    description: "Protocol for parsing and handling event envelopes"
+    optional: false
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-06"
+  ticket: "OMN-1908"
+  tags:
+    - compute
+    - validation-ledger
+    - projection
+    - cross-repo-validation
+    - deterministic-replay
