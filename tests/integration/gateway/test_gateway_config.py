@@ -305,6 +305,71 @@ class TestGatewayConfigValidation:
             assert config.runtime_id == runtime_id
 
 
+class TestKeyPathAbsoluteValidation:
+    """Tests for _validate_key_path_is_absolute path traversal prevention."""
+
+    def test_relative_private_key_path_rejected(self) -> None:
+        """Relative private_key_path is rejected to prevent path traversal."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelGatewayConfig(
+                realm="test",
+                runtime_id="test-runtime",
+                private_key_path=Path("../../../etc/shadow"),
+            )
+
+        assert "absolute" in str(exc_info.value).lower()
+
+    def test_relative_public_key_path_rejected(self) -> None:
+        """Relative public_key_path is rejected to prevent path traversal."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelGatewayConfig(
+                realm="test",
+                runtime_id="test-runtime",
+                public_key_path=Path("keys/public.pem"),
+            )
+
+        assert "absolute" in str(exc_info.value).lower()
+
+    def test_absolute_private_key_path_accepted(self) -> None:
+        """Absolute private_key_path is accepted."""
+        config = ModelGatewayConfig(
+            realm="test",
+            runtime_id="test-runtime",
+            private_key_path=Path("/etc/onex/keys/private.pem"),
+        )
+
+        assert config.private_key_path == Path("/etc/onex/keys/private.pem")
+
+    def test_absolute_public_key_path_accepted(self) -> None:
+        """Absolute public_key_path is accepted."""
+        config = ModelGatewayConfig(
+            realm="test",
+            runtime_id="test-runtime",
+            public_key_path=Path("/etc/onex/keys/public.pem"),
+        )
+
+        assert config.public_key_path == Path("/etc/onex/keys/public.pem")
+
+    def test_none_key_path_accepted(self) -> None:
+        """None key paths (default) pass validation."""
+        config = ModelGatewayConfig(
+            realm="test",
+            runtime_id="test-runtime",
+        )
+
+        assert config.private_key_path is None
+        assert config.public_key_path is None
+
+    def test_dot_slash_relative_path_rejected(self) -> None:
+        """Dot-slash relative paths are rejected."""
+        with pytest.raises(ValidationError):
+            ModelGatewayConfig(
+                realm="test",
+                runtime_id="test-runtime",
+                private_key_path=Path("./keys/private.pem"),
+            )
+
+
 class TestGatewayConfigUseCases:
     """Tests for common configuration use cases."""
 

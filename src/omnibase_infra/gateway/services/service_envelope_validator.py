@@ -560,4 +560,4 @@ class ServiceEnvelopeValidator:
             return runtime_id in self._public_keys
 
 
-__all__ = ["ServiceEnvelopeValidator", "ValidationResult"]
+__all__: list[str] = ["ServiceEnvelopeValidator", "ValidationResult"]

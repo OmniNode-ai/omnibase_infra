@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from omnibase_infra.enums import (
     EnumConsumerGroupPurpose,
@@ -4190,12 +4190,17 @@ class RuntimeHostProcess:
 
                 return extracted_envelope
 
-            except Exception as e:
-                # Failed to parse or validate signed envelope
+            except (ValidationError, ValueError, KeyError, TypeError) as e:
+                # Failed to parse or validate signed envelope.
+                # Catches expected failures: malformed data (ValidationError,
+                # ValueError), missing fields (KeyError), type mismatches
+                # (TypeError). Unexpected errors (ImportError, AttributeError)
+                # propagate to surface real bugs.
                 logger.warning(
                     "Failed to validate signed envelope",
                     extra={
                         "topic": topic,
+                        "error_type": type(e).__name__,
                         "error": str(e),
                         "correlation_id": str(correlation_id),
                     },

@@ -9,6 +9,9 @@ Tests verify that:
     - Signing failure degrades gracefully (publishes unsigned)
     - UUID and datetime fields are properly serialized in the output
     - Policy engine rejection prevents publishing
+    - _validate_gateway_envelope rejects unsigned envelopes when reject_unsigned=True
+    - _validate_gateway_envelope rejects policy-denied inbound messages
+    - _validate_gateway_envelope validates signed envelopes and extracts payload
 
 Related Tickets:
     - OMN-1899: Runtime gateway envelope signing
@@ -26,9 +29,15 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.gateway.models.model_gateway_config import ModelGatewayConfig
 from omnibase_infra.gateway.services.service_envelope_signer import (
     ServiceEnvelopeSigner,
 )
+from omnibase_infra.gateway.services.service_envelope_validator import (
+    ServiceEnvelopeValidator,
+    ValidationResult,
+)
+from omnibase_infra.gateway.services.service_policy_engine import ServicePolicyEngine
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 
 pytestmark = pytest.mark.integration
@@ -784,3 +793,293 @@ class TestBusIdExtraction:
         # Assert
         published = bus.publish_envelope.call_args[0][0]
         assert published["bus_id"] == "default"
+
+
+# =============================================================================
+# Tests: _validate_gateway_envelope - Inbound Validation
+# =============================================================================
+
+
+class TestValidateGatewayEnvelopeRejectUnsigned:
+    """Tests for reject_unsigned enforcement in _validate_gateway_envelope."""
+
+    @pytest.mark.asyncio
+    async def test_reject_unsigned_rejects_unsigned_envelope(self) -> None:
+        """When reject_unsigned=True, unsigned envelopes are rejected (returns None)."""
+        # Arrange
+        runtime = _make_runtime()
+
+        # Configure gateway with reject_unsigned=True but NO validator
+        # (simulates no public_key_path configured)
+        config = ModelGatewayConfig(
+            realm="test",
+            runtime_id="test-runtime",
+            reject_unsigned=True,
+        )
+        runtime._gateway_config = config
+        # No _envelope_validator set (no public_key_path)
+        runtime._envelope_validator = None
+        runtime._policy_engine = None
+
+        unsigned_envelope: dict[str, object] = {
+            "success": True,
+            "data": "test",
+            "correlation_id": str(uuid4()),
+        }
+
+        # Act
+        result = await runtime._validate_gateway_envelope(
+            unsigned_envelope, "events.test"
+        )
+
+        # Assert - unsigned envelope should be rejected
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_reject_unsigned_false_accepts_unsigned_envelope(self) -> None:
+        """When reject_unsigned=False, unsigned envelopes are accepted."""
+        # Arrange
+        runtime = _make_runtime()
+
+        config = ModelGatewayConfig(
+            realm="test",
+            runtime_id="test-runtime",
+            reject_unsigned=False,
+        )
+        runtime._gateway_config = config
+        runtime._envelope_validator = None
+        runtime._policy_engine = None
+
+        unsigned_envelope: dict[str, object] = {
+            "success": True,
+            "data": "test",
+        }
+
+        # Act
+        result = await runtime._validate_gateway_envelope(
+            unsigned_envelope, "events.test"
+        )
+
+        # Assert - unsigned envelope should be accepted
+        assert result is not None
+        assert result["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_no_gateway_config_passes_through(self) -> None:
+        """When no gateway is configured, envelopes pass through unchanged."""
+        # Arrange
+        runtime = _make_runtime()
+        # Default state: no gateway config, no validator, no policy engine
+
+        envelope: dict[str, object] = {"data": "test", "key": "value"}
+
+        # Act
+        result = await runtime._validate_gateway_envelope(envelope, "any-topic")
+
+        # Assert
+        assert result is envelope  # Same object, unchanged
+
+
+class TestValidateGatewayEnvelopePolicyCheck:
+    """Tests for policy engine integration in _validate_gateway_envelope."""
+
+    @pytest.mark.asyncio
+    async def test_policy_rejection_blocks_inbound(self) -> None:
+        """When policy engine rejects inbound topic, envelope is rejected."""
+        # Arrange
+        runtime = _make_runtime()
+
+        policy = ServicePolicyEngine(
+            allowed_topics=["events.*"],
+            expected_realm=None,
+        )
+        runtime._policy_engine = policy
+        runtime._gateway_config = ModelGatewayConfig(
+            realm="test",
+            runtime_id="test-runtime",
+            reject_unsigned=False,
+        )
+
+        envelope: dict[str, object] = {"data": "test"}
+
+        # Act - topic not in allowlist
+        result = await runtime._validate_gateway_envelope(envelope, "internal.secret")
+
+        # Assert
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_policy_allows_matching_topic(self) -> None:
+        """When policy allows the topic, envelope passes through."""
+        # Arrange
+        runtime = _make_runtime()
+
+        policy = ServicePolicyEngine(
+            allowed_topics=["events.*"],
+            expected_realm=None,
+        )
+        runtime._policy_engine = policy
+        runtime._gateway_config = ModelGatewayConfig(
+            realm="test",
+            runtime_id="test-runtime",
+            reject_unsigned=False,
+        )
+
+        envelope: dict[str, object] = {"data": "test"}
+
+        # Act
+        result = await runtime._validate_gateway_envelope(
+            envelope, "events.order.created"
+        )
+
+        # Assert
+        assert result is not None
+        assert result["data"] == "test"
+
+    @pytest.mark.asyncio
+    async def test_realm_mismatch_rejects_inbound(self) -> None:
+        """When envelope realm doesn't match expected, it is rejected."""
+        # Arrange
+        runtime = _make_runtime()
+
+        policy = ServicePolicyEngine(
+            expected_realm="tenant-123",
+        )
+        runtime._policy_engine = policy
+        runtime._gateway_config = ModelGatewayConfig(
+            realm="tenant-123",
+            runtime_id="test-runtime",
+            reject_unsigned=False,
+        )
+
+        envelope: dict[str, object] = {
+            "data": "test",
+            "realm": "tenant-456",  # Wrong realm
+        }
+
+        # Act
+        result = await runtime._validate_gateway_envelope(envelope, "events.order")
+
+        # Assert
+        assert result is None
+
+
+class TestValidateGatewayEnvelopeSignedEnvelope:
+    """Tests for signed envelope validation in _validate_gateway_envelope."""
+
+    @pytest.mark.asyncio
+    async def test_valid_signed_envelope_extracts_payload(self) -> None:
+        """A validly signed envelope is validated and inner payload extracted."""
+        # Arrange
+        runtime = _make_runtime()
+        private_key = Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+
+        signer = ServiceEnvelopeSigner(
+            realm="test",
+            runtime_id="test-runtime-001",
+            private_key=private_key,
+        )
+
+        validator = ServiceEnvelopeValidator(
+            expected_realm="test",
+            public_keys={"test-runtime-001": public_key},
+            reject_unsigned=True,
+        )
+        runtime._envelope_validator = validator
+        runtime._gateway_config = ModelGatewayConfig(
+            realm="test",
+            runtime_id="test-runtime",
+            reject_unsigned=True,
+        )
+
+        # Sign a payload
+        payload = ModelTestEvent(
+            action="created",
+            resource_id="resource-123",
+        )
+        signed = signer.sign_envelope(payload=payload, bus_id="test-bus")
+        signed_dict: dict[str, object] = signed.model_dump(mode="json")
+
+        # Act
+        result = await runtime._validate_gateway_envelope(signed_dict, "events.test")
+
+        # Assert - inner payload should be extracted
+        assert result is not None
+        assert result["action"] == "created"
+        assert result["resource_id"] == "resource-123"
+
+    @pytest.mark.asyncio
+    async def test_invalid_signature_rejects_envelope(self) -> None:
+        """An envelope with an invalid signature is rejected."""
+        # Arrange
+        runtime = _make_runtime()
+        private_key = Ed25519PrivateKey.generate()
+        wrong_public_key = Ed25519PrivateKey.generate().public_key()
+
+        signer = ServiceEnvelopeSigner(
+            realm="test",
+            runtime_id="test-runtime-001",
+            private_key=private_key,
+        )
+
+        # Use wrong public key for validation
+        validator = ServiceEnvelopeValidator(
+            expected_realm="test",
+            public_keys={"test-runtime-001": wrong_public_key},
+            reject_unsigned=True,
+        )
+        runtime._envelope_validator = validator
+        runtime._gateway_config = ModelGatewayConfig(
+            realm="test",
+            runtime_id="test-runtime",
+            reject_unsigned=True,
+        )
+
+        payload = ModelTestEvent(
+            action="created",
+            resource_id="resource-123",
+        )
+        signed = signer.sign_envelope(payload=payload, bus_id="test-bus")
+        signed_dict: dict[str, object] = signed.model_dump(mode="json")
+
+        # Act
+        result = await runtime._validate_gateway_envelope(signed_dict, "events.test")
+
+        # Assert - invalid signature should reject
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_malformed_signed_envelope_rejected_gracefully(self) -> None:
+        """Malformed signed-looking envelope is handled without crash."""
+        # Arrange
+        runtime = _make_runtime()
+        private_key = Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+
+        validator = ServiceEnvelopeValidator(
+            expected_realm="test",
+            public_keys={"test-runtime-001": public_key},
+        )
+        runtime._envelope_validator = validator
+        runtime._gateway_config = ModelGatewayConfig(
+            realm="test",
+            runtime_id="test-runtime",
+            reject_unsigned=False,
+        )
+
+        # Envelope that looks signed (has signature + required fields)
+        # but has malformed data that will fail ModelMessageEnvelope validation
+        malformed: dict[str, object] = {
+            "realm": "test",
+            "runtime_id": "test-runtime-001",
+            "bus_id": "test-bus",
+            "signature": {"algorithm": "ed25519", "value": "invalid"},
+            "payload": "not-a-valid-payload",
+        }
+
+        # Act - should not raise
+        result = await runtime._validate_gateway_envelope(malformed, "events.test")
+
+        # Assert - malformed envelope is rejected (returns None)
+        assert result is None
