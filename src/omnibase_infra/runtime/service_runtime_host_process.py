@@ -2097,8 +2097,10 @@ class RuntimeHostProcess:
         """Dynamically materialize a handler from a Kafka-sourced contract descriptor.
 
         Lifecycle ordering invariant (architectural invariant):
-            import -> instantiate -> initialize -> wire subscriptions ->
-            register in _handlers -> publish CAPABILITY_CHANGE.
+            import -> instantiate -> initialize ->
+            register in RegistryProtocolBinding (validates protocol compliance) ->
+            wire subscriptions -> register in _handlers ->
+            publish CAPABILITY_CHANGE.
 
         Failure at any step before registration means the handler never enters
         ``_handlers`` and no CAPABILITY_CHANGE announcement is made.
@@ -2220,8 +2222,8 @@ class RuntimeHostProcess:
                     effective_config.update(self._config)
                 await handler_instance.initialize(effective_config)
 
-            # Steps 9-11: Wire, register, and announce under mutation lock.
-            # All three MUST be atomic to prevent orphan-subscription leaks
+            # Steps 9-12: Validate, wire, register, and announce under lock.
+            # All operations MUST be atomic to prevent orphan-subscription leaks
             # when concurrent materializations race for the same protocol_type.
             async with self._handler_mutation_lock:
                 # Double-check idempotency under lock — if another coroutine
@@ -2229,25 +2231,42 @@ class RuntimeHostProcess:
                 if protocol_type in self._handlers:
                     return True
 
-                # Step 9: Wire event bus subscriptions BEFORE registration
-                await self._wire_live_handler_subscriptions(node_name, descriptor)
+                # Resolve registry once for both registration and rollback.
+                handler_registry = await self._get_handler_registry()
 
-                # Step 10: Register handler
-                self._handler_descriptors[protocol_type] = descriptor
-                self._handlers[protocol_type] = handler_instance
+                try:
+                    # Step 9: Register handler class in RegistryProtocolBinding
+                    # BEFORE wiring subscriptions. register() validates protocol
+                    # compliance (execute/handle methods). Performing this first
+                    # prevents orphan subscriptions if validation fails — there
+                    # is no unwire API for event bus subscriptions.
+                    handler_registry.register(protocol_type, handler_cls)
 
-                logger.info(
-                    "Live handler materialized successfully",
-                    extra={
-                        "node_name": node_name,
-                        "protocol_type": protocol_type,
-                        "handler_class": handler_class_path,
-                        "correlation_id": str(correlation_id),
-                    },
-                )
+                    # Step 10: Wire event bus subscriptions
+                    await self._wire_live_handler_subscriptions(node_name, descriptor)
 
-                # Step 11: Publish CAPABILITY_CHANGE
-                await self._publish_capability_change(node_name, correlation_id)
+                    # Step 11: Register handler instance
+                    self._handler_descriptors[protocol_type] = descriptor
+                    self._handlers[protocol_type] = handler_instance
+
+                    logger.info(
+                        "Live handler materialized successfully",
+                        extra={
+                            "node_name": node_name,
+                            "protocol_type": protocol_type,
+                            "handler_class": handler_class_path,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+
+                    # Step 12: Publish CAPABILITY_CHANGE
+                    await self._publish_capability_change(node_name, correlation_id)
+                except Exception:
+                    # Roll back all partial state to prevent orphaned handlers
+                    handler_registry.unregister(protocol_type)
+                    self._handler_descriptors.pop(protocol_type, None)
+                    self._handlers.pop(protocol_type, None)
+                    raise  # Re-raise to be caught by outer try/except
 
             return True
 
@@ -2353,7 +2372,10 @@ class RuntimeHostProcess:
         if node_name in self._announced_capabilities:
             logger.debug(
                 "CAPABILITY_CHANGE already announced, skipping",
-                extra={"node_name": node_name},
+                extra={
+                    "node_name": node_name,
+                    "correlation_id": str(correlation_id),
+                },
             )
             return
 

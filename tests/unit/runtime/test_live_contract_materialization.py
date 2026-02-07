@@ -32,7 +32,7 @@ pytestmark = pytest.mark.unit
 
 
 def _make_descriptor(
-    handler_id: str = "proto.test_handler",
+    handler_id: str = "proto.effect_test",
     name: str = "test-handler",
     handler_class: str | None = "omnibase_infra.test_module.TestHandler",
     contract_path: str | None = "kafka://dev/contracts/test-handler",
@@ -74,6 +74,9 @@ def _make_runtime(**overrides: object) -> RuntimeHostProcess:
     Skips __init__ and manually sets internal state needed for
     live materialization methods.
     """
+    from omnibase_infra.models.runtime import ModelRuntimeIntrospectionConfig
+    from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
+
     runtime = RuntimeHostProcess.__new__(RuntimeHostProcess)
     runtime._handlers = {}
     runtime._handler_descriptors = {}
@@ -86,9 +89,7 @@ def _make_runtime(**overrides: object) -> RuntimeHostProcess:
     runtime._materialized_resources = None
     runtime._dependency_resolver = None
     runtime._container = None
-
-    # Import the config class for introspection
-    from omnibase_infra.models.runtime import ModelRuntimeIntrospectionConfig
+    runtime._handler_registry = MagicMock(spec=RegistryProtocolBinding)
 
     runtime._introspection_config = ModelRuntimeIntrospectionConfig()
 
@@ -113,7 +114,7 @@ class TestKafkaContractCacheGet:
 
         result = cache.get("test-node")
         assert result is not None
-        assert result.handler_id == "proto.test_handler"
+        assert result.handler_id == "proto.effect_test"
 
     def test_cache_get_returns_none_for_unknown(self) -> None:
         """get() returns None for a node name not in the cache."""
@@ -137,7 +138,7 @@ class TestKafkaContractSourceGetCachedDescriptor:
         source._cache.add("direct-node", descriptor)
         result = source.get_cached_descriptor("direct-node")
         assert result is not None
-        assert result.handler_id == "proto.test_handler"
+        assert result.handler_id == "proto.effect_test"
 
     def test_source_get_cached_descriptor_returns_none(self) -> None:
         """get_cached_descriptor() returns None for unknown node."""
@@ -164,10 +165,17 @@ class TestMaterializeHandlerLive:
         mock_handler_instance.initialize = AsyncMock()
         mock_handler_cls = _make_handler_class(mock_handler_instance)
         mock_container = MagicMock()
+        mock_registry = MagicMock()
 
         with (
             patch.object(
                 runtime, "_get_or_create_container", return_value=mock_container
+            ),
+            patch.object(
+                runtime,
+                "_get_handler_registry",
+                new_callable=AsyncMock,
+                return_value=mock_registry,
             ),
             patch(
                 "omnibase_infra.runtime.service_runtime_host_process.importlib.import_module"
@@ -184,15 +192,16 @@ class TestMaterializeHandlerLive:
             )
 
         assert result is True
-        assert "test_handler" in runtime._handlers
-        assert "test_handler" in runtime._handler_descriptors
+        assert "effect_test" in runtime._handlers
+        assert "effect_test" in runtime._handler_descriptors
+        mock_registry.register.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_materialize_idempotent(self) -> None:
         """Second call returns True without re-instantiation."""
         mock_existing = MagicMock()
         runtime = _make_runtime()
-        runtime._handlers["test_handler"] = mock_existing
+        runtime._handlers["effect_test"] = mock_existing
 
         descriptor = _make_descriptor()
         correlation_id = uuid4()
@@ -205,7 +214,7 @@ class TestMaterializeHandlerLive:
 
         assert result is True
         # Original handler preserved, not replaced
-        assert runtime._handlers["test_handler"] is mock_existing
+        assert runtime._handlers["effect_test"] is mock_existing
 
     @pytest.mark.asyncio
     async def test_materialize_skips_no_handler_class(self) -> None:
@@ -221,7 +230,7 @@ class TestMaterializeHandlerLive:
         )
 
         assert result is False
-        assert "test_handler" not in runtime._handlers
+        assert "effect_test" not in runtime._handlers
 
     @pytest.mark.asyncio
     async def test_materialize_rejects_untrusted_namespace(self) -> None:
@@ -237,7 +246,7 @@ class TestMaterializeHandlerLive:
         )
 
         assert result is False
-        assert "test_handler" not in runtime._handlers
+        assert "effect_test" not in runtime._handlers
 
     @pytest.mark.asyncio
     async def test_materialize_handles_import_error(self) -> None:
@@ -256,7 +265,7 @@ class TestMaterializeHandlerLive:
         )
 
         assert result is False
-        assert "test_handler" not in runtime._handlers
+        assert "effect_test" not in runtime._handlers
 
     @pytest.mark.asyncio
     async def test_materialize_skips_kafka_path_deps(self) -> None:
@@ -271,10 +280,17 @@ class TestMaterializeHandlerLive:
         mock_handler_instance.initialize = AsyncMock()
         mock_handler_cls = _make_handler_class(mock_handler_instance)
         mock_container = MagicMock()
+        mock_registry = MagicMock()
 
         with (
             patch.object(
                 runtime, "_get_or_create_container", return_value=mock_container
+            ),
+            patch.object(
+                runtime,
+                "_get_handler_registry",
+                new_callable=AsyncMock,
+                return_value=mock_registry,
             ),
             patch.object(
                 runtime,
@@ -339,9 +355,106 @@ class TestMaterializeHandlerLive:
             )
 
         assert result is False
-        assert "test_handler" not in runtime._handlers
+        assert "effect_test" not in runtime._handlers
         # No CAPABILITY_CHANGE should be announced
         assert "test-node" not in runtime._announced_capabilities
+
+    @pytest.mark.asyncio
+    async def test_materialize_registry_failure_rolls_back(self) -> None:
+        """Registry registration failure rolls back cleanly, no orphaned state."""
+        from omnibase_infra.runtime.registry.registry_protocol_binding import (
+            RegistryError,
+        )
+
+        runtime = _make_runtime()
+        descriptor = _make_descriptor()
+        correlation_id = uuid4()
+
+        mock_handler_instance = MagicMock()
+        mock_handler_instance.initialize = AsyncMock()
+        mock_handler_cls = _make_handler_class(mock_handler_instance)
+        mock_container = MagicMock()
+
+        # Registry that fails on register()
+        mock_registry = MagicMock()
+        mock_registry.register.side_effect = RegistryError(
+            "missing execute/handle",
+            protocol_type="effect_test",
+        )
+
+        with (
+            patch.object(
+                runtime, "_get_or_create_container", return_value=mock_container
+            ),
+            patch.object(
+                runtime,
+                "_get_handler_registry",
+                new_callable=AsyncMock,
+                return_value=mock_registry,
+            ),
+            patch(
+                "omnibase_infra.runtime.service_runtime_host_process.importlib.import_module"
+            ) as mock_import,
+        ):
+            mock_module = MagicMock()
+            mock_module.TestHandler = mock_handler_cls
+            mock_import.return_value = mock_module
+
+            result = await runtime._materialize_handler_live(
+                node_name="test-node",
+                descriptor=descriptor,
+                correlation_id=correlation_id,
+            )
+
+        assert result is False
+        assert "effect_test" not in runtime._handlers
+        assert "effect_test" not in runtime._handler_descriptors
+        assert "test-node" not in runtime._announced_capabilities
+
+    @pytest.mark.asyncio
+    async def test_materialize_registers_in_protocol_binding(self) -> None:
+        """Live materialization registers handler class in RegistryProtocolBinding."""
+        from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
+
+        mock_registry = MagicMock(spec=RegistryProtocolBinding)
+        runtime = _make_runtime()
+        descriptor = _make_descriptor()
+        correlation_id = uuid4()
+
+        mock_handler_instance = MagicMock()
+        mock_handler_instance.initialize = AsyncMock()
+        mock_handler_cls = _make_handler_class(mock_handler_instance)
+        mock_container = MagicMock()
+
+        with (
+            patch.object(
+                runtime, "_get_or_create_container", return_value=mock_container
+            ),
+            patch.object(
+                runtime,
+                "_get_handler_registry",
+                new_callable=AsyncMock,
+                return_value=mock_registry,
+            ),
+            patch(
+                "omnibase_infra.runtime.service_runtime_host_process.importlib.import_module"
+            ) as mock_import,
+        ):
+            mock_module = MagicMock()
+            mock_module.TestHandler = mock_handler_cls
+            mock_import.return_value = mock_module
+
+            result = await runtime._materialize_handler_live(
+                node_name="test-node",
+                descriptor=descriptor,
+                correlation_id=correlation_id,
+            )
+
+        assert result is True
+        mock_registry.register.assert_called_once()
+        # Verify the protocol_type used matches the stripped handler_id
+        call_args = mock_registry.register.call_args
+        assert call_args[0][0] == "effect_test"
 
 
 # ===========================================================================
