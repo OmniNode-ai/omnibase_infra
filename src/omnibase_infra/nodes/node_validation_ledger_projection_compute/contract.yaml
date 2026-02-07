@@ -1,0 +1,97 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeValidationLedgerProjectionCompute
+#
+# COMPUTE node that subscribes to 3 cross-repo validation event topics for
+# validation ledger persistence. This node projects validation events into
+# the validation_event_ledger table for replay and dashboard queries.
+#
+# Related Tickets:
+#   - OMN-1908: Cross-Repo Validation Ledger Persistence
+#   - OMN-1771: Implement Cross-Repo Conformance Validators
+#   - OMN-1776: Cross-Repo Validators Phase 2
+# Contract identifiers
+name: "node_validation_ledger_projection_compute"
+contract_name: "node_validation_ledger_projection_compute"
+node_name: "node_validation_ledger_projection_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "0.1.0"
+# Node type - COMPUTE for event projection logic
+node_type: "COMPUTE_GENERIC"
+# Description
+description: >
+  COMPUTE node that subscribes to 3 cross-repo validation event topics for validation ledger persistence. Projects validation events into the validation_event_ledger table, enabling deterministic replay of validation runs and dashboard queries by run_id and repo_id.
+
+# Event bus configuration
+event_bus:
+  version:
+    major: 1
+    minor: 0
+    patch: 0
+  # Subscribe to all 3 validation event topics
+  subscribe_topics:
+    - "onex.validation.cross_repo.run.started.v1"
+    - "onex.validation.cross_repo.violations.batch.v1"
+    - "onex.validation.cross_repo.run.completed.v1"
+  # Audit consumer - read-only, non-processing consumption
+  consumer_purpose: "audit"
+  # Start from earliest offset to capture all historical events
+  auto_offset_reset: "earliest"
+  # Consumer group for validation ledger projection
+  consumer_group: "onex-validation-ledger-projection-compute"
+# Strongly typed I/O models
+input_model:
+  name: "ModelEventMessage"
+  module: "omnibase_infra.event_bus.models.model_event_message"
+  description: >
+    Kafka event message containing raw bytes payload and headers. The compute node processes events from all 3 validation topics.
+
+output_model:
+  name: "ModelValidationLedgerEntry"
+  module: "omnibase_infra.models.validation_ledger.model_validation_ledger_entry"
+  description: >
+    Typed validation ledger entry ready for persistence to the validation_event_ledger table.
+
+# Handler routing - delegates compute logic to handler
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "validation_ledger_projection"
+      handler:
+        name: "HandlerValidationLedgerProjection"
+        module: "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection"
+      supported_operations:
+        - "validation_ledger.project"
+# Capabilities provided by this node
+capabilities:
+  - name: "validation_ledger.projection"
+    description: "Project cross-repo validation events into the validation ledger"
+    version: "0.1.0"
+  - name: "validation_ledger.projection.multi_topic"
+    description: "Subscribe to 3 validation topics for complete validation event capture"
+  - name: "validation_ledger.projection.audit"
+    description: "Non-processing, read-only event consumption for validation audit"
+# Dependencies
+dependencies:
+  - name: "protocol_validation_ledger_repository"
+    type: "protocol"
+    description: "Protocol for persisting validation events to PostgreSQL"
+    optional: false
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-07"
+  ticket: "OMN-1908"
+  tags:
+    - compute
+    - validation
+    - ledger
+    - audit
+    - projection
+    - cross-repo
