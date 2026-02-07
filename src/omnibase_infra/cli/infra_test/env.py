@@ -51,6 +51,7 @@ def _run_compose(
         capture_output=capture,
         text=True,
         check=False,
+        timeout=300,
     )
     if result.returncode != 0:
         if capture and result.stderr:
@@ -91,6 +92,7 @@ def _wait_for_healthy(
             capture_output=True,
             text=True,
             check=False,
+            timeout=30,
         )
         if result.returncode != 0:
             time.sleep(2)

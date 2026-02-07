@@ -44,8 +44,39 @@ def _run_cli_command(args: list[str]) -> int:
         Exit code.
     """
     cmd = ["onex-infra-test", *args]
-    result = subprocess.run(cmd, check=False)
+    result = subprocess.run(cmd, check=False, timeout=120)
     return result.returncode
+
+
+def _verify_env_running(compose_file: str, project_name: str) -> None:
+    """Verify the E2E docker-compose environment is running.
+
+    Raises:
+        SystemExit: If no running containers are found.
+    """
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            compose_file,
+            "-p",
+            project_name,
+            "ps",
+            "--status",
+            "running",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        console.print(
+            "[bold red]E2E environment is not running. Run 'env up' first.[/bold red]"
+        )
+        raise SystemExit(1)
+    console.print("  [green]Environment running.[/green]")
 
 
 def _publish_introspection(
@@ -83,6 +114,7 @@ def _publish_introspection(
         capture_output=True,
         text=True,
         check=False,
+        timeout=30,
     )
     return result.returncode == 0
 
@@ -104,14 +136,15 @@ def _wait_for_registration(dsn: str, node_id: str, timeout: int = 30) -> bool:
     while time.monotonic() - start < timeout:
         try:
             conn = psycopg2.connect(dsn, connect_timeout=5)
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT current_state FROM registration_projections WHERE entity_id = %s",
-                (node_id,),
-            )
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT current_state FROM registration_projections WHERE entity_id = %s",
+                        (node_id,),
+                    )
+                    row = cur.fetchone()
+            finally:
+                conn.close()
             if row is not None:
                 console.print(f"  Registration state: [green]{row[0]}[/green]")
                 return True
@@ -177,28 +210,7 @@ def _run_smoke_suite(compose_file: str, project_name: str) -> None:
     failures: list[str] = []
 
     _step("1. Verify environment is running")
-    result = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "-f",
-            compose_file,
-            "-p",
-            project_name,
-            "ps",
-            "--status",
-            "running",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0 or not result.stdout.strip():
-        console.print(
-            "[bold red]E2E environment is not running. Run 'env up' first.[/bold red]"
-        )
-        raise SystemExit(1)
-    console.print("  [green]Environment running.[/green]")
+    _verify_env_running(compose_file, project_name)
 
     _step("2. Publish introspection event")
     console.print(f"  node_id: {node_id}")
@@ -257,25 +269,7 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
     repetitions = 3
 
     _step("1. Verify environment")
-    result = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "-f",
-            compose_file,
-            "-p",
-            project_name,
-            "ps",
-            "--status",
-            "running",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0 or not result.stdout.strip():
-        console.print("[bold red]E2E environment is not running.[/bold red]")
-        raise SystemExit(1)
+    _verify_env_running(compose_file, project_name)
 
     _step(f"2. Publish {repetitions} identical events")
     console.print(f"  node_id: {node_id}")
@@ -285,22 +279,25 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
             raise SystemExit(1)
         console.print(f"  Published {i + 1}/{repetitions}")
 
-    _step("3. Wait for processing (5s)")
-    time.sleep(5)
+    # Allow time for Kafka consumer lag to clear after rapid-fire publishes.
+    idempotency_settle_seconds = 5
+    _step(f"3. Wait for processing ({idempotency_settle_seconds}s)")
+    time.sleep(idempotency_settle_seconds)
 
     _step("4. Check for duplicates")
     try:
         import psycopg2
 
         conn = psycopg2.connect(dsn, connect_timeout=5)
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT COUNT(*) FROM registration_projections WHERE entity_id = %s",
-            (node_id,),
-        )
-        count = cur.fetchone()[0]
-        cur.close()
-        conn.close()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) FROM registration_projections WHERE entity_id = %s",
+                    (node_id,),
+                )
+                count = cur.fetchone()[0]
+        finally:
+            conn.close()
     except Exception as e:
         console.print(f"[bold red]PostgreSQL error: {type(e).__name__}: {e}[/bold red]")
         raise SystemExit(1)
@@ -353,6 +350,7 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=30,
     )
     services = result.stdout.strip().splitlines()
     if "runtime" not in services:
@@ -389,6 +387,7 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=30,
     )
     if kill_result.returncode != 0:
         console.print(
@@ -419,6 +418,7 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=60,
     )
     if restart_result.returncode != 0:
         console.print(
@@ -427,7 +427,7 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
         raise SystemExit(1)
 
     # Wait for runtime to become healthy
-    console.print("  [yellow]Waiting for runtime health (30s)...[/yellow]")
+    console.print("  [yellow]Waiting for runtime health (10s)...[/yellow]")
     time.sleep(10)  # Give it time to start
     console.print("  [green]Runtime restarted.[/green]")
 
@@ -445,14 +445,15 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
         import psycopg2
 
         conn = psycopg2.connect(dsn, connect_timeout=5)
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT current_state FROM registration_projections WHERE entity_id = %s",
-            (node_a,),
-        )
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT current_state FROM registration_projections WHERE entity_id = %s",
+                    (node_a,),
+                )
+                row = cur.fetchone()
+        finally:
+            conn.close()
 
         if row is None:
             console.print("[bold red]Node A data lost after restart![/bold red]")

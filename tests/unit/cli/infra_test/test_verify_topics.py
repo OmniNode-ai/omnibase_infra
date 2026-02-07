@@ -14,6 +14,7 @@ import pytest
 from omnibase_infra.cli.infra_test.verify import ONEX_TOPIC_PATTERN
 
 
+@pytest.mark.unit
 class TestOnexTopicPattern:
     """Test ONEX 5-segment topic naming regex."""
 

@@ -4,11 +4,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
+
+import pytest
 
 from omnibase_infra.cli.infra_test.introspect import _build_introspection_payload
 
 
+@pytest.mark.unit
 class TestBuildIntrospectionPayload:
     """Test introspection event payload builder."""
 
@@ -39,9 +43,13 @@ class TestBuildIntrospectionPayload:
         assert UUID(str(payload["correlation_id"]))
 
     def test_has_timestamp(self) -> None:
-        """Payload includes a timestamp."""
+        """Payload includes a valid ISO 8601 timestamp."""
         payload = _build_introspection_payload()
-        assert payload["timestamp"]
+        ts = str(payload["timestamp"])
+        assert ts
+        # Verify it's parseable as ISO 8601
+        parsed = datetime.fromisoformat(ts)
+        assert parsed.year >= 2024
 
     def test_has_version_semver(self) -> None:
         """Payload includes node_version as semver dict."""
@@ -51,6 +59,15 @@ class TestBuildIntrospectionPayload:
         assert version["major"] == 1
         assert version["minor"] == 0
         assert version["patch"] == 0
+
+    def test_custom_version(self) -> None:
+        """Custom version string is parsed into node_version."""
+        payload = _build_introspection_payload(version="2.3.4")
+        version = payload["node_version"]
+        assert isinstance(version, dict)
+        assert version["major"] == 2
+        assert version["minor"] == 3
+        assert version["patch"] == 4
 
     def test_has_endpoints(self) -> None:
         """Payload includes health endpoint."""

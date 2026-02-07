@@ -8,11 +8,13 @@ and the command hierarchy is correct.
 
 from __future__ import annotations
 
+import pytest
 from click.testing import CliRunner
 
 from omnibase_infra.cli.infra_test.cli import cli
 
 
+@pytest.mark.unit
 class TestCLIScaffold:
     """Test CLI command structure and help output."""
 

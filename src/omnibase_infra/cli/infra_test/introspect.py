@@ -17,6 +17,8 @@ from uuid import uuid4
 import click
 from rich.console import Console
 
+from omnibase_infra.cli.infra_test._helpers import get_broker
+
 console = Console()
 
 # Default ONEX topic for introspection events (5-segment format)
@@ -99,7 +101,7 @@ def introspect(
     """
     # Click resolves envvar=KAFKA_BOOTSTRAP_SERVERS for --broker; apply
     # the final fallback only when neither the flag nor the envvar was set.
-    resolved_broker: str = broker or "localhost:29092"
+    resolved_broker: str = broker or get_broker()
 
     payload = _build_introspection_payload(node_id, node_type, version)
     payload_json = json.dumps(payload)
@@ -129,6 +131,7 @@ def introspect(
         capture_output=True,
         text=True,
         check=False,
+        timeout=30,
     )
 
     if result.returncode != 0:

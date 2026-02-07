@@ -75,6 +75,7 @@ def verify_topics() -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=30,
     )
 
     if result.returncode != 0:
@@ -151,6 +152,7 @@ def verify_snapshots(topic: str) -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=30,
     )
 
     if result.returncode != 0:
@@ -249,6 +251,7 @@ def verify_idempotency(topic: str, repetitions: int) -> None:
             capture_output=True,
             text=True,
             check=False,
+            timeout=30,
         )
         if result.returncode != 0:
             console.print(
@@ -363,23 +366,23 @@ def _verify_postgres_registry(node_id: str | None) -> bool:
         import psycopg2
 
         conn = psycopg2.connect(dsn, connect_timeout=5)
-        cur = conn.cursor()
+        try:
+            with conn.cursor() as cur:
+                if node_id:
+                    cur.execute(
+                        "SELECT entity_id, current_state, node_type, updated_at "
+                        "FROM registration_projections WHERE entity_id = %s",
+                        (node_id,),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT entity_id, current_state, node_type, updated_at "
+                        "FROM registration_projections ORDER BY updated_at DESC LIMIT 20"
+                    )
 
-        if node_id:
-            cur.execute(
-                "SELECT entity_id, current_state, node_type, updated_at "
-                "FROM registration_projections WHERE entity_id = %s",
-                (node_id,),
-            )
-        else:
-            cur.execute(
-                "SELECT entity_id, current_state, node_type, updated_at "
-                "FROM registration_projections ORDER BY updated_at DESC LIMIT 20"
-            )
-
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
+                rows = cur.fetchall()
+        finally:
+            conn.close()
     except Exception as e:
         console.print(f"  [red]Cannot connect to PostgreSQL: {type(e).__name__}[/red]")
         return False
@@ -415,16 +418,17 @@ def _count_postgres_registrations(dsn: str, node_id: str) -> int | None:
         import psycopg2
 
         conn = psycopg2.connect(dsn, connect_timeout=5)
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT COUNT(*) FROM registration_projections WHERE entity_id = %s",
-            (node_id,),
-        )
-        row = cur.fetchone()
-        count: int = row[0] if row else 0
-        cur.close()
-        conn.close()
-        return count
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) FROM registration_projections WHERE entity_id = %s",
+                    (node_id,),
+                )
+                row = cur.fetchone()
+                count: int = row[0] if row else 0
+            return count
+        finally:
+            conn.close()
     except Exception as e:
         console.print(f"  [red]PostgreSQL error: {type(e).__name__}: {e}[/red]")
         return None
