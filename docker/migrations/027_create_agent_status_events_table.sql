@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS agent_status_events (
     received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- Extensible metadata
-    metadata JSONB NOT NULL DEFAULT '{}'::JSONB
+    metadata JSONB
 );
 
 -- ============================================================================
