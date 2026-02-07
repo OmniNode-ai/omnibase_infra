@@ -30,7 +30,7 @@ from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProce
 
 
 def _make_descriptor(
-    handler_id: str = "test.handler",
+    handler_id: str = "proto.test_handler",
     name: str = "test-handler",
     handler_class: str | None = "omnibase_infra.test_module.TestHandler",
     contract_path: str | None = "kafka://dev/contracts/test-handler",
@@ -95,7 +95,7 @@ class TestKafkaContractCacheGet:
 
         result = cache.get("test-node")
         assert result is not None
-        assert result.handler_id == "test.handler"
+        assert result.handler_id == "proto.test_handler"
 
     def test_cache_get_returns_none_for_unknown(self) -> None:
         """get() returns None for a node name not in the cache."""
@@ -119,7 +119,7 @@ class TestKafkaContractSourceGetCachedDescriptor:
         source._cache.add("direct-node", descriptor)
         result = source.get_cached_descriptor("direct-node")
         assert result is not None
-        assert result.handler_id == "test.handler"
+        assert result.handler_id == "proto.test_handler"
 
     def test_source_get_cached_descriptor_returns_none(self) -> None:
         """get_cached_descriptor() returns None for unknown node."""
@@ -166,8 +166,8 @@ class TestMaterializeHandlerLive:
             )
 
         assert result is True
-        assert "test.handler" in runtime._handlers
-        assert "test.handler" in runtime._handler_descriptors
+        assert "test_handler" in runtime._handlers
+        assert "test_handler" in runtime._handler_descriptors
         mock_handler_cls.assert_called_once_with(container=mock_container)
 
     @pytest.mark.asyncio
@@ -175,7 +175,7 @@ class TestMaterializeHandlerLive:
         """Second call returns True without re-instantiation."""
         mock_existing = MagicMock()
         runtime = _make_runtime()
-        runtime._handlers["test.handler"] = mock_existing
+        runtime._handlers["test_handler"] = mock_existing
 
         descriptor = _make_descriptor()
         correlation_id = uuid4()
@@ -188,7 +188,7 @@ class TestMaterializeHandlerLive:
 
         assert result is True
         # Original handler preserved, not replaced
-        assert runtime._handlers["test.handler"] is mock_existing
+        assert runtime._handlers["test_handler"] is mock_existing
 
     @pytest.mark.asyncio
     async def test_materialize_skips_no_handler_class(self) -> None:
@@ -204,7 +204,7 @@ class TestMaterializeHandlerLive:
         )
 
         assert result is False
-        assert "test.handler" not in runtime._handlers
+        assert "test_handler" not in runtime._handlers
 
     @pytest.mark.asyncio
     async def test_materialize_rejects_untrusted_namespace(self) -> None:
@@ -220,7 +220,7 @@ class TestMaterializeHandlerLive:
         )
 
         assert result is False
-        assert "test.handler" not in runtime._handlers
+        assert "test_handler" not in runtime._handlers
 
     @pytest.mark.asyncio
     async def test_materialize_handles_import_error(self) -> None:
@@ -239,7 +239,7 @@ class TestMaterializeHandlerLive:
         )
 
         assert result is False
-        assert "test.handler" not in runtime._handlers
+        assert "test_handler" not in runtime._handlers
 
     @pytest.mark.asyncio
     async def test_materialize_skips_kafka_path_deps(self) -> None:
@@ -322,7 +322,7 @@ class TestMaterializeHandlerLive:
             )
 
         assert result is False
-        assert "test.handler" not in runtime._handlers
+        assert "test_handler" not in runtime._handlers
         # No CAPABILITY_CHANGE should be announced
         assert "test-node" not in runtime._announced_capabilities
 

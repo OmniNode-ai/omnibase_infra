@@ -2132,7 +2132,11 @@ class RuntimeHostProcess:
                 return False
 
             # Step 2: Extract protocol_type from handler_id
-            protocol_type = descriptor.handler_id
+            # Strip HANDLER_IDENTITY_PREFIX ("proto.") to match the key format
+            # used by _discover_or_wire_handlers() and _handle_envelope().
+            protocol_type = descriptor.handler_id.removeprefix(
+                f"{HANDLER_IDENTITY_PREFIX}."
+            )
 
             # Step 3: Idempotency - already registered
             if protocol_type in self._handlers:
