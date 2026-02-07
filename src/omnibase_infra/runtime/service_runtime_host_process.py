@@ -840,6 +840,22 @@ class RuntimeHostProcess:
         # True when stop() has been called and we're waiting for messages to drain
         self._is_draining: bool = False
 
+        # Live contract materialization lock (OMN-1989)
+        # Guards handler graph mutations during live materialization.
+        # Separate from _pending_lock to avoid priority inversion between
+        # message processing and handler registration.
+        self._handler_mutation_lock: asyncio.Lock = asyncio.Lock()
+
+        # Idempotency guard for CAPABILITY_CHANGE announcements (OMN-1989)
+        # Tracks which node_names have been announced during this runtime boot.
+        # Prevents introspection spam from Kafka replays or duplicate events.
+        self._announced_capabilities: set[str] = set()
+
+        # In-flight guard for concurrent live materializations (OMN-1989)
+        # Tracks protocol_types currently being materialized to prevent
+        # duplicate instantiation and orphaned handler instances.
+        self._materializing_handlers: set[str] = set()
+
         # Idempotency guard for duplicate message detection (OMN-945)
         # None = disabled, otherwise points to configured store
         self._idempotency_store: ProtocolIdempotencyStore | None = None
@@ -2072,6 +2088,356 @@ class RuntimeHostProcess:
                 "total_count": len(self._handlers),
             },
         )
+
+    # =========================================================================
+    # Live Contract Materialization (OMN-1989)
+    # =========================================================================
+
+    async def _materialize_handler_live(
+        self,
+        node_name: str,
+        descriptor: ModelHandlerDescriptor,
+        correlation_id: UUID,
+    ) -> bool:
+        """Dynamically materialize a handler from a Kafka-sourced contract descriptor.
+
+        Lifecycle ordering invariant (architectural invariant):
+            import -> in-flight reservation ->
+            resolve dependencies -> instantiate -> initialize ->
+            [under lock] register in RegistryProtocolBinding ->
+            wire subscriptions -> register in _handlers ->
+            [outside lock] publish CAPABILITY_CHANGE (best-effort) ->
+            release in-flight reservation.
+
+        Failure at any step before registration means the handler never enters
+        ``_handlers`` and no CAPABILITY_CHANGE announcement is made.
+
+        This method is best-effort: all exceptions are caught and logged at
+        WARNING level. The runtime is never crashed by live materialization.
+
+        Args:
+            node_name: Unique identifier for the handler being materialized.
+            descriptor: Handler descriptor from Kafka contract cache.
+            correlation_id: Correlation ID for distributed tracing.
+
+        Returns:
+            True if the handler was successfully materialized (or was already
+            registered), False on any failure.
+
+        .. versionadded:: 0.9.0
+            Added as part of OMN-1989 live contract materialization.
+        """
+        try:
+            # Step 1: Early-return if no handler_class
+            if descriptor.handler_class is None:
+                logger.debug(
+                    "Skipping live materialization: no handler_class in descriptor",
+                    extra={
+                        "node_name": node_name,
+                        "handler_id": descriptor.handler_id,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                return False
+
+            # Step 2: Extract protocol_type from handler_id
+            # Strip HANDLER_IDENTITY_PREFIX ("proto.") to match the key format
+            # used by _discover_or_wire_handlers() and _handle_envelope().
+            protocol_type = descriptor.handler_id.removeprefix(
+                f"{HANDLER_IDENTITY_PREFIX}."
+            )
+
+            # Step 3: Idempotency - already registered
+            if protocol_type in self._handlers:
+                logger.debug(
+                    "Handler already registered, skipping live materialization",
+                    extra={
+                        "node_name": node_name,
+                        "protocol_type": protocol_type,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                return True
+
+            # Step 4: Namespace validation (security boundary)
+            handler_class_path = descriptor.handler_class
+            allowed_namespaces = ("omnibase_infra.", "omnibase_core.")
+            if not handler_class_path.startswith(allowed_namespaces):
+                logger.warning(
+                    "Rejected live materialization: handler_class outside "
+                    "allowed namespaces",
+                    extra={
+                        "node_name": node_name,
+                        "handler_class": handler_class_path,
+                        "allowed_namespaces": list(allowed_namespaces),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                return False
+
+            # Step 5: Import handler class
+            module_path, class_name = handler_class_path.rsplit(".", 1)
+            module = importlib.import_module(module_path)
+            handler_cls = getattr(module, class_name)
+
+            if not isinstance(handler_cls, type):
+                logger.warning(
+                    "Handler class path does not resolve to a class type",
+                    extra={
+                        "node_name": node_name,
+                        "handler_class": handler_class_path,
+                        "resolved_type": type(handler_cls).__name__,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                return False
+
+            # -- In-flight reservation --
+            # Reserve protocol_type to prevent concurrent duplicate instantiation.
+            # If another coroutine is already materializing this handler, bail out
+            # early instead of creating an orphaned instance.
+            async with self._handler_mutation_lock:
+                if (
+                    protocol_type in self._handlers
+                    or protocol_type in self._materializing_handlers
+                ):
+                    return True
+                self._materializing_handlers.add(protocol_type)
+
+            try:
+                # Step 6: Resolve dependencies
+                # Skip filesystem resolution for kafka:// paths but still merge
+                # materialized resources if present
+                resolved_dependencies: ModelResolvedDependencies | None = None
+                contract_path = descriptor.contract_path
+                if contract_path and not contract_path.startswith("kafka://"):
+                    resolved_dependencies = await self._resolve_handler_dependencies(
+                        descriptor
+                    )
+                elif self._materialized_resources:
+                    # kafka:// path: skip filesystem resolution, merge shared resources
+                    merged_protocols = dict(self._materialized_resources.resources)
+                    if merged_protocols:
+                        resolved_dependencies = ModelResolvedDependencies(
+                            protocols=merged_protocols
+                        )
+
+                # Step 7: Instantiate handler
+                container = self._get_or_create_container()
+                handler_instance: ProtocolContainerAware
+                if resolved_dependencies and self._accepts_dependencies_param(
+                    handler_cls
+                ):
+                    handler_instance = handler_cls(
+                        container=container,
+                        dependencies=resolved_dependencies,
+                    )
+                else:
+                    handler_instance = handler_cls(container=container)
+
+                # Step 8: Initialize handler
+                if hasattr(handler_instance, "initialize"):
+                    effective_config: dict[str, object] = {}
+                    if descriptor.contract_config:
+                        effective_config.update(descriptor.contract_config)
+                    if self._config:
+                        effective_config.update(self._config)
+                    await handler_instance.initialize(effective_config)
+
+                # Steps 9-11: Validate, wire, and register under lock.
+                # All operations MUST be atomic to prevent orphan-subscription
+                # leaks when concurrent materializations race for the same
+                # protocol_type.  Step 12 (CAPABILITY_CHANGE) runs outside
+                # the lock since it is best-effort async I/O.
+                async with self._handler_mutation_lock:
+                    # Double-check idempotency under lock — if another coroutine
+                    # already registered this handler, skip wiring and return.
+                    if protocol_type in self._handlers:
+                        return True
+
+                    # Resolve registry once for both registration and rollback.
+                    handler_registry = await self._get_handler_registry()
+
+                    try:
+                        # Step 9: Register handler class in
+                        # RegistryProtocolBinding BEFORE wiring subscriptions.
+                        # register() validates protocol compliance
+                        # (execute/handle methods). Performing this first
+                        # prevents orphan subscriptions if validation
+                        # fails — there is no unwire API for event bus
+                        # subscriptions.
+                        handler_registry.register(protocol_type, handler_cls)
+
+                        # Step 10: Wire event bus subscriptions
+                        await self._wire_live_handler_subscriptions(
+                            node_name, descriptor
+                        )
+
+                        # Step 11: Register handler instance
+                        self._handler_descriptors[protocol_type] = descriptor
+                        self._handlers[protocol_type] = handler_instance
+
+                        logger.info(
+                            "Live handler materialized successfully",
+                            extra={
+                                "node_name": node_name,
+                                "protocol_type": protocol_type,
+                                "handler_class": handler_class_path,
+                                "correlation_id": str(correlation_id),
+                            },
+                        )
+                    except Exception:
+                        # Roll back all partial state to prevent orphaned
+                        # handlers.  unregister() is a no-op when register()
+                        # itself was the call that threw.
+                        handler_registry.unregister(protocol_type)
+                        self._handler_descriptors.pop(protocol_type, None)
+                        self._handlers.pop(protocol_type, None)
+                        raise  # Re-raise to be caught by outer try/except
+
+                # Step 12: Publish CAPABILITY_CHANGE (best-effort, outside lock)
+                # Handler is committed to _handlers at step 11, so this can
+                # safely run without holding the mutation lock. Reduces lock
+                # contention by not blocking on async I/O.
+                await self._publish_capability_change(node_name, correlation_id)
+
+                return True
+            finally:
+                async with self._handler_mutation_lock:
+                    self._materializing_handlers.discard(protocol_type)
+
+        except Exception as e:
+            # Best-effort: never crash the runtime
+            logger.warning(
+                "Live handler materialization failed",
+                extra={
+                    "node_name": node_name,
+                    "handler_id": descriptor.handler_id,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return False
+
+    async def _wire_live_handler_subscriptions(
+        self,
+        node_name: str,
+        descriptor: ModelHandlerDescriptor,
+    ) -> None:
+        """Wire event bus subscriptions for a live-materialized handler.
+
+        Extracts the ``event_bus`` section from the descriptor's contract_config
+        and wires subscriptions via the existing EventBusSubcontractWiring.
+
+        This is a no-op if:
+        - ``_event_bus_wiring`` is None (not configured)
+        - descriptor has no ``contract_config``
+        - contract_config has no ``event_bus`` section
+
+        Args:
+            node_name: Handler node name for consumer group identification.
+            descriptor: Handler descriptor containing contract_config.
+
+        Raises:
+            Exception: Propagated from ``wire_subscriptions()`` to allow the
+                caller (``_materialize_handler_live``) to abort registration.
+
+        .. versionadded:: 0.9.0
+            Added as part of OMN-1989 live contract materialization.
+        """
+        if self._event_bus_wiring is None:
+            return
+
+        if not descriptor.contract_config:
+            return
+
+        event_bus_data = descriptor.contract_config.get("event_bus")
+        if not event_bus_data or not isinstance(event_bus_data, dict):
+            return
+
+        from omnibase_core.models.contracts.subcontracts import (
+            ModelEventBusSubcontract,
+        )
+
+        subcontract = ModelEventBusSubcontract.model_validate(event_bus_data)
+        if subcontract.subscribe_topics:
+            await self._event_bus_wiring.wire_subscriptions(
+                subcontract=subcontract,
+                node_name=node_name,
+            )
+            logger.debug(
+                "Live handler subscriptions wired",
+                extra={
+                    "node_name": node_name,
+                    "topics": subcontract.subscribe_topics,
+                },
+            )
+
+    async def _publish_capability_change(
+        self,
+        node_name: str,
+        correlation_id: UUID,
+    ) -> None:
+        """Publish a CAPABILITY_CHANGE introspection event for a live-materialized handler.
+
+        Idempotency: skips if ``node_name`` has already been announced during
+        this runtime boot (prevents introspection spam from Kafka replays).
+
+        Bypasses jitter/throttle: capability changes announce immediately since
+        consumers reacting to CAPABILITY_CHANGE may send traffic right away.
+
+        This is a no-op if:
+        - ``_introspection_service`` is None
+        - introspection is disabled by config
+        - ``node_name`` was already announced
+
+        Args:
+            node_name: Handler node name that was materialized.
+            correlation_id: Correlation ID for distributed tracing.
+
+        .. versionadded:: 0.9.0
+            Added as part of OMN-1989 live contract materialization.
+        """
+        if self._introspection_service is None:
+            return
+
+        if not self._introspection_config.enabled:
+            return
+
+        if node_name in self._announced_capabilities:
+            logger.debug(
+                "CAPABILITY_CHANGE already announced, skipping",
+                extra={
+                    "node_name": node_name,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return
+
+        try:
+            await self._introspection_service.publish_introspection(
+                reason=EnumIntrospectionReason.CAPABILITY_CHANGE,
+                correlation_id=correlation_id,
+            )
+            self._announced_capabilities.add(node_name)
+
+            logger.info(
+                "CAPABILITY_CHANGE introspection published",
+                extra={
+                    "node_name": node_name,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to publish CAPABILITY_CHANGE introspection",
+                extra={
+                    "node_name": node_name,
+                    "error": str(e),
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
     async def _materialize_dependencies(self) -> None:
         """Materialize infrastructure resources from contract dependencies.
@@ -3695,16 +4061,23 @@ class RuntimeHostProcess:
         )
 
         async def handle_registration(msg: ModelEventMessage) -> None:
-            """Handle contract registration event from Kafka."""
+            """Handle contract registration event from Kafka.
+
+            After successful caching, triggers live materialization (OMN-1989)
+            if the runtime is running. This enables handlers discovered via
+            Kafka to become active without a restart.
+            """
+            correlation_id: UUID = uuid4()
             try:
                 parsed = _parse_contract_event_payload(msg)
                 if parsed is None:
                     return
 
                 payload, correlation_id = parsed
+                node_name = str(payload.get("node_name", ""))
 
-                source.on_contract_registered(
-                    node_name=str(payload.get("node_name", "")),
+                success = source.on_contract_registered(
+                    node_name=node_name,
                     contract_yaml=str(payload.get("contract_yaml", "")),
                     correlation_id=correlation_id,
                 )
@@ -3712,11 +4085,21 @@ class RuntimeHostProcess:
                 logger.debug(
                     "Processed contract registration event",
                     extra={
-                        "node_name": payload.get("node_name"),
+                        "node_name": node_name,
                         "topic": registration_topic,
                         "correlation_id": str(correlation_id),
                     },
                 )
+
+                # OMN-1989: Trigger live materialization after successful caching
+                if success and self._is_running:
+                    descriptor = source.get_cached_descriptor(node_name)
+                    if descriptor is not None:
+                        await self._materialize_handler_live(
+                            node_name=node_name,
+                            descriptor=descriptor,
+                            correlation_id=correlation_id,
+                        )
 
             except Exception as e:
                 logger.warning(
@@ -3725,11 +4108,18 @@ class RuntimeHostProcess:
                         "error": str(e),
                         "error_type": type(e).__name__,
                         "topic": registration_topic,
+                        "correlation_id": str(correlation_id),
                     },
                 )
 
         async def handle_deregistration(msg: ModelEventMessage) -> None:
             """Handle contract deregistration event from Kafka."""
+            # TODO(OMN-1989): Live handler teardown on deregistration.
+            # Phase 1 supports addition only -- deregistered handlers remain
+            # active until the next runtime restart. This callback clears the
+            # contract cache but does NOT remove the handler from _handlers,
+            # unwire event bus subscriptions, or clear _handler_descriptors.
+            # See OMN-1989 design decisions: "Live removal is a non-goal".
             try:
                 parsed = _parse_contract_event_payload(msg)
                 if parsed is None:
