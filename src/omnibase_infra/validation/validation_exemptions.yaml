@@ -195,6 +195,38 @@ pattern_exemptions:
       - docs/architecture/RUNTIME_HOST_IMPLEMENTATION_PLAN.md
     ticket: OMN-756
   # ==========================================================================
+  # KafkaContractCache Exemptions (OMN-1989)
+  # ==========================================================================
+  # Thread-safe cache with cohesive CRUD and query operations for contract
+  # descriptors. All methods serve the same concern: atomic cache manipulation.
+  # Methods: add, remove, get, get_all, add_error, get_errors,
+  #          get_and_clear_errors, clear, count (property), error_count (property)
+  - file_pattern: 'kafka_contract_source\.py'
+    class_pattern: "Class 'KafkaContractCache'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Thread-safe cache pattern requires atomic CRUD operations (add, remove, get, get_all), error collection (add_error, get_errors, get_and_clear_errors), and lifecycle (clear). All operations are cohesive cache manipulation under a single lock. Breaking into smaller classes would fragment the lock and reduce atomicity guarantees.
+
+    documentation:
+      - OMN-1989 PR description
+      - OMN-1654 Kafka contract source design
+    ticket: OMN-1989
+  # ==========================================================================
+  # KafkaContractSource Exemptions (OMN-1989)
+  # ==========================================================================
+  # Contract source with event handling, cache access, and discovery methods.
+  # Implements ProtocolContractSource and MixinTypedContractEvents.
+  - file_pattern: 'kafka_contract_source\.py'
+    class_pattern: "Class 'KafkaContractSource'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Kafka-based contract source requires: discovery (discover_handlers), cache access (get_cached_descriptor, cached_count), event handling (on_contract_registered, on_contract_deregistered), and lifecycle (clear_cache). Protocol compliance with ProtocolContractSource requires discover_handlers and source_type.
+
+    documentation:
+      - OMN-1989 PR description
+      - OMN-1654 Kafka contract source design
+    ticket: OMN-1989
+  # ==========================================================================
   # PolicyRegistry Exemptions
   # ==========================================================================
   # Domain registry pattern requires comprehensive policy management operations.

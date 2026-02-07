@@ -346,6 +346,21 @@ class KafkaContractCache:
         with self._lock:
             return self._descriptors.pop(node_name, None)
 
+    def get(self, node_name: str) -> ModelHandlerDescriptor | None:
+        """Return a single cached descriptor by node name.
+
+        Args:
+            node_name: Unique identifier for the node (cache key).
+
+        Returns:
+            The cached descriptor if found, None otherwise.
+
+        .. versionadded:: 0.9.0
+            Added as part of OMN-1989 live contract materialization.
+        """
+        with self._lock:
+            return self._descriptors.get(node_name)
+
     def get_all(self) -> list[ModelHandlerDescriptor]:
         """Return all cached descriptors.
 
@@ -831,6 +846,30 @@ class KafkaContractSource(MixinTypedContractEvents, ProtocolContractSource):
             descriptors=descriptors,
             validation_errors=errors,
         )
+
+    def get_cached_descriptor(
+        self,
+        node_name: str,
+    ) -> ModelHandlerDescriptor | None:
+        """Return a cached descriptor by node name without side effects.
+
+        Unlike ``discover_handlers()`` which clears pending errors (one-shot
+        behavior), this method provides read-only access to a single cached
+        descriptor. Useful for live materialization after a registration event.
+
+        Args:
+            node_name: Unique identifier for the node (cache key).
+
+        Returns:
+            The cached descriptor if found, None otherwise.
+
+        Thread Safety:
+            This method is thread-safe. Access is protected by the cache lock.
+
+        .. versionadded:: 0.9.0
+            Added as part of OMN-1989 live contract materialization.
+        """
+        return self._cache.get(node_name)
 
     def on_contract_registered(
         self,
