@@ -71,23 +71,27 @@ from omnibase_infra.utils import sanitize_error_message
 from tests.conftest import check_service_registry_available
 from tests.infrastructure_config import DEFAULT_CONSUL_PORT, DEFAULT_POSTGRES_PORT
 
-# Load environment configuration with priority:
-# 1. .env.docker in this directory (for Docker compose infrastructure)
-# 2. .env in project root (for remote infrastructure)
-# This allows easy switching between Docker and remote infrastructure
+# Load environment configuration with layered priority:
+# 1. .env in project root (base configuration - credentials, shared settings)
+# 2. .env.docker in this directory (overrides for local Docker infrastructure)
+#
+# The layered approach ensures:
+# - Credentials (POSTGRES_PASSWORD, etc.) come from the project .env
+# - Infrastructure endpoints (hosts, ports) can be overridden for local Docker
+# - No need to duplicate credentials in .env.docker
 _e2e_dir = Path(__file__).parent
 _project_root = _e2e_dir.parent.parent.parent.parent
 
-# Check for Docker-specific env file first (for docker-compose.e2e.yml)
 _docker_env_file = _e2e_dir / ".env.docker"
 _project_env_file = _project_root / ".env"
 
-if _docker_env_file.exists():
-    # Docker infrastructure mode - use localhost ports
-    load_dotenv(_docker_env_file, override=True)
-elif _project_env_file.exists():
-    # Remote infrastructure mode - use project .env
+# Layer 1: Load project .env as base (credentials, shared settings)
+if _project_env_file.exists():
     load_dotenv(_project_env_file)
+
+# Layer 2: Override with .env.docker for local Docker infrastructure endpoints
+if _docker_env_file.exists():
+    load_dotenv(_docker_env_file, override=True)
 
 if TYPE_CHECKING:
     import asyncpg
@@ -479,7 +483,6 @@ async def real_kafka_event_bus() -> AsyncGenerator[EventBusKafka, None]:
     config = ModelKafkaEventBusConfig(
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         environment="e2e-test",
-        group="registration-e2e",
         timeout_seconds=30,
         max_retry_attempts=3,
         circuit_breaker_threshold=5,

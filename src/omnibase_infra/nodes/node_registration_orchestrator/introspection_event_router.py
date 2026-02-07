@@ -57,23 +57,39 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _normalize_metadata(metadata: dict[str, object] | None) -> dict[str, object] | None:
+def _normalize_metadata(
+    metadata: object | None,
+) -> dict[str, object] | None:
     """Normalize metadata values, handling bytes to str conversion.
 
     Kafka headers and metadata may arrive as bytes. This function defensively
     converts bytes values to strings using UTF-8 decoding to ensure consistent
     string-based metadata handling downstream.
 
+    Supports both dict metadata and Pydantic model metadata (e.g.,
+    ModelEnvelopeMetadata). Pydantic models are converted to dict via
+    model_dump() before normalization.
+
     Uses duck-typing (hasattr check for decode method) instead of isinstance
     to align with protocol-based design principles.
 
     Args:
-        metadata: Optional metadata dictionary with potentially mixed value types.
+        metadata: Optional metadata dictionary or Pydantic model with potentially
+            mixed value types.
 
     Returns:
         Normalized metadata dict with bytes converted to str, or None if input is None.
     """
     if metadata is None:
+        return None
+
+    # Convert Pydantic models to dict (e.g., ModelEnvelopeMetadata)
+    if hasattr(metadata, "model_dump") and not isinstance(metadata, dict):
+        metadata = metadata.model_dump()
+
+    # Narrow to dict for mypy — model_dump() always returns dict,
+    # and raw dict metadata passes through directly.
+    if not isinstance(metadata, dict):
         return None
 
     normalized: dict[str, object] = {}

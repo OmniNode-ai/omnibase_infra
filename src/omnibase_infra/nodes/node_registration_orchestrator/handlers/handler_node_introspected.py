@@ -429,7 +429,9 @@ class HandlerNodeIntrospected:
                 "node_version": str(node_version) if node_version else None,
                 "capabilities": capabilities_json,
                 # Capability fields (defaults for new registration)
-                "contract_type": "unknown",
+                # contract_type is NULL until capabilities are fully resolved;
+                # schema CHECK constraint only allows NULL or valid node kinds
+                "contract_type": None,
                 "intent_types": [],
                 "protocols": [],
                 "capability_tags": [],
