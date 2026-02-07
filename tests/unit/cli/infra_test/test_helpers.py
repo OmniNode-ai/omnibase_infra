@@ -50,6 +50,12 @@ class TestGetConsulAddr:
         with patch.dict("os.environ", {"CONSUL_SCHEME": "https"}, clear=True):
             assert get_consul_addr() == "https://localhost:8500"
 
+    def test_invalid_scheme_raises(self) -> None:
+        """Rejects non-http/https schemes."""
+        with patch.dict("os.environ", {"CONSUL_SCHEME": "ftp"}, clear=True):
+            with pytest.raises(ValueError, match="CONSUL_SCHEME must be"):
+                get_consul_addr()
+
 
 @pytest.mark.unit
 class TestGetPostgresDsn:
@@ -84,3 +90,15 @@ class TestGetPostgresDsn:
             dsn = get_postgres_dsn()
             assert "p%40ss%3Aw%2Frd" in dsn
             assert "p@ss:w/rd" not in dsn
+
+    def test_host_with_at_raises(self) -> None:
+        """Rejects POSTGRES_HOST containing '@'."""
+        with patch.dict("os.environ", {"POSTGRES_HOST": "evil@host"}, clear=True):
+            with pytest.raises(ValueError, match="POSTGRES_HOST contains '@'"):
+                get_postgres_dsn()
+
+    def test_non_numeric_port_raises(self) -> None:
+        """Rejects non-numeric POSTGRES_PORT."""
+        with patch.dict("os.environ", {"POSTGRES_PORT": "abc"}, clear=True):
+            with pytest.raises(ValueError, match="POSTGRES_PORT must be numeric"):
+                get_postgres_dsn()

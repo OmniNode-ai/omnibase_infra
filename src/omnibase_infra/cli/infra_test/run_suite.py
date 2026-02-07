@@ -148,8 +148,8 @@ def _wait_for_registration(dsn: str, node_id: str, timeout: int = 30) -> bool:
             if row is not None:
                 console.print(f"  Registration state: [green]{row[0]}[/green]")
                 return True
-        except Exception as e:
-            # Transient errors during polling — log at debug level and retry
+        except psycopg2.Error as e:
+            # Transient database errors during polling — log and retry
             console.print(f"  [dim]Poll error: {type(e).__name__}: {e}[/dim]")
         time.sleep(2)
 

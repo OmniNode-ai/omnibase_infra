@@ -30,6 +30,8 @@ def get_consul_addr() -> str:
     host = os.getenv("CONSUL_HOST", "localhost")
     port = os.getenv("CONSUL_PORT", "8500")
     scheme = os.getenv("CONSUL_SCHEME", "http")
+    if scheme not in ("http", "https"):
+        raise ValueError(f"CONSUL_SCHEME must be 'http' or 'https', got {scheme!r}.")
     return f"{scheme}://{host}:{port}"
 
 
@@ -48,4 +50,10 @@ def get_postgres_dsn() -> str:
     db = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
     user = os.getenv("POSTGRES_USER", "postgres")
     password = os.getenv("POSTGRES_PASSWORD", "test-password")
+    if "@" in host:
+        raise ValueError(
+            f"POSTGRES_HOST contains '@' ({host!r}), which would produce a malformed DSN."
+        )
+    if not port.isdigit():
+        raise ValueError(f"POSTGRES_PORT must be numeric, got {port!r}.")
     return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{db}"

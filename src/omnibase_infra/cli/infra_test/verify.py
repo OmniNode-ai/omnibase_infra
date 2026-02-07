@@ -316,6 +316,11 @@ def _verify_consul_registry(node_id: str | None) -> bool:
             onex_services = {k: v for k, v in services.items() if "onex" in k.lower()}
 
             if not onex_services:
+                if node_id:
+                    console.print(
+                        f"  [red]Node {node_id} not found in Consul services.[/red]"
+                    )
+                    return False
                 console.print("  [yellow]No ONEX services found in Consul.[/yellow]")
                 return True  # Not a failure if nothing registered yet
 
@@ -324,14 +329,21 @@ def _verify_consul_registry(node_id: str | None) -> bool:
             table.add_column("Service Name")
             table.add_column("Tags")
 
+            matched = 0
             for sid, svc in onex_services.items():
                 if node_id and node_id not in sid:
                     continue
+                matched += 1
                 table.add_row(
                     sid, svc.get("Service", ""), ", ".join(svc.get("Tags", []))
                 )
 
             console.print(table)
+            if node_id and matched == 0:
+                console.print(
+                    f"  [red]Node {node_id} not found in Consul services.[/red]"
+                )
+                return False
             return True
         except Exception as e:
             console.print(
@@ -340,18 +352,26 @@ def _verify_consul_registry(node_id: str | None) -> bool:
             return False
 
     if not keys:
+        if node_id:
+            console.print(f"  [red]Node {node_id} not found in Consul KV.[/red]")
+            return False
         console.print("  [yellow]No ONEX service keys in Consul KV.[/yellow]")
         return True
 
     table = Table(title="Consul KV Service Keys")
     table.add_column("Key", style="cyan")
 
+    matched = 0
     for key in keys:
         if node_id and node_id not in key:
             continue
+        matched += 1
         table.add_row(key)
 
     console.print(table)
+    if node_id and matched == 0:
+        console.print(f"  [red]Node {node_id} not found in Consul KV.[/red]")
+        return False
     console.print(f"  [green]{len(keys)} service key(s) found.[/green]")
     return True
 
@@ -388,6 +408,9 @@ def _verify_postgres_registry(node_id: str | None) -> bool:
         return False
 
     if not rows:
+        if node_id:
+            console.print(f"  [red]Node {node_id} not found in projections.[/red]")
+            return False
         console.print("  [yellow]No registration projections found.[/yellow]")
         return True
 
