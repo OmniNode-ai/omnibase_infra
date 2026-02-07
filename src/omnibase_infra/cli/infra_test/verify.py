@@ -302,8 +302,9 @@ def _verify_consul_registry(node_id: str | None) -> bool:
         resp = httpx.get(url, timeout=5.0)
         resp.raise_for_status()
         keys = resp.json()
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, ValueError) as e:
         # KV not populated or unreachable -- fall back to service catalog
+        # ValueError catches json.JSONDecodeError (its subclass) for non-JSON responses
         console.print(
             f"  [dim]KV lookup failed ({type(e).__name__}), trying service catalog...[/dim]"
         )
@@ -345,7 +346,7 @@ def _verify_consul_registry(node_id: str | None) -> bool:
                 )
                 return False
             return True
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, ValueError) as e:
             console.print(
                 f"  [red]Cannot reach Consul at {consul_addr}: {type(e).__name__}: {e}[/red]"
             )
