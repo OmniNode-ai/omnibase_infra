@@ -8,7 +8,7 @@ ProtocolValidationLedgerRepository using asyncpg for direct PostgreSQL access.
 Table: validation_event_ledger
     - Stores raw validation event envelopes for cross-repo replay
     - Idempotent writes via (kafka_topic, kafka_partition, kafka_offset) UNIQUE
-    - Deterministic replay ordering via kafka_partition, kafka_offset
+    - Deterministic replay ordering via kafka_topic, kafka_partition, kafka_offset
     - Time-based + min-run retention for cleanup
 
 Idempotency:
@@ -93,7 +93,7 @@ SELECT
     created_at
 FROM validation_event_ledger
 WHERE run_id = $1
-ORDER BY kafka_partition, kafka_offset
+ORDER BY kafka_topic, kafka_partition, kafka_offset
 LIMIT $2
 OFFSET $3
 """
@@ -169,7 +169,7 @@ class PostgresValidationLedgerRepository:
         ...     kafka_partition=0,
         ...     kafka_offset=42,
         ...     envelope_bytes=b"...",
-        ...     envelope_hash="sha256:abc123",
+        ...     envelope_hash="9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
         ... )
     """
 
@@ -303,8 +303,8 @@ class PostgresValidationLedgerRepository:
     ) -> list[ModelValidationLedgerEntry]:
         """Query entries for a specific validation run.
 
-        Returns entries ordered by kafka_partition, kafka_offset for
-        deterministic replay ordering.
+        Returns entries ordered by kafka_topic, kafka_partition, kafka_offset
+        for deterministic replay ordering.
 
         Args:
             run_id: The validation run UUID to query for.
@@ -426,7 +426,7 @@ class PostgresValidationLedgerRepository:
             select_sql = (
                 _SQL_SELECT_BASE
                 + where_sql
-                + " ORDER BY kafka_partition, kafka_offset"
+                + " ORDER BY kafka_topic, kafka_partition, kafka_offset"
                 + f" LIMIT ${param_index} OFFSET ${param_index + 1}"
             )
 

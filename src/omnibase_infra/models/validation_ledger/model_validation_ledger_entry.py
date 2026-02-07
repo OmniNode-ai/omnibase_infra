@@ -8,10 +8,11 @@ entry, representing one row in the validation_event_ledger table.
 
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ModelValidationLedgerEntry(BaseModel):
@@ -44,6 +45,39 @@ class ModelValidationLedgerEntry(BaseModel):
         description="Base64-encoded raw envelope bytes for deterministic replay",
     )
     envelope_hash: str = Field(
-        ..., min_length=1, description="SHA-256 hash of envelope_bytes"
+        ...,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+        description="SHA-256 hex digest of the raw envelope bytes (before base64 encoding)",
     )
     created_at: datetime = Field(..., description="When this ledger entry was created")
+
+    @field_validator("envelope_bytes")
+    @classmethod
+    def validate_base64(cls, v: str) -> str:
+        """Validate that envelope_bytes is valid base64-encoded data.
+
+        PostgreSQL ``encode(bytea, 'base64')`` inserts newlines every 76
+        characters per RFC 2045. We strip whitespace before strict validation
+        so that PG-produced base64 passes the check.
+
+        Args:
+            v: Base64-encoded string, potentially containing newlines
+                and spaces from PostgreSQL encoding.
+
+        Returns:
+            The original string unchanged. Whitespace is stripped only
+            for validation; the stored value preserves PostgreSQL formatting.
+
+        Raises:
+            ValueError: If the string is not valid base64.
+        """
+        try:
+            stripped = v.translate({10: None, 13: None, 32: None})
+            base64.b64decode(stripped, validate=True)
+        except Exception as exc:
+            raise ValueError(
+                "envelope_bytes must be valid base64-encoded data"
+            ) from exc
+        return v

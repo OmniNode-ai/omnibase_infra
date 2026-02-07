@@ -47,7 +47,7 @@ def _make_entry(**overrides: object) -> ModelValidationLedgerEntry:
         "kafka_partition": 0,
         "kafka_offset": 42,
         "envelope_bytes": "dGVzdA==",
-        "envelope_hash": "abc123def456",
+        "envelope_hash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
         "created_at": datetime.now(UTC),
     }
     defaults.update(overrides)
@@ -68,7 +68,10 @@ class TestModelValidationLedgerEntryValid:
         assert entry.repo_id == "omnibase_core"
         assert entry.kafka_partition == 0
         assert entry.kafka_offset == 42
-        assert entry.envelope_hash == "abc123def456"
+        assert (
+            entry.envelope_hash
+            == "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+        )
 
     def test_uuid_fields_accept_valid_uuids(self) -> None:
         """Test that id and run_id accept valid UUID values."""
@@ -139,10 +142,16 @@ class TestModelValidationLedgerEntryValidation:
             _make_entry(kafka_topic="")
         assert "kafka_topic" in str(exc_info.value)
 
-    def test_envelope_hash_min_length_rejects_empty(self) -> None:
-        """Test that envelope_hash with min_length=1 rejects empty string."""
+    def test_envelope_hash_rejects_empty(self) -> None:
+        """Test that envelope_hash rejects empty string."""
         with pytest.raises(ValidationError) as exc_info:
             _make_entry(envelope_hash="")
+        assert "envelope_hash" in str(exc_info.value)
+
+    def test_envelope_hash_rejects_non_sha256_format(self) -> None:
+        """Test that envelope_hash rejects values not matching ^[0-9a-f]{64}$."""
+        with pytest.raises(ValidationError) as exc_info:
+            _make_entry(envelope_hash="abc123")
         assert "envelope_hash" in str(exc_info.value)
 
     def test_kafka_partition_ge_zero_rejects_negative(self) -> None:
@@ -181,7 +190,7 @@ class TestModelValidationLedgerEntryValidation:
                 kafka_partition=0,
                 kafka_offset=0,
                 envelope_bytes="dGVzdA==",
-                envelope_hash="h",
+                envelope_hash="9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
                 created_at=datetime.now(UTC),
             )  # type: ignore[call-arg]
         assert "repo_id" in str(exc_info.value)
@@ -208,7 +217,9 @@ class TestModelValidationLedgerEntryFromAttributes:
                 self.kafka_partition = 0
                 self.kafka_offset = 0
                 self.envelope_bytes = "dGVzdA=="
-                self.envelope_hash = "h"
+                self.envelope_hash = (
+                    "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+                )
                 self.created_at = now
 
         entry = ModelValidationLedgerEntry.model_validate(Row())

@@ -59,7 +59,7 @@ class ProtocolValidationLedgerRepository(Protocol):
         ...         kafka_partition=0,
         ...         kafka_offset=42,
         ...         envelope_bytes=envelope_bytes,
-        ...         envelope_hash="sha256:abc123",
+        ...         envelope_hash="9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
         ...     )
     """
 
@@ -115,8 +115,8 @@ class ProtocolValidationLedgerRepository(Protocol):
     ) -> list[ModelValidationLedgerEntry]:
         """Query entries for a specific validation run.
 
-        Returns entries ordered by kafka_partition and kafka_offset for
-        deterministic replay ordering.
+        Returns entries ordered by kafka_topic, kafka_partition, and
+        kafka_offset for deterministic replay ordering.
 
         Args:
             run_id: The validation run UUID to query for.
@@ -125,7 +125,8 @@ class ProtocolValidationLedgerRepository(Protocol):
 
         Returns:
             List of ModelValidationLedgerEntry matching the run_id,
-            ordered by kafka_partition, kafka_offset for deterministic replay.
+            ordered by kafka_topic, kafka_partition, kafka_offset for
+            deterministic replay.
 
         Raises:
             RepositoryExecutionError: If database query fails.

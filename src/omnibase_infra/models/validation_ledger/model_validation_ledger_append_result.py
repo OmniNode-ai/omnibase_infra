@@ -15,7 +15,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelValidationLedgerAppendResult(BaseModel):
-    """Result of appending a validation event to the ledger."""
+    """Result of appending a validation event to the ledger.
+
+    Returned by ``ProtocolValidationLedgerRepository.append()``. Uses
+    PostgreSQL ``INSERT ... ON CONFLICT DO NOTHING RETURNING id`` to provide
+    idempotent writes with duplicate detection:
+
+    - **New entry**: ``success=True``, ``ledger_entry_id=<uuid>``, ``duplicate=False``
+    - **Duplicate**: ``success=True``, ``ledger_entry_id=None``, ``duplicate=True``
+    - **Error**: raises ``RepositoryExecutionError`` (this model is not created)
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
