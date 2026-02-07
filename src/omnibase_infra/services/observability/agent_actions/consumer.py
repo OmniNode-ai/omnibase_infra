@@ -25,6 +25,7 @@ Topics consumed:
     - router-performance-metrics
     - agent-detection-failures
     - agent-execution-logs
+    - onex.evt.agent.status.v1
 
 Related Tickets:
     - OMN-1743: Migrate agent_actions_consumer to omnibase_infra (current)
@@ -76,6 +77,7 @@ from omnibase_infra.services.observability.agent_actions.config import (
 )
 from omnibase_infra.services.observability.agent_actions.models import (
     ModelAgentAction,
+    ModelAgentStatusEvent,
     ModelDetectionFailure,
     ModelExecutionLog,
     ModelPerformanceMetric,
@@ -167,6 +169,7 @@ TOPIC_TO_MODEL: dict[str, type[BaseModel]] = {
     "router-performance-metrics": ModelPerformanceMetric,
     "agent-detection-failures": ModelDetectionFailure,
     "agent-execution-logs": ModelExecutionLog,
+    "onex.evt.agent.status.v1": ModelAgentStatusEvent,
 }
 
 # Map topics to writer method names
@@ -177,6 +180,7 @@ TOPIC_TO_WRITER_METHOD: dict[str, str] = {
     "router-performance-metrics": "write_performance_metrics",
     "agent-detection-failures": "write_detection_failures",
     "agent-execution-logs": "write_execution_logs",
+    "onex.evt.agent.status.v1": "write_agent_status_events",
 }
 
 

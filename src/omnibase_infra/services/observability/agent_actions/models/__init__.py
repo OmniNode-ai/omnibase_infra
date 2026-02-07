@@ -24,6 +24,7 @@ Idempotency Keys (per table):
     - router_performance_metrics: id (UUID)
     - agent_detection_failures: correlation_id (UUID)
     - agent_execution_logs: execution_id (UUID)
+    - agent_status_events: id (UUID)
 
 Example:
     >>> from omnibase_infra.services.observability.agent_actions.models import (
@@ -57,6 +58,9 @@ Example:
 from omnibase_infra.services.observability.agent_actions.models.model_agent_action import (
     ModelAgentAction,
 )
+from omnibase_infra.services.observability.agent_actions.models.model_agent_status_event import (
+    ModelAgentStatusEvent,
+)
 from omnibase_infra.services.observability.agent_actions.models.model_detection_failure import (
     ModelDetectionFailure,
 )
@@ -78,6 +82,7 @@ from omnibase_infra.services.observability.agent_actions.models.model_transforma
 
 __all__ = [
     "ModelAgentAction",
+    "ModelAgentStatusEvent",
     "ModelDetectionFailure",
     "ModelExecutionLog",
     "ModelObservabilityEnvelope",

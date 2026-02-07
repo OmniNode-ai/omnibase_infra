@@ -2201,6 +2201,27 @@ pattern_exemptions:
       - OMN-1898 ticket description (Identity Alignment section)
     ticket: OMN-1899
   # ==========================================================================
+  # Agent Status Event Model Exemptions (OMN-1849)
+  # ==========================================================================
+  # These models consume EXTERNAL Kafka events from agent status reporters.
+  # The field types are dictated by the producer schema, not our internal design.
+  - file_pattern: 'services/observability/agent_actions/models/model_agent_status_event\.py'
+    violation_pattern: "Field 'agent_name' might reference an entity"
+    reason: >
+      External observability event payload. The agent_name field comes from Kafka events produced by agent status reporters. Using ID + display_name pattern would break compatibility with existing producers.
+
+    documentation:
+      - CLAUDE.md (Observability Models)
+    ticket: OMN-1849
+  - file_pattern: 'services/observability/agent_actions/models/model_agent_status_event\.py'
+    violation_pattern: "Field 'session_id' should use UUID"
+    reason: >
+      session_id is a human-readable session identifier string (e.g., "session-abc123") from external Kafka events. It is NOT a UUID but a string key for grouping status events within a session. The _id suffix triggers a false positive UUID suggestion.
+
+    documentation:
+      - CLAUDE.md (Observability Models)
+    ticket: OMN-1849
+  # ==========================================================================
   # Validation Ledger Exemptions (OMN-1908)
   # ==========================================================================
   # repo_id is intentionally str (not UUID) because it is a human-readable

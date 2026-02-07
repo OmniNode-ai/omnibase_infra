@@ -22,6 +22,7 @@ Idempotency Contract:
     | router_performance_metrics    | id               | DO NOTHING      |
     | agent_detection_failures      | correlation_id   | DO NOTHING      |
     | agent_execution_logs          | execution_id     | DO UPDATE       |
+    | agent_status_events           | id               | DO NOTHING      |
 
 Example:
     >>> import asyncpg
@@ -58,6 +59,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.services.observability.agent_actions.models import (
     ModelAgentAction,
+    ModelAgentStatusEvent,
     ModelDetectionFailure,
     ModelExecutionLog,
     ModelPerformanceMetric,
@@ -911,6 +913,131 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
                 )
             raise RuntimeHostError(
                 f"Database error during write_execution_logs: {type(e).__name__}",
+                context=context,
+            ) from e
+
+    async def write_agent_status_events(
+        self,
+        events: list[ModelAgentStatusEvent],
+        correlation_id: UUID | None = None,
+    ) -> int:
+        """Write batch of agent status events to PostgreSQL.
+
+        Uses INSERT ... ON CONFLICT (id) DO NOTHING for idempotency.
+        Append-only audit log - duplicates are silently ignored.
+
+        Args:
+            events: List of agent status events to write.
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            Count of events in the batch (executemany doesn't return affected rows).
+
+        Raises:
+            InfraConnectionError: If database connection fails.
+            InfraTimeoutError: If operation times out.
+            InfraUnavailableError: If circuit breaker is open.
+        """
+        if not events:
+            return 0
+
+        op_correlation_id = correlation_id or uuid4()
+
+        # Check circuit breaker
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker(
+                operation="write_agent_status_events",
+                correlation_id=op_correlation_id,
+            )
+
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.DATABASE,
+            operation="write_agent_status_events",
+            target_name="agent_status_events",
+            correlation_id=op_correlation_id,
+        )
+
+        sql = """
+            INSERT INTO agent_status_events (
+                id, correlation_id, agent_name, session_id, state,
+                status_schema_version, message, progress, current_phase,
+                current_task, blocking_reason, created_at, received_at, metadata
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), $13)
+            ON CONFLICT (id) DO NOTHING
+        """
+
+        try:
+            async with self._pool.acquire() as conn:
+                await conn.executemany(
+                    sql,
+                    [
+                        (
+                            e.id,
+                            e.correlation_id,
+                            e.agent_name,
+                            e.session_id,
+                            e.state,
+                            e.status_schema_version,
+                            e.message,
+                            e.progress,
+                            e.current_phase,
+                            e.current_task,
+                            e.blocking_reason,
+                            e.created_at,
+                            self._serialize_json(e.metadata),
+                        )
+                        for e in events
+                    ],
+                )
+
+            # Record success
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            logger.debug(
+                "Wrote agent status events batch",
+                extra={
+                    "count": len(events),
+                    "correlation_id": str(op_correlation_id),
+                },
+            )
+            return len(events)
+
+        except asyncpg.QueryCanceledError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="write_agent_status_events",
+                    correlation_id=op_correlation_id,
+                )
+            raise InfraTimeoutError(
+                "Write agent status events timed out",
+                context=ModelTimeoutErrorContext(
+                    transport_type=context.transport_type,
+                    operation=context.operation,
+                    target_name=context.target_name,
+                    correlation_id=context.correlation_id,
+                    timeout_seconds=self._query_timeout,
+                ),
+            ) from e
+        except asyncpg.PostgresConnectionError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="write_agent_status_events",
+                    correlation_id=op_correlation_id,
+                )
+            raise InfraConnectionError(
+                "Database connection failed during write_agent_status_events",
+                context=context,
+            ) from e
+        except asyncpg.PostgresError as e:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation="write_agent_status_events",
+                    correlation_id=op_correlation_id,
+                )
+            raise RuntimeHostError(
+                f"Database error during write_agent_status_events: {type(e).__name__}",
                 context=context,
             ) from e
 
