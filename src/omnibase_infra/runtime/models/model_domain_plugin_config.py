@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
     from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+    from omnibase_infra.models import ModelNodeIdentity
     from omnibase_infra.runtime import MessageDispatchEngine
 
 
@@ -63,6 +64,11 @@ class ModelDomainPluginConfig:
         consumer_group: The consumer group for Kafka consumers.
         dispatch_engine: The MessageDispatchEngine for dispatcher wiring
             (set after engine creation, may be None).
+        node_identity: Typed node identity for structured consumer group naming.
+            Used by plugins that subscribe to event bus topics. The kernel creates
+            this from runtime config (service name, environment, version).
+        kafka_bootstrap_servers: Kafka bootstrap servers string. Used by plugins
+            that need direct Kafka access (e.g., snapshot publishing).
 
     Example:
         ```python
@@ -73,6 +79,10 @@ class ModelDomainPluginConfig:
             input_topic="requests",
             output_topic="responses",
             consumer_group="onex-runtime",
+            node_identity=ModelNodeIdentity(
+                env="local", service="my-service",
+                node_name="my-service", version="v1",
+            ),
         )
         result = await plugin.initialize(config)
         ```
@@ -87,6 +97,14 @@ class ModelDomainPluginConfig:
 
     # Optional: MessageDispatchEngine for dispatcher wiring (set after engine creation)
     dispatch_engine: MessageDispatchEngine | None = None
+
+    # Optional: Typed node identity for structured consumer group naming (OMN-1602)
+    # Used by plugins that subscribe to event bus topics via subscribe(node_identity=...)
+    node_identity: ModelNodeIdentity | None = None
+
+    # Optional: Kafka bootstrap servers for plugins needing direct Kafka access
+    # (e.g., SnapshotPublisher). None when using inmemory event bus.
+    kafka_bootstrap_servers: str | None = None
 
 
 __all__ = ["ModelDomainPluginConfig"]

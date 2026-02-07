@@ -61,7 +61,6 @@ from pathlib import Path
 from typing import cast
 from uuid import UUID
 
-import asyncpg
 import yaml
 from pydantic import ValidationError
 
@@ -76,7 +75,6 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.nodes.contract_registry_reducer.contract_registration_event_router import (
     ContractRegistrationEventRouter,
@@ -85,26 +83,21 @@ from omnibase_infra.nodes.contract_registry_reducer.contract_registration_event_
 from omnibase_infra.nodes.contract_registry_reducer.reducer import (
     ContractRegistryReducer,
 )
-from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
-    DispatcherNodeIntrospected,
-)
-from omnibase_infra.nodes.node_registration_orchestrator.introspection_event_router import (
-    IntrospectionEventRouter,
+from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
+    PluginRegistration,
 )
 from omnibase_infra.runtime.handler_registry import RegistryProtocolBinding
 from omnibase_infra.runtime.models import (
-    ModelProjectorPluginLoaderConfig,
+    ModelDomainPluginConfig,
     ModelRuntimeConfig,
 )
-from omnibase_infra.runtime.projector_plugin_loader import (
-    ProjectorPluginLoader,
-    ProjectorShell,
-    ProtocolEventProjector,
+from omnibase_infra.runtime.protocol_domain_plugin import (
+    ProtocolDomainPlugin,
+    RegistryDomainPlugin,
 )
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from omnibase_infra.runtime.util_container_wiring import (
     wire_infrastructure_services,
-    wire_registration_handlers,
 )
 
 # Circular Import Note (OMN-529):
@@ -435,14 +428,17 @@ async def bootstrap() -> int:
     # Initialize resources to None for cleanup guard in finally block
     runtime: RuntimeHostProcess | None = None
     health_server: ServiceHealth | None = None
-    postgres_pool: asyncpg.Pool | None = None
-    introspection_unsubscribe: Callable[[], Awaitable[None]] | None = None
-    # Contract registry unsubscribe functions and router
+    # Plugin system owns resource lifecycle (pools, publishers, dispatchers)
+    plugin_registry: RegistryDomainPlugin | None = None
+    registration_plugin: PluginRegistration | None = None
+    activated_plugins: list[ProtocolDomainPlugin] = []
+    plugin_unsubscribe_callbacks: list[Callable[[], Awaitable[None]]] = []
+    # Contract registry unsubscribe functions and router (separate domain)
     contract_router: ContractRegistrationEventRouter | None = None
     contract_unsub_registered: Callable[[], Awaitable[None]] | None = None
     contract_unsub_deregistered: Callable[[], Awaitable[None]] | None = None
     contract_unsub_heartbeat: Callable[[], Awaitable[None]] | None = None
-    snapshot_publisher: SnapshotPublisherRegistration | None = None
+    plugin_config: ModelDomainPluginConfig | None = None
     correlation_id = generate_correlation_id()
     bootstrap_start_time = time.time()
 
@@ -684,486 +680,210 @@ async def bootstrap() -> int:
             },
         )
 
-        # 4.5. Create PostgreSQL pool for projections
-        # Only create if POSTGRES_HOST is set (indicates registration should be enabled)
-        projector: ProjectorShell | None = None
-        introspection_dispatcher: DispatcherNodeIntrospected | None = None
-        consul_handler = None  # Will be initialized if Consul is configured
-        snapshot_publisher = None  # Will be initialized if Kafka is available
+        # 4.5. Activate domain plugins via RegistryDomainPlugin (OMN-1992)
+        #
+        # The plugin system replaces inline wiring of registration infrastructure.
+        # Each domain plugin encapsulates its own resource creation, handler wiring,
+        # dispatcher setup, and consumer startup. The kernel iterates registered
+        # plugins and calls the standard lifecycle:
+        #   should_activate() -> initialize() -> wire_handlers() ->
+        #   wire_dispatchers() -> start_consumers()
+        #
+        # Plugins are shut down in LIFO order during kernel shutdown.
+        plugin_registry = RegistryDomainPlugin()
+        registration_plugin = PluginRegistration()
+        plugin_registry.register(registration_plugin)
 
-        postgres_host = os.getenv("POSTGRES_HOST")
-        if postgres_host:
-            postgres_pool_start_time = time.time()
-            try:
-                postgres_pool = await asyncpg.create_pool(
-                    user=os.getenv("POSTGRES_USER", "postgres"),
-                    password=os.getenv("POSTGRES_PASSWORD", ""),
-                    host=postgres_host,
-                    port=int(os.getenv("POSTGRES_PORT", "5432")),
-                    database=os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
-                    min_size=2,
-                    max_size=10,
-                )
-                postgres_pool_duration = time.time() - postgres_pool_start_time
+        # Try to import and register PluginIntelligence (graceful degradation)
+        # If omniintelligence is not installed, kernel boots without it.
+        try:
+            from omniintelligence.runtime.plugin import (  # type: ignore[import-not-found]
+                PluginIntelligence,
+            )
+
+            plugin_registry.register(PluginIntelligence())
+            logger.info(
+                "PluginIntelligence registered (correlation_id=%s)",
+                correlation_id,
+            )
+        except ImportError:
+            logger.debug(
+                "omniintelligence not installed, intelligence plugin not available "
+                "(correlation_id=%s)",
+                correlation_id,
+            )
+
+        # Create typed node identity for plugin subscriptions (OMN-1602)
+        plugin_node_identity: ModelNodeIdentity | None = None
+        if config.name:
+            plugin_node_identity = ModelNodeIdentity(
+                env=environment,
+                service=config.name,
+                node_name=config.name,
+                version=config.contract_version or "v1",
+            )
+
+        # Create shared plugin configuration
+        plugin_config = ModelDomainPluginConfig(
+            container=container,
+            event_bus=event_bus,
+            correlation_id=correlation_id,
+            input_topic=config.input_topic,
+            output_topic=config.output_topic,
+            consumer_group=config.consumer_group,
+            node_identity=plugin_node_identity,
+            kafka_bootstrap_servers=kafka_bootstrap_servers,
+        )
+
+        # Activate plugins in standard lifecycle order
+        plugin_activation_start = time.time()
+        for plugin in plugin_registry.get_all():
+            plugin_id = plugin.plugin_id
+
+            # 1. Check activation
+            if not plugin.should_activate(plugin_config):
                 logger.info(
-                    "PostgreSQL pool created in %.3fs (correlation_id=%s)",
-                    postgres_pool_duration,
+                    "Plugin '%s' skipped (not activated) (correlation_id=%s)",
+                    plugin_id,
                     correlation_id,
-                    extra={
-                        "host": postgres_host,
-                        "port": os.getenv("POSTGRES_PORT", "5432"),
-                        "database": os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
-                    },
                 )
+                continue
 
-                # 4.6. Load projectors from contracts via ProjectorPluginLoader (OMN-1170/1169)
-                #
-                # This section implements fully contract-driven projector management. The
-                # loader discovers projector contracts from the package's projectors/contracts
-                # directory and creates ProjectorShell instances for runtime use.
-                #
-                # Contract-driven approach:
-                # - Projector behavior defined in YAML contracts (registration_projector.yaml)
-                # - ProjectorPluginLoader discovers and loads projectors from contracts
-                # - ProjectorShell provides generic projection operations (project, partial_update)
-                # - Schema initialization is decoupled - SQL executed directly from schema file
-                #
-                # The registration projector is identified by projector_id="registration-projector"
-                # and is passed to wire_registration_handlers() for handler injection.
-                #
-                projector_contracts_dir = (
-                    Path(__file__).parent.parent / "projectors" / "contracts"
-                )
-
-                # Try to discover projectors from contracts
-                projector_loader = ProjectorPluginLoader(
-                    config=ModelProjectorPluginLoaderConfig(graceful_mode=True),
-                    container=container,
-                    pool=postgres_pool,
-                )
-
-                discovered_projectors: list[ProtocolEventProjector] = []
-                if projector_contracts_dir.exists():
-                    try:
-                        discovered_projectors = (
-                            await projector_loader.load_from_directory(
-                                projector_contracts_dir
-                            )
-                        )
-                        if discovered_projectors:
-                            logger.info(
-                                "Discovered %d projector(s) from contracts (correlation_id=%s)",
-                                len(discovered_projectors),
-                                correlation_id,
-                                extra={
-                                    "discovered_count": len(discovered_projectors),
-                                    "contracts_dir": str(projector_contracts_dir),
-                                    "projector_ids": [
-                                        getattr(p, "projector_id", "unknown")
-                                        for p in discovered_projectors
-                                    ],
-                                },
-                            )
-                        else:
-                            logger.warning(
-                                "No projector contracts found in %s (correlation_id=%s)",
-                                projector_contracts_dir,
-                                correlation_id,
-                                extra={
-                                    "contracts_dir": str(projector_contracts_dir),
-                                },
-                            )
-                    except Exception as discovery_error:
-                        # Log warning but continue - projector discovery is best-effort
-                        # Registration features will be unavailable if discovery fails
-                        logger.warning(
-                            "Projector contract discovery failed: %s (correlation_id=%s)",
-                            sanitize_error_message(discovery_error),
-                            correlation_id,
-                            extra={
-                                "error_type": type(discovery_error).__name__,
-                                "contracts_dir": str(projector_contracts_dir),
-                            },
-                        )
-                else:
-                    logger.debug(
-                        "Projector contracts directory not found, skipping discovery "
-                        "(correlation_id=%s)",
-                        correlation_id,
-                        extra={
-                            "contracts_dir": str(projector_contracts_dir),
-                        },
-                    )
-
-                # Extract registration projector from discovered projectors (OMN-1169)
-                # This replaces the legacy ProjectorRegistration with contract-loaded ProjectorShell
-                registration_projector_id = "registration-projector"
-                for discovered in discovered_projectors:
-                    if (
-                        getattr(discovered, "projector_id", None)
-                        == registration_projector_id
-                    ):
-                        # Cast to ProjectorShell (loader creates ProjectorShell when pool provided)
-                        if isinstance(discovered, ProjectorShell):
-                            projector = discovered
-                            logger.info(
-                                "Using contract-loaded ProjectorShell for registration "
-                                "(correlation_id=%s)",
-                                correlation_id,
-                                extra={
-                                    "projector_id": registration_projector_id,
-                                    "aggregate_type": projector.aggregate_type,
-                                },
-                            )
-                        break
-
-                if projector is None:
-                    # Fallback: No registration projector discovered from contracts
-                    logger.warning(
-                        "Registration projector not found in contracts, "
-                        "registration features will be unavailable (correlation_id=%s)",
-                        correlation_id,
-                        extra={
-                            "expected_projector_id": registration_projector_id,
-                            "discovered_count": len(discovered_projectors),
-                        },
-                    )
-
-                # Initialize schema by executing SQL file directly
-                # Schema initialization is decoupled from the projector - it just ensures
-                # the table and indexes exist. The ProjectorShell uses the schema at runtime.
-                schema_file = (
-                    Path(__file__).parent.parent
-                    / "schemas"
-                    / "schema_registration_projection.sql"
-                )
-                if schema_file.exists():
-                    try:
-                        schema_sql = schema_file.read_text()
-                        async with postgres_pool.acquire() as conn:
-                            await conn.execute(schema_sql)
-                        logger.info(
-                            "Registration projection schema initialized (correlation_id=%s)",
-                            correlation_id,
-                        )
-                    except Exception as schema_error:
-                        # Log warning but continue - schema may already exist
-                        logger.warning(
-                            "Schema initialization encountered error: %s (correlation_id=%s)",
-                            sanitize_error_message(schema_error),
-                            correlation_id,
-                            extra={
-                                "error_type": type(schema_error).__name__,
-                            },
-                        )
-                else:
-                    logger.warning(
-                        "Schema file not found: %s (correlation_id=%s)",
-                        schema_file,
-                        correlation_id,
-                    )
-
-                # 4.6.5. Initialize HandlerConsul if Consul is configured
-                # CONSUL_HOST determines whether to enable Consul registration
-                consul_host = os.getenv("CONSUL_HOST")
-                if consul_host:
-                    # Validate CONSUL_PORT environment variable
-                    consul_port_str = os.getenv("CONSUL_PORT", "8500")
-                    try:
-                        consul_port = int(consul_port_str)
-                        if not MIN_PORT <= consul_port <= MAX_PORT:
-                            logger.warning(
-                                "CONSUL_PORT %d outside valid range %d-%d, using default 8500 (correlation_id=%s)",
-                                consul_port,
-                                MIN_PORT,
-                                MAX_PORT,
-                                correlation_id,
-                            )
-                            consul_port = 8500
-                    except ValueError:
-                        logger.warning(
-                            "Invalid CONSUL_PORT value '%s', using default 8500 (correlation_id=%s)",
-                            consul_port_str,
-                            correlation_id,
-                        )
-                        consul_port = 8500
-
-                    try:
-                        # Deferred import: Only load HandlerConsul when Consul is configured.
-                        # This avoids loading the consul dependency (and its transitive deps)
-                        # when Consul integration is disabled, reducing startup time.
-                        from omnibase_infra.handlers import HandlerConsul
-
-                        consul_handler = HandlerConsul(container)
-                        await consul_handler.initialize(
-                            {
-                                "host": consul_host,
-                                "port": consul_port,
-                            }
-                        )
-                        logger.info(
-                            "HandlerConsul initialized for dual registration (correlation_id=%s)",
-                            correlation_id,
-                            extra={
-                                "consul_host": consul_host,
-                                "consul_port": consul_port,
-                            },
-                        )
-                    except Exception as consul_error:
-                        # Log warning but continue without Consul (PostgreSQL is source of truth)
-                        # Use sanitize_error_message to prevent credential leakage in logs
-                        logger.warning(
-                            "Failed to initialize HandlerConsul, proceeding without Consul: %s (correlation_id=%s)",
-                            sanitize_error_message(consul_error),
-                            correlation_id,
-                            extra={
-                                "error_type": type(consul_error).__name__,
-                            },
-                        )
-                        consul_handler = None
-                else:
-                    logger.debug(
-                        "CONSUL_HOST not set, Consul registration disabled (correlation_id=%s)",
-                        correlation_id,
-                    )
-
-                # 4.6.6. Create SnapshotPublisherRegistration if Kafka is available
-                # Snapshot publishing is best-effort - if creation or start fails,
-                # the system continues without snapshot publishing.
-                snapshot_publisher = None
-                if kafka_bootstrap_servers:
-                    try:
-                        from aiokafka import AIOKafkaProducer
-
-                        from omnibase_infra.models.projection import (
-                            ModelSnapshotTopicConfig,
-                        )
-                        from omnibase_infra.projectors.snapshot_publisher_registration import (
-                            SnapshotPublisherRegistration,
-                        )
-
-                        snapshot_config = ModelSnapshotTopicConfig.default()
-                        snapshot_producer = AIOKafkaProducer(
-                            bootstrap_servers=kafka_bootstrap_servers,
-                        )
-                        snapshot_publisher = SnapshotPublisherRegistration(
-                            snapshot_producer,
-                            snapshot_config,
-                            bootstrap_servers=kafka_bootstrap_servers,
-                        )
-                        await snapshot_publisher.start()
-                        logger.info(
-                            "SnapshotPublisherRegistration started for topic %s (correlation_id=%s)",
-                            snapshot_config.topic,
-                            correlation_id,
-                            extra={
-                                "topic": snapshot_config.topic,
-                                "bootstrap_servers": kafka_bootstrap_servers,
-                            },
-                        )
-                    except Exception as snap_pub_error:
-                        # Log warning but continue without snapshot publishing
-                        logger.warning(
-                            "Failed to start SnapshotPublisherRegistration, "
-                            "continuing without snapshot publishing: %s (correlation_id=%s)",
-                            sanitize_error_message(snap_pub_error),
-                            correlation_id,
-                            extra={
-                                "error_type": type(snap_pub_error).__name__,
-                            },
-                        )
-                        snapshot_publisher = None
-                else:
-                    logger.debug(
-                        "KAFKA_BOOTSTRAP_SERVERS not set, snapshot publishing disabled (correlation_id=%s)",
-                        correlation_id,
-                    )
-
-                # 4.7. Wire registration handlers with projector and consul_handler
-                registration_summary = await wire_registration_handlers(
-                    container,
-                    postgres_pool,
-                    projector=projector,
-                    consul_handler=consul_handler,
-                    snapshot_publisher=snapshot_publisher,
-                )
-                logger.info(
-                    "Registration handlers wired (correlation_id=%s)",
-                    correlation_id,
-                    extra={
-                        "services": registration_summary["services"],
-                    },
-                )
-
-                # 4.8. Create introspection dispatcher for routing events
-                # Deferred import: HandlerNodeIntrospected depends on PostgreSQL and
-                # registration infrastructure. Only loaded after PostgreSQL pool is
-                # successfully created and registration handlers are wired.
-                from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-                    HandlerNodeIntrospected,
-                )
-
-                # Check if service_registry is available (may be None in omnibase_core 0.6.x)
-                if container.service_registry is None:
-                    logger.warning(
-                        "DEGRADED_MODE: ServiceRegistry not available, skipping introspection dispatcher creation (correlation_id=%s)",
-                        correlation_id,
-                        extra={
-                            "error_type": "NoneType",
-                            "correlation_id": correlation_id,
-                            "degraded_mode": True,
-                            "degraded_reason": "service_registry_unavailable",
-                            "component": "introspection_dispatcher",
-                        },
-                    )
-                    # Set introspection_dispatcher to None and continue without it
-                    introspection_dispatcher = None
-                else:
-                    logger.debug(
-                        "Resolving HandlerNodeIntrospected from container (correlation_id=%s)",
-                        correlation_id,
-                    )
-                    handler_introspected: HandlerNodeIntrospected = (
-                        await container.service_registry.resolve_service(
-                            HandlerNodeIntrospected
-                        )
-                    )
-                    logger.debug(
-                        "HandlerNodeIntrospected resolved successfully (correlation_id=%s)",
-                        correlation_id,
-                        extra={
-                            "handler_class": handler_introspected.__class__.__name__,
-                        },
-                    )
-
-                    introspection_dispatcher = DispatcherNodeIntrospected(
-                        handler_introspected
-                    )
-                    logger.info(
-                        "Introspection dispatcher created and wired (correlation_id=%s)",
-                        correlation_id,
-                        extra={
-                            "dispatcher_class": introspection_dispatcher.__class__.__name__,
-                            "handler_class": handler_introspected.__class__.__name__,
-                        },
-                    )
-
-                # 4.9. Wire ContractRegistrationEventRouter if contract_registry.enabled
-                # This router subscribes to contract lifecycle events (registration,
-                # deregistration, heartbeat) and routes them to the ContractRegistryReducer.
-                # The router also runs an internal tick timer for staleness computation.
-                if config.contract_registry.enabled and postgres_pool is not None:
-                    # Import postgres handlers for contract persistence
-                    # Deferred import to avoid loading heavy dependencies when not needed
-                    from omnibase_infra.nodes.node_contract_persistence_effect.handlers import (
-                        HandlerPostgresCleanupTopics,
-                        HandlerPostgresContractUpsert,
-                        HandlerPostgresDeactivate,
-                        HandlerPostgresHeartbeat,
-                        HandlerPostgresMarkStale,
-                        HandlerPostgresTopicUpdate,
-                    )
-
-                    # Create effect handlers keyed by intent_type
-                    # These handlers execute PostgreSQL operations for intents from the reducer
-                    # Note: Handlers implement ProtocolIntentEffect duck-typing style with
-                    # more specific payload types. Cast tells mypy they satisfy the protocol.
-                    contract_effect_handlers: dict[str, ProtocolIntentEffect] = {
-                        "postgres.upsert_contract": cast(
-                            "ProtocolIntentEffect",
-                            HandlerPostgresContractUpsert(postgres_pool),
-                        ),
-                        "postgres.update_topic": cast(
-                            "ProtocolIntentEffect",
-                            HandlerPostgresTopicUpdate(postgres_pool),
-                        ),
-                        "postgres.mark_stale": cast(
-                            "ProtocolIntentEffect",
-                            HandlerPostgresMarkStale(postgres_pool),
-                        ),
-                        "postgres.update_heartbeat": cast(
-                            "ProtocolIntentEffect",
-                            HandlerPostgresHeartbeat(postgres_pool),
-                        ),
-                        "postgres.deactivate_contract": cast(
-                            "ProtocolIntentEffect",
-                            HandlerPostgresDeactivate(postgres_pool),
-                        ),
-                        "postgres.cleanup_topic_references": cast(
-                            "ProtocolIntentEffect",
-                            HandlerPostgresCleanupTopics(postgres_pool),
-                        ),
-                    }
-
-                    # Create reducer and router
-                    contract_reducer = ContractRegistryReducer()
-                    contract_router = ContractRegistrationEventRouter(
-                        container=container,
-                        reducer=contract_reducer,
-                        effect_handlers=contract_effect_handlers,
-                        event_bus=event_bus,
-                        tick_interval_seconds=config.contract_registry.tick_interval_seconds,
-                    )
-
-                    logger.info(
-                        "ContractRegistrationEventRouter created (correlation_id=%s)",
-                        correlation_id,
-                        extra={
-                            "tick_interval_seconds": config.contract_registry.tick_interval_seconds,
-                            "handler_count": len(contract_effect_handlers),
-                        },
-                    )
-                else:
-                    logger.debug(
-                        "Contract registry disabled or no postgres_pool (correlation_id=%s)",
-                        correlation_id,
-                        extra={
-                            "contract_registry_enabled": config.contract_registry.enabled,
-                            "postgres_pool_available": postgres_pool is not None,
-                        },
-                    )
-
-            except Exception as pool_error:
-                # Log warning but continue without registration support
-                # Use sanitize_error_message to prevent credential leakage in logs
-                # (PostgreSQL connection errors may include DSN with password)
+            # 2. Initialize (create pools, connections, resources)
+            init_result = await plugin.initialize(plugin_config)
+            if not init_result:
                 logger.warning(
-                    "Failed to initialize PostgreSQL pool for registration: %s (correlation_id=%s)",
-                    sanitize_error_message(pool_error),
+                    "Plugin '%s' initialization failed: %s (correlation_id=%s)",
+                    plugin_id,
+                    init_result.get_error_message_or_default(),
                     correlation_id,
-                    extra={
-                        "error_type": type(pool_error).__name__,
-                    },
                 )
-                if postgres_pool is not None:
-                    try:
-                        await postgres_pool.close()
-                    except Exception as cleanup_error:
-                        # Sanitize cleanup errors to prevent credential leakage
-                        # NOTE: Do NOT use exc_info=True here - tracebacks may contain
-                        # connection strings with credentials from PostgreSQL errors
-                        logger.warning(
-                            "Cleanup failed for PostgreSQL pool close: %s (correlation_id=%s)",
-                            sanitize_error_message(cleanup_error),
-                            correlation_id,
-                        )
-                    postgres_pool = None
-                projector = None
-                introspection_dispatcher = None
-                if snapshot_publisher is not None:
-                    try:
-                        await snapshot_publisher.stop()
-                    except Exception as snap_cleanup_error:
-                        logger.warning(
-                            "Cleanup failed for snapshot publisher stop: %s (correlation_id=%s)",
-                            sanitize_error_message(snap_cleanup_error),
-                            correlation_id,
-                        )
-                snapshot_publisher = None
+                continue
+
+            # 3. Wire handlers
+            wire_result = await plugin.wire_handlers(plugin_config)
+            if not wire_result:
+                logger.warning(
+                    "Plugin '%s' handler wiring failed: %s (correlation_id=%s)",
+                    plugin_id,
+                    wire_result.get_error_message_or_default(),
+                    correlation_id,
+                )
+                continue
+
+            # 4. Wire dispatchers (non-fatal if skipped)
+            dispatch_result = await plugin.wire_dispatchers(plugin_config)
+            if not dispatch_result:
+                logger.warning(
+                    "Plugin '%s' dispatcher wiring failed: %s (correlation_id=%s)",
+                    plugin_id,
+                    dispatch_result.get_error_message_or_default(),
+                    correlation_id,
+                )
+
+            # 5. Start consumers
+            consumer_result = await plugin.start_consumers(plugin_config)
+            if consumer_result and consumer_result.unsubscribe_callbacks:
+                plugin_unsubscribe_callbacks.extend(
+                    consumer_result.unsubscribe_callbacks
+                )
+
+            activated_plugins.append(plugin)
+            logger.info(
+                "Plugin '%s' activated successfully (correlation_id=%s)",
+                plugin_id,
+                correlation_id,
+            )
+
+        plugin_activation_duration = time.time() - plugin_activation_start
+        logger.info(
+            "Plugin activation completed in %.3fs: %d/%d plugins activated "
+            "(correlation_id=%s)",
+            plugin_activation_duration,
+            len(activated_plugins),
+            len(plugin_registry),
+            correlation_id,
+            extra={
+                "activated_plugins": [p.plugin_id for p in activated_plugins],
+                "duration_seconds": plugin_activation_duration,
+            },
+        )
+
+        # 4.9. Wire ContractRegistrationEventRouter if contract_registry.enabled
+        # This router subscribes to contract lifecycle events (registration,
+        # deregistration, heartbeat) and routes them to the ContractRegistryReducer.
+        # The router also runs an internal tick timer for staleness computation.
+        # Uses postgres_pool from the registration plugin.
+        postgres_pool = registration_plugin.postgres_pool
+        if config.contract_registry.enabled and postgres_pool is not None:
+            # Import postgres handlers for contract persistence
+            # Deferred import to avoid loading heavy dependencies when not needed
+            from omnibase_infra.nodes.node_contract_persistence_effect.handlers import (
+                HandlerPostgresCleanupTopics,
+                HandlerPostgresContractUpsert,
+                HandlerPostgresDeactivate,
+                HandlerPostgresHeartbeat,
+                HandlerPostgresMarkStale,
+                HandlerPostgresTopicUpdate,
+            )
+
+            # Create effect handlers keyed by intent_type
+            # These handlers execute PostgreSQL operations for intents from the reducer
+            # Note: Handlers implement ProtocolIntentEffect duck-typing style with
+            # more specific payload types. Cast tells mypy they satisfy the protocol.
+            contract_effect_handlers: dict[str, ProtocolIntentEffect] = {
+                "postgres.upsert_contract": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresContractUpsert(postgres_pool),
+                ),
+                "postgres.update_topic": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresTopicUpdate(postgres_pool),
+                ),
+                "postgres.mark_stale": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresMarkStale(postgres_pool),
+                ),
+                "postgres.update_heartbeat": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresHeartbeat(postgres_pool),
+                ),
+                "postgres.deactivate_contract": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresDeactivate(postgres_pool),
+                ),
+                "postgres.cleanup_topic_references": cast(
+                    "ProtocolIntentEffect",
+                    HandlerPostgresCleanupTopics(postgres_pool),
+                ),
+            }
+
+            # Create reducer and router
+            contract_reducer = ContractRegistryReducer()
+            contract_router = ContractRegistrationEventRouter(
+                container=container,
+                reducer=contract_reducer,
+                effect_handlers=contract_effect_handlers,
+                event_bus=event_bus,
+                tick_interval_seconds=config.contract_registry.tick_interval_seconds,
+            )
+
+            logger.info(
+                "ContractRegistrationEventRouter created (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "tick_interval_seconds": config.contract_registry.tick_interval_seconds,
+                    "handler_count": len(contract_effect_handlers),
+                },
+            )
         else:
             logger.debug(
-                "POSTGRES_HOST not set, skipping registration handler wiring (correlation_id=%s)",
+                "Contract registry disabled or no postgres_pool (correlation_id=%s)",
                 correlation_id,
+                extra={
+                    "contract_registry_enabled": config.contract_registry.enabled,
+                    "postgres_pool_available": postgres_pool is not None,
+                },
             )
 
         # 5. Resolve RegistryProtocolBinding from container or create new instance
@@ -1390,120 +1110,16 @@ async def bootstrap() -> int:
             },
         )
 
-        # 9.5. Start introspection event consumer if dispatcher is available
-        # This consumer subscribes to the input topic and routes introspection
-        # events to the HandlerNodeIntrospected via DispatcherNodeIntrospected.
-        # Unlike RuntimeHostProcess which routes based on handler_type field,
-        # this consumer directly parses introspection events from JSON.
-        #
-        # The message handler is extracted to IntrospectionMessageHandler for
-        # better testability and separation of concerns (PR #101 code quality).
-        #
-        # Duck typing approach per CLAUDE.md architectural guidelines:
-        # Check for subscribe() capability via hasattr/callable instead of isinstance.
-        # This enables any event bus implementing subscribe() to participate in
-        # introspection event consumption, following protocol-based polymorphism.
-        #
-        # Production considerations:
-        # - EventBusKafka: Uses distributed consumer groups for production workloads
-        # - EventBusInmemory: subscribe() works for testing scenarios
-        # - Other implementations: Will work if they implement subscribe()
-        #
-        # The duck typing approach allows new event bus implementations to
-        # participate in introspection without modifying this code.
-        has_subscribe = hasattr(event_bus, "subscribe") and callable(
-            getattr(event_bus, "subscribe", None)
-        )
-        if introspection_dispatcher is not None and has_subscribe:
-            # Create extracted event router with container-based DI pattern
-            # Dependencies are passed explicitly since they are created at runtime
-            # by the kernel and may not be registered in the container yet
-            introspection_event_router = IntrospectionEventRouter(
-                container=container,
-                output_topic=config.output_topic,
-                dispatcher=introspection_dispatcher,
-                event_bus=event_bus,
-            )
-
-            # Create typed node identity for introspection subscription (OMN-1602)
-            # Uses ModelNodeIdentity + EnumConsumerGroupPurpose instead of hardcoded
-            # group_id suffix hack for proper semantic consumer group naming.
-            #
-            # Required fields from config (fail-fast if missing):
-            # - service_name: from config.name (required for node identification)
-            # - node_name: from config.name (required for node identification)
-            # Optional with defaults:
-            # - env: from environment variable or event_bus.environment
-            # - version: from config.contract_version or "v1"
-            if not config.name:
-                context = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.RUNTIME,
-                    operation="create_node_identity",
-                    correlation_id=correlation_id,
-                )
-                raise ProtocolConfigurationError(
-                    "Runtime config requires 'name' field for service identification. "
-                    "Add 'name: your-service-name' to runtime_config.yaml. "
-                    "This is required for typed introspection subscription (OMN-1602).",
-                    context=context,
-                    parameter="name",
-                )
-
-            introspection_node_identity = ModelNodeIdentity(
-                env=environment,
-                service=config.name,
-                node_name=config.name,
-                version=config.contract_version or "v1",
-            )
-
-            # Subscribe with callback - returns unsubscribe function
-            subscribe_start_time = time.time()
-            logger.info(
-                "Subscribing to introspection events on event bus (correlation_id=%s)",
-                correlation_id,
-                extra={
-                    "topic": config.input_topic,
-                    "node_identity": {
-                        "env": introspection_node_identity.env,
-                        "service": introspection_node_identity.service,
-                        "node_name": introspection_node_identity.node_name,
-                        "version": introspection_node_identity.version,
-                    },
-                    "purpose": EnumConsumerGroupPurpose.INTROSPECTION.value,
-                    "event_bus_type": event_bus_type,
-                },
-            )
-
-            introspection_unsubscribe = await event_bus.subscribe(
-                topic=config.input_topic,
-                node_identity=introspection_node_identity,
-                on_message=introspection_event_router.handle_message,
-                purpose=EnumConsumerGroupPurpose.INTROSPECTION,
-                required_for_readiness=True,
-            )
-            subscribe_duration = time.time() - subscribe_start_time
-
-            logger.info(
-                "Introspection event consumer started successfully in %.3fs (correlation_id=%s)",
-                subscribe_duration,
-                correlation_id,
-                extra={
-                    "topic": config.input_topic,
-                    "node_identity": {
-                        "env": introspection_node_identity.env,
-                        "service": introspection_node_identity.service,
-                        "node_name": introspection_node_identity.node_name,
-                        "version": introspection_node_identity.version,
-                    },
-                    "purpose": EnumConsumerGroupPurpose.INTROSPECTION.value,
-                    "subscribe_duration_seconds": subscribe_duration,
-                    "event_bus_type": event_bus_type,
-                },
-            )
+        # 9.5. Introspection event consumer is now started by domain plugins
+        # during plugin activation (step 4.5). The PluginRegistration.start_consumers()
+        # method handles subscription using node_identity and EnumConsumerGroupPurpose.
 
         # 9.6. Start contract registry event consumer if router is available
         # This consumer subscribes to 3 Kafka topics for contract lifecycle events
         # and routes them to the ContractRegistryReducer for projection.
+        has_subscribe = hasattr(event_bus, "subscribe") and callable(
+            getattr(event_bus, "subscribe", None)
+        )
         if contract_router is not None and has_subscribe:
             # Create typed node identity for contract registry subscriptions
             contract_node_identity = ModelNodeIdentity(
@@ -1615,16 +1231,8 @@ async def bootstrap() -> int:
         bootstrap_duration = time.time() - bootstrap_start_time
 
         # Display startup banner with key configuration
-        if introspection_dispatcher is not None:
-            if consul_handler is not None:
-                registration_status = "enabled (PostgreSQL + Consul)"
-            else:
-                registration_status = "enabled (PostgreSQL only)"
-        else:
-            registration_status = "disabled"
-
-        # Snapshot publisher status for banner
-        snapshot_status = "enabled" if snapshot_publisher is not None else "disabled"
+        # Get registration status from plugin (encapsulates backend details)
+        registration_status = registration_plugin.get_status_line()
 
         # Contract registry status for banner
         if contract_router is not None:
@@ -1634,6 +1242,9 @@ async def bootstrap() -> int:
         else:
             contract_registry_status = "disabled"
 
+        # Plugin summary for banner
+        plugin_names = [p.plugin_id for p in activated_plugins]
+
         banner_lines = [
             "=" * 60,
             f"ONEX Runtime Kernel v{KERNEL_VERSION}",
@@ -1642,8 +1253,8 @@ async def bootstrap() -> int:
             f"Event Bus: {event_bus_type} (group: {config.consumer_group})",
             f"Topics: {config.input_topic} -> {config.output_topic}",
             f"Registration: {registration_status}",
-            f"Snapshot Publisher: {snapshot_status}",
             f"Contract Registry: {contract_registry_status}",
+            f"Plugins: {', '.join(plugin_names) if plugin_names else 'none'}",
             f"Health endpoint: http://0.0.0.0:{http_port}/health",
             f"Bootstrap time: {bootstrap_duration:.3f}s",
             f"Correlation ID: {correlation_id}",
@@ -1678,21 +1289,17 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
-        # Stop introspection consumer first (fast)
-        if introspection_unsubscribe is not None:
+        # Stop plugin consumers first (unsubscribe callbacks from start_consumers)
+        for unsub_callback in plugin_unsubscribe_callbacks:
             try:
-                await introspection_unsubscribe()
-                logger.debug(
-                    "Introspection consumer stopped (correlation_id=%s)",
-                    correlation_id,
-                )
+                await unsub_callback()
             except Exception as consumer_stop_error:
                 logger.warning(
-                    "Failed to stop introspection consumer: %s (correlation_id=%s)",
+                    "Failed to stop plugin consumer: %s (correlation_id=%s)",
                     sanitize_error_message(consumer_stop_error),
                     correlation_id,
                 )
-            introspection_unsubscribe = None
+        plugin_unsubscribe_callbacks.clear()
 
         # Stop contract registry router and consumers
         if contract_router is not None:
@@ -1781,41 +1388,35 @@ async def bootstrap() -> int:
             )
         runtime = None  # Mark as stopped to prevent double-stop in finally
 
-        # Stop snapshot publisher
-        if snapshot_publisher is not None:
-            try:
-                await snapshot_publisher.stop()
-                logger.debug(
-                    "Snapshot publisher stopped (correlation_id=%s)",
-                    correlation_id,
-                )
-            except Exception as snap_stop_error:
-                logger.warning(
-                    "Failed to stop snapshot publisher: %s (correlation_id=%s)",
-                    sanitize_error_message(snap_stop_error),
-                    correlation_id,
-                )
-            snapshot_publisher = None
-
-        # Close PostgreSQL pool
-        if postgres_pool is not None:
-            try:
-                pool_close_start_time = time.time()
-                await postgres_pool.close()
-                pool_close_duration = time.time() - pool_close_start_time
-                logger.debug(
-                    "PostgreSQL pool closed in %.3fs (correlation_id=%s)",
-                    pool_close_duration,
-                    correlation_id,
-                )
-            except Exception as pool_close_error:
-                # Sanitize to prevent credential leakage
-                logger.warning(
-                    "Failed to close PostgreSQL pool: %s (correlation_id=%s)",
-                    sanitize_error_message(pool_close_error),
-                    correlation_id,
-                )
-            postgres_pool = None
+        # Shutdown plugins in LIFO order (Last In, First Out)
+        # This ensures plugins activated later are shut down before plugins they
+        # may depend on. Each plugin handles its own resource cleanup (pools,
+        # publishers, connections).
+        if plugin_config is not None:
+            for plugin in reversed(activated_plugins):
+                try:
+                    shutdown_result = await plugin.shutdown(plugin_config)
+                    if not shutdown_result:
+                        logger.warning(
+                            "Plugin '%s' shutdown reported errors: %s (correlation_id=%s)",
+                            plugin.plugin_id,
+                            shutdown_result.get_error_message_or_default(),
+                            correlation_id,
+                        )
+                    else:
+                        logger.debug(
+                            "Plugin '%s' shut down (correlation_id=%s)",
+                            plugin.plugin_id,
+                            correlation_id,
+                        )
+                except Exception as plugin_shutdown_error:
+                    logger.warning(
+                        "Plugin '%s' shutdown failed: %s (correlation_id=%s)",
+                        plugin.plugin_id,
+                        sanitize_error_message(plugin_shutdown_error),
+                        correlation_id,
+                    )
+            activated_plugins.clear()
 
         shutdown_duration = time.time() - shutdown_start_time
         logger.info(
@@ -1876,14 +1477,15 @@ async def bootstrap() -> int:
 
     finally:
         # Guard cleanup - stop all resources if not already stopped
-        # Order: introspection consumer -> contract registry -> health server -> runtime -> pool
+        # Order: plugin consumers -> contract registry -> health server -> runtime -> plugins (LIFO)
 
-        if introspection_unsubscribe is not None:
+        # Cleanup plugin consumer subscriptions
+        for unsub_callback in plugin_unsubscribe_callbacks:
             try:
-                await introspection_unsubscribe()
+                await unsub_callback()
             except Exception as cleanup_error:
                 logger.warning(
-                    "Failed to stop introspection consumer during cleanup: %s (correlation_id=%s)",
+                    "Failed to stop plugin consumer during cleanup: %s (correlation_id=%s)",
                     sanitize_error_message(cleanup_error),
                     correlation_id,
                 )
@@ -1936,32 +1538,20 @@ async def bootstrap() -> int:
                     correlation_id,
                 )
 
-        # Stop snapshot publisher if still running.
-        # The graceful shutdown path and the inner pool_error except block both
-        # clean up the snapshot publisher and set it to None. This guard catches
-        # the case where an exception occurs AFTER the publisher is started but
-        # OUTSIDE those two cleanup paths (e.g., during RuntimeHostProcess
-        # creation, health server start, or introspection subscription setup).
-        if snapshot_publisher is not None:
-            try:
-                await snapshot_publisher.stop()
-            except Exception as cleanup_error:
-                logger.warning(
-                    "Failed to stop snapshot publisher during cleanup: %s (correlation_id=%s)",
-                    sanitize_error_message(cleanup_error),
-                    correlation_id,
-                )
-
-        if postgres_pool is not None:
-            try:
-                await postgres_pool.close()
-            except Exception as cleanup_error:
-                # Sanitize to prevent credential leakage from PostgreSQL errors
-                logger.warning(
-                    "Failed to close PostgreSQL pool during cleanup: %s (correlation_id=%s)",
-                    sanitize_error_message(cleanup_error),
-                    correlation_id,
-                )
+        # Shutdown plugins in LIFO order (handles pools, publishers, connections)
+        # Uses minimal config for cleanup to avoid depending on resources that may
+        # have been partially created during a failed bootstrap.
+        if plugin_config is not None:
+            for plugin in reversed(activated_plugins):
+                try:
+                    await plugin.shutdown(plugin_config)
+                except Exception as cleanup_error:
+                    logger.warning(
+                        "Failed to shut down plugin '%s' during cleanup: %s (correlation_id=%s)",
+                        plugin.plugin_id,
+                        sanitize_error_message(cleanup_error),
+                        correlation_id,
+                    )
 
 
 def configure_logging() -> None:

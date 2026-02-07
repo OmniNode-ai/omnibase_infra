@@ -76,6 +76,9 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
         DispatcherNodeIntrospected,
     )
+    from omnibase_infra.projectors.snapshot_publisher_registration import (
+        SnapshotPublisherRegistration,
+    )
     from omnibase_infra.runtime.projector_shell import ProjectorShell
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -177,6 +180,7 @@ class PluginRegistration:
         self._projector: ProjectorShell | None = None
         self._consul_handler: HandlerConsul | None = None
         self._introspection_dispatcher: DispatcherNodeIntrospected | None = None
+        self._snapshot_publisher: SnapshotPublisherRegistration | None = None
         self._shutdown_in_progress: bool = False
 
     @property
@@ -203,6 +207,11 @@ class PluginRegistration:
     def consul_handler(self) -> HandlerConsul | None:
         """Return the Consul handler (for external access)."""
         return self._consul_handler
+
+    @property
+    def snapshot_publisher(self) -> SnapshotPublisherRegistration | None:
+        """Return the snapshot publisher (for external access)."""
+        return self._snapshot_publisher
 
     def should_activate(self, config: ModelDomainPluginConfig) -> bool:
         """Check if Registration should activate based on environment.
@@ -302,6 +311,11 @@ class PluginRegistration:
             await self._initialize_consul_handler(config)
             if self._consul_handler is not None:
                 resources_created.append("consul_handler")
+
+            # 5. Initialize SnapshotPublisher (optional, requires Kafka)
+            await self._initialize_snapshot_publisher(config)
+            if self._snapshot_publisher is not None:
+                resources_created.append("snapshot_publisher")
 
             duration = time.time() - start_time
             # Use constructor directly for results with resources_created
@@ -535,9 +549,83 @@ class PluginRegistration:
             )
             self._consul_handler = None
 
+    async def _initialize_snapshot_publisher(
+        self, config: ModelDomainPluginConfig
+    ) -> None:
+        """Initialize SnapshotPublisher if Kafka is available.
+
+        Creates a SnapshotPublisherRegistration for publishing compacted
+        snapshots to Kafka. This is best-effort - if creation or start
+        fails, the system continues without snapshot publishing.
+
+        Args:
+            config: Plugin configuration with kafka_bootstrap_servers.
+        """
+        correlation_id = config.correlation_id
+        kafka_bootstrap_servers = config.kafka_bootstrap_servers
+
+        if not kafka_bootstrap_servers:
+            logger.debug(
+                "kafka_bootstrap_servers not set, snapshot publishing disabled "
+                "(correlation_id=%s)",
+                correlation_id,
+            )
+            return
+
+        try:
+            from aiokafka import AIOKafkaProducer
+
+            from omnibase_infra.models.projection import ModelSnapshotTopicConfig
+            from omnibase_infra.projectors.snapshot_publisher_registration import (
+                SnapshotPublisherRegistration,
+            )
+
+            snapshot_config = ModelSnapshotTopicConfig.default()
+            snapshot_producer = AIOKafkaProducer(
+                bootstrap_servers=kafka_bootstrap_servers,
+            )
+            self._snapshot_publisher = SnapshotPublisherRegistration(
+                snapshot_producer,
+                snapshot_config,
+                bootstrap_servers=kafka_bootstrap_servers,
+            )
+            await self._snapshot_publisher.start()
+            logger.info(
+                "SnapshotPublisherRegistration started for topic %s "
+                "(correlation_id=%s)",
+                snapshot_config.topic,
+                correlation_id,
+                extra={
+                    "topic": snapshot_config.topic,
+                    "bootstrap_servers": kafka_bootstrap_servers,
+                },
+            )
+        except Exception as snap_pub_error:
+            logger.warning(
+                "Failed to start SnapshotPublisherRegistration, "
+                "continuing without snapshot publishing: %s (correlation_id=%s)",
+                sanitize_error_message(snap_pub_error),
+                correlation_id,
+                extra={
+                    "error_type": type(snap_pub_error).__name__,
+                },
+            )
+            self._snapshot_publisher = None
+
     async def _cleanup_on_failure(self, config: ModelDomainPluginConfig) -> None:
         """Clean up resources if initialization fails."""
         correlation_id = config.correlation_id
+
+        if self._snapshot_publisher is not None:
+            try:
+                await self._snapshot_publisher.stop()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Cleanup failed for snapshot publisher stop: %s (correlation_id=%s)",
+                    sanitize_error_message(cleanup_error),
+                    correlation_id,
+                )
+            self._snapshot_publisher = None
 
         if self._pool is not None:
             try:
@@ -590,6 +678,7 @@ class PluginRegistration:
                 self._pool,
                 projector=self._projector,
                 consul_handler=self._consul_handler,
+                snapshot_publisher=self._snapshot_publisher,
                 correlation_id=correlation_id,
             )
             duration = time.time() - start_time
@@ -716,14 +805,16 @@ class PluginRegistration:
         Subscribes to the input topic to route introspection events to
         HandlerNodeIntrospected via IntrospectionEventRouter.
 
-        Note: Only starts consumer for KafkaEventBus, not InMemoryEventBus.
+        Requires config.node_identity to be set for structured consumer group
+        naming (OMN-1602).
 
         Args:
-            config: Plugin configuration with event_bus.
+            config: Plugin configuration with event_bus and node_identity.
 
         Returns:
             Result with unsubscribe_callbacks for cleanup.
         """
+        from omnibase_infra.enums import EnumConsumerGroupPurpose
         from omnibase_infra.nodes.node_registration_orchestrator.introspection_event_router import (
             IntrospectionEventRouter,
         )
@@ -745,6 +836,12 @@ class PluginRegistration:
                 reason="Event bus does not support subscribe",
             )
 
+        if config.node_identity is None:
+            return ModelDomainPluginResult.skipped(
+                plugin_id=self.plugin_id,
+                reason="node_identity not set (required for consumer subscription)",
+            )
+
         try:
             # Create event router with container-based DI pattern
             introspection_event_router = IntrospectionEventRouter(
@@ -754,25 +851,34 @@ class PluginRegistration:
                 output_topic=config.output_topic,
             )
 
-            # Subscribe to input topic
+            # Subscribe using typed node identity for structured consumer group naming
             logger.info(
-                "Subscribing to introspection events on Kafka (correlation_id=%s)",
+                "Subscribing to introspection events on event bus (correlation_id=%s)",
                 correlation_id,
                 extra={
                     "topic": config.input_topic,
-                    "consumer_group": f"{config.consumer_group}-introspection",
+                    "node_identity": {
+                        "env": config.node_identity.env,
+                        "service": config.node_identity.service,
+                        "node_name": config.node_identity.node_name,
+                        "version": config.node_identity.version,
+                    },
+                    "purpose": EnumConsumerGroupPurpose.INTROSPECTION.value,
                 },
             )
 
             introspection_unsubscribe = await config.event_bus.subscribe(
                 topic=config.input_topic,
-                group_id=f"{config.consumer_group}-introspection",
+                node_identity=config.node_identity,
                 on_message=introspection_event_router.handle_message,
+                purpose=EnumConsumerGroupPurpose.INTROSPECTION,
+                required_for_readiness=True,
             )
 
             duration = time.time() - start_time
             logger.info(
-                "Introspection event consumer started (correlation_id=%s)",
+                "Introspection event consumer started in %.3fs (correlation_id=%s)",
+                duration,
                 correlation_id,
                 extra={
                     "subscribe_duration_seconds": duration,
@@ -840,6 +946,10 @@ class PluginRegistration:
     ) -> ModelDomainPluginResult:
         """Internal shutdown implementation.
 
+        Shutdown order: snapshot_publisher -> pool -> clear references.
+        Snapshot publisher is stopped first because it depends on Kafka,
+        which may be shutting down independently.
+
         Args:
             config: Plugin configuration.
 
@@ -849,6 +959,24 @@ class PluginRegistration:
         start_time = time.time()
         correlation_id = config.correlation_id
         errors: list[str] = []
+
+        # Stop snapshot publisher first (depends on external Kafka)
+        if self._snapshot_publisher is not None:
+            try:
+                await self._snapshot_publisher.stop()
+                logger.debug(
+                    "Snapshot publisher stopped (correlation_id=%s)",
+                    correlation_id,
+                )
+            except Exception as snap_stop_error:
+                error_msg = sanitize_error_message(snap_stop_error)
+                errors.append(f"snapshot_publisher: {error_msg}")
+                logger.warning(
+                    "Failed to stop snapshot publisher: %s (correlation_id=%s)",
+                    error_msg,
+                    correlation_id,
+                )
+            self._snapshot_publisher = None
 
         if self._pool is not None:
             try:
@@ -895,9 +1023,12 @@ class PluginRegistration:
         if self._pool is None:
             return "disabled"
 
+        parts = ["PostgreSQL"]
         if self._consul_handler is not None:
-            return "enabled (PostgreSQL + Consul)"
-        return "enabled (PostgreSQL only)"
+            parts.append("Consul")
+        if self._snapshot_publisher is not None:
+            parts.append("Snapshots")
+        return f"enabled ({' + '.join(parts)})"
 
 
 # Verify protocol compliance at module load time
