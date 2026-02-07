@@ -105,7 +105,7 @@ class ModelDispatchOutputs(BaseModel):
             ensures basic namespace separation (at least one dot) to catch obvious
             errors like single-word topics without any structure.
 
-            Full ONEX topic structure validation ({env}.{namespace}.{category}.{name}.v{N})
+            Full ONEX topic structure validation (onex.{kind}.{producer}.{name}.v{N})
             is handled by ModelParsedTopic, which provides comprehensive parsing and
             validation of the complete topic format. This separation of concerns allows:
 

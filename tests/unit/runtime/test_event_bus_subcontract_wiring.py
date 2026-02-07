@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -155,8 +155,8 @@ class TestTopicResolution:
             service="test-service",
             version="v1",
         )
-        result = wiring.resolve_topic("onex.cmd.process.v1")
-        assert result == "onex.cmd.process.v1"
+        result = wiring.resolve_topic("onex.cmd.platform.process-event.v1")
+        assert result == "onex.cmd.platform.process-event.v1"
 
 
 # =============================================================================

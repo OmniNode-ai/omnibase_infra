@@ -82,6 +82,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.topics import TopicResolver
 
 if TYPE_CHECKING:
     from aiokafka import ConsumerRecord
@@ -245,6 +246,9 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
                 "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
             )
 
+        # Canonical topic resolver - all topic resolution delegates here
+        self._topic_resolver = TopicResolver()
+
         # Initialize circuit breaker for publish protection
         self._init_circuit_breaker(
             threshold=5,
@@ -266,9 +270,11 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
     def resolve_topic(self, topic_suffix: str) -> str:
         """Resolve topic suffix to topic name (realm-agnostic, no environment prefix).
 
-        Topics are realm-agnostic in ONEX. The environment/realm is enforced via
-        envelope identity, not topic naming. This enables cross-environment event
-        routing when needed while maintaining proper isolation through identity.
+        Delegates to the canonical ``TopicResolver`` for centralized topic
+        resolution logic. Topics are realm-agnostic in ONEX. The environment/realm
+        is enforced via envelope identity, not topic naming. This enables
+        cross-environment event routing when needed while maintaining proper
+        isolation through identity.
 
         Args:
             topic_suffix: ONEX format topic suffix
@@ -281,7 +287,7 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
         Note:
             Consumer groups still include environment for proper isolation.
         """
-        return topic_suffix
+        return self._topic_resolver.resolve(topic_suffix)
 
     async def wire_request_response(
         self,

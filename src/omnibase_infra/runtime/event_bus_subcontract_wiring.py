@@ -113,6 +113,7 @@ from omnibase_infra.models.event_bus import (
 )
 from omnibase_infra.observability.wiring_health import MixinConsumptionCounter
 from omnibase_infra.protocols import ProtocolDispatchEngine, ProtocolIdempotencyStore
+from omnibase_infra.topics import TopicResolver
 from omnibase_infra.utils import compute_consumer_group_id
 
 if TYPE_CHECKING:
@@ -297,12 +298,17 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         # Initialize consumption counter mixin (wiring health monitoring)
         self._init_consumption_counter()
 
+        # Canonical topic resolver - all topic resolution delegates here
+        self._topic_resolver = TopicResolver()
+
     def resolve_topic(self, topic_suffix: str) -> str:
         """Resolve topic suffix to topic name (realm-agnostic, no environment prefix).
 
-        Topics are realm-agnostic in ONEX. The environment/realm is enforced via
-        envelope identity, not topic naming. This enables cross-environment event
-        routing when needed while maintaining proper isolation through identity.
+        Delegates to the canonical ``TopicResolver`` for centralized topic
+        resolution logic. Topics are realm-agnostic in ONEX. The environment/realm
+        is enforced via envelope identity, not topic naming. This enables
+        cross-environment event routing when needed while maintaining proper
+        isolation through identity.
 
         Topic suffixes from contracts follow the ONEX naming convention:
             onex.{kind}.{producer}.{event-name}.v{n}
@@ -327,7 +333,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
             Consumer groups still include environment for proper isolation.
             See wire_subscriptions() for consumer group naming.
         """
-        return topic_suffix
+        return self._topic_resolver.resolve(topic_suffix)
 
     async def wire_subscriptions(
         self,

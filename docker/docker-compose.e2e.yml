@@ -139,27 +139,31 @@ services:
     command: |
       -c "
       echo 'Creating ONEX infrastructure topics...'
+      # Topic names use 5-segment ONEX format: onex.<kind>.<producer>.<event-name>.v<version>
+      # Source of truth: node_registration_orchestrator/contract.yaml event_bus section
 
-      # Node introspection and registration topics
-      rpk topic create dev.onex.evt.node-introspection.v1 --brokers redpanda:9092 -p 3 || true
-      rpk topic create dev.onex.evt.node-heartbeat.v1 --brokers redpanda:9092 -p 3 || true
-      rpk topic create dev.onex.evt.node-registration-acked.v1 --brokers redpanda:9092 -p 3 || true
-      rpk topic create dev.onex.evt.registry-request-introspection.v1 --brokers redpanda:9092 -p 3 || true
+      # Consumed events (subscribe_topics from contract)
+      rpk topic create onex.evt.platform.node-introspection.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.evt.platform.node-heartbeat.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.cmd.platform.node-registration-acked.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.evt.platform.registry-request-introspection.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.intent.platform.runtime-tick.v1 --brokers redpanda:9092 -p 1 || true
 
-      # Runtime tick and timeout topics
-      rpk topic create dev.onex.evt.runtime-tick.v1 --brokers redpanda:9092 -p 1 || true
-      rpk topic create dev.onex.evt.ack-timeout.v1 --brokers redpanda:9092 -p 3 || true
-      rpk topic create dev.onex.evt.liveness-timeout.v1 --brokers redpanda:9092 -p 3 || true
-
-      # Registration orchestrator topics
-      rpk topic create dev.onex.evt.registration-effect-requested.v1 --brokers redpanda:9092 -p 3 || true
-      rpk topic create dev.onex.evt.registration-completed.v1 --brokers redpanda:9092 -p 3 || true
+      # Published events (publish_topics from contract)
+      rpk topic create onex.evt.platform.node-registration-result.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.evt.platform.node-registration-initiated.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.evt.platform.node-registration-accepted.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.evt.platform.node-registration-rejected.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.evt.platform.node-registration-ack-timed-out.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.evt.platform.node-registration-ack-received.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.evt.platform.node-became-active.v1 --brokers redpanda:9092 -p 3 || true
+      rpk topic create onex.evt.platform.node-liveness-expired.v1 --brokers redpanda:9092 -p 3 || true
 
       # Dead letter queue
-      rpk topic create dev.onex.dlq.registration.v1 --brokers redpanda:9092 -p 1 || true
+      rpk topic create onex.dlq.platform.registration.v1 --brokers redpanda:9092 -p 1 || true
 
       # Snapshot topics for projection recovery
-      rpk topic create dev.onex.snapshot.registration.v1 --brokers redpanda:9092 -p 1 --config cleanup.policy=compact || true
+      rpk topic create onex.snapshot.platform.registration-snapshots.v1 --brokers redpanda:9092 -p 1 --config cleanup.policy=compact || true
 
       echo 'Topics created successfully!'
       rpk topic list --brokers redpanda:9092

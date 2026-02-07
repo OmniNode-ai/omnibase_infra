@@ -57,21 +57,22 @@ capabilities:
   - name: "ledger.query.by_time_range"
     description: "Query events within a time range"
 # Event-driven topic configuration
-# Uses {env}.{namespace} placeholders for environment-aware topics
+# Topics use realm-agnostic 5-segment format: onex.<kind>.<producer>.<event-name>.v<N>
+# The runtime composes the full qualified topic by prepending env.namespace at startup.
 consumed_events:
-  - topic: "{env}.{namespace}.onex.cmd.ledger-append.v1"
+  - topic: "onex.cmd.platform.ledger-append.v1"
     event_type: "LedgerAppendCommand"
     message_category: "COMMAND"
     description: "Command to append an event to the audit ledger"
-  - topic: "{env}.{namespace}.onex.cmd.ledger-query.v1"
+  - topic: "onex.cmd.platform.ledger-query.v1"
     event_type: "LedgerQueryCommand"
     message_category: "COMMAND"
     description: "Command to query events from the audit ledger"
 published_events:
-  - topic: "{env}.{namespace}.onex.evt.ledger-appended.v1"
+  - topic: "onex.evt.platform.ledger-appended.v1"
     event_type: "LedgerAppendedEvent"
     description: "Confirmation that event was appended to the ledger"
-  - topic: "{env}.{namespace}.onex.evt.ledger-query-result.v1"
+  - topic: "onex.evt.platform.ledger-query-result.v1"
     event_type: "LedgerQueryResultEvent"
     description: "Result of a ledger query operation"
 # IO operations (EFFECT node specific)

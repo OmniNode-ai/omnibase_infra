@@ -375,24 +375,29 @@ The contract defines error handling for specific error types:
 
 ### Consumed Events
 
-| Topic Pattern | Event Type | Purpose |
-|---------------|------------|---------|
-| `{env}.{ns}.onex.evt.node-introspection.v1` | `NodeIntrospectionEvent` | Node metadata and capabilities |
-| `{env}.{ns}.onex.evt.registry-request-introspection.v1` | `RegistryRequestIntrospectionEvent` | Explicit registration request |
-| `{env}.{ns}.onex.internal.runtime-tick.v1` | `RuntimeTick` | Timeout evaluation trigger |
+Topics use realm-agnostic 5-segment ONEX format: `onex.<kind>.<producer>.<event-name>.v<version>`.
+The event_bus section in `contract.yaml` is the source of truth for runtime subscriptions.
+
+| Topic | Event Type | Purpose |
+|-------|------------|---------|
+| `onex.evt.platform.node-introspection.v1` | `NodeIntrospectionEvent` | Node metadata and capabilities |
+| `onex.evt.platform.registry-request-introspection.v1` | `RegistryRequestIntrospectionEvent` | Explicit registration request |
+| `onex.intent.platform.runtime-tick.v1` | `RuntimeTick` | Timeout evaluation trigger |
+| `onex.cmd.platform.node-registration-acked.v1` | `NodeRegistrationAcked` | Node acknowledges registration acceptance |
+| `onex.evt.platform.node-heartbeat.v1` | `NodeHeartbeatEvent` | Periodic heartbeat for liveness tracking |
 
 ### Published Events
 
-| Topic Pattern | Event Type | Purpose |
-|---------------|------------|---------|
-| `{env}.{ns}.onex.evt.node-registration-result.v1` | `NodeRegistrationResultEvent` | Final outcome |
-| `{env}.{ns}.onex.evt.node-registration-initiated.v1` | `NodeRegistrationInitiated` | Workflow started |
-| `{env}.{ns}.onex.evt.node-registration-accepted.v1` | `NodeRegistrationAccepted` | Registration succeeded |
-| `{env}.{ns}.onex.evt.node-registration-rejected.v1` | `NodeRegistrationRejected` | Registration failed |
-| `{env}.{ns}.onex.evt.node-registration-ack-timed-out.v1` | `NodeRegistrationAckTimedOut` | ACK timeout |
-| `{env}.{ns}.onex.evt.node-registration-ack-received.v1` | `NodeRegistrationAckReceived` | ACK received |
-| `{env}.{ns}.onex.evt.node-became-active.v1` | `NodeBecameActive` | Node activated |
-| `{env}.{ns}.onex.evt.node-liveness-expired.v1` | `NodeLivenessExpired` | Liveness check failed |
+| Topic | Event Type | Purpose |
+|-------|------------|---------|
+| `onex.evt.platform.node-registration-result.v1` | `NodeRegistrationResultEvent` | Outcome |
+| `onex.evt.platform.node-registration-initiated.v1` | `NodeRegistrationInitiated` | Workflow started |
+| `onex.evt.platform.node-registration-accepted.v1` | `NodeRegistrationAccepted` | Registration succeeded |
+| `onex.evt.platform.node-registration-rejected.v1` | `NodeRegistrationRejected` | Registration failed |
+| `onex.evt.platform.node-registration-ack-timed-out.v1` | `NodeRegistrationAckTimedOut` | ACK timeout |
+| `onex.evt.platform.node-registration-ack-received.v1` | `NodeRegistrationAckReceived` | ACK received |
+| `onex.evt.platform.node-became-active.v1` | `NodeBecameActive` | Node activated |
+| `onex.evt.platform.node-liveness-expired.v1` | `NodeLivenessExpired` | Liveness check failed |
 
 ## Integration Points
 

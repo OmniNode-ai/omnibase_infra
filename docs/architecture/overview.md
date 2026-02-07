@@ -293,9 +293,9 @@ Events enter the system through the Event Bus (Kafka) and are routed to the appr
 ```
 
 **Key Points**:
-- Topics follow the pattern: `{env}.{namespace}.onex.{category}.{event-type}.v{version}`
+- Topics use realm-agnostic 5-segment ONEX format: `onex.<kind>.<producer>.<event-name>.v<version>`
 - The dispatch engine uses topic patterns to match registered dispatchers
-- Category is one of: `evt` (event), `cmd` (command), `intent`
+- Kind is one of: `evt` (event), `cmd` (command), `intent`, `snapshot`, `dlq`
 - Multiple dispatchers can receive the same event (fan-out pattern)
 
 ### Phase 2: Handler/Reducer Processing
