@@ -42,10 +42,15 @@ def _build_introspection_payload(
     cid = str(uuid4())
     now = datetime.now(UTC).isoformat()
 
+    parts = version.split(".")
+    major = int(parts[0]) if len(parts) > 0 else 1
+    minor = int(parts[1]) if len(parts) > 1 else 0
+    patch = int(parts[2]) if len(parts) > 2 else 0
+
     return {
         "node_id": nid,
         "node_type": node_type,
-        "node_version": {"major": 1, "minor": 0, "patch": 0},
+        "node_version": {"major": major, "minor": minor, "patch": patch},
         "declared_capabilities": {},
         "discovered_capabilities": {},
         "contract_capabilities": None,
