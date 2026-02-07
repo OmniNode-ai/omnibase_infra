@@ -2171,6 +2171,18 @@ class RuntimeHostProcess:
             module = importlib.import_module(module_path)
             handler_cls = getattr(module, class_name)
 
+            if not isinstance(handler_cls, type):
+                logger.warning(
+                    "Handler class path does not resolve to a class type",
+                    extra={
+                        "node_name": node_name,
+                        "handler_class": handler_class_path,
+                        "resolved_type": type(handler_cls).__name__,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
+                return False
+
             # Step 6: Resolve dependencies
             # Skip filesystem resolution for kafka:// paths but still merge
             # materialized resources if present
@@ -4042,7 +4054,7 @@ class RuntimeHostProcess:
 
         async def handle_deregistration(msg: ModelEventMessage) -> None:
             """Handle contract deregistration event from Kafka."""
-            # TODO(OMN-XXXX): Live handler teardown on deregistration.
+            # TODO(OMN-1989): Live handler teardown on deregistration.
             # Phase 1 supports addition only -- deregistered handlers remain
             # active until the next runtime restart. This callback clears the
             # contract cache but does NOT remove the handler from _handlers,

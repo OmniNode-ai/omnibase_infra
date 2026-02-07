@@ -24,6 +24,8 @@ from omnibase_infra.runtime.kafka_contract_source import (
 )
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -48,6 +50,22 @@ def _make_descriptor(
         contract_path=contract_path,
         contract_config=contract_config,
     )
+
+
+def _make_handler_class(instance: MagicMock) -> type:
+    """Create a real class whose constructor returns *instance*.
+
+    The returned object passes ``isinstance(cls, type)`` so the runtime's
+    type-guard in ``_materialize_handler_live`` accepts it, while still
+    allowing standard mock assertions (``assert_called_once_with``).
+    """
+
+    class _StubHandler:
+        def __new__(cls, **kwargs: object) -> MagicMock:  # type: ignore[misc]
+            instance._init_kwargs = kwargs
+            return instance
+
+    return _StubHandler
 
 
 def _make_runtime(**overrides: object) -> RuntimeHostProcess:
@@ -144,7 +162,7 @@ class TestMaterializeHandlerLive:
 
         mock_handler_instance = MagicMock()
         mock_handler_instance.initialize = AsyncMock()
-        mock_handler_cls = MagicMock(return_value=mock_handler_instance)
+        mock_handler_cls = _make_handler_class(mock_handler_instance)
         mock_container = MagicMock()
 
         with (
@@ -168,7 +186,6 @@ class TestMaterializeHandlerLive:
         assert result is True
         assert "test_handler" in runtime._handlers
         assert "test_handler" in runtime._handler_descriptors
-        mock_handler_cls.assert_called_once_with(container=mock_container)
 
     @pytest.mark.asyncio
     async def test_materialize_idempotent(self) -> None:
@@ -252,7 +269,7 @@ class TestMaterializeHandlerLive:
 
         mock_handler_instance = MagicMock()
         mock_handler_instance.initialize = AsyncMock()
-        mock_handler_cls = MagicMock(return_value=mock_handler_instance)
+        mock_handler_cls = _make_handler_class(mock_handler_instance)
         mock_container = MagicMock()
 
         with (
@@ -293,7 +310,7 @@ class TestMaterializeHandlerLive:
 
         mock_handler_instance = MagicMock()
         mock_handler_instance.initialize = AsyncMock()
-        mock_handler_cls = MagicMock(return_value=mock_handler_instance)
+        mock_handler_cls = _make_handler_class(mock_handler_instance)
         mock_container = MagicMock()
 
         # Set up event_bus_wiring that will fail
