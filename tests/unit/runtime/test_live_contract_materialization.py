@@ -476,6 +476,28 @@ class TestWireLiveHandlerSubscriptions:
         # Should complete without error
         await runtime._wire_live_handler_subscriptions("test-node", descriptor)
 
+    @pytest.mark.asyncio
+    async def test_wire_live_subscriptions_calls_wiring(self) -> None:
+        """Positive path: wiring.wire_subscriptions() called with parsed subcontract."""
+        mock_wiring = MagicMock()
+        mock_wiring.wire_subscriptions = AsyncMock()
+        runtime = _make_runtime(_event_bus_wiring=mock_wiring)
+
+        event_bus_config = {
+            "version": {"major": 1, "minor": 0, "patch": 0},
+            "subscribe_topics": ["onex.evt.producer.test-event.v1"],
+        }
+        descriptor = _make_descriptor(contract_config={"event_bus": event_bus_config})
+
+        await runtime._wire_live_handler_subscriptions("test-node", descriptor)
+
+        mock_wiring.wire_subscriptions.assert_awaited_once()
+        call_kwargs = mock_wiring.wire_subscriptions.call_args.kwargs
+        assert call_kwargs["node_name"] == "test-node"
+        assert call_kwargs["subcontract"].subscribe_topics == [
+            "onex.evt.producer.test-event.v1"
+        ]
+
 
 # ===========================================================================
 # _publish_capability_change() tests
