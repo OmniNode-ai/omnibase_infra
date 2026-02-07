@@ -15,7 +15,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelValidationLedgerQuery(BaseModel):
-    """Filter model for validation ledger queries. All fields optional."""
+    """Filter model for validation ledger queries.
+
+    All filter fields are optional. Non-None fields are combined with AND
+    logic into a dynamic WHERE clause by the repository implementation.
+    Results are ordered by ``(kafka_topic, kafka_partition, kafka_offset)``
+    for deterministic replay.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 

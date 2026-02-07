@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: MIT
+-- Copyright (c) 2026 OmniNode Team
+--
 -- Migration: 002_drop_validation_event_ledger.sql
 -- Purpose: Rollback for 002_create_validation_event_ledger.sql
 -- Author: ONEX Infrastructure Team

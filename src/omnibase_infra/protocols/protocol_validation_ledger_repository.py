@@ -115,8 +115,8 @@ class ProtocolValidationLedgerRepository(Protocol):
     ) -> list[ModelValidationLedgerEntry]:
         """Query entries for a specific validation run.
 
-        Returns entries ordered by kafka_partition and kafka_offset for
-        deterministic replay ordering.
+        Returns entries ordered by kafka_topic, kafka_partition, and
+        kafka_offset for deterministic replay ordering.
 
         Args:
             run_id: The validation run UUID to query for.
@@ -125,7 +125,8 @@ class ProtocolValidationLedgerRepository(Protocol):
 
         Returns:
             List of ModelValidationLedgerEntry matching the run_id,
-            ordered by kafka_partition, kafka_offset for deterministic replay.
+            ordered by kafka_topic, kafka_partition, kafka_offset for
+            deterministic replay.
 
         Raises:
             RepositoryExecutionError: If database query fails.

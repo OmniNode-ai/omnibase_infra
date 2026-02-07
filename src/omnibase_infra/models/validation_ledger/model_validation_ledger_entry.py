@@ -49,7 +49,7 @@ class ModelValidationLedgerEntry(BaseModel):
         min_length=64,
         max_length=64,
         pattern=r"^[0-9a-f]{64}$",
-        description="SHA-256 hex digest of envelope_bytes",
+        description="SHA-256 hex digest of the raw envelope bytes (before base64 encoding)",
     )
     created_at: datetime = Field(..., description="When this ledger entry was created")
 
@@ -61,6 +61,14 @@ class ModelValidationLedgerEntry(BaseModel):
         PostgreSQL ``encode(bytea, 'base64')`` inserts newlines every 76
         characters per RFC 2045. We strip whitespace before strict validation
         so that PG-produced base64 passes the check.
+
+        Args:
+            v: Base64-encoded string, potentially containing newlines
+                and spaces from PostgreSQL encoding.
+
+        Returns:
+            The original string unchanged. Whitespace is stripped only
+            for validation; the stored value preserves PostgreSQL formatting.
 
         Raises:
             ValueError: If the string is not valid base64.

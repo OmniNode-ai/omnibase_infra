@@ -7,6 +7,7 @@ database operations with safety constraints and deterministic query behavior.
 
 Components:
     - PostgresRepositoryRuntime: Generic Postgres runtime for contract execution
+    - PostgresValidationLedgerRepository: Validation event ledger repository (OMN-1908)
     - ModelRepositoryRuntimeConfig: Configuration for runtime behavior
     - ModelDbRepositoryContract: Repository contract specification
     - ModelDbOperation: Database operation specification
