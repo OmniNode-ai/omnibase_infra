@@ -22,6 +22,7 @@ from pydantic import ValidationError
 
 from omnibase_infra.services.observability.agent_actions.models import (
     ModelAgentAction,
+    ModelAgentStatusEvent,
     ModelDetectionFailure,
     ModelExecutionLog,
     ModelObservabilityEnvelope,
@@ -626,9 +627,204 @@ class TestModelDetectionFailureSpecific:
         ]
 
 
+# =============================================================================
+# Agent Status Event Tests (OMN-1849)
+# =============================================================================
+
+
+class TestModelAgentStatusEventExtrasAllowed:
+    """Test that ModelAgentStatusEvent allows extra fields."""
+
+    def test_agent_status_event_accepts_extra_fields(self) -> None:
+        """Agent status event should accept and preserve extra fields."""
+        event = ModelAgentStatusEvent(  # type: ignore[call-arg]
+            correlation_id=uuid4(),
+            agent_name="test-agent",
+            session_id="session-123",
+            state="working",
+            message="Processing request",
+            created_at=datetime.now(UTC),
+            custom_field="extra_value",
+        )
+
+        assert event.model_extra is not None
+        assert event.model_extra.get("custom_field") == "extra_value"
+
+    def test_agent_status_event_required_fields_enforced(self) -> None:
+        """Agent status event should enforce required fields."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelAgentStatusEvent()  # type: ignore[call-arg]
+
+        errors = exc_info.value.errors()
+        error_locs = {e["loc"][0] for e in errors}
+        assert "correlation_id" in error_locs
+        assert "agent_name" in error_locs
+        assert "session_id" in error_locs
+        assert "state" in error_locs
+        assert "message" in error_locs
+
+    def test_agent_status_event_optional_fields_default(self) -> None:
+        """Agent status event optional fields should default correctly."""
+        event = ModelAgentStatusEvent(
+            correlation_id=uuid4(),
+            agent_name="test-agent",
+            session_id="session-123",
+            state="idle",
+            message="Waiting for input",
+        )
+
+        assert event.progress is None
+        assert event.current_phase is None
+        assert event.current_task is None
+        assert event.blocking_reason is None
+        assert event.metadata is None
+        assert event.status_schema_version == 1
+
+    def test_agent_status_event_id_auto_generated(self) -> None:
+        """Agent status event should auto-generate id if not provided."""
+        event = ModelAgentStatusEvent(
+            correlation_id=uuid4(),
+            agent_name="test-agent",
+            session_id="session-123",
+            state="working",
+            message="Processing",
+        )
+
+        assert event.id is not None
+
+    def test_agent_status_event_created_at_auto_generated(self) -> None:
+        """Agent status event should auto-generate created_at if not provided."""
+        event = ModelAgentStatusEvent(
+            correlation_id=uuid4(),
+            agent_name="test-agent",
+            session_id="session-123",
+            state="working",
+            message="Processing",
+        )
+
+        assert event.created_at is not None
+
+
+class TestModelAgentStatusEventSpecific:
+    """Model-specific tests for ModelAgentStatusEvent."""
+
+    def test_agent_status_event_with_all_optional_fields(self) -> None:
+        """Agent status event should work with all optional fields populated."""
+        now = datetime.now(UTC)
+        event = ModelAgentStatusEvent(
+            id=uuid4(),
+            correlation_id=uuid4(),
+            agent_name="test-agent",
+            session_id="session-123",
+            state="working",
+            status_schema_version=1,
+            message="Reviewing code",
+            progress=0.75,
+            current_phase="analysis",
+            current_task="Checking imports",
+            blocking_reason=None,
+            created_at=now,
+            metadata={"file": "/test/path.py"},
+        )
+
+        assert event.state == "working"
+        assert event.progress == 0.75
+        assert event.current_phase == "analysis"
+        assert event.current_task == "Checking imports"
+        assert event.metadata == {"file": "/test/path.py"}
+
+    def test_agent_status_event_progress_boundary_zero(self) -> None:
+        """Progress at 0.0 should be accepted."""
+        event = ModelAgentStatusEvent(
+            correlation_id=uuid4(),
+            agent_name="test-agent",
+            session_id="session-123",
+            state="working",
+            message="Starting",
+            progress=0.0,
+        )
+        assert event.progress == 0.0
+
+    def test_agent_status_event_progress_boundary_one(self) -> None:
+        """Progress at 1.0 should be accepted."""
+        event = ModelAgentStatusEvent(
+            correlation_id=uuid4(),
+            agent_name="test-agent",
+            session_id="session-123",
+            state="working",
+            message="Complete",
+            progress=1.0,
+        )
+        assert event.progress == 1.0
+
+    def test_agent_status_event_rejects_progress_above_one(self) -> None:
+        """Progress above 1.0 should be rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelAgentStatusEvent(
+                correlation_id=uuid4(),
+                agent_name="test-agent",
+                session_id="session-123",
+                state="working",
+                message="Invalid progress",
+                progress=1.5,
+            )
+
+        errors = exc_info.value.errors()
+        assert any(e["loc"] == ("progress",) for e in errors)
+
+    def test_agent_status_event_rejects_progress_below_zero(self) -> None:
+        """Progress below 0.0 should be rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelAgentStatusEvent(
+                correlation_id=uuid4(),
+                agent_name="test-agent",
+                session_id="session-123",
+                state="working",
+                message="Invalid progress",
+                progress=-0.1,
+            )
+
+        errors = exc_info.value.errors()
+        assert any(e["loc"] == ("progress",) for e in errors)
+
+    def test_agent_status_event_blocked_state_with_reason(self) -> None:
+        """Blocked agent should include blocking_reason."""
+        event = ModelAgentStatusEvent(
+            correlation_id=uuid4(),
+            agent_name="test-agent",
+            session_id="session-123",
+            state="blocked",
+            message="Waiting for dependency",
+            blocking_reason="Dependency OMN-1847 not yet merged",
+        )
+
+        assert event.state == "blocked"
+        assert event.blocking_reason == "Dependency OMN-1847 not yet merged"
+
+    def test_agent_status_event_str_representation(self) -> None:
+        """String representation should include key fields."""
+        event = ModelAgentStatusEvent(
+            correlation_id=uuid4(),
+            agent_name="test-agent",
+            session_id="session-123",
+            state="working",
+            message="Processing",
+            progress=0.5,
+            current_phase="analysis",
+        )
+
+        result = str(event)
+        assert "test-agent" in result
+        assert "working" in result
+        assert "0.5" in result
+        assert "analysis" in result
+
+
 __all__ = [
     "TestModelObservabilityEnvelopeStrict",
     "TestModelAgentActionExtrasAllowed",
+    "TestModelAgentStatusEventExtrasAllowed",
+    "TestModelAgentStatusEventSpecific",
     "TestModelRoutingDecisionExtrasAllowed",
     "TestModelTransformationEventExtrasAllowed",
     "TestModelPerformanceMetricExtrasAllowed",

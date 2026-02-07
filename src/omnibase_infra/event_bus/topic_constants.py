@@ -404,6 +404,14 @@ TOPIC_INJECTION_LATENCY_BREAKDOWN: Final[str] = (
 )
 """Latency breakdown metrics from omniclaude injection hooks."""
 
+# Agent status events
+TOPIC_AGENT_STATUS: Final[str] = "onex.evt.agent.status.v1"
+"""Agent status events for real-time agent visibility.
+
+Producer: Agent status reporters (claude hooks, runtime)
+Consumer: agent_actions consumer for persistence
+"""
+
 # Grouped constants for wiring health monitoring
 WIRING_HEALTH_MONITORED_TOPICS: Final[tuple[str, ...]] = (
     TOPIC_SESSION_OUTCOME_CURRENT,
@@ -424,6 +432,8 @@ __all__ = [
     # Constants
     "DLQ_TOPIC_VERSION",
     "ENV_PATTERN",
+    # Agent Status Topics
+    "TOPIC_AGENT_STATUS",
     # Wiring Health Topics
     "TOPIC_INJECTION_AGENT_MATCH",
     "TOPIC_INJECTION_CONTEXT_UTILIZATION",

@@ -47,7 +47,7 @@ class ConfigAgentActionsConsumer(BaseSettings):
         description="Consumer group ID for offset tracking",
     )
 
-    # Topics to subscribe (6 observability topics)
+    # Topics to subscribe (7 observability topics)
     topics: list[str] = Field(
         default_factory=lambda: [
             "agent-actions",
@@ -56,6 +56,7 @@ class ConfigAgentActionsConsumer(BaseSettings):
             "router-performance-metrics",
             "agent-detection-failures",
             "agent-execution-logs",
+            "onex.evt.agent.status.v1",
         ],
         description="Kafka topics to consume for agent observability",
     )

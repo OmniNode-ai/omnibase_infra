@@ -122,6 +122,7 @@ class TestTopicModelMapping:
             "router-performance-metrics",
             "agent-detection-failures",
             "agent-execution-logs",
+            "onex.evt.agent.status.v1",
         }
         assert set(TOPIC_TO_MODEL.keys()) == expected_topics
 
@@ -134,6 +135,7 @@ class TestTopicModelMapping:
             "router-performance-metrics",
             "agent-detection-failures",
             "agent-execution-logs",
+            "onex.evt.agent.status.v1",
         }
         assert set(TOPIC_TO_WRITER_METHOD.keys()) == expected_topics
 
@@ -141,6 +143,7 @@ class TestTopicModelMapping:
         """Topic to model mapping should be correct."""
         from omnibase_infra.services.observability.agent_actions.models import (
             ModelAgentAction,
+            ModelAgentStatusEvent,
             ModelDetectionFailure,
             ModelExecutionLog,
             ModelPerformanceMetric,
@@ -154,6 +157,7 @@ class TestTopicModelMapping:
         assert TOPIC_TO_MODEL["router-performance-metrics"] is ModelPerformanceMetric
         assert TOPIC_TO_MODEL["agent-detection-failures"] is ModelDetectionFailure
         assert TOPIC_TO_MODEL["agent-execution-logs"] is ModelExecutionLog
+        assert TOPIC_TO_MODEL["onex.evt.agent.status.v1"] is ModelAgentStatusEvent
 
 
 # =============================================================================
