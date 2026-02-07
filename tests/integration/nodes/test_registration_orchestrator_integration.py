@@ -762,14 +762,30 @@ class TestEventIntegration:
     """
 
     def test_consumed_events_have_topics(self, contract_data: dict) -> None:
-        """Test that consumed events have topic patterns."""
+        """Test that consumed events have well-formed ONEX topic suffixes."""
         consumed = contract_data["consumed_events"]
 
         for event in consumed:
             assert "topic" in event
             assert "event_type" in event
-            # Topic should be a pattern with placeholders
-            assert "{" in event["topic"] and "}" in event["topic"]
+            # Topic should be a valid ONEX 5-segment suffix:
+            # onex.(evt|cmd|intent).platform.<slug>.v<N>
+            topic = event["topic"]
+            assert topic, f"Topic must be non-empty for {event['event_type']}"
+            segments = topic.split(".")
+            assert len(segments) == 5, (
+                f"ONEX topic must have 5 dot-separated segments, "
+                f"got {len(segments)}: {topic}"
+            )
+            assert segments[0] == "onex", (
+                f"ONEX topic must start with 'onex', got: {topic}"
+            )
+            assert segments[1] in ("evt", "cmd", "intent"), (
+                f"ONEX topic segment 2 must be evt/cmd/intent, got: {topic}"
+            )
+            assert segments[4].startswith("v"), (
+                f"ONEX topic must end with version segment (v<N>), got: {topic}"
+            )
 
     def test_published_events_have_topics(self, contract_data: dict) -> None:
         """Test that published events have topic patterns."""

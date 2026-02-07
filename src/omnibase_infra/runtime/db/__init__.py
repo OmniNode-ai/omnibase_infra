@@ -65,6 +65,9 @@ from omnibase_infra.runtime.db.models import (
 from omnibase_infra.runtime.db.postgres_repository_runtime import (
     PostgresRepositoryRuntime,
 )
+from omnibase_infra.runtime.db.postgres_validation_ledger_repository import (
+    PostgresValidationLedgerRepository,
+)
 
 __all__: list[str] = [
     "ModelDbOperation",
@@ -74,4 +77,5 @@ __all__: list[str] = [
     "ModelDbSafetyPolicy",
     "ModelRepositoryRuntimeConfig",
     "PostgresRepositoryRuntime",
+    "PostgresValidationLedgerRepository",
 ]

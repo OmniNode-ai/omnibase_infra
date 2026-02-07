@@ -38,6 +38,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
@@ -57,7 +58,15 @@ from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
-from omnibase_infra.utils import validate_timezone_aware_with_context
+from omnibase_infra.utils import (
+    sanitize_error_message,
+    validate_timezone_aware_with_context,
+)
+
+if TYPE_CHECKING:
+    from omnibase_infra.protocols.protocol_snapshot_publisher import (
+        ProtocolSnapshotPublisher,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -111,13 +120,21 @@ class HandlerRuntimeTick:
         >>> # Note: last_heartbeat_at is None if no heartbeats were ever received
     """
 
-    def __init__(self, projection_reader: ProjectionReaderRegistration) -> None:
+    def __init__(
+        self,
+        projection_reader: ProjectionReaderRegistration,
+        snapshot_publisher: ProtocolSnapshotPublisher | None = None,
+    ) -> None:
         """Initialize the handler with a projection reader.
 
         Args:
             projection_reader: Reader for querying registration projection state.
+            snapshot_publisher: Optional ProtocolSnapshotPublisher for publishing
+                tombstones when nodes expire. If None, tombstone publishing is skipped.
+                Tombstone publishing is always best-effort and non-blocking.
         """
         self._projection_reader = projection_reader
+        self._snapshot_publisher = snapshot_publisher
 
     @property
     def handler_id(self) -> str:
@@ -357,6 +374,23 @@ class HandlerRuntimeTick:
                     "correlation_id": str(correlation_id),
                 },
             )
+
+            # Publish tombstone to snapshot topic (best-effort, non-blocking)
+            if self._snapshot_publisher is not None:
+                try:
+                    await self._snapshot_publisher.delete_snapshot(
+                        str(projection.entity_id), projection.domain
+                    )
+                except Exception as snap_err:
+                    logger.warning(
+                        "Snapshot tombstone publish failed (non-blocking): %s",
+                        sanitize_error_message(snap_err),
+                        extra={
+                            "node_id": str(projection.entity_id),
+                            "correlation_id": str(correlation_id),
+                            "error_type": type(snap_err).__name__,
+                        },
+                    )
 
         return events
 

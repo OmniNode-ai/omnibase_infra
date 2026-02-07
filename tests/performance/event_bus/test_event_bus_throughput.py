@@ -26,6 +26,7 @@ CI Behavior:
         - test_10000_sequential_publishes (5000 events/sec threshold)
         - test_batch_publish_1000_messages (5000 events/sec threshold)
         - test_50_concurrent_publishers (5000 events/sec aggregate threshold)
+        - test_concurrent_multi_topic (3000 events/sec multi-topic threshold)
 
     These tests run locally and provide value for detecting performance
     regressions during development.
@@ -421,6 +422,12 @@ class TestConcurrentPublishers:
         print(f"  Throughput: {events_per_sec:.0f} events/sec")
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        IS_CI,
+        reason="Environment-dependent throughput: CI runners may not achieve 3000 "
+        "events/sec for multi-topic publishing due to variable CPU/memory resources "
+        "(observed 2126/sec in CI). Runs locally only.",
+    )
     async def test_concurrent_multi_topic(
         self,
         event_bus: EventBusInmemory,

@@ -1,13 +1,24 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Validation event ledger models for cross-repo validation persistence.
+"""Validation ledger models for cross-repo validation event persistence.
 
-This package provides domain models for the validation_event_ledger table:
-    - ModelValidationLedgerEntry: Single ledger row
-    - ModelValidationLedgerQuery: Query parameters with optional filters
-    - ModelValidationLedgerReplayBatch: Paginated query result
+This module provides Pydantic models for the validation_event_ledger table,
+supporting append, query, and replay operations for cross-repository
+validation events.
 
-Ticket: OMN-1908
+Models:
+    - ModelValidationLedgerEntry: Single row in the validation_event_ledger table
+    - ModelValidationLedgerQuery: Filter model for validation ledger queries
+    - ModelValidationLedgerReplayBatch: Paginated result set from a query
+    - ModelValidationLedgerAppendResult: Result of appending a validation event
+
+Example:
+    >>> from omnibase_infra.models.validation_ledger import (
+    ...     ModelValidationLedgerEntry,
+    ...     ModelValidationLedgerQuery,
+    ...     ModelValidationLedgerReplayBatch,
+    ...     ModelValidationLedgerAppendResult,
+    ... )
 """
 
 from omnibase_infra.models.validation_ledger.model_validation_ledger_append_result import (

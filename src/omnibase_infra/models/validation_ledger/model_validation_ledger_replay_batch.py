@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Validation ledger replay batch model for paginated query results.
+"""Validation ledger replay batch model.
 
-This module defines the result structure returned by validation event ledger
-queries, including entries, total count, and pagination metadata.
-
-Ticket: OMN-1908
+This module defines the paginated result set returned from a validation
+ledger query, containing matched entries and pagination metadata.
 """
+
+from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,31 +19,15 @@ from omnibase_infra.models.validation_ledger.model_validation_ledger_query impor
 
 
 class ModelValidationLedgerReplayBatch(BaseModel):
-    """Result of a validation event ledger query.
+    """Paginated result set from a validation ledger query."""
 
-    Contains the matching entries along with pagination metadata
-    and the original query for reference.
-    """
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    entries: list[ModelValidationLedgerEntry] = Field(
-        ...,
-        description="List of matching validation ledger entries",
-    )
-    total_count: int = Field(
-        ...,
-        ge=0,
-        description="Total number of entries matching the query (before pagination)",
-    )
+    entries: tuple[ModelValidationLedgerEntry, ...] = Field(default_factory=tuple)
+    total_count: int = Field(..., ge=0, description="Total matching entries")
     has_more: bool = Field(
-        ...,
-        description="True if more entries exist beyond the current page",
+        ..., description="Whether more entries exist beyond this page"
     )
     query: ModelValidationLedgerQuery = Field(
-        ...,
-        description="The query parameters used to generate this result",
+        ..., description="Original query for reference"
     )
-
-
-__all__ = ["ModelValidationLedgerReplayBatch"]

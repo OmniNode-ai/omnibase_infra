@@ -1,306 +1,324 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Handler for validation ledger projection - transforms Kafka events to ledger entries.
+"""Handler for projecting validation events into ledger entries.
 
-This handler encapsulates the compute logic for projecting cross-repo validation
-events into ModelValidationLedgerEntry for persistence in the
-validation_event_ledger table.
+Pure COMPUTE handler that extracts metadata from Kafka messages and prepares
+them for validation ledger persistence. Follows best-effort metadata extraction:
+events are NEVER dropped due to parsing failures.
 
 Design Rationale - Best-Effort Metadata Extraction:
-    The handler extracts domain fields (run_id, repo_id, event_type) from the
-    Kafka message value (JSON). If JSON parsing fails, the handler logs a warning
-    and raises, since domain fields are required for meaningful ledger entries.
-    However, auxiliary metadata (event_version) uses defensive defaults.
+    The validation ledger serves as the system's source of truth for cross-repo
+    validation events. Events must NEVER be dropped due to metadata extraction
+    failures. All metadata fields are extracted best-effort - parsing errors
+    result in fallback values, not exceptions.
 
 Bytes Encoding:
-    The raw Kafka message value is base64-encoded for transport in the model.
-    SHA-256 hash is computed for integrity verification during replay.
+    Kafka event values are bytes. Raw bytes are passed through for BYTEA storage
+    in PostgreSQL. A SHA-256 hash of the raw bytes is also computed for integrity
+    verification and deterministic replay. Base64 encoding for the read path is
+    handled at the SQL layer via encode(envelope_bytes, 'base64').
 
 Ticket: OMN-1908
 """
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from omnibase_core.errors import OnexError
-from omnibase_core.models.dispatch import ModelHandlerOutput
+from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
+    EnumInfraTransportType,
 )
-from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
-from omnibase_infra.models.validation_ledger import ModelValidationLedgerEntry
-
-if TYPE_CHECKING:
-    from omnibase_core.container import ModelONEXContainer
+from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 
 logger = logging.getLogger(__name__)
 
+# Handler ID for identification in logs and outputs
 HANDLER_ID_VALIDATION_LEDGER_PROJECTION: str = "validation-ledger-projection-handler"
 
 
 class HandlerValidationLedgerProjection:
-    """Handler that transforms cross-repo validation events to ledger entries.
+    """Handler that projects validation events into ledger entry fields.
 
-    Implements the compute logic for the validation ledger projection node.
-    Extracts domain fields from the Kafka message JSON payload, base64-encodes
-    the raw bytes, and computes an envelope hash for integrity verification.
+    This handler implements the compute logic for the validation ledger
+    projection node, extracting metadata from raw Kafka messages and
+    producing dictionaries matching ModelValidationLedgerEntry fields.
 
-    INVARIANTS:
-    - event_value is REQUIRED (raises OnexError if None)
-    - run_id and repo_id are REQUIRED from the JSON payload
-    - event_version defaults to "v1" if not extractable
-    - SHA-256 hash computed from raw bytes for replay verification
+    CRITICAL INVARIANTS:
+    - NEVER drop events due to metadata extraction failure
+    - Raw bytes (value) are REQUIRED (raises RuntimeHostError if None/empty)
+    - All other metadata uses best-effort extraction with fallbacks
+    - No I/O operations - pure COMPUTE handler
 
     Attributes:
-        handler_type: EnumHandlerType.COMPUTE_HANDLER
-        handler_category: EnumHandlerTypeCategory.COMPUTE
+        handler_type: EnumHandlerType.INFRA_HANDLER
+        handler_category: EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE
+
+    Example:
+        >>> handler = HandlerValidationLedgerProjection()
+        >>> result = handler.project(
+        ...     topic="onex.evt.validation.cross-repo-run-started.v1",
+        ...     partition=0,
+        ...     offset=42,
+        ...     value=b'{"run_id": "abc-123", "repo_id": "omnibase_core"}',
+        ... )
+        >>> result["event_type"]
+        'onex.evt.validation.cross-repo-run-started.v1'
     """
-
-    def __init__(self, container: ModelONEXContainer) -> None:
-        """Initialize the validation ledger projection handler.
-
-        Args:
-            container: ONEX dependency injection container.
-        """
-        self._container = container
-        self._initialized: bool = False
 
     @property
     def handler_type(self) -> EnumHandlerType:
-        """Return the architectural role of this handler."""
-        return EnumHandlerType.COMPUTE_HANDLER
+        """Return the architectural role of this handler.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER - This handler is an infrastructure
+            handler for validation ledger projection.
+        """
+        return EnumHandlerType.INFRA_HANDLER
 
     @property
     def handler_category(self) -> EnumHandlerTypeCategory:
-        """Return the behavioral classification of this handler."""
-        return EnumHandlerTypeCategory.COMPUTE
-
-    async def initialize(self, config: dict[str, object]) -> None:
-        """Initialize the handler.
-
-        Args:
-            config: Configuration dict (currently unused).
-        """
-        self._initialized = True
-        logger.info(
-            "%s initialized successfully",
-            self.__class__.__name__,
-            extra={"handler": self.__class__.__name__},
-        )
-
-    async def shutdown(self) -> None:
-        """Shutdown the handler."""
-        self._initialized = False
-        logger.info("HandlerValidationLedgerProjection shutdown complete")
-
-    def project(self, message: ModelEventMessage) -> ModelValidationLedgerEntry:
-        """Transform Kafka event message to validation ledger entry.
-
-        Extracts domain metadata (run_id, repo_id, event_type) from the
-        message JSON payload, base64-encodes the raw bytes, and computes
-        a SHA-256 hash for integrity verification.
-
-        Args:
-            message: The incoming Kafka event message.
+        """Return the behavioral classification of this handler.
 
         Returns:
-            ModelValidationLedgerEntry ready for persistence.
+            EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE - This handler
+            performs transformations that use nondeterministic operations
+            (uuid4, datetime.now) for fallback metadata values.
+        """
+        return EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE
+
+    def project(
+        self,
+        *,
+        topic: str,
+        partition: int,
+        offset: int,
+        value: bytes,
+        _headers: dict[str, bytes] | None = None,
+    ) -> dict[str, object]:
+        """Project a Kafka message into validation ledger entry fields.
+
+        Extracts metadata from the raw Kafka message and computes a SHA-256
+        hash of the raw bytes. Raw bytes are passed through as envelope_bytes
+        for BYTEA storage in PostgreSQL. Uses best-effort metadata extraction
+        from the JSON payload.
+
+        Args:
+            topic: Kafka topic the message was consumed from.
+            partition: Kafka partition number.
+            offset: Kafka offset within the partition.
+            value: Raw Kafka message value (bytes). REQUIRED.
+            _headers: Optional Kafka message headers (currently unused, reserved
+                for future header-based routing).
+
+        Returns:
+            Dict with keys matching the write-path parameters of
+            ProtocolValidationLedgerRepository.append():
+                - run_id: UUID (extracted or generated)
+                - repo_id: str (extracted or "unknown")
+                - event_type: str (extracted or from topic)
+                - event_version: str (extracted or "unknown")
+                - occurred_at: datetime (extracted or now UTC)
+                - kafka_topic: str
+                - kafka_partition: int
+                - kafka_offset: int
+                - envelope_bytes: bytes (raw Kafka value for BYTEA storage)
+                - envelope_hash: str (SHA-256 hex digest)
 
         Raises:
-            OnexError: If message.value is None or required domain fields
-                cannot be extracted from the payload.
+            RuntimeHostError: If ``value`` is None or empty bytes
+                (with error_code=INVALID_INPUT).
+
+        Field Extraction Strategy:
+            | Field          | Primary Source        | Fallback              |
+            |----------------|-----------------------|-----------------------|
+            | run_id         | payload["run_id"]     | uuid4()               |
+            | repo_id        | payload["repo_id"]    | "unknown"             |
+            | event_type     | payload["event_type"] | topic name            |
+            | event_version  | topic suffix          | "unknown"             |
+            | occurred_at    | payload["timestamp"]  | datetime.now(utc)     |
         """
-        if message.value is None:
-            raise OnexError(
-                "Cannot create validation ledger entry: message.value is None. "
-                "Event body is required for validation ledger persistence."
+        if not value:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="project_validation_event",
+            )
+            raise RuntimeHostError(
+                "Cannot create validation ledger entry: value is None or empty. "
+                "Raw event bytes are required for ledger persistence.",
+                error_code=EnumCoreErrorCode.INVALID_INPUT,
+                context=context,
             )
 
-        # Base64 encode raw bytes for transport
-        envelope_bytes_b64 = base64.b64encode(message.value).decode("ascii")
-
         # Compute SHA-256 hash for integrity verification
-        envelope_hash = hashlib.sha256(message.value).hexdigest()
+        envelope_hash = hashlib.sha256(value).hexdigest()
 
-        # Extract domain fields from JSON payload
+        # Best-effort metadata extraction from JSON payload
         run_id, repo_id, event_type, event_version, occurred_at = (
-            self._extract_domain_fields(message)
+            self._extract_metadata(value, topic)
         )
 
-        # Use topic as event_type if not extractable from payload
-        if event_type is None:
-            event_type = message.topic
+        return {
+            "run_id": run_id,
+            "repo_id": repo_id,
+            "event_type": event_type,
+            "event_version": event_version,
+            "occurred_at": occurred_at,
+            "kafka_topic": topic,
+            "kafka_partition": partition,
+            "kafka_offset": offset,
+            "envelope_bytes": value,
+            "envelope_hash": envelope_hash,
+        }
 
-        # Kafka position
-        partition = message.partition if message.partition is not None else 0
-        kafka_offset = self._parse_offset(message.offset)
-
-        return ModelValidationLedgerEntry(
-            id=uuid4(),
-            run_id=run_id,
-            repo_id=repo_id,
-            event_type=event_type,
-            event_version=event_version,
-            occurred_at=occurred_at,
-            kafka_topic=message.topic,
-            kafka_partition=partition,
-            kafka_offset=kafka_offset,
-            envelope_bytes=envelope_bytes_b64,
-            envelope_hash=envelope_hash,
-            created_at=datetime.now(UTC),
-        )
-
-    async def execute(
+    def _extract_metadata(
         self,
-        envelope: dict[str, object],
-    ) -> ModelHandlerOutput[ModelValidationLedgerEntry]:
-        """Execute validation ledger projection from envelope.
+        value: bytes,
+        topic: str,
+    ) -> tuple[UUID, str, str, str, datetime]:
+        """Extract metadata fields from raw Kafka message bytes.
+
+        Best-effort extraction: if JSON parsing fails or fields are missing,
+        fallback values are used. Events are NEVER dropped.
 
         Args:
-            envelope: Request envelope containing:
-                - operation: "validation_ledger.project"
-                - payload: ModelEventMessage as dict
-                - correlation_id: Optional correlation ID
-
-        Returns:
-            ModelHandlerOutput wrapping ModelValidationLedgerEntry.
-        """
-        correlation_id_raw = envelope.get("correlation_id")
-        correlation_id = (
-            UUID(str(correlation_id_raw)) if correlation_id_raw else uuid4()
-        )
-        input_envelope_id = uuid4()
-
-        payload_raw = envelope.get("payload")
-        if not isinstance(payload_raw, dict):
-            raise RuntimeError("Missing or invalid 'payload' in envelope")
-
-        message = ModelEventMessage.model_validate(payload_raw)
-        entry = self.project(message)
-
-        return ModelHandlerOutput.for_compute(
-            input_envelope_id=input_envelope_id,
-            correlation_id=correlation_id,
-            handler_id=HANDLER_ID_VALIDATION_LEDGER_PROJECTION,
-            result=entry,
-        )
-
-    # =========================================================================
-    # Private Helpers
-    # =========================================================================
-
-    def _extract_domain_fields(
-        self, message: ModelEventMessage
-    ) -> tuple[UUID, str, str | None, str, datetime]:
-        """Extract domain fields from JSON event payload.
-
-        Best-effort extraction: required fields (run_id, repo_id) raise
-        on failure; optional fields use defensive defaults.
-
-        Args:
-            message: Event message with JSON value bytes.
+            value: Raw Kafka message bytes.
+            topic: Kafka topic name (used as fallback for event_type
+                and for extracting event_version).
 
         Returns:
             Tuple of (run_id, repo_id, event_type, event_version, occurred_at).
-
-        Raises:
-            OnexError: If run_id or repo_id cannot be extracted.
         """
+        run_id: UUID = uuid4()
+        repo_id: str = "unknown"
+        event_type: str = topic
+        event_version: str = self._extract_version_from_topic(topic)
+        occurred_at: datetime = datetime.now(UTC)
+
         try:
-            payload = json.loads(message.value)
-        except (json.JSONDecodeError, TypeError) as e:
-            raise OnexError(
-                "Cannot parse validation event JSON payload. "
-                f"topic={message.topic}, error={type(e).__name__}: {e}"
-            ) from e
+            payload = json.loads(value)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            logger.warning(
+                "Failed to JSON-decode validation event from topic=%s, "
+                "using fallback metadata values",
+                topic,
+                exc_info=True,
+            )
+            return run_id, repo_id, event_type, event_version, occurred_at
 
         if not isinstance(payload, dict):
-            raise OnexError(
-                f"Validation event payload is not a dict: {type(payload).__name__}. "
-                f"topic={message.topic}"
+            logger.warning(
+                "Validation event payload is not a dict (type=%s) from "
+                "topic=%s, using fallback metadata values",
+                type(payload).__name__,
+                topic,
             )
+            return run_id, repo_id, event_type, event_version, occurred_at
 
-        # Required: run_id
-        run_id_raw = payload.get("run_id")
-        if run_id_raw is None:
-            raise OnexError(
-                f"Validation event missing required field 'run_id'. "
-                f"topic={message.topic}"
-            )
-        try:
-            run_id = UUID(str(run_id_raw))
-        except (ValueError, TypeError) as e:
-            raise OnexError(
-                f"Invalid run_id '{run_id_raw}': {e}. topic={message.topic}"
-            ) from e
+        # Extract run_id
+        run_id = self._extract_uuid(payload, "run_id", default=run_id)
 
-        # Required: repo_id
-        repo_id = payload.get("repo_id")
-        if not repo_id or not isinstance(repo_id, str):
-            raise OnexError(
-                f"Validation event missing or invalid 'repo_id'. topic={message.topic}"
-            )
+        # Extract repo_id
+        raw_repo_id = payload.get("repo_id")
+        if isinstance(raw_repo_id, str) and raw_repo_id:
+            repo_id = raw_repo_id
 
-        # Best-effort: event_type from payload, fallback to topic
-        event_type = payload.get("event_type")
-        if isinstance(event_type, str) and event_type:
-            pass  # use extracted value
-        else:
-            event_type = None  # caller falls back to topic
+        # Extract event_type
+        raw_event_type = payload.get("event_type")
+        if isinstance(raw_event_type, str) and raw_event_type:
+            event_type = raw_event_type
 
-        # Best-effort: event_version
-        event_version = "v1"
-        schema_version = payload.get("schema_version")
-        if isinstance(schema_version, str) and schema_version:
-            event_version = schema_version
+        # Extract event_version from event_type or topic
+        event_version = self._extract_version_from_topic(event_type)
 
-        # Best-effort: occurred_at from timestamp field
-        occurred_at = datetime.now(UTC)
-        timestamp_raw = payload.get("timestamp")
-        if timestamp_raw is not None:
-            try:
-                if isinstance(timestamp_raw, str):
-                    occurred_at = datetime.fromisoformat(timestamp_raw)
-                elif isinstance(timestamp_raw, (int, float)):
-                    occurred_at = datetime.fromtimestamp(timestamp_raw, tz=UTC)
-            except (ValueError, TypeError, OSError):
-                logger.warning(
-                    "Failed to parse timestamp '%s', using current time. "
-                    "topic=%s, run_id=%s",
-                    timestamp_raw,
-                    message.topic,
-                    run_id,
-                )
+        # Extract occurred_at from timestamp field
+        occurred_at = self._extract_timestamp(payload, "timestamp", default=occurred_at)
 
         return run_id, repo_id, event_type, event_version, occurred_at
 
-    def _parse_offset(self, offset: str | None) -> int:
-        """Parse Kafka offset string to integer.
+    def _extract_uuid(
+        self,
+        payload: dict[str, object],
+        key: str,
+        default: UUID,
+    ) -> UUID:
+        """Extract a UUID field from payload with fallback.
 
         Args:
-            offset: Offset string from Kafka, or None.
+            payload: Parsed JSON payload dict.
+            key: Key to extract from payload.
+            default: Fallback UUID if extraction fails.
 
         Returns:
-            Parsed offset as integer, or 0 if None or unparseable.
+            Extracted UUID or default.
         """
-        if offset is None:
-            return 0
+        raw = payload.get(key)
+        if raw is None:
+            return default
         try:
-            return int(offset)
+            return UUID(str(raw))
+        except (ValueError, AttributeError):
+            logger.warning(
+                "Failed to parse '%s' as UUID from validation event "
+                "(value=%r), using generated fallback",
+                key,
+                raw,
+            )
+            return default
+
+    def _extract_timestamp(
+        self,
+        payload: dict[str, object],
+        key: str,
+        default: datetime,
+    ) -> datetime:
+        """Extract an ISO-8601 timestamp from payload with fallback.
+
+        Args:
+            payload: Parsed JSON payload dict.
+            key: Key to extract from payload.
+            default: Fallback datetime if extraction fails.
+
+        Returns:
+            Extracted datetime or default.
+        """
+        raw = payload.get(key)
+        if raw is None:
+            return default
+        try:
+            return datetime.fromisoformat(str(raw))
         except (ValueError, TypeError):
             logger.warning(
-                "Failed to parse offset '%s' as integer, defaulting to 0",
-                offset,
+                "Failed to parse '%s' as ISO timestamp from validation "
+                "event (value=%r), using current UTC time as fallback",
+                key,
+                raw,
             )
-            return 0
+            return default
+
+    @staticmethod
+    def _extract_version_from_topic(topic: str) -> str:
+        """Extract version suffix from a topic or event_type string.
+
+        Looks for a trailing version segment like ".v1", ".v2", etc.
+
+        Args:
+            topic: Topic or event_type string
+                (e.g., "onex.evt.validation.cross-repo-run-started.v1").
+
+        Returns:
+            Version string (e.g., "v1") or "unknown" if not found.
+        """
+        parts = topic.rsplit(".", maxsplit=1)
+        if len(parts) == 2 and parts[1].startswith("v") and parts[1][1:].isdigit():
+            return parts[1]
+        return "unknown"
 
 
 __all__ = ["HandlerValidationLedgerProjection"]

@@ -441,7 +441,7 @@ class TestContractTimeInjectionConfiguration:
         for timeout evaluation and other time-dependent operations.
 
         Expected Structure in consumed_events:
-            - topic: "{env}.{namespace}.onex.internal.runtime-tick.v1"
+            - topic: "onex.intent.platform.runtime-tick.v1"
               event_type: "RuntimeTick"
               internal: true
         """

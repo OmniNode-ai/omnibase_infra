@@ -89,22 +89,26 @@ from omnibase_infra.protocols.protocol_snapshot_publisher import (
     ProtocolSnapshotPublisher,
 )
 from omnibase_infra.protocols.protocol_snapshot_store import ProtocolSnapshotStore
+from omnibase_infra.protocols.protocol_validation_ledger_repository import (
+    ProtocolValidationLedgerRepository,
+)
 
 __all__: list[str] = [
     "ProtocolCapabilityProjection",
     "ProtocolCapabilityQuery",
-    "ProtocolEventBusLike",
-    "ProtocolEventProjector",
     "ProtocolContainerAware",
     "ProtocolDispatchEngine",
+    "ProtocolEventBusLike",
+    "ProtocolEventProjector",
     "ProtocolIdempotencyStore",
-    "ProtocolNodeIntrospection",
     "ProtocolLedgerSink",
     "ProtocolMessageDispatcher",
     "ProtocolMessageTypeRegistry",
+    "ProtocolNodeIntrospection",
     "ProtocolPluginCompute",
     "ProtocolProjectorSchemaValidator",
     "ProtocolRegistryMetrics",
     "ProtocolSnapshotPublisher",
     "ProtocolSnapshotStore",
+    "ProtocolValidationLedgerRepository",
 ]

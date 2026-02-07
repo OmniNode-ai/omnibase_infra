@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Validation ledger query model for filtering and pagination.
+"""Validation ledger query model.
 
-This module defines query parameters for validation event ledger searches.
-All filter fields are optional - omitting a field means no filtering on
-that dimension. Multiple filters are combined with AND logic.
-
-Ticket: OMN-1908
+This module defines the filter model used to query the validation_event_ledger
+table. All filter fields are optional to support flexible query composition.
 """
+
+from __future__ import annotations
 
 from datetime import datetime
 from uuid import UUID
@@ -16,47 +15,18 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelValidationLedgerQuery(BaseModel):
-    """Query parameters for validation event ledger searches.
+    """Filter model for validation ledger queries. All fields optional."""
 
-    All filter fields are optional - omitting a field means no filtering
-    on that dimension. Multiple filters are combined with AND logic.
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    The limit and offset fields enable pagination through large result sets.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    run_id: UUID | None = Field(
-        default=None,
-        description="Filter by validation run ID",
-    )
-    repo_id: str | None = Field(
-        default=None,
-        description="Filter by repository identifier",
-    )
-    event_type: str | None = Field(
-        default=None,
-        description="Filter by event type discriminator",
-    )
+    run_id: UUID | None = Field(default=None, description="Filter by validation run ID")
+    repo_id: str | None = Field(default=None, description="Filter by repository ID")
+    event_type: str | None = Field(default=None, description="Filter by event type")
     start_time: datetime | None = Field(
-        default=None,
-        description="Filter events at or after this timestamp",
+        default=None, description="Filter events after this time"
     )
     end_time: datetime | None = Field(
-        default=None,
-        description="Filter events before this timestamp",
+        default=None, description="Filter events before this time"
     )
-    limit: int = Field(
-        default=100,
-        ge=1,
-        le=10000,
-        description="Maximum number of entries to return",
-    )
-    offset: int = Field(
-        default=0,
-        ge=0,
-        description="Number of entries to skip for pagination",
-    )
-
-
-__all__ = ["ModelValidationLedgerQuery"]
+    limit: int = Field(default=100, ge=1, le=10000, description="Max results")
+    offset: int = Field(default=0, ge=0, description="Pagination offset")

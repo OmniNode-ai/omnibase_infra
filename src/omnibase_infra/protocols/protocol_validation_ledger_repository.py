@@ -1,26 +1,27 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Protocol definition for validation event ledger repository operations.
+"""Protocol for validation event ledger repository operations.
 
 This module defines the ProtocolValidationLedgerRepository interface for
-validation event storage, retrieval, and retention management.
+validation event ledger persistence and replay. Implementations provide
+append, query, and retention operations for the validation_event_ledger
+table used by cross-repo validation runs.
 
 Design Decisions:
     - runtime_checkable: Enables isinstance() checks for duck typing
     - Async methods: All operations are async for non-blocking I/O
     - Typed models: Uses Pydantic models for type safety
-    - Replay ordering: By (kafka_partition, kafka_offset) within topic
-
-Ticket: OMN-1908
+    - Idempotent writes: (kafka_topic, kafka_partition, kafka_offset) unique constraint
+    - Deterministic replay: Ordering by kafka_partition, kafka_offset
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from uuid import UUID
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from omnibase_infra.models.validation_ledger import (
         ModelValidationLedgerAppendResult,
         ModelValidationLedgerEntry,
@@ -31,40 +32,78 @@ if TYPE_CHECKING:
 
 @runtime_checkable
 class ProtocolValidationLedgerRepository(Protocol):
-    """Protocol for validation event ledger persistence operations.
+    """Protocol for validation event ledger persistence and replay.
 
-    This protocol defines the interface for appending validation events
-    to the domain-specific ledger, querying by run_id or flexible filters,
-    and managing retention.
+    Provides append, query, and retention operations for the
+    validation_event_ledger table. Implementations must support
+    idempotent writes via (kafka_topic, kafka_partition, kafka_offset)
+    unique constraint.
 
-    Implementations must provide idempotent append operations via the
-    (kafka_topic, kafka_partition, kafka_offset) unique constraint.
+    Implementations:
+        - PostgresValidationLedgerRepository: Production asyncpg implementation
+        - MockValidationLedgerRepository: Test double for unit testing
 
-    Methods:
-        append: Idempotent write of a validation event to the ledger.
-        query_by_run_id: Retrieve all events for a specific validation run.
-        query: Flexible query with optional filters and pagination.
-        cleanup_expired: Remove old entries respecting retention policy.
+    Example:
+        >>> async def persist_event(
+        ...     repo: ProtocolValidationLedgerRepository,
+        ...     run_id: UUID,
+        ...     envelope_bytes: bytes,
+        ... ) -> ModelValidationLedgerAppendResult:
+        ...     return await repo.append(
+        ...         run_id=run_id,
+        ...         repo_id="omnibase_core",
+        ...         event_type="onex.evt.validation.cross-repo-run-started.v1",
+        ...         event_version="v1",
+        ...         occurred_at=datetime.now(UTC),
+        ...         kafka_topic="onex.evt.validation.cross-repo-run-started.v1",
+        ...         kafka_partition=0,
+        ...         kafka_offset=42,
+        ...         envelope_bytes=envelope_bytes,
+        ...         envelope_hash="sha256:abc123",
+        ...     )
     """
 
     async def append(
         self,
-        entry: ModelValidationLedgerEntry,
+        *,
+        run_id: UUID,
+        repo_id: str,
+        event_type: str,
+        event_version: str,
+        occurred_at: datetime,
+        kafka_topic: str,
+        kafka_partition: int,
+        kafka_offset: int,
+        envelope_bytes: bytes,
+        envelope_hash: str,
     ) -> ModelValidationLedgerAppendResult:
         """Append a validation event to the ledger with idempotent write support.
 
         Uses INSERT ... ON CONFLICT DO NOTHING with the
         (kafka_topic, kafka_partition, kafka_offset) unique constraint.
+        Duplicate events are detected without raising errors.
 
         Args:
-            entry: Validation ledger entry to persist.
+            run_id: UUID of the validation run this event belongs to.
+            repo_id: Repository identifier (e.g., "omnibase_core").
+            event_type: Fully qualified event type name.
+            event_version: Semantic version of the event schema.
+            occurred_at: Timestamp when the event originally occurred.
+            kafka_topic: Kafka topic the event was consumed from.
+            kafka_partition: Kafka partition number.
+            kafka_offset: Kafka offset within the partition.
+            envelope_bytes: Raw envelope bytes stored as BYTEA.
+            envelope_hash: SHA-256 hash of the envelope for integrity verification.
 
         Returns:
-            ModelValidationLedgerAppendResult with success, entry_id,
-            and duplicate flag.
+            ModelValidationLedgerAppendResult with:
+                - success: True if operation completed without error
+                - ledger_entry_id: UUID of created entry, None if duplicate
+                - duplicate: True if ON CONFLICT was triggered
 
         Raises:
             RepositoryExecutionError: If database operation fails.
+            RepositoryTimeoutError: If operation times out.
         """
         ...
 
@@ -74,18 +113,23 @@ class ProtocolValidationLedgerRepository(Protocol):
         limit: int = 100,
         offset: int = 0,
     ) -> list[ModelValidationLedgerEntry]:
-        """Query validation ledger entries by run ID.
+        """Query entries for a specific validation run.
 
-        Returns entries ordered by (kafka_partition, kafka_offset) for
-        correct replay ordering within the run.
+        Returns entries ordered by kafka_partition and kafka_offset for
+        deterministic replay ordering.
 
         Args:
-            run_id: The validation run ID to search for.
-            limit: Maximum entries to return (default: 100).
-            offset: Number of entries to skip for pagination.
+            run_id: The validation run UUID to query for.
+            limit: Maximum number of entries to return (default: 100).
+            offset: Number of entries to skip for pagination (default: 0).
 
         Returns:
-            List of entries ordered by Kafka offset for replay.
+            List of ModelValidationLedgerEntry matching the run_id,
+            ordered by kafka_partition, kafka_offset for deterministic replay.
+
+        Raises:
+            RepositoryExecutionError: If database query fails.
+            RepositoryTimeoutError: If query times out.
         """
         ...
 
@@ -93,16 +137,26 @@ class ProtocolValidationLedgerRepository(Protocol):
         self,
         query: ModelValidationLedgerQuery,
     ) -> ModelValidationLedgerReplayBatch:
-        """Execute a flexible query with optional filters and pagination.
+        """Query with flexible filters, returns paginated results.
 
-        Builds WHERE clause from non-None query fields combined with AND.
+        Builds a dynamic WHERE clause from the non-None fields of the query
+        model. Returns a ModelValidationLedgerReplayBatch with pagination
+        metadata (total_count, has_more).
 
         Args:
-            query: Query parameters with optional filters.
+            query: Query parameters including optional filters for run_id,
+                repo_id, event_type, start_time, end_time, and pagination.
 
         Returns:
-            ModelValidationLedgerReplayBatch with entries, total_count,
-            has_more, and the original query.
+            ModelValidationLedgerReplayBatch with:
+                - entries: Matching ledger entries
+                - total_count: Total matching rows (before pagination)
+                - has_more: Whether more results exist beyond this page
+                - query: The original query for reference
+
+        Raises:
+            RepositoryExecutionError: If database query fails.
+            RepositoryTimeoutError: If query times out.
         """
         ...
 
@@ -110,21 +164,29 @@ class ProtocolValidationLedgerRepository(Protocol):
         self,
         retention_days: int = 30,
         min_runs_per_repo: int = 25,
-        max_deletions: int = 1000,
+        batch_size: int = 1000,
     ) -> int:
-        """Remove expired validation ledger entries.
+        """Delete old entries respecting time-based and min-run retention.
 
-        Implements combined retention policy:
-        1. Delete entries older than retention_days
-        2. BUT preserve at least min_runs_per_repo distinct runs per repo
+        Implements a two-phase cleanup strategy:
+        1. Identify protected run_ids (most recent min_runs_per_repo per repo)
+        2. Delete entries older than retention_days that are NOT in protected runs
+
+        Uses batched deletion to avoid long-running locks on large tables.
 
         Args:
-            retention_days: Delete entries older than this many days.
-            min_runs_per_repo: Minimum distinct runs to keep per repo.
-            max_deletions: Maximum rows to delete per call (prevents lock contention).
+            retention_days: Number of days to retain entries (default: 30).
+            min_runs_per_repo: Minimum number of recent runs to preserve
+                per repo_id, regardless of age (default: 25).
+            batch_size: Number of records to delete per batch iteration
+                (default: 1000).
 
         Returns:
-            Number of entries deleted.
+            Total number of entries deleted across all batches.
+
+        Raises:
+            RepositoryExecutionError: If database operation fails.
+            RepositoryTimeoutError: If cleanup times out.
         """
         ...
 

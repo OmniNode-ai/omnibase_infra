@@ -236,13 +236,10 @@ class ServiceTimeoutEmitter:
         InfraUnavailableError: If circuit breaker is open
     """
 
-    # Default topic patterns following ONEX conventions
-    DEFAULT_ACK_TIMEOUT_TOPIC = (
-        "{env}.{namespace}.onex.evt.node-registration-ack-timed-out.v1"
-    )
-    DEFAULT_LIVENESS_EXPIRED_TOPIC = (
-        "{env}.{namespace}.onex.evt.node-liveness-expired.v1"
-    )
+    # Default topic suffixes following ONEX 5-segment realm-agnostic conventions.
+    # The runtime composes the full qualified topic by prepending env.namespace.
+    DEFAULT_ACK_TIMEOUT_TOPIC = "onex.evt.platform.node-registration-ack-timed-out.v1"
+    DEFAULT_LIVENESS_EXPIRED_TOPIC = "onex.evt.platform.node-liveness-expired.v1"
 
     # Error rate threshold for systemic issue detection.
     # When more than 50% of emissions fail in a single batch, this indicates
@@ -312,19 +309,18 @@ class ServiceTimeoutEmitter:
         """Return configured namespace."""
         return self._config.namespace
 
-    def _build_topic(self, topic_pattern: str) -> str:
-        """Build topic name from pattern with environment and namespace.
+    def _build_topic(self, topic_suffix: str) -> str:
+        """Build fully qualified topic by prepending environment and namespace.
 
         Args:
-            topic_pattern: Topic pattern with {env} and {namespace} placeholders.
+            topic_suffix: Realm-agnostic ONEX topic suffix
+                (e.g., ``onex.evt.platform.node-liveness-expired.v1``).
 
         Returns:
-            Fully qualified topic name.
+            Fully qualified topic name
+                (e.g., ``prod.myapp.onex.evt.platform.node-liveness-expired.v1``).
         """
-        return topic_pattern.format(
-            env=self._config.environment,
-            namespace=self._config.namespace,
-        )
+        return f"{self._config.environment}.{self._config.namespace}.{topic_suffix}"
 
     async def process_timeouts(
         self,

@@ -19,7 +19,7 @@ Design Notes:
        - Snapshots are derived, read-optimized views (can be rebuilt from events)
 
     3. **Key Format**:
-       - Snapshot keys: "{domain}:{entity_id}" (e.g., "registration:uuid-here")
+       - Snapshot keys: entity_id (UUID string, e.g., "550e8400-...")
        - This enables per-entity compaction where only the latest snapshot survives
 
     4. **Partition Strategy**:
@@ -96,14 +96,14 @@ class ModelSnapshotTopicConfig(BaseModel):
 
     Key Semantics:
         Kafka compaction uses message keys to determine which records to retain.
-        For snapshot topics, keys should follow the format:
+        For snapshot topics, the key is the entity_id as a plain UUID string
+        (NOT ``domain:entity_id``). Domain isolation is handled at the topic
+        level, not the key level.
 
-            {domain}:{entity_id}
-
-        For example: "registration:550e8400-e29b-41d4-a716-446655440000"
+        For example: "550e8400-e29b-41d4-a716-446655440000"
 
         This ensures that only the latest snapshot for each entity survives
-        compaction, while maintaining domain isolation.
+        compaction with simple cross-language consumer compatibility.
 
     Compaction Timing:
         The min_compaction_lag_ms and max_compaction_lag_ms settings control
@@ -565,27 +565,29 @@ class ModelSnapshotTopicConfig(BaseModel):
             "min.insync.replicas": str(self.min_insync_replicas),
         }
 
-    def get_snapshot_key(self, domain: str, entity_id: str) -> str:
+    def get_snapshot_key(self, entity_id: str) -> str:
         """Generate a snapshot key for Kafka compaction.
 
-        Keys follow the format: {domain}:{entity_id}
+        Keys are the entity_id as a plain UUID string. This ensures
+        compaction retains only the latest snapshot per node and simplifies
+        cross-language consumer compatibility.
 
-        This ensures that compaction retains only the latest snapshot
-        for each (domain, entity_id) combination.
+        Note:
+            The key is entity_id ONLY. It does NOT include domain or any
+            other prefix (e.g., NOT "domain:entity_id").
 
         Args:
-            domain: Domain namespace (e.g., "registration", "discovery")
             entity_id: Entity UUID as string
 
         Returns:
-            Formatted snapshot key for Kafka message
+            Entity UUID string for Kafka message key
 
         Example:
             >>> config = ModelSnapshotTopicConfig.default()
-            >>> config.get_snapshot_key("registration", "550e8400-e29b-41d4-a716-446655440000")
-            'registration:550e8400-e29b-41d4-a716-446655440000'
+            >>> config.get_snapshot_key("550e8400-e29b-41d4-a716-446655440000")
+            '550e8400-e29b-41d4-a716-446655440000'
         """
-        return f"{domain}:{entity_id}"
+        return entity_id
 
 
 __all__: list[str] = ["ModelSnapshotTopicConfig"]

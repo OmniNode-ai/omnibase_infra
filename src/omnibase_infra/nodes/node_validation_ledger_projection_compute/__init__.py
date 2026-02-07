@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Node Validation Ledger Projection Compute - Cross-repo validation event projection.
+"""Node Validation Ledger Projection Compute - Cross-repo validation ledger projection node.
 
-This package provides the NodeValidationLedgerProjectionCompute, a declarative
-COMPUTE node that subscribes to 3 cross-repo validation event topics for
-validation event ledger persistence.
+This package provides the NodeValidationLedgerProjectionCompute, a declarative COMPUTE
+node that subscribes to 3 cross-repo validation event topics for validation ledger
+persistence.
 
 Architecture:
     This node follows the ONEX declarative pattern where:
@@ -13,15 +13,21 @@ Architecture:
     - contract.yaml defines behavior via handler_routing
 
 Core Purpose:
-    Projects cross-repo validation events into the validation_event_ledger
-    table, enabling deterministic replay and dashboard queries.
+    Projects validation events from the event bus into the validation_event_ledger,
+    enabling deterministic replay and complete traceability of cross-repo validation
+    runs, violations, and completions.
 
 Subscribed Topics:
-    - onex.validation.cross_repo.run.started.v1
-    - onex.validation.cross_repo.violations.batch.v1
-    - onex.validation.cross_repo.run.completed.v1
+    - onex.evt.validation.cross-repo-run-started.v1
+    - onex.evt.validation.violations-batch.v1
+    - onex.evt.validation.cross-repo-run-completed.v1
 
-Ticket: OMN-1908
+Consumer Configuration:
+    - consumer_purpose: "projection" (non-processing, read-only)
+    - auto_offset_reset: "earliest" (capture all historical events)
+
+Related Tickets:
+    - OMN-1908: Cross-Repo Validation Ledger Persistence
 """
 
 from omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers import (
@@ -30,12 +36,8 @@ from omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers imp
 from omnibase_infra.nodes.node_validation_ledger_projection_compute.node import (
     NodeValidationLedgerProjectionCompute,
 )
-from omnibase_infra.nodes.node_validation_ledger_projection_compute.registry import (
-    RegistryInfraValidationLedgerProjection,
-)
 
 __all__ = [
     "HandlerValidationLedgerProjection",
     "NodeValidationLedgerProjectionCompute",
-    "RegistryInfraValidationLedgerProjection",
 ]

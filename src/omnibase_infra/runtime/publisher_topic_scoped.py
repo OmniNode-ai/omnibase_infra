@@ -77,6 +77,7 @@ from uuid import UUID
 from omnibase_core.types import JsonType
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
+from omnibase_infra.topics import TopicResolver
 
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
@@ -152,6 +153,7 @@ class PublisherTopicScoped:
         self._allowed_topics = frozenset(allowed_topics)
         self._environment = environment
         self._logger = logging.getLogger(__name__)
+        self._topic_resolver = TopicResolver()
 
     def _normalize_correlation_id(
         self,
@@ -176,9 +178,11 @@ class PublisherTopicScoped:
     def resolve_topic(self, topic_suffix: str) -> str:
         """Resolve topic suffix to topic name (realm-agnostic, no environment prefix).
 
-        Topics are realm-agnostic in ONEX. The environment/realm is enforced via
-        envelope identity, not topic naming. This enables cross-environment event
-        routing when needed while maintaining proper isolation through identity.
+        Delegates to the canonical ``TopicResolver`` for centralized topic
+        resolution logic. Topics are realm-agnostic in ONEX. The environment/realm
+        is enforced via envelope identity, not topic naming. This enables
+        cross-environment event routing when needed while maintaining proper
+        isolation through identity.
 
         Args:
             topic_suffix: ONEX format topic suffix (e.g., 'onex.events.v1')
@@ -194,7 +198,7 @@ class PublisherTopicScoped:
             The environment is still stored for potential consumer group derivation
             in related components. Topics themselves are realm-agnostic.
         """
-        return topic_suffix
+        return self._topic_resolver.resolve(topic_suffix)
 
     async def publish(
         self,

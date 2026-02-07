@@ -155,12 +155,9 @@ from omnibase_infra.runtime.handler_identity import (
     handler_identity,
 )
 from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
-from omnibase_infra.runtime.kafka_contract_source import (
-    TOPIC_SUFFIX_CONTRACT_DEREGISTERED,
-    TOPIC_SUFFIX_CONTRACT_REGISTERED,
-    KafkaContractSource,
-)
+from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
 from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
+from omnibase_infra.topics import TopicResolutionError, TopicResolver
 
 # Expose wire_default_handlers as wire_handlers for test patching compatibility
 # Tests patch "omnibase_infra.runtime.service_runtime_host_process.wire_handlers"
@@ -3624,9 +3621,9 @@ class RuntimeHostProcess:
             - KAFKA_EVENTS mode must be active (self._kafka_contract_source set)
             - Event bus must be available and started
 
-        Topic Format:
-            - Registration: {env}.{TOPIC_SUFFIX_CONTRACT_REGISTERED}
-            - Deregistration: {env}.{TOPIC_SUFFIX_CONTRACT_DEREGISTERED}
+        Topic Format (realm-agnostic, resolved via TopicResolver):
+            - Registration: onex.evt.platform.contract-registered.v1
+            - Deregistration: onex.evt.platform.contract-deregistered.v1
 
         Note:
             Unsubscribe callbacks are stored in self._baseline_subscriptions
@@ -3655,9 +3652,42 @@ class RuntimeHostProcess:
         source = self._kafka_contract_source
         environment = source.environment
 
-        # Compose topic names using platform-reserved suffixes
-        registration_topic = f"{environment}.{TOPIC_SUFFIX_CONTRACT_REGISTERED}"
-        deregistration_topic = f"{environment}.{TOPIC_SUFFIX_CONTRACT_DEREGISTERED}"
+        # Resolve realm-agnostic topic names via TopicResolver (no env prefix).
+        # Topics are realm-agnostic in ONEX; the environment/realm is enforced
+        # via envelope identity and consumer group naming, not topic names.
+        # Generate a correlation_id for this wiring phase (no request-scoped
+        # correlation_id is available at startup time).
+        wiring_correlation_id = uuid4()
+        topic_resolver = TopicResolver()
+        try:
+            registration_topic = topic_resolver.resolve(
+                "onex.evt.platform.contract-registered.v1",
+                correlation_id=wiring_correlation_id,
+            )
+            deregistration_topic = topic_resolver.resolve(
+                "onex.evt.platform.contract-deregistered.v1",
+                correlation_id=wiring_correlation_id,
+            )
+        except TopicResolutionError as e:
+            # TopicResolutionError is a ProtocolConfigurationError with a
+            # guaranteed infra_context (including correlation_id). Log at
+            # warning level so operators can diagnose baseline wiring issues,
+            # then re-raise with runtime-specific context message.
+            logger.warning(
+                "TopicResolver rejected baseline topic suffix during runtime "
+                "startup (correlation_id=%s): %s",
+                e.infra_context.correlation_id,
+                e,
+                extra={
+                    "correlation_id": str(e.infra_context.correlation_id),
+                    "transport_type": "kafka",
+                    "operation": "resolve_topic",
+                },
+            )
+            raise ProtocolConfigurationError(
+                f"Invalid topic suffix in runtime configuration: {e}",
+                context=e.infra_context,
+            ) from e
 
         # Import ModelEventMessage type for handler signature
         from omnibase_infra.event_bus.models.model_event_message import (

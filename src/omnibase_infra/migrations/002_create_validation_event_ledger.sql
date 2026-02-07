@@ -1,57 +1,59 @@
+-- SPDX-License-Identifier: MIT
+-- Copyright (c) 2026 OmniNode Team
+--
 -- Migration: 002_create_validation_event_ledger.sql
 -- Purpose: Create the validation_event_ledger table for cross-repo validation event persistence and replay
 -- Author: ONEX Infrastructure Team
--- Date: 2026-02-07
--- Ticket: OMN-1908
+-- Date: 2026-02-06
 --
 -- Design Decisions:
---   1. Domain-specific table: Keeps validation events separate from the generic event_ledger.
---      First-class run_id, repo_id, event_type columns enable efficient domain queries
---      without polluting the generic ledger schema.
+--   1. Domain-specific first-class columns: run_id, repo_id, event_type, and event_version
+--      are all NOT NULL because validation events have a well-defined schema. Unlike the
+--      generic event_ledger (which must tolerate malformed events), validation events are
+--      structurally guaranteed by the producing pipeline.
 --
---   2. BYTEA for envelope_bytes: Raw binary preservation of the complete Kafka envelope.
---      Enables deterministic replay by storing the exact bytes as received.
---      Base64 encoding happens at the application layer (model transport), not in the DB.
+--   2. BYTEA for envelope_bytes: Raw byte-level preservation for deterministic replay.
+--      The validation replay subsystem requires bit-for-bit identical event reconstruction,
+--      making binary storage essential.
 --
---   3. TEXT for envelope_hash: SHA-256 hex digest of envelope_bytes for integrity verification.
---      Consumers can verify replay fidelity by comparing hash of decoded bytes.
+--   3. TEXT for envelope_hash: SHA-256 hex digest of envelope_bytes for integrity
+--      verification during replay. Consumers can verify hash(envelope_bytes) == envelope_hash
+--      before processing to detect storage corruption.
 --
---   4. Idempotency via (kafka_topic, kafka_partition, kafka_offset): Ensures exactly-once
---      semantics for event capture even with consumer restarts or rebalancing.
---      Uses ON CONFLICT DO NOTHING for safe duplicate handling.
+--   4. Idempotency via (kafka_topic, kafka_partition, kafka_offset): Same pattern as
+--      the generic event_ledger. ON CONFLICT DO NOTHING ensures exactly-once semantics
+--      for validation event capture even with consumer restarts or rebalancing.
 --
---   5. Replay ordering by (kafka_partition, kafka_offset): Within a single topic+partition,
---      Kafka offsets provide total ordering. occurred_at is stored for display but NOT used
---      for ordering (clock drift unsafe).
---
---   6. Retention via cleanup_expired(): Time-based + minimum run count per repo.
---      No pg_cron dependency - cleanup is programmatic via repository method.
+--   5. occurred_at from event payload vs created_at from database: occurred_at reflects
+--      when the validation event actually happened; created_at records when we persisted it.
+--      Both are NOT NULL for audit completeness.
 
 -- =============================================================================
 -- TABLE: validation_event_ledger
 -- =============================================================================
--- Domain-specific ledger for cross-repo validation events. Stores validation
--- run lifecycle events (started, violations batch, completed) for:
---   - Replay capability for historical validation runs
---   - Dashboard queries by run_id and repo_id
---   - Deterministic replay via raw envelope bytes
---   - Idempotent Kafka consumer writes
+-- The validation_event_ledger provides durable, append-only storage of all
+-- cross-repo validation events consumed from Kafka. It serves as:
+--   - Source of truth for validation run replay and reprocessing
+--   - Audit trail for cross-repository validation outcomes
+--   - Integrity-verified store via envelope_hash for deterministic replay
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS validation_event_ledger (
-    -- Primary key: UUID for ledger entry identification
+    -- Primary key: Auto-generated UUID for ledger entry identification
     id                  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- =========================================================================
-    -- Domain Fields (first-class for efficient querying)
+    -- Validation Event Identity
     -- =========================================================================
-    run_id              UUID            NOT NULL,       -- Links started -> violations -> completed events
-    repo_id             TEXT            NOT NULL,       -- Human-readable repository identifier
-    event_type          TEXT            NOT NULL,       -- Event type discriminator (e.g., "onex.validation.cross_repo.run.started.v1")
+    -- These fields identify the validation context. All NOT NULL because
+    -- validation events are structurally well-defined.
+    run_id              UUID            NOT NULL,       -- Validation run correlation ID
+    repo_id             TEXT            NOT NULL,       -- Repository being validated
+    event_type          TEXT            NOT NULL,       -- Event type (e.g., onex.evt.validation.cross-repo-run-started.v1)
     event_version       TEXT            NOT NULL,       -- Event schema version
 
     -- =========================================================================
-    -- Event Timestamp
+    -- Temporal
     -- =========================================================================
     occurred_at         TIMESTAMPTZ     NOT NULL,       -- When the validation event occurred (from event payload)
 
@@ -65,40 +67,44 @@ CREATE TABLE IF NOT EXISTS validation_event_ledger (
     kafka_offset        BIGINT          NOT NULL,       -- Kafka offset within partition
 
     -- =========================================================================
-    -- Raw Envelope Data
+    -- Raw Event Data
     -- =========================================================================
-    -- Preserved exactly as received from Kafka for deterministic replay.
-    envelope_bytes      BYTEA           NOT NULL,       -- Complete Kafka envelope as raw bytes
+    -- Preserved as raw bytes for deterministic replay. The hash provides
+    -- integrity verification without needing to deserialize.
+    envelope_bytes      BYTEA           NOT NULL,       -- Raw envelope bytes for deterministic replay
     envelope_hash       TEXT            NOT NULL,       -- SHA-256 hex digest of envelope_bytes
 
     -- =========================================================================
-    -- Timestamps
+    -- Ledger Metadata
     -- =========================================================================
-    created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),  -- When this ledger entry was written
+    created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),  -- When this ledger entry was persisted
 
     -- =========================================================================
     -- Constraints
     -- =========================================================================
     -- Idempotency constraint: Ensures each Kafka message is recorded exactly once.
+    -- On consumer restart, duplicate inserts will fail gracefully (ON CONFLICT DO NOTHING).
     CONSTRAINT uk_validation_ledger_kafka_position UNIQUE (kafka_topic, kafka_partition, kafka_offset)
 );
 
 -- =============================================================================
 -- INDEXES
 -- =============================================================================
+-- Optimized for common query patterns: run lookups, repo+time scans,
+-- and repo+run composite queries.
 
 -- Index 1: Run ID lookups
--- Use case: Replay all events for a specific validation run
+-- Use case: Retrieving all events for a specific validation run
 CREATE INDEX IF NOT EXISTS idx_validation_ledger_run_id
     ON validation_event_ledger (run_id);
 
--- Index 2: Repo + time range queries (descending for recent-first)
--- Use case: Dashboard showing recent validation runs for a repository
-CREATE INDEX IF NOT EXISTS idx_validation_ledger_repo_occurred_at
+-- Index 2: Repository + occurred_at descending
+-- Use case: Finding recent validation events for a specific repository
+CREATE INDEX IF NOT EXISTS idx_validation_ledger_repo_occurred
     ON validation_event_ledger (repo_id, occurred_at DESC);
 
--- Index 3: Repo + run composite
--- Use case: Find all events for a specific repo's validation run
+-- Index 3: Repository + Run ID composite
+-- Use case: Scoping a validation run to a specific repository
 CREATE INDEX IF NOT EXISTS idx_validation_ledger_repo_run
     ON validation_event_ledger (repo_id, run_id);
 
@@ -107,25 +113,25 @@ CREATE INDEX IF NOT EXISTS idx_validation_ledger_repo_run
 -- =============================================================================
 
 COMMENT ON TABLE validation_event_ledger IS
-    'Domain-specific ledger for cross-repo validation events. Enables deterministic replay and dashboard queries for validation runs.';
+    'Durable, append-only ledger of cross-repo validation events consumed from Kafka. Provides replay capability, integrity verification via envelope_hash, and idempotency guarantees.';
 
 COMMENT ON COLUMN validation_event_ledger.id IS
     'Auto-generated UUID primary key for this ledger entry';
 
 COMMENT ON COLUMN validation_event_ledger.run_id IS
-    'Validation run identifier linking started, violations, and completed events';
+    'Validation run correlation ID linking all events in a single validation run';
 
 COMMENT ON COLUMN validation_event_ledger.repo_id IS
-    'Human-readable repository identifier (e.g., "omnibase_core", "omnibase_infra")';
+    'Identifier of the repository being validated';
 
 COMMENT ON COLUMN validation_event_ledger.event_type IS
-    'Event type discriminator (e.g., "onex.validation.cross_repo.run.started.v1")';
+    'Fully qualified event type (e.g., onex.evt.validation.cross-repo-run-started.v1)';
 
 COMMENT ON COLUMN validation_event_ledger.event_version IS
-    'Event schema version for forward compatibility';
+    'Schema version of the event type for forward/backward compatibility';
 
 COMMENT ON COLUMN validation_event_ledger.occurred_at IS
-    'When the validation event occurred (from event payload timestamp)';
+    'Timestamp from the event payload indicating when the validation event occurred';
 
 COMMENT ON COLUMN validation_event_ledger.kafka_topic IS
     'Kafka topic from which the event was consumed';
@@ -134,16 +140,16 @@ COMMENT ON COLUMN validation_event_ledger.kafka_partition IS
     'Kafka partition number (idempotency key component)';
 
 COMMENT ON COLUMN validation_event_ledger.kafka_offset IS
-    'Kafka offset within partition (idempotency key component)';
+    'Kafka offset within the partition (idempotency key component)';
 
 COMMENT ON COLUMN validation_event_ledger.envelope_bytes IS
-    'Complete Kafka envelope as raw BYTEA for deterministic replay';
+    'Raw envelope bytes stored as BYTEA for bit-level deterministic replay';
 
 COMMENT ON COLUMN validation_event_ledger.envelope_hash IS
-    'SHA-256 hex digest of envelope_bytes for integrity verification';
+    'SHA-256 hex digest of envelope_bytes for integrity verification during replay';
 
 COMMENT ON COLUMN validation_event_ledger.created_at IS
-    'Timestamp when this entry was written to the ledger';
+    'Timestamp when this entry was persisted to the ledger (database server time)';
 
 COMMENT ON CONSTRAINT uk_validation_ledger_kafka_position ON validation_event_ledger IS
     'Idempotency constraint: ensures each Kafka message is recorded exactly once';

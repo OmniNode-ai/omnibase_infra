@@ -49,7 +49,7 @@ class ModelNodeLivenessExpired(BaseModel):
     this event.
 
     Topic Pattern:
-        {env}.{namespace}.onex.evt.node-liveness-expired.v1
+        onex.evt.platform.node-liveness-expired.v1
 
     Attributes:
         node_id: UUID of the node whose liveness expired.
@@ -76,6 +76,7 @@ class ModelNodeLivenessExpired(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        from_attributes=True,
     )
 
     node_id: UUID = Field(

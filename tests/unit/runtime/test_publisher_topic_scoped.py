@@ -43,7 +43,7 @@ def publisher(mock_event_bus: AsyncMock) -> PublisherTopicScoped:
     """Create publisher with standard allowed topics."""
     return PublisherTopicScoped(
         event_bus=mock_event_bus,
-        allowed_topics={"onex.evt.allowed.v1", "onex.evt.another.v1"},
+        allowed_topics={"onex.evt.platform.allowed.v1", "onex.evt.platform.another.v1"},
         environment="dev",
     )
 
@@ -53,7 +53,7 @@ def publisher_prod(mock_event_bus: AsyncMock) -> PublisherTopicScoped:
     """Create publisher with production environment."""
     return PublisherTopicScoped(
         event_bus=mock_event_bus,
-        allowed_topics={"onex.evt.orders.v1"},
+        allowed_topics={"onex.evt.platform.orders.v1"},
         environment="prod",
     )
 
@@ -75,7 +75,7 @@ class TestPublishSuccess:
         result = await publisher.publish(
             event_type="test.event",
             payload={"key": "value"},
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
             correlation_id="corr-123",
         )
 
@@ -91,11 +91,11 @@ class TestPublishSuccess:
         await publisher.publish(
             event_type="test.event",
             payload={"key": "value"},
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
         )
 
         call_kwargs = mock_event_bus.publish.call_args.kwargs
-        assert call_kwargs["topic"] == "onex.evt.allowed.v1"
+        assert call_kwargs["topic"] == "onex.evt.platform.allowed.v1"
 
     async def test_publish_serializes_payload_to_json(
         self,
@@ -107,7 +107,7 @@ class TestPublishSuccess:
         await publisher.publish(
             event_type="test.event",
             payload=payload,
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
         )
 
         call_kwargs = mock_event_bus.publish.call_args.kwargs
@@ -124,7 +124,7 @@ class TestPublishSuccess:
         await publisher.publish(
             event_type="test.event",
             payload={"key": "value"},
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
             correlation_id="corr-abc-123",
         )
 
@@ -148,7 +148,7 @@ class TestPublishSuccess:
         await publisher.publish(
             event_type="test.event",
             payload={"key": "value"},
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
             correlation_id=test_uuid,
         )
 
@@ -171,7 +171,7 @@ class TestPublishSuccess:
         await publisher.publish(
             event_type="test.event",
             payload={"key": "value"},
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
         )
 
         call_kwargs = mock_event_bus.publish.call_args.kwargs
@@ -186,12 +186,12 @@ class TestPublishSuccess:
         result = await publisher.publish(
             event_type="test.event",
             payload={"data": "test"},
-            topic="onex.evt.another.v1",
+            topic="onex.evt.platform.another.v1",
         )
 
         assert result is True
         call_kwargs = mock_event_bus.publish.call_args.kwargs
-        assert call_kwargs["topic"] == "onex.evt.another.v1"
+        assert call_kwargs["topic"] == "onex.evt.platform.another.v1"
 
 
 # =============================================================================
@@ -213,7 +213,7 @@ class TestPublishFailure:
             await publisher.publish(
                 event_type="test.event",
                 payload={"key": "value"},
-                topic="onex.evt.forbidden.v1",
+                topic="onex.evt.platform.forbidden.v1",
             )
 
     async def test_publish_without_topic_raises(
@@ -237,13 +237,13 @@ class TestPublishFailure:
             await publisher.publish(
                 event_type="test.event",
                 payload={},
-                topic="onex.evt.forbidden.v1",
+                topic="onex.evt.platform.forbidden.v1",
             )
             pytest.fail("Should have raised ProtocolConfigurationError")
         except ProtocolConfigurationError as e:
             error_msg = str(e)
-            assert "onex.evt.allowed.v1" in error_msg
-            assert "onex.evt.another.v1" in error_msg
+            assert "onex.evt.platform.allowed.v1" in error_msg
+            assert "onex.evt.platform.another.v1" in error_msg
 
     async def test_publish_does_not_call_event_bus_on_validation_failure(
         self,
@@ -255,7 +255,7 @@ class TestPublishFailure:
             await publisher.publish(
                 event_type="test.event",
                 payload={},
-                topic="onex.evt.forbidden.v1",
+                topic="onex.evt.platform.forbidden.v1",
             )
 
         mock_event_bus.publish.assert_not_called()
@@ -274,16 +274,16 @@ class TestTopicResolution:
         publisher: PublisherTopicScoped,
     ) -> None:
         """Test resolve_topic returns topic unchanged (realm-agnostic)."""
-        result = publisher.resolve_topic("onex.evt.test.v1")
-        assert result == "onex.evt.test.v1"
+        result = publisher.resolve_topic("onex.evt.platform.test-event.v1")
+        assert result == "onex.evt.platform.test-event.v1"
 
     def test_resolve_topic_with_prod_environment_unchanged(
         self,
         publisher_prod: PublisherTopicScoped,
     ) -> None:
         """Test resolve_topic returns topic unchanged regardless of environment."""
-        result = publisher_prod.resolve_topic("onex.evt.orders.v1")
-        assert result == "onex.evt.orders.v1"
+        result = publisher_prod.resolve_topic("onex.evt.platform.orders.v1")
+        assert result == "onex.evt.platform.orders.v1"
 
     def test_resolve_topic_with_custom_environment_unchanged(
         self,
@@ -292,11 +292,11 @@ class TestTopicResolution:
         """Test resolve_topic returns topic unchanged regardless of environment."""
         publisher = PublisherTopicScoped(
             event_bus=mock_event_bus,
-            allowed_topics={"topic.v1"},
+            allowed_topics={"onex.evt.platform.custom-topic.v1"},
             environment="staging-eu",
         )
-        result = publisher.resolve_topic("topic.v1")
-        assert result == "topic.v1"
+        result = publisher.resolve_topic("onex.evt.platform.custom-topic.v1")
+        assert result == "onex.evt.platform.custom-topic.v1"
 
 
 # =============================================================================
@@ -321,8 +321,8 @@ class TestProperties:
     ) -> None:
         """Test allowed_topics contains expected values."""
         topics = publisher.allowed_topics
-        assert "onex.evt.allowed.v1" in topics
-        assert "onex.evt.another.v1" in topics
+        assert "onex.evt.platform.allowed.v1" in topics
+        assert "onex.evt.platform.another.v1" in topics
         assert len(topics) == 2
 
     def test_allowed_topics_is_immutable(
@@ -367,7 +367,7 @@ class TestPayloadSerialization:
         await publisher.publish(
             event_type="test",
             payload=payload,
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
         )
 
         call_kwargs = mock_event_bus.publish.call_args.kwargs
@@ -383,7 +383,7 @@ class TestPayloadSerialization:
         await publisher.publish(
             event_type="test",
             payload=payload,
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
         )
 
         call_kwargs = mock_event_bus.publish.call_args.kwargs
@@ -399,7 +399,7 @@ class TestPayloadSerialization:
         await publisher.publish(
             event_type="test",
             payload=payload,
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
         )
 
         call_kwargs = mock_event_bus.publish.call_args.kwargs
@@ -421,7 +421,7 @@ class TestPayloadSerialization:
         await publisher.publish(
             event_type="test",
             payload=payload,
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
         )
 
         call_kwargs = mock_event_bus.publish.call_args.kwargs
@@ -437,7 +437,7 @@ class TestPayloadSerialization:
         await publisher.publish(
             event_type="test",
             payload=payload,
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
         )
 
         call_kwargs = mock_event_bus.publish.call_args.kwargs
@@ -481,7 +481,7 @@ class TestEdgeCases:
         result = await publisher.publish(
             event_type="test",
             payload={"key": "value"},
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
             extra_arg="ignored",
             another_arg=123,
         )
@@ -502,7 +502,7 @@ class TestEdgeCases:
         await publisher.publish(
             event_type="test",
             payload={},
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
             correlation_id="",
         )
 
@@ -520,7 +520,7 @@ class TestEdgeCases:
         await publisher.publish(
             event_type="test",
             payload=payload,
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
         )
 
         call_kwargs = mock_event_bus.publish.call_args.kwargs
@@ -536,7 +536,7 @@ class TestEdgeCases:
         await publisher.publish(
             event_type="test",
             payload={},
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
             correlation_id="corr-test-abc",
         )
 
@@ -562,7 +562,7 @@ class TestMultiplePublications:
             await publisher.publish(
                 event_type="test",
                 payload={"count": i},
-                topic="onex.evt.allowed.v1",
+                topic="onex.evt.platform.allowed.v1",
             )
 
         assert mock_event_bus.publish.call_count == 3
@@ -576,16 +576,16 @@ class TestMultiplePublications:
         await publisher.publish(
             event_type="event1",
             payload={"a": 1},
-            topic="onex.evt.allowed.v1",
+            topic="onex.evt.platform.allowed.v1",
         )
         await publisher.publish(
             event_type="event2",
             payload={"b": 2},
-            topic="onex.evt.another.v1",
+            topic="onex.evt.platform.another.v1",
         )
 
         assert mock_event_bus.publish.call_count == 2
         calls = mock_event_bus.publish.call_args_list
         topics = [c.kwargs["topic"] for c in calls]
-        assert "onex.evt.allowed.v1" in topics
-        assert "onex.evt.another.v1" in topics
+        assert "onex.evt.platform.allowed.v1" in topics
+        assert "onex.evt.platform.another.v1" in topics
