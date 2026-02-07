@@ -2104,9 +2104,9 @@ class RuntimeHostProcess:
         Lifecycle ordering invariant (architectural invariant):
             import -> in-flight reservation ->
             resolve dependencies -> instantiate -> initialize ->
-            register in RegistryProtocolBinding (validates protocol compliance) ->
+            [under lock] register in RegistryProtocolBinding ->
             wire subscriptions -> register in _handlers ->
-            publish CAPABILITY_CHANGE ->
+            [outside lock] publish CAPABILITY_CHANGE (best-effort) ->
             release in-flight reservation.
 
         Failure at any step before registration means the handler never enters
@@ -2244,10 +2244,11 @@ class RuntimeHostProcess:
                         effective_config.update(self._config)
                     await handler_instance.initialize(effective_config)
 
-                # Steps 9-12: Validate, wire, register, and announce under lock.
+                # Steps 9-11: Validate, wire, and register under lock.
                 # All operations MUST be atomic to prevent orphan-subscription
                 # leaks when concurrent materializations race for the same
-                # protocol_type.
+                # protocol_type.  Step 12 (CAPABILITY_CHANGE) runs outside
+                # the lock since it is best-effort async I/O.
                 async with self._handler_mutation_lock:
                     # Double-check idempotency under lock — if another coroutine
                     # already registered this handler, skip wiring and return.
@@ -2285,16 +2286,20 @@ class RuntimeHostProcess:
                                 "correlation_id": str(correlation_id),
                             },
                         )
-
-                        # Step 12: Publish CAPABILITY_CHANGE
-                        await self._publish_capability_change(node_name, correlation_id)
                     except Exception:
                         # Roll back all partial state to prevent orphaned
-                        # handlers
+                        # handlers.  unregister() is a no-op when register()
+                        # itself was the call that threw.
                         handler_registry.unregister(protocol_type)
                         self._handler_descriptors.pop(protocol_type, None)
                         self._handlers.pop(protocol_type, None)
                         raise  # Re-raise to be caught by outer try/except
+
+                # Step 12: Publish CAPABILITY_CHANGE (best-effort, outside lock)
+                # Handler is committed to _handlers at step 11, so this can
+                # safely run without holding the mutation lock. Reduces lock
+                # contention by not blocking on async I/O.
+                await self._publish_capability_change(node_name, correlation_id)
 
                 return True
             finally:
