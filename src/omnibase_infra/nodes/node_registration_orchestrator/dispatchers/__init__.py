@@ -8,6 +8,7 @@ category-based routing.
 
 Available Dispatchers:
     - DispatcherNodeIntrospected: Handles ModelNodeIntrospectionEvent (EVENT)
+    - DispatcherNodeHeartbeat: Handles ModelNodeHeartbeatEvent (EVENT)
     - DispatcherRuntimeTick: Handles ModelRuntimeTick (EVENT)
     - DispatcherNodeRegistrationAcked: Handles ModelNodeRegistrationAcked (COMMAND)
 
@@ -34,8 +35,12 @@ Related:
     - OMN-892: 2-way Registration E2E Integration Test
     - OMN-934: Message Dispatch Engine
     - OMN-1346: Registration Code Extraction
+    - OMN-1990: Heartbeat Dispatcher Wiring
 """
 
+from omnibase_infra.nodes.node_registration_orchestrator.dispatchers.dispatcher_node_heartbeat import (
+    DispatcherNodeHeartbeat,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers.dispatcher_node_introspected import (
     DispatcherNodeIntrospected,
 )
@@ -47,6 +52,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.dispatchers.dispatcher_
 )
 
 __all__: list[str] = [
+    "DispatcherNodeHeartbeat",
     "DispatcherNodeIntrospected",
     "DispatcherNodeRegistrationAcked",
     "DispatcherRuntimeTick",

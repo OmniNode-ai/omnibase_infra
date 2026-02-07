@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.handlers.handler_consul import HandlerConsul
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeHeartbeat,
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
@@ -104,6 +105,14 @@ ROUTE_ID_RUNTIME_TICK = "route.registration.runtime-tick"
 
 Topic pattern: *.runtime.tick.events.*
 Message type: ModelRuntimeTick
+Category: EVENT
+"""
+
+ROUTE_ID_NODE_HEARTBEAT = "route.registration.node-heartbeat"
+"""Route ID for node heartbeat events.
+
+Topic pattern: *.node.heartbeat.events.*
+Message type: ModelNodeHeartbeatEvent
 Category: EVENT
 """
 
@@ -236,11 +245,13 @@ async def wire_registration_dispatchers(
     from omnibase_infra.enums import EnumMessageCategory
     from omnibase_infra.models.dispatch.model_dispatch_route import ModelDispatchRoute
     from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
+        DispatcherNodeHeartbeat,
         DispatcherNodeIntrospected,
         DispatcherNodeRegistrationAcked,
         DispatcherRuntimeTick,
     )
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeHeartbeat,
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
@@ -262,6 +273,18 @@ async def wire_registration_dispatchers(
                 HandlerNodeRegistrationAcked
             )
         )
+
+        # 1d. Resolve heartbeat handler (optional - requires projector)
+        handler_heartbeat: HandlerNodeHeartbeat | None = None
+        try:
+            handler_heartbeat = await container.service_registry.resolve_service(
+                HandlerNodeHeartbeat
+            )
+        except Exception:
+            logger.info(
+                "HandlerNodeHeartbeat not registered (projector may be unavailable), "
+                "heartbeat dispatcher will not be wired",
+            )
 
         # 2. Create dispatcher adapters
         dispatcher_introspected = DispatcherNodeIntrospected(handler_introspected)
@@ -335,6 +358,28 @@ async def wire_registration_dispatchers(
         )
         engine.register_route(route_acked)
         routes_registered.append(route_acked.route_id)
+
+        # 3d/4d. Register DispatcherNodeHeartbeat (if handler available)
+        if handler_heartbeat is not None:
+            dispatcher_heartbeat = DispatcherNodeHeartbeat(handler_heartbeat)
+
+            engine.register_dispatcher(
+                dispatcher_id=dispatcher_heartbeat.dispatcher_id,
+                dispatcher=dispatcher_heartbeat.handle,
+                category=dispatcher_heartbeat.category,
+                message_types=dispatcher_heartbeat.message_types,
+            )
+            dispatchers_registered.append(dispatcher_heartbeat.dispatcher_id)
+
+            route_heartbeat = ModelDispatchRoute(
+                route_id=ROUTE_ID_NODE_HEARTBEAT,
+                topic_pattern="*.node.heartbeat.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id=dispatcher_heartbeat.dispatcher_id,
+                message_type="ModelNodeHeartbeatEvent",
+            )
+            engine.register_route(route_heartbeat)
+            routes_registered.append(route_heartbeat.route_id)
 
         logger.info(
             "Registration dispatchers wired successfully",
@@ -427,6 +472,7 @@ async def wire_registration_handlers(
 
     from omnibase_core.models.primitives import ModelSemVer
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeHeartbeat,
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
@@ -524,6 +570,28 @@ async def wire_registration_handlers(
         )
         services_registered.append("HandlerNodeRegistrationAcked")
         logger.debug("Registered HandlerNodeRegistrationAcked in container")
+
+        # Register HandlerNodeHeartbeat (requires projector)
+        if projector is not None:
+            handler_heartbeat = HandlerNodeHeartbeat(
+                projection_reader,
+                projector=projector,
+            )
+            await container.service_registry.register_instance(
+                interface=HandlerNodeHeartbeat,
+                instance=handler_heartbeat,
+                scope=EnumInjectionScope.GLOBAL,
+                metadata={
+                    "description": "Handler for NodeHeartbeatEvent",
+                    "version": str(semver_default),
+                },
+            )
+            services_registered.append("HandlerNodeHeartbeat")
+            logger.debug("Registered HandlerNodeHeartbeat in container")
+        else:
+            logger.info(
+                "Skipping HandlerNodeHeartbeat registration (projector not available)"
+            )
 
     except AttributeError as e:
         error_str = str(e)
@@ -738,8 +806,41 @@ async def get_handler_node_registration_acked_from_container(
         ) from e
 
 
+async def get_handler_node_heartbeat_from_container(
+    container: ModelONEXContainer,
+    correlation_id: UUID | None = None,
+) -> HandlerNodeHeartbeat | None:
+    """Get HandlerNodeHeartbeat from container.
+
+    Returns None if the handler was not registered (e.g., projector unavailable).
+
+    Args:
+        container: ONEX container with registered services.
+        correlation_id: Optional correlation ID for error tracking.
+
+    Returns:
+        HandlerNodeHeartbeat instance or None if not registered.
+    """
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerNodeHeartbeat,
+    )
+
+    _validate_service_registry(container, "resolve HandlerNodeHeartbeat")
+    try:
+        return cast(
+            "HandlerNodeHeartbeat",
+            await container.service_registry.resolve_service(HandlerNodeHeartbeat),
+        )
+    except Exception:
+        logger.debug(
+            "HandlerNodeHeartbeat not registered (projector may be unavailable)"
+        )
+        return None
+
+
 __all__: list[str] = [
     # Route ID constants
+    "ROUTE_ID_NODE_HEARTBEAT",
     "ROUTE_ID_NODE_INTROSPECTION",
     "ROUTE_ID_NODE_REGISTRATION_ACKED",
     "ROUTE_ID_RUNTIME_TICK",
@@ -751,6 +852,7 @@ __all__: list[str] = [
     # Handler getters (OMN-1346)
     "get_projection_reader_from_container",
     "get_handler_node_introspected_from_container",
+    "get_handler_node_heartbeat_from_container",
     "get_handler_runtime_tick_from_container",
     "get_handler_node_registration_acked_from_container",
 ]
