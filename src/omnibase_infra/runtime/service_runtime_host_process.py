@@ -2204,28 +2204,34 @@ class RuntimeHostProcess:
                     effective_config.update(self._config)
                 await handler_instance.initialize(effective_config)
 
-            # Step 9: Wire event bus subscriptions BEFORE registration
-            await self._wire_live_handler_subscriptions(node_name, descriptor)
-
-            # Step 10: Register under mutation lock (double-check idempotency)
+            # Steps 9-11: Wire, register, and announce under mutation lock.
+            # All three MUST be atomic to prevent orphan-subscription leaks
+            # when concurrent materializations race for the same protocol_type.
             async with self._handler_mutation_lock:
+                # Double-check idempotency under lock — if another coroutine
+                # already registered this handler, skip wiring and return.
                 if protocol_type in self._handlers:
                     return True
+
+                # Step 9: Wire event bus subscriptions BEFORE registration
+                await self._wire_live_handler_subscriptions(node_name, descriptor)
+
+                # Step 10: Register handler
                 self._handler_descriptors[protocol_type] = descriptor
                 self._handlers[protocol_type] = handler_instance
 
-            logger.info(
-                "Live handler materialized successfully",
-                extra={
-                    "node_name": node_name,
-                    "protocol_type": protocol_type,
-                    "handler_class": handler_class_path,
-                    "correlation_id": str(correlation_id),
-                },
-            )
+                logger.info(
+                    "Live handler materialized successfully",
+                    extra={
+                        "node_name": node_name,
+                        "protocol_type": protocol_type,
+                        "handler_class": handler_class_path,
+                        "correlation_id": str(correlation_id),
+                    },
+                )
 
-            # Step 11: Publish CAPABILITY_CHANGE
-            await self._publish_capability_change(node_name, correlation_id)
+                # Step 11: Publish CAPABILITY_CHANGE
+                await self._publish_capability_change(node_name, correlation_id)
 
             return True
 
@@ -4032,6 +4038,12 @@ class RuntimeHostProcess:
 
         async def handle_deregistration(msg: ModelEventMessage) -> None:
             """Handle contract deregistration event from Kafka."""
+            # TODO(OMN-XXXX): Live handler teardown on deregistration.
+            # Phase 1 supports addition only -- deregistered handlers remain
+            # active until the next runtime restart. This callback clears the
+            # contract cache but does NOT remove the handler from _handlers,
+            # unwire event bus subscriptions, or clear _handler_descriptors.
+            # See OMN-1989 design decisions: "Live removal is a non-goal".
             try:
                 parsed = _parse_contract_event_payload(msg)
                 if parsed is None:
