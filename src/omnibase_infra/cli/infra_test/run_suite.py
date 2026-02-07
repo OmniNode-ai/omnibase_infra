@@ -9,7 +9,6 @@ individual CLI commands in sequence.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import time
 from uuid import uuid4
@@ -18,12 +17,9 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 
+from omnibase_infra.cli.infra_test._helpers import get_broker, get_postgres_dsn
+
 console = Console()
-
-
-def _get_broker() -> str:
-    """Resolve Kafka broker address from environment."""
-    return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:29092")
 
 
 def _get_compose_args(ctx: click.Context) -> tuple[str, str]:
@@ -127,19 +123,6 @@ def _wait_for_registration(dsn: str, node_id: str, timeout: int = 30) -> bool:
     return False
 
 
-def _get_postgres_dsn() -> str:
-    """Build PostgreSQL DSN from environment.
-
-    Defaults are for local E2E test environments only — never use in production.
-    """
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5433")
-    db = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
-    user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD", "test-password")
-    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
-
-
 @click.command("run")
 @click.option(
     "--suite",
@@ -187,8 +170,8 @@ def _run_smoke_suite(compose_file: str, project_name: str) -> None:
         5. Verify topic naming compliance
         6. Verify snapshot topic
     """
-    broker = _get_broker()
-    dsn = _get_postgres_dsn()
+    broker = get_broker()
+    dsn = get_postgres_dsn()
     topic = "onex.evt.platform.node-introspection.v1"
     node_id = str(uuid4())
     failures: list[str] = []
@@ -267,8 +250,8 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
         3. Wait for processing
         4. Assert <= 1 registration record in PostgreSQL
     """
-    broker = _get_broker()
-    dsn = _get_postgres_dsn()
+    broker = get_broker()
+    dsn = get_postgres_dsn()
     topic = "onex.evt.platform.node-introspection.v1"
     node_id = str(uuid4())
     repetitions = 3
@@ -349,8 +332,8 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
         6. Verify node B registration completes (backfill from Kafka)
         7. Verify node A registration still exists (no data loss)
     """
-    broker = _get_broker()
-    dsn = _get_postgres_dsn()
+    broker = get_broker()
+    dsn = get_postgres_dsn()
     topic = "onex.evt.platform.node-introspection.v1"
     node_a = str(uuid4())
     node_b = str(uuid4())

@@ -10,7 +10,6 @@ registration orchestrator workflow.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -93,9 +92,9 @@ def introspect(
     Simulates a node announcing itself to the cluster by publishing an
     introspection event to Kafka via ``rpk``.
     """
-    resolved_broker: str = (
-        broker or os.getenv("KAFKA_BOOTSTRAP_SERVERS") or "localhost:29092"
-    )
+    # Click resolves envvar=KAFKA_BOOTSTRAP_SERVERS for --broker; apply
+    # the final fallback only when neither the flag nor the envvar was set.
+    resolved_broker: str = broker or "localhost:29092"
 
     payload = _build_introspection_payload(node_id, node_type, version)
     payload_json = json.dumps(payload)

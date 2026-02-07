@@ -15,7 +15,7 @@ class TestBuildIntrospectionPayload:
     def test_auto_generates_node_id(self) -> None:
         """Payload auto-generates a valid UUID for node_id."""
         payload = _build_introspection_payload()
-        assert UUID(payload["node_id"])
+        assert UUID(str(payload["node_id"]))
 
     def test_uses_provided_node_id(self) -> None:
         """Payload uses the provided node_id."""
@@ -36,7 +36,7 @@ class TestBuildIntrospectionPayload:
     def test_has_correlation_id(self) -> None:
         """Payload includes a correlation_id UUID."""
         payload = _build_introspection_payload()
-        assert UUID(payload["correlation_id"])
+        assert UUID(str(payload["correlation_id"]))
 
     def test_has_timestamp(self) -> None:
         """Payload includes a timestamp."""
@@ -47,6 +47,7 @@ class TestBuildIntrospectionPayload:
         """Payload includes node_version as semver dict."""
         payload = _build_introspection_payload()
         version = payload["node_version"]
+        assert isinstance(version, dict)
         assert version["major"] == 1
         assert version["minor"] == 0
         assert version["patch"] == 0
@@ -55,6 +56,7 @@ class TestBuildIntrospectionPayload:
         """Payload includes health endpoint."""
         payload = _build_introspection_payload()
         endpoints = payload["endpoints"]
+        assert isinstance(endpoints, dict)
         assert "health" in endpoints
 
     def test_reason_is_startup(self) -> None:

@@ -9,13 +9,18 @@ snapshot topics, and idempotency of the registration pipeline.
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 
 import click
 from rich.console import Console
 from rich.table import Table
+
+from omnibase_infra.cli.infra_test._helpers import (
+    get_broker,
+    get_consul_addr,
+    get_postgres_dsn,
+)
 
 console = Console()
 
@@ -24,34 +29,6 @@ console = Console()
 ONEX_TOPIC_PATTERN = re.compile(
     r"^onex\.(evt|cmd|intent|snapshot|dlq)\.[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.v[0-9]+$"
 )
-
-
-def _get_broker() -> str:
-    """Resolve Kafka broker address from environment."""
-    return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:29092")
-
-
-def _get_consul_addr() -> str:
-    """Resolve Consul HTTP address from environment."""
-    host = os.getenv("CONSUL_HOST", "localhost")
-    port = os.getenv("CONSUL_PORT", "8500")
-    scheme = os.getenv("CONSUL_SCHEME", "http")
-    return f"{scheme}://{host}:{port}"
-
-
-def _get_postgres_dsn() -> str:
-    """Build PostgreSQL DSN from environment variables.
-
-    Defaults are for local E2E test environments only -- never use in production.
-    All values (including the fallback password) are overridden via environment
-    variables in real deployments.
-    """
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5433")
-    db = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
-    user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD", "test-password")
-    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
 
 @click.group()
@@ -87,7 +64,7 @@ def verify_topics() -> None:
     Non-ONEX topics (internal Redpanda topics like ``_schemas``) are
     reported but not flagged as violations.
     """
-    broker = _get_broker()
+    broker = get_broker()
 
     console.print(
         f"[bold blue]Checking topic naming compliance ({broker})...[/bold blue]"
@@ -164,7 +141,7 @@ def verify_snapshots(topic: str) -> None:
     Verifies that the compacted snapshot topic exists and contains at least
     one record, indicating the snapshot publisher has written data.
     """
-    broker = _get_broker()
+    broker = get_broker()
 
     console.print(f"[bold blue]Verifying snapshot topic: {topic}[/bold blue]")
 
@@ -244,7 +221,7 @@ def verify_idempotency(topic: str, repetitions: int) -> None:
 
     from omnibase_infra.cli.infra_test.introspect import _build_introspection_payload
 
-    broker = _get_broker()
+    broker = get_broker()
     node_id = str(uuid4())
 
     console.print(
@@ -285,7 +262,7 @@ def verify_idempotency(topic: str, repetitions: int) -> None:
     time.sleep(5)
 
     # Check PostgreSQL for duplicate records
-    dsn = _get_postgres_dsn()
+    dsn = get_postgres_dsn()
     count = _count_postgres_registrations(dsn, node_id)
 
     if count is None:
@@ -311,7 +288,7 @@ def verify_idempotency(topic: str, repetitions: int) -> None:
 
 def _verify_consul_registry(node_id: str | None) -> bool:
     """Verify registrations in Consul KV store."""
-    consul_addr = _get_consul_addr()
+    consul_addr = get_consul_addr()
 
     console.print(f"[bold blue]Checking Consul registry ({consul_addr})...[/bold blue]")
 
@@ -378,7 +355,7 @@ def _verify_consul_registry(node_id: str | None) -> bool:
 
 def _verify_postgres_registry(node_id: str | None) -> bool:
     """Verify registrations in PostgreSQL."""
-    dsn = _get_postgres_dsn()
+    dsn = get_postgres_dsn()
 
     console.print("[bold blue]Checking PostgreSQL registry...[/bold blue]")
 
