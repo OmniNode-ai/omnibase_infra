@@ -9,6 +9,7 @@ Centralises environment-resolution functions used by multiple subcommands
 from __future__ import annotations
 
 import os
+from urllib.parse import quote_plus
 
 
 def get_broker() -> str:
@@ -47,4 +48,4 @@ def get_postgres_dsn() -> str:
     db = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
     user = os.getenv("POSTGRES_USER", "postgres")
     password = os.getenv("POSTGRES_PASSWORD", "test-password")
-    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{db}"

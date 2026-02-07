@@ -45,9 +45,15 @@ def _build_introspection_payload(
     now = datetime.now(UTC).isoformat()
 
     parts = version.split(".")
-    major = int(parts[0]) if len(parts) > 0 else 1
-    minor = int(parts[1]) if len(parts) > 1 else 0
-    patch = int(parts[2]) if len(parts) > 2 else 0
+    try:
+        major = int(parts[0])
+        minor = int(parts[1]) if len(parts) > 1 else 0
+        patch = int(parts[2]) if len(parts) > 2 else 0
+    except ValueError:
+        raise click.BadParameter(
+            f"Invalid version '{version}'. Expected semver format (e.g. 1.0.0).",
+            param_hint="'--version'",
+        ) from None
 
     return {
         "node_id": nid,

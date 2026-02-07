@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
+import click
 import pytest
 
 from omnibase_infra.cli.infra_test.introspect import _build_introspection_payload
@@ -80,3 +81,8 @@ class TestBuildIntrospectionPayload:
         """Default reason is STARTUP."""
         payload = _build_introspection_payload()
         assert payload["reason"] == "STARTUP"
+
+    def test_invalid_version_raises(self) -> None:
+        """Non-numeric version string raises click.BadParameter."""
+        with pytest.raises(click.BadParameter, match="Invalid version"):
+            _build_introspection_payload(version="abc")
