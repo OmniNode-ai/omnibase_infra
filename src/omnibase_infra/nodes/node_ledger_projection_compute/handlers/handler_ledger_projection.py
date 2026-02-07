@@ -27,15 +27,17 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from omnibase_core.errors import OnexError
+from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
+    EnumInfraTransportType,
     EnumResponseStatus,
 )
+from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.nodes.reducers.models.model_payload_ledger_append import (
@@ -60,7 +62,7 @@ class HandlerLedgerProjection:
 
     CRITICAL INVARIANTS:
     - NEVER drop events due to metadata extraction failure
-    - event_value is REQUIRED (raises OnexError if None)
+    - event_value is REQUIRED (raises RuntimeHostError if None)
     - correlation_id and other metadata are OPTIONAL
     - Best-effort extraction - parsing errors yield None, not exceptions
 
@@ -143,11 +145,13 @@ class HandlerLedgerProjection:
             append payload for the Effect layer.
 
         Raises:
-            OnexError: If message.value is None (event body is required).
+            RuntimeHostError: If message.value is None (event body is
+                required), with KAFKA transport context and INVALID_INPUT
+                error code.
 
         INVARIANTS:
         - Never drop events due to metadata extraction failure
-        - event_value is REQUIRED (raises OnexError if None)
+        - event_value is REQUIRED (raises RuntimeHostError if None)
         - correlation_id is optional
         """
         payload = self._extract_ledger_metadata(message)
@@ -177,8 +181,8 @@ class HandlerLedgerProjection:
             ModelHandlerOutput wrapping ModelIntent.
 
         Raises:
-            OnexError: If message.value is None.
-            RuntimeError: If payload is missing or invalid.
+            RuntimeHostError: If message.value is None or payload is
+                missing/invalid.
         """
         correlation_id_raw = envelope.get("correlation_id")
         correlation_id = (
@@ -188,7 +192,17 @@ class HandlerLedgerProjection:
 
         payload_raw = envelope.get("payload")
         if not isinstance(payload_raw, dict):
-            raise RuntimeError("Missing or invalid 'payload' in envelope")
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="ledger_projection.execute",
+            )
+            raise RuntimeHostError(
+                "Missing or invalid 'payload' in envelope: expected dict, "
+                f"got {type(payload_raw).__name__}",
+                error_code=EnumCoreErrorCode.INVALID_INPUT,
+                context=context,
+            )
 
         # Parse payload into typed model
         message = ModelEventMessage.model_validate(payload_raw)
@@ -286,7 +300,8 @@ class HandlerLedgerProjection:
             Populated ledger append payload ready for the Effect layer.
 
         Raises:
-            OnexError: If message.value is None.
+            RuntimeHostError: If message.value is None (with INVALID_INPUT
+                error code and KAFKA transport context).
 
         Field Mapping:
             | Payload Field    | Source                          | Required |
@@ -306,28 +321,43 @@ class HandlerLedgerProjection:
             * Defaults to 0 if not available (for consumed messages, these
               should always be present, but we handle None defensively).
         """
+        # Extract headers best-effort for correlation context in error paths
+        headers = message.headers
+        correlation_id = headers.correlation_id if headers else None
+
         # CRITICAL: event_value is required - this is the only case where we raise
         if message.value is None:
-            raise OnexError(
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="ledger_projection.extract_metadata",
+            )
+            raise RuntimeHostError(
                 "Cannot create ledger entry: message.value is None. "
-                "Event body is required for audit ledger persistence."
+                "Event body is required for audit ledger persistence.",
+                error_code=EnumCoreErrorCode.INVALID_INPUT,
+                context=context,
             )
 
         # Base64 encode the raw bytes
         event_value_b64 = self._b64(message.value)
         # Defensive check - _b64 should never return None for non-None input
         if event_value_b64 is None:
-            raise OnexError(
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="ledger_projection.extract_metadata",
+            )
+            raise RuntimeHostError(
                 "Unexpected: base64 encoding of message.value returned None. "
-                "This should never happen for non-None bytes input."
+                "This should never happen for non-None bytes input.",
+                error_code=EnumCoreErrorCode.OPERATION_FAILED,
+                context=context,
             )
 
         event_key_b64 = self._b64(message.key)
 
-        # Extract headers best-effort
-        headers = message.headers
-        # Extract correlation_id early for logging context in helper methods
-        correlation_id = headers.correlation_id if headers else None
+        # headers and correlation_id already extracted above for error context
         onex_headers = self._normalize_headers(headers)
 
         # Build payload with best-effort metadata extraction

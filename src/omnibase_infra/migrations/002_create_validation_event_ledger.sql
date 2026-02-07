@@ -29,6 +29,21 @@
 --      Both are NOT NULL for audit completeness.
 
 -- =============================================================================
+-- EXTENSION: pgcrypto
+-- =============================================================================
+-- Ensures gen_random_uuid() is available for the DEFAULT on the id column.
+-- In PostgreSQL 13+ gen_random_uuid() is built-in, but declaring the
+-- extension preserves backwards compatibility with PostgreSQL 12 and earlier.
+--
+-- NOTE: This statement requires CREATE privilege on the database (or superuser
+-- in PG < 15). If running migrations under a limited-privilege application
+-- user, ensure the extension is pre-created by a DBA:
+--     CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- =============================================================================
+
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- =============================================================================
 -- TABLE: validation_event_ledger
 -- =============================================================================
 -- The validation_event_ledger provides durable, append-only storage of all

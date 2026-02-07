@@ -458,6 +458,38 @@ class TestTimestampEdgeCases:
         # Fallback should be approximately "now"
         assert before <= occurred_at <= after
 
+    def test_naive_timestamp_gets_utc_timezone(
+        self, handler: HandlerValidationLedgerProjection
+    ) -> None:
+        """Test that a naive ISO timestamp (no tz suffix) is assigned UTC.
+
+        The _extract_timestamp method adds UTC when parsed.tzinfo is None,
+        ensuring occurred_at is always timezone-aware for TIMESTAMPTZ storage.
+        """
+        payload = json.dumps(
+            {
+                "run_id": str(uuid4()),
+                "timestamp": "2026-01-15T12:00:00",
+            }
+        ).encode()
+
+        result = handler.project(
+            topic="t.v1",
+            partition=0,
+            offset=0,
+            value=payload,
+        )
+
+        occurred_at = result["occurred_at"]
+        assert isinstance(occurred_at, datetime)
+        assert occurred_at.tzinfo is not None
+        assert occurred_at.tzinfo == UTC
+        assert occurred_at.year == 2026
+        assert occurred_at.month == 1
+        assert occurred_at.day == 15
+        assert occurred_at.hour == 12
+        assert occurred_at.minute == 0
+
     def test_invalid_run_id_uses_fallback_uuid(
         self, handler: HandlerValidationLedgerProjection
     ) -> None:
