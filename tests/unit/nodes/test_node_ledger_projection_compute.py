@@ -40,7 +40,7 @@ import yaml
 
 pytestmark = [pytest.mark.unit]
 
-from omnibase_core.errors import OnexError
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.nodes.node_ledger_projection_compute import (
@@ -358,7 +358,7 @@ class TestExtractLedgerMetadata:
             offset="0",
         )
 
-        with pytest.raises(OnexError) as exc_info:
+        with pytest.raises(RuntimeHostError) as exc_info:
             handler._extract_ledger_metadata(message)
 
         assert "message.value is None" in str(exc_info.value)
@@ -688,7 +688,7 @@ class TestHandlerLedgerProjection:
             offset="0",
         )
 
-        with pytest.raises(OnexError):
+        with pytest.raises(RuntimeHostError):
             handler.project(message)
 
 

@@ -48,6 +48,5 @@ class RegistryInfraValidationLedgerProjection:
 
 
 __all__ = [
-    "NodeValidationLedgerProjectionCompute",
     "RegistryInfraValidationLedgerProjection",
 ]
