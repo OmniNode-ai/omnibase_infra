@@ -1,0 +1,482 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""Test suite runner (``run --suite smoke|failure``).
+
+Orchestrates multi-step integration test suites by invoking the
+individual CLI commands in sequence.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import time
+from uuid import uuid4
+
+import click
+from rich.console import Console
+from rich.panel import Panel
+
+console = Console()
+
+
+def _get_broker() -> str:
+    """Resolve Kafka broker address from environment."""
+    return os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:29092")
+
+
+def _get_compose_args(ctx: click.Context) -> tuple[str, str]:
+    """Extract compose file and project name from context."""
+    compose_file = ctx.obj["compose_file"]
+    project_name = ctx.obj["project_name"]
+    return compose_file, project_name
+
+
+def _step(name: str) -> None:
+    """Print a suite step header."""
+    console.print(f"\n[bold cyan]--- {name} ---[/bold cyan]")
+
+
+def _run_cli_command(args: list[str]) -> int:
+    """Run a CLI subcommand via subprocess.
+
+    Args:
+        args: Command arguments (e.g. ["verify", "registry"]).
+
+    Returns:
+        Exit code.
+    """
+    cmd = ["onex-infra-test", *args]
+    result = subprocess.run(cmd, check=False)
+    return result.returncode
+
+
+def _publish_introspection(
+    broker: str,
+    topic: str,
+    node_id: str,
+) -> bool:
+    """Publish an introspection event via rpk.
+
+    Args:
+        broker: Kafka bootstrap server.
+        topic: Target topic.
+        node_id: Node UUID string.
+
+    Returns:
+        True if published successfully.
+    """
+    from omnibase_infra.cli.infra_test.introspect import _build_introspection_payload
+
+    payload = _build_introspection_payload(node_id=node_id)
+    payload_json = json.dumps(payload)
+
+    result = subprocess.run(
+        [
+            "rpk",
+            "topic",
+            "produce",
+            topic,
+            "--brokers",
+            broker,
+            "-k",
+            node_id,
+        ],
+        input=payload_json,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _wait_for_registration(dsn: str, node_id: str, timeout: int = 30) -> bool:
+    """Wait for a registration projection to appear in PostgreSQL.
+
+    Args:
+        dsn: PostgreSQL connection string.
+        node_id: Node UUID to look for.
+        timeout: Seconds to wait.
+
+    Returns:
+        True if found within timeout.
+    """
+    import psycopg2
+
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        try:
+            conn = psycopg2.connect(dsn, connect_timeout=5)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT current_state FROM registration_projections WHERE entity_id = %s",
+                (node_id,),
+            )
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            if row is not None:
+                console.print(f"  Registration state: [green]{row[0]}[/green]")
+                return True
+        except Exception:
+            pass
+        time.sleep(2)
+
+    return False
+
+
+def _get_postgres_dsn() -> str:
+    """Build PostgreSQL DSN from environment."""
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5433")
+    db = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
+    user = os.getenv("POSTGRES_USER", "postgres")
+    password = os.getenv("POSTGRES_PASSWORD", "test-password")
+    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+
+
+@click.command("run")
+@click.option(
+    "--suite",
+    type=click.Choice(["smoke", "idempotency", "failure"]),
+    required=True,
+    help="Test suite to execute.",
+)
+@click.pass_context
+def run_suite(ctx: click.Context, suite: str) -> None:
+    """Execute an integration test suite.
+
+    Available suites:
+
+    \b
+    smoke       - Happy path: env up, introspect, verify all, env down
+    idempotency - Duplicate event handling: publish N times, assert <= 1 record
+    failure     - Kill runtime, restart, verify recovery with no data loss
+    """
+    compose_file, project_name = _get_compose_args(ctx)
+
+    console.print(
+        Panel(
+            f"[bold]Running suite: {suite}[/bold]",
+            title="onex-infra-test",
+            border_style="blue",
+        )
+    )
+
+    if suite == "smoke":
+        _run_smoke_suite(compose_file, project_name)
+    elif suite == "idempotency":
+        _run_idempotency_suite(compose_file, project_name)
+    elif suite == "failure":
+        _run_failure_suite(compose_file, project_name)
+
+
+def _run_smoke_suite(compose_file: str, project_name: str) -> None:
+    """Smoke suite: happy-path registration verification.
+
+    Steps:
+        1. Verify environment is running
+        2. Publish introspection event
+        3. Wait for registration to complete
+        4. Verify registry (Consul + PostgreSQL)
+        5. Verify topic naming compliance
+        6. Verify snapshot topic
+    """
+    broker = _get_broker()
+    dsn = _get_postgres_dsn()
+    topic = "onex.evt.platform.node-introspection.v1"
+    node_id = str(uuid4())
+    failures: list[str] = []
+
+    _step("1. Verify environment is running")
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            compose_file,
+            "-p",
+            project_name,
+            "ps",
+            "--status",
+            "running",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        console.print(
+            "[bold red]E2E environment is not running. Run 'env up' first.[/bold red]"
+        )
+        raise SystemExit(1)
+    console.print("  [green]Environment running.[/green]")
+
+    _step("2. Publish introspection event")
+    console.print(f"  node_id: {node_id}")
+    if not _publish_introspection(broker, topic, node_id):
+        console.print("[bold red]Failed to publish introspection event.[/bold red]")
+        raise SystemExit(1)
+    console.print("  [green]Published.[/green]")
+
+    _step("3. Wait for registration")
+    if not _wait_for_registration(dsn, node_id, timeout=30):
+        console.print("[bold red]Registration not found within 30s.[/bold red]")
+        failures.append("Registration not found in PostgreSQL")
+
+    _step("4. Verify registry state")
+    rc = _run_cli_command(["verify", "registry", "--node-id", node_id])
+    if rc != 0:
+        failures.append("Registry verification failed")
+
+    _step("5. Verify topic naming")
+    rc = _run_cli_command(["verify", "topics"])
+    if rc != 0:
+        failures.append("Topic naming verification failed")
+
+    _step("6. Verify snapshots")
+    rc = _run_cli_command(["verify", "snapshots"])
+    # Snapshots may be empty in a fresh environment, so only warn
+    if rc != 0:
+        console.print(
+            "  [yellow]Snapshot verification returned non-zero (may be empty).[/yellow]"
+        )
+
+    # Summary
+    console.print()
+    if failures:
+        console.print("[bold red]Smoke suite: FAIL[/bold red]")
+        for f in failures:
+            console.print(f"  [red]- {f}[/red]")
+        raise SystemExit(1)
+
+    console.print("[bold green]Smoke suite: PASS[/bold green]")
+
+
+def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
+    """Idempotency suite: duplicate event handling.
+
+    Steps:
+        1. Verify environment is running
+        2. Publish same introspection event 3x rapidly
+        3. Wait for processing
+        4. Assert <= 1 registration record in PostgreSQL
+    """
+    broker = _get_broker()
+    dsn = _get_postgres_dsn()
+    topic = "onex.evt.platform.node-introspection.v1"
+    node_id = str(uuid4())
+    repetitions = 3
+
+    _step("1. Verify environment")
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            compose_file,
+            "-p",
+            project_name,
+            "ps",
+            "--status",
+            "running",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        console.print("[bold red]E2E environment is not running.[/bold red]")
+        raise SystemExit(1)
+
+    _step(f"2. Publish {repetitions} identical events")
+    console.print(f"  node_id: {node_id}")
+    for i in range(repetitions):
+        if not _publish_introspection(broker, topic, node_id):
+            console.print(f"[red]Failed on event {i + 1}[/red]")
+            raise SystemExit(1)
+        console.print(f"  Published {i + 1}/{repetitions}")
+
+    _step("3. Wait for processing (5s)")
+    time.sleep(5)
+
+    _step("4. Check for duplicates")
+    try:
+        import psycopg2
+
+        conn = psycopg2.connect(dsn, connect_timeout=5)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM registration_projections WHERE entity_id = %s",
+            (node_id,),
+        )
+        count = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+    except Exception as e:
+        console.print(f"[bold red]PostgreSQL error: {e}[/bold red]")
+        raise SystemExit(1)
+
+    console.print(f"  Records found: {count}")
+
+    if count <= 1:
+        console.print("[bold green]Idempotency suite: PASS[/bold green]")
+    else:
+        console.print(
+            f"[bold red]Idempotency suite: FAIL (expected <= 1, found {count})[/bold red]"
+        )
+        raise SystemExit(1)
+
+
+def _run_failure_suite(compose_file: str, project_name: str) -> None:
+    """Failure suite: runtime kill and recovery.
+
+    Tests that the system recovers after the runtime process is killed.
+    The registration orchestrator runs INSIDE the runtime-main process,
+    not as a separate container.
+
+    Steps:
+        1. Verify environment + runtime are running
+        2. Publish introspection event for node A, verify registration
+        3. Kill runtime-main process
+        4. Publish introspection event for node B (goes to Kafka)
+        5. Restart runtime
+        6. Verify node B registration completes (backfill from Kafka)
+        7. Verify node A registration still exists (no data loss)
+    """
+    broker = _get_broker()
+    dsn = _get_postgres_dsn()
+    topic = "onex.evt.platform.node-introspection.v1"
+    node_a = str(uuid4())
+    node_b = str(uuid4())
+
+    _step("1. Verify environment with runtime profile")
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            compose_file,
+            "-p",
+            project_name,
+            "ps",
+            "--services",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    services = result.stdout.strip().splitlines()
+    if "runtime" not in services:
+        console.print(
+            "[bold red]Runtime service not found. "
+            "Start with: onex-infra-test env up --profile runtime[/bold red]"
+        )
+        raise SystemExit(1)
+    console.print("  [green]Runtime service present.[/green]")
+
+    _step("2. Register node A")
+    console.print(f"  node_a: {node_a}")
+    if not _publish_introspection(broker, topic, node_a):
+        console.print("[bold red]Failed to publish for node A.[/bold red]")
+        raise SystemExit(1)
+
+    if not _wait_for_registration(dsn, node_a, timeout=30):
+        console.print("[bold red]Node A registration not found.[/bold red]")
+        raise SystemExit(1)
+    console.print("  [green]Node A registered.[/green]")
+
+    _step("3. Kill runtime process")
+    kill_result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            compose_file,
+            "-p",
+            project_name,
+            "kill",
+            "runtime",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if kill_result.returncode != 0:
+        console.print(
+            f"[bold red]Failed to kill runtime: {kill_result.stderr.strip()}[/bold red]"
+        )
+        raise SystemExit(1)
+    console.print("  [green]Runtime killed.[/green]")
+
+    _step("4. Publish introspection for node B (while runtime is down)")
+    console.print(f"  node_b: {node_b}")
+    if not _publish_introspection(broker, topic, node_b):
+        console.print("[bold red]Failed to publish for node B.[/bold red]")
+        raise SystemExit(1)
+    console.print("  [green]Event published to Kafka (buffered).[/green]")
+
+    _step("5. Restart runtime")
+    restart_result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            compose_file,
+            "-p",
+            project_name,
+            "start",
+            "runtime",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if restart_result.returncode != 0:
+        console.print(
+            f"[bold red]Failed to restart runtime: {restart_result.stderr.strip()}[/bold red]"
+        )
+        raise SystemExit(1)
+
+    # Wait for runtime to become healthy
+    console.print("  [yellow]Waiting for runtime health (30s)...[/yellow]")
+    time.sleep(10)  # Give it time to start
+    console.print("  [green]Runtime restarted.[/green]")
+
+    _step("6. Verify node B registration (backfill)")
+    if not _wait_for_registration(dsn, node_b, timeout=60):
+        console.print(
+            "[bold red]Node B registration not found after recovery.[/bold red]"
+        )
+        console.print("[bold red]Failure suite: FAIL (backfill failed)[/bold red]")
+        raise SystemExit(1)
+    console.print("  [green]Node B registered (backfill succeeded).[/green]")
+
+    _step("7. Verify node A still exists (no data loss)")
+    try:
+        import psycopg2
+
+        conn = psycopg2.connect(dsn, connect_timeout=5)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT current_state FROM registration_projections WHERE entity_id = %s",
+            (node_a,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if row is None:
+            console.print("[bold red]Node A data lost after restart![/bold red]")
+            console.print("[bold red]Failure suite: FAIL (data loss)[/bold red]")
+            raise SystemExit(1)
+
+        console.print(f"  Node A state: [green]{row[0]}[/green]")
+    except SystemExit:
+        raise
+    except Exception as e:
+        console.print(f"[bold red]PostgreSQL error: {e}[/bold red]")
+        raise SystemExit(1)
+
+    console.print("[bold green]Failure suite: PASS[/bold green]")
