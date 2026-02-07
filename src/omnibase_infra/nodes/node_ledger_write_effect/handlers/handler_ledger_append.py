@@ -305,7 +305,7 @@ class HandlerLedgerAppend:
             RuntimeHostError: If decoding fails.
         """
         try:
-            return base64.b64decode(encoded)
+            return base64.b64decode(encoded, validate=True)
         except Exception as e:
             ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.DATABASE,

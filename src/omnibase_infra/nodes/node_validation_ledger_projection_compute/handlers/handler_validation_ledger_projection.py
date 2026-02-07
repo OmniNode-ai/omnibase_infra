@@ -156,26 +156,39 @@ class HandlerValidationLedgerProjection:
                 context=context,
             )
 
-        # Compute SHA-256 hash for integrity verification
-        envelope_hash = hashlib.sha256(value).hexdigest()
+        try:
+            # Compute SHA-256 hash for integrity verification
+            envelope_hash = hashlib.sha256(value).hexdigest()
 
-        # Best-effort metadata extraction from JSON payload
-        run_id, repo_id, event_type, event_version, occurred_at = (
-            self._extract_metadata(value, topic)
-        )
+            # Best-effort metadata extraction from JSON payload
+            run_id, repo_id, event_type, event_version, occurred_at = (
+                self._extract_metadata(value, topic)
+            )
 
-        return {
-            "run_id": run_id,
-            "repo_id": repo_id,
-            "event_type": event_type,
-            "event_version": event_version,
-            "occurred_at": occurred_at,
-            "kafka_topic": topic,
-            "kafka_partition": partition,
-            "kafka_offset": offset,
-            "envelope_bytes": value,
-            "envelope_hash": envelope_hash,
-        }
+            return {
+                "run_id": run_id,
+                "repo_id": repo_id,
+                "event_type": event_type,
+                "event_version": event_version,
+                "occurred_at": occurred_at,
+                "kafka_topic": topic,
+                "kafka_partition": partition,
+                "kafka_offset": offset,
+                "envelope_bytes": value,
+                "envelope_hash": envelope_hash,
+            }
+        except RuntimeHostError:
+            raise
+        except Exception as e:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="project_validation_event",
+            )
+            raise RuntimeHostError(
+                f"Unexpected error during validation ledger projection: "
+                f"{type(e).__name__}: {e}",
+                context=context,
+            ) from e
 
     def _extract_metadata(
         self,
@@ -292,7 +305,11 @@ class HandlerValidationLedgerProjection:
         if raw is None:
             return default
         try:
-            return datetime.fromisoformat(str(raw))
+            parsed = datetime.fromisoformat(str(raw))
+            # Ensure timezone-aware: naive ISO strings (no tz suffix) get UTC
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed
         except (ValueError, TypeError):
             logger.warning(
                 "Failed to parse '%s' as ISO timestamp from validation "

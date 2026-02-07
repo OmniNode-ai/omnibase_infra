@@ -4,7 +4,9 @@
 
 This package provides handlers for the validation ledger projection compute node:
     - HandlerValidationLedgerProjection: Extracts metadata from Kafka messages
-      and prepares validation ledger entries with base64 encoding and SHA-256 hashing.
+      and prepares validation ledger entries with SHA-256 hashing. Raw bytes are
+      passed through for BYTEA storage; base64 encoding is handled at the SQL
+      layer on the read path.
 
 The handler implements best-effort metadata extraction, ensuring validation events
 are never dropped due to parsing failures.
