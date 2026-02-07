@@ -302,7 +302,7 @@ def _verify_consul_registry(node_id: str | None) -> bool:
         resp = httpx.get(url, timeout=5.0)
         resp.raise_for_status()
         keys = resp.json()
-    except Exception as e:
+    except httpx.HTTPError as e:
         # KV not populated or unreachable -- fall back to service catalog
         console.print(
             f"  [dim]KV lookup failed ({type(e).__name__}), trying service catalog...[/dim]"
@@ -345,7 +345,7 @@ def _verify_consul_registry(node_id: str | None) -> bool:
                 )
                 return False
             return True
-        except Exception as e:
+        except httpx.HTTPError as e:
             console.print(
                 f"  [red]Cannot reach Consul at {consul_addr}: {type(e).__name__}: {e}[/red]"
             )
@@ -382,9 +382,9 @@ def _verify_postgres_registry(node_id: str | None) -> bool:
 
     console.print("[bold blue]Checking PostgreSQL registry...[/bold blue]")
 
-    try:
-        import psycopg2
+    import psycopg2
 
+    try:
         conn = psycopg2.connect(dsn, connect_timeout=5)
         try:
             with conn.cursor() as cur:
@@ -403,7 +403,7 @@ def _verify_postgres_registry(node_id: str | None) -> bool:
                 rows = cur.fetchall()
         finally:
             conn.close()
-    except Exception as e:
+    except psycopg2.Error as e:
         console.print(f"  [red]Cannot connect to PostgreSQL: {type(e).__name__}[/red]")
         return False
 
@@ -437,9 +437,9 @@ def _verify_postgres_registry(node_id: str | None) -> bool:
 
 def _count_postgres_registrations(dsn: str, node_id: str) -> int | None:
     """Count registration records for a node in PostgreSQL."""
-    try:
-        import psycopg2
+    import psycopg2
 
+    try:
         conn = psycopg2.connect(dsn, connect_timeout=5)
         try:
             with conn.cursor() as cur:
@@ -452,6 +452,6 @@ def _count_postgres_registrations(dsn: str, node_id: str) -> int | None:
             return count
         finally:
             conn.close()
-    except Exception as e:
+    except psycopg2.Error as e:
         console.print(f"  [red]PostgreSQL error: {type(e).__name__}: {e}[/red]")
         return None

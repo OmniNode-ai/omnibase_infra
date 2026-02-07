@@ -285,9 +285,9 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
     time.sleep(idempotency_settle_seconds)
 
     _step("4. Check for duplicates")
-    try:
-        import psycopg2
+    import psycopg2
 
+    try:
         conn = psycopg2.connect(dsn, connect_timeout=5)
         try:
             with conn.cursor() as cur:
@@ -298,7 +298,7 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
                 count = cur.fetchone()[0]
         finally:
             conn.close()
-    except Exception as e:
+    except psycopg2.Error as e:
         console.print(f"[bold red]PostgreSQL error: {type(e).__name__}: {e}[/bold red]")
         raise SystemExit(1)
 
@@ -441,9 +441,9 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
     console.print("  [green]Node B registered (backfill succeeded).[/green]")
 
     _step("7. Verify node A still exists (no data loss)")
-    try:
-        import psycopg2
+    import psycopg2
 
+    try:
         conn = psycopg2.connect(dsn, connect_timeout=5)
         try:
             with conn.cursor() as cur:
@@ -463,7 +463,7 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
         console.print(f"  Node A state: [green]{row[0]}[/green]")
     except SystemExit:
         raise
-    except Exception as e:
+    except psycopg2.Error as e:
         console.print(f"[bold red]PostgreSQL error: {type(e).__name__}: {e}[/bold red]")
         raise SystemExit(1)
 

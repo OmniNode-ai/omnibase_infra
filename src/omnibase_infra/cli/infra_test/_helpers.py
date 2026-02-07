@@ -56,4 +56,4 @@ def get_postgres_dsn() -> str:
         )
     if not port.isdigit():
         raise ValueError(f"POSTGRES_PORT must be numeric, got {port!r}.")
-    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{db}"
+    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{quote_plus(db)}"
