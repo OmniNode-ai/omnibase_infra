@@ -106,6 +106,12 @@ from omnibase_infra.runtime.models.model_health_check_result import (
     ModelHealthCheckResult,
 )
 
+# Dependency materialization models (OMN-1976)
+from omnibase_infra.runtime.models.model_http_client_config import ModelHttpClientConfig
+from omnibase_infra.runtime.models.model_kafka_producer_config import (
+    ModelKafkaProducerConfig,
+)
+
 # NOTE: ModelIntentExecutionSummary is NOT imported here to avoid circular import.
 # It depends on ModelBackendResult from nodes.effects, which loads after runtime.models.
 # Import directly when needed:
@@ -114,6 +120,12 @@ from omnibase_infra.runtime.models.model_lifecycle_result import (
     ModelLifecycleResult,
 )
 from omnibase_infra.runtime.models.model_logging_config import ModelLoggingConfig
+from omnibase_infra.runtime.models.model_materialized_resources import (
+    ModelMaterializedResources,
+)
+from omnibase_infra.runtime.models.model_materializer_config import (
+    ModelMaterializerConfig,
+)
 from omnibase_infra.runtime.models.model_optional_correlation_id import (
     ModelOptionalCorrelationId,
 )
@@ -126,6 +138,9 @@ from omnibase_infra.runtime.models.model_policy_registration import (
 )
 from omnibase_infra.runtime.models.model_policy_result import ModelPolicyResult
 from omnibase_infra.runtime.models.model_policy_type_filter import ModelPolicyTypeFilter
+from omnibase_infra.runtime.models.model_postgres_pool_config import (
+    ModelPostgresPoolConfig,
+)
 from omnibase_infra.runtime.models.model_projector_notification_config import (
     ModelProjectorNotificationConfig,
 )
@@ -232,4 +247,10 @@ __all__: list[str] = [
     "ModelRuntimeContractConfig",
     # Security configuration (OMN-1519)
     "ModelSecurityConfig",
+    # Dependency materialization models (OMN-1976)
+    "ModelHttpClientConfig",
+    "ModelKafkaProducerConfig",
+    "ModelMaterializedResources",
+    "ModelMaterializerConfig",
+    "ModelPostgresPoolConfig",
 ]

@@ -287,6 +287,9 @@ from omnibase_infra.runtime.contract_dependency_resolver import (
     ContractDependencyResolver,
 )
 
+# Dependency materializer (OMN-1976)
+from omnibase_infra.runtime.dependency_materializer import DependencyMaterializer
+
 # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
 from omnibase_infra.runtime.chain_aware_dispatch import (
     ChainAwareDispatcher,
@@ -465,4 +468,6 @@ __all__: list[str] = [
     "get_baseline_topics",
     # Contract dependency resolver (OMN-1732)
     "ContractDependencyResolver",
+    # Dependency materializer (OMN-1976)
+    "DependencyMaterializer",
 ]
