@@ -36,6 +36,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
@@ -133,8 +134,12 @@ def snapshot_config() -> ModelSnapshotTopicConfig:
 def publisher(
     mock_producer: AsyncMock, snapshot_config: ModelSnapshotTopicConfig
 ) -> SnapshotPublisherRegistration:
-    """Create a SnapshotPublisherRegistration instance with mocked producer."""
-    return SnapshotPublisherRegistration(mock_producer, snapshot_config)
+    """Create a SnapshotPublisherRegistration instance with mocked producer.
+
+    Uses debounce_ms=0 so existing tests that assert immediate Kafka sends
+    continue to work without timing concerns.
+    """
+    return SnapshotPublisherRegistration(mock_producer, snapshot_config, debounce_ms=0)
 
 
 @pytest.mark.unit
@@ -159,7 +164,7 @@ class TestSnapshotPublisherInitialization:
         snapshot_config: ModelSnapshotTopicConfig,
     ) -> None:
         """Test initialization with custom version tracker."""
-        tracker = {"registration:entity-1": 5}
+        tracker = {"entity-1": 5}
         pub = SnapshotPublisherRegistration(
             mock_producer, snapshot_config, snapshot_version_tracker=tracker
         )
@@ -342,10 +347,10 @@ class TestPublishSnapshot:
         key = call_args[1]["key"]
         value = call_args[1]["value"]
 
-        # Key should be bytes in format "domain:entity_id"
+        # Key should be bytes containing entity_id only
         assert isinstance(key, bytes)
         key_str = key.decode("utf-8")
-        assert key_str.startswith(f"{projection.domain}:")
+        assert key_str == str(projection.entity_id)
 
         # Value should be JSON bytes
         assert isinstance(value, bytes)
@@ -518,7 +523,7 @@ class TestDeleteSnapshot:
         # Verify tombstone has null value
         call_args = mock_producer.send_and_wait.call_args
         assert call_args[1]["value"] is None
-        assert call_args[1]["key"] == b"registration:entity-123"
+        assert call_args[1]["key"] == b"entity-123"
 
     async def test_version_tracker_cleared_after_delete(
         self,
@@ -527,12 +532,12 @@ class TestDeleteSnapshot:
     ) -> None:
         """Test version tracker is cleared after delete."""
         # Pre-populate version tracker
-        publisher._version_tracker["registration:entity-123"] = 5
+        publisher._version_tracker["entity-123"] = 5
 
         result = await publisher.delete_snapshot("entity-123", "registration")
 
         assert result is True
-        assert "registration:entity-123" not in publisher._version_tracker
+        assert "entity-123" not in publisher._version_tracker
 
     async def test_delete_with_kafka_error_returns_false(
         self,
@@ -662,9 +667,9 @@ class TestVersionTracking:
         entity_id = str(uuid4())
 
         # Call _get_next_version multiple times (now async)
-        v1 = await publisher._get_next_version(entity_id, "registration")
-        v2 = await publisher._get_next_version(entity_id, "registration")
-        v3 = await publisher._get_next_version(entity_id, "registration")
+        v1 = await publisher._get_next_version(entity_id)
+        v2 = await publisher._get_next_version(entity_id)
+        v3 = await publisher._get_next_version(entity_id)
 
         assert v1 == 1
         assert v2 == 2
@@ -680,30 +685,16 @@ class TestVersionTracking:
         entity_b = str(uuid4())
 
         # Get versions for entity A (now async)
-        v_a1 = await publisher._get_next_version(entity_a, "registration")
-        v_a2 = await publisher._get_next_version(entity_a, "registration")
+        v_a1 = await publisher._get_next_version(entity_a)
+        v_a2 = await publisher._get_next_version(entity_a)
 
         # Get versions for entity B
-        v_b1 = await publisher._get_next_version(entity_b, "registration")
+        v_b1 = await publisher._get_next_version(entity_b)
 
         # Entity A should be at version 2, entity B should be at version 1
         assert v_a1 == 1
         assert v_a2 == 2
         assert v_b1 == 1
-
-    async def test_different_domains_have_independent_versions(
-        self,
-        publisher: SnapshotPublisherRegistration,
-        mock_producer: AsyncMock,
-    ) -> None:
-        """Test same entity in different domains has independent versions."""
-        entity_id = str(uuid4())
-
-        v_reg = await publisher._get_next_version(entity_id, "registration")
-        v_disc = await publisher._get_next_version(entity_id, "discovery")
-
-        assert v_reg == 1
-        assert v_disc == 1
 
     async def test_version_cleared_after_delete(
         self,
@@ -714,15 +705,15 @@ class TestVersionTracking:
         entity_id = str(uuid4())
 
         # Build up version (now async)
-        await publisher._get_next_version(entity_id, "registration")
-        await publisher._get_next_version(entity_id, "registration")
-        assert publisher._version_tracker[f"registration:{entity_id}"] == 2
+        await publisher._get_next_version(entity_id)
+        await publisher._get_next_version(entity_id)
+        assert publisher._version_tracker[entity_id] == 2
 
         # Delete clears the version
         await publisher.delete_snapshot(entity_id, "registration")
 
         # Next version should be 1 again
-        v_new = await publisher._get_next_version(entity_id, "registration")
+        v_new = await publisher._get_next_version(entity_id)
         assert v_new == 1
 
 
@@ -737,7 +728,9 @@ class TestCircuitBreakerIntegration:
         snapshot_config: ModelSnapshotTopicConfig,
     ) -> None:
         """Test circuit breaker opens after threshold failures."""
-        publisher = SnapshotPublisherRegistration(mock_producer, snapshot_config)
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, debounce_ms=0
+        )
         mock_producer.send_and_wait.side_effect = Exception("Kafka unavailable")
 
         projection = create_test_projection()
@@ -757,7 +750,9 @@ class TestCircuitBreakerIntegration:
         snapshot_config: ModelSnapshotTopicConfig,
     ) -> None:
         """Test InfraUnavailableError raised when circuit is open."""
-        publisher = SnapshotPublisherRegistration(mock_producer, snapshot_config)
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, debounce_ms=0
+        )
         mock_producer.send_and_wait.side_effect = Exception("Kafka unavailable")
 
         projection = create_test_projection()
@@ -779,7 +774,9 @@ class TestCircuitBreakerIntegration:
         snapshot_config: ModelSnapshotTopicConfig,
     ) -> None:
         """Test circuit breaker resets after timeout."""
-        publisher = SnapshotPublisherRegistration(mock_producer, snapshot_config)
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, debounce_ms=0
+        )
 
         # Open the circuit
         mock_producer.send_and_wait.side_effect = Exception("Kafka unavailable")
@@ -1016,10 +1013,10 @@ class TestEdgeCases:
         snapshot = await publisher.publish_from_projection(projection)
 
         assert snapshot.domain == "custom_domain"
-        # Verify key includes domain
+        # Verify key is entity_id only (domain no longer in key)
         call_args = mock_producer.send_and_wait.call_args
         key = call_args[1]["key"].decode("utf-8")
-        assert key.startswith("custom_domain:")
+        assert key == str(projection.entity_id)
 
     async def test_publish_with_complex_capabilities(
         self,
@@ -1072,6 +1069,172 @@ class TestEdgeCases:
         snapshot = await publisher.publish_from_projection(projection, node_name=None)
 
         assert snapshot.node_name is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestDebounce:
+    """Test debounce behavior for publish coalescing.
+
+    Validates:
+    - Single publish is delayed by debounce_ms
+    - Rapid publishes for same entity are coalesced into one Kafka send
+    - Different entities have independent debounce timers
+    - debounce_ms=0 disables debounce entirely
+    - stop() flushes all pending debounced publishes
+    - delete_snapshot bypasses debounce (tombstones publish immediately)
+
+    Related Tickets:
+        - OMN-1932 (P3.4): 500ms debounce per node_id
+    """
+
+    async def test_debounce_delays_publish(
+        self,
+        mock_producer: AsyncMock,
+        snapshot_config: ModelSnapshotTopicConfig,
+    ) -> None:
+        """Test single publish is delayed by debounce_ms."""
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, debounce_ms=100
+        )
+        projection = create_test_projection()
+
+        snapshot = await publisher.publish_from_projection(projection)
+
+        # Snapshot should be returned immediately
+        assert snapshot is not None
+        assert snapshot.snapshot_version == 1
+
+        # Kafka send should NOT have happened yet (within debounce window)
+        mock_producer.send_and_wait.assert_not_called()
+
+        # Wait for debounce to expire (150ms > 100ms debounce)
+        await asyncio.sleep(0.15)
+
+        # Now Kafka send should have happened
+        mock_producer.send_and_wait.assert_called_once()
+
+    async def test_debounce_coalesces_rapid_publishes(
+        self,
+        mock_producer: AsyncMock,
+        snapshot_config: ModelSnapshotTopicConfig,
+    ) -> None:
+        """Test rapid publishes for same entity result in single Kafka send."""
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, debounce_ms=100
+        )
+        # Create projection with fixed entity for repeated publishes
+        projection = create_test_projection()
+
+        # Rapid fire 3 publishes for the same entity
+        snap1 = await publisher.publish_from_projection(projection)
+        snap2 = await publisher.publish_from_projection(projection)
+        snap3 = await publisher.publish_from_projection(projection)
+
+        # All snapshots returned immediately with incrementing versions
+        assert snap1.snapshot_version == 1
+        assert snap2.snapshot_version == 2
+        assert snap3.snapshot_version == 3
+
+        # No Kafka sends yet (all within debounce window)
+        mock_producer.send_and_wait.assert_not_called()
+
+        # Wait for debounce to expire
+        await asyncio.sleep(0.15)
+
+        # Only ONE Kafka send (the last snapshot superseded previous ones)
+        mock_producer.send_and_wait.assert_called_once()
+
+        # Verify it was the last snapshot (version 3) that was published
+        call_args = mock_producer.send_and_wait.call_args
+        value = call_args[1]["value"]
+        value_dict = json.loads(value.decode("utf-8"))
+        assert value_dict["snapshot_version"] == 3
+
+    async def test_debounce_different_entities_independent(
+        self,
+        mock_producer: AsyncMock,
+        snapshot_config: ModelSnapshotTopicConfig,
+    ) -> None:
+        """Test debounce is per-entity, different entities publish independently."""
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, debounce_ms=100
+        )
+        proj_a = create_test_projection()
+        proj_b = create_test_projection()
+
+        await publisher.publish_from_projection(proj_a)
+        await publisher.publish_from_projection(proj_b)
+
+        # No sends yet (within debounce window)
+        mock_producer.send_and_wait.assert_not_called()
+
+        # Wait for debounce to expire
+        await asyncio.sleep(0.15)
+
+        # Both entities should have been published independently
+        assert mock_producer.send_and_wait.call_count == 2
+
+    async def test_debounce_zero_disables(
+        self,
+        mock_producer: AsyncMock,
+        snapshot_config: ModelSnapshotTopicConfig,
+    ) -> None:
+        """Test debounce_ms=0 publishes immediately without deferral."""
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, debounce_ms=0
+        )
+        projection = create_test_projection()
+
+        await publisher.publish_from_projection(projection)
+
+        # Should publish immediately (no debounce)
+        mock_producer.send_and_wait.assert_called_once()
+
+    async def test_debounce_flush_on_stop(
+        self,
+        mock_producer: AsyncMock,
+        snapshot_config: ModelSnapshotTopicConfig,
+    ) -> None:
+        """Test stopping publisher flushes pending publishes immediately."""
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, debounce_ms=5000
+        )
+        publisher._started = True
+
+        projection = create_test_projection()
+        await publisher.publish_from_projection(projection)
+
+        # Not published yet (5s debounce - well within window)
+        mock_producer.send_and_wait.assert_not_called()
+
+        # Stop should flush all pending publishes before stopping producer
+        await publisher.stop()
+
+        # Should have been published during stop (flushed immediately)
+        mock_producer.send_and_wait.assert_called_once()
+
+        # Pending state should be cleared
+        assert len(publisher._pending_snapshots) == 0
+        assert len(publisher._debounce_timers) == 0
+
+    async def test_debounce_delete_not_debounced(
+        self,
+        mock_producer: AsyncMock,
+        snapshot_config: ModelSnapshotTopicConfig,
+    ) -> None:
+        """Test delete_snapshot publishes tombstone immediately without debounce."""
+        publisher = SnapshotPublisherRegistration(
+            mock_producer, snapshot_config, debounce_ms=5000
+        )
+
+        result = await publisher.delete_snapshot("entity-123", "registration")
+
+        assert result is True
+        # Tombstone published immediately (not debounced)
+        mock_producer.send_and_wait.assert_called_once()
+        call_args = mock_producer.send_and_wait.call_args
+        assert call_args[1]["value"] is None  # Tombstone
 
 
 @pytest.fixture
@@ -1159,7 +1322,7 @@ class TestSnapshotCacheOperations:
 
         entity_id = uuid4()
         snapshot = create_test_snapshot(entity_id=entity_id, version=5)
-        cache_key = f"registration:{entity_id}"
+        cache_key = str(entity_id)
 
         # Create mock message with snapshot data
         message = create_mock_kafka_message(
@@ -1198,7 +1361,7 @@ class TestSnapshotCacheOperations:
         )
 
         entity_id = uuid4()
-        cache_key = f"registration:{entity_id}"
+        cache_key = str(entity_id)
         snapshot = create_test_snapshot(entity_id=entity_id, version=1)
 
         # Create messages: first a snapshot, then a tombstone
@@ -1242,7 +1405,7 @@ class TestSnapshotCacheOperations:
         )
 
         entity_id = uuid4()
-        cache_key = f"registration:{entity_id}"
+        cache_key = str(entity_id)
         snapshot_v1 = create_test_snapshot(entity_id=entity_id, version=1)
         snapshot_v2 = create_test_snapshot(entity_id=entity_id, version=2)
 
@@ -1297,14 +1460,14 @@ class TestSnapshotCacheOperations:
         # Pre-populate cache with old data
         old_entity_id = uuid4()
         old_snapshot = create_test_snapshot(entity_id=old_entity_id, version=1)
-        publisher._snapshot_cache[f"registration:{old_entity_id}"] = old_snapshot
+        publisher._snapshot_cache[str(old_entity_id)] = old_snapshot
         publisher._cache_loaded = True
 
         # New snapshot from topic
         new_entity_id = uuid4()
         new_snapshot = create_test_snapshot(entity_id=new_entity_id, version=1)
         new_message = create_mock_kafka_message(
-            key=f"registration:{new_entity_id}",
+            key=str(new_entity_id),
             value=new_snapshot.model_dump_json().encode("utf-8"),
         )
 
@@ -1321,9 +1484,9 @@ class TestSnapshotCacheOperations:
 
         assert count == 1
         # Old entry should be gone
-        assert f"registration:{old_entity_id}" not in publisher._snapshot_cache
+        assert str(old_entity_id) not in publisher._snapshot_cache
         # New entry should be present
-        assert f"registration:{new_entity_id}" in publisher._snapshot_cache
+        assert str(new_entity_id) in publisher._snapshot_cache
 
     async def test_cache_refresh_preserves_old_cache_on_failure(
         self,
@@ -1341,7 +1504,7 @@ class TestSnapshotCacheOperations:
         # Pre-populate cache
         entity_id = uuid4()
         old_snapshot = create_test_snapshot(entity_id=entity_id, version=3)
-        cache_key = f"registration:{entity_id}"
+        cache_key = str(entity_id)
         publisher._snapshot_cache[cache_key] = old_snapshot
         publisher._cache_loaded = True
 
@@ -1445,7 +1608,7 @@ class TestSnapshotCacheOperations:
         entity_id = uuid4()
         snapshot = create_test_snapshot(entity_id=entity_id)
         message = create_mock_kafka_message(
-            key=f"registration:{entity_id}",
+            key=str(entity_id),
             value=snapshot.model_dump_json().encode("utf-8"),
         )
 
@@ -1483,7 +1646,7 @@ class TestSnapshotCacheOperations:
         for i in range(1, 6):  # version must be >= 1
             entity_id = uuid4()
             snapshot = create_test_snapshot(entity_id=entity_id, version=i)
-            publisher._snapshot_cache[f"registration:{entity_id}"] = snapshot
+            publisher._snapshot_cache[str(entity_id)] = snapshot
 
         assert publisher.cache_size == 5
 
@@ -1536,7 +1699,7 @@ class TestSnapshotCacheOperations:
         # Pre-populate cache
         entity_id = uuid4()
         snapshot = create_test_snapshot(entity_id=entity_id)
-        publisher._snapshot_cache[f"registration:{entity_id}"] = snapshot
+        publisher._snapshot_cache[str(entity_id)] = snapshot
         publisher._cache_loaded = True
         publisher._started = True
 
@@ -1567,7 +1730,7 @@ class TestSnapshotCacheOperations:
         entity_id = uuid4()
         snapshot = create_test_snapshot(entity_id=entity_id)
         valid_message = create_mock_kafka_message(
-            key=f"registration:{entity_id}",
+            key=str(entity_id),
             value=snapshot.model_dump_json().encode("utf-8"),
         )
 
@@ -1601,7 +1764,7 @@ class TestSnapshotCacheOperations:
 
         # Create malformed message
         bad_message = create_mock_kafka_message(
-            key="registration:bad-entity",
+            key="bad-entity",
             value=b"not valid json",
         )
 
@@ -1609,7 +1772,7 @@ class TestSnapshotCacheOperations:
         entity_id = uuid4()
         snapshot = create_test_snapshot(entity_id=entity_id)
         good_message = create_mock_kafka_message(
-            key=f"registration:{entity_id}",
+            key=str(entity_id),
             value=snapshot.model_dump_json().encode("utf-8"),
         )
 
@@ -1665,7 +1828,7 @@ class TestSnapshotCacheOperations:
         # Pre-populate cache and mark as loaded
         entity_id = uuid4()
         snapshot = create_test_snapshot(entity_id=entity_id, version=42)
-        publisher._snapshot_cache[f"registration:{entity_id}"] = snapshot
+        publisher._snapshot_cache[str(entity_id)] = snapshot
         publisher._cache_loaded = True
 
         # Consumer should not be called since cache is already loaded
@@ -1690,6 +1853,7 @@ class TestSnapshotCacheOperations:
             mock_producer,
             snapshot_config,
             bootstrap_servers="localhost:9092",
+            debounce_ms=0,
         )
 
         # Mark cache as loaded (simulating previous read)
@@ -1699,7 +1863,7 @@ class TestSnapshotCacheOperations:
         await publisher.publish_from_projection(projection)
 
         # Cache should now contain the published snapshot
-        cache_key = f"{projection.domain}:{projection.entity_id}"
+        cache_key = str(projection.entity_id)
         assert cache_key in publisher._snapshot_cache
         assert publisher._snapshot_cache[cache_key].snapshot_version == 1
 
@@ -1716,7 +1880,7 @@ class TestSnapshotCacheOperations:
         )
 
         entity_id = uuid4()
-        cache_key = f"registration:{entity_id}"
+        cache_key = str(entity_id)
 
         # Pre-populate cache
         snapshot = create_test_snapshot(entity_id=entity_id)

@@ -78,6 +78,9 @@ if TYPE_CHECKING:
         HandlerRuntimeTick,
     )
     from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.protocols.protocol_snapshot_publisher import (
+        ProtocolSnapshotPublisher,
+    )
     from omnibase_infra.runtime import MessageDispatchEngine, ProjectorShell
 
 logger = logging.getLogger(__name__)
@@ -378,6 +381,7 @@ async def wire_registration_handlers(
     liveness_interval_seconds: int | None = None,
     projector: ProjectorShell | None = None,
     consul_handler: HandlerConsul | None = None,
+    snapshot_publisher: ProtocolSnapshotPublisher | None = None,
     correlation_id: UUID | None = None,
 ) -> WiringResult:
     """Register registration orchestrator handlers with the container.
@@ -396,6 +400,9 @@ async def wire_registration_handlers(
             If None, uses ONEX_LIVENESS_INTERVAL_SECONDS env var or default (60s).
         projector: Optional ProjectorShell for persisting state transitions.
         consul_handler: Optional HandlerConsul for dual registration with Consul.
+        snapshot_publisher: Optional ProtocolSnapshotPublisher for publishing
+            compacted snapshots to Kafka. If provided, handlers will publish
+            snapshots after state transitions (best-effort, non-blocking).
         correlation_id: Optional correlation ID for error tracking. If not provided,
             one will be auto-generated when errors are raised.
 
@@ -467,6 +474,7 @@ async def wire_registration_handlers(
             projection_reader,
             projector=projector,
             consul_handler=consul_handler,
+            snapshot_publisher=snapshot_publisher,
         )
         await container.service_registry.register_instance(
             interface=HandlerNodeIntrospected,
@@ -477,12 +485,16 @@ async def wire_registration_handlers(
                 "version": str(semver_default),
                 "has_projector": projector is not None,
                 "has_consul_handler": consul_handler is not None,
+                "has_snapshot_publisher": snapshot_publisher is not None,
             },
         )
         services_registered.append("HandlerNodeIntrospected")
         logger.debug("Registered HandlerNodeIntrospected in container")
 
-        handler_runtime_tick = HandlerRuntimeTick(projection_reader)
+        handler_runtime_tick = HandlerRuntimeTick(
+            projection_reader,
+            snapshot_publisher=snapshot_publisher,
+        )
         await container.service_registry.register_instance(
             interface=HandlerRuntimeTick,
             instance=handler_runtime_tick,
@@ -498,6 +510,7 @@ async def wire_registration_handlers(
         handler_acked = HandlerNodeRegistrationAcked(
             projection_reader,
             liveness_interval_seconds=resolved_liveness_interval,
+            snapshot_publisher=snapshot_publisher,
         )
         await container.service_registry.register_instance(
             interface=HandlerNodeRegistrationAcked,

@@ -123,6 +123,7 @@ from omnibase_infra.models.projection import (
     ModelSnapshotTopicConfig,
 )
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
     from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
@@ -143,7 +144,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
     is expected.
 
     Compaction Semantics:
-        - Key: "{domain}:{entity_id}" (e.g., "registration:uuid-here")
+        - Key: entity_id (UUID string, e.g., "550e8400-e29b-41d4-a716-446655440000")
         - Value: JSON-serialized ModelRegistrationSnapshot
         - Tombstone: null value deletes the key during compaction
         - After compaction: only latest snapshot per key survives
@@ -200,6 +201,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         snapshot_version_tracker: dict[str, int] | None = None,
         bootstrap_servers: str | None = None,
         consumer_timeout_ms: int = 5000,
+        debounce_ms: int = 500,
     ) -> None:
         """Initialize snapshot publisher.
 
@@ -217,6 +219,13 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 reads will attempt to extract from the producer configuration.
             consumer_timeout_ms: Timeout in milliseconds for consumer poll operations.
                 Default is 5000ms (5 seconds). Used when loading the snapshot cache.
+            debounce_ms: Debounce window in milliseconds for coalescing rapid
+                publishes per entity_id. When multiple publish requests arrive
+                for the same entity within this window, only the last snapshot
+                is published to Kafka (trailing-edge debounce). The snapshot
+                model is returned immediately to callers; only the Kafka send
+                is deferred. Set to 0 to disable debounce (useful for testing).
+                Default is 500ms.
 
         Example:
             >>> producer = AIOKafkaProducer(
@@ -243,7 +252,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         self._consumer_started = False
 
         # In-memory cache for O(1) snapshot lookups
-        # Key: "{domain}:{entity_id}", Value: ModelRegistrationSnapshot
+        # Key: entity_id (UUID string), Value: ModelRegistrationSnapshot
         #
         # Cache Size Expectations:
         #   - Typical deployment: 100-1000 registered nodes
@@ -259,6 +268,18 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         self._cache_lock = asyncio.Lock()
         self._cache_loaded = False
         self._cache_warming_in_progress = False
+
+        # Debounce configuration for coalescing rapid publishes per entity.
+        # When debounce_ms > 0, publish_from_projection schedules a deferred
+        # Kafka send instead of publishing immediately. If another publish
+        # arrives for the same entity within the window, the timer resets and
+        # only the latest snapshot is sent (trailing-edge debounce).
+        self._debounce_ms = debounce_ms
+        self._debounce_timers: dict[str, asyncio.TimerHandle] = {}
+        self._pending_snapshots: dict[
+            str, tuple[ModelRegistrationSnapshot, UUID | None]
+        ] = {}
+        self._debounce_lock = asyncio.Lock()
 
         # Initialize circuit breaker with Kafka-appropriate settings
         cb_config = ModelCircuitBreakerConfig.from_env(
@@ -421,6 +442,10 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 self._consumer_started = False
                 self._consumer = None
 
+        # Flush pending debounced publishes before stopping producer.
+        # This ensures no snapshots are silently discarded on shutdown.
+        await self._flush_pending_publishes()
+
         if not self._started:
             logger.debug("Snapshot publisher already stopped")
             return
@@ -443,7 +468,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             self._snapshot_cache.clear()
             self._cache_loaded = False
 
-    async def _get_next_version(self, entity_id: str, domain: str) -> int:
+    async def _get_next_version(self, entity_id: str) -> int:
         """Get the next snapshot version for an entity.
 
         Increments and returns the version counter for the given entity.
@@ -456,12 +481,11 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
 
         Args:
             entity_id: The entity identifier
-            domain: The domain namespace
 
         Returns:
             Next version number (starting from 1)
         """
-        key = f"{domain}:{entity_id}"
+        key = entity_id
         async with self._version_tracker_lock:
             current = self._version_tracker.get(key, 0)
             next_version = current + 1
@@ -491,7 +515,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         """Publish a single snapshot to the snapshot topic.
 
         Publishes the projection as a snapshot to the compacted Kafka topic.
-        The key is derived from (entity_id, domain) for proper compaction.
+        The key is the entity_id (UUID string) for proper compaction.
 
         NOTE: This is a READ OPTIMIZATION. The event log remains source of truth.
 
@@ -501,7 +525,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
 
         Args:
             snapshot: The projection to publish as a snapshot. Must contain
-                valid entity_id and domain for key construction.
+                valid entity_id for key construction (domain isolation at topic level).
 
         Raises:
             InfraConnectionError: If Kafka connection fails
@@ -521,6 +545,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
     async def _publish_snapshot_model(
         self,
         snapshot: ModelRegistrationSnapshot,
+        correlation_id: UUID | None = None,
     ) -> None:
         """Publish a pre-built snapshot model to Kafka.
 
@@ -530,13 +555,18 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
 
         Args:
             snapshot: The snapshot model to publish
+            correlation_id: Optional correlation ID for tracing. If not
+                provided, a new one is generated. When called via the
+                debounce path, the correlation_id from the original
+                publish_from_projection call is propagated here.
 
         Raises:
             InfraConnectionError: If Kafka connection fails
             InfraTimeoutError: If publish times out
             InfraUnavailableError: If circuit breaker is open
         """
-        correlation_id = uuid4()
+        if correlation_id is None:
+            correlation_id = uuid4()
 
         # Check circuit breaker before operation
         async with self._circuit_breaker_lock:
@@ -734,7 +764,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             await self._load_cache_from_topic(correlation_id)
 
         # Lookup in cache (O(1))
-        key = f"{domain}:{entity_id}"
+        key = entity_id
         async with self._cache_lock:
             snapshot = self._snapshot_cache.get(key)
 
@@ -1168,9 +1198,31 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("delete_snapshot", correlation_id)
 
+        # Cancel any pending debounced publish for this entity to prevent
+        # resurrection (a debounced publish firing after the tombstone would
+        # re-create the snapshot on the compacted topic).
+        async with self._debounce_lock:
+            existing_timer = self._debounce_timers.pop(entity_id, None)
+            if existing_timer is not None:
+                existing_timer.cancel()
+                logger.debug(
+                    "Cancelled pending debounce timer for %s (entity being tombstoned)",
+                    entity_id,
+                    extra={"correlation_id": str(correlation_id)},
+                )
+            cancelled_pending = self._pending_snapshots.pop(entity_id, None)
+            if cancelled_pending is not None:
+                logger.debug(
+                    "Discarded pending debounced snapshot for %s version %d "
+                    "(entity being tombstoned)",
+                    entity_id,
+                    cancelled_pending[0].snapshot_version,
+                    extra={"correlation_id": str(correlation_id)},
+                )
+
         try:
-            # Build key for tombstone
-            key = f"{domain}:{entity_id}".encode()
+            # Build key for tombstone (node_id only, matches to_kafka_key())
+            key = entity_id.encode()
 
             # Publish tombstone (null value)
             await self._producer.send_and_wait(
@@ -1184,14 +1236,13 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 await self._reset_circuit_breaker()
 
             # Clear version tracker for this entity (thread-safe)
-            tracker_key = f"{domain}:{entity_id}"
             async with self._version_tracker_lock:
-                self._version_tracker.pop(tracker_key, None)
+                self._version_tracker.pop(entity_id, None)
 
             # Also remove from cache if loaded (for consistency)
             if self._cache_loaded:
                 async with self._cache_lock:
-                    self._snapshot_cache.pop(tracker_key, None)
+                    self._snapshot_cache.pop(entity_id, None)
 
             logger.info(
                 "Published tombstone for %s:%s",
@@ -1218,6 +1269,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         projection: ModelRegistrationProjection,
         *,
         node_name: str | None = None,
+        correlation_id: UUID | None = None,
     ) -> ModelRegistrationSnapshot:
         """Create and publish a snapshot from a projection.
 
@@ -1233,6 +1285,10 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             node_name: Optional node name to include in snapshot.
                 Not stored in projection, must be provided externally
                 (e.g., from introspection data).
+            correlation_id: Optional correlation ID for tracing. When provided,
+                the ID is propagated through the debounce pipeline to
+                _publish_snapshot_model, preserving the trace chain from the
+                original handler invocation.
 
         Returns:
             The published snapshot model with assigned version
@@ -1258,9 +1314,9 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             ... )
         """
         entity_id_str = str(projection.entity_id)
-        version = await self._get_next_version(entity_id_str, projection.domain)
+        version = await self._get_next_version(entity_id_str)
 
-        # Create snapshot from projection
+        # Create snapshot from projection (returned immediately to caller)
         snapshot = ModelRegistrationSnapshot.from_projection(
             projection=projection,
             snapshot_version=version,
@@ -1268,10 +1324,172 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
             node_name=node_name,
         )
 
-        # Publish the snapshot model
-        await self._publish_snapshot_model(snapshot)
+        # Publish with optional debounce. When debounce is enabled, the Kafka
+        # send is deferred; only the latest snapshot per entity within the
+        # debounce window is actually published.
+        if self._debounce_ms > 0:
+            await self._schedule_debounced_publish(
+                entity_id_str, snapshot, correlation_id
+            )
+        else:
+            await self._publish_snapshot_model(snapshot, correlation_id)
 
         return snapshot
+
+    async def _schedule_debounced_publish(
+        self,
+        entity_id: str,
+        snapshot: ModelRegistrationSnapshot,
+        correlation_id: UUID | None = None,
+    ) -> None:
+        """Schedule a debounced publish for an entity.
+
+        If a publish is already pending for this entity, cancel the existing
+        timer and replace with the new snapshot. Only the latest snapshot
+        within the debounce window will be published (trailing-edge debounce).
+
+        Concurrency Safety:
+            Uses _debounce_lock (asyncio.Lock) to ensure atomic access to
+            the timer and pending snapshot dictionaries.
+
+        Args:
+            entity_id: The entity identifier (node_id as string)
+            snapshot: The snapshot to publish after the debounce window expires
+            correlation_id: Optional correlation ID from the originating handler
+                call. Stored alongside the snapshot and propagated to
+                _publish_snapshot_model when the debounce timer fires.
+        """
+        async with self._debounce_lock:
+            # Cancel existing timer if any (superseded by newer snapshot)
+            existing_timer = self._debounce_timers.get(entity_id)
+            if existing_timer is not None:
+                existing_timer.cancel()
+                logger.debug(
+                    "Cancelled pending debounce timer for %s "
+                    "(superseded by snapshot version %d)",
+                    entity_id,
+                    snapshot.snapshot_version,
+                )
+
+            # Store the latest snapshot and its correlation_id for this entity
+            self._pending_snapshots[entity_id] = (snapshot, correlation_id)
+
+            # Schedule publish after debounce window expires
+            loop = asyncio.get_running_loop()
+            delay = self._debounce_ms / 1000.0
+            timer = loop.call_later(
+                delay,
+                self._debounce_timer_callback,
+                entity_id,
+                loop,
+            )
+            self._debounce_timers[entity_id] = timer
+
+            logger.debug(
+                "Scheduled debounced publish for %s version %d in %dms",
+                entity_id,
+                snapshot.snapshot_version,
+                self._debounce_ms,
+            )
+
+    def _debounce_timer_callback(
+        self,
+        entity_id: str,
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        """Callback for debounce timer expiry.
+
+        This is a synchronous callback scheduled by call_later(). It creates
+        an async task to execute the actual publish operation.
+
+        Args:
+            entity_id: The entity identifier to publish for
+            loop: The event loop to schedule the publish task on
+        """
+        loop.create_task(self._execute_debounced_publish(entity_id))
+
+    async def _execute_debounced_publish(self, entity_id: str) -> None:
+        """Execute a debounced publish for an entity.
+
+        Called by the timer callback after the debounce window expires.
+        Removes the entity from pending state and publishes the snapshot
+        to Kafka via _publish_snapshot_model.
+
+        If the snapshot was already flushed (e.g., by stop()), this is a
+        no-op since _pending_snapshots will not contain the entity.
+
+        Args:
+            entity_id: The entity identifier to publish for
+        """
+        snapshot: ModelRegistrationSnapshot | None = None
+        correlation_id: UUID | None = None
+
+        async with self._debounce_lock:
+            pending = self._pending_snapshots.pop(entity_id, None)
+            self._debounce_timers.pop(entity_id, None)
+
+        if pending is not None:
+            snapshot, correlation_id = pending
+
+        if snapshot is not None:
+            try:
+                await self._publish_snapshot_model(snapshot, correlation_id)
+                logger.debug(
+                    "Published debounced snapshot for %s version %d",
+                    entity_id,
+                    snapshot.snapshot_version,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to publish debounced snapshot for %s version %d: %s",
+                    entity_id,
+                    snapshot.snapshot_version,
+                    sanitize_error_message(e),
+                )
+
+    async def _flush_pending_publishes(self) -> None:
+        """Flush all pending debounced publishes immediately.
+
+        Cancels all debounce timers and publishes any pending snapshots
+        immediately. Called during stop() to ensure no data is lost when
+        the publisher is shutting down.
+
+        Each pending snapshot is published independently; failures for one
+        entity do not block others (best-effort flush).
+        """
+        async with self._debounce_lock:
+            # Cancel all pending timers
+            for timer in self._debounce_timers.values():
+                timer.cancel()
+            self._debounce_timers.clear()
+
+            # Take ownership of all pending snapshots
+            pending = dict(self._pending_snapshots)
+            self._pending_snapshots.clear()
+
+        if not pending:
+            return
+
+        logger.info(
+            "Flushing %d pending debounced publish(es) for topic %s",
+            len(pending),
+            self._config.topic,
+        )
+
+        for entity_id, (snapshot, correlation_id) in pending.items():
+            try:
+                await self._publish_snapshot_model(snapshot, correlation_id)
+                logger.debug(
+                    "Flushed debounced snapshot for %s version %d",
+                    entity_id,
+                    snapshot.snapshot_version,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to flush debounced snapshot for %s during stop: %s",
+                    entity_id,
+                    sanitize_error_message(e),
+                )
 
     async def publish_snapshot_batch(
         self,

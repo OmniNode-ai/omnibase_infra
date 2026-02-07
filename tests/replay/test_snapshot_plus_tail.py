@@ -381,9 +381,8 @@ class TestSnapshotCreation:
         """Verify snapshot produces correct Kafka compaction key."""
         key = sample_snapshot.to_kafka_key()
 
-        # Key format: domain:entity_id
-        assert key.startswith("registration:")
-        assert str(sample_snapshot.entity_id) in key
+        # Key format: entity_id (UUID string)
+        assert key == str(sample_snapshot.entity_id)
 
 
 # =============================================================================

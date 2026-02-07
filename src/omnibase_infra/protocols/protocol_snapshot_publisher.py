@@ -33,7 +33,7 @@ Architecture Context:
 
 Compaction Semantics:
     Kafka compacted topics retain only the latest value per key:
-    - Key: (entity_id, domain) composite key as string
+    - Key: entity_id as plain UUID string (domain isolation at topic level)
     - Value: Serialized snapshot (JSON or Avro)
     - Tombstones: null value deletes the key (entity deletion)
 
@@ -55,7 +55,7 @@ Example Usage:
             snapshot: ModelRegistrationProjection,
         ) -> None:
             '''Publish snapshot to Kafka compacted topic.'''
-            key = f"{snapshot.domain}:{snapshot.entity_id}"
+            key = str(snapshot.entity_id)  # entity_id only; domain isolation at topic level
             await self._kafka_producer.send(
                 topic="registration.snapshots",
                 key=key,
@@ -68,7 +68,7 @@ Example Usage:
             domain: str,
         ) -> bool:
             '''Publish tombstone to delete snapshot.'''
-            key = f"{domain}:{entity_id}"
+            key = entity_id  # entity_id only; domain isolation at topic level
             await self._kafka_producer.send(
                 topic="registration.snapshots",
                 key=key,
@@ -99,9 +99,14 @@ See Also:
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from omnibase_infra.models.projection import ModelRegistrationProjection
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from omnibase_infra.models.projection import ModelRegistrationSnapshot
 
 __all__ = [
     "ProtocolSnapshotPublisher",
@@ -131,7 +136,7 @@ class ProtocolSnapshotPublisher(Protocol):
         3. Optional: apply any events since snapshot for freshness
 
     Compaction Semantics:
-        - Key: Composite of (entity_id, domain) as string
+        - Key: entity_id as plain UUID string (domain isolation at topic level)
         - Value: Serialized snapshot (latest wins per key)
         - Tombstone: null value indicates entity deletion
         - Consumers see: only latest snapshot per entity
@@ -158,7 +163,7 @@ class ProtocolSnapshotPublisher(Protocol):
                 self,
                 snapshot: ModelRegistrationProjection,
             ) -> None:
-                key = self._build_key(snapshot.entity_id, snapshot.domain)
+                key = str(snapshot.entity_id)  # entity_id only; domain at topic level
                 value = snapshot.model_dump_json()
                 await self._producer.send(self._topic, key=key, value=value)
 
@@ -180,24 +185,21 @@ class ProtocolSnapshotPublisher(Protocol):
                 self,
                 entity_id: str,
                 domain: str,
-            ) -> ModelRegistrationProjection | None:
-                key = self._build_key(entity_id, domain)
+            ) -> ModelRegistrationSnapshot | None:
+                key = entity_id  # entity_id only; domain at topic level
                 value = await self._consumer.get_latest(self._topic, key)
                 if value is None:
                     return None
-                return ModelRegistrationProjection.model_validate_json(value)
+                return ModelRegistrationSnapshot.model_validate_json(value)
 
             async def delete_snapshot(
                 self,
                 entity_id: str,
                 domain: str,
             ) -> bool:
-                key = self._build_key(entity_id, domain)
+                key = entity_id  # entity_id only; domain at topic level
                 await self._producer.send(self._topic, key=key, value=None)
                 return True
-
-            def _build_key(self, entity_id: str, domain: str) -> str:
-                return f"{domain}:{entity_id}"
         ```
     """
 
@@ -208,14 +210,14 @@ class ProtocolSnapshotPublisher(Protocol):
         """Publish a single snapshot to the snapshot topic.
 
         Publishes a materialized projection snapshot to the compacted Kafka topic.
-        The snapshot key is derived from (entity_id, domain) for proper compaction.
+        The snapshot key is entity_id (UUID string) for proper compaction.
 
         NOTE: This is a READ OPTIMIZATION. The event log remains source of truth.
         Snapshots can be regenerated from the event log at any time.
 
         Args:
             snapshot: The projection snapshot to publish. Must contain valid
-                entity_id and domain for key construction.
+                entity_id for key construction (domain isolation at topic level).
 
         Raises:
             InfraConnectionError: If Kafka/transport is unavailable
@@ -239,7 +241,8 @@ class ProtocolSnapshotPublisher(Protocol):
             ```
 
         Implementation Notes:
-            - Key should be deterministic: f"{domain}:{entity_id}"
+            - Key should be deterministic: str(entity_id) (UUID string only)
+            - Domain isolation is at the topic level, not the key level
             - Value should be serialized consistently (JSON or Avro)
             - Include correlation_id in publish context for tracing
             - Consider batching for high-volume scenarios
@@ -260,7 +263,7 @@ class ProtocolSnapshotPublisher(Protocol):
 
         Args:
             snapshots: List of projection snapshots to publish.
-                Each must contain valid entity_id and domain.
+                Each must contain valid entity_id for key construction.
 
         Returns:
             Count of successfully published snapshots.
@@ -292,7 +295,7 @@ class ProtocolSnapshotPublisher(Protocol):
         self,
         entity_id: str,
         domain: str,
-    ) -> ModelRegistrationProjection | None:
+    ) -> ModelRegistrationSnapshot | None:
         """Retrieve the latest snapshot for an entity.
 
         Reads the latest snapshot from the compacted topic. This is the
@@ -392,5 +395,33 @@ class ProtocolSnapshotPublisher(Protocol):
             - Compaction runs periodically (Kafka config)
             - Until compaction, consumers may still see old snapshot
             - After compaction, key is removed from topic
+        """
+        ...
+
+    async def publish_from_projection(
+        self,
+        projection: ModelRegistrationProjection,
+        *,
+        node_name: str | None = None,
+        correlation_id: UUID | None = None,
+    ) -> ModelRegistrationSnapshot:
+        """Create and publish a snapshot from a projection.
+
+        Convenience method that handles snapshot creation and version tracking.
+        Converts the projection to a snapshot model, assigns the next version
+        number, and publishes to Kafka.
+
+        Args:
+            projection: The projection to convert and publish.
+            node_name: Optional human-readable node name for the snapshot.
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            The published snapshot model with assigned version.
+
+        Raises:
+            InfraConnectionError: If Kafka/transport is unavailable
+            InfraTimeoutError: If publish operation times out
+            InfraUnavailableError: If circuit breaker is open
         """
         ...

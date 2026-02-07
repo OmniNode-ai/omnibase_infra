@@ -167,6 +167,7 @@ def publisher_with_bootstrap(
         snapshot_config,
         bootstrap_servers="localhost:9092",
         consumer_timeout_ms=100,  # Fast timeout for tests
+        debounce_ms=0,  # Disable debounce for immediate publish in tests
     )
 
 
@@ -299,7 +300,7 @@ class TestCacheLoadFromTopic:
 
         # Create malformed message
         msg_malformed = MagicMock()
-        msg_malformed.key = b"registration:malformed-entity"
+        msg_malformed.key = b"malformed-entity"
         msg_malformed.value = b"not valid json"
 
         mock_tp = MagicMock()
