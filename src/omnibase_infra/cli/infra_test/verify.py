@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from datetime import UTC, datetime
 
 import click
 from rich.console import Console
@@ -386,8 +387,7 @@ def _verify_postgres_registry(node_id: str | None) -> bool:
     import psycopg2
 
     try:
-        conn = psycopg2.connect(dsn, connect_timeout=5)
-        try:
+        with psycopg2.connect(dsn, connect_timeout=5) as conn:
             with conn.cursor() as cur:
                 if node_id:
                     cur.execute(
@@ -402,8 +402,6 @@ def _verify_postgres_registry(node_id: str | None) -> bool:
                     )
 
                 rows = cur.fetchall()
-        finally:
-            conn.close()
     except psycopg2.Error as e:
         console.print(f"  [red]Cannot connect to PostgreSQL: {type(e).__name__}[/red]")
         return False
@@ -424,11 +422,26 @@ def _verify_postgres_registry(node_id: str | None) -> bool:
     for row in rows:
         entity_id, state, ntype, updated = row
         state_style = "[green]" if state == "ACTIVE" else "[yellow]"
+
+        # Validate timestamp with type and range checks, not just truthiness
+        if isinstance(updated, datetime):
+            now = datetime.now(tz=UTC)
+            # Make tz-aware for comparison (assume UTC if naive)
+            ts = updated if updated.tzinfo else updated.replace(tzinfo=UTC)
+            if ts > now:
+                updated_display = f"[red]{updated} (future timestamp)[/red]"
+            else:
+                updated_display = str(updated)
+        elif updated is not None:
+            updated_display = f"[yellow]{updated} (not a datetime)[/yellow]"
+        else:
+            updated_display = "[yellow]missing[/yellow]"
+
         table.add_row(
             str(entity_id),
             f"{state_style}{state}[/{state_style.strip('[')}",
             str(ntype or ""),
-            str(updated or ""),
+            updated_display,
         )
 
     console.print(table)
@@ -441,8 +454,7 @@ def _count_postgres_registrations(dsn: str, node_id: str) -> int | None:
     import psycopg2
 
     try:
-        conn = psycopg2.connect(dsn, connect_timeout=5)
-        try:
+        with psycopg2.connect(dsn, connect_timeout=5) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT COUNT(*) FROM registration_projections WHERE entity_id = %s",
@@ -451,8 +463,6 @@ def _count_postgres_registrations(dsn: str, node_id: str) -> int | None:
                 row = cur.fetchone()
                 count: int = row[0] if row else 0
             return count
-        finally:
-            conn.close()
     except psycopg2.Error as e:
         console.print(f"  [red]PostgreSQL error: {type(e).__name__}: {e}[/red]")
         return None

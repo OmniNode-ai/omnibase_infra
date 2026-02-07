@@ -44,7 +44,19 @@ def _build_introspection_payload(
     cid = str(uuid4())
     now = datetime.now(UTC).isoformat()
 
+    if not version:
+        raise click.BadParameter(
+            "Version must not be empty. Expected semver format (e.g. 1.0.0).",
+            param_hint="'--version'",
+        )
+
     parts = version.split(".")
+    if len(parts) > 3:
+        raise click.BadParameter(
+            f"Invalid version '{version}'. Expected at most 3 segments (e.g. 1.0.0).",
+            param_hint="'--version'",
+        )
+
     try:
         major = int(parts[0])
         minor = int(parts[1]) if len(parts) > 1 else 0
@@ -54,6 +66,12 @@ def _build_introspection_payload(
             f"Invalid version '{version}'. Expected semver format (e.g. 1.0.0).",
             param_hint="'--version'",
         ) from None
+
+    if major < 0 or minor < 0 or patch < 0:
+        raise click.BadParameter(
+            f"Invalid version '{version}'. Version segments must not be negative.",
+            param_hint="'--version'",
+        )
 
     return {
         "node_id": nid,

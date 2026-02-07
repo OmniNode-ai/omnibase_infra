@@ -82,6 +82,39 @@ class TestBuildIntrospectionPayload:
         payload = _build_introspection_payload()
         assert payload["reason"] == "STARTUP"
 
+    def test_partial_version_major_only(self) -> None:
+        """Partial version with major only fills minor and patch with 0."""
+        payload = _build_introspection_payload(version="1")
+        version = payload["node_version"]
+        assert isinstance(version, dict)
+        assert version["major"] == 1
+        assert version["minor"] == 0
+        assert version["patch"] == 0
+
+    def test_partial_version_major_minor(self) -> None:
+        """Partial version with major.minor fills patch with 0."""
+        payload = _build_introspection_payload(version="1.2")
+        version = payload["node_version"]
+        assert isinstance(version, dict)
+        assert version["major"] == 1
+        assert version["minor"] == 2
+        assert version["patch"] == 0
+
+    def test_extra_segments_raises(self) -> None:
+        """Version with more than 3 segments raises click.BadParameter."""
+        with pytest.raises(click.BadParameter, match="at most 3 segments"):
+            _build_introspection_payload(version="1.2.3.4")
+
+    def test_negative_version_raises(self) -> None:
+        """Negative version segment raises click.BadParameter."""
+        with pytest.raises(click.BadParameter, match="must not be negative"):
+            _build_introspection_payload(version="-1.0.0")
+
+    def test_empty_version_raises(self) -> None:
+        """Empty version string raises click.BadParameter."""
+        with pytest.raises(click.BadParameter, match="must not be empty"):
+            _build_introspection_payload(version="")
+
     def test_invalid_version_raises(self) -> None:
         """Non-numeric version string raises click.BadParameter."""
         with pytest.raises(click.BadParameter, match="Invalid version"):

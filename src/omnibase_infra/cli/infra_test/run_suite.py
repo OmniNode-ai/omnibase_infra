@@ -135,16 +135,13 @@ def _wait_for_registration(dsn: str, node_id: str, timeout: int = 30) -> bool:
     start = time.monotonic()
     while time.monotonic() - start < timeout:
         try:
-            conn = psycopg2.connect(dsn, connect_timeout=5)
-            try:
+            with psycopg2.connect(dsn, connect_timeout=5) as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT current_state FROM registration_projections WHERE entity_id = %s",
                         (node_id,),
                     )
                     row = cur.fetchone()
-            finally:
-                conn.close()
             if row is not None:
                 console.print(f"  Registration state: [green]{row[0]}[/green]")
                 return True
@@ -288,16 +285,13 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
     import psycopg2
 
     try:
-        conn = psycopg2.connect(dsn, connect_timeout=5)
-        try:
+        with psycopg2.connect(dsn, connect_timeout=5) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT COUNT(*) FROM registration_projections WHERE entity_id = %s",
                     (node_id,),
                 )
                 count = cur.fetchone()[0]
-        finally:
-            conn.close()
     except psycopg2.Error as e:
         console.print(f"[bold red]PostgreSQL error: {type(e).__name__}: {e}[/bold red]")
         raise SystemExit(1)
@@ -444,16 +438,13 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
     import psycopg2
 
     try:
-        conn = psycopg2.connect(dsn, connect_timeout=5)
-        try:
+        with psycopg2.connect(dsn, connect_timeout=5) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT current_state FROM registration_projections WHERE entity_id = %s",
                     (node_a,),
                 )
                 row = cur.fetchone()
-        finally:
-            conn.close()
 
         if row is None:
             console.print("[bold red]Node A data lost after restart![/bold red]")
