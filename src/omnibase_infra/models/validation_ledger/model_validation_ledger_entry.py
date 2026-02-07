@@ -45,7 +45,11 @@ class ModelValidationLedgerEntry(BaseModel):
         description="Base64-encoded raw envelope bytes for deterministic replay",
     )
     envelope_hash: str = Field(
-        ..., min_length=1, description="SHA-256 hash of envelope_bytes"
+        ...,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+        description="SHA-256 hex digest of envelope_bytes",
     )
     created_at: datetime = Field(..., description="When this ledger entry was created")
 
@@ -54,11 +58,16 @@ class ModelValidationLedgerEntry(BaseModel):
     def validate_base64(cls, v: str) -> str:
         """Validate that envelope_bytes is valid base64-encoded data.
 
+        PostgreSQL ``encode(bytea, 'base64')`` inserts newlines every 76
+        characters per RFC 2045. We strip whitespace before strict validation
+        so that PG-produced base64 passes the check.
+
         Raises:
             ValueError: If the string is not valid base64.
         """
         try:
-            base64.b64decode(v, validate=True)
+            stripped = v.translate({10: None, 13: None, 32: None})
+            base64.b64decode(stripped, validate=True)
         except Exception as exc:
             raise ValueError(
                 "envelope_bytes must be valid base64-encoded data"
