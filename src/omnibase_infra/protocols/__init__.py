@@ -17,6 +17,7 @@ Protocols:
     - ProtocolRegistryMetrics: Interface for registry metrics collection (optional)
     - ProtocolSnapshotPublisher: Interface for snapshot publishing services (F2)
     - ProtocolSnapshotStore: Interface for snapshot storage backends
+    - ProtocolValidationLedgerRepository: Interface for validation event ledger persistence
 
 Note:
     ProtocolCircuitBreakerAware is defined in omnibase_infra.mixins (tightly coupled

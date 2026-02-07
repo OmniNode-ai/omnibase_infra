@@ -36,6 +36,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.utils import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +115,8 @@ class HandlerValidationLedgerProjection:
             partition: Kafka partition number.
             offset: Kafka offset within the partition.
             value: Raw Kafka message value (bytes). REQUIRED.
-            _headers: Optional Kafka message headers (currently unused, reserved
-                for future header-based routing).
+            _headers: Optional Kafka message headers. If present, the handler
+                extracts ``correlation_id`` for distributed tracing.
 
         Returns:
             Dict with keys matching the write-path parameters of
@@ -144,8 +145,13 @@ class HandlerValidationLedgerProjection:
             | event_version  | topic suffix          | "unknown"             |
             | occurred_at    | payload["timestamp"]  | datetime.now(utc)     |
         """
+        # Prefer correlation_id from Kafka headers for distributed tracing;
+        # fall back to a fresh uuid4 when absent or unparseable.
+        correlation_id = self._extract_header_correlation_id(_headers)
+
         if not value:
             context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="project_validation_event",
             )
@@ -156,26 +162,75 @@ class HandlerValidationLedgerProjection:
                 context=context,
             )
 
-        # Compute SHA-256 hash for integrity verification
-        envelope_hash = hashlib.sha256(value).hexdigest()
+        try:
+            # Compute SHA-256 hash for integrity verification
+            envelope_hash = hashlib.sha256(value).hexdigest()
 
-        # Best-effort metadata extraction from JSON payload
-        run_id, repo_id, event_type, event_version, occurred_at = (
-            self._extract_metadata(value, topic)
-        )
+            # Best-effort metadata extraction from JSON payload
+            run_id, repo_id, event_type, event_version, occurred_at = (
+                self._extract_metadata(value, topic)
+            )
 
-        return {
-            "run_id": run_id,
-            "repo_id": repo_id,
-            "event_type": event_type,
-            "event_version": event_version,
-            "occurred_at": occurred_at,
-            "kafka_topic": topic,
-            "kafka_partition": partition,
-            "kafka_offset": offset,
-            "envelope_bytes": value,
-            "envelope_hash": envelope_hash,
-        }
+            return {
+                "run_id": run_id,
+                "repo_id": repo_id,
+                "event_type": event_type,
+                "event_version": event_version,
+                "occurred_at": occurred_at,
+                "kafka_topic": topic,
+                "kafka_partition": partition,
+                "kafka_offset": offset,
+                "envelope_bytes": value,
+                "envelope_hash": envelope_hash,
+            }
+        except RuntimeHostError:
+            raise
+        except Exception as e:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="project_validation_event",
+            )
+            raise RuntimeHostError(
+                f"Unexpected error during validation ledger projection: "
+                f"{sanitize_error_string(str(e))}",
+                error_code=EnumCoreErrorCode.OPERATION_FAILED,
+                context=context,
+            ) from e
+
+    @staticmethod
+    def _extract_header_correlation_id(
+        headers: dict[str, bytes] | None,
+    ) -> UUID:
+        """Extract correlation_id from Kafka headers, falling back to uuid4.
+
+        Kafka messages produced by the ONEX event bus include a
+        ``correlation_id`` header (UTF-8 encoded UUID string). When
+        present and valid, the handler reuses this ID so that the entire
+        processing chain shares a single trace. If the header is absent,
+        empty, or contains an invalid UUID, a fresh uuid4 is generated.
+
+        Args:
+            headers: Kafka message headers as ``{key: value_bytes}``,
+                or None when no headers were delivered.
+
+        Returns:
+            Parsed UUID from the header, or a newly generated UUID.
+        """
+        if headers is None:
+            return uuid4()
+        raw = headers.get("correlation_id")
+        if raw is None:
+            return uuid4()
+        try:
+            return UUID(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, AttributeError):
+            logger.warning(
+                "Failed to parse correlation_id from Kafka header "
+                "(raw=%r), using generated fallback",
+                raw,
+            )
+            return uuid4()
 
     def _extract_metadata(
         self,
@@ -292,7 +347,11 @@ class HandlerValidationLedgerProjection:
         if raw is None:
             return default
         try:
-            return datetime.fromisoformat(str(raw))
+            parsed = datetime.fromisoformat(str(raw))
+            # Ensure timezone-aware: naive ISO strings (no tz suffix) get UTC
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed
         except (ValueError, TypeError):
             logger.warning(
                 "Failed to parse '%s' as ISO timestamp from validation "

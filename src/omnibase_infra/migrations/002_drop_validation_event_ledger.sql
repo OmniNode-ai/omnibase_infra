@@ -1,0 +1,21 @@
+-- SPDX-License-Identifier: MIT
+-- Copyright (c) 2026 OmniNode Team
+--
+-- Migration: 002_drop_validation_event_ledger.sql
+-- Purpose: Rollback for 002_create_validation_event_ledger.sql
+-- Author: ONEX Infrastructure Team
+-- Date: 2026-02-07
+-- Ticket: OMN-1908
+--
+-- WARNING: This migration is DESTRUCTIVE. All data in validation_event_ledger will be lost.
+-- Use only in development or when intentionally resetting the ledger.
+--
+-- This rollback drops:
+--   - Table: validation_event_ledger
+--   - Constraint: uk_validation_ledger_kafka_position (dropped with table)
+--   - Index: idx_validation_ledger_run_id (dropped with table)
+--   - Index: idx_validation_ledger_repo_occurred (dropped with table)
+--   - Index: idx_validation_ledger_repo_run (dropped with table)
+--   - All table and column comments (dropped with table)
+
+DROP TABLE IF EXISTS validation_event_ledger CASCADE;
