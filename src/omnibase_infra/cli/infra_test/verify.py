@@ -40,7 +40,12 @@ def _get_consul_addr() -> str:
 
 
 def _get_postgres_dsn() -> str:
-    """Build PostgreSQL DSN from environment variables."""
+    """Build PostgreSQL DSN from environment variables.
+
+    Defaults are for local E2E test environments only -- never use in production.
+    All values (including the fallback password) are overridden via environment
+    variables in real deployments.
+    """
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5433")
     db = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
@@ -317,8 +322,11 @@ def _verify_consul_registry(node_id: str | None) -> bool:
         resp = httpx.get(url, timeout=5.0)
         resp.raise_for_status()
         keys = resp.json()
-    except Exception:
-        # Try service catalog instead if KV not populated
+    except Exception as e:
+        # KV not populated or unreachable -- fall back to service catalog
+        console.print(
+            f"  [dim]KV lookup failed ({type(e).__name__}), trying service catalog...[/dim]"
+        )
         try:
             url = f"{consul_addr}/v1/agent/services"
             resp = httpx.get(url, timeout=5.0)
@@ -345,8 +353,10 @@ def _verify_consul_registry(node_id: str | None) -> bool:
 
             console.print(table)
             return True
-        except Exception:
-            console.print(f"  [red]Cannot reach Consul at {consul_addr}[/red]")
+        except Exception as e:
+            console.print(
+                f"  [red]Cannot reach Consul at {consul_addr}: {type(e).__name__}: {e}[/red]"
+            )
             return False
 
     if not keys:

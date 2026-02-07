@@ -119,15 +119,19 @@ def _wait_for_registration(dsn: str, node_id: str, timeout: int = 30) -> bool:
             if row is not None:
                 console.print(f"  Registration state: [green]{row[0]}[/green]")
                 return True
-        except Exception:
-            pass
+        except Exception as e:
+            # Transient errors during polling — log at debug level and retry
+            console.print(f"  [dim]Poll error: {type(e).__name__}: {e}[/dim]")
         time.sleep(2)
 
     return False
 
 
 def _get_postgres_dsn() -> str:
-    """Build PostgreSQL DSN from environment."""
+    """Build PostgreSQL DSN from environment.
+
+    Defaults are for local E2E test environments only — never use in production.
+    """
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5433")
     db = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
@@ -315,7 +319,7 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
         cur.close()
         conn.close()
     except Exception as e:
-        console.print(f"[bold red]PostgreSQL error: {e}[/bold red]")
+        console.print(f"[bold red]PostgreSQL error: {type(e).__name__}: {e}[/bold red]")
         raise SystemExit(1)
 
     console.print(f"  Records found: {count}")
@@ -476,7 +480,7 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
     except SystemExit:
         raise
     except Exception as e:
-        console.print(f"[bold red]PostgreSQL error: {e}[/bold red]")
+        console.print(f"[bold red]PostgreSQL error: {type(e).__name__}: {e}[/bold red]")
         raise SystemExit(1)
 
     console.print("[bold green]Failure suite: PASS[/bold green]")

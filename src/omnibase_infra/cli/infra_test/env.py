@@ -8,7 +8,6 @@ Wraps Docker Compose to manage the E2E testing infrastructure stack.
 from __future__ import annotations
 
 import subprocess
-import sys
 import time
 
 import click
