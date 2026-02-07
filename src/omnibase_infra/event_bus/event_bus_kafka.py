@@ -200,6 +200,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.mixin_kafka_broadcast import MixinKafkaBroadcast
 from omnibase_infra.event_bus.mixin_kafka_dlq import MixinKafkaDlq
 from omnibase_infra.event_bus.models import (
+    ModelEventBusReadiness,
     ModelEventHeaders,
     ModelEventMessage,
 )
@@ -230,6 +231,7 @@ class EventBusKafka(
         - Dead letter queue (DLQ) for failed message processing
         - Environment-based message routing
         - Proper async producer/consumer lifecycle management
+        - Readiness checking with per-topic partition assignment tracking
 
     Attributes:
         environment: Environment identifier (e.g., "local", "dev", "prod")
@@ -247,7 +249,7 @@ class EventBusKafka(
         - Properties (3): config, adapter, environment
         - Lifecycle methods (4): start, initialize, shutdown, close
         - Pub/Sub methods (3): publish, subscribe, start_consuming
-        - Health check (1): health_check
+        - Health/Readiness (2): health_check, get_readiness_status
 
     Example:
         ```python
@@ -363,6 +365,10 @@ class EventBusKafka(
 
         # Background consumer tasks
         self._consumer_tasks: dict[str, asyncio.Task[None]] = {}
+
+        # Topics marked as required for readiness (OMN-1931)
+        # Readiness is blocked until all required topics have active consumers
+        self._required_topics: set[str] = set()
 
         # Producer lock for independent producer access (avoids deadlock with main lock)
         self._producer_lock = asyncio.Lock()
@@ -933,6 +939,7 @@ class EventBusKafka(
         on_message: Callable[[ModelEventMessage], Awaitable[None]],
         *,
         purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
+        required_for_readiness: bool = False,
     ) -> Callable[[], Awaitable[None]]:
         """Subscribe to topic with callback handler.
 
@@ -953,6 +960,9 @@ class EventBusKafka(
             on_message: Async callback invoked for each message
             purpose: Consumer group purpose classification. Defaults to CONSUME.
                 Used in the consumer group ID derivation for disambiguation.
+            required_for_readiness: Whether this subscription must have active
+                partition assignments for the runtime to report as ready via
+                ``/ready``. Defaults to False (does not block readiness).
 
         Returns:
             Async unsubscribe function to remove this subscription
@@ -995,6 +1005,10 @@ class EventBusKafka(
         self._validate_topic_name(topic, correlation_id)
 
         async with self._lock:
+            # Track readiness-required topics (OMN-1931)
+            if required_for_readiness:
+                self._required_topics.add(topic)
+
             # Add to subscriber registry
             self._subscribers[topic].append(
                 (effective_group_id, subscription_id, on_message)
@@ -1010,6 +1024,7 @@ class EventBusKafka(
                     "topic": topic,
                     "group_id": effective_group_id,
                     "subscription_id": subscription_id,
+                    "required_for_readiness": required_for_readiness,
                 },
             )
 
@@ -1448,6 +1463,75 @@ class EventBusKafka(
             "topic_count": topic_count,
             "consumer_count": consumer_count,
         }
+
+    async def get_readiness_status(self) -> ModelEventBusReadiness:
+        """Check event bus readiness for serving traffic.
+
+        Readiness is separate from liveness (health_check). A bus is ready when
+        all topics marked ``required_for_readiness=True`` at subscribe time have:
+        - An active consumer with partition assignments
+        - A running consume loop task
+
+        Readiness is continuously evaluated: loss of partition assignments
+        flips readiness to False.
+
+        Returns:
+            Structured readiness status with per-topic partition assignments,
+            task liveness, and overall readiness determination.
+        """
+        last_error = ""
+
+        try:
+            async with self._lock:
+                consumers_started = self._started
+                required_topics = tuple(sorted(self._required_topics))
+
+                # Collect partition assignments and task liveness per topic
+                assignments: dict[str, list[int]] = {}
+                consume_tasks_alive: dict[str, bool] = {}
+
+                for topic, consumer in self._consumers.items():
+                    try:
+                        topic_partitions = consumer.assignment()
+                        assignments[topic] = sorted(
+                            tp.partition for tp in topic_partitions
+                        )
+                    except Exception:
+                        assignments[topic] = []
+
+                for topic, task in self._consumer_tasks.items():
+                    consume_tasks_alive[topic] = not task.done()
+
+            # Determine required topics readiness
+            required_topics_ready = consumers_started and all(
+                topic in assignments
+                and len(assignments[topic]) > 0
+                and consume_tasks_alive.get(topic, False)
+                for topic in required_topics
+            )
+
+            # Overall readiness: started AND all required topics ready
+            # If no required topics, readiness is True when started
+            is_ready = consumers_started and required_topics_ready
+
+        except Exception as e:
+            last_error = str(e)
+            is_ready = False
+            consumers_started = False
+            assignments = {}
+            consume_tasks_alive = {}
+            required_topics = ()
+            required_topics_ready = False
+
+        return ModelEventBusReadiness(
+            is_ready=is_ready,
+            consumers_started=consumers_started,
+            assignments=assignments,
+            consume_tasks_alive=consume_tasks_alive,
+            required_topics=required_topics,
+            required_topics_ready=required_topics_ready,
+            last_error=last_error,
+        )
 
     # =========================================================================
     # Helper Methods

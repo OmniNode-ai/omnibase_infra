@@ -313,6 +313,14 @@ class TestServiceHealthIntegration:
                 "registered_handlers": ["http", "db"],
             }
         )
+        mock_runtime.readiness_check = AsyncMock(
+            return_value={
+                "ready": True,
+                "is_running": True,
+                "is_draining": False,
+                "event_bus_readiness": {"is_ready": True},
+            }
+        )
 
         # Use port 0 for automatic port assignment to avoid conflicts
         server = ServiceHealth(
@@ -347,7 +355,7 @@ class TestServiceHealthIntegration:
                     assert data["version"] == "test-1.0.0"
                     assert data["details"]["healthy"] is True
 
-                # Test /ready endpoint (alias)
+                # Test /ready endpoint (OMN-1931: separate readiness probe)
                 async with session.get(
                     f"http://127.0.0.1:{actual_port}/ready"
                 ) as response:

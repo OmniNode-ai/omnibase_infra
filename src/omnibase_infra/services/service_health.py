@@ -9,8 +9,8 @@ It is designed to run alongside the ONEX runtime kernel to satisfy Docker/K8s
 health check requirements.
 
 The service exposes:
-    - GET /health: Returns runtime health status as JSON
-    - GET /ready: Returns readiness status as JSON (alias for /health)
+    - GET /health: Returns runtime liveness status as JSON (process alive)
+    - GET /ready: Returns runtime readiness status as JSON (can serve traffic)
 
 Configuration:
     ONEX_HTTP_PORT: Port to listen on (default: 8085)
@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Literal, cast
+from uuid import UUID
 
 from aiohttp import web
 
@@ -121,10 +122,13 @@ def _get_port_from_env(default: int) -> int:
 
 
 class ServiceHealth:
-    """Minimal HTTP server for health check endpoints.
+    """Minimal HTTP server for liveness and readiness endpoints.
 
-    This server provides health check endpoints for Docker and Kubernetes
-    liveness/readiness probes. It delegates health status to the RuntimeHostProcess.
+    This server provides separate liveness (``/health``) and readiness
+    (``/ready``) endpoints for Docker and Kubernetes probes. Liveness is
+    delegated to ``RuntimeHostProcess.health_check()``; readiness is
+    delegated to ``RuntimeHostProcess.readiness_check()``, which verifies
+    that all required Kafka consumers have active partition assignments.
 
     Attributes:
         runtime: The RuntimeHostProcess instance to query for health status.
@@ -175,7 +179,8 @@ class ServiceHealth:
     Example:
         >>> server = ServiceHealth(runtime=runtime, port=8085)
         >>> await server.start()
-        >>> # curl http://localhost:8085/health
+        >>> # Liveness:  curl http://localhost:8085/health
+        >>> # Readiness: curl http://localhost:8085/ready
         >>> await server.stop()
 
     See Also:
@@ -485,17 +490,28 @@ class ServiceHealth:
             7. Mark server as running and log startup with correlation tracking
 
         Health Endpoints:
-            - GET /health: Primary health check endpoint
-            - GET /ready: Readiness probe (alias for /health)
+            - GET /health: Liveness probe -- reports whether the process is alive.
+              Delegates to ``RuntimeHostProcess.health_check()`` and returns
+              healthy / degraded / unhealthy status.
+            - GET /ready: Readiness probe -- reports whether the runtime can
+              serve traffic that depends on Kafka-driven orchestration. Checks
+              that all required Kafka subscriptions have active partition
+              assignments. This is an independent check, **not** an alias for
+              ``/health``.
 
-        Both endpoints return JSON with:
+        Response Format (both endpoints):
+            JSON with:
             - status: "healthy" | "degraded" | "unhealthy"
             - version: Runtime kernel version
-            - details: Full health check details from RuntimeHostProcess
+            - details: Endpoint-specific check details
 
         HTTP Status Codes:
-            - 200: Healthy or degraded (container operational)
-            - 503: Unhealthy (container should be restarted)
+            /health:
+                - 200: Healthy or degraded (container operational)
+                - 503: Unhealthy (container should be restarted)
+            /ready:
+                - 200: Ready (all consumers subscribed with partition assignments)
+                - 503: Not ready (starting up or lost assignments)
 
         This method is idempotent - calling start() on an already running
         server is safe and has no effect. This prevents double-start errors
@@ -516,16 +532,19 @@ class ServiceHealth:
         Example:
             >>> server = ServiceHealth(runtime=runtime, port=8085)
             >>> await server.start()
-            >>> # Server now listening at http://0.0.0.0:8085/health
-            >>> # Docker can probe: curl http://localhost:8085/health
+            >>> # Liveness:  curl http://localhost:8085/health
+            >>> # Readiness: curl http://localhost:8085/ready
 
         Example Error (Port In Use):
             RuntimeHostError: Failed to start health server on 0.0.0.0:8085: [Errno 48] Address already in use
             (correlation_id: 123e4567-e89b-12d3-a456-426614174000)
 
-        Docker Integration:
+        Docker Integration (liveness):
             HEALTHCHECK --interval=30s --timeout=3s \\
                 CMD curl -f http://localhost:8085/health || exit 1
+
+            Kubernetes readiness probes should target ``/ready`` instead
+            of ``/health``.
         """
         if self._is_running:
             logger.debug("ServiceHealth already started, skipping")
@@ -543,9 +562,9 @@ class ServiceHealth:
             # Create aiohttp application
             self._app = web.Application()
 
-            # Register routes
+            # Register routes (OMN-1931: /ready has its own handler)
             self._app.router.add_get("/health", self._handle_health)
-            self._app.router.add_get("/ready", self._handle_health)  # Alias
+            self._app.router.add_get("/ready", self._handle_readiness)
 
             # Create and start runner
             self._runner = web.AppRunner(self._app)
@@ -703,12 +722,16 @@ class ServiceHealth:
         )
 
     async def _handle_health(self, request: web.Request) -> web.Response:
-        """Handle GET /health and GET /ready requests.
+        """Handle GET /health requests (liveness probe).
 
-        This is the main health check endpoint handler for Docker/Kubernetes
-        health probes. It delegates to RuntimeHostProcess.health_check() for
-        actual health status determination and returns a standardized JSON
-        response with status information and diagnostics.
+        This is the liveness endpoint handler for Docker/Kubernetes health
+        probes. It delegates to RuntimeHostProcess.health_check() for actual
+        health status determination and returns a standardized JSON response
+        with status information and diagnostics.
+
+        Note:
+            Readiness checking is handled separately by ``_handle_readiness()``
+            which serves the ``/ready`` endpoint (OMN-1931).
 
         Health Status Logic:
             1. Query RuntimeHostProcess for current health state
@@ -878,6 +901,109 @@ class ServiceHealth:
                 extra={
                     "error": str(e),
                     "error_type": type(e).__name__,
+                },
+            )
+
+            error_response = ModelHealthCheckResponse.failure(
+                version=self._version,
+                error=str(e),
+                error_type=type(e).__name__,
+                correlation_id=str(correlation_id),
+            )
+
+            return web.Response(
+                text=error_response.model_dump_json(exclude_none=True),
+                status=503,
+                content_type="application/json",
+            )
+
+    async def _handle_readiness(self, request: web.Request) -> web.Response:
+        """Handle GET /ready requests (readiness probe).
+
+        Readiness indicates whether the runtime can serve traffic that depends
+        on Kafka-driven orchestration. Unlike ``/health`` (liveness), this
+        checks that all required Kafka subscriptions have active partition
+        assignments.
+
+        Readiness is continuously evaluated:
+            - Returns 200 when all required consumers are subscribed and assigned
+            - Returns 503 when starting up or when required consumers lose assignments
+            - ``/health`` remains independent (process health only)
+
+        This matches Kubernetes semantics: loss of readiness removes the pod
+        from service rotation but does not restart it.
+
+        Args:
+            request: Incoming HTTP request. The ``X-Correlation-ID`` header, if
+                present and a valid UUID, is propagated into error responses so
+                callers can correlate failures with their original request.
+
+        Returns:
+            JSON response with readiness status:
+                - HTTP 200: Runtime is ready to serve traffic
+                - HTTP 503: Runtime is not ready (starting up or lost assignments)
+        """
+        # Extract correlation ID from request header, or generate a new one.
+        # This ensures the caller's trace context is propagated into error responses.
+        raw_correlation = request.headers.get("X-Correlation-ID")
+        try:
+            correlation_id: UUID = (
+                UUID(raw_correlation) if raw_correlation else generate_correlation_id()
+            )
+        except ValueError:
+            correlation_id = generate_correlation_id()
+
+        try:
+            readiness_details = await self.runtime.readiness_check(
+                correlation_id=correlation_id,
+            )
+
+            if not isinstance(readiness_details, dict):
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="validate_readiness_check_response",
+                    target_name="RuntimeHostProcess.readiness_check",
+                )
+                raise ProtocolConfigurationError(
+                    f"readiness_check() must return dict, got {type(readiness_details).__name__}",
+                    context=context,
+                )
+
+            is_ready = bool(readiness_details.get("ready", False))
+            status: Literal["healthy", "degraded", "unhealthy"] = (
+                "healthy" if is_ready else "unhealthy"
+            )
+            http_status = 200 if is_ready else 503
+
+            response = ModelHealthCheckResponse.success(
+                status=status,
+                version=self._version,
+                details=cast("dict[str, JsonType]", readiness_details),
+            )
+
+            return web.Response(
+                text=response.model_dump_json(exclude_none=True),
+                status=http_status,
+                content_type="application/json",
+            )
+
+        except Exception as e:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="readiness_check",
+                target_name="RuntimeHostProcess.readiness_check",
+            )
+            logger.exception(
+                "Readiness check failed with exception (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "correlation_id": str(context.correlation_id),
+                    "transport_type": context.transport_type,
+                    "operation": context.operation,
                 },
             )
 

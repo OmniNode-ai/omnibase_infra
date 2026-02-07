@@ -5,6 +5,7 @@ the SPI protocols (ProtocolEventMessage, ProtocolEventHeaders) for use
 with event bus implementations.
 
 Exports:
+    ModelEventBusReadiness: Readiness status for event bus consumers
     ModelEventHeaders: Headers for event bus messages implementing ProtocolEventHeaders
     ModelEventMessage: Event bus message implementing ProtocolEventMessage
     ModelKafkaEventBusConfig: Configuration model for EventBusKafka
@@ -17,12 +18,16 @@ from __future__ import annotations
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_dlq_event import ModelDlqEvent
 from omnibase_infra.event_bus.models.model_dlq_metrics import ModelDlqMetrics
+from omnibase_infra.event_bus.models.model_event_bus_readiness import (
+    ModelEventBusReadiness,
+)
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 
 __all__: list[str] = [
     "ModelDlqEvent",
     "ModelDlqMetrics",
+    "ModelEventBusReadiness",
     "ModelEventHeaders",
     "ModelEventMessage",
     "ModelKafkaEventBusConfig",

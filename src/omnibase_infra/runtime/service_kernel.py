@@ -1409,6 +1409,7 @@ async def bootstrap() -> int:
                 node_identity=introspection_node_identity,
                 on_message=introspection_event_router.handle_message,
                 purpose=EnumConsumerGroupPurpose.INTROSPECTION,
+                required_for_readiness=True,
             )
             subscribe_duration = time.time() - subscribe_start_time
 
@@ -1478,18 +1479,21 @@ async def bootstrap() -> int:
                 node_identity=contract_node_identity,
                 on_message=contract_router.handle_message,
                 purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
+                required_for_readiness=True,
             )
             contract_unsub_deregistered = await event_bus.subscribe(
                 topic=contract_deregistered_topic,
                 node_identity=contract_node_identity,
                 on_message=contract_router.handle_message,
                 purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
+                required_for_readiness=True,
             )
             contract_unsub_heartbeat = await event_bus.subscribe(
                 topic=node_heartbeat_topic,
                 node_identity=contract_node_identity,
                 on_message=contract_router.handle_message,
                 purpose=EnumConsumerGroupPurpose.CONTRACT_REGISTRY,
+                required_for_readiness=True,
             )
 
             # Start the router's tick timer
