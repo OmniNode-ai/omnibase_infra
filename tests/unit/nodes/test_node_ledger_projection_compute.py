@@ -16,7 +16,7 @@ Test Coverage per Ticket OMN-1648:
     2. JSON payload with correlation_id in body: Fallback extraction (if implemented)
     3. Missing headers: Event still captured, onex_headers is empty dict {}
     4. Base64 roundtrip: base64.b64decode(event_value) matches original message.value
-    5. None event_value: Raises OnexError (not silently succeeds)
+    5. None event_value: Raises RuntimeHostError (not silently succeeds)
     6. All 7 topic suffixes: Contract subscribes to complete set
 
 Related:
@@ -37,6 +37,8 @@ from uuid import uuid4
 
 import pytest
 import yaml
+
+pytestmark = [pytest.mark.unit]
 
 from omnibase_core.errors import OnexError
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
@@ -339,10 +341,12 @@ class TestExtractLedgerMetadata:
     def test_raises_error_for_none_event_value(
         self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
-        """INVARIANT: event_value is REQUIRED - must raise OnexError.
+        """INVARIANT: event_value is REQUIRED - must raise RuntimeHostError.
 
         This test uses model_construct to bypass Pydantic validation and create
         a message with None value, testing the handler's defensive handling.
+        RuntimeHostError inherits from OnexError, so the pytest.raises check
+        catches both.
         """
         # Use model_construct to bypass Pydantic validation
         message = ModelEventMessage.model_construct(
@@ -674,7 +678,7 @@ class TestHandlerLedgerProjection:
     def test_project_with_none_value_raises_error(
         self, handler: HandlerLedgerProjection, sample_headers: ModelEventHeaders
     ) -> None:
-        """project() raises OnexError for None event value."""
+        """project() raises RuntimeHostError for None event value."""
         message = ModelEventMessage.model_construct(
             topic="test.topic",
             key=None,

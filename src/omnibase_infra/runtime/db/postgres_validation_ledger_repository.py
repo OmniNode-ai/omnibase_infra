@@ -93,7 +93,7 @@ SELECT
     created_at
 FROM validation_event_ledger
 WHERE run_id = $1
-ORDER BY kafka_partition, kafka_offset
+ORDER BY kafka_topic, kafka_partition, kafka_offset
 LIMIT $2
 OFFSET $3
 """
@@ -303,8 +303,8 @@ class PostgresValidationLedgerRepository:
     ) -> list[ModelValidationLedgerEntry]:
         """Query entries for a specific validation run.
 
-        Returns entries ordered by kafka_partition, kafka_offset for
-        deterministic replay ordering.
+        Returns entries ordered by kafka_topic, kafka_partition, kafka_offset
+        for deterministic replay ordering.
 
         Args:
             run_id: The validation run UUID to query for.
@@ -426,7 +426,7 @@ class PostgresValidationLedgerRepository:
             select_sql = (
                 _SQL_SELECT_BASE
                 + where_sql
-                + " ORDER BY kafka_partition, kafka_offset"
+                + " ORDER BY kafka_topic, kafka_partition, kafka_offset"
                 + f" LIMIT ${param_index} OFFSET ${param_index + 1}"
             )
 

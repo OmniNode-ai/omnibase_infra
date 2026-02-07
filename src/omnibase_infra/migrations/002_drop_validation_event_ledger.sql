@@ -11,7 +11,7 @@
 --   - Table: validation_event_ledger
 --   - Constraint: uk_validation_ledger_kafka_position (dropped with table)
 --   - Index: idx_validation_ledger_run_id (dropped with table)
---   - Index: idx_validation_ledger_repo_occurred_at (dropped with table)
+--   - Index: idx_validation_ledger_repo_occurred (dropped with table)
 --   - Index: idx_validation_ledger_repo_run (dropped with table)
 --   - All table and column comments (dropped with table)
 
