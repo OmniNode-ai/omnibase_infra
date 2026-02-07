@@ -193,7 +193,7 @@ class HandlerValidationLedgerProjection:
             )
             raise RuntimeHostError(
                 f"Unexpected error during validation ledger projection: "
-                f"{type(e).__name__}: {sanitize_error_message(e)}",
+                f"{sanitize_error_message(e)}",
                 error_code=EnumCoreErrorCode.OPERATION_FAILED,
                 context=context,
             ) from e
