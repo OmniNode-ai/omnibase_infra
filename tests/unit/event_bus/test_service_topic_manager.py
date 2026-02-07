@@ -23,7 +23,7 @@ import pytest
 from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
 from omnibase_infra.topics import ALL_PLATFORM_SUFFIXES
 
-pytestmark = [pytest.mark.asyncio]
+pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
 
 
 class TestTopicProvisioner:

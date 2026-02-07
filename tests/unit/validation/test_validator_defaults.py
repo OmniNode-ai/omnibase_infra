@@ -13,6 +13,8 @@ from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # Import all validators and constants
 from omnibase_infra.validation.infra_validators import (
     INFRA_MAX_UNIONS,
@@ -30,6 +32,8 @@ from omnibase_infra.validation.infra_validators import (
     validate_infra_patterns,
     validate_infra_union_usage,
 )
+
+pytestmark = [pytest.mark.unit]
 
 
 class TestInfraValidatorConstants:

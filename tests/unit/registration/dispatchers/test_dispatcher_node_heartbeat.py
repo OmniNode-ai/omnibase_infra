@@ -31,7 +31,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
     DispatcherNodeHeartbeat,
 )
 
-pytestmark = [pytest.mark.asyncio]
+pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
 
 
 def _make_heartbeat_event() -> ModelNodeHeartbeatEvent:

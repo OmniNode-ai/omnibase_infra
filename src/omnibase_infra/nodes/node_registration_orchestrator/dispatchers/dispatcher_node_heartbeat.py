@@ -220,20 +220,6 @@ class DispatcherNodeHeartbeat(MixinAsyncCircuitBreaker):
                         output_events=[],
                     )
 
-            # Explicit type guard (not assert) for production safety
-            # Type narrowing after isinstance/model_validate above
-            if not isinstance(payload, ModelNodeHeartbeatEvent):
-                context = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.KAFKA,
-                    operation="handle_heartbeat",
-                    correlation_id=correlation_id,
-                )
-                raise EnvelopeValidationError(
-                    f"Expected ModelNodeHeartbeatEvent after validation, "
-                    f"got {type(payload).__name__}",
-                    context=context,
-                )
-
             # Get current time for handler
             now = datetime.now(UTC)
 

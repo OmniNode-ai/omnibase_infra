@@ -29,6 +29,7 @@ from omnibase_infra.models.projection.model_snapshot_topic_config import (
     ModelSnapshotTopicConfig,
 )
 from omnibase_infra.topics import ALL_PLATFORM_SUFFIXES, SUFFIX_REGISTRATION_SNAPSHOTS
+from omnibase_infra.utils import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +175,7 @@ class TopicProvisioner:
                         type(e).__name__,
                         extra={
                             "correlation_id": str(correlation_id),
-                            "error": str(e),
+                            "error": sanitize_error_message(e),
                         },
                     )
 
@@ -186,7 +187,7 @@ class TopicProvisioner:
                 extra={
                     "bootstrap_servers": self._bootstrap_servers,
                     "correlation_id": str(correlation_id),
-                    "error": str(e),
+                    "error": sanitize_error_message(e),
                 },
             )
             return {
@@ -290,7 +291,7 @@ class TopicProvisioner:
                 type(e).__name__,
                 extra={
                     "correlation_id": str(correlation_id),
-                    "error": str(e),
+                    "error": sanitize_error_message(e),
                 },
             )
             return False

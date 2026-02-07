@@ -13,9 +13,12 @@ Related:
 
 from __future__ import annotations
 
+import pytest
 from click.testing import CliRunner
 
 from omnibase_infra.cli.commands import cli
+
+pytestmark = [pytest.mark.unit]
 
 
 class TestCLIRegistryCommands:

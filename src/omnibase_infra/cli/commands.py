@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 
 import click
 from rich.console import Console
@@ -210,6 +211,11 @@ def _get_db_dsn() -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 
+def _sanitize_dsn(dsn: str) -> str:
+    """Mask the password portion of a DSN to prevent credential leaks."""
+    return re.sub(r"://([^:]+):([^@]*)@", r"://\1:****@", dsn)
+
+
 async def _run_list_nodes(
     state: str | None,
     node_type: str | None,
@@ -219,10 +225,27 @@ async def _run_list_nodes(
     import asyncpg
 
     from omnibase_infra.enums import EnumRegistrationState
+    from omnibase_infra.models.projection.model_registration_projection import (
+        ModelRegistrationProjection,
+    )
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
     dsn = _get_db_dsn()
-    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=2)
+    try:
+        pool = await asyncio.wait_for(
+            asyncpg.create_pool(dsn, min_size=1, max_size=2),
+            timeout=10.0,
+        )
+    except TimeoutError:
+        sanitized = _sanitize_dsn(dsn)
+        console.print(f"[red]Connection timed out to {sanitized}[/red]")
+        raise SystemExit(1)
+    except Exception as e:
+        sanitized = _sanitize_dsn(dsn)
+        console.print(
+            f"[red]Failed to connect to {sanitized}: {type(e).__name__}[/red]"
+        )
+        raise SystemExit(1)
     try:
         reader = ProjectionReaderRegistration(pool)
 
@@ -237,11 +260,12 @@ async def _run_list_nodes(
                 )
                 raise SystemExit(1)
 
-        projections = []
+        projections: list[ModelRegistrationProjection] = []
         if state_filter is not None:
             projections = await reader.get_by_state(state=state_filter, limit=limit)
         else:
-            # Query all active-like states
+            # Query all active-like states, tracking remaining capacity
+            remaining = limit
             for query_state in [
                 EnumRegistrationState.ACTIVE,
                 EnumRegistrationState.ACCEPTED,
@@ -249,10 +273,13 @@ async def _run_list_nodes(
                 EnumRegistrationState.ACK_RECEIVED,
                 EnumRegistrationState.PENDING_REGISTRATION,
             ]:
+                if remaining <= 0:
+                    break
                 state_projections = await reader.get_by_state(
-                    state=query_state, limit=limit
+                    state=query_state, limit=remaining
                 )
                 projections.extend(state_projections)
+                remaining -= len(state_projections)
 
         # Apply node_type filter
         if node_type:
@@ -273,7 +300,7 @@ async def _run_list_nodes(
         table.add_column("Last Heartbeat", style="dim")
         table.add_column("Registered At", style="dim")
 
-        for proj in projections[:limit]:
+        for proj in projections:
             hb = (
                 proj.last_heartbeat_at.strftime("%Y-%m-%d %H:%M:%S")
                 if proj.last_heartbeat_at
@@ -313,7 +340,21 @@ async def _run_get_node(node_id_str: str) -> None:
         raise SystemExit(1)
 
     dsn = _get_db_dsn()
-    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=2)
+    try:
+        pool = await asyncio.wait_for(
+            asyncpg.create_pool(dsn, min_size=1, max_size=2),
+            timeout=10.0,
+        )
+    except TimeoutError:
+        sanitized = _sanitize_dsn(dsn)
+        console.print(f"[red]Connection timed out to {sanitized}[/red]")
+        raise SystemExit(1)
+    except Exception as e:
+        sanitized = _sanitize_dsn(dsn)
+        console.print(
+            f"[red]Failed to connect to {sanitized}: {type(e).__name__}[/red]"
+        )
+        raise SystemExit(1)
     try:
         reader = ProjectionReaderRegistration(pool)
         proj = await reader.get_entity_state(entity_id=node_id)
@@ -390,7 +431,7 @@ def registry_list_nodes(state: str | None, node_type: str | None, limit: int) ->
     except SystemExit:
         raise
     except Exception as e:
-        console.print(f"[red]Error: {type(e).__name__}: {e}[/red]")
+        console.print(f"[red]Error: {type(e).__name__}[/red]")
         raise SystemExit(1)
 
 
@@ -403,7 +444,7 @@ def registry_get_node(node_id: str) -> None:
     except SystemExit:
         raise
     except Exception as e:
-        console.print(f"[red]Error: {type(e).__name__}: {e}[/red]")
+        console.print(f"[red]Error: {type(e).__name__}[/red]")
         raise SystemExit(1)
 
 
@@ -415,7 +456,7 @@ def registry_list_topics() -> None:
     except SystemExit:
         raise
     except Exception as e:
-        console.print(f"[red]Error: {type(e).__name__}: {e}[/red]")
+        console.print(f"[red]Error: {type(e).__name__}[/red]")
         raise SystemExit(1)
 
 
