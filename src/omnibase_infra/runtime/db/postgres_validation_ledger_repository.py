@@ -8,7 +8,7 @@ ProtocolValidationLedgerRepository using asyncpg for direct PostgreSQL access.
 Table: validation_event_ledger
     - Stores raw validation event envelopes for cross-repo replay
     - Idempotent writes via (kafka_topic, kafka_partition, kafka_offset) UNIQUE
-    - Deterministic replay ordering via kafka_partition, kafka_offset
+    - Deterministic replay ordering via kafka_topic, kafka_partition, kafka_offset
     - Time-based + min-run retention for cleanup
 
 Idempotency:

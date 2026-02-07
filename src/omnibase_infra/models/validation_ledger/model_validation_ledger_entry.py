@@ -8,10 +8,11 @@ entry, representing one row in the validation_event_ledger table.
 
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ModelValidationLedgerEntry(BaseModel):
@@ -47,3 +48,19 @@ class ModelValidationLedgerEntry(BaseModel):
         ..., min_length=1, description="SHA-256 hash of envelope_bytes"
     )
     created_at: datetime = Field(..., description="When this ledger entry was created")
+
+    @field_validator("envelope_bytes")
+    @classmethod
+    def validate_base64(cls, v: str) -> str:
+        """Validate that envelope_bytes is valid base64-encoded data.
+
+        Raises:
+            ValueError: If the string is not valid base64.
+        """
+        try:
+            base64.b64decode(v, validate=True)
+        except Exception as exc:
+            raise ValueError(
+                "envelope_bytes must be valid base64-encoded data"
+            ) from exc
+        return v

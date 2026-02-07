@@ -36,6 +36,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
+from omnibase_infra.utils import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -144,8 +145,13 @@ class HandlerValidationLedgerProjection:
             | event_version  | topic suffix          | "unknown"             |
             | occurred_at    | payload["timestamp"]  | datetime.now(utc)     |
         """
+        # Single correlation_id for the entire project() call so both error
+        # paths (empty-value and unexpected-exception) share a traceable ID.
+        correlation_id = uuid4()
+
         if not value:
             context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="project_validation_event",
             )
@@ -181,12 +187,13 @@ class HandlerValidationLedgerProjection:
             raise
         except Exception as e:
             context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="project_validation_event",
             )
             raise RuntimeHostError(
                 f"Unexpected error during validation ledger projection: "
-                f"{type(e).__name__}: {e}",
+                f"{type(e).__name__}: {sanitize_error_message(e)}",
                 context=context,
             ) from e
 
