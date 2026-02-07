@@ -851,6 +851,11 @@ class RuntimeHostProcess:
         # Prevents introspection spam from Kafka replays or duplicate events.
         self._announced_capabilities: set[str] = set()
 
+        # In-flight guard for concurrent live materializations (OMN-1989)
+        # Tracks protocol_types currently being materialized to prevent
+        # duplicate instantiation and orphaned handler instances.
+        self._materializing_handlers: set[str] = set()
+
         # Idempotency guard for duplicate message detection (OMN-945)
         # None = disabled, otherwise points to configured store
         self._idempotency_store: ProtocolIdempotencyStore | None = None
@@ -2097,10 +2102,12 @@ class RuntimeHostProcess:
         """Dynamically materialize a handler from a Kafka-sourced contract descriptor.
 
         Lifecycle ordering invariant (architectural invariant):
-            import -> instantiate -> initialize ->
+            import -> in-flight reservation ->
+            resolve dependencies -> instantiate -> initialize ->
             register in RegistryProtocolBinding (validates protocol compliance) ->
             wire subscriptions -> register in _handlers ->
-            publish CAPABILITY_CHANGE.
+            publish CAPABILITY_CHANGE ->
+            release in-flight reservation.
 
         Failure at any step before registration means the handler never enters
         ``_handlers`` and no CAPABILITY_CHANGE announcement is made.
@@ -2185,90 +2192,114 @@ class RuntimeHostProcess:
                 )
                 return False
 
-            # Step 6: Resolve dependencies
-            # Skip filesystem resolution for kafka:// paths but still merge
-            # materialized resources if present
-            resolved_dependencies: ModelResolvedDependencies | None = None
-            contract_path = descriptor.contract_path
-            if contract_path and not contract_path.startswith("kafka://"):
-                resolved_dependencies = await self._resolve_handler_dependencies(
-                    descriptor
-                )
-            elif self._materialized_resources:
-                # kafka:// path: skip filesystem resolution, merge shared resources
-                merged_protocols = dict(self._materialized_resources.resources)
-                if merged_protocols:
-                    resolved_dependencies = ModelResolvedDependencies(
-                        protocols=merged_protocols
-                    )
-
-            # Step 7: Instantiate handler
-            container = self._get_or_create_container()
-            handler_instance: ProtocolContainerAware
-            if resolved_dependencies and self._accepts_dependencies_param(handler_cls):
-                handler_instance = handler_cls(
-                    container=container,
-                    dependencies=resolved_dependencies,
-                )
-            else:
-                handler_instance = handler_cls(container=container)
-
-            # Step 8: Initialize handler
-            if hasattr(handler_instance, "initialize"):
-                effective_config: dict[str, object] = {}
-                if descriptor.contract_config:
-                    effective_config.update(descriptor.contract_config)
-                if self._config:
-                    effective_config.update(self._config)
-                await handler_instance.initialize(effective_config)
-
-            # Steps 9-12: Validate, wire, register, and announce under lock.
-            # All operations MUST be atomic to prevent orphan-subscription leaks
-            # when concurrent materializations race for the same protocol_type.
+            # -- In-flight reservation --
+            # Reserve protocol_type to prevent concurrent duplicate instantiation.
+            # If another coroutine is already materializing this handler, bail out
+            # early instead of creating an orphaned instance.
             async with self._handler_mutation_lock:
-                # Double-check idempotency under lock — if another coroutine
-                # already registered this handler, skip wiring and return.
-                if protocol_type in self._handlers:
+                if (
+                    protocol_type in self._handlers
+                    or protocol_type in self._materializing_handlers
+                ):
                     return True
+                self._materializing_handlers.add(protocol_type)
 
-                # Resolve registry once for both registration and rollback.
-                handler_registry = await self._get_handler_registry()
-
-                try:
-                    # Step 9: Register handler class in RegistryProtocolBinding
-                    # BEFORE wiring subscriptions. register() validates protocol
-                    # compliance (execute/handle methods). Performing this first
-                    # prevents orphan subscriptions if validation fails — there
-                    # is no unwire API for event bus subscriptions.
-                    handler_registry.register(protocol_type, handler_cls)
-
-                    # Step 10: Wire event bus subscriptions
-                    await self._wire_live_handler_subscriptions(node_name, descriptor)
-
-                    # Step 11: Register handler instance
-                    self._handler_descriptors[protocol_type] = descriptor
-                    self._handlers[protocol_type] = handler_instance
-
-                    logger.info(
-                        "Live handler materialized successfully",
-                        extra={
-                            "node_name": node_name,
-                            "protocol_type": protocol_type,
-                            "handler_class": handler_class_path,
-                            "correlation_id": str(correlation_id),
-                        },
+            try:
+                # Step 6: Resolve dependencies
+                # Skip filesystem resolution for kafka:// paths but still merge
+                # materialized resources if present
+                resolved_dependencies: ModelResolvedDependencies | None = None
+                contract_path = descriptor.contract_path
+                if contract_path and not contract_path.startswith("kafka://"):
+                    resolved_dependencies = await self._resolve_handler_dependencies(
+                        descriptor
                     )
+                elif self._materialized_resources:
+                    # kafka:// path: skip filesystem resolution, merge shared resources
+                    merged_protocols = dict(self._materialized_resources.resources)
+                    if merged_protocols:
+                        resolved_dependencies = ModelResolvedDependencies(
+                            protocols=merged_protocols
+                        )
 
-                    # Step 12: Publish CAPABILITY_CHANGE
-                    await self._publish_capability_change(node_name, correlation_id)
-                except Exception:
-                    # Roll back all partial state to prevent orphaned handlers
-                    handler_registry.unregister(protocol_type)
-                    self._handler_descriptors.pop(protocol_type, None)
-                    self._handlers.pop(protocol_type, None)
-                    raise  # Re-raise to be caught by outer try/except
+                # Step 7: Instantiate handler
+                container = self._get_or_create_container()
+                handler_instance: ProtocolContainerAware
+                if resolved_dependencies and self._accepts_dependencies_param(
+                    handler_cls
+                ):
+                    handler_instance = handler_cls(
+                        container=container,
+                        dependencies=resolved_dependencies,
+                    )
+                else:
+                    handler_instance = handler_cls(container=container)
 
-            return True
+                # Step 8: Initialize handler
+                if hasattr(handler_instance, "initialize"):
+                    effective_config: dict[str, object] = {}
+                    if descriptor.contract_config:
+                        effective_config.update(descriptor.contract_config)
+                    if self._config:
+                        effective_config.update(self._config)
+                    await handler_instance.initialize(effective_config)
+
+                # Steps 9-12: Validate, wire, register, and announce under lock.
+                # All operations MUST be atomic to prevent orphan-subscription
+                # leaks when concurrent materializations race for the same
+                # protocol_type.
+                async with self._handler_mutation_lock:
+                    # Double-check idempotency under lock — if another coroutine
+                    # already registered this handler, skip wiring and return.
+                    if protocol_type in self._handlers:
+                        return True
+
+                    # Resolve registry once for both registration and rollback.
+                    handler_registry = await self._get_handler_registry()
+
+                    try:
+                        # Step 9: Register handler class in
+                        # RegistryProtocolBinding BEFORE wiring subscriptions.
+                        # register() validates protocol compliance
+                        # (execute/handle methods). Performing this first
+                        # prevents orphan subscriptions if validation
+                        # fails — there is no unwire API for event bus
+                        # subscriptions.
+                        handler_registry.register(protocol_type, handler_cls)
+
+                        # Step 10: Wire event bus subscriptions
+                        await self._wire_live_handler_subscriptions(
+                            node_name, descriptor
+                        )
+
+                        # Step 11: Register handler instance
+                        self._handler_descriptors[protocol_type] = descriptor
+                        self._handlers[protocol_type] = handler_instance
+
+                        logger.info(
+                            "Live handler materialized successfully",
+                            extra={
+                                "node_name": node_name,
+                                "protocol_type": protocol_type,
+                                "handler_class": handler_class_path,
+                                "correlation_id": str(correlation_id),
+                            },
+                        )
+
+                        # Step 12: Publish CAPABILITY_CHANGE
+                        await self._publish_capability_change(node_name, correlation_id)
+                    except Exception:
+                        # Roll back all partial state to prevent orphaned
+                        # handlers
+                        handler_registry.unregister(protocol_type)
+                        self._handler_descriptors.pop(protocol_type, None)
+                        self._handlers.pop(protocol_type, None)
+                        raise  # Re-raise to be caught by outer try/except
+
+                return True
+            finally:
+                async with self._handler_mutation_lock:
+                    self._materializing_handlers.discard(protocol_type)
 
         except Exception as e:
             # Best-effort: never crash the runtime
@@ -4031,6 +4062,7 @@ class RuntimeHostProcess:
             if the runtime is running. This enables handlers discovered via
             Kafka to become active without a restart.
             """
+            correlation_id: UUID = uuid4()
             try:
                 parsed = _parse_contract_event_payload(msg)
                 if parsed is None:
@@ -4071,6 +4103,7 @@ class RuntimeHostProcess:
                         "error": str(e),
                         "error_type": type(e).__name__,
                         "topic": registration_topic,
+                        "correlation_id": str(correlation_id),
                     },
                 )
 

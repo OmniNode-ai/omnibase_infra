@@ -82,6 +82,7 @@ def _make_runtime(**overrides: object) -> RuntimeHostProcess:
     runtime._handler_descriptors = {}
     runtime._handler_mutation_lock = asyncio.Lock()
     runtime._announced_capabilities = set()
+    runtime._materializing_handlers = set()
     runtime._is_running = True
     runtime._config = None
     runtime._event_bus_wiring = None
