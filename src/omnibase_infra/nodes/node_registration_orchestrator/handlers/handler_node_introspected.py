@@ -259,11 +259,11 @@ class HandlerNodeIntrospected:
     def handler_category(self) -> EnumHandlerTypeCategory:
         """Behavioral classification for this handler.
 
-        Returns NONDETERMINISTIC_COMPUTE because this handler performs
-        I/O side effects: writes projections to PostgreSQL, optionally
-        registers with Consul, and publishes snapshots to Kafka.
+        Returns EFFECT because this handler performs I/O side effects:
+        writes projections to PostgreSQL, optionally registers with
+        Consul, and publishes snapshots to Kafka.
         """
-        return EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE
+        return EnumHandlerTypeCategory.EFFECT
 
     @property
     def has_projector(self) -> bool:

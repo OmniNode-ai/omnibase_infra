@@ -191,7 +191,11 @@ class TopicProvisioner:
             return {
                 "created": created,
                 "existing": existing,
-                "failed": list(ALL_PLATFORM_SUFFIXES),
+                "failed": [
+                    s
+                    for s in ALL_PLATFORM_SUFFIXES
+                    if s not in set(created) and s not in set(existing)
+                ],
                 "status": "unavailable",
             }
 
@@ -275,11 +279,19 @@ class TopicProvisioner:
                 )
 
             await admin.create_topics([new_topic])
-            logger.info("Created topic: %s", topic_name)
+            logger.info(
+                "Created topic: %s",
+                topic_name,
+                extra={"correlation_id": str(correlation_id)},
+            )
             return True
 
         except TopicAlreadyExistsError:
-            logger.debug("Topic already exists: %s", topic_name)
+            logger.debug(
+                "Topic already exists: %s",
+                topic_name,
+                extra={"correlation_id": str(correlation_id)},
+            )
             return True
 
         except Exception as e:

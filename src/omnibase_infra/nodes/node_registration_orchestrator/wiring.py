@@ -256,6 +256,7 @@ async def wire_registration_dispatchers(
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
     )
+    from omnibase_infra.utils import sanitize_error_message
 
     dispatchers_registered: list[str] = []
     routes_registered: list[str] = []
@@ -284,7 +285,10 @@ async def wire_registration_dispatchers(
             logger.info(
                 "HandlerNodeHeartbeat not registered (projector may be unavailable), "
                 "heartbeat dispatcher will not be wired",
-                extra={"error": str(e), "error_type": type(e).__name__},
+                extra={
+                    "error": sanitize_error_message(e),
+                    "error_type": type(e).__name__,
+                },
             )
 
         # 2. Create dispatcher adapters

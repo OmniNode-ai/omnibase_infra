@@ -386,8 +386,8 @@ async def _run_get_node(node_id_str: str) -> None:
         await pool.close()
 
 
-async def _run_list_topics() -> None:
-    """Async implementation for list-topics command."""
+def _run_list_topics() -> None:
+    """Implementation for list-topics command."""
     from omnibase_infra.topics import ALL_PLATFORM_SUFFIXES
 
     table = Table(title="ONEX Platform Topics")
@@ -454,7 +454,7 @@ def registry_get_node(node_id: str) -> None:
 def registry_list_topics() -> None:
     """List all ONEX platform topics."""
     try:
-        asyncio.run(_run_list_topics())
+        _run_list_topics()
     except SystemExit:
         raise
     except Exception as e:
