@@ -722,19 +722,19 @@ async def bootstrap() -> int:
 
         # Create typed node identity for plugin subscriptions (OMN-1602)
         plugin_node_identity: ModelNodeIdentity | None = None
-        if not config.name:
-            logger.warning(
-                "runtime_config.yaml missing 'name' field — plugin consumers "
-                "will not subscribe to introspection events "
-                "(correlation_id=%s)",
-                correlation_id,
-            )
         if config.name:
             plugin_node_identity = ModelNodeIdentity(
                 env=environment,
                 service=config.name,
                 node_name=config.name,
                 version=config.contract_version or "v1",
+            )
+        else:
+            logger.warning(
+                "runtime_config.yaml missing 'name' field — plugin consumers "
+                "will not subscribe to introspection events "
+                "(correlation_id=%s)",
+                correlation_id,
             )
 
         # Create shared plugin configuration
