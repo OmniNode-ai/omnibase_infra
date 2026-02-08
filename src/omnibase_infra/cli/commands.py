@@ -423,7 +423,9 @@ async def _run_list_topics() -> None:
     default=None,
     help="Filter by node type (effect, compute, reducer, orchestrator)",
 )
-@click.option("--limit", default=100, help="Maximum number of results")
+@click.option(
+    "--limit", default=100, type=click.IntRange(min=1), help="Maximum number of results"
+)
 def registry_list_nodes(state: str | None, node_type: str | None, limit: int) -> None:
     """List registered nodes from the projection database."""
     try:

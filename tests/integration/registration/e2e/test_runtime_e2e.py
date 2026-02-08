@@ -156,10 +156,11 @@ RUNTIME_AVAILABLE = _check_runtime_available()
 # Set RUNTIME_E2E_PROCESSING_ENABLED=true to enable these tests when
 # you have verified the runtime is fully functional end-to-end.
 
-# Auto-enable feature flags when runtime is available.
-# conftest.py's module-level skipif ensures ALL_INFRA_AVAILABLE is true
-# when these tests execute. If the runtime is also healthy, enable all
-# features by default. Override with explicit env vars if needed.
+# Feature flags require explicit opt-in via environment variables.
+# Even when runtime is healthy, event processing tests are disabled by
+# default to avoid long timeout waits (60-120s) if the runtime pipeline
+# isn't fully operational. Set RUNTIME_E2E_*_ENABLED=true after verifying
+# the full E2E pipeline works.
 _default_enabled = "false"
 
 RUNTIME_PROCESSING_ENABLED = os.getenv(

@@ -56,9 +56,7 @@ from omnibase_infra.enums import (
     EnumMessageCategory,
 )
 from omnibase_infra.errors import (
-    EnvelopeValidationError,
     InfraUnavailableError,
-    ModelInfraErrorContext,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult

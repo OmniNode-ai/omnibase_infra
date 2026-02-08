@@ -23,8 +23,6 @@ import logging
 import os
 from uuid import UUID, uuid4
 
-from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.models.projection.model_snapshot_topic_config import (
     ModelSnapshotTopicConfig,
 )
