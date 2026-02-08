@@ -107,17 +107,19 @@ def _wait_for_healthy(
 
         # Check health status for each service
         all_healthy = True
+        services_checked = 0
         for line in lines:
             parts = line.split("\t", 1)
             if len(parts) < 2:
                 continue
+            services_checked += 1
             service, health = parts[0].strip(), parts[1].strip().lower()
             # Services without healthchecks show empty or "-"
-            if health and health not in ("healthy", "-", ""):
+            if health and health not in ("healthy", "-"):
                 all_healthy = False
                 break
 
-        if all_healthy:
+        if services_checked > 0 and all_healthy:
             return True
 
         time.sleep(2)

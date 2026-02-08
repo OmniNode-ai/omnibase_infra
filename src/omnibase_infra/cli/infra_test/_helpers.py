@@ -32,6 +32,8 @@ def get_consul_addr() -> str:
     scheme = os.getenv("CONSUL_SCHEME", "http")
     if scheme not in ("http", "https"):
         raise ValueError(f"CONSUL_SCHEME must be 'http' or 'https', got {scheme!r}.")
+    if not port.isdigit():
+        raise ValueError(f"CONSUL_PORT must be numeric, got {port!r}.")
     return f"{scheme}://{host}:{port}"
 
 

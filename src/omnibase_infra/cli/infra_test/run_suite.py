@@ -305,19 +305,20 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
     _step("4. Check for duplicates")
     import psycopg2
 
-    conn = psycopg2.connect(dsn, connect_timeout=5)
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT COUNT(*) FROM registration_projections WHERE entity_id = %s",
-                (node_id,),
-            )
-            count = cur.fetchone()[0]
+        conn = psycopg2.connect(dsn, connect_timeout=5)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) FROM registration_projections WHERE entity_id = %s",
+                    (node_id,),
+                )
+                count = cur.fetchone()[0]
+        finally:
+            conn.close()
     except psycopg2.Error as e:
         console.print(f"[bold red]PostgreSQL error: {type(e).__name__}: {e}[/bold red]")
         raise SystemExit(1)
-    finally:
-        conn.close()
 
     console.print(f"  Records found: {count}")
 
@@ -466,19 +467,20 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
     _step("7. Verify node A still exists (no data loss)")
     import psycopg2
 
-    conn = psycopg2.connect(dsn, connect_timeout=5)
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT current_state FROM registration_projections WHERE entity_id = %s",
-                (node_a,),
-            )
-            row = cur.fetchone()
+        conn = psycopg2.connect(dsn, connect_timeout=5)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT current_state FROM registration_projections WHERE entity_id = %s",
+                    (node_a,),
+                )
+                row = cur.fetchone()
+        finally:
+            conn.close()
     except psycopg2.Error as e:
         console.print(f"[bold red]PostgreSQL error: {type(e).__name__}: {e}[/bold red]")
         raise SystemExit(1)
-    finally:
-        conn.close()
 
     if row is None:
         console.print("[bold red]Node A data lost after restart![/bold red]")

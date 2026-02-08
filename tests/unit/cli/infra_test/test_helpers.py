@@ -56,6 +56,12 @@ class TestGetConsulAddr:
             with pytest.raises(ValueError, match="CONSUL_SCHEME must be"):
                 get_consul_addr()
 
+    def test_non_numeric_port_raises(self) -> None:
+        """Rejects non-numeric CONSUL_PORT."""
+        with patch.dict("os.environ", {"CONSUL_PORT": "abc"}, clear=True):
+            with pytest.raises(ValueError, match="CONSUL_PORT must be numeric"):
+                get_consul_addr()
+
 
 @pytest.mark.unit
 class TestGetPostgresDsn:
