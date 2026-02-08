@@ -107,7 +107,9 @@ class TopicProvisioner:
 
         try:
             from aiokafka.admin import AIOKafkaAdminClient, NewTopic
-            from aiokafka.errors import TopicAlreadyExistsError
+            from aiokafka.errors import (
+                TopicAlreadyExistsError as _TopicAlreadyExistsError,
+            )
         except ImportError:
             logger.warning(
                 "aiokafka not available, skipping topic auto-creation. "
@@ -120,6 +122,9 @@ class TopicProvisioner:
                 "failed": list(ALL_PLATFORM_SUFFIXES),
                 "status": "unavailable",
             }
+
+        # Bind to local after successful import block
+        TopicAlreadyExistsError = _TopicAlreadyExistsError
 
         admin: AIOKafkaAdminClient | None = None
         try:
@@ -262,7 +267,9 @@ class TopicProvisioner:
 
         try:
             from aiokafka.admin import AIOKafkaAdminClient, NewTopic
-            from aiokafka.errors import TopicAlreadyExistsError
+            from aiokafka.errors import (
+                TopicAlreadyExistsError as _TopicAlreadyExistsError,
+            )
         except ImportError:
             logger.warning(
                 "aiokafka not available, cannot create topic %s",
@@ -270,6 +277,9 @@ class TopicProvisioner:
                 extra={"correlation_id": str(correlation_id)},
             )
             return False
+
+        # Bind to local after successful import block
+        TopicAlreadyExistsError = _TopicAlreadyExistsError
 
         admin: AIOKafkaAdminClient | None = None
         try:

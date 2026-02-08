@@ -400,9 +400,12 @@ async def wire_registration_dispatchers(
         )
 
     except Exception as e:
-        logger.exception(
-            "Failed to wire registration dispatchers",
-            extra={"error": str(e), "error_type": type(e).__name__},
+        # Deliberately use logger.error (not .exception) to avoid leaking
+        # sensitive connection data in tracebacks — see CLAUDE.md error sanitization.
+        logger.error(  # noqa: TRY400
+            "Failed to wire registration dispatchers: %s",
+            type(e).__name__,
+            extra={"error_type": type(e).__name__},
         )
         context = ModelInfraErrorContext.with_correlation(
             correlation_id=correlation_id,
@@ -608,7 +611,7 @@ async def wire_registration_handlers(
             if "register_instance" in error_str
             else f"Missing attribute: {e}"
         )
-        logger.exception("Failed to register handlers", extra={"hint": hint})
+        logger.error("Failed to register handlers: %s", hint)  # noqa: TRY400
         context = ModelInfraErrorContext.with_correlation(
             correlation_id=correlation_id,
             transport_type=EnumInfraTransportType.RUNTIME,
@@ -622,7 +625,7 @@ async def wire_registration_handlers(
             else str(e),
         ) from e
     except Exception as e:
-        logger.exception("Failed to register handlers", extra={"error": str(e)})
+        logger.error("Failed to register handlers: %s", type(e).__name__)  # noqa: TRY400
         context = ModelInfraErrorContext.with_correlation(
             correlation_id=correlation_id,
             transport_type=EnumInfraTransportType.RUNTIME,
@@ -675,7 +678,9 @@ async def get_projection_reader_from_container(
             ),
         )
     except Exception as e:
-        logger.exception("Failed to resolve ProjectionReaderRegistration")
+        logger.error(  # noqa: TRY400
+            "Failed to resolve ProjectionReaderRegistration: %s", type(e).__name__
+        )
         context = ModelInfraErrorContext.with_correlation(
             correlation_id=correlation_id,
             transport_type=EnumInfraTransportType.RUNTIME,
@@ -716,7 +721,7 @@ async def get_handler_node_introspected_from_container(
             await container.service_registry.resolve_service(HandlerNodeIntrospected),
         )
     except Exception as e:
-        logger.exception("Failed to resolve HandlerNodeIntrospected")
+        logger.error("Failed to resolve HandlerNodeIntrospected: %s", type(e).__name__)  # noqa: TRY400
         context = ModelInfraErrorContext.with_correlation(
             correlation_id=correlation_id,
             transport_type=EnumInfraTransportType.RUNTIME,
@@ -757,7 +762,7 @@ async def get_handler_runtime_tick_from_container(
             await container.service_registry.resolve_service(HandlerRuntimeTick),
         )
     except Exception as e:
-        logger.exception("Failed to resolve HandlerRuntimeTick")
+        logger.error("Failed to resolve HandlerRuntimeTick: %s", type(e).__name__)  # noqa: TRY400
         context = ModelInfraErrorContext.with_correlation(
             correlation_id=correlation_id,
             transport_type=EnumInfraTransportType.RUNTIME,
@@ -800,7 +805,9 @@ async def get_handler_node_registration_acked_from_container(
             ),
         )
     except Exception as e:
-        logger.exception("Failed to resolve HandlerNodeRegistrationAcked")
+        logger.error(  # noqa: TRY400
+            "Failed to resolve HandlerNodeRegistrationAcked: %s", type(e).__name__
+        )
         context = ModelInfraErrorContext.with_correlation(
             correlation_id=correlation_id,
             transport_type=EnumInfraTransportType.RUNTIME,

@@ -208,6 +208,11 @@ def _get_db_dsn() -> str:
     user = os.environ.get("POSTGRES_USER", "postgres")
     password = os.environ.get("POSTGRES_PASSWORD", "")
     database = os.environ.get("POSTGRES_DATABASE", "omninode_bridge")
+    if not password:
+        click.echo(
+            "Warning: POSTGRES_PASSWORD not set. Set it via environment or .env file.",
+            err=True,
+        )
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 
