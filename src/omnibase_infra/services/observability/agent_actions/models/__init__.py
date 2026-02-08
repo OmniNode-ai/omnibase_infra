@@ -79,6 +79,9 @@ from omnibase_infra.services.observability.agent_actions.models.model_routing_de
 from omnibase_infra.services.observability.agent_actions.models.model_transformation_event import (
     ModelTransformationEvent,
 )
+from omnibase_infra.services.observability.agent_actions.models.model_ttl_cleanup_result import (
+    ModelTTLCleanupResult,
+)
 
 __all__ = [
     "ModelAgentAction",
@@ -88,5 +91,6 @@ __all__ = [
     "ModelObservabilityEnvelope",
     "ModelPerformanceMetric",
     "ModelRoutingDecision",
+    "ModelTTLCleanupResult",
     "ModelTransformationEvent",
 ]

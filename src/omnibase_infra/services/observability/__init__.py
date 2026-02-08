@@ -30,11 +30,15 @@ Example:
 from omnibase_infra.services.observability.agent_actions import (
     AgentActionsConsumer,
     ConfigAgentActionsConsumer,
+    ConfigTTLCleanup,
+    ServiceTTLCleanup,
     WriterAgentActionsPostgres,
 )
 
 __all__ = [
     "AgentActionsConsumer",
     "ConfigAgentActionsConsumer",
+    "ConfigTTLCleanup",
+    "ServiceTTLCleanup",
     "WriterAgentActionsPostgres",
 ]

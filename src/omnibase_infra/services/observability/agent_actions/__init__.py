@@ -11,6 +11,8 @@ Components:
     - AgentActionsConsumer: Async Kafka consumer with per-partition offset tracking
     - ConfigAgentActionsConsumer: Configuration for the consumer
     - WriterAgentActionsPostgres: PostgreSQL writer for observability events
+    - ServiceTTLCleanup: Async TTL cleanup service for expired rows (OMN-1759)
+    - ConfigTTLCleanup: Configuration for the TTL cleanup service
 
 Topics consumed:
     - agent-actions
@@ -45,11 +47,17 @@ Example:
 from omnibase_infra.services.observability.agent_actions.config import (
     ConfigAgentActionsConsumer,
 )
+from omnibase_infra.services.observability.agent_actions.config_ttl_cleanup import (
+    ConfigTTLCleanup,
+)
 from omnibase_infra.services.observability.agent_actions.consumer import (
     AgentActionsConsumer,
     ConsumerMetrics,
     EnumHealthStatus,
     mask_dsn_password,
+)
+from omnibase_infra.services.observability.agent_actions.service_ttl_cleanup import (
+    ServiceTTLCleanup,
 )
 from omnibase_infra.services.observability.agent_actions.writer_postgres import (
     WriterAgentActionsPostgres,
@@ -58,8 +66,10 @@ from omnibase_infra.services.observability.agent_actions.writer_postgres import 
 __all__ = [
     "AgentActionsConsumer",
     "ConfigAgentActionsConsumer",
+    "ConfigTTLCleanup",
     "ConsumerMetrics",
     "EnumHealthStatus",
+    "ServiceTTLCleanup",
     "WriterAgentActionsPostgres",
     "mask_dsn_password",
 ]
