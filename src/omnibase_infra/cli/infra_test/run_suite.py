@@ -83,6 +83,7 @@ def _publish_introspection(
     broker: str,
     topic: str,
     node_id: str,
+    payload_json: str | None = None,
 ) -> bool:
     """Publish an introspection event via rpk.
 
@@ -90,14 +91,21 @@ def _publish_introspection(
         broker: Kafka bootstrap server.
         topic: Target topic.
         node_id: Node UUID string.
+        payload_json: Pre-serialised JSON payload. When *None* a fresh
+            payload is built (new ``correlation_id`` and ``timestamp``).
+            Pass an explicit value to guarantee byte-identical publishes
+            (e.g. idempotency tests).
 
     Returns:
         True if published successfully.
     """
-    from omnibase_infra.cli.infra_test.introspect import _build_introspection_payload
+    if payload_json is None:
+        from omnibase_infra.cli.infra_test.introspect import (
+            _build_introspection_payload,
+        )
 
-    payload = _build_introspection_payload(node_id=node_id)
-    payload_json = json.dumps(payload)
+        payload = _build_introspection_payload(node_id=node_id)
+        payload_json = json.dumps(payload)
 
     result = subprocess.run(
         [
@@ -135,18 +143,21 @@ def _wait_for_registration(dsn: str, node_id: str, timeout: int = 30) -> bool:
     start = time.monotonic()
     while time.monotonic() - start < timeout:
         try:
-            with psycopg2.connect(dsn, connect_timeout=5) as conn:
+            conn = psycopg2.connect(dsn, connect_timeout=5)
+            try:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT current_state FROM registration_projections WHERE entity_id = %s",
                         (node_id,),
                     )
                     row = cur.fetchone()
+            finally:
+                conn.close()
             if row is not None:
                 console.print(f"  Registration state: [green]{row[0]}[/green]")
                 return True
         except psycopg2.Error as e:
-            # Transient database errors during polling — log and retry
+            # Transient database errors during polling -- log and retry
             console.print(f"  [dim]Poll error: {type(e).__name__}: {e}[/dim]")
         time.sleep(2)
 
@@ -168,7 +179,7 @@ def run_suite(ctx: click.Context, suite: str) -> None:
 
     \b
     smoke       - Happy path: env up, introspect, verify all, env down
-    idempotency - Duplicate event handling: publish N times, assert <= 1 record
+    idempotency - Duplicate event handling: publish N times, assert exactly 1 record
     failure     - Kill runtime, restart, verify recovery with no data loss
     """
     compose_file, project_name = _get_compose_args(ctx)
@@ -255,10 +266,12 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
 
     Steps:
         1. Verify environment is running
-        2. Publish same introspection event 3x rapidly
+        2. Publish same introspection event 3x rapidly (byte-identical payloads)
         3. Wait for processing
-        4. Assert <= 1 registration record in PostgreSQL
+        4. Assert exactly 1 registration record in PostgreSQL
     """
+    from omnibase_infra.cli.infra_test.introspect import _build_introspection_payload
+
     broker = get_broker()
     dsn = get_postgres_dsn()
     topic = "onex.evt.platform.node-introspection.v1"
@@ -270,8 +283,16 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
 
     _step(f"2. Publish {repetitions} identical events")
     console.print(f"  node_id: {node_id}")
+
+    # Build the payload once so every publish is byte-identical
+    # (same correlation_id + timestamp).
+    payload = _build_introspection_payload(node_id=node_id)
+    frozen_payload_json = json.dumps(payload)
+
     for i in range(repetitions):
-        if not _publish_introspection(broker, topic, node_id):
+        if not _publish_introspection(
+            broker, topic, node_id, payload_json=frozen_payload_json
+        ):
             console.print(f"[red]Failed on event {i + 1}[/red]")
             raise SystemExit(1)
         console.print(f"  Published {i + 1}/{repetitions}")
@@ -284,25 +305,33 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
     _step("4. Check for duplicates")
     import psycopg2
 
+    conn = psycopg2.connect(dsn, connect_timeout=5)
     try:
-        with psycopg2.connect(dsn, connect_timeout=5) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT COUNT(*) FROM registration_projections WHERE entity_id = %s",
-                    (node_id,),
-                )
-                count = cur.fetchone()[0]
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM registration_projections WHERE entity_id = %s",
+                (node_id,),
+            )
+            count = cur.fetchone()[0]
     except psycopg2.Error as e:
         console.print(f"[bold red]PostgreSQL error: {type(e).__name__}: {e}[/bold red]")
         raise SystemExit(1)
+    finally:
+        conn.close()
 
     console.print(f"  Records found: {count}")
 
-    if count <= 1:
+    if count == 0:
+        console.print(
+            "[bold red]Idempotency suite: FAIL "
+            "(no registrations found -- events were not processed)[/bold red]"
+        )
+        raise SystemExit(1)
+    if count == 1:
         console.print("[bold green]Idempotency suite: PASS[/bold green]")
     else:
         console.print(
-            f"[bold red]Idempotency suite: FAIL (expected <= 1, found {count})[/bold red]"
+            f"[bold red]Idempotency suite: FAIL (expected 1 record, found {count})[/bold red]"
         )
         raise SystemExit(1)
 
@@ -437,25 +466,25 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
     _step("7. Verify node A still exists (no data loss)")
     import psycopg2
 
+    conn = psycopg2.connect(dsn, connect_timeout=5)
     try:
-        with psycopg2.connect(dsn, connect_timeout=5) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT current_state FROM registration_projections WHERE entity_id = %s",
-                    (node_a,),
-                )
-                row = cur.fetchone()
-
-        if row is None:
-            console.print("[bold red]Node A data lost after restart![/bold red]")
-            console.print("[bold red]Failure suite: FAIL (data loss)[/bold red]")
-            raise SystemExit(1)
-
-        console.print(f"  Node A state: [green]{row[0]}[/green]")
-    except SystemExit:
-        raise
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT current_state FROM registration_projections WHERE entity_id = %s",
+                (node_a,),
+            )
+            row = cur.fetchone()
     except psycopg2.Error as e:
         console.print(f"[bold red]PostgreSQL error: {type(e).__name__}: {e}[/bold red]")
         raise SystemExit(1)
+    finally:
+        conn.close()
+
+    if row is None:
+        console.print("[bold red]Node A data lost after restart![/bold red]")
+        console.print("[bold red]Failure suite: FAIL (data loss)[/bold red]")
+        raise SystemExit(1)
+
+    console.print(f"  Node A state: [green]{row[0]}[/green]")
 
     console.print("[bold green]Failure suite: PASS[/bold green]")

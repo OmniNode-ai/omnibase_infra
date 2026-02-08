@@ -275,12 +275,18 @@ def verify_idempotency(topic: str, repetitions: int) -> None:
 
     console.print(f"  Registration records found: {count}")
 
-    if count <= 1:
+    if count == 0:
+        console.print(
+            "[bold red]Idempotency verification: FAIL "
+            "(no registrations found — events were not processed)[/bold red]"
+        )
+        raise SystemExit(1)
+    if count == 1:
         console.print("[bold green]Idempotency verification: PASS[/bold green]")
     else:
         console.print(
             f"[bold red]Idempotency verification: FAIL "
-            f"(expected <= 1 record, found {count})[/bold red]"
+            f"(expected 1 record, found {count})[/bold red]"
         )
         raise SystemExit(1)
 
@@ -374,7 +380,12 @@ def _verify_consul_registry(node_id: str | None) -> bool:
     if node_id and matched == 0:
         console.print(f"  [red]Node {node_id} not found in Consul KV.[/red]")
         return False
-    console.print(f"  [green]{len(keys)} service key(s) found.[/green]")
+    if node_id:
+        console.print(
+            f"  [green]{matched} matching service key(s) found (of {len(keys)} total).[/green]"
+        )
+    else:
+        console.print(f"  [green]{len(keys)} service key(s) found.[/green]")
     return True
 
 
