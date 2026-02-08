@@ -283,7 +283,7 @@ async def _run_list_nodes(
                     break
                 state_projections = await reader.get_by_state(
                     state=query_state,
-                    limit=limit,
+                    limit=remaining,
                 )
                 if node_type:
                     nt_upper = node_type.upper()
