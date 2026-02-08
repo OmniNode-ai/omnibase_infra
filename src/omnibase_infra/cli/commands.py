@@ -1,8 +1,17 @@
 """
 ONEX Infrastructure CLI Commands.
 
-Provides CLI interface for infrastructure management and validation.
+Provides CLI interface for infrastructure management, validation, and
+registry queries.
 """
+
+from __future__ import annotations
+
+import asyncio
+import os
+import re
+from urllib.parse import quote_plus
+from uuid import uuid4
 
 import click
 from rich.console import Console
@@ -178,6 +187,311 @@ def validate_all_cmd(directory: str, nodes_dir: str) -> None:
 
     all_valid = summary.get("failed", 0) == 0
     raise SystemExit(0 if all_valid else 1)
+
+
+# =============================================================================
+# Registry Query Commands
+# =============================================================================
+
+
+@cli.group()
+def registry() -> None:
+    """Registry discovery and node query commands.
+
+    Query the registration projection database directly without needing
+    the full FastAPI server running.
+    """
+
+
+def _get_db_dsn() -> str:
+    """Build PostgreSQL DSN from environment variables."""
+    host = os.environ.get("POSTGRES_HOST", "192.168.86.200")
+    port = os.environ.get("POSTGRES_PORT", "5436")
+    user = os.environ.get("POSTGRES_USER", "postgres")
+    password = os.environ.get("POSTGRES_PASSWORD", "")
+    database = os.environ.get("POSTGRES_DATABASE", "omninode_bridge")
+    if not password:
+        click.echo(
+            "Warning: POSTGRES_PASSWORD not set. Set it via environment or .env file.",
+            err=True,
+        )
+    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}"
+
+
+def _sanitize_dsn(dsn: str) -> str:
+    """Mask the password portion of a DSN to prevent credential leaks."""
+    return re.sub(r"://([^:]+):([^@]*)@", r"://\1:****@", dsn)
+
+
+async def _run_list_nodes(
+    state: str | None,
+    node_type: str | None,
+    limit: int,
+) -> None:
+    """Async implementation for list-nodes command."""
+    import asyncpg
+
+    from omnibase_infra.enums import EnumRegistrationState
+    from omnibase_infra.models.projection.model_registration_projection import (
+        ModelRegistrationProjection,
+    )
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+
+    dsn = _get_db_dsn()
+    correlation_id = uuid4()
+    try:
+        pool = await asyncio.wait_for(
+            asyncpg.create_pool(dsn, min_size=1, max_size=2),
+            timeout=10.0,
+        )
+    except TimeoutError:
+        sanitized = _sanitize_dsn(dsn)
+        console.print(
+            f"[red]Connection timed out to {sanitized} (correlation_id={correlation_id})[/red]"
+        )
+        raise SystemExit(1)
+    except Exception as e:
+        sanitized = _sanitize_dsn(dsn)
+        console.print(
+            f"[red]Failed to connect to {sanitized}: {type(e).__name__} "
+            f"(correlation_id={correlation_id})[/red]"
+        )
+        raise SystemExit(1)
+    try:
+        reader = ProjectionReaderRegistration(pool)
+
+        state_filter = None
+        if state:
+            try:
+                state_filter = EnumRegistrationState(state.lower())
+            except ValueError:
+                console.print(f"[red]Invalid state: {state}[/red]")
+                console.print(
+                    f"Valid states: {', '.join(s.value for s in EnumRegistrationState)}"
+                )
+                raise SystemExit(1)
+
+        projections: list[ModelRegistrationProjection] = []
+        if state_filter is not None:
+            raw = await reader.get_by_state(
+                state=state_filter, limit=limit, correlation_id=correlation_id
+            )
+            if node_type:
+                nt_upper = node_type.upper()
+                projections = [p for p in raw if p.node_type.value.upper() == nt_upper][
+                    :limit
+                ]
+            else:
+                projections = raw
+        else:
+            remaining = limit
+            for query_state in [
+                EnumRegistrationState.ACTIVE,
+                EnumRegistrationState.ACCEPTED,
+                EnumRegistrationState.AWAITING_ACK,
+                EnumRegistrationState.ACK_RECEIVED,
+                EnumRegistrationState.PENDING_REGISTRATION,
+            ]:
+                if remaining <= 0:
+                    break
+                state_projections = await reader.get_by_state(
+                    state=query_state,
+                    limit=remaining,
+                    correlation_id=correlation_id,
+                )
+                if node_type:
+                    nt_upper = node_type.upper()
+                    state_projections = [
+                        p
+                        for p in state_projections
+                        if p.node_type.value.upper() == nt_upper
+                    ]
+                projections.extend(state_projections)
+                remaining = limit - len(projections)
+
+        if not projections:
+            console.print("[yellow]No nodes found matching criteria[/yellow]")
+            raise SystemExit(0)
+
+        table = Table(title=f"Registered Nodes ({len(projections)})")
+        table.add_column("Node ID", style="cyan", max_width=12)
+        table.add_column("Type", style="bold")
+        table.add_column("State", style="green")
+        table.add_column("Version", style="dim")
+        table.add_column("Last Heartbeat", style="dim")
+        table.add_column("Registered At", style="dim")
+
+        for proj in projections:
+            hb = (
+                proj.last_heartbeat_at.strftime("%Y-%m-%d %H:%M:%S")
+                if proj.last_heartbeat_at
+                else "-"
+            )
+            reg = (
+                proj.registered_at.strftime("%Y-%m-%d %H:%M:%S")
+                if proj.registered_at
+                else "-"
+            )
+            table.add_row(
+                str(proj.entity_id)[:12],
+                proj.node_type.value.upper(),
+                proj.current_state.value,
+                str(proj.node_version) if proj.node_version else "-",
+                hb,
+                reg,
+            )
+
+        console.print(table)
+    finally:
+        await pool.close()
+
+
+async def _run_get_node(node_id_str: str) -> None:
+    """Async implementation for get-node command."""
+    from uuid import UUID
+
+    import asyncpg
+
+    from omnibase_infra.projectors import ProjectionReaderRegistration
+
+    try:
+        node_id = UUID(node_id_str)
+    except ValueError:
+        console.print(f"[red]Invalid UUID: {node_id_str}[/red]")
+        raise SystemExit(1)
+
+    dsn = _get_db_dsn()
+    correlation_id = uuid4()
+    try:
+        pool = await asyncio.wait_for(
+            asyncpg.create_pool(dsn, min_size=1, max_size=2),
+            timeout=10.0,
+        )
+    except TimeoutError:
+        sanitized = _sanitize_dsn(dsn)
+        console.print(
+            f"[red]Connection timed out to {sanitized} (correlation_id={correlation_id})[/red]"
+        )
+        raise SystemExit(1)
+    except Exception as e:
+        sanitized = _sanitize_dsn(dsn)
+        console.print(
+            f"[red]Failed to connect to {sanitized}: {type(e).__name__} "
+            f"(correlation_id={correlation_id})[/red]"
+        )
+        raise SystemExit(1)
+    try:
+        reader = ProjectionReaderRegistration(pool)
+        proj = await reader.get_entity_state(
+            entity_id=node_id, correlation_id=correlation_id
+        )
+
+        if proj is None:
+            console.print(f"[yellow]Node not found: {node_id}[/yellow]")
+            raise SystemExit(1)
+
+        console.print(f"[bold cyan]Node: {proj.entity_id}[/bold cyan]")
+        console.print(f"  Type:          {proj.node_type.value.upper()}")
+        console.print(f"  State:         {proj.current_state.value}")
+        console.print(f"  Version:       {proj.node_version or '-'}")
+        console.print(f"  Domain:        {proj.domain}")
+        if proj.registered_at:
+            console.print(
+                f"  Registered:    {proj.registered_at.strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+        if proj.last_heartbeat_at:
+            console.print(
+                f"  Last Heartbeat:{proj.last_heartbeat_at.strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+        if proj.liveness_deadline:
+            console.print(
+                f"  Liveness Until:{proj.liveness_deadline.strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+        if proj.capability_tags:
+            console.print(f"  Capabilities:  {', '.join(proj.capability_tags)}")
+    finally:
+        await pool.close()
+
+
+def _run_list_topics() -> None:
+    """Implementation for list-topics command."""
+    from omnibase_infra.topics import ALL_PLATFORM_SUFFIXES
+
+    table = Table(title="ONEX Platform Topics")
+    table.add_column("Topic Suffix", style="cyan")
+    table.add_column("Kind", style="bold")
+    table.add_column("Description", style="dim")
+
+    for suffix in ALL_PLATFORM_SUFFIXES:
+        # Parse kind from suffix: onex.<kind>.<producer>.<event-name>.v<version>
+        parts = suffix.split(".")
+        kind = parts[1] if len(parts) > 1 else "unknown"
+        kind_labels = {
+            "evt": "Event",
+            "cmd": "Command",
+            "intent": "Intent",
+            "snapshot": "Snapshot",
+            "dlq": "DLQ",
+        }
+        kind_label = kind_labels.get(kind, kind)
+
+        # Build description from parts
+        desc = ".".join(parts[2:-1]) if len(parts) > 3 else suffix
+
+        table.add_row(suffix, kind_label, desc)
+
+    console.print(table)
+
+
+@registry.command("list-nodes")
+@click.option("--state", default=None, help="Filter by registration state")
+@click.option(
+    "--node-type",
+    default=None,
+    help="Filter by node type (effect, compute, reducer, orchestrator)",
+)
+@click.option(
+    "--limit", default=100, type=click.IntRange(min=1), help="Maximum number of results"
+)
+def registry_list_nodes(state: str | None, node_type: str | None, limit: int) -> None:
+    """List registered nodes from the projection database."""
+    try:
+        asyncio.run(_run_list_nodes(state, node_type, limit))
+    except SystemExit:
+        raise
+    except Exception as e:
+        console.print(f"[red]Error: {type(e).__name__}[/red]")
+        raise SystemExit(1)
+
+
+@registry.command("get-node")
+@click.argument("node_id")
+def registry_get_node(node_id: str) -> None:
+    """Show details for a specific node by UUID."""
+    try:
+        asyncio.run(_run_get_node(node_id))
+    except SystemExit:
+        raise
+    except Exception as e:
+        console.print(f"[red]Error: {type(e).__name__}[/red]")
+        raise SystemExit(1)
+
+
+@registry.command("list-topics")
+def registry_list_topics() -> None:
+    """List all ONEX platform topics."""
+    try:
+        _run_list_topics()
+    except SystemExit:
+        raise
+    except Exception as e:
+        console.print(f"[red]Error: {type(e).__name__}[/red]")
+        raise SystemExit(1)
+
+
+# =============================================================================
+# Utility Functions
+# =============================================================================
 
 
 def _is_result_valid(result: object) -> bool:

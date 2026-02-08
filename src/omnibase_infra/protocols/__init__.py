@@ -17,6 +17,7 @@ Protocols:
     - ProtocolRegistryMetrics: Interface for registry metrics collection (optional)
     - ProtocolSnapshotPublisher: Interface for snapshot publishing services (F2)
     - ProtocolSnapshotStore: Interface for snapshot storage backends
+    - ProtocolNodeHeartbeat: Interface for node heartbeat DI resolution
     - ProtocolValidationLedgerRepository: Interface for validation event ledger persistence
 
 Note:
@@ -78,6 +79,9 @@ from omnibase_infra.protocols.protocol_message_dispatcher import (
 from omnibase_infra.protocols.protocol_message_type_registry import (
     ProtocolMessageTypeRegistry,
 )
+from omnibase_infra.protocols.protocol_node_heartbeat import (
+    ProtocolNodeHeartbeat,
+)
 from omnibase_infra.protocols.protocol_node_introspection import (
     ProtocolNodeIntrospection,
 )
@@ -105,6 +109,7 @@ __all__: list[str] = [
     "ProtocolLedgerSink",
     "ProtocolMessageDispatcher",
     "ProtocolMessageTypeRegistry",
+    "ProtocolNodeHeartbeat",
     "ProtocolNodeIntrospection",
     "ProtocolPluginCompute",
     "ProtocolProjectorSchemaValidator",

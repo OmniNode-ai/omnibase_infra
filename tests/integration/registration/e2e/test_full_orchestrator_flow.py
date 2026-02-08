@@ -825,19 +825,37 @@ async def validate_test_topic_exists(real_kafka_event_bus: EventBusKafka) -> str
             )
 
         # Get the topic description from describe_topics response.
-        # aiokafka 0.11.0+ returns dict format: {'topic_name': TopicDescription(...)}
-        if not isinstance(topic_descriptions, dict):
+        # aiokafka may return dict format (0.11.0+) or list format (older versions).
+        topic_metadata: object | None = None
+        if isinstance(topic_descriptions, dict):
+            topic_metadata = topic_descriptions.get(TEST_INTROSPECTION_TOPIC)
+        elif isinstance(topic_descriptions, list):
+            # Older aiokafka returns list of topic descriptions
+            for td in topic_descriptions:
+                td_topic = _extract_topic_field(td, "topic") or _extract_topic_field(
+                    td, "name"
+                )
+                if td_topic == TEST_INTROSPECTION_TOPIC:
+                    topic_metadata = td
+                    break
+        else:
             pytest.fail(
                 f"Unexpected describe_topics response type: {type(topic_descriptions).__name__}.\n"
-                f"Expected dict (aiokafka 0.11.0+ format), got: {topic_descriptions!r}"
+                f"Expected dict or list, got: {topic_descriptions!r}"
                 f"{topic_creation_hint}"
             )
-
-        topic_metadata: object | None = topic_descriptions.get(TEST_INTROSPECTION_TOPIC)
         if topic_metadata is None:
+            if isinstance(topic_descriptions, dict):
+                available = list(topic_descriptions.keys())
+            else:
+                available = [
+                    _extract_topic_field(td, "topic")
+                    or _extract_topic_field(td, "name")
+                    for td in topic_descriptions
+                ]
             pytest.fail(
                 f"Topic '{TEST_INTROSPECTION_TOPIC}' not found in describe_topics response.\n"
-                f"Available topics: {list(topic_descriptions.keys())}"
+                f"Available topics: {available}"
                 f"{topic_creation_hint}"
             )
 

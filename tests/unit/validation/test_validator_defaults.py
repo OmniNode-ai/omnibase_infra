@@ -13,6 +13,8 @@ from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # Import all validators and constants
 from omnibase_infra.validation.infra_validators import (
     INFRA_MAX_UNIONS,
@@ -30,6 +32,8 @@ from omnibase_infra.validation.infra_validators import (
     validate_infra_patterns,
     validate_infra_union_usage,
 )
+
+pytestmark = [pytest.mark.unit]
 
 
 class TestInfraValidatorConstants:
@@ -94,11 +98,16 @@ class TestInfraValidatorConstants:
         - 115 (2026-01-29): OMN-1653 contract registry reducer (+2 unions)
           - ContractRegistryEvent: 4-type union for event routing
           - contract_yaml: dict | str for flexible YAML handling
+        - 117 (2026-02-01): OMN-1783 PostgresRepositoryRuntime (+2 unions)
+          - call() and _execute_with_timeout() return types: list[dict] | dict | None
+        - 118 (2026-02-04): OMN-1869 ContractRegistration IntentPayloadType (+1 union)
+        - 119 (2026-02-07): OMN-1990 ServiceTopicManager return type (+1 union)
+          - dict[str, list[str] | str] for topic provisioning result
 
-        Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
+        Current: 119 (as of OMN-1990). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 118, (
-            "INFRA_MAX_UNIONS should be 118 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 119, (
+            "INFRA_MAX_UNIONS should be 119 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

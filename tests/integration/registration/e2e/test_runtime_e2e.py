@@ -122,7 +122,7 @@ assert SLA_HARD_LIMIT_SECONDS > SLA_TARGET_SECONDS, (
 # Runtime Availability Check
 # =============================================================================
 
-RUNTIME_HOST = os.getenv("RUNTIME_HOST", "host.docker.internal")
+RUNTIME_HOST = os.getenv("RUNTIME_HOST", "localhost")
 RUNTIME_PORT = int(os.getenv("RUNTIME_PORT", "8085"))
 RUNTIME_HEALTH_URL = f"http://{RUNTIME_HOST}:{RUNTIME_PORT}/health"
 
@@ -156,8 +156,15 @@ RUNTIME_AVAILABLE = _check_runtime_available()
 # Set RUNTIME_E2E_PROCESSING_ENABLED=true to enable these tests when
 # you have verified the runtime is fully functional end-to-end.
 
+# Feature flags require explicit opt-in via environment variables.
+# Even when runtime is healthy, event processing tests are disabled by
+# default to avoid long timeout waits (60-120s) if the runtime pipeline
+# isn't fully operational. Set RUNTIME_E2E_*_ENABLED=true after verifying
+# the full E2E pipeline works.
+_default_enabled = "false"
+
 RUNTIME_PROCESSING_ENABLED = os.getenv(
-    "RUNTIME_E2E_PROCESSING_ENABLED", "false"
+    "RUNTIME_E2E_PROCESSING_ENABLED", _default_enabled
 ).lower() in ("true", "1", "yes")
 
 # Skip reason for tests requiring event processing
@@ -178,7 +185,7 @@ SKIP_PROCESSING_REASON = (
 # Tests for these features require explicit opt-in to avoid soft failures.
 
 RUNTIME_OUTPUT_EVENTS_ENABLED = os.getenv(
-    "RUNTIME_E2E_OUTPUT_EVENTS_ENABLED", "false"
+    "RUNTIME_E2E_OUTPUT_EVENTS_ENABLED", _default_enabled
 ).lower() in ("true", "1", "yes")
 
 SKIP_OUTPUT_EVENTS_REASON = (
@@ -189,7 +196,9 @@ SKIP_OUTPUT_EVENTS_REASON = (
     "Without this flag, tests would wait and timeout."
 )
 
-RUNTIME_CONSUL_ENABLED = os.getenv("RUNTIME_E2E_CONSUL_ENABLED", "false").lower() in (
+RUNTIME_CONSUL_ENABLED = os.getenv(
+    "RUNTIME_E2E_CONSUL_ENABLED", _default_enabled
+).lower() in (
     "true",
     "1",
     "yes",

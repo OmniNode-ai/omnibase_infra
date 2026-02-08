@@ -46,7 +46,11 @@ from pydantic import BaseModel
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import ModelInfraErrorContext
 from omnibase_infra.models.registration.events.model_node_liveness_expired import (
     ModelNodeLivenessExpired,
@@ -155,6 +159,25 @@ class HandlerRuntimeTick:
     def node_kind(self) -> EnumNodeKind:
         """Return the node kind this handler belongs to."""
         return EnumNodeKind.ORCHESTRATOR
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role classification for this handler.
+
+        Returns NODE_HANDLER because this handler processes node-level
+        timeout detection events (not infrastructure plumbing).
+        """
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification for this handler.
+
+        Returns EFFECT because this handler performs side-effecting I/O:
+        queries the registration projection in PostgreSQL to detect
+        overdue ack and liveness deadlines.
+        """
+        return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
         self,

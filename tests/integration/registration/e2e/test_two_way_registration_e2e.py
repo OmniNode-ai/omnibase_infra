@@ -1272,8 +1272,13 @@ class TestSuite4HeartbeatPublishing:
             if hasattr(message, "value") and message.value:
                 try:
                     data = json.loads(message.value.decode("utf-8"))
-                    if data.get("node_id") == node_id_str:
-                        heartbeat = ModelNodeHeartbeatEvent.model_validate(data)
+                    # Unwrap envelope if present (publish_envelope wraps in ModelEventEnvelope)
+                    payload = data.get("payload", data)
+                    if (
+                        isinstance(payload, dict)
+                        and payload.get("node_id") == node_id_str
+                    ):
+                        heartbeat = ModelNodeHeartbeatEvent.model_validate(payload)
                         collected_heartbeats.append(heartbeat)
                 except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
                     pass
@@ -1357,8 +1362,15 @@ class TestSuite4HeartbeatPublishing:
             if hasattr(message, "value") and message.value:
                 try:
                     data = json.loads(message.value.decode("utf-8"))
-                    if data.get("node_id") == node_id_str:
-                        first_heartbeat = ModelNodeHeartbeatEvent.model_validate(data)
+                    # Unwrap envelope if present (publish_envelope wraps in ModelEventEnvelope)
+                    payload = data.get("payload", data)
+                    if (
+                        isinstance(payload, dict)
+                        and payload.get("node_id") == node_id_str
+                    ):
+                        first_heartbeat = ModelNodeHeartbeatEvent.model_validate(
+                            payload
+                        )
                         event_received.set()
                 except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
                     pass
@@ -1566,8 +1578,13 @@ class TestHeartbeatPerformanceExtended:
             if hasattr(message, "value") and message.value:
                 try:
                     data = json.loads(message.value.decode("utf-8"))
-                    if data.get("node_id") == node_id_str:
-                        heartbeat = ModelNodeHeartbeatEvent.model_validate(data)
+                    # Unwrap envelope if present (publish_envelope wraps in ModelEventEnvelope)
+                    payload = data.get("payload", data)
+                    if (
+                        isinstance(payload, dict)
+                        and payload.get("node_id") == node_id_str
+                    ):
+                        heartbeat = ModelNodeHeartbeatEvent.model_validate(payload)
                         collected_heartbeats.append(heartbeat)
                 except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
                     pass

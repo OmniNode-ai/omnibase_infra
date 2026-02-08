@@ -63,7 +63,12 @@ from uuid import UUID, uuid4
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+    EnumRegistrationState,
+)
 from omnibase_infra.errors import ModelInfraErrorContext
 
 if TYPE_CHECKING:
@@ -240,6 +245,25 @@ class HandlerNodeIntrospected:
     def node_kind(self) -> EnumNodeKind:
         """Node kind this handler belongs to."""
         return EnumNodeKind.ORCHESTRATOR
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role classification for this handler.
+
+        Returns NODE_HANDLER because this handler processes node-level
+        introspection events (not infrastructure plumbing).
+        """
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification for this handler.
+
+        Returns EFFECT because this handler performs I/O side effects:
+        writes projections to PostgreSQL, optionally registers with
+        Consul, and publishes snapshots to Kafka.
+        """
+        return EnumHandlerTypeCategory.EFFECT
 
     @property
     def has_projector(self) -> bool:
@@ -429,7 +453,9 @@ class HandlerNodeIntrospected:
                 "node_version": str(node_version) if node_version else None,
                 "capabilities": capabilities_json,
                 # Capability fields (defaults for new registration)
-                "contract_type": "unknown",
+                # contract_type is NULL until capabilities are fully resolved;
+                # schema CHECK constraint only allows NULL or valid node kinds
+                "contract_type": None,
                 "intent_types": [],
                 "protocols": [],
                 "capability_tags": [],
