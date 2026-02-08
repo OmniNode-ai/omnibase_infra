@@ -251,11 +251,13 @@ from omnibase_infra.runtime.runtime_contract_config_loader import (
     RuntimeContractConfigLoader,
 )
 
-# Security constants (OMN-1519)
+# Security constants (OMN-1519, OMN-2010)
 from omnibase_infra.runtime.constants_security import (
     ALLOW_NAMESPACE_OVERRIDE_ENV_VAR,
+    DOMAIN_PLUGIN_ENTRY_POINT_GROUP,
     SECURITY_CONFIG_PATH_ENV_VAR,
     TRUSTED_HANDLER_NAMESPACE_PREFIXES,
+    TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
 )
 
 # Registry contract source (OMN-1100)
@@ -444,11 +446,13 @@ __all__: list[str] = [
     "RequestResponseWiring",
     # Runtime contract config loader (OMN-1519)
     "RuntimeContractConfigLoader",
-    # Security constants and configuration (OMN-1519)
+    # Security constants and configuration (OMN-1519, OMN-2010)
     "ALLOW_NAMESPACE_OVERRIDE_ENV_VAR",
+    "DOMAIN_PLUGIN_ENTRY_POINT_GROUP",
     "ModelSecurityConfig",
     "SECURITY_CONFIG_PATH_ENV_VAR",
     "TRUSTED_HANDLER_NAMESPACE_PREFIXES",
+    "TRUSTED_PLUGIN_NAMESPACE_PREFIXES",
     # Registry contract source (OMN-1100)
     "DEFAULT_CONSUL_HOST",
     "DEFAULT_CONSUL_PORT",
