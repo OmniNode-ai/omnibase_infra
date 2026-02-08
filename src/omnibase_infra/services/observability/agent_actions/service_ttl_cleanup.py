@@ -285,10 +285,10 @@ class ServiceTTLCleanup(MixinAsyncCircuitBreaker):
             correlation_id=op_correlation_id,
             started_at=started_at,
             completed_at=completed_at,
-            tables_cleaned=tables_cleaned,
+            tables_cleaned=tuple(tables_cleaned.items()),
             total_rows_deleted=total_deleted,
             duration_ms=elapsed_ms,
-            errors=errors,
+            errors=tuple(errors.items()),
         )
 
         self._last_result = result
@@ -515,8 +515,8 @@ class ServiceTTLCleanup(MixinAsyncCircuitBreaker):
 
         last_result_info: dict[str, JsonType] | None = None
         if self._last_result is not None:
-            # Widen dict[str, str] to dict[str, JsonType] for type compatibility.
-            # dict is invariant in its value type, so explicit construction is needed.
+            # Convert tuple[tuple[str, str], ...] to dict[str, JsonType] for JSON.
+            # dict() accepts an iterable of (key, value) pairs.
             errors_json: dict[str, JsonType] | None = (
                 dict(self._last_result.errors) if self._last_result.errors else None
             )

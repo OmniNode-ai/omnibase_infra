@@ -17,10 +17,9 @@ Example:
     ...     correlation_id=uuid4(),
     ...     started_at=datetime.now(UTC),
     ...     completed_at=datetime.now(UTC),
-    ...     tables_cleaned={
-    ...         "agent_actions": 150,
-    ...         "agent_routing_decisions": 0,
-    ...     },
+    ...     tables_cleaned=tuple(
+    ...         {"agent_actions": 150, "agent_routing_decisions": 0}.items()
+    ...     ),
     ...     total_rows_deleted=150,
     ...     duration_ms=1234,
     ... )
@@ -42,17 +41,17 @@ class ModelTTLCleanupResult(BaseModel):
         correlation_id: Unique identifier for this cleanup run.
         started_at: Timestamp when the cleanup run started.
         completed_at: Timestamp when the cleanup run completed.
-        tables_cleaned: Mapping of table name to rows deleted.
+        tables_cleaned: Immutable pairs of (table_name, rows_deleted).
         total_rows_deleted: Sum of all rows deleted across all tables.
         duration_ms: Total duration of the cleanup run in milliseconds.
-        errors: Mapping of table name to error message for failed tables.
+        errors: Immutable pairs of (table_name, error_message) for failed tables.
 
     Example:
         >>> result = ModelTTLCleanupResult(
         ...     correlation_id=uuid4(),
         ...     started_at=datetime.now(UTC),
         ...     completed_at=datetime.now(UTC),
-        ...     tables_cleaned={"agent_actions": 500},
+        ...     tables_cleaned=tuple({"agent_actions": 500}.items()),
         ...     total_rows_deleted=500,
         ...     duration_ms=2345,
         ... )
@@ -78,9 +77,9 @@ class ModelTTLCleanupResult(BaseModel):
         ...,
         description="Timestamp when the cleanup run completed.",
     )
-    tables_cleaned: dict[str, int] = Field(
-        default_factory=dict,
-        description="Mapping of table name to rows deleted in this run.",
+    tables_cleaned: tuple[tuple[str, int], ...] = Field(
+        default_factory=tuple,
+        description="Immutable pairs of (table_name, rows_deleted) in this run.",
     )
     total_rows_deleted: int = Field(
         default=0,
@@ -92,9 +91,9 @@ class ModelTTLCleanupResult(BaseModel):
         ge=0,
         description="Total duration of the cleanup run in milliseconds.",
     )
-    errors: dict[str, str] = Field(
-        default_factory=dict,
-        description="Mapping of table name to error message for failed tables.",
+    errors: tuple[tuple[str, str], ...] = Field(
+        default_factory=tuple,
+        description="Immutable pairs of (table_name, error_message) for failed tables.",
     )
 
     def __bool__(self) -> bool:

@@ -216,7 +216,7 @@ class TestCleanupOnceEmpty:
         result = await service.cleanup_once()
 
         assert result.total_rows_deleted == 0
-        assert all(count == 0 for count in result.tables_cleaned.values())
+        assert all(count == 0 for _, count in result.tables_cleaned)
 
     @pytest.mark.asyncio
     async def test_cleanup_empty_returns_all_tables(
@@ -229,7 +229,7 @@ class TestCleanupOnceEmpty:
 
         result = await service.cleanup_once()
 
-        assert set(result.tables_cleaned.keys()) == set(
+        assert set(dict(result.tables_cleaned).keys()) == set(
             DEFAULT_TABLE_TTL_COLUMNS.keys()
         )
 
@@ -308,7 +308,7 @@ class TestCleanupOnceWithRows:
 
         result = await service.cleanup_once()
 
-        assert result.tables_cleaned["agent_actions"] == 150
+        assert dict(result.tables_cleaned)["agent_actions"] == 150
         assert result.total_rows_deleted == 150
         assert mock_conn.execute.call_count == 2
 
@@ -510,8 +510,9 @@ class TestCircuitBreaker:
         result = await service.cleanup_once()
 
         # cleanup_once catches exceptions and records them in errors
-        assert "agent_actions" in result.errors
-        assert "InfraConnectionError" in result.errors["agent_actions"]
+        errors_dict = dict(result.errors)
+        assert "agent_actions" in errors_dict
+        assert "InfraConnectionError" in errors_dict["agent_actions"]
 
     @pytest.mark.asyncio
     async def test_timeout_error_raises_infra_timeout_error(
@@ -534,8 +535,9 @@ class TestCircuitBreaker:
 
         result = await service.cleanup_once()
 
-        assert "agent_actions" in result.errors
-        assert "InfraTimeoutError" in result.errors["agent_actions"]
+        errors_dict = dict(result.errors)
+        assert "agent_actions" in errors_dict
+        assert "InfraTimeoutError" in errors_dict["agent_actions"]
 
     @pytest.mark.asyncio
     async def test_repeated_failures_open_circuit(
@@ -563,8 +565,9 @@ class TestCircuitBreaker:
 
         # Third call should hit circuit breaker
         result = await service.cleanup_once()
-        assert "agent_actions" in result.errors
-        assert "InfraUnavailableError" in result.errors["agent_actions"]
+        errors_dict = dict(result.errors)
+        assert "agent_actions" in errors_dict
+        assert "InfraUnavailableError" in errors_dict["agent_actions"]
 
 
 # =============================================================================
@@ -751,7 +754,7 @@ class TestModelTTLCleanupResult:
             correlation_id=uuid4(),
             started_at=datetime.now(UTC),
             completed_at=datetime.now(UTC),
-            tables_cleaned={"agent_actions": 100},
+            tables_cleaned=(("agent_actions", 100),),
             total_rows_deleted=100,
             duration_ms=500,
         )
@@ -763,7 +766,7 @@ class TestModelTTLCleanupResult:
             correlation_id=uuid4(),
             started_at=datetime.now(UTC),
             completed_at=datetime.now(UTC),
-            tables_cleaned={},
+            tables_cleaned=(),
             total_rows_deleted=0,
             duration_ms=100,
         )
@@ -790,13 +793,13 @@ class TestModelTTLCleanupResult:
             )
 
     def test_result_default_errors_empty(self) -> None:
-        """Default errors should be an empty dict."""
+        """Default errors should be an empty tuple."""
         result = ModelTTLCleanupResult(
             correlation_id=uuid4(),
             started_at=datetime.now(UTC),
             completed_at=datetime.now(UTC),
         )
-        assert result.errors == {}
+        assert result.errors == ()
 
 
 __all__ = [
