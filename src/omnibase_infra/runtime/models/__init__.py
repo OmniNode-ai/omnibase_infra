@@ -57,6 +57,9 @@ Exports:
     ModelBindingConfigResolverConfig: Configuration for BindingConfigResolver
     ModelConfigCacheEntry: Internal cache entry for BindingConfigResolver
     ModelSecurityConfig: Security configuration for handler namespace allowlisting
+    ModelPluginDiscoveryEntry: Single entry-point discovery result
+    ModelPluginDiscoveryReport: Structured report for plugin discovery pass
+    PluginDiscoveryStatus: Literal type for plugin discovery entry statuses
 """
 
 # Re-export from omnibase_core for convenience
@@ -131,6 +134,13 @@ from omnibase_infra.runtime.models.model_optional_correlation_id import (
 )
 from omnibase_infra.runtime.models.model_optional_string import ModelOptionalString
 from omnibase_infra.runtime.models.model_optional_uuid import ModelOptionalUUID
+from omnibase_infra.runtime.models.model_plugin_discovery_entry import (
+    ModelPluginDiscoveryEntry,
+    PluginDiscoveryStatus,
+)
+from omnibase_infra.runtime.models.model_plugin_discovery_report import (
+    ModelPluginDiscoveryReport,
+)
 from omnibase_infra.runtime.models.model_policy_context import ModelPolicyContext
 from omnibase_infra.runtime.models.model_policy_key import ModelPolicyKey
 from omnibase_infra.runtime.models.model_policy_registration import (
@@ -253,4 +263,8 @@ __all__: list[str] = [
     "ModelMaterializedResources",
     "ModelMaterializerConfig",
     "ModelPostgresPoolConfig",
+    # Plugin discovery models (OMN-2012)
+    "ModelPluginDiscoveryEntry",
+    "ModelPluginDiscoveryReport",
+    "PluginDiscoveryStatus",
 ]
