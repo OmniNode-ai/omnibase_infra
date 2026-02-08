@@ -754,60 +754,69 @@ async def bootstrap() -> int:
         for plugin in plugin_registry.get_all():
             plugin_id = plugin.plugin_id
 
-            # 1. Check activation
-            if not plugin.should_activate(plugin_config):
+            try:
+                # 1. Check activation
+                if not plugin.should_activate(plugin_config):
+                    logger.info(
+                        "Plugin '%s' skipped (not activated) (correlation_id=%s)",
+                        plugin_id,
+                        correlation_id,
+                    )
+                    continue
+
+                # 2. Initialize (create pools, connections, resources)
+                init_result = await plugin.initialize(plugin_config)
+                if not init_result:
+                    logger.warning(
+                        "Plugin '%s' initialization failed: %s (correlation_id=%s)",
+                        plugin_id,
+                        init_result.get_error_message_or_default(),
+                        correlation_id,
+                    )
+                    continue
+
+                # 3. Wire handlers
+                wire_result = await plugin.wire_handlers(plugin_config)
+                if not wire_result:
+                    logger.warning(
+                        "Plugin '%s' handler wiring failed: %s (correlation_id=%s)",
+                        plugin_id,
+                        wire_result.get_error_message_or_default(),
+                        correlation_id,
+                    )
+                    continue
+
+                # 4. Wire dispatchers (non-fatal if skipped)
+                dispatch_result = await plugin.wire_dispatchers(plugin_config)
+                if not dispatch_result:
+                    logger.warning(
+                        "Plugin '%s' dispatcher wiring failed: %s (correlation_id=%s)",
+                        plugin_id,
+                        dispatch_result.get_error_message_or_default(),
+                        correlation_id,
+                    )
+
+                # 5. Start consumers
+                consumer_result = await plugin.start_consumers(plugin_config)
+                if consumer_result and consumer_result.unsubscribe_callbacks:
+                    plugin_unsubscribe_callbacks.extend(
+                        consumer_result.unsubscribe_callbacks
+                    )
+
+                activated_plugins.append(plugin)
                 logger.info(
-                    "Plugin '%s' skipped (not activated) (correlation_id=%s)",
+                    "Plugin '%s' activated successfully (correlation_id=%s)",
                     plugin_id,
                     correlation_id,
                 )
-                continue
-
-            # 2. Initialize (create pools, connections, resources)
-            init_result = await plugin.initialize(plugin_config)
-            if not init_result:
+            except Exception:
                 logger.warning(
-                    "Plugin '%s' initialization failed: %s (correlation_id=%s)",
+                    "Plugin '%s' failed during lifecycle activation "
+                    "(correlation_id=%s)",
                     plugin_id,
-                    init_result.get_error_message_or_default(),
                     correlation_id,
+                    exc_info=True,
                 )
-                continue
-
-            # 3. Wire handlers
-            wire_result = await plugin.wire_handlers(plugin_config)
-            if not wire_result:
-                logger.warning(
-                    "Plugin '%s' handler wiring failed: %s (correlation_id=%s)",
-                    plugin_id,
-                    wire_result.get_error_message_or_default(),
-                    correlation_id,
-                )
-                continue
-
-            # 4. Wire dispatchers (non-fatal if skipped)
-            dispatch_result = await plugin.wire_dispatchers(plugin_config)
-            if not dispatch_result:
-                logger.warning(
-                    "Plugin '%s' dispatcher wiring failed: %s (correlation_id=%s)",
-                    plugin_id,
-                    dispatch_result.get_error_message_or_default(),
-                    correlation_id,
-                )
-
-            # 5. Start consumers
-            consumer_result = await plugin.start_consumers(plugin_config)
-            if consumer_result and consumer_result.unsubscribe_callbacks:
-                plugin_unsubscribe_callbacks.extend(
-                    consumer_result.unsubscribe_callbacks
-                )
-
-            activated_plugins.append(plugin)
-            logger.info(
-                "Plugin '%s' activated successfully (correlation_id=%s)",
-                plugin_id,
-                correlation_id,
-            )
 
         plugin_activation_duration = time.time() - plugin_activation_start
         logger.info(
