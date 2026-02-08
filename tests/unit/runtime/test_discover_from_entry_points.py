@@ -90,16 +90,19 @@ class TestParseModulePath:
     """Tests for RegistryDomainPlugin._parse_module_path."""
 
     def test_standard_colon_format(self) -> None:
+        """Standard 'module:Class' format returns the module portion."""
         result = RegistryDomainPlugin._parse_module_path(
             "omnibase_infra.plugins.foo:PluginFoo"
         )
         assert result == "omnibase_infra.plugins.foo"
 
     def test_no_colon_returns_full_value(self) -> None:
+        """Value with no colon is returned unchanged."""
         result = RegistryDomainPlugin._parse_module_path("omnibase_infra.plugins.foo")
         assert result == "omnibase_infra.plugins.foo"
 
     def test_multiple_colons_splits_on_first(self) -> None:
+        """Multiple colons split only on the first occurrence."""
         result = RegistryDomainPlugin._parse_module_path("pkg.mod:Class:extra")
         assert result == "pkg.mod"
 
@@ -113,12 +116,14 @@ class TestValidatePluginNamespace:
     """Tests for RegistryDomainPlugin._validate_plugin_namespace."""
 
     def test_trusted_namespace_with_dot(self) -> None:
+        """Module in a trusted dot-suffixed namespace is accepted."""
         assert RegistryDomainPlugin._validate_plugin_namespace(
             "omnibase_infra.plugins.foo",
             ("omnibase_core.", "omnibase_infra."),
         )
 
     def test_untrusted_namespace_rejected(self) -> None:
+        """Module outside all trusted namespaces is rejected."""
         assert not RegistryDomainPlugin._validate_plugin_namespace(
             "malicious.module",
             ("omnibase_core.", "omnibase_infra."),
@@ -158,6 +163,7 @@ class TestValidatePluginNamespace:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestDiscoverFromEntryPoints:
     """Tests for RegistryDomainPlugin.discover_from_entry_points."""
 
@@ -169,9 +175,6 @@ class TestDiscoverFromEntryPoints:
             "omnibase_infra.plugins.reg:PluginReg",
         )
         plugin_instance = _FakePlugin("registration")
-        ep.load.return_value = lambda: plugin_instance
-        # Make the lambda return the plugin when called
-        ep.load.return_value = type(plugin_instance)
 
         # Patch the type to return our instance
         loaded_cls = MagicMock(return_value=plugin_instance)
