@@ -112,6 +112,7 @@ class TopicProvisioner:
             logger.warning(
                 "aiokafka not available, skipping topic auto-creation. "
                 "Install aiokafka to enable automatic topic management.",
+                extra={"correlation_id": str(correlation_id)},
             )
             return {
                 "created": created,
@@ -188,14 +189,24 @@ class TopicProvisioner:
                     "error": sanitize_error_message(e),
                 },
             )
+            unattempted = [
+                s
+                for s in ALL_PLATFORM_SUFFIXES
+                if s not in set(created) and s not in set(existing)
+            ]
+            if unattempted:
+                logger.warning(
+                    "Topics not attempted due to connection failure: %d topics",
+                    len(unattempted),
+                    extra={
+                        "unattempted_count": len(unattempted),
+                        "correlation_id": str(correlation_id),
+                    },
+                )
             return {
                 "created": created,
                 "existing": existing,
-                "failed": [
-                    s
-                    for s in ALL_PLATFORM_SUFFIXES
-                    if s not in set(created) and s not in set(existing)
-                ],
+                "failed": unattempted,
                 "status": "unavailable",
             }
 
@@ -253,7 +264,11 @@ class TopicProvisioner:
             from aiokafka.admin import AIOKafkaAdminClient, NewTopic
             from aiokafka.errors import TopicAlreadyExistsError
         except ImportError:
-            logger.warning("aiokafka not available, cannot create topic %s", topic_name)
+            logger.warning(
+                "aiokafka not available, cannot create topic %s",
+                topic_name,
+                extra={"correlation_id": str(correlation_id)},
+            )
             return False
 
         admin: AIOKafkaAdminClient | None = None

@@ -276,6 +276,9 @@ async def wire_registration_dispatchers(
         )
 
         # 1d. Resolve heartbeat handler (optional - requires projector)
+        # NOTE: Uses concrete class for DI resolution (same pattern as other handlers
+        # above). ServiceRegistry.resolve_service() requires a type parameter;
+        # string-based resolution is not supported by the current DI framework.
         handler_heartbeat: HandlerNodeHeartbeat | None = None
         try:
             handler_heartbeat = await container.service_registry.resolve_service(

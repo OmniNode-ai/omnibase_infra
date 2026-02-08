@@ -102,7 +102,7 @@ class TestInfraValidatorConstants:
           - Dispatcher and handler models for heartbeat, snapshot publishing
           - ModelDispatchRoute message_type and category fields
 
-        Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
+        Current: 119 (as of OMN-1990). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
         assert INFRA_MAX_UNIONS == 119, (
             "INFRA_MAX_UNIONS should be 119 (non-optional unions only, X | None excluded)"

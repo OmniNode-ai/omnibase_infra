@@ -262,9 +262,15 @@ async def _run_list_nodes(
 
         projections: list[ModelRegistrationProjection] = []
         if state_filter is not None:
-            projections = await reader.get_by_state(state=state_filter, limit=limit)
+            raw = await reader.get_by_state(state=state_filter, limit=limit)
+            if node_type:
+                nt_upper = node_type.upper()
+                projections = [p for p in raw if p.node_type.value.upper() == nt_upper][
+                    :limit
+                ]
+            else:
+                projections = raw
         else:
-            # Query all active-like states, tracking remaining capacity
             remaining = limit
             for query_state in [
                 EnumRegistrationState.ACTIVE,
@@ -276,17 +282,18 @@ async def _run_list_nodes(
                 if remaining <= 0:
                     break
                 state_projections = await reader.get_by_state(
-                    state=query_state, limit=remaining
+                    state=query_state,
+                    limit=limit,
                 )
+                if node_type:
+                    nt_upper = node_type.upper()
+                    state_projections = [
+                        p
+                        for p in state_projections
+                        if p.node_type.value.upper() == nt_upper
+                    ]
                 projections.extend(state_projections)
-                remaining -= len(state_projections)
-
-        # Apply node_type filter
-        if node_type:
-            nt_upper = node_type.upper()
-            projections = [
-                p for p in projections if p.node_type.value.upper() == nt_upper
-            ]
+                remaining = limit - len(projections)
 
         if not projections:
             console.print("[yellow]No nodes found matching criteria[/yellow]")
