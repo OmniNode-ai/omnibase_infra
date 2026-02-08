@@ -5,6 +5,7 @@
 Tests validate:
 - Default configuration returns trusted namespaces only
 - Third-party handler flag controls effective namespace behavior
+- Third-party plugin flag controls effective plugin namespace behavior
 - Model is frozen (immutable)
 - Extra fields are forbidden
 - Serialization/deserialization roundtrip
@@ -12,8 +13,12 @@ Tests validate:
 .. versionadded:: 0.2.8
     Initial test coverage for ModelSecurityConfig (OMN-1519).
 
+.. versionchanged:: 0.3.0
+    Added plugin namespace field tests (OMN-2015).
+
 Related Tickets:
     - OMN-1519: Security hardening for handler namespace configuration
+    - OMN-2015: Extend ModelSecurityConfig with plugin namespace fields
 """
 
 from __future__ import annotations
@@ -21,7 +26,10 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.runtime.constants_security import TRUSTED_HANDLER_NAMESPACE_PREFIXES
+from omnibase_infra.runtime.constants_security import (
+    TRUSTED_HANDLER_NAMESPACE_PREFIXES,
+    TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
+)
 from omnibase_infra.runtime.models.model_security_config import ModelSecurityConfig
 
 
@@ -209,6 +217,8 @@ class TestModelSecurityConfigSerialization:
         assert data == {
             "allow_third_party_handlers": True,
             "allowed_handler_namespaces": ("custom.",),
+            "allow_third_party_plugins": False,
+            "allowed_plugin_namespaces": TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
         }
 
     def test_model_dump_json(self) -> None:
@@ -216,6 +226,7 @@ class TestModelSecurityConfigSerialization:
         config = ModelSecurityConfig()
         json_str = config.model_dump_json()
         assert '"allow_third_party_handlers":false' in json_str
+        assert '"allow_third_party_plugins":false' in json_str
 
     def test_roundtrip_serialization(self) -> None:
         """Test roundtrip serialization/deserialization."""
@@ -347,3 +358,209 @@ class TestModelSecurityConfigEquality:
         config = ModelSecurityConfig()
         assert config != {"allow_third_party_handlers": False}
         assert config is not None
+
+
+class TestModelSecurityConfigPluginDefaults:
+    """Tests for ModelSecurityConfig plugin namespace default behavior."""
+
+    def test_default_plugin_config_returns_trusted_namespaces(self) -> None:
+        """Test that default config returns only trusted plugin namespaces."""
+        config = ModelSecurityConfig()
+        effective = config.get_effective_plugin_namespaces()
+        assert effective == TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+        assert "omnibase_core." in effective
+        assert "omnibase_infra." in effective
+
+    def test_default_allow_third_party_plugins_is_false(self) -> None:
+        """Test that allow_third_party_plugins defaults to False."""
+        config = ModelSecurityConfig()
+        assert config.allow_third_party_plugins is False
+
+    def test_default_allowed_plugin_namespaces_equals_trusted(self) -> None:
+        """Test that default allowed_plugin_namespaces equals trusted prefixes."""
+        config = ModelSecurityConfig()
+        assert config.allowed_plugin_namespaces == TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+
+
+class TestModelSecurityConfigPluginThirdPartyDisabled:
+    """Tests for plugin behavior when allow_third_party_plugins=False."""
+
+    def test_custom_plugin_namespaces_ignored_when_disabled(self) -> None:
+        """Test that custom plugin namespaces are ignored when third-party disabled."""
+        config = ModelSecurityConfig(
+            allow_third_party_plugins=False,
+            allowed_plugin_namespaces=(
+                "custom.plugins.",
+                "another.plugins.",
+            ),
+        )
+        effective = config.get_effective_plugin_namespaces()
+        assert effective == TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+        assert "custom.plugins." not in effective
+        assert "another.plugins." not in effective
+
+    def test_empty_custom_plugin_namespaces_ignored_when_disabled(self) -> None:
+        """Test that empty custom plugin namespaces still returns trusted."""
+        config = ModelSecurityConfig(
+            allow_third_party_plugins=False,
+            allowed_plugin_namespaces=(),
+        )
+        effective = config.get_effective_plugin_namespaces()
+        assert effective == TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+
+
+class TestModelSecurityConfigPluginThirdPartyEnabled:
+    """Tests for plugin behavior when allow_third_party_plugins=True."""
+
+    def test_custom_plugin_namespaces_used_when_enabled(self) -> None:
+        """Test that custom plugin namespaces are used when third-party enabled."""
+        custom_namespaces = (
+            "omnibase_core.",
+            "omnibase_infra.",
+            "mycompany.plugins.",
+        )
+        config = ModelSecurityConfig(
+            allow_third_party_plugins=True,
+            allowed_plugin_namespaces=custom_namespaces,
+        )
+        effective = config.get_effective_plugin_namespaces()
+        assert effective == custom_namespaces
+        assert "mycompany.plugins." in effective
+
+    def test_completely_custom_plugin_namespaces_when_enabled(self) -> None:
+        """Test that completely custom plugin namespaces work when enabled."""
+        custom_namespaces = ("custom.only.",)
+        config = ModelSecurityConfig(
+            allow_third_party_plugins=True,
+            allowed_plugin_namespaces=custom_namespaces,
+        )
+        effective = config.get_effective_plugin_namespaces()
+        assert effective == custom_namespaces
+        assert "omnibase_core." not in effective
+        assert "omnibase_infra." not in effective
+
+    def test_empty_plugin_namespaces_when_enabled(self) -> None:
+        """Test that empty plugin namespace list is allowed when enabled."""
+        config = ModelSecurityConfig(
+            allow_third_party_plugins=True,
+            allowed_plugin_namespaces=(),
+        )
+        effective = config.get_effective_plugin_namespaces()
+        assert effective == ()
+
+    def test_default_plugin_namespaces_used_when_enabled_without_custom(self) -> None:
+        """Test that default plugin namespaces are used when enabled but no custom set."""
+        config = ModelSecurityConfig(
+            allow_third_party_plugins=True,
+        )
+        effective = config.get_effective_plugin_namespaces()
+        assert effective == TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+
+
+class TestModelSecurityConfigPluginImmutability:
+    """Tests for plugin field immutability (frozen=True)."""
+
+    def test_allow_third_party_plugins_is_immutable(self) -> None:
+        """Test that allow_third_party_plugins cannot be modified."""
+        config = ModelSecurityConfig()
+        with pytest.raises(ValidationError):
+            config.allow_third_party_plugins = True  # type: ignore[misc]
+
+    def test_allowed_plugin_namespaces_is_immutable(self) -> None:
+        """Test that allowed_plugin_namespaces cannot be modified."""
+        config = ModelSecurityConfig()
+        with pytest.raises(ValidationError):
+            config.allowed_plugin_namespaces = ("new.namespace.",)  # type: ignore[misc]
+
+
+class TestModelSecurityConfigPluginValidation:
+    """Tests for plugin field validation."""
+
+    def test_strict_mode_rejects_non_bool_for_plugins(self) -> None:
+        """Test that strict mode rejects non-bool for allow_third_party_plugins."""
+        with pytest.raises(ValidationError):
+            ModelSecurityConfig(
+                allow_third_party_plugins="yes",  # type: ignore[arg-type]
+            )
+
+    def test_strict_mode_rejects_non_tuple_for_plugin_namespaces(self) -> None:
+        """Test that strict mode rejects non-tuple for plugin namespaces."""
+        with pytest.raises(ValidationError):
+            ModelSecurityConfig(
+                allowed_plugin_namespaces=["list", "not", "tuple"],  # type: ignore[arg-type]
+            )
+
+    def test_strict_mode_rejects_non_string_in_plugin_namespace_tuple(self) -> None:
+        """Test that strict mode rejects non-string elements in plugin namespace tuple."""
+        with pytest.raises(ValidationError):
+            ModelSecurityConfig(
+                allowed_plugin_namespaces=(123, 456),  # type: ignore[arg-type]
+            )
+
+
+class TestModelSecurityConfigHandlerPluginIndependence:
+    """Tests verifying handler and plugin fields are independent."""
+
+    def test_handler_and_plugin_flags_independent(self) -> None:
+        """Test that handler and plugin third-party flags are independent."""
+        config = ModelSecurityConfig(
+            allow_third_party_handlers=True,
+            allow_third_party_plugins=False,
+        )
+        assert config.allow_third_party_handlers is True
+        assert config.allow_third_party_plugins is False
+
+    def test_handler_enabled_plugin_disabled_effective_namespaces(self) -> None:
+        """Test effective namespaces when handler enabled but plugin disabled."""
+        config = ModelSecurityConfig(
+            allow_third_party_handlers=True,
+            allowed_handler_namespaces=("custom.handlers.",),
+            allow_third_party_plugins=False,
+            allowed_plugin_namespaces=("custom.plugins.",),
+        )
+        assert config.get_effective_namespaces() == ("custom.handlers.",)
+        assert (
+            config.get_effective_plugin_namespaces()
+            == TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+        )
+
+    def test_handler_disabled_plugin_enabled_effective_namespaces(self) -> None:
+        """Test effective namespaces when handler disabled but plugin enabled."""
+        config = ModelSecurityConfig(
+            allow_third_party_handlers=False,
+            allowed_handler_namespaces=("custom.handlers.",),
+            allow_third_party_plugins=True,
+            allowed_plugin_namespaces=("custom.plugins.",),
+        )
+        assert config.get_effective_namespaces() == TRUSTED_HANDLER_NAMESPACE_PREFIXES
+        assert config.get_effective_plugin_namespaces() == ("custom.plugins.",)
+
+    def test_both_enabled_with_different_namespaces(self) -> None:
+        """Test both handler and plugin third-party enabled with different namespaces."""
+        config = ModelSecurityConfig(
+            allow_third_party_handlers=True,
+            allowed_handler_namespaces=("handlers.only.",),
+            allow_third_party_plugins=True,
+            allowed_plugin_namespaces=("plugins.only.",),
+        )
+        assert config.get_effective_namespaces() == ("handlers.only.",)
+        assert config.get_effective_plugin_namespaces() == ("plugins.only.",)
+
+    def test_plugin_serialization_roundtrip(self) -> None:
+        """Test roundtrip serialization/deserialization with plugin fields."""
+        original = ModelSecurityConfig(
+            allow_third_party_handlers=True,
+            allowed_handler_namespaces=("h1.",),
+            allow_third_party_plugins=True,
+            allowed_plugin_namespaces=("p1.", "p2."),
+        )
+        data = original.model_dump()
+        restored = ModelSecurityConfig.model_validate(data)
+        assert original == restored
+
+    def test_copy_with_plugin_update(self) -> None:
+        """Test that model_copy with plugin field update works correctly."""
+        original = ModelSecurityConfig(allow_third_party_plugins=False)
+        modified = original.model_copy(update={"allow_third_party_plugins": True})
+        assert modified.allow_third_party_plugins is True
+        assert original.allow_third_party_plugins is False
