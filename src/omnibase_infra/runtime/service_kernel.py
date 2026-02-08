@@ -730,6 +730,11 @@ async def bootstrap() -> int:
                 version=config.contract_version or "v1",
             )
         else:
+            # Graceful degradation (OMN-1992): config.name absence is logged
+            # rather than raising ProtocolConfigurationError so kernels with
+            # optional introspection can still boot.  Plugins that require
+            # node_identity (e.g. PluginRegistration.start_consumers) will
+            # return a "skipped" result instead of failing.
             logger.error(
                 "runtime_config.yaml missing 'name' field — plugin consumers "
                 "will not subscribe to introspection events. "

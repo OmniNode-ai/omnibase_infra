@@ -867,7 +867,10 @@ class PluginRegistration:
 
         # Duck typing: check for subscribe capability rather than concrete type
         # Per CLAUDE.md: "Protocol Resolution - Duck typing through protocols, never isinstance"
-        if not hasattr(config.event_bus, "subscribe"):
+        if not (
+            hasattr(config.event_bus, "subscribe")
+            and callable(getattr(config.event_bus, "subscribe", None))
+        ):
             return ModelDomainPluginResult.skipped(
                 plugin_id=self.plugin_id,
                 reason="Event bus does not support subscribe",
