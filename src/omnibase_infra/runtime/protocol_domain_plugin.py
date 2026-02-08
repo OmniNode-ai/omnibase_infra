@@ -63,6 +63,10 @@ Plugin Discovery:
        - Deterministic ordering by entry-point name then value
        - Duplicate plugin IDs are silently skipped (explicit wins)
 
+    Explicit registration always takes precedence on duplicate ``plugin_id``.
+    Entry-point discovery is security-gated by namespace allowlisting
+    (pre-import) and protocol validation (post-import).
+
 Example Implementation:
     ```python
     from omnibase_infra.runtime.protocol_domain_plugin import ProtocolDomainPlugin
@@ -141,6 +145,7 @@ from omnibase_infra.runtime.models.model_plugin_discovery_report import (
     ModelPluginDiscoveryReport,
 )
 from omnibase_infra.runtime.models.model_security_config import ModelSecurityConfig
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -401,9 +406,13 @@ class RegistryDomainPlugin:
 
     Provides two complementary registration mechanisms:
 
-    1. **Explicit registration** via ``register()`` -- direct, auditable, testable.
-    2. **Entry-point discovery** via ``discover_from_entry_points()`` -- PEP 621
-       based, namespace-secured, deterministic ordering.
+    1. **Explicit registration** via ``register()`` -- the primary path for
+       first-party plugins. Direct, auditable, and easy to test.
+
+    2. **Entry-point discovery** via ``discover_from_entry_points()`` --
+       secondary mechanism for external packages. Uses PEP 621 entry_points
+       to scan installed packages. Security-gated by namespace allowlisting
+       and protocol validation.
 
     Explicit registrations always take precedence: if ``discover_from_entry_points()``
     finds a plugin whose ``plugin_id`` matches an already-registered plugin, the
@@ -423,16 +432,16 @@ class RegistryDomainPlugin:
             PluginRegistration,
         )
 
-        # Register plugins explicitly
+        # 1. Register first-party plugins explicitly
         registry = RegistryDomainPlugin()
         registry.register(PluginRegistration())
 
-        # Discover additional plugins from entry points
+        # 2. Discover third-party plugins from entry_points
         report = registry.discover_from_entry_points()
         if report.has_errors:
             logger.warning("Plugin discovery had errors: %s", report.rejected)
 
-        # Get all registered plugins
+        # 3. Activate all registered plugins
         plugins = registry.get_all()
         for plugin in plugins:
             if plugin.should_activate(config):
@@ -602,7 +611,7 @@ class RegistryDomainPlugin:
             try:
                 loaded_class = ep.load()
             except Exception as exc:
-                msg = f"{type(exc).__name__}: {exc}"
+                msg = sanitize_error_message(exc)
                 logger.warning(
                     "Failed to load plugin entry point '%s': %s",
                     ep.name,
@@ -618,7 +627,8 @@ class RegistryDomainPlugin:
                 )
                 if strict:
                     raise ImportError(
-                        f"Failed to load plugin entry point '{ep.name}': {msg}"
+                        f"Failed to load plugin entry point '{ep.name}': "
+                        f"{type(exc).__name__}: {exc}"
                     ) from exc
                 continue
 
@@ -626,7 +636,7 @@ class RegistryDomainPlugin:
             try:
                 plugin = loaded_class()
             except Exception as exc:
-                msg = f"{type(exc).__name__}: {exc}"
+                msg = sanitize_error_message(exc)
                 logger.warning(
                     "Failed to instantiate plugin from entry point '%s': %s",
                     ep.name,
@@ -643,7 +653,7 @@ class RegistryDomainPlugin:
                 if strict:
                     raise TypeError(
                         f"Failed to instantiate plugin from entry point "
-                        f"'{ep.name}': {msg}"
+                        f"'{ep.name}': {type(exc).__name__}: {exc}"
                     ) from exc
                 continue
 
@@ -713,12 +723,22 @@ class RegistryDomainPlugin:
                 )
             )
 
-        return ModelPluginDiscoveryReport(
+        report = ModelPluginDiscoveryReport(
             group=group,
             discovered_count=len(sorted_eps),
             accepted=tuple(accepted),
             entries=tuple(entries),
         )
+
+        logger.info(
+            "Plugin discovery for group '%s': %d discovered, %d accepted, %d rejected",
+            group,
+            report.discovered_count,
+            len(report.accepted),
+            len(report.rejected),
+        )
+
+        return report
 
     @staticmethod
     def _validate_plugin_namespace(
