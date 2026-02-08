@@ -45,7 +45,12 @@ from pydantic import BaseModel
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+    EnumRegistrationState,
+)
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.projection.model_registration_projection import (
     ModelRegistrationProjection,
@@ -234,6 +239,24 @@ class HandlerNodeRegistrationAcked:
     def node_kind(self) -> EnumNodeKind:
         """Return the node kind this handler belongs to."""
         return EnumNodeKind.ORCHESTRATOR
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role classification for this handler.
+
+        Returns NODE_HANDLER because this handler processes node-level
+        registration acknowledgment commands (not infrastructure plumbing).
+        """
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification for this handler.
+
+        Returns EFFECT because this handler performs side-effecting I/O:
+        reads projection state from PostgreSQL and publishes snapshots.
+        """
+        return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
         self,

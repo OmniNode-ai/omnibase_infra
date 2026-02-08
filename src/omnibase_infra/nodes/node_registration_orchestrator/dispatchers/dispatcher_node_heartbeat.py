@@ -64,8 +64,8 @@ from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
-    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-        HandlerNodeHeartbeat,
+    from omnibase_infra.protocols.protocol_node_heartbeat import (
+        ProtocolNodeHeartbeat,
     )
 
 __all__ = ["DispatcherNodeHeartbeat"]
@@ -101,14 +101,14 @@ class DispatcherNodeHeartbeat(MixinAsyncCircuitBreaker):
         state management. The wrapped handler must also be coroutine-safe.
 
     Attributes:
-        _handler: The wrapped HandlerNodeHeartbeat instance.
+        _handler: The wrapped handler (ProtocolNodeHeartbeat).
     """
 
-    def __init__(self, handler: HandlerNodeHeartbeat) -> None:
+    def __init__(self, handler: ProtocolNodeHeartbeat) -> None:
         """Initialize dispatcher with wrapped handler and circuit breaker.
 
         Args:
-            handler: HandlerNodeHeartbeat instance to delegate to.
+            handler: Handler implementing ProtocolNodeHeartbeat.
 
         Circuit Breaker:
             Initialized with KAFKA transport settings per dispatcher_resilience.md:

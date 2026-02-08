@@ -88,7 +88,8 @@ class TopicProvisioner:
 
         This method is best-effort: individual topic creation failures are
         logged as warnings but do not prevent other topics from being created.
-        Total failure to connect to Kafka is also logged as a warning.
+        Unrecoverable failures (connection, authentication, etc.) are also
+        logged as warnings and never block startup.
 
         Args:
             correlation_id: Optional correlation ID for tracing.
@@ -185,7 +186,7 @@ class TopicProvisioner:
 
         except Exception as e:
             logger.warning(
-                "Failed to connect to Kafka for topic auto-creation: %s. "
+                "Topic auto-creation interrupted by %s. "
                 "Topics may need to be created manually or via broker auto-create.",
                 type(e).__name__,
                 extra={
@@ -194,24 +195,24 @@ class TopicProvisioner:
                     "error": sanitize_error_message(e),
                 },
             )
-            unattempted = [
-                s
-                for s in ALL_PLATFORM_SUFFIXES
-                if s not in set(created) and s not in set(existing)
+            # Separate individually-failed topics from those never attempted
+            already_resolved = set(created) | set(existing) | set(failed)
+            not_attempted = [
+                s for s in ALL_PLATFORM_SUFFIXES if s not in already_resolved
             ]
-            if unattempted:
+            if not_attempted:
                 logger.warning(
-                    "Topics not attempted due to connection failure: %d topics",
-                    len(unattempted),
+                    "Topics not attempted due to early termination: %d topics",
+                    len(not_attempted),
                     extra={
-                        "unattempted_count": len(unattempted),
+                        "not_attempted_count": len(not_attempted),
                         "correlation_id": str(correlation_id),
                     },
                 )
             return {
                 "created": created,
                 "existing": existing,
-                "failed": unattempted,
+                "failed": failed + not_attempted,
                 "status": "unavailable",
             }
 

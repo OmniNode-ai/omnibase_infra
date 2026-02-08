@@ -251,7 +251,6 @@ async def wire_registration_dispatchers(
         DispatcherRuntimeTick,
     )
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-        HandlerNodeHeartbeat,
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
@@ -276,13 +275,16 @@ async def wire_registration_dispatchers(
         )
 
         # 1d. Resolve heartbeat handler (optional - requires projector)
-        # NOTE: Uses concrete class for DI resolution (same pattern as other handlers
-        # above). ServiceRegistry.resolve_service() requires a type parameter;
-        # string-based resolution is not supported by the current DI framework.
-        handler_heartbeat: HandlerNodeHeartbeat | None = None
+        # Uses ProtocolNodeHeartbeat for protocol-based DI resolution,
+        # decoupling consumers from the concrete HandlerNodeHeartbeat class.
+        from omnibase_infra.protocols.protocol_node_heartbeat import (
+            ProtocolNodeHeartbeat,
+        )
+
+        handler_heartbeat: ProtocolNodeHeartbeat | None = None
         try:
             handler_heartbeat = await container.service_registry.resolve_service(
-                HandlerNodeHeartbeat
+                ProtocolNodeHeartbeat
             )
         except Exception as e:
             logger.info(
@@ -583,13 +585,18 @@ async def wire_registration_handlers(
         logger.debug("Registered HandlerNodeRegistrationAcked in container")
 
         # Register HandlerNodeHeartbeat (requires projector)
+        # Uses ProtocolNodeHeartbeat for protocol-based DI resolution.
         if projector is not None:
+            from omnibase_infra.protocols.protocol_node_heartbeat import (
+                ProtocolNodeHeartbeat,
+            )
+
             handler_heartbeat = HandlerNodeHeartbeat(
                 projection_reader,
                 projector=projector,
             )
             await container.service_registry.register_instance(
-                interface=HandlerNodeHeartbeat,
+                interface=ProtocolNodeHeartbeat,  # type: ignore[type-abstract]
                 instance=handler_heartbeat,
                 scope=EnumInjectionScope.GLOBAL,
                 metadata={
@@ -836,15 +843,15 @@ async def get_handler_node_heartbeat_from_container(
     Returns:
         HandlerNodeHeartbeat instance or None if not registered.
     """
-    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-        HandlerNodeHeartbeat,
+    from omnibase_infra.protocols.protocol_node_heartbeat import (
+        ProtocolNodeHeartbeat,
     )
 
     _validate_service_registry(container, "resolve HandlerNodeHeartbeat")
     try:
         return cast(
             "HandlerNodeHeartbeat",
-            await container.service_registry.resolve_service(HandlerNodeHeartbeat),
+            await container.service_registry.resolve_service(ProtocolNodeHeartbeat),
         )
     except Exception:
         logger.debug(
