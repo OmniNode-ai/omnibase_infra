@@ -2,44 +2,43 @@
 # Copyright (c) 2025 OmniNode Team
 """Plugin discovery report model.
 
-This module provides the ModelPluginDiscoveryReport and PluginDiscoveryEntry
-dataclasses for structured reporting of plugin discovery outcomes.
+This module provides the ModelPluginDiscoveryReport dataclass for
+structured reporting of plugin discovery outcomes across an entire
+entry-point group.
 
 Design Pattern:
-    Discovery report models provide detailed per-entry diagnostics for
-    plugin loading, making "why didn't my plugin load?" a 10-second
-    debugging problem. Each entry records the disposition of a single
-    entry-point discovered via ``importlib.metadata``.
+    The report aggregates all ``ModelPluginDiscoveryEntry`` results
+    produced while scanning one entry-point group, providing quick-access
+    properties for filtering rejected entries and detecting errors.
 
 Thread Safety:
-    Both dataclasses are immutable by convention (no mutating methods).
-    Lists are populated at construction time and should not be modified
-    after creation.
+    The dataclass uses ``frozen=True`` to prevent attribute reassignment
+    after construction. Collection fields use tuples for immutability.
 
 Example:
     >>> from omnibase_infra.runtime.models import (
     ...     ModelPluginDiscoveryReport,
-    ...     PluginDiscoveryEntry,
+    ...     ModelPluginDiscoveryEntry,
     ... )
     >>>
-    >>> entries = [
-    ...     PluginDiscoveryEntry(
+    >>> entries = (
+    ...     ModelPluginDiscoveryEntry(
     ...         entry_point_name="my_plugin",
     ...         module_path="myapp.plugins.my_plugin",
     ...         status="accepted",
     ...         plugin_id="my_plugin",
     ...     ),
-    ...     PluginDiscoveryEntry(
+    ...     ModelPluginDiscoveryEntry(
     ...         entry_point_name="bad_plugin",
     ...         module_path="myapp.plugins.bad",
     ...         status="import_error",
     ...         reason="ModuleNotFoundError: No module named 'myapp.plugins.bad'",
     ...     ),
-    ... ]
+    ... )
     >>> report = ModelPluginDiscoveryReport(
     ...     group="omnibase_infra.projectors",
     ...     discovered_count=2,
-    ...     accepted=["my_plugin"],
+    ...     accepted=("my_plugin",),
     ...     entries=entries,
     ... )
     >>> report.has_errors
@@ -48,7 +47,7 @@ Example:
     1
 
 Related:
-    - OMN-2012: Create ModelPluginDiscoveryReport + PluginDiscoveryEntry
+    - OMN-2012: Create ModelPluginDiscoveryReport + ModelPluginDiscoveryEntry
     - OMN-1346: Registration Code Extraction
 """
 
@@ -56,55 +55,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
-@dataclass
-class PluginDiscoveryEntry:
-    """A single entry-point discovery result.
-
-    Records the outcome of attempting to load one plugin entry-point,
-    including its final disposition and any diagnostic information.
-
-    Attributes:
-        entry_point_name: Name of the entry-point as declared in
-            ``pyproject.toml`` or ``setup.cfg``.
-        module_path: Dotted module path the entry-point resolves to.
-        status: Disposition of this entry-point. One of:
-            ``"accepted"`` -- successfully loaded and registered.
-            ``"namespace_rejected"`` -- blocked by namespace allowlist.
-            ``"import_error"`` -- ``importlib`` could not load the module.
-            ``"instantiation_error"`` -- class loaded but constructor failed.
-            ``"protocol_invalid"`` -- class does not satisfy required protocol.
-            ``"duplicate_skipped"`` -- a plugin with the same ID was already
-            registered.
-        reason: Human-readable explanation. Empty string for accepted entries.
-        plugin_id: Plugin identifier. Set only for ``"accepted"`` and
-            ``"duplicate_skipped"`` entries; ``None`` otherwise.
-
-    Example:
-        >>> entry = PluginDiscoveryEntry(
-        ...     entry_point_name="my_plugin",
-        ...     module_path="myapp.plugins.my_plugin",
-        ...     status="accepted",
-        ...     plugin_id="my_plugin",
-        ... )
-        >>> entry.status
-        'accepted'
-        >>> entry.reason
-        ''
-    """
-
-    entry_point_name: str
-    module_path: str
-    status: str
-    reason: str = ""
-    plugin_id: str | None = None
+from omnibase_infra.runtime.models.model_plugin_discovery_entry import (
+    ModelPluginDiscoveryEntry,
+)
 
 
-@dataclass
+@dataclass(frozen=True)
 class ModelPluginDiscoveryReport:
     """Structured report for a single entry-point group discovery pass.
 
-    Aggregates all ``PluginDiscoveryEntry`` results produced while scanning
+    Aggregates all ``ModelPluginDiscoveryEntry`` results produced while scanning
     one entry-point group (e.g. ``omnibase_infra.projectors``). Provides
     quick-access properties for filtering rejected entries and detecting
     errors.
@@ -116,28 +76,28 @@ class ModelPluginDiscoveryReport:
             before any filtering.
         accepted: Plugin IDs that were successfully registered, in
             registration order.
-        entries: Complete list of ``PluginDiscoveryEntry`` results for
+        entries: Complete tuple of ``ModelPluginDiscoveryEntry`` results for
             every entry-point in the group.
 
     Example:
-        >>> entries = [
-        ...     PluginDiscoveryEntry(
+        >>> entries = (
+        ...     ModelPluginDiscoveryEntry(
         ...         entry_point_name="good",
         ...         module_path="pkg.good",
         ...         status="accepted",
         ...         plugin_id="good",
         ...     ),
-        ...     PluginDiscoveryEntry(
+        ...     ModelPluginDiscoveryEntry(
         ...         entry_point_name="bad",
         ...         module_path="pkg.bad",
         ...         status="import_error",
         ...         reason="No module named 'pkg.bad'",
         ...     ),
-        ... ]
+        ... )
         >>> report = ModelPluginDiscoveryReport(
         ...     group="my.plugins",
         ...     discovered_count=2,
-        ...     accepted=["good"],
+        ...     accepted=("good",),
         ...     entries=entries,
         ... )
         >>> report.has_errors
@@ -148,11 +108,11 @@ class ModelPluginDiscoveryReport:
 
     group: str
     discovered_count: int
-    accepted: list[str] = field(default_factory=list)
-    entries: list[PluginDiscoveryEntry] = field(default_factory=list)
+    accepted: tuple[str, ...] = field(default_factory=tuple)
+    entries: tuple[ModelPluginDiscoveryEntry, ...] = field(default_factory=tuple)
 
     @property
-    def rejected(self) -> list[PluginDiscoveryEntry]:
+    def rejected(self) -> list[ModelPluginDiscoveryEntry]:
         """Return entries whose status is not ``"accepted"``.
 
         Returns:
@@ -162,14 +122,14 @@ class ModelPluginDiscoveryReport:
             >>> report = ModelPluginDiscoveryReport(
             ...     group="g",
             ...     discovered_count=1,
-            ...     entries=[
-            ...         PluginDiscoveryEntry(
+            ...     entries=(
+            ...         ModelPluginDiscoveryEntry(
             ...             entry_point_name="x",
             ...             module_path="m",
             ...             status="namespace_rejected",
             ...             reason="blocked",
             ...         ),
-            ...     ],
+            ...     ),
             ... )
             >>> len(report.rejected)
             1
@@ -193,14 +153,14 @@ class ModelPluginDiscoveryReport:
             >>> report = ModelPluginDiscoveryReport(
             ...     group="g",
             ...     discovered_count=1,
-            ...     entries=[
-            ...         PluginDiscoveryEntry(
+            ...     entries=(
+            ...         ModelPluginDiscoveryEntry(
             ...             entry_point_name="x",
             ...             module_path="m",
             ...             status="namespace_rejected",
             ...             reason="blocked",
             ...         ),
-            ...     ],
+            ...     ),
             ... )
             >>> report.has_errors
             False
@@ -209,4 +169,4 @@ class ModelPluginDiscoveryReport:
         return any(e.status in error_statuses for e in self.entries)
 
 
-__all__ = ["ModelPluginDiscoveryReport", "PluginDiscoveryEntry"]
+__all__ = ["ModelPluginDiscoveryReport"]
