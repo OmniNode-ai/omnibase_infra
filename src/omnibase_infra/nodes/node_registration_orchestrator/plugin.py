@@ -589,7 +589,23 @@ class PluginRegistration:
                 snapshot_config,
                 bootstrap_servers=kafka_bootstrap_servers,
             )
-            await self._snapshot_publisher.start()
+            try:
+                await self._snapshot_publisher.start()
+            except Exception:
+                # Clean up the raw AIOKafkaProducer to prevent resource leak
+                try:
+                    await snapshot_producer.stop()
+                except Exception as producer_cleanup_error:
+                    logger.warning(
+                        "Failed to stop AIOKafkaProducer during cleanup: %s "
+                        "(correlation_id=%s)",
+                        sanitize_error_message(producer_cleanup_error),
+                        correlation_id,
+                        extra={
+                            "error_type": type(producer_cleanup_error).__name__,
+                        },
+                    )
+                raise
             logger.info(
                 "SnapshotPublisherRegistration started for topic %s "
                 "(correlation_id=%s)",
