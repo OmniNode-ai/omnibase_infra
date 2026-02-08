@@ -17,8 +17,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from omnibase_infra.runtime.constants_security import (
     DOMAIN_PLUGIN_ENTRY_POINT_GROUP,
     TRUSTED_PLUGIN_NAMESPACE_PREFIXES,

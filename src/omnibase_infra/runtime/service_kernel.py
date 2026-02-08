@@ -730,56 +730,66 @@ async def bootstrap() -> int:
         # Security: Discovery validates entry_point module paths against the
         # namespace allowlist BEFORE calling .load() (pre-import gate).
         # Post-import, isinstance(plugin, ProtocolDomainPlugin) is checked.
-        security_config = ModelSecurityConfig()
-        effective_plugin_namespaces = security_config.get_effective_plugin_namespaces()
-        discovery_report = plugin_registry.discover_from_entry_points(
-            allowed_namespaces=effective_plugin_namespaces,
-        )
-        if discovery_report.has_errors:
+        try:
+            security_config = ModelSecurityConfig()
+            effective_plugin_namespaces = (
+                security_config.get_effective_plugin_namespaces()
+            )
+            discovery_report = plugin_registry.discover_from_entry_points(
+                allowed_namespaces=effective_plugin_namespaces,
+            )
+            if discovery_report.has_errors:
+                logger.warning(
+                    "Plugin entry_point discovery had errors: %d entries with "
+                    "import/instantiation failures (correlation_id=%s)",
+                    len(
+                        [
+                            e
+                            for e in discovery_report.entries
+                            if e.status in ("import_error", "instantiation_error")
+                        ]
+                    ),
+                    correlation_id,
+                    extra={
+                        "group": discovery_report.group,
+                        "discovered_count": discovery_report.discovered_count,
+                        "accepted": discovery_report.accepted,
+                        "errors": [
+                            {
+                                "name": e.entry_point_name,
+                                "status": e.status,
+                                "reason": e.reason,
+                            }
+                            for e in discovery_report.entries
+                            if e.status in ("import_error", "instantiation_error")
+                        ],
+                    },
+                )
+            elif discovery_report.accepted:
+                logger.info(
+                    "Plugin entry_point discovery: %d plugins discovered from "
+                    "group '%s' (correlation_id=%s)",
+                    len(discovery_report.accepted),
+                    discovery_report.group,
+                    correlation_id,
+                    extra={
+                        "accepted_plugins": discovery_report.accepted,
+                        "discovered_count": discovery_report.discovered_count,
+                    },
+                )
+            else:
+                logger.debug(
+                    "Plugin entry_point discovery: no new plugins found in "
+                    "group '%s' (correlation_id=%s)",
+                    discovery_report.group,
+                    correlation_id,
+                )
+        except Exception:
             logger.warning(
-                "Plugin entry_point discovery had errors: %d entries with "
-                "import/instantiation failures (correlation_id=%s)",
-                len(
-                    [
-                        e
-                        for e in discovery_report.entries
-                        if e.status in ("import_error", "instantiation_error")
-                    ]
-                ),
+                "Plugin entry_point discovery failed; continuing with "
+                "explicitly registered plugins only (correlation_id=%s)",
                 correlation_id,
-                extra={
-                    "group": discovery_report.group,
-                    "discovered_count": discovery_report.discovered_count,
-                    "accepted": discovery_report.accepted,
-                    "errors": [
-                        {
-                            "name": e.entry_point_name,
-                            "status": e.status,
-                            "reason": e.reason,
-                        }
-                        for e in discovery_report.entries
-                        if e.status in ("import_error", "instantiation_error")
-                    ],
-                },
-            )
-        elif discovery_report.accepted:
-            logger.info(
-                "Plugin entry_point discovery: %d plugins discovered from "
-                "group '%s' (correlation_id=%s)",
-                len(discovery_report.accepted),
-                discovery_report.group,
-                correlation_id,
-                extra={
-                    "accepted_plugins": discovery_report.accepted,
-                    "discovered_count": discovery_report.discovered_count,
-                },
-            )
-        else:
-            logger.debug(
-                "Plugin entry_point discovery: no new plugins found in "
-                "group '%s' (correlation_id=%s)",
-                discovery_report.group,
-                correlation_id,
+                exc_info=True,
             )
 
         # Create typed node identity for plugin subscriptions (OMN-1602)
