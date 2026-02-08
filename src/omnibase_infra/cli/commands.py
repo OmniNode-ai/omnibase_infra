@@ -11,6 +11,7 @@ import asyncio
 import os
 import re
 from urllib.parse import quote_plus
+from uuid import uuid4
 
 import click
 from rich.console import Console
@@ -237,6 +238,7 @@ async def _run_list_nodes(
     from omnibase_infra.projectors import ProjectionReaderRegistration
 
     dsn = _get_db_dsn()
+    correlation_id = uuid4()
     try:
         pool = await asyncio.wait_for(
             asyncpg.create_pool(dsn, min_size=1, max_size=2),
@@ -244,12 +246,15 @@ async def _run_list_nodes(
         )
     except TimeoutError:
         sanitized = _sanitize_dsn(dsn)
-        console.print(f"[red]Connection timed out to {sanitized}[/red]")
+        console.print(
+            f"[red]Connection timed out to {sanitized} (correlation_id={correlation_id})[/red]"
+        )
         raise SystemExit(1)
     except Exception as e:
         sanitized = _sanitize_dsn(dsn)
         console.print(
-            f"[red]Failed to connect to {sanitized}: {type(e).__name__}[/red]"
+            f"[red]Failed to connect to {sanitized}: {type(e).__name__} "
+            f"(correlation_id={correlation_id})[/red]"
         )
         raise SystemExit(1)
     try:
@@ -268,7 +273,9 @@ async def _run_list_nodes(
 
         projections: list[ModelRegistrationProjection] = []
         if state_filter is not None:
-            raw = await reader.get_by_state(state=state_filter, limit=limit)
+            raw = await reader.get_by_state(
+                state=state_filter, limit=limit, correlation_id=correlation_id
+            )
             if node_type:
                 nt_upper = node_type.upper()
                 projections = [p for p in raw if p.node_type.value.upper() == nt_upper][
@@ -290,6 +297,7 @@ async def _run_list_nodes(
                 state_projections = await reader.get_by_state(
                     state=query_state,
                     limit=remaining,
+                    correlation_id=correlation_id,
                 )
                 if node_type:
                     nt_upper = node_type.upper()
@@ -353,6 +361,7 @@ async def _run_get_node(node_id_str: str) -> None:
         raise SystemExit(1)
 
     dsn = _get_db_dsn()
+    correlation_id = uuid4()
     try:
         pool = await asyncio.wait_for(
             asyncpg.create_pool(dsn, min_size=1, max_size=2),
@@ -360,17 +369,22 @@ async def _run_get_node(node_id_str: str) -> None:
         )
     except TimeoutError:
         sanitized = _sanitize_dsn(dsn)
-        console.print(f"[red]Connection timed out to {sanitized}[/red]")
+        console.print(
+            f"[red]Connection timed out to {sanitized} (correlation_id={correlation_id})[/red]"
+        )
         raise SystemExit(1)
     except Exception as e:
         sanitized = _sanitize_dsn(dsn)
         console.print(
-            f"[red]Failed to connect to {sanitized}: {type(e).__name__}[/red]"
+            f"[red]Failed to connect to {sanitized}: {type(e).__name__} "
+            f"(correlation_id={correlation_id})[/red]"
         )
         raise SystemExit(1)
     try:
         reader = ProjectionReaderRegistration(pool)
-        proj = await reader.get_entity_state(entity_id=node_id)
+        proj = await reader.get_entity_state(
+            entity_id=node_id, correlation_id=correlation_id
+        )
 
         if proj is None:
             console.print(f"[yellow]Node not found: {node_id}[/yellow]")

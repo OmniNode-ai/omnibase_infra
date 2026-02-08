@@ -209,11 +209,14 @@ class TopicProvisioner:
                         "correlation_id": str(correlation_id),
                     },
                 )
+            # Use "partial" if any topics succeeded before the interruption;
+            # "unavailable" only when nothing was resolved at all.
+            interrupted_status = "partial" if (created or existing) else "unavailable"
             return {
                 "created": created,
                 "existing": existing,
                 "failed": failed + not_attempted,
-                "status": "unavailable",
+                "status": interrupted_status,
             }
 
         finally:

@@ -415,7 +415,7 @@ async def wire_registration_dispatchers(
             operation="wire_registration_dispatchers",
         )
         raise ContainerWiringError(
-            f"Failed to wire registration dispatchers: {e}\n"
+            f"Failed to wire registration dispatchers: {sanitize_error_message(e)}\n"
             f"Fix: Ensure wire_registration_handlers(container, pool) "
             f"was called first.",
             context=context,
@@ -495,6 +495,7 @@ async def wire_registration_handlers(
     )
     from omnibase_infra.projectors import ProjectionReaderRegistration
     from omnibase_infra.runtime.projector_shell import ProjectorShell
+    from omnibase_infra.utils import sanitize_error_message
 
     semver_default = ModelSemVer.parse("1.0.0")
     resolved_liveness_interval = get_liveness_interval_seconds(
@@ -616,7 +617,7 @@ async def wire_registration_handlers(
         hint = (
             "Container.service_registry missing 'register_instance' method."
             if "register_instance" in error_str
-            else f"Missing attribute: {e}"
+            else f"Missing attribute: {sanitize_error_message(e)}"
         )
         logger.error("Failed to register handlers: %s", hint)  # noqa: TRY400
         context = ModelInfraErrorContext.with_correlation(
@@ -625,11 +626,11 @@ async def wire_registration_handlers(
             operation="wire_registration_handlers",
         )
         raise ContainerValidationError(
-            f"Handler wiring failed - {hint}\nOriginal: {e}",
+            f"Handler wiring failed - {hint}\nOriginal: {sanitize_error_message(e)}",
             context=context,
             missing_attribute="register_instance"
             if "register_instance" in error_str
-            else str(e),
+            else sanitize_error_message(e),
         ) from e
     except Exception as e:
         logger.error("Failed to register handlers: %s", type(e).__name__)  # noqa: TRY400
@@ -639,7 +640,7 @@ async def wire_registration_handlers(
             operation="wire_registration_handlers",
         )
         raise ContainerWiringError(
-            f"Failed to wire registration handlers: {e}",
+            f"Failed to wire registration handlers: {sanitize_error_message(e)}",
             context=context,
         ) from e
 
