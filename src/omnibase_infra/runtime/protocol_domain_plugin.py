@@ -50,11 +50,20 @@ Lifecycle Hooks:
     6. `shutdown()` - Clean up resources during kernel shutdown
 
 Plugin Discovery:
-    Plugins can be registered explicitly via `PluginDomainRegistry.register()`.
-    This explicit registration approach provides:
-    - Clear, auditable plugin loading
-    - No magic discovery that could load untrusted code
-    - Easy testing with mock plugins
+    Plugins support hybrid discovery with two mechanisms:
+
+    1. **Explicit registration** via ``RegistryDomainPlugin.register()`` --
+       the primary path for first-party plugins. Provides clear, auditable
+       loading and easy testing with mock plugins.
+
+    2. **Entry-point discovery** via ``RegistryDomainPlugin.discover_from_entry_points()``
+       -- secondary mechanism for external packages. Uses PEP 621 entry_points
+       (``importlib.metadata``) to scan installed packages for plugins
+       declared under the ``onex.domain_plugins`` group.
+
+    Explicit registration always takes precedence on duplicate ``plugin_id``.
+    Entry-point discovery is security-gated by namespace allowlisting
+    (pre-import) and protocol validation (post-import).
 
 Example Implementation:
     ```python
@@ -117,12 +126,24 @@ Related:
 from __future__ import annotations
 
 import logging
+from importlib.metadata import entry_points
 from typing import Protocol, runtime_checkable
 
+from omnibase_infra.runtime.constants_security import (
+    DOMAIN_PLUGIN_ENTRY_POINT_GROUP,
+    TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
+)
 from omnibase_infra.runtime.models import (
     ModelDomainPluginConfig,
     ModelDomainPluginResult,
 )
+from omnibase_infra.runtime.models.model_plugin_discovery_entry import (
+    ModelPluginDiscoveryEntry,
+)
+from omnibase_infra.runtime.models.model_plugin_discovery_report import (
+    ModelPluginDiscoveryReport,
+)
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -379,11 +400,19 @@ class ProtocolDomainPlugin(Protocol):
 
 
 class RegistryDomainPlugin:
-    """Registry for domain plugins.
+    """Registry for domain plugins with hybrid discovery.
 
-    Provides explicit plugin registration and discovery. Plugins must be
-    registered explicitly - there is no automatic discovery to prevent
-    loading untrusted code.
+    Provides two discovery mechanisms:
+
+    1. **Explicit registration** via ``register()`` -- the primary path for
+       first-party plugins. Clear, auditable, and easy to test.
+
+    2. **Entry-point discovery** via ``discover_from_entry_points()`` --
+       secondary mechanism for external packages. Uses Python entry_points
+       (PEP 621) to scan installed packages. Security-gated by namespace
+       allowlisting and protocol validation.
+
+    Explicit registration always wins on duplicate ``plugin_id``.
 
     Thread Safety:
         The registry is NOT thread-safe. Plugin registration should happen
@@ -398,11 +427,15 @@ class RegistryDomainPlugin:
             PluginRegistration,
         )
 
-        # Register plugins explicitly
+        # 1. Register first-party plugins explicitly
         registry = RegistryDomainPlugin()
         registry.register(PluginRegistration())
 
-        # Get all registered plugins
+        # 2. Discover third-party plugins from entry_points
+        report = registry.discover_from_entry_points()
+        # Explicit registration wins on duplicate plugin_id
+
+        # 3. Activate all registered plugins
         plugins = registry.get_all()
         for plugin in plugins:
             if plugin.should_activate(config):
@@ -464,6 +497,197 @@ class RegistryDomainPlugin:
     def __len__(self) -> int:
         """Return number of registered plugins."""
         return len(self._plugins)
+
+    def discover_from_entry_points(
+        self,
+        group: str = DOMAIN_PLUGIN_ENTRY_POINT_GROUP,
+        allowed_namespaces: tuple[str, ...] = TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
+    ) -> ModelPluginDiscoveryReport:
+        """Discover and register domain plugins from Python entry_points.
+
+        Scans the given entry_point group for plugin classes, validates them
+        against the namespace allowlist and ProtocolDomainPlugin protocol,
+        then registers any that pass. Plugins already registered via explicit
+        ``register()`` calls are skipped (explicit wins on duplicate plugin_id).
+
+        Security Model:
+            1. **Pre-import namespace validation** -- ``entry_point.value``
+               (the dotted module path) is checked against ``allowed_namespaces``
+               BEFORE ``entry_point.load()`` is called. No code is executed for
+               rejected namespaces.
+            2. **Post-import protocol validation** -- After loading the class and
+               instantiating it, ``isinstance(instance, ProtocolDomainPlugin)``
+               validates structural conformance.
+            3. **Duplicate-safe** -- If a plugin with the same ``plugin_id`` was
+               already registered (e.g. via explicit ``register()``), the
+               entry_point is silently skipped with status ``"duplicate_skipped"``.
+
+        Args:
+            group: PEP 621 entry_point group name to scan.
+                Defaults to ``DOMAIN_PLUGIN_ENTRY_POINT_GROUP``
+                (``"onex.domain_plugins"``).
+            allowed_namespaces: Tuple of namespace prefixes that are trusted
+                for dynamic import. Only entry_points whose ``value`` starts
+                with one of these prefixes will be loaded.
+                Defaults to ``TRUSTED_PLUGIN_NAMESPACE_PREFIXES``.
+
+        Returns:
+            ModelPluginDiscoveryReport with per-entry diagnostics.
+
+        Example:
+            >>> registry = RegistryDomainPlugin()
+            >>> report = registry.discover_from_entry_points()
+            >>> for entry in report.entries:
+            ...     print(f"{entry.entry_point_name}: {entry.status}")
+        """
+        discovered_eps = entry_points(group=group)
+        entries: list[ModelPluginDiscoveryEntry] = []
+        accepted: list[str] = []
+
+        for ep in discovered_eps:
+            ep_name = ep.name
+            # entry_point.value is the "module:class" string, e.g.
+            # "omnibase_infra.nodes...plugin:PluginRegistration"
+            module_path = ep.value
+
+            # --- Pre-import namespace validation ---
+            if not any(module_path.startswith(prefix) for prefix in allowed_namespaces):
+                entries.append(
+                    ModelPluginDiscoveryEntry(
+                        entry_point_name=ep_name,
+                        module_path=module_path,
+                        status="namespace_rejected",
+                        reason=(
+                            f"Module path '{module_path}' does not start with "
+                            f"any allowed namespace prefix: {allowed_namespaces}"
+                        ),
+                    )
+                )
+                logger.info(
+                    "Plugin entry_point '%s' rejected: namespace '%s' not in "
+                    "allowed prefixes",
+                    ep_name,
+                    module_path,
+                )
+                continue
+
+            # --- Load the class (executes module-level code) ---
+            try:
+                plugin_class = ep.load()
+            except Exception as load_err:
+                entries.append(
+                    ModelPluginDiscoveryEntry(
+                        entry_point_name=ep_name,
+                        module_path=module_path,
+                        status="import_error",
+                        reason=sanitize_error_message(load_err),
+                    )
+                )
+                logger.warning(
+                    "Plugin entry_point '%s' failed to load: %s",
+                    ep_name,
+                    sanitize_error_message(load_err),
+                )
+                continue
+
+            # --- Instantiate the plugin ---
+            try:
+                instance = plugin_class()
+            except Exception as init_err:
+                entries.append(
+                    ModelPluginDiscoveryEntry(
+                        entry_point_name=ep_name,
+                        module_path=module_path,
+                        status="instantiation_error",
+                        reason=sanitize_error_message(init_err),
+                    )
+                )
+                logger.warning(
+                    "Plugin entry_point '%s' failed to instantiate: %s",
+                    ep_name,
+                    sanitize_error_message(init_err),
+                )
+                continue
+
+            # --- Protocol validation ---
+            if not isinstance(instance, ProtocolDomainPlugin):
+                entries.append(
+                    ModelPluginDiscoveryEntry(
+                        entry_point_name=ep_name,
+                        module_path=module_path,
+                        status="protocol_invalid",
+                        reason=(
+                            f"Class '{type(instance).__name__}' does not implement "
+                            f"ProtocolDomainPlugin protocol"
+                        ),
+                    )
+                )
+                logger.warning(
+                    "Plugin entry_point '%s' does not implement "
+                    "ProtocolDomainPlugin: %s",
+                    ep_name,
+                    type(instance).__name__,
+                )
+                continue
+
+            # --- Duplicate check (explicit wins) ---
+            plugin_id = instance.plugin_id
+            if plugin_id in self._plugins:
+                entries.append(
+                    ModelPluginDiscoveryEntry(
+                        entry_point_name=ep_name,
+                        module_path=module_path,
+                        status="duplicate_skipped",
+                        reason=(
+                            f"Plugin ID '{plugin_id}' already registered "
+                            f"(explicit registration takes precedence)"
+                        ),
+                        plugin_id=plugin_id,
+                    )
+                )
+                logger.debug(
+                    "Plugin entry_point '%s' skipped: plugin_id '%s' already "
+                    "registered (explicit registration wins)",
+                    ep_name,
+                    plugin_id,
+                )
+                continue
+
+            # --- Register ---
+            self._plugins[plugin_id] = instance
+            accepted.append(plugin_id)
+            entries.append(
+                ModelPluginDiscoveryEntry(
+                    entry_point_name=ep_name,
+                    module_path=module_path,
+                    status="accepted",
+                    plugin_id=plugin_id,
+                )
+            )
+            logger.info(
+                "Plugin entry_point '%s' discovered and registered "
+                "(plugin_id='%s', module='%s')",
+                ep_name,
+                plugin_id,
+                module_path,
+            )
+
+        report = ModelPluginDiscoveryReport(
+            group=group,
+            discovered_count=len(entries),
+            accepted=tuple(accepted),
+            entries=tuple(entries),
+        )
+
+        logger.info(
+            "Plugin discovery for group '%s': %d discovered, %d accepted, %d rejected",
+            group,
+            report.discovered_count,
+            len(report.accepted),
+            len(report.rejected),
+        )
+
+        return report
 
 
 __all__: list[str] = [
