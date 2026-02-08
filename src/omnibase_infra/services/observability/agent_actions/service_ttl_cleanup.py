@@ -374,6 +374,7 @@ class ServiceTTLCleanup(MixinAsyncCircuitBreaker):
                         sql,
                         cutoff,
                         self._config.batch_size,
+                        timeout=self._config.query_timeout_seconds,
                     )
 
                 # Parse "DELETE N" result string
