@@ -730,9 +730,10 @@ async def bootstrap() -> int:
                 version=config.contract_version or "v1",
             )
         else:
-            logger.warning(
+            logger.error(
                 "runtime_config.yaml missing 'name' field — plugin consumers "
-                "will not subscribe to introspection events "
+                "will not subscribe to introspection events. "
+                "Set 'name' in runtime_config.yaml to enable introspection "
                 "(correlation_id=%s)",
                 correlation_id,
             )
@@ -821,6 +822,21 @@ async def bootstrap() -> int:
                     correlation_id,
                     exc_info=True,
                 )
+                # Safety: if exception occurred before the plugin was tracked
+                # in activated_plugins (e.g. during should_activate or
+                # initialize), attempt best-effort shutdown to prevent
+                # resource leaks from partially-initialized plugins.
+                if plugin not in activated_plugins:
+                    try:
+                        await plugin.shutdown()
+                    except Exception:
+                        logger.debug(
+                            "Best-effort shutdown of untracked plugin '%s' "
+                            "also failed (correlation_id=%s)",
+                            plugin_id,
+                            correlation_id,
+                            exc_info=True,
+                        )
 
         plugin_activation_duration = time.time() - plugin_activation_start
         logger.info(
