@@ -775,6 +775,11 @@ async def bootstrap() -> int:
                     )
                     continue
 
+                # Track for shutdown immediately after successful init so
+                # allocated resources (DB pools, Kafka producers) are always
+                # cleaned up even if later lifecycle steps fail.
+                activated_plugins.append(plugin)
+
                 # 3. Wire handlers
                 wire_result = await plugin.wire_handlers(plugin_config)
                 if not wire_result:
@@ -803,7 +808,6 @@ async def bootstrap() -> int:
                         consumer_result.unsubscribe_callbacks
                     )
 
-                activated_plugins.append(plugin)
                 logger.info(
                     "Plugin '%s' activated successfully (correlation_id=%s)",
                     plugin_id,
