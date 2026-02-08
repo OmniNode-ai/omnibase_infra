@@ -98,6 +98,9 @@ class TestInfraValidatorConstants:
         - 115 (2026-01-29): OMN-1653 contract registry reducer (+2 unions)
           - ContractRegistryEvent: 4-type union for event routing
           - contract_yaml: dict | str for flexible YAML handling
+        - 119 (2026-02-07): OMN-1990 registration workflow wiring (+4 unions)
+          - Dispatcher and handler models for heartbeat, snapshot publishing
+          - ModelDispatchRoute message_type and category fields
 
         Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """

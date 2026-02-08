@@ -280,10 +280,11 @@ async def wire_registration_dispatchers(
             handler_heartbeat = await container.service_registry.resolve_service(
                 HandlerNodeHeartbeat
             )
-        except Exception:
+        except Exception as e:
             logger.info(
                 "HandlerNodeHeartbeat not registered (projector may be unavailable), "
                 "heartbeat dispatcher will not be wired",
+                extra={"error": str(e), "error_type": type(e).__name__},
             )
 
         # 2. Create dispatcher adapters

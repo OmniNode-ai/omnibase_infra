@@ -845,9 +845,17 @@ async def validate_test_topic_exists(real_kafka_event_bus: EventBusKafka) -> str
                 f"{topic_creation_hint}"
             )
         if topic_metadata is None:
+            if isinstance(topic_descriptions, dict):
+                available = list(topic_descriptions.keys())
+            else:
+                available = [
+                    _extract_topic_field(td, "topic")
+                    or _extract_topic_field(td, "name")
+                    for td in topic_descriptions
+                ]
             pytest.fail(
                 f"Topic '{TEST_INTROSPECTION_TOPIC}' not found in describe_topics response.\n"
-                f"Available topics: {list(topic_descriptions.keys())}"
+                f"Available topics: {available}"
                 f"{topic_creation_hint}"
             )
 

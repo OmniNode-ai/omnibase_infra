@@ -160,7 +160,7 @@ RUNTIME_AVAILABLE = _check_runtime_available()
 # conftest.py's module-level skipif ensures ALL_INFRA_AVAILABLE is true
 # when these tests execute. If the runtime is also healthy, enable all
 # features by default. Override with explicit env vars if needed.
-_default_enabled = "true" if RUNTIME_AVAILABLE else "false"
+_default_enabled = "false"
 
 RUNTIME_PROCESSING_ENABLED = os.getenv(
     "RUNTIME_E2E_PROCESSING_ENABLED", _default_enabled

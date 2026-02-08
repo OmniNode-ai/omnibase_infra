@@ -189,7 +189,18 @@ class DispatcherNodeHeartbeat(MixinAsyncCircuitBreaker):
             InfraUnavailableError: If circuit breaker is OPEN.
         """
         started_at = datetime.now(UTC)
-        correlation_id = envelope.correlation_id or uuid4()
+        # Prefer envelope correlation_id, then payload correlation_id, then generate
+        correlation_id = envelope.correlation_id
+        if correlation_id is None:
+            raw = envelope.payload
+            if isinstance(raw, dict):
+                cid = raw.get("correlation_id")
+            else:
+                cid = getattr(raw, "correlation_id", None)
+            if cid is not None:
+                correlation_id = cid
+        if correlation_id is None:
+            correlation_id = uuid4()
 
         # Check circuit breaker before processing (coroutine-safe)
         # If circuit is OPEN, raises InfraUnavailableError immediately
