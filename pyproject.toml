@@ -16,6 +16,9 @@ omni-infra = "omnibase_infra.cli.commands:cli"
 onex-runtime = "omnibase_infra.runtime.kernel:main"
 onex-infra-test = "omnibase_infra.cli.infra_test.cli:cli"
 
+[tool.poetry.plugins."onex.domain_plugins"]
+registration = "omnibase_infra.nodes.node_registration_orchestrator.plugin:PluginRegistration"
+
 [tool.poetry.dependencies]
 python = "^3.12"
 
