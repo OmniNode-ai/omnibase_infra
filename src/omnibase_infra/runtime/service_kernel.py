@@ -694,8 +694,8 @@ async def bootstrap() -> int:
         registration_plugin = PluginRegistration()
         plugin_registry.register(registration_plugin)
 
-        # Try to import and register PluginIntelligence (graceful degradation)
-        # If omniintelligence is not installed, kernel boots without it.
+        # Try to import and register PluginIntelligence (graceful degradation).
+        # omniintelligence is an optional dependency — kernel boots without it.
         try:
             from omniintelligence.runtime.plugin import (  # type: ignore[import-not-found]
                 PluginIntelligence,
@@ -712,9 +712,23 @@ async def bootstrap() -> int:
                 "(correlation_id=%s)",
                 correlation_id,
             )
+        except Exception:
+            logger.warning(
+                "PluginIntelligence failed to initialize, continuing without it "
+                "(correlation_id=%s)",
+                correlation_id,
+                exc_info=True,
+            )
 
         # Create typed node identity for plugin subscriptions (OMN-1602)
         plugin_node_identity: ModelNodeIdentity | None = None
+        if not config.name:
+            logger.warning(
+                "runtime_config.yaml missing 'name' field — plugin consumers "
+                "will not subscribe to introspection events "
+                "(correlation_id=%s)",
+                correlation_id,
+            )
         if config.name:
             plugin_node_identity = ModelNodeIdentity(
                 env=environment,
