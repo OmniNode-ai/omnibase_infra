@@ -45,7 +45,7 @@ Example Usage:
     ```
 
 Integration Points:
-- EmitDaemon uses this registry to route events to correct Kafka topics
+- The emit daemon in omniclaude3 uses this registry to route events to Kafka topics
 - Hook events from OmniClaude are routed through this registry
 - Metadata injection ensures event traceability across the system
 """
@@ -461,7 +461,7 @@ class EventRegistry:
                 scheduled jobs, external triggers).
 
                 Note: This is an extension point for future event chain tracing
-                functionality. Current EmitDaemon usage passes None for all events
+                functionality. Current emit daemon usage passes None for all events
                 since hook events are root events initiated by user actions.
 
         Returns:

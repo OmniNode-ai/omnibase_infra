@@ -7,11 +7,11 @@ notification topics from Kafka and routes events to the Slack alerter.
 
 Architecture:
     ```
-    +-------------+     Kafka     +----------------------+     Slack
-    | EmitDaemon  | ------------> | NotificationConsumer | ------------> Webhook
-    | (publisher) |   Topics:     | (this file)          |   via
-    +-------------+   blocked/    +----------------------+   HandlerSlackWebhook
-                      completed
+    +-----------------+     Kafka     +----------------------+     Slack
+    | Event Publisher  | ------------> | NotificationConsumer | ------------> Webhook
+    | (omniclaude3)    |   Topics:     | (this file)          |   via
+    +-----------------+   blocked/    +----------------------+   HandlerSlackWebhook
+                          completed
     ```
 
 The consumer transforms notification events into Slack alerts:

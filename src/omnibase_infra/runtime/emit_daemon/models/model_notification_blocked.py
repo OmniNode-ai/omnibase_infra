@@ -7,7 +7,7 @@ waiting for human input during ticket work execution.
 
 Design:
     - Event payload for `notification.blocked` event type
-    - Published via emit daemon to Kafka
+    - Published to Kafka by the emit daemon in omniclaude3
     - Consumed by notification consumer and routed to Slack
 
 Example Payload:
