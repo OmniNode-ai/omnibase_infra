@@ -255,6 +255,10 @@ class TopicProvisioner:
     ) -> bool:
         """Ensure a single topic exists with optional custom config.
 
+        Creates a new AIOKafkaAdminClient connection per call. For creating
+        multiple topics, prefer :meth:`ensure_platform_topics_exist` which
+        reuses a single admin connection for all topics.
+
         Args:
             topic_name: The topic name to create.
             config: Optional topic configuration. If None, uses default

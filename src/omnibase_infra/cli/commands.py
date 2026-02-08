@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+from urllib.parse import quote_plus
 
 import click
 from rich.console import Console
@@ -213,7 +214,7 @@ def _get_db_dsn() -> str:
             "Warning: POSTGRES_PASSWORD not set. Set it via environment or .env file.",
             err=True,
         )
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}"
 
 
 def _sanitize_dsn(dsn: str) -> str:

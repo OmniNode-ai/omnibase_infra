@@ -109,6 +109,67 @@ class TestTopicProvisioner:
         assert result["status"] == "unavailable"
         assert len(result["failed"]) == len(ALL_PLATFORM_SUFFIXES)
 
+    async def test_ensure_platform_topics_import_error(self) -> None:
+        """Graceful degradation when aiokafka is not installed."""
+        manager = TopicProvisioner(bootstrap_servers="localhost:9092")
+
+        import importlib
+
+        import omnibase_infra.event_bus.service_topic_manager as mod
+
+        # Force ImportError by temporarily removing aiokafka from sys.modules
+        with patch.dict(
+            "sys.modules",
+            {"aiokafka": None, "aiokafka.admin": None, "aiokafka.errors": None},
+        ):
+            # Reload so the function-level import sees the patched modules
+            importlib.reload(mod)
+            reloaded_manager = mod.TopicProvisioner(bootstrap_servers="localhost:9092")
+            result = await reloaded_manager.ensure_platform_topics_exist()
+
+        # Restore module for other tests
+        importlib.reload(mod)
+
+        assert result["status"] == "unavailable"
+        assert len(result["failed"]) == len(ALL_PLATFORM_SUFFIXES)
+        assert len(result["created"]) == 0
+        assert len(result["existing"]) == 0
+
+    async def test_ensure_platform_topics_already_exist(self) -> None:
+        """Topics that already exist are counted as 'existing', not 'created'."""
+        manager = TopicProvisioner(bootstrap_servers="localhost:9092")
+
+        topic_already_exists_cls = type("TopicAlreadyExistsError", (Exception,), {})
+
+        mock_admin_cls = MagicMock()
+        mock_admin_instance = AsyncMock()
+        mock_admin_instance.start = AsyncMock()
+        mock_admin_instance.close = AsyncMock()
+        mock_admin_instance.create_topics = AsyncMock(
+            side_effect=topic_already_exists_cls("Topic exists")
+        )
+        mock_admin_cls.return_value = mock_admin_instance
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "aiokafka": MagicMock(),
+                "aiokafka.admin": MagicMock(
+                    AIOKafkaAdminClient=mock_admin_cls,
+                    NewTopic=MagicMock(),
+                ),
+                "aiokafka.errors": MagicMock(
+                    TopicAlreadyExistsError=topic_already_exists_cls,
+                ),
+            },
+        ):
+            result = await manager.ensure_platform_topics_exist()
+
+        assert result["status"] == "success"
+        assert len(result["existing"]) == len(ALL_PLATFORM_SUFFIXES)
+        assert len(result["created"]) == 0
+        assert len(result["failed"]) == 0
+
     async def test_ensure_single_topic_success(self) -> None:
         """Single topic creation returns True on success."""
         manager = TopicProvisioner(bootstrap_servers="localhost:9092")
