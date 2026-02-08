@@ -828,7 +828,7 @@ async def bootstrap() -> int:
                 # resource leaks from partially-initialized plugins.
                 if plugin not in activated_plugins:
                     try:
-                        await plugin.shutdown()
+                        await plugin.shutdown(plugin_config)
                     except Exception:
                         logger.debug(
                             "Best-effort shutdown of untracked plugin '%s' "
