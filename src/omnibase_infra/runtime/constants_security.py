@@ -31,10 +31,17 @@ Example:
     ...     TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
     ... )
     >>> handler_module = "omnibase_infra.handlers.handler_db"
-    >>> is_trusted = any(
+    >>> any(
     ...     handler_module.startswith(prefix)
     ...     for prefix in TRUSTED_HANDLER_NAMESPACE_PREFIXES
     ... )
+    True
+    >>> plugin_module = "omnibase_infra.plugins.plugin_registry"
+    >>> any(
+    ...     plugin_module.startswith(prefix)
+    ...     for prefix in TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+    ... )
+    True
 
 .. versionadded:: 0.2.8
     Created as part of OMN-1519 security hardening.
