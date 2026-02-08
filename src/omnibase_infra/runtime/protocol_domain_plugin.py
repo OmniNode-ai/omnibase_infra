@@ -674,7 +674,7 @@ class RegistryDomainPlugin:
 
         report = ModelPluginDiscoveryReport(
             group=group,
-            discovered_count=len(list(discovered_eps)),
+            discovered_count=len(entries),
             accepted=tuple(accepted),
             entries=tuple(entries),
         )
