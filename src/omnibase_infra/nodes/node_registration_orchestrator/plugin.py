@@ -523,7 +523,28 @@ class PluginRegistration:
             )
             return
 
-        consul_port = int(os.getenv("CONSUL_PORT", "8500"))
+        _MIN_PORT = 1
+        _MAX_PORT = 65535
+        try:
+            consul_port = int(os.getenv("CONSUL_PORT", "8500"))
+            if not (_MIN_PORT <= consul_port <= _MAX_PORT):
+                logger.warning(
+                    "CONSUL_PORT=%d out of range (%d-%d), falling back to 8500 "
+                    "(correlation_id=%s)",
+                    consul_port,
+                    _MIN_PORT,
+                    _MAX_PORT,
+                    correlation_id,
+                )
+                consul_port = 8500
+        except (ValueError, TypeError):
+            logger.warning(
+                "Invalid CONSUL_PORT value %r, falling back to 8500 "
+                "(correlation_id=%s)",
+                os.getenv("CONSUL_PORT"),
+                correlation_id,
+            )
+            consul_port = 8500
 
         try:
             # Deferred import: Only load HandlerConsul when Consul is configured
