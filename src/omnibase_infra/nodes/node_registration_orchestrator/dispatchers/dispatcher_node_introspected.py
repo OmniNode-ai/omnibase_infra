@@ -275,6 +275,9 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             # Delegate to wrapped handler
             handler_output = await self._handler.handle(handler_envelope)
             output_events = list(handler_output.events)
+            output_intents = (
+                handler_output.intents
+            )  # Already a tuple from ModelHandlerOutput
 
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
@@ -303,6 +306,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                 duration_ms=duration_ms,
                 output_count=len(output_events),
                 output_events=output_events,
+                output_intents=output_intents,
                 correlation_id=correlation_id,
             )
 

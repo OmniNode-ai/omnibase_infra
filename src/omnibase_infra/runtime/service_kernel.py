@@ -812,6 +812,27 @@ async def bootstrap() -> int:
                 correlation_id,
             )
 
+        # 4.7. Create MessageDispatchEngine (OMN-2050)
+        #
+        # The dispatch engine is the single routing component for all events.
+        # It is instantiated here, set on plugin_config so plugins can register
+        # dispatchers during wire_dispatchers(), then frozen after all plugins
+        # have registered their dispatchers but BEFORE any consumers start.
+        #
+        # This two-pass lifecycle ensures:
+        #   Pass 1: initialize -> wire_handlers -> wire_dispatchers (all plugins)
+        #   Freeze: dispatch_engine.freeze()
+        #   Pass 2: start_consumers (all plugins)
+        from omnibase_infra.runtime.service_message_dispatch_engine import (
+            MessageDispatchEngine,
+        )
+
+        dispatch_engine = MessageDispatchEngine(logger=logger)
+        logger.debug(
+            "MessageDispatchEngine created (correlation_id=%s)",
+            correlation_id,
+        )
+
         # Create shared plugin configuration
         plugin_config = ModelDomainPluginConfig(
             container=container,
@@ -820,12 +841,27 @@ async def bootstrap() -> int:
             input_topic=config.input_topic,
             output_topic=config.output_topic,
             consumer_group=config.consumer_group,
+            dispatch_engine=dispatch_engine,
             node_identity=plugin_node_identity,
             kafka_bootstrap_servers=kafka_bootstrap_servers,
         )
 
-        # Activate plugins in standard lifecycle order
+        # Activate plugins using two-pass lifecycle (OMN-2050)
+        #
+        # Pass 1: should_activate -> initialize -> wire_handlers -> wire_dispatchers
+        #   All plugins register their dispatchers with the engine before it is frozen.
+        #
+        # Freeze: dispatch_engine.freeze() after all wire_dispatchers() complete
+        #
+        # Pass 2: start_consumers for all activated plugins
+        #   Consumers only start after the engine is frozen and read-only.
+        #
+        # This ordering prevents a race where a late plugin's wire_dispatchers()
+        # could modify the engine while an early plugin's consumer is already
+        # dispatching messages through it.
         plugin_activation_start = time.time()
+
+        # --- Pass 1: Initialize, wire handlers, wire dispatchers ---
         for plugin in plugin_registry.get_all():
             plugin_id = plugin.plugin_id
 
@@ -876,15 +912,8 @@ async def bootstrap() -> int:
                         correlation_id,
                     )
 
-                # 5. Start consumers
-                consumer_result = await plugin.start_consumers(plugin_config)
-                if consumer_result and consumer_result.unsubscribe_callbacks:
-                    plugin_unsubscribe_callbacks.extend(
-                        consumer_result.unsubscribe_callbacks
-                    )
-
                 logger.info(
-                    "Plugin '%s' activated successfully (correlation_id=%s)",
+                    "Plugin '%s' wiring completed (correlation_id=%s)",
                     plugin_id,
                     correlation_id,
                 )
@@ -911,6 +940,38 @@ async def bootstrap() -> int:
                             correlation_id,
                             exc_info=True,
                         )
+
+        # --- Freeze dispatch engine ---
+        # All plugins have registered their dispatchers. Freeze the engine
+        # to make it read-only and thread-safe for concurrent dispatch.
+        dispatch_engine.freeze()
+        logger.info(
+            "MessageDispatchEngine frozen after all wire_dispatchers() "
+            "(correlation_id=%s)",
+            correlation_id,
+        )
+
+        # --- Pass 2: Start consumers for all activated plugins ---
+        for plugin in activated_plugins:
+            plugin_id = plugin.plugin_id
+            try:
+                consumer_result = await plugin.start_consumers(plugin_config)
+                if consumer_result and consumer_result.unsubscribe_callbacks:
+                    plugin_unsubscribe_callbacks.extend(
+                        consumer_result.unsubscribe_callbacks
+                    )
+                logger.info(
+                    "Plugin '%s' consumers started (correlation_id=%s)",
+                    plugin_id,
+                    correlation_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Plugin '%s' failed to start consumers (correlation_id=%s)",
+                    plugin_id,
+                    correlation_id,
+                    exc_info=True,
+                )
 
         plugin_activation_duration = time.time() - plugin_activation_start
         logger.info(

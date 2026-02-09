@@ -532,9 +532,6 @@ async def wire_registration_handlers(
 
         handler_introspected = HandlerNodeIntrospected(
             projection_reader,
-            projector=projector,
-            consul_handler=consul_handler,
-            snapshot_publisher=snapshot_publisher,
         )
         await container.service_registry.register_instance(
             interface=HandlerNodeIntrospected,
@@ -543,9 +540,6 @@ async def wire_registration_handlers(
             metadata={
                 "description": "Handler for NodeIntrospectionEvent",
                 "version": str(semver_default),
-                "has_projector": projector is not None,
-                "has_consul_handler": consul_handler is not None,
-                "has_snapshot_publisher": snapshot_publisher is not None,
             },
         )
         services_registered.append("HandlerNodeIntrospected")

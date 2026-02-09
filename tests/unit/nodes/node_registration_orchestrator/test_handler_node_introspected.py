@@ -6,6 +6,7 @@ Tests validate:
 - Handler emits NodeRegistrationInitiated for new nodes
 - Handler skips registration for nodes in blocking states
 - Handler re-initiates registration for nodes in retriable states
+- Handler returns intents for effect layer execution (OMN-2050)
 - State decision matrix per C1 requirements
 
 G2 Acceptance Criteria:
@@ -15,6 +16,7 @@ G2 Acceptance Criteria:
 Related Tickets:
     - OMN-888 (C1): Registration Orchestrator
     - G2: Test orchestrator logic
+    - OMN-2050: Wire MessageDispatchEngine as single consumer path
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.projection import ModelRegistrationProjection
@@ -39,6 +42,12 @@ from omnibase_infra.models.registration import (
 from omnibase_infra.models.registration.events import ModelNodeRegistrationInitiated
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected import (
     HandlerNodeIntrospected,
+)
+from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
+    ModelPayloadConsulRegister,
+)
+from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
+    ModelPayloadPostgresUpsertRegistration,
 )
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
@@ -222,6 +231,9 @@ class TestHandlerNodeIntrospectedSkipsBlockingStates:
 
         assert isinstance(output, ModelHandlerOutput)
         assert len(output.events) == 0, f"Expected no events for state {blocking_state}"
+        assert len(output.intents) == 0, (
+            f"Expected no intents for state {blocking_state}"
+        )
 
 
 class TestHandlerNodeIntrospectedRetriableStates:
@@ -466,31 +478,16 @@ class TestHandlerNodeIntrospectedTimezoneValidation:
         assert len(output.events) == 1  # New node triggers registration
 
 
-def create_mock_projector() -> AsyncMock:
-    """Create a mock ProjectorShell."""
-    from omnibase_infra.runtime.projector_shell import ProjectorShell
-
-    mock = AsyncMock(spec=ProjectorShell)
-    mock.upsert_partial = AsyncMock(return_value=True)
-    mock.partial_update = AsyncMock(return_value=True)
-    return mock
-
-
-class TestHandlerNodeIntrospectedProjectionPersistence:
-    """Test projection persistence when projector is configured."""
+class TestHandlerNodeIntrospectedIntents:
+    """Test intent-based output for effect layer execution (OMN-2050)."""
 
     @pytest.mark.asyncio
-    async def test_persists_projection_when_projector_configured(self) -> None:
-        """Test that projection is persisted when projector is provided."""
+    async def test_returns_postgres_and_consul_intents(self) -> None:
+        """Test that handler returns both postgres and consul intents."""
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None  # New node
 
-        mock_projector = create_mock_projector()
-
-        handler = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-            projector=mock_projector,
-        )
+        handler = HandlerNodeIntrospected(mock_reader)
 
         node_id = uuid4()
         correlation_id = uuid4()
@@ -501,38 +498,63 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
 
         output = await handler.handle(envelope)
 
-        # Should emit event
-        assert isinstance(output, ModelHandlerOutput)
-        assert len(output.events) == 1
-        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
+        # Should have 2 intents: postgres upsert + consul register
+        assert len(output.intents) == 2
 
-        # Should have called projector to persist state transition
-        mock_projector.upsert_partial.assert_called_once()
-
-        # Verify correct parameters were passed
-        call_kwargs = mock_projector.upsert_partial.call_args[1]
-        assert call_kwargs["aggregate_id"] == node_id
-        assert call_kwargs["correlation_id"] == correlation_id
-        assert call_kwargs["conflict_columns"] == ["entity_id", "domain"]
-
-        # Verify values dict contains expected fields
-        values = call_kwargs["values"]
-        assert values["entity_id"] == node_id
-        assert values["domain"] == "registration"
-        assert (
-            values["current_state"] == EnumRegistrationState.PENDING_REGISTRATION.value
-        )
-        assert values["node_type"] == "effect"
-        assert values["updated_at"] == TEST_NOW
+        # Verify intent types
+        intent_payload_types = [type(i.payload).__name__ for i in output.intents]
+        assert "ModelPayloadPostgresUpsertRegistration" in intent_payload_types
+        assert "ModelPayloadConsulRegister" in intent_payload_types
 
     @pytest.mark.asyncio
-    async def test_does_not_persist_when_no_projector(self) -> None:
-        """Test that no persistence happens when projector is None."""
+    async def test_postgres_intent_has_correct_record(self) -> None:
+        """Test that postgres intent has correct registration record data."""
         mock_reader = create_mock_projection_reader()
-        mock_reader.get_entity_state.return_value = None  # New node
+        mock_reader.get_entity_state.return_value = None
 
-        # No projector provided
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader)
+
+        node_id = uuid4()
+        correlation_id = uuid4()
+        introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(
+            introspection_event, now=TEST_NOW, correlation_id=correlation_id
+        )
+
+        output = await handler.handle(envelope)
+
+        # Find the postgres intent
+        postgres_intents = [
+            i
+            for i in output.intents
+            if isinstance(i.payload, ModelPayloadPostgresUpsertRegistration)
+        ]
+        assert len(postgres_intents) == 1
+
+        postgres_payload = postgres_intents[0].payload
+        assert postgres_payload.correlation_id == correlation_id
+
+        # Verify record contains expected fields
+        # record is a BaseModel subclass (extra="allow"); convert to dict for access
+        record = postgres_payload.record.model_dump()
+        assert record["entity_id"] == str(node_id)
+        assert record["domain"] == "registration"
+        assert (
+            record["current_state"] == EnumRegistrationState.PENDING_REGISTRATION.value
+        )
+        assert record["node_type"] == "effect"
+
+        # Verify intent envelope
+        assert postgres_intents[0].intent_type == "extension"
+        assert f"{node_id}" in postgres_intents[0].target
+
+    @pytest.mark.asyncio
+    async def test_consul_intent_has_correct_service_name(self) -> None:
+        """Test that consul intent follows ONEX service naming convention."""
+        mock_reader = create_mock_projection_reader()
+        mock_reader.get_entity_state.return_value = None
+
+        handler = HandlerNodeIntrospected(mock_reader)
 
         node_id = uuid4()
         introspection_event = create_introspection_event(node_id=node_id)
@@ -540,42 +562,125 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
 
         output = await handler.handle(envelope)
 
-        # Should still emit event
-        assert isinstance(output, ModelHandlerOutput)
+        # Find the consul intent
+        consul_intents = [
+            i
+            for i in output.intents
+            if isinstance(i.payload, ModelPayloadConsulRegister)
+        ]
+        assert len(consul_intents) == 1
+
+        consul_payload = consul_intents[0].payload
+        assert consul_payload.service_name == "onex-effect"
+        assert consul_payload.service_id == f"onex-effect-{node_id}"
+        assert "onex" in consul_payload.tags
+        assert "node-type:effect" in consul_payload.tags
+
+    @pytest.mark.asyncio
+    async def test_no_intents_for_blocking_states(self) -> None:
+        """Test that no intents are returned for nodes in blocking states."""
+        mock_reader = create_mock_projection_reader()
+        node_id = uuid4()
+
+        # Node is already active
+        mock_reader.get_entity_state.return_value = create_projection(
+            entity_id=node_id,
+            state=EnumRegistrationState.ACTIVE,
+        )
+
+        handler = HandlerNodeIntrospected(mock_reader)
+
+        introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
+
+        output = await handler.handle(envelope)
+
+        assert len(output.events) == 0
+        assert len(output.intents) == 0
+
+    @pytest.mark.asyncio
+    async def test_intents_for_retriable_states(self) -> None:
+        """Test that intents are returned for re-registration from retriable states."""
+        mock_reader = create_mock_projection_reader()
+        node_id = uuid4()
+
+        # Node has expired liveness
+        mock_reader.get_entity_state.return_value = create_projection(
+            entity_id=node_id,
+            state=EnumRegistrationState.LIVENESS_EXPIRED,
+        )
+
+        handler = HandlerNodeIntrospected(mock_reader)
+
+        introspection_event = create_introspection_event(node_id=node_id)
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
+
+        output = await handler.handle(envelope)
+
+        # Should have events and intents for re-registration
         assert len(output.events) == 1
         assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
+        assert len(output.intents) == 2
 
     @pytest.mark.asyncio
-    async def test_has_projector_property(self) -> None:
-        """Test the has_projector property reflects configuration."""
-        mock_reader = create_mock_projection_reader()
-        mock_projector = create_mock_projector()
-
-        handler_with_projector = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-            projector=mock_projector,
-        )
-        assert handler_with_projector.has_projector is True
-
-        handler_without_projector = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-        )
-        assert handler_without_projector.has_projector is False
-
-    @pytest.mark.asyncio
-    async def test_projection_uses_capabilities_from_event(self) -> None:
-        """Test that projection uses capabilities from introspection event."""
+    async def test_ack_deadline_in_postgres_intent(self) -> None:
+        """Test that ack_deadline is calculated correctly in postgres intent."""
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        mock_projector = create_mock_projector()
-
+        ack_timeout_seconds = 60.0
         handler = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-            projector=mock_projector,
+            mock_reader,
+            ack_timeout_seconds=ack_timeout_seconds,
         )
 
-        # Create event with specific capabilities
+        introspection_event = create_introspection_event()
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
+
+        output = await handler.handle(envelope)
+
+        # Find postgres intent and verify ack_deadline
+        postgres_intents = [
+            i
+            for i in output.intents
+            if isinstance(i.payload, ModelPayloadPostgresUpsertRegistration)
+        ]
+        assert len(postgres_intents) == 1
+
+        record = postgres_intents[0].payload.record.model_dump()
+        expected_deadline = TEST_NOW + timedelta(seconds=ack_timeout_seconds)
+        assert record["ack_deadline"] == expected_deadline.isoformat()
+
+    @pytest.mark.asyncio
+    async def test_default_ack_timeout_in_intent(self) -> None:
+        """Test that default ack timeout (30s) is used in intent."""
+        mock_reader = create_mock_projection_reader()
+        mock_reader.get_entity_state.return_value = None
+
+        handler = HandlerNodeIntrospected(mock_reader)
+
+        introspection_event = create_introspection_event()
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
+
+        output = await handler.handle(envelope)
+
+        postgres_intents = [
+            i
+            for i in output.intents
+            if isinstance(i.payload, ModelPayloadPostgresUpsertRegistration)
+        ]
+        record = postgres_intents[0].payload.record.model_dump()
+        expected_deadline = TEST_NOW + timedelta(seconds=30.0)
+        assert record["ack_deadline"] == expected_deadline.isoformat()
+
+    @pytest.mark.asyncio
+    async def test_capabilities_in_postgres_intent(self) -> None:
+        """Test that capabilities from event are included in postgres intent."""
+        mock_reader = create_mock_projection_reader()
+        mock_reader.get_entity_state.return_value = None
+
+        handler = HandlerNodeIntrospected(mock_reader)
+
         capabilities = ModelNodeCapabilities(
             postgres=True,
             read=True,
@@ -591,348 +696,16 @@ class TestHandlerNodeIntrospectedProjectionPersistence:
         )
         envelope = create_envelope(introspection_event, now=TEST_NOW)
 
-        await handler.handle(envelope)
-
-        # Verify capabilities were passed to projector
-        call_kwargs = mock_projector.upsert_partial.call_args[1]
-        values = call_kwargs["values"]
-        # Capabilities are serialized to JSON string
-        assert values["capabilities"] == capabilities.model_dump_json()
-        assert values["node_version"] == "2.0.0"
-
-    @pytest.mark.asyncio
-    async def test_projection_calculates_ack_deadline(self) -> None:
-        """Test that ack_deadline is calculated correctly."""
-        mock_reader = create_mock_projection_reader()
-        mock_reader.get_entity_state.return_value = None
-
-        mock_projector = create_mock_projector()
-
-        # Use custom ack timeout
-        ack_timeout_seconds = 60.0
-        handler = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-            projector=mock_projector,
-            ack_timeout_seconds=ack_timeout_seconds,
-        )
-
-        introspection_event = create_introspection_event()
-        envelope = create_envelope(introspection_event, now=TEST_NOW)
-
-        await handler.handle(envelope)
-
-        # Verify ack_deadline was calculated
-        call_kwargs = mock_projector.upsert_partial.call_args[1]
-        values = call_kwargs["values"]
-        expected_deadline = TEST_NOW + timedelta(seconds=ack_timeout_seconds)
-        assert values["ack_deadline"] == expected_deadline
-
-    @pytest.mark.asyncio
-    async def test_default_ack_timeout(self) -> None:
-        """Test that default ack timeout is 30 seconds."""
-        mock_reader = create_mock_projection_reader()
-        mock_reader.get_entity_state.return_value = None
-
-        mock_projector = create_mock_projector()
-
-        # Use default timeout
-        handler = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-            projector=mock_projector,
-        )
-
-        introspection_event = create_introspection_event()
-        envelope = create_envelope(introspection_event, now=TEST_NOW)
-
-        await handler.handle(envelope)
-
-        # Verify default ack_deadline (30 seconds)
-        call_kwargs = mock_projector.upsert_partial.call_args[1]
-        values = call_kwargs["values"]
-        expected_deadline = TEST_NOW + timedelta(seconds=30.0)
-        assert values["ack_deadline"] == expected_deadline
-
-    @pytest.mark.asyncio
-    async def test_does_not_persist_for_blocking_states(self) -> None:
-        """Test that no persistence happens for nodes in blocking states."""
-        mock_reader = create_mock_projection_reader()
-        node_id = uuid4()
-
-        # Node is already active
-        mock_reader.get_entity_state.return_value = create_projection(
-            entity_id=node_id,
-            state=EnumRegistrationState.ACTIVE,
-        )
-
-        mock_projector = create_mock_projector()
-
-        handler = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-            projector=mock_projector,
-        )
-
-        introspection_event = create_introspection_event(node_id=node_id)
-        envelope = create_envelope(introspection_event, now=TEST_NOW)
-
         output = await handler.handle(envelope)
 
-        # Should not emit events (node already active)
-        assert isinstance(output, ModelHandlerOutput)
-        assert len(output.events) == 0
-
-        # Should NOT call projector
-        mock_projector.upsert_partial.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_persists_for_retriable_states(self) -> None:
-        """Test that projection is persisted for re-registration from retriable states."""
-        mock_reader = create_mock_projection_reader()
-        node_id = uuid4()
-
-        # Node has expired liveness
-        mock_reader.get_entity_state.return_value = create_projection(
-            entity_id=node_id,
-            state=EnumRegistrationState.LIVENESS_EXPIRED,
-        )
-
-        mock_projector = create_mock_projector()
-
-        handler = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-            projector=mock_projector,
-        )
-
-        introspection_event = create_introspection_event(node_id=node_id)
-        correlation_id = uuid4()
-        envelope = create_envelope(
-            introspection_event, now=TEST_NOW, correlation_id=correlation_id
-        )
-
-        output = await handler.handle(envelope)
-
-        # Should emit re-registration event
-        assert isinstance(output, ModelHandlerOutput)
-        assert len(output.events) == 1
-        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
-
-        # Should persist projection for re-registration
-        mock_projector.upsert_partial.assert_called_once()
-        call_kwargs = mock_projector.upsert_partial.call_args[1]
-        values = call_kwargs["values"]
-        assert (
-            values["current_state"] == EnumRegistrationState.PENDING_REGISTRATION.value
-        )
-
-
-def create_mock_consul_handler() -> AsyncMock:
-    """Create a mock HandlerConsul."""
-    from omnibase_infra.handlers import HandlerConsul
-
-    mock = AsyncMock(spec=HandlerConsul)
-    mock.execute = AsyncMock(return_value=None)
-    return mock
-
-
-class TestHandlerNodeIntrospectedConsulRegistration:
-    """Test Consul registration (dual registration) functionality."""
-
-    @pytest.mark.asyncio
-    async def test_has_consul_handler_property(self) -> None:
-        """Test the has_consul_handler property reflects configuration."""
-        mock_reader = create_mock_projection_reader()
-        mock_consul = create_mock_consul_handler()
-
-        handler_with_consul = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-            consul_handler=mock_consul,
-        )
-        assert handler_with_consul.has_consul_handler is True
-
-        handler_without_consul = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-        )
-        assert handler_without_consul.has_consul_handler is False
-
-    @pytest.mark.asyncio
-    async def test_registers_with_consul_when_handler_provided(self) -> None:
-        """Test that Consul registration is called when handler is provided."""
-        mock_reader = create_mock_projection_reader()
-        mock_reader.get_entity_state.return_value = None  # New node
-
-        mock_consul = create_mock_consul_handler()
-
-        handler = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-            consul_handler=mock_consul,
-        )
-
-        node_id = uuid4()
-        introspection_event = create_introspection_event(node_id=node_id)
-        envelope = create_envelope(introspection_event, now=TEST_NOW)
-
-        output = await handler.handle(envelope)
-
-        # Should emit event
-        assert isinstance(output, ModelHandlerOutput)
-        assert len(output.events) == 1
-        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
-
-        # Should have called HandlerConsul.execute
-        mock_consul.execute.assert_called_once()
-
-        # Verify the call had correct structure
-        call_args = mock_consul.execute.call_args[0][0]
-        assert call_args["operation"] == "consul.register"
-        assert "payload" in call_args
-
-        payload = call_args["payload"]
-        # Service name follows ONEX convention: onex-{node_type}
-        assert payload["name"] == "onex-effect"
-        assert payload["service_id"] == f"onex-effect-{node_id}"
-        assert "onex" in payload["tags"]
-
-    @pytest.mark.asyncio
-    async def test_skips_consul_when_no_handler(self) -> None:
-        """Test that Consul registration is skipped when no handler provided."""
-        mock_reader = create_mock_projection_reader()
-        mock_reader.get_entity_state.return_value = None  # New node
-
-        # No consul handler
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
-        node_id = uuid4()
-        introspection_event = create_introspection_event(node_id=node_id)
-        envelope = create_envelope(introspection_event, now=TEST_NOW)
-
-        # Should not raise - just skip Consul registration
-        output = await handler.handle(envelope)
-
-        assert isinstance(output, ModelHandlerOutput)
-        assert len(output.events) == 1
-        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
-
-    @pytest.mark.asyncio
-    async def test_continues_on_consul_error(self) -> None:
-        """Test that handler continues even if Consul registration fails."""
-        mock_reader = create_mock_projection_reader()
-        mock_reader.get_entity_state.return_value = None  # New node
-
-        mock_consul = create_mock_consul_handler()
-        mock_consul.execute.side_effect = Exception("Consul connection failed")
-
-        handler = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-            consul_handler=mock_consul,
-        )
-
-        node_id = uuid4()
-        introspection_event = create_introspection_event(node_id=node_id)
-        envelope = create_envelope(introspection_event, now=TEST_NOW)
-
-        # Should not raise - Consul failure is non-fatal
-        output = await handler.handle(envelope)
-
-        # Should still emit event despite Consul failure
-        assert isinstance(output, ModelHandlerOutput)
-        assert len(output.events) == 1
-        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
-
-        # Consul execute should have been attempted
-        mock_consul.execute.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_consul_registration_uses_correct_service_name_format(self) -> None:
-        """Test service name follows ONEX convention: onex-{node_type}."""
-        mock_reader = create_mock_projection_reader()
-        mock_reader.get_entity_state.return_value = None
-
-        mock_consul = create_mock_consul_handler()
-
-        handler = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-            consul_handler=mock_consul,
-        )
-
-        node_id = uuid4()
-        # Service name follows ONEX convention: onex-{node_type}
-        # create_introspection_event uses node_type=EnumNodeKind.EFFECT by default
-        expected_service_name = "onex-effect"
-
-        introspection_event = create_introspection_event(node_id=node_id)
-        envelope = create_envelope(introspection_event, now=TEST_NOW)
-
-        await handler.handle(envelope)
-
-        call_args = mock_consul.execute.call_args[0][0]
-        payload = call_args["payload"]
-
-        # Service name should match ONEX convention
-        assert payload["name"] == expected_service_name
-
-    @pytest.mark.asyncio
-    async def test_consul_registration_extracts_address_from_endpoints(self) -> None:
-        """Test that address/port are extracted from endpoint URLs."""
-        mock_reader = create_mock_projection_reader()
-        mock_reader.get_entity_state.return_value = None
-
-        mock_consul = create_mock_consul_handler()
-
-        handler = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-            consul_handler=mock_consul,
-        )
-
-        node_id = uuid4()
-        introspection_event = ModelNodeIntrospectionEvent(
-            node_id=node_id,
-            node_type=EnumNodeKind.EFFECT,
-            endpoints={
-                "health": "http://test-node:8080/health",
-                "api": "http://test-node:8080/api",
-            },
-            correlation_id=uuid4(),
-            timestamp=TEST_NOW,
-        )
-        envelope = create_envelope(introspection_event, now=TEST_NOW)
-
-        await handler.handle(envelope)
-
-        call_args = mock_consul.execute.call_args[0][0]
-        payload = call_args["payload"]
-
-        # Should extract address and port from endpoint URL
-        assert payload.get("address") == "test-node"
-        assert payload.get("port") == 8080
-
-    @pytest.mark.asyncio
-    async def test_consul_registration_with_full_dual_registration(self) -> None:
-        """Test full dual registration with both PostgreSQL and Consul."""
-        mock_reader = create_mock_projection_reader()
-        mock_reader.get_entity_state.return_value = None  # New node
-
-        mock_projector = create_mock_projector()
-        mock_consul = create_mock_consul_handler()
-
-        handler = HandlerNodeIntrospected(
-            projection_reader=mock_reader,
-            projector=mock_projector,
-            consul_handler=mock_consul,
-        )
-
-        node_id = uuid4()
-        introspection_event = create_introspection_event(node_id=node_id)
-        envelope = create_envelope(introspection_event, now=TEST_NOW)
-
-        output = await handler.handle(envelope)
-
-        # Should emit event
-        assert isinstance(output, ModelHandlerOutput)
-        assert len(output.events) == 1
-        assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
-
-        # Both PostgreSQL and Consul should be called
-        mock_projector.upsert_partial.assert_called_once()
-        mock_consul.execute.assert_called_once()
+        postgres_intents = [
+            i
+            for i in output.intents
+            if isinstance(i.payload, ModelPayloadPostgresUpsertRegistration)
+        ]
+        record = postgres_intents[0].payload.record.model_dump()
+        assert record["capabilities"] == capabilities.model_dump_json()
+        assert record["node_version"] == "2.0.0"
 
 
 class TestSanitizeToolName:

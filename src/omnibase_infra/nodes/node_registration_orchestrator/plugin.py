@@ -73,11 +73,11 @@ if TYPE_CHECKING:
     import asyncpg
 
     from omnibase_infra.handlers import HandlerConsul
-    from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
-        DispatcherNodeIntrospected,
-    )
     from omnibase_infra.projectors.snapshot_publisher_registration import (
         SnapshotPublisherRegistration,
+    )
+    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+        EventBusSubcontractWiring,
     )
     from omnibase_infra.runtime.projector_shell import ProjectorShell
 
@@ -171,7 +171,7 @@ class PluginRegistration:
         _pool: PostgreSQL connection pool (created in initialize())
         _projector: ProjectorShell for projections (created in initialize())
         _consul_handler: HandlerConsul for dual-registration (optional)
-        _introspection_dispatcher: Dispatcher for introspection events
+        _wiring: EventBusSubcontractWiring for dispatch engine consumers
     """
 
     def __init__(self) -> None:
@@ -179,8 +179,8 @@ class PluginRegistration:
         self._pool: asyncpg.Pool | None = None
         self._projector: ProjectorShell | None = None
         self._consul_handler: HandlerConsul | None = None
-        self._introspection_dispatcher: DispatcherNodeIntrospected | None = None
         self._snapshot_publisher: SnapshotPublisherRegistration | None = None
+        self._wiring: EventBusSubcontractWiring | None = None
         self._shutdown_in_progress: bool = False
 
     @property
@@ -751,14 +751,14 @@ class PluginRegistration:
         self,
         config: ModelDomainPluginConfig,
     ) -> ModelDomainPluginResult:
-        """Create introspection dispatcher (no dispatch engine wiring).
+        """Wire registration dispatchers into the MessageDispatchEngine.
 
-        Creates the introspection dispatcher from container-resolved handlers.
-        Note: This plugin does not register with MessageDispatchEngine directly;
-        introspection events are consumed via dedicated Kafka consumer.
+        Calls wire_registration_dispatchers() to register 4 dispatchers + 4 routes
+        with the dispatch engine. The engine is frozen by the kernel after all
+        plugins have completed wire_dispatchers().
 
         Args:
-            config: Plugin configuration with container.
+            config: Plugin configuration with container and dispatch_engine.
 
         Returns:
             Result indicating success/failure.
@@ -769,8 +769,8 @@ class PluginRegistration:
         # Check if service_registry is available
         if config.container.service_registry is None:
             logger.warning(
-                "DEGRADED_MODE: ServiceRegistry not available, skipping introspection "
-                "dispatcher creation (correlation_id=%s)",
+                "DEGRADED_MODE: ServiceRegistry not available, skipping "
+                "dispatcher wiring (correlation_id=%s)",
                 correlation_id,
             )
             return ModelDomainPluginResult.skipped(
@@ -778,53 +778,50 @@ class PluginRegistration:
                 reason="ServiceRegistry not available",
             )
 
-        try:
-            # Deferred import: HandlerNodeIntrospected depends on registration infra
-            from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
-                DispatcherNodeIntrospected,
-            )
-            from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-                HandlerNodeIntrospected,
-            )
-
-            logger.debug(
-                "Resolving HandlerNodeIntrospected from container (correlation_id=%s)",
+        if config.dispatch_engine is None:
+            logger.warning(
+                "DEGRADED_MODE: dispatch_engine not available, skipping "
+                "dispatcher wiring (correlation_id=%s)",
                 correlation_id,
             )
-
-            handler_introspected: HandlerNodeIntrospected = (
-                await config.container.service_registry.resolve_service(
-                    HandlerNodeIntrospected
-                )
+            return ModelDomainPluginResult.skipped(
+                plugin_id=self.plugin_id,
+                reason="dispatch_engine not available",
             )
 
-            self._introspection_dispatcher = DispatcherNodeIntrospected(
-                handler_introspected
+        try:
+            from omnibase_infra.nodes.node_registration_orchestrator.wiring import (
+                wire_registration_dispatchers,
+            )
+
+            dispatch_summary = await wire_registration_dispatchers(
+                container=config.container,
+                engine=config.dispatch_engine,
+                correlation_id=correlation_id,
             )
 
             duration = time.time() - start_time
             logger.info(
-                "Introspection dispatcher created (correlation_id=%s)",
+                "Registration dispatchers wired into engine (correlation_id=%s)",
                 correlation_id,
                 extra={
-                    "dispatcher_class": self._introspection_dispatcher.__class__.__name__,
-                    "handler_class": handler_introspected.__class__.__name__,
+                    "dispatchers": dispatch_summary.get("dispatchers", []),
+                    "routes": dispatch_summary.get("routes", []),
                 },
             )
 
-            # Use constructor directly for results with resources_created
             return ModelDomainPluginResult(
                 plugin_id=self.plugin_id,
                 success=True,
-                message="Introspection dispatcher created",
-                resources_created=["introspection_dispatcher"],
+                message="Registration dispatchers wired into engine",
+                resources_created=list(dispatch_summary.get("dispatchers", [])),
                 duration_seconds=duration,
             )
 
         except Exception as e:
             duration = time.time() - start_time
             logger.exception(
-                "Failed to create introspection dispatcher (correlation_id=%s)",
+                "Failed to wire registration dispatchers (correlation_id=%s)",
                 correlation_id,
             )
             return ModelDomainPluginResult.failed(
@@ -837,36 +834,33 @@ class PluginRegistration:
         self,
         config: ModelDomainPluginConfig,
     ) -> ModelDomainPluginResult:
-        """Start introspection event consumer.
+        """Start event consumers via EventBusSubcontractWiring.
 
-        Subscribes to the input topic to route introspection events to
-        HandlerNodeIntrospected via IntrospectionEventRouter.
+        Reads subscribe_topics from the registration orchestrator contract
+        and wires Kafka subscriptions through EventBusSubcontractWiring.
+        Messages are deserialized and dispatched through the frozen
+        MessageDispatchEngine. Output events are published by the
+        DispatchResultApplier.
 
-        Requires config.node_identity to be set for structured consumer group
-        naming (OMN-1602).
+        Requires config.node_identity and config.dispatch_engine to be set.
 
         Args:
-            config: Plugin configuration with event_bus and node_identity.
+            config: Plugin configuration with event_bus, node_identity,
+                and dispatch_engine.
 
         Returns:
             Result with unsubscribe_callbacks for cleanup.
         """
-        from omnibase_infra.enums import EnumConsumerGroupPurpose
-        from omnibase_infra.nodes.node_registration_orchestrator.introspection_event_router import (
-            IntrospectionEventRouter,
-        )
-
         start_time = time.time()
         correlation_id = config.correlation_id
 
-        if self._introspection_dispatcher is None:
+        if config.dispatch_engine is None:
             return ModelDomainPluginResult.skipped(
                 plugin_id=self.plugin_id,
-                reason="Introspection dispatcher not available",
+                reason="dispatch_engine not available",
             )
 
         # Duck typing: check for subscribe capability rather than concrete type
-        # Per CLAUDE.md: "Protocol Resolution - Duck typing through protocols, never isinstance"
         if not (
             hasattr(config.event_bus, "subscribe")
             and callable(getattr(config.event_bus, "subscribe", None))
@@ -883,61 +877,85 @@ class PluginRegistration:
             )
 
         try:
-            # Create event router with container-based DI pattern
-            introspection_event_router = IntrospectionEventRouter(
-                container=config.container,
-                dispatcher=self._introspection_dispatcher,
+            from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+                EventBusSubcontractWiring,
+                load_event_bus_subcontract,
+            )
+            from omnibase_infra.runtime.service_dispatch_result_applier import (
+                DispatchResultApplier,
+            )
+            from omnibase_infra.runtime.service_intent_executor import (
+                IntentExecutor,
+            )
+
+            # Load event_bus subcontract from registration orchestrator contract
+            contract_path = Path(__file__).parent / "contract.yaml"
+            subcontract = load_event_bus_subcontract(contract_path, logger=logger)
+
+            if subcontract is None:
+                return ModelDomainPluginResult.skipped(
+                    plugin_id=self.plugin_id,
+                    reason=f"No event_bus subcontract in {contract_path}",
+                )
+
+            # Create intent executor for effect layer delegation (Phase C)
+            intent_executor = IntentExecutor(container=config.container)
+
+            # Create dispatch result applier for output event publishing + intent delegation
+            result_applier = DispatchResultApplier(
                 event_bus=config.event_bus,
                 output_topic=config.output_topic,
+                intent_executor=intent_executor,
             )
 
-            # Subscribe using typed node identity for structured consumer group naming
+            # Create EventBusSubcontractWiring with dispatch engine and result applier
+            self._wiring = EventBusSubcontractWiring(
+                event_bus=config.event_bus,
+                dispatch_engine=config.dispatch_engine,
+                environment=config.node_identity.env,
+                node_name=config.node_identity.node_name,
+                service=config.node_identity.service,
+                version=config.node_identity.version,
+                result_applier=result_applier,
+            )
+
+            # Wire subscriptions from contract-declared topics
+            await self._wiring.wire_subscriptions(
+                subcontract=subcontract,
+                node_name="registration-orchestrator",
+            )
+
             logger.info(
-                "Subscribing to introspection events on event bus (correlation_id=%s)",
+                "Registration consumers started via EventBusSubcontractWiring "
+                "(correlation_id=%s)",
                 correlation_id,
                 extra={
-                    "topic": config.input_topic,
-                    "node_identity": {
-                        "env": config.node_identity.env,
-                        "service": config.node_identity.service,
-                        "node_name": config.node_identity.node_name,
-                        "version": config.node_identity.version,
-                    },
-                    "purpose": EnumConsumerGroupPurpose.INTROSPECTION.value,
+                    "subscribe_topics": subcontract.subscribe_topics,
+                    "topic_count": len(subcontract.subscribe_topics)
+                    if subcontract.subscribe_topics
+                    else 0,
                 },
-            )
-
-            introspection_unsubscribe = await config.event_bus.subscribe(
-                topic=config.input_topic,
-                node_identity=config.node_identity,
-                on_message=introspection_event_router.handle_message,
-                purpose=EnumConsumerGroupPurpose.INTROSPECTION,
-                required_for_readiness=True,
             )
 
             duration = time.time() - start_time
-            logger.info(
-                "Introspection event consumer started in %.3fs (correlation_id=%s)",
-                duration,
-                correlation_id,
-                extra={
-                    "subscribe_duration_seconds": duration,
-                },
-            )
 
-            # Use constructor directly since we need unsubscribe_callbacks
+            # Cleanup callback wraps the wiring cleanup
+            async def _cleanup_wiring() -> None:
+                if self._wiring is not None:
+                    await self._wiring.cleanup()
+
             return ModelDomainPluginResult(
                 plugin_id=self.plugin_id,
                 success=True,
-                message="Introspection event consumer started",
+                message="Registration consumers started via EventBusSubcontractWiring",
                 duration_seconds=duration,
-                unsubscribe_callbacks=[introspection_unsubscribe],
+                unsubscribe_callbacks=[_cleanup_wiring],
             )
 
         except Exception as e:
             duration = time.time() - start_time
             logger.exception(
-                "Failed to start introspection consumer (correlation_id=%s)",
+                "Failed to start registration consumers (correlation_id=%s)",
                 correlation_id,
             )
             return ModelDomainPluginResult.failed(
@@ -1037,7 +1055,7 @@ class PluginRegistration:
 
         self._projector = None
         self._consul_handler = None
-        self._introspection_dispatcher = None
+        self._wiring = None
 
         duration = time.time() - start_time
 

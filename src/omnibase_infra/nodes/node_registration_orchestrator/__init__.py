@@ -51,9 +51,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
     DispatcherNodeRegistrationAcked,
     DispatcherRuntimeTick,
 )
-from omnibase_infra.nodes.node_registration_orchestrator.introspection_event_router import (
-    IntrospectionEventRouter,
-)
 from omnibase_infra.nodes.node_registration_orchestrator.models import (
     ModelIntentExecutionResult,
     ModelOrchestratorConfig,
@@ -91,8 +88,6 @@ __all__: list[str] = [
     "DispatcherNodeIntrospected",
     "DispatcherNodeRegistrationAcked",
     "DispatcherRuntimeTick",
-    # Event routing (moved from runtime/ - OMN-1346)
-    "IntrospectionEventRouter",
     "ModelIntentExecutionResult",
     # Models
     "ModelOrchestratorConfig",

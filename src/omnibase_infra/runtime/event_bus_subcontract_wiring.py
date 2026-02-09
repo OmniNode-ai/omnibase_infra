@@ -208,6 +208,8 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         _dispatch_engine: Engine to dispatch received messages to handlers
         _environment: Environment identifier for consumer groups (e.g., 'dev', 'prod')
         _node_name: Name of the node/handler for consumer group and logging
+        _result_applier: Optional applier for processing dispatch results
+            (publishing output events and delegating intents)
         _idempotency_store: Optional store for tracking processed messages
         _idempotency_config: Configuration for idempotency behavior
         _dlq_config: Configuration for Dead Letter Queue behavior
@@ -231,6 +233,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         node_name: str,
         service: str,
         version: str,
+        result_applier: object | None = None,
         idempotency_store: ProtocolIdempotencyStore | None = None,
         idempotency_config: ModelIdempotencyConfig | None = None,
         dlq_config: ModelDlqConfig | None = None,
@@ -254,6 +257,11 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 Used to derive consumer group ID.
             version: Version string for node identity (e.g., 'v1', 'v1.0.0').
                 Used to derive consumer group ID.
+            result_applier: Optional DispatchResultApplier for processing
+                dispatch results. When provided, the wiring captures the return value
+                of dispatch_engine.dispatch() and passes it to the applier for output
+                event publishing and intent delegation. Duck-typed: must have an async
+                ``apply(result, correlation_id)`` method.
             idempotency_store: Optional idempotency store for message deduplication.
                 If provided with enabled config, messages are deduplicated by envelope_id.
             idempotency_config: Optional configuration for idempotency behavior.
@@ -288,6 +296,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         self._node_name = node_name
         self._service = service
         self._version = version
+        self._result_applier = result_applier
         self._idempotency_store = idempotency_store
         self._idempotency_config = idempotency_config or ModelIdempotencyConfig()
         self._dlq_config = dlq_config or ModelDlqConfig()
@@ -666,7 +675,13 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                         return  # Skip dispatch
 
                 # Dispatch via ProtocolDispatchEngine interface
-                await self._dispatch_engine.dispatch(topic, envelope)
+                result = await self._dispatch_engine.dispatch(topic, envelope)
+
+                # Apply dispatch result (publish output events + delegate intents)
+                if self._result_applier is not None and result is not None:
+                    apply_fn = getattr(self._result_applier, "apply", None)
+                    if apply_fn is not None and callable(apply_fn):
+                        await apply_fn(result, correlation_id)
 
                 # Success - commit offset if policy requires and clear retry count
                 if self._should_commit_after_handler():
@@ -879,7 +894,9 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         # Propagate event_type from topic if not already set in the envelope.
         # This ensures all envelopes flowing through the wiring have event_type
         # populated, even if the producer did not explicitly set it.
-        if envelope.event_type is None:
+        # Uses getattr for forward-compatibility: omnibase_core may not yet
+        # have the event_type field on ModelEventEnvelope.
+        if getattr(envelope, "event_type", None) is None:
             derived_event_type = self._derive_event_type_from_topic(topic)
             if derived_event_type is not None:
                 envelope = envelope.model_copy(
