@@ -875,7 +875,7 @@ class MessageDispatchEngine:
         Dispatch Process:
             1. Parse topic to extract message category
             2. Validate envelope category matches topic category
-            3. Get message type from envelope payload
+            3. Get routing key from event_type (preferred) or payload class name
             4. Find all matching dispatchers (by category + message type)
             5. Execute dispatchers (fan-out)
             6. Collect outputs and return result
@@ -1005,8 +1005,27 @@ class MessageDispatchEngine:
         # if envelope_category != topic_category:
         #     ... (category mismatch handling with structured metrics)
 
-        # Step 3: Get message type from payload
-        message_type = type(envelope.payload).__name__
+        # Step 3: Get routing key from event_type (primary) or payload class name (fallback)
+        #
+        # Design: envelope.event_type is the preferred routing key because it provides
+        # an explicit, contract-driven identifier (e.g., "node.introspected.v1") that
+        # decouples routing from Python class names. When event_type is absent or None,
+        # we fall back to inferring the message type from the payload class name for
+        # backwards compatibility with existing dispatchers.
+        #
+        # The extracted routing key is matched against DispatchEntryInternal.message_types
+        # in _find_matching_dispatchers(), so dispatchers can register for either
+        # event_type strings or class names transparently.
+        #
+        # Related: OMN-2037
+        envelope_event_type: str | None = getattr(envelope, "event_type", None)
+        normalized_event_type = (
+            str(envelope_event_type).strip() if envelope_event_type is not None else ""
+        )
+        if normalized_event_type:
+            message_type = normalized_event_type
+        else:
+            message_type = type(envelope.payload).__name__
 
         # Step 4: Find matching dispatchers
         matching_dispatchers = self._find_matching_dispatchers(
@@ -1016,10 +1035,12 @@ class MessageDispatchEngine:
         )
 
         # Log routing decision at DEBUG level
+        routing_source = "event_type" if normalized_event_type else "payload_class"
         self._logger.debug(
-            "Routing decision: %d dispatchers matched for message_type '%s'",
+            "Routing decision: %d dispatchers matched for message_type '%s' (source=%s)",
             len(matching_dispatchers),
             message_type,
+            routing_source,
             extra=self._build_log_context(
                 topic=topic,
                 category=topic_category,
