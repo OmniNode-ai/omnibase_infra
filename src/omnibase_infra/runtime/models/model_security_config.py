@@ -8,7 +8,8 @@ configuration file while maintaining secure defaults for both handler loading an
 plugin discovery.
 
 Security Model:
-    - Default: Only omnibase_core. and omnibase_infra. are trusted
+    - Default handlers: Only omnibase_core. and omnibase_infra. are trusted
+    - Default plugins: omnibase_core., omnibase_infra., and omniclaude. are trusted
     - Third-party handlers: Requires allow_third_party_handlers=True AND
       explicit listing in allowed_handler_namespaces
     - Third-party plugins: Requires allow_third_party_plugins=True AND
@@ -21,7 +22,7 @@ Example:
     >>> config.get_effective_namespaces()
     ('omnibase_core.', 'omnibase_infra.')
     >>> config.get_effective_plugin_namespaces()
-    ('omnibase_core.', 'omnibase_infra.')
+    ('omnibase_core.', 'omnibase_infra.', 'omniclaude.')
 
     >>> # Enable third-party handlers
     >>> config = ModelSecurityConfig(
@@ -72,7 +73,9 @@ class ModelSecurityConfig(BaseModel):
     namespaces require explicit opt-in for both handlers and plugins.
 
     Security Model:
-        - Default: Only omnibase_core. and omnibase_infra. are trusted
+        - Default handlers: Only omnibase_core. and omnibase_infra. are trusted
+        - Default plugins: omnibase_core., omnibase_infra., and omniclaude.
+          are trusted (omniclaude provides first-party domain plugins)
         - Third-party handlers: Requires allow_third_party_handlers=True AND
           explicit listing in allowed_handler_namespaces
         - Third-party plugins: Requires allow_third_party_plugins=True AND
@@ -160,7 +163,7 @@ class ModelSecurityConfig(BaseModel):
         Example:
             >>> config = ModelSecurityConfig()
             >>> config.get_effective_plugin_namespaces()
-            ('omnibase_core.', 'omnibase_infra.')
+            ('omnibase_core.', 'omnibase_infra.', 'omniclaude.')
 
             >>> config = ModelSecurityConfig(
             ...     allow_third_party_plugins=True,

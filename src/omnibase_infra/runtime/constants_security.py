@@ -22,7 +22,7 @@ Design Decisions:
     - SPI is NOT included because it contains protocols, not handler implementations
     - Third-party namespaces require explicit config file, not env vars
     - Env vars are only acceptable to point to a config file path
-    - Plugin namespace prefixes mirror handler prefixes (same trust boundary)
+    - Plugin namespace prefixes are a superset of handler prefixes
     - Domain plugin entry point group uses PEP 621 naming conventions
 
 Example:
@@ -48,6 +48,9 @@ Example:
 
 .. versionadded:: 0.3.0
     Added plugin security constants as part of OMN-2010.
+
+.. versionchanged:: 0.6.0
+    Added omniclaude. to TRUSTED_PLUGIN_NAMESPACE_PREFIXES (OMN-2047).
 """
 
 from __future__ import annotations
@@ -77,19 +80,23 @@ TRUSTED_HANDLER_NAMESPACE_PREFIXES: Final[tuple[str, ...]] = (
 #
 # SECURITY: This is a security boundary. Changes require review.
 #
-# Plugin namespace prefixes mirror handler prefixes — plugins and handlers share
-# the same trust boundary. Only modules from these namespaces may be dynamically
-# discovered and loaded as domain plugins.
+# Plugin namespace prefixes are a superset of handler prefixes. The core trust
+# boundary (omnibase_core., omnibase_infra.) is shared, but plugins may include
+# additional first-party namespaces that provide domain plugins without providing
+# handler implementations.
 #
-# Why the same namespaces as handlers:
-# - Plugins are an extension mechanism with the same privilege level as handlers
-# - They can execute arbitrary code at import time (same risk profile)
-# - Keeping a single trust boundary simplifies security auditing
+# Why omniclaude. is included:
+# - omniclaude provides PluginClaude, a first-party domain plugin registered via
+#   pyproject.toml entry_points (onex.domain_plugins group)
+# - Without this prefix, RegistryDomainPlugin.discover_from_entry_points() rejects
+#   the entry point with status namespace_rejected (OMN-2047)
+# - omniclaude is a first-party package maintained in the same monorepo ecosystem
 #
 # Third-party plugin namespaces must be explicitly configured via security config file.
 TRUSTED_PLUGIN_NAMESPACE_PREFIXES: Final[tuple[str, ...]] = (
     "omnibase_core.",
     "omnibase_infra.",
+    "omniclaude.",
 )
 
 # PEP 621 entry_points group name for domain plugin discovery.

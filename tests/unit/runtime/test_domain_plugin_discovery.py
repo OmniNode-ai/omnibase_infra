@@ -12,9 +12,9 @@ Comprehensive unit tests for the plugin discovery mechanism covering:
 
 Reuses MockPlugin pattern from test_domain_plugin_shutdown.py.
 
-Test classes and counts (32 total):
-    - TestPluginNamespaceValidation: 4 tests
-    - TestDiscoverFromEntryPoints: 15 tests
+Test classes and counts (34 total):
+    - TestPluginNamespaceValidation: 5 tests
+    - TestDiscoverFromEntryPoints: 16 tests
     - TestDiscoveryReport: 3 tests
     - TestSecurityConfigPluginNamespaces: 5 tests
     - TestSecurityPolicyEnforcement: 2 tests
@@ -173,6 +173,18 @@ class TestPluginNamespaceValidation:
         assert not RegistryDomainPlugin._validate_plugin_namespace(
             "omnibase_infra.plugins.foo",
             (),
+        )
+
+    def test_omniclaude_namespace_accepted(self) -> None:
+        """omniclaude. namespace is trusted for plugin discovery (OMN-2047).
+
+        The omniclaude package provides PluginClaude via entry_points. Its
+        module path ``omniclaude.runtime.plugin`` must be accepted by the
+        default trusted plugin namespace prefixes.
+        """
+        assert RegistryDomainPlugin._validate_plugin_namespace(
+            "omniclaude.runtime.plugin",
+            TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
         )
 
     def test_non_dotted_prefix_uses_boundary_check(self) -> None:
@@ -507,6 +519,40 @@ class TestDiscoverFromEntryPoints:
 
         mock_entry_points.assert_called_once_with(group="custom.group")
         assert report.group == "custom.group"
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_omniclaude_entry_point_accepted(
+        self, mock_entry_points: MagicMock
+    ) -> None:
+        """omniclaude entry point is discovered and accepted with default config (OMN-2047).
+
+        Simulates the real omniclaude entry point registration::
+
+            [project.entry-points."onex.domain_plugins"]
+            claude = "omniclaude.runtime.plugin:PluginClaude"
+
+        The plugin must be accepted by the default trusted namespace prefixes
+        without requiring a custom security_config.
+        """
+
+        class PluginClaude(MockPlugin):
+            def __init__(self) -> None:
+                super().__init__(plugin_id="claude")
+
+        ep = _make_entry_point(
+            "claude",
+            "omniclaude.runtime.plugin:PluginClaude",
+            PluginClaude,
+        )
+        mock_entry_points.return_value = [ep]
+
+        registry = RegistryDomainPlugin()
+        report = registry.discover_from_entry_points()
+
+        assert len(report.accepted) == 1
+        assert report.accepted[0] == "claude"
+        assert registry.get("claude") is not None
+        assert not report.has_errors
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
     def test_parse_module_path_no_colon(self, mock_entry_points: MagicMock) -> None:
