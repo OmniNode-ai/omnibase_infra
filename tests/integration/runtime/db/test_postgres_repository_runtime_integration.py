@@ -487,8 +487,8 @@ class TestArgumentValidation:
 class TestLearnedPatternsTable:
     """Test against the real learned_patterns table schema."""
 
-    async def test_query_learned_patterns_empty(self, db_pool: asyncpg.Pool):
-        """Test querying the actual learned_patterns table."""
+    async def test_query_learned_patterns_validated(self, db_pool: asyncpg.Pool):
+        """Test querying the actual learned_patterns table for validated patterns."""
         contract = ModelDbRepositoryContract(
             name="learned_patterns_repo",
             engine="postgres",
@@ -514,9 +514,25 @@ class TestLearnedPatternsTable:
         config = ModelRepositoryRuntimeConfig(max_row_limit=10)
         runtime = PostgresRepositoryRuntime(db_pool, contract, config)
 
-        # Query for validated patterns (table is empty, so expect empty list)
+        # Query for validated patterns - validates the runtime executes correctly
         results = await runtime.call("find_validated", "validated")
 
+        # Validate the query returns a well-formed list of dicts
         assert isinstance(results, list)
-        # Table is empty based on our earlier check
-        assert len(results) == 0
+
+        expected_keys = {"id", "pattern_signature", "domain_id", "confidence", "status"}
+        for row in results:
+            assert isinstance(row, dict), f"Expected dict row, got {type(row)}"
+            assert expected_keys.issubset(row.keys()), (
+                f"Row missing expected keys: {expected_keys - row.keys()}"
+            )
+            assert row["status"] == "validated", (
+                f"Expected status='validated', got status='{row['status']}'"
+            )
+
+        # Verify ORDER BY confidence DESC is respected
+        if len(results) > 1:
+            confidences = [row["confidence"] for row in results]
+            assert confidences == sorted(confidences, reverse=True), (
+                "Results are not ordered by confidence DESC"
+            )

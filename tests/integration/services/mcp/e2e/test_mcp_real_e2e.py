@@ -26,6 +26,7 @@ import threading
 import time
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -683,6 +684,7 @@ class MCPConsulServerFixture:
 
         This must be called before start() to populate discovered_tools.
         """
+        from omnibase_core.container import ModelONEXContainer
         from omnibase_infra.services.mcp import MCPServerLifecycle, ModelMCPServerConfig
 
         config = ModelMCPServerConfig(
@@ -694,7 +696,8 @@ class MCPConsulServerFixture:
             kafka_enabled=False,
         )
 
-        self._lifecycle = MCPServerLifecycle(config)
+        mock_container = MagicMock(spec=ModelONEXContainer)
+        self._lifecycle = MCPServerLifecycle(container=mock_container, config=config)
         await self._lifecycle.start()
 
         # Get discovered tools from registry
