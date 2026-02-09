@@ -28,7 +28,11 @@ Related:
 
 from __future__ import annotations
 
-from importlib.metadata import EntryPoint, entry_points
+from importlib.metadata import entry_points
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from importlib.metadata import EntryPoint
 
 import pytest
 
