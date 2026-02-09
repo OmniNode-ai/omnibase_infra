@@ -149,12 +149,13 @@ class IntentEffectPostgresUpsert:
                 )
                 return
 
-            # Convert string UUID if needed
-            if isinstance(entity_id, str):
-                entity_id = UUID(entity_id)
+            # Convert to UUID (may arrive as str from model_dump)
+            aggregate_id = UUID(entity_id) if isinstance(entity_id, str) else entity_id
+            if not isinstance(aggregate_id, UUID):
+                aggregate_id = UUID(str(aggregate_id))
 
             await self._projector.upsert_partial(
-                aggregate_id=entity_id,
+                aggregate_id=aggregate_id,
                 values=record_dict,
                 correlation_id=effective_correlation_id,
                 conflict_columns=["entity_id", "domain"],
