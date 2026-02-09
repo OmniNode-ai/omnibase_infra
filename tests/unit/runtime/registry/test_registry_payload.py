@@ -210,6 +210,13 @@ class TestRegistryPayloadErrors:
         with pytest.raises(PayloadRegistryError, match="BaseModel subclass"):
             registry.register("BadType", "1.0.0", dict)  # type: ignore[arg-type]
 
+    def test_register_basemodel_itself_raises_error(
+        self, registry: RegistryPayload
+    ) -> None:
+        """Registering BaseModel itself (not a subclass) raises error."""
+        with pytest.raises(PayloadRegistryError, match="concrete BaseModel subclass"):
+            registry.register("BadType", "1.0.0", BaseModel)
+
     def test_register_empty_payload_type_raises_error(
         self, registry: RegistryPayload
     ) -> None:
@@ -465,16 +472,29 @@ class TestRegistryPayloadBehavior:
         assert registry.is_frozen is True
 
     def test_len(self, registry: RegistryPayload) -> None:
-        """__len__ returns entry count."""
-        assert len(registry) == 0
+        """__len__ returns entry count after freeze."""
         registry.register("A", "1.0.0", ModelClaudeHookEvent)
+        registry.freeze()
         assert len(registry) == 1
 
-    def test_contains(self, registry: RegistryPayload) -> None:
-        """__contains__ supports 'in' operator."""
+    def test_len_before_freeze_raises(self, registry: RegistryPayload) -> None:
+        """__len__ raises before freeze to enforce freeze-after-init invariant."""
         registry.register("A", "1.0.0", ModelClaudeHookEvent)
+        with pytest.raises(PayloadRegistryError, match="not frozen"):
+            len(registry)
+
+    def test_contains(self, registry: RegistryPayload) -> None:
+        """__contains__ supports 'in' operator after freeze."""
+        registry.register("A", "1.0.0", ModelClaudeHookEvent)
+        registry.freeze()
         assert ("A", "1.0.0") in registry
         assert ("B", "1.0.0") not in registry
+
+    def test_contains_before_freeze_raises(self, registry: RegistryPayload) -> None:
+        """__contains__ raises before freeze to enforce freeze-after-init invariant."""
+        registry.register("A", "1.0.0", ModelClaudeHookEvent)
+        with pytest.raises(PayloadRegistryError, match="not frozen"):
+            registry.__contains__(("A", "1.0.0"))
 
     def test_str_representation(self, registry: RegistryPayload) -> None:
         """__str__ produces readable output."""

@@ -116,6 +116,14 @@ class MixinPayloadRegistration:
                 version=version,
             )
 
+        if model_class is BaseModel:
+            raise PayloadRegistryError(
+                "model_class must be a concrete BaseModel subclass, "
+                "not BaseModel itself",
+                payload_type=payload_type,
+                version=version,
+            )
+
         key = (payload_type, version)
 
         # Thread-safe registration with atomic check-and-set

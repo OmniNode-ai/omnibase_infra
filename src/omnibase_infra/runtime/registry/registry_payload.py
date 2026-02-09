@@ -159,11 +159,21 @@ class RegistryPayload(MixinPayloadRegistration, MixinPayloadQuery):
     # =========================================================================
 
     def __len__(self) -> int:
-        """Return the number of registered payload types."""
+        """Return the number of registered payload types.
+
+        Raises:
+            PayloadRegistryError: If registry is not frozen.
+        """
+        self._require_frozen("__len__")
         return len(self._entries)
 
     def __contains__(self, key: tuple[str, str]) -> bool:
-        """Check if (payload_type, version) is registered using 'in' operator."""
+        """Check if (payload_type, version) is registered using 'in' operator.
+
+        Raises:
+            PayloadRegistryError: If registry is not frozen.
+        """
+        self._require_frozen("__contains__")
         return key in self._entries
 
     def __str__(self) -> str:
