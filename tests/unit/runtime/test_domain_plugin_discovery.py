@@ -12,12 +12,13 @@ Comprehensive unit tests for the plugin discovery mechanism covering:
 
 Reuses MockPlugin pattern from test_domain_plugin_shutdown.py.
 
-Test classes and counts (24 total):
+Test classes and counts (29 total):
     - TestPluginNamespaceValidation: 4 tests
     - TestDiscoverFromEntryPoints: 12 tests
     - TestDiscoveryReport: 3 tests
-    - TestSecurityConfigPluginNamespaces: 3 tests
+    - TestSecurityConfigPluginNamespaces: 5 tests
     - TestSecurityPolicyEnforcement: 2 tests
+    - TestSecurityConstants: 3 tests
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ import pytest
 
 from omnibase_infra.runtime.constants_security import (
     DOMAIN_PLUGIN_ENTRY_POINT_GROUP,
+    TRUSTED_HANDLER_NAMESPACE_PREFIXES,
     TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
 )
 from omnibase_infra.runtime.models.model_plugin_discovery_report import (
@@ -282,6 +284,7 @@ class TestDiscoverFromEntryPoints:
         assert len(report.accepted) == 0
         assert len(registry) == 0
         assert report.entries[0].status == "namespace_rejected"
+        assert "evil_corp.plugins" in report.entries[0].reason
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
     def test_protocol_invalid_rejected(self, mock_entry_points: MagicMock) -> None:
@@ -580,6 +583,43 @@ class TestSecurityConfigPluginNamespaces:
 
         assert effective == custom
 
+    def test_third_party_enabled_default_namespaces_returns_trusted(self) -> None:
+        """Third-party enabled WITHOUT custom namespaces returns trusted defaults.
+
+        When ``allow_third_party_plugins=True`` is set but
+        ``allowed_plugin_namespaces`` is not overridden, the field defaults to
+        ``TRUSTED_PLUGIN_NAMESPACE_PREFIXES``. This verifies that the
+        opt-in flag alone does not widen the namespace boundary.
+        """
+        config = ModelSecurityConfig(allow_third_party_plugins=True)
+        effective = config.get_effective_plugin_namespaces()
+
+        assert effective == TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+
+    def test_handler_and_plugin_namespaces_independent(self) -> None:
+        """Handler and plugin namespaces return independent results.
+
+        When both ``allow_third_party_handlers`` and
+        ``allow_third_party_plugins`` are True with different namespace tuples,
+        ``get_effective_namespaces()`` and ``get_effective_plugin_namespaces()``
+        return their respective custom tuples independently.
+        """
+        handler_ns = ("mycompany.handlers.",)
+        plugin_ns = ("mycompany.plugins.", "partner.plugins.")
+        config = ModelSecurityConfig(
+            allow_third_party_handlers=True,
+            allowed_handler_namespaces=handler_ns,
+            allow_third_party_plugins=True,
+            allowed_plugin_namespaces=plugin_ns,
+        )
+
+        effective_handlers = config.get_effective_namespaces()
+        effective_plugins = config.get_effective_plugin_namespaces()
+
+        assert effective_handlers == handler_ns
+        assert effective_plugins == plugin_ns
+        assert effective_handlers != effective_plugins
+
 
 # ---------------------------------------------------------------------------
 # TestSecurityPolicyEnforcement (2 tests)
@@ -649,10 +689,38 @@ class TestSecurityPolicyEnforcement:
         assert registry.get("custom-plugin") is not None
 
 
+# ---------------------------------------------------------------------------
+# TestSecurityConstants (3 tests)
+# ---------------------------------------------------------------------------
+
+
+class TestSecurityConstants:
+    """Regression guards for security constants.
+
+    Verifies that critical constants retain expected values and types.
+    Changes to these constants alter the security boundary and must be
+    intentional.
+    """
+
+    def test_domain_plugin_entry_point_group_value(self) -> None:
+        """DOMAIN_PLUGIN_ENTRY_POINT_GROUP is 'onex.domain_plugins'."""
+        assert DOMAIN_PLUGIN_ENTRY_POINT_GROUP == "onex.domain_plugins"
+
+    def test_trusted_plugin_namespace_prefixes_contains_core_and_infra(self) -> None:
+        """TRUSTED_PLUGIN_NAMESPACE_PREFIXES includes omnibase_core. and omnibase_infra."""
+        assert "omnibase_core." in TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+        assert "omnibase_infra." in TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+
+    def test_trusted_plugin_namespace_prefixes_is_tuple(self) -> None:
+        """TRUSTED_PLUGIN_NAMESPACE_PREFIXES is a tuple (immutable)."""
+        assert isinstance(TRUSTED_PLUGIN_NAMESPACE_PREFIXES, tuple)
+
+
 __all__: list[str] = [
     "TestPluginNamespaceValidation",
     "TestDiscoverFromEntryPoints",
     "TestDiscoveryReport",
     "TestSecurityConfigPluginNamespaces",
     "TestSecurityPolicyEnforcement",
+    "TestSecurityConstants",
 ]
