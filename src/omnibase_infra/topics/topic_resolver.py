@@ -29,7 +29,6 @@ Topic Suffix Format:
 
 See Also:
     omnibase_core.validation.validate_topic_suffix - Suffix format validation
-    omnibase_infra.topics.util_topic_composition - Full topic composition
     omnibase_infra.topics.platform_topic_suffixes - Platform-reserved suffixes
 """
 
