@@ -12,9 +12,9 @@ Comprehensive unit tests for the plugin discovery mechanism covering:
 
 Reuses MockPlugin pattern from test_domain_plugin_shutdown.py.
 
-Test classes and counts (22 total):
+Test classes and counts (24 total):
     - TestPluginNamespaceValidation: 4 tests
-    - TestDiscoverFromEntryPoints: 10 tests
+    - TestDiscoverFromEntryPoints: 12 tests
     - TestDiscoveryReport: 3 tests
     - TestSecurityConfigPluginNamespaces: 3 tests
     - TestSecurityPolicyEnforcement: 2 tests
@@ -27,6 +27,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from omnibase_infra.runtime.constants_security import (
+    DOMAIN_PLUGIN_ENTRY_POINT_GROUP,
     TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
 )
 from omnibase_infra.runtime.models.model_plugin_discovery_report import (
@@ -193,7 +194,7 @@ class TestPluginNamespaceValidation:
 
 
 # ---------------------------------------------------------------------------
-# TestDiscoverFromEntryPoints (10 tests)
+# TestDiscoverFromEntryPoints (12 tests)
 # ---------------------------------------------------------------------------
 
 
@@ -298,6 +299,7 @@ class TestDiscoverFromEntryPoints:
         assert len(report.accepted) == 0
         assert report.entries[0].status == "protocol_invalid"
         assert "ProtocolDomainPlugin" in report.entries[0].reason
+        assert len(registry) == 0
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
     def test_import_error_graceful_non_strict(
@@ -317,6 +319,7 @@ class TestDiscoverFromEntryPoints:
         assert len(report.accepted) == 0
         assert report.entries[0].status == "import_error"
         assert report.has_errors
+        assert len(registry) == 0
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
     def test_import_error_raises_in_strict_mode(
@@ -350,6 +353,7 @@ class TestDiscoverFromEntryPoints:
         assert len(report.accepted) == 0
         assert report.entries[0].status == "instantiation_error"
         assert report.has_errors
+        assert len(registry) == 0
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
     def test_multiple_valid_all_registered(self, mock_entry_points: MagicMock) -> None:
@@ -433,6 +437,39 @@ class TestDiscoverFromEntryPoints:
         report2 = registry2.discover_from_entry_points()
 
         assert report2.accepted == ("first", "second")
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_default_group_name(self, mock_entry_points: MagicMock) -> None:
+        """Default group kwarg uses DOMAIN_PLUGIN_ENTRY_POINT_GROUP constant.
+
+        Verifies that calling ``discover_from_entry_points()`` without an
+        explicit ``group`` argument passes the canonical constant to
+        ``importlib.metadata.entry_points`` and that the report's ``group``
+        field reflects the same value.
+        """
+        mock_entry_points.return_value = []
+
+        registry = RegistryDomainPlugin()
+        report = registry.discover_from_entry_points()
+
+        mock_entry_points.assert_called_once_with(group=DOMAIN_PLUGIN_ENTRY_POINT_GROUP)
+        assert report.group == DOMAIN_PLUGIN_ENTRY_POINT_GROUP
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_custom_group_name(self, mock_entry_points: MagicMock) -> None:
+        """Custom group string is forwarded to entry_points() and reflected in report.
+
+        Verifies that passing ``group="custom.group"`` forwards the value to
+        ``importlib.metadata.entry_points`` and that the resulting report
+        stores the custom group name.
+        """
+        mock_entry_points.return_value = []
+
+        registry = RegistryDomainPlugin()
+        report = registry.discover_from_entry_points(group="custom.group")
+
+        mock_entry_points.assert_called_once_with(group="custom.group")
+        assert report.group == "custom.group"
 
 
 # ---------------------------------------------------------------------------
