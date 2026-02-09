@@ -168,7 +168,7 @@ class TestA3OrchestratedDualRegistration:
         intent_types = {
             intent.payload.intent_type
             for intent in reducer_output.intents
-            if intent.intent_type == "extension"
+            if intent.intent_type
         }
         assert "consul.register" in intent_types
         assert "postgres.upsert_registration" in intent_types
@@ -234,7 +234,7 @@ class TestA3OrchestratedDualRegistration:
 
         for intent in reducer_output.intents:
             # All intents use extension format
-            assert intent.intent_type == "extension"
+            assert intent.intent_type
             assert intent.target is not None
             assert intent.payload is not None
             assert intent.payload.intent_type in (

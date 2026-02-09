@@ -59,7 +59,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 
@@ -175,9 +175,10 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
         """Specific message types this dispatcher accepts.
 
         Returns:
-            set[str]: Set containing ModelNodeIntrospectionEvent type name.
+            set[str]: Set containing both Python class name and ONEX event_type
+                routing key for backwards compatibility and routing flexibility.
         """
-        return {"ModelNodeIntrospectionEvent"}
+        return {"ModelNodeIntrospectionEvent", "platform.node-introspection"}
 
     @property
     def node_kind(self) -> EnumNodeKind:
@@ -190,12 +191,16 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
 
     async def handle(
         self,
-        envelope: ModelEventEnvelope[object],
+        envelope: ModelEventEnvelope[object] | dict[str, object],
     ) -> ModelDispatchResult:
         """Handle introspection event and return dispatch result.
 
         Deserializes the envelope payload to ModelNodeIntrospectionEvent,
         delegates to the wrapped handler, and returns a structured result.
+
+        The dispatch engine materializes envelopes to dicts before calling
+        dispatchers (serialization boundary). This method accepts both
+        ModelEventEnvelope objects and materialized dicts.
 
         Circuit Breaker Integration:
             - Checks circuit state before processing (raises if OPEN)
@@ -204,7 +209,8 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             - InfraUnavailableError propagates to caller for DLQ handling
 
         Args:
-            envelope: Event envelope containing introspection payload.
+            envelope: Event envelope or materialized dict from dispatch engine.
+                Dict format: {"payload": {...}, "__bindings": {...}, "__debug_trace": {...}}
 
         Returns:
             ModelDispatchResult: Success with output events or error details.
@@ -213,7 +219,21 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             InfraUnavailableError: If circuit breaker is OPEN.
         """
         started_at = datetime.now(UTC)
-        correlation_id = envelope.correlation_id or uuid4()
+
+        # Handle both ModelEventEnvelope and materialized dict from dispatch engine
+        if isinstance(envelope, dict):
+            # Materialized dict: extract correlation_id from __debug_trace
+            debug_trace = envelope.get("__debug_trace", {})
+            raw_corr = (
+                debug_trace.get("correlation_id")
+                if isinstance(debug_trace, dict)
+                else None
+            )
+            correlation_id = UUID(raw_corr) if raw_corr else uuid4()
+            raw_payload = envelope.get("payload", {})
+        else:
+            correlation_id = envelope.correlation_id or uuid4()
+            raw_payload = envelope.payload
 
         # Check circuit breaker before processing (coroutine-safe)
         # If circuit is OPEN, raises InfraUnavailableError immediately
@@ -222,7 +242,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
 
         try:
             # Validate payload type
-            payload = envelope.payload
+            payload = raw_payload
             if not isinstance(payload, ModelNodeIntrospectionEvent):
                 # Try to construct from dict if payload is dict-like
                 if isinstance(payload, dict):

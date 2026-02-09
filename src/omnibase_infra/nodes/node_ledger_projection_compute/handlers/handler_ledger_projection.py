@@ -156,7 +156,7 @@ class HandlerLedgerProjection:
         """
         payload = self._extract_ledger_metadata(message)
         return ModelIntent(
-            intent_type="extension",
+            intent_type=payload.intent_type,
             target=f"postgres://event_ledger/{payload.topic}/{payload.partition}/{payload.kafka_offset}",
             payload=payload,
         )

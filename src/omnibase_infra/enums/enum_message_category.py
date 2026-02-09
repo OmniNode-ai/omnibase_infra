@@ -204,9 +204,14 @@ _CATEGORY_TO_SUFFIX: dict[EnumMessageCategory, str] = {
     EnumMessageCategory.INTENT: "intents",
 }
 _SUFFIX_TO_CATEGORY: dict[str, EnumMessageCategory] = {
+    # Environment-Aware format (plural): dev.user.events.v1
     "events": EnumMessageCategory.EVENT,
     "commands": EnumMessageCategory.COMMAND,
     "intents": EnumMessageCategory.INTENT,
+    # ONEX Kafka format (short): onex.evt.platform.node-introspection.v1
+    "evt": EnumMessageCategory.EVENT,
+    "cmd": EnumMessageCategory.COMMAND,
+    "intent": EnumMessageCategory.INTENT,
 }
 
 

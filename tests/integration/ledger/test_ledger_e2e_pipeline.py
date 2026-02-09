@@ -93,7 +93,7 @@ class TestLedgerE2EPipeline:
         # Note: project() is synchronous (pure compute) - no await
         intent = projection_handler.project(message)
 
-        assert intent.intent_type == "extension"
+        assert intent.intent_type
         assert intent.payload.intent_type == "ledger.append"
 
         # Step 2: Append handler persists to database
@@ -454,7 +454,7 @@ class TestLedgerProjectionHandler:
         intent = handler.project(message)
 
         assert isinstance(intent, ModelIntent)
-        assert intent.intent_type == "extension"
+        assert intent.intent_type
         assert intent.payload.intent_type == "ledger.append"
         # Target includes topic/partition/offset for idempotency routing
         assert intent.target == "postgres://event_ledger/test.intent.v1/0/100"

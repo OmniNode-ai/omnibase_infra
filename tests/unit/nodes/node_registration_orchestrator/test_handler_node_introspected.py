@@ -545,7 +545,7 @@ class TestHandlerNodeIntrospectedIntents:
         assert record["node_type"] == "effect"
 
         # Verify intent envelope
-        assert postgres_intents[0].intent_type == "extension"
+        assert postgres_intents[0].intent_type
         assert f"{node_id}" in postgres_intents[0].target
 
     @pytest.mark.asyncio

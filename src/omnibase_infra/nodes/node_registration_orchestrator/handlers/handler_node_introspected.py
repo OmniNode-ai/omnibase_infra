@@ -406,7 +406,7 @@ class HandlerNodeIntrospected:
 
         intents.append(
             ModelIntent(
-                intent_type="extension",
+                intent_type=postgres_payload.intent_type,
                 target=f"postgres://node_registrations/{node_id}",
                 payload=postgres_payload,
             )
@@ -444,7 +444,7 @@ class HandlerNodeIntrospected:
 
         intents.append(
             ModelIntent(
-                intent_type="extension",
+                intent_type=consul_payload.intent_type,
                 target=f"consul://service/{service_name}",
                 payload=consul_payload,
             )

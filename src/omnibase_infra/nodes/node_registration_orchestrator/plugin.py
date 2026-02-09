@@ -901,6 +901,13 @@ class PluginRegistration:
             # Create intent executor for effect layer delegation (Phase C)
             intent_executor = IntentExecutor(container=config.container)
 
+            # Wire intent effect adapters from contract-driven routing table
+            self._wire_intent_effects(
+                intent_executor=intent_executor,
+                contract_path=contract_path,
+                correlation_id=correlation_id,
+            )
+
             # Create dispatch result applier for output event publishing + intent delegation
             result_applier = DispatchResultApplier(
                 event_bus=config.event_bus,
@@ -963,6 +970,101 @@ class PluginRegistration:
                 error_message=sanitize_error_message(e),
                 duration_seconds=duration,
             )
+
+    def _wire_intent_effects(
+        self,
+        intent_executor: object,
+        contract_path: Path,
+        correlation_id: object,
+    ) -> None:
+        """Wire intent effect adapters from contract-driven routing table.
+
+        Reads the intent_routing_table from the contract and registers
+        appropriate effect adapters with the IntentExecutor. Effect adapters
+        are created only for intent types where the required infrastructure
+        resources (projector, consul_handler) are available.
+
+        Args:
+            intent_executor: IntentExecutor to register handlers with.
+                Duck-typed: must have register_handler(intent_type, handler).
+            contract_path: Path to the contract YAML with intent_routing_table.
+            correlation_id: Correlation ID for logging.
+        """
+        from omnibase_infra.runtime.service_intent_routing_loader import (
+            load_intent_routing_table,
+        )
+
+        routing_table = load_intent_routing_table(contract_path, logger_override=logger)
+        if not routing_table:
+            logger.debug(
+                "No intent routing table found, IntentExecutor has no effect "
+                "handlers (correlation_id=%s)",
+                correlation_id,
+            )
+            return
+
+        register_fn = getattr(intent_executor, "register_handler", None)
+        if register_fn is None or not callable(register_fn):
+            logger.warning(
+                "IntentExecutor does not support register_handler, "
+                "skipping effect wiring (correlation_id=%s)",
+                correlation_id,
+            )
+            return
+
+        registered_count = 0
+
+        for intent_type in routing_table:
+            if intent_type.startswith("postgres.") and self._projector is not None:
+                from omnibase_infra.runtime.intent_effects import (
+                    IntentEffectPostgresUpsert,
+                )
+
+                pg_effect = IntentEffectPostgresUpsert(projector=self._projector)
+                register_fn(intent_type, pg_effect)
+                registered_count += 1
+                logger.debug(
+                    "Registered IntentEffectPostgresUpsert for intent_type=%s "
+                    "(correlation_id=%s)",
+                    intent_type,
+                    correlation_id,
+                )
+
+            elif intent_type.startswith("consul.") and self._consul_handler is not None:
+                from omnibase_infra.runtime.intent_effects import (
+                    IntentEffectConsulRegister,
+                )
+
+                consul_effect = IntentEffectConsulRegister(
+                    consul_handler=self._consul_handler,
+                )
+                register_fn(intent_type, consul_effect)
+                registered_count += 1
+                logger.debug(
+                    "Registered IntentEffectConsulRegister for intent_type=%s "
+                    "(correlation_id=%s)",
+                    intent_type,
+                    correlation_id,
+                )
+
+            else:
+                logger.debug(
+                    "Skipping intent_type=%s (no matching adapter or resource "
+                    "unavailable) (correlation_id=%s)",
+                    intent_type,
+                    correlation_id,
+                )
+
+        logger.info(
+            "Wired %d intent effect adapter(s) from contract routing table "
+            "(correlation_id=%s)",
+            registered_count,
+            correlation_id,
+            extra={
+                "routing_table_size": len(routing_table),
+                "registered_count": registered_count,
+            },
+        )
 
     async def shutdown(
         self,

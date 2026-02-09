@@ -849,8 +849,7 @@ class RegistrationReducer:
             correlation_id: Correlation ID for tracing.
 
         Returns:
-            ModelIntent with intent_type="extension" (dual-layer routing).
-            The routing key "consul.register" is in payload.intent_type.
+            ModelIntent with intent_type matching payload.intent_type for routing.
         """
         service_id = f"onex-{event.node_type.value}-{event.node_id}"
         service_name = f"onex-{event.node_type.value}"
@@ -881,7 +880,7 @@ class RegistrationReducer:
 
         # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
-            intent_type="extension",
+            intent_type=consul_payload.intent_type,
             target=f"consul://service/{service_name}",
             payload=consul_payload,
         )
@@ -901,8 +900,7 @@ class RegistrationReducer:
             correlation_id: Correlation ID for tracing.
 
         Returns:
-            ModelIntent with intent_type="extension" (dual-layer routing).
-            The routing key "postgres.upsert_registration" is in payload.intent_type.
+            ModelIntent with intent_type matching payload.intent_type for routing.
         """
         now = datetime.now(UTC)
 
@@ -931,7 +929,7 @@ class RegistrationReducer:
 
         # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
-            intent_type="extension",
+            intent_type=postgres_payload.intent_type,
             target=f"postgres://node_registrations/{event.node_id}",
             payload=postgres_payload,
         )

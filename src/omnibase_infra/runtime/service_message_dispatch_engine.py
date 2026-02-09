@@ -1101,6 +1101,8 @@ class MessageDispatchEngine:
 
         # Step 5: Execute dispatchers and collect outputs
         outputs: list[str] = []
+        all_output_events: list[object] = []  # Collect output_events from dispatchers
+        all_intents: list[object] = []  # Collect output_intents from dispatchers
         dispatcher_errors: list[str] = []
         executed_dispatcher_ids: list[str] = []
 
@@ -1191,6 +1193,14 @@ class MessageDispatchEngine:
                 # This centralizes the union handling in the model's from_legacy_output().
                 outcome = ModelDispatchOutcome.from_legacy_output(result)
                 outputs.extend(outcome.topics)
+
+                # Collect output_events and output_intents from dispatcher results
+                dispatcher_events = getattr(result, "output_events", [])
+                if dispatcher_events:
+                    all_output_events.extend(dispatcher_events)
+                dispatcher_intents = getattr(result, "output_intents", ())
+                if dispatcher_intents:
+                    all_intents.extend(dispatcher_intents)
             except (SystemExit, KeyboardInterrupt, GeneratorExit):
                 # Never catch cancellation/exit signals
                 raise
@@ -1400,6 +1410,8 @@ class MessageDispatchEngine:
                 completed_at=completed_at,
                 outputs=dispatch_outputs,
                 output_count=len(outputs),
+                output_events=list(all_output_events),
+                output_intents=tuple(all_intents),
                 error_message="; ".join(dispatcher_errors)
                 if dispatcher_errors
                 else None,

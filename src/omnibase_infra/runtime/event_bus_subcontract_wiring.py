@@ -891,12 +891,14 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         # Validate and construct envelope
         envelope = ModelEventEnvelope[object].model_validate(data)
 
-        # Propagate event_type from topic if not already set in the envelope.
-        # This ensures all envelopes flowing through the wiring have event_type
-        # populated, even if the producer did not explicitly set it.
-        # Uses getattr for forward-compatibility: omnibase_core may not yet
-        # have the event_type field on ModelEventEnvelope.
-        if getattr(envelope, "event_type", None) is None:
+        # Propagate event_type: check the RAW data dict (not the envelope) to
+        # preserve any explicit event_type from the producer. ModelEventEnvelope
+        # doesn't define event_type as a field, so model_validate() strips it.
+        # Use model_copy() to attach it post-deserialization.
+        explicit_event_type = data.get("event_type")
+        if explicit_event_type:
+            envelope = envelope.model_copy(update={"event_type": explicit_event_type})
+        else:
             derived_event_type = self._derive_event_type_from_topic(topic)
             if derived_event_type is not None:
                 envelope = envelope.model_copy(

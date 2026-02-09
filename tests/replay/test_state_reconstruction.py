@@ -237,7 +237,7 @@ class TestMultipleReconstructionScenarios:
         intent_types = {
             intent.payload.intent_type
             for intent in output.intents
-            if intent.intent_type == "extension"
+            if intent.intent_type
         }
         assert "consul.register" in intent_types
         assert "postgres.upsert_registration" in intent_types
@@ -395,10 +395,7 @@ class TestMultipleReconstructionScenarios:
 
             # Verify intent targets include node type
             for intent in output.intents:
-                if (
-                    intent.intent_type == "extension"
-                    and intent.payload.intent_type == "consul.register"
-                ):
+                if intent.intent_type == "consul.register":
                     assert node_type in intent.target
 
 

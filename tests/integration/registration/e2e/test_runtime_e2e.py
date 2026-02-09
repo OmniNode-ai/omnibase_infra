@@ -81,8 +81,10 @@ logger = logging.getLogger(__name__)
 # Topic Configuration
 # =============================================================================
 # Get topic from environment or use docker-compose default
-# The runtime container expects: onex.evt.node-introspection.v1 (from ONEX_INPUT_TOPIC)
-RUNTIME_INPUT_TOPIC = os.getenv("ONEX_INPUT_TOPIC", "onex.evt.node-introspection.v1")
+# The runtime container subscribes to the ONEX 5-segment topic from contract.yaml
+RUNTIME_INPUT_TOPIC = os.getenv(
+    "ONEX_INPUT_TOPIC", "onex.evt.platform.node-introspection.v1"
+)
 
 # =============================================================================
 # CI Environment Timing Configuration

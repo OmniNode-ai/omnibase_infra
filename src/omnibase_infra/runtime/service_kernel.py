@@ -1171,6 +1171,10 @@ async def bootstrap() -> int:
             # This enables contract-based handler registration instead of
             # falling back to wire_handlers() with an empty registry
             contract_paths=[str(contracts_dir)],
+            # OMN-2050: Wire dispatch engine so RuntimeHostProcess skips the
+            # legacy _on_message subscription and routes through
+            # EventBusSubcontractWiring instead.
+            dispatch_engine=dispatch_engine,
         )
         runtime_create_duration = time.time() - runtime_create_start_time
         logger.debug(
