@@ -238,6 +238,13 @@ class TestRegistryPayloadErrors:
         with pytest.raises(PayloadRegistryError, match="non-empty string"):
             registry.register("   ", "1.0.0", ModelClaudeHookEvent)
 
+    def test_register_whitespace_version_raises_error(
+        self, registry: RegistryPayload
+    ) -> None:
+        """Whitespace-only version raises error."""
+        with pytest.raises(PayloadRegistryError, match="non-empty string"):
+            registry.register("ModelClaudeHookEvent", "   ", ModelClaudeHookEvent)
+
     def test_error_includes_payload_type_context(
         self, registry: RegistryPayload
     ) -> None:
