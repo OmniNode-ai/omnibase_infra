@@ -732,11 +732,8 @@ async def bootstrap() -> int:
         # Post-import, isinstance(plugin, ProtocolDomainPlugin) is checked.
         try:
             security_config = ModelSecurityConfig()
-            effective_plugin_namespaces = (
-                security_config.get_effective_plugin_namespaces()
-            )
             discovery_report = plugin_registry.discover_from_entry_points(
-                allowed_namespaces=effective_plugin_namespaces,
+                security_config=security_config,
             )
             if discovery_report.has_errors:
                 logger.warning(
