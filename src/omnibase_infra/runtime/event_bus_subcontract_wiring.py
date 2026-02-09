@@ -590,7 +590,9 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
 
         Creates an async callback function that:
         1. Receives ProtocolEventMessage from the Kafka consumer
-        2. Deserializes the message value to ModelEventEnvelope
+        2. Deserializes the message value to ModelEventEnvelope, deriving
+           ``event_type`` from the ONEX topic convention if not already
+           present in the payload (see ``_deserialize_to_envelope``)
         3. Checks idempotency (if enabled) to skip duplicate messages
         4. Dispatches the envelope to the MessageDispatchEngine
         5. Classifies errors as content (DLQ) vs infrastructure (fail-fast)
@@ -812,7 +814,8 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         Returns:
             Derived event_type as ``'{producer}.{event-name}'``
             (e.g., ``'omniintelligence.intent-classified'``), or ``None`` if
-            the topic does not follow the expected 5-segment ONEX format.
+            the topic does not follow the expected ONEX format (at least 5
+            dot-separated segments starting with ``onex``).
 
         Example:
             >>> EventBusSubcontractWiring._derive_event_type_from_topic(

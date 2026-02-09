@@ -34,6 +34,8 @@ from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     load_event_bus_subcontract,
 )
 
+pytestmark = pytest.mark.unit
+
 # =============================================================================
 # Fixtures
 # =============================================================================
