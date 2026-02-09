@@ -4807,3 +4807,142 @@ class TestEventTypeRouting:
 
         assert result.status == EnumDispatchStatus.SUCCESS
         assert len(results) == 1
+
+
+# ============================================================================
+# DLQ Routing for Unknown event_type Tests (OMN-2040)
+# ============================================================================
+
+
+class TestDispatchDlqRouting:
+    """Tests for DLQ topic derivation in NO_DISPATCHER results (OMN-2040).
+
+    When dispatch() returns NO_DISPATCHER, the result should include a
+    dlq_topic derived from the event_type domain prefix. For legacy messages
+    without event_type, the DLQ topic is derived from the original topic's
+    message category.
+    """
+
+    @pytest.mark.asyncio
+    async def test_no_dispatcher_with_event_type_includes_dlq_topic(self) -> None:
+        """NO_DISPATCHER result includes dlq_topic derived from event_type prefix."""
+        engine = MessageDispatchEngine()
+        engine.freeze()
+
+        envelope = EnvelopeWithEventType(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            event_type="intelligence.code-analysis-completed.v1",
+        )
+
+        # Topic must contain ".events." segment for category inference
+        result = await engine.dispatch(
+            "dev.intelligence.events.v1",
+            envelope,  # type: ignore[arg-type]
+        )
+
+        assert result.status == EnumDispatchStatus.NO_DISPATCHER
+        assert result.dlq_topic == "onex.dlq.intelligence.v1"
+
+    @pytest.mark.asyncio
+    async def test_no_dispatcher_with_platform_event_type(self) -> None:
+        """platform.* event_type routes to onex.dlq.platform.v1."""
+        engine = MessageDispatchEngine()
+        engine.freeze()
+
+        envelope = EnvelopeWithEventType(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            event_type="platform.node-registered.v1",
+        )
+
+        result = await engine.dispatch(
+            "dev.platform.events.v1",
+            envelope,  # type: ignore[arg-type]
+        )
+
+        assert result.status == EnumDispatchStatus.NO_DISPATCHER
+        assert result.dlq_topic == "onex.dlq.platform.v1"
+
+    @pytest.mark.asyncio
+    async def test_no_dispatcher_without_event_type_uses_topic_based_dlq(self) -> None:
+        """Legacy messages without event_type use topic-based DLQ routing."""
+        engine = MessageDispatchEngine()
+        engine.freeze()
+
+        # Standard envelope without event_type attribute
+        envelope = ModelEventEnvelope(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            correlation_id=uuid4(),
+        )
+
+        result = await engine.dispatch("dev.user.events.v1", envelope)
+
+        assert result.status == EnumDispatchStatus.NO_DISPATCHER
+        assert result.dlq_topic == "dev.dlq.events.v1"
+
+    @pytest.mark.asyncio
+    async def test_no_dispatcher_without_event_type_command_topic(self) -> None:
+        """Legacy command messages route to commands DLQ."""
+        engine = MessageDispatchEngine()
+        engine.freeze()
+
+        envelope = ModelEventEnvelope(
+            payload=CreateUserCommand(name="Test"),
+            correlation_id=uuid4(),
+        )
+
+        result = await engine.dispatch("dev.user.commands.v1", envelope)
+
+        assert result.status == EnumDispatchStatus.NO_DISPATCHER
+        assert result.dlq_topic == "dev.dlq.commands.v1"
+
+    @pytest.mark.asyncio
+    async def test_successful_dispatch_has_no_dlq_topic(self) -> None:
+        """Successful dispatch results have dlq_topic=None."""
+        engine = MessageDispatchEngine()
+
+        async def handler(envelope: object) -> str:
+            return "output.v1"
+
+        engine.register_dispatcher(
+            dispatcher_id="handler",
+            dispatcher=handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        engine.register_route(
+            ModelDispatchRoute(
+                route_id="route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="handler",
+            )
+        )
+        engine.freeze()
+
+        envelope = ModelEventEnvelope(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            correlation_id=uuid4(),
+        )
+
+        result = await engine.dispatch("dev.user.events.v1", envelope)
+
+        assert result.status == EnumDispatchStatus.SUCCESS
+        assert result.dlq_topic is None
+
+    @pytest.mark.asyncio
+    async def test_no_dispatcher_agent_event_type_routes_to_agent_dlq(self) -> None:
+        """agent.* event_type routes to onex.dlq.agent.v1."""
+        engine = MessageDispatchEngine()
+        engine.freeze()
+
+        envelope = EnvelopeWithEventType(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            event_type="agent.status-changed.v1",
+        )
+
+        result = await engine.dispatch(
+            "dev.agent.events.v1",
+            envelope,  # type: ignore[arg-type]
+        )
+
+        assert result.status == EnumDispatchStatus.NO_DISPATCHER
+        assert result.dlq_topic == "onex.dlq.agent.v1"

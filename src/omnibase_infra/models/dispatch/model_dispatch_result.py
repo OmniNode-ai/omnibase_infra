@@ -220,6 +220,17 @@ class ModelDispatchResult(BaseModel):
         ),
     )
 
+    # ---- DLQ Routing ----
+    dlq_topic: str | None = Field(
+        default=None,
+        description=(
+            "Target DLQ topic for unroutable messages. Set when status is "
+            "NO_DISPATCHER and a DLQ topic can be derived from the event_type "
+            "domain prefix or original topic category. Callers should publish "
+            "the original message to this topic for later analysis or retry."
+        ),
+    )
+
     # ---- Error Information ----
     error_message: str | None = Field(
         default=None,
