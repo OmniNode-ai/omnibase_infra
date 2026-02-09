@@ -99,33 +99,31 @@ class TestSnapshotStateTransitions:
 
     @pytest.mark.asyncio
     async def test_introspection_publishes_snapshot(self) -> None:
-        """Introspection of a new node publishes a PENDING_REGISTRATION snapshot.
+        """Introspection of a new node emits PENDING_REGISTRATION intents.
 
         Given:
-            - HandlerNodeIntrospected with mock projector and snapshot publisher
+            - HandlerNodeIntrospected with projection reader
             - ProjectionReader returns None (new node)
         When:
             - ModelNodeIntrospectionEvent is fired
         Then:
-            - mock_producer.send_and_wait is called
-            - Published JSON contains current_state = pending_registration
+            - Output contains 1 event (NodeRegistrationInitiated)
+            - Output contains 2 intents (postgres upsert + consul register)
+            - Postgres upsert intent has current_state = pending_registration
+
+        Note (OMN-2050):
+            The handler no longer performs direct I/O (projector.upsert_partial,
+            snapshot publishing). Instead it returns ModelIntent objects for
+            the effect layer to execute.
         """
         # Arrange
-        mock_producer = _create_mock_producer()
-        publisher = await _create_publisher(mock_producer, debounce_ms=0)
-
         mock_reader = _create_mock_reader(entity_state=None)  # New node
-
-        mock_projector = AsyncMock()
-        mock_projector.upsert_partial = AsyncMock()
 
         node_id = uuid4()
         correlation_id = uuid4()
 
         handler = HandlerNodeIntrospected(
             projection_reader=mock_reader,
-            projector=mock_projector,
-            snapshot_publisher=publisher,
         )
 
         # Create introspection event
@@ -154,32 +152,38 @@ class TestSnapshotStateTransitions:
         # Assert - handler should emit registration initiated event
         assert len(output.events) == 1
 
-        # Assert - projector was called (projection persisted)
-        mock_projector.upsert_partial.assert_called_once()
+        # Assert - handler emits 2 intents for effect layer execution
+        assert len(output.intents) == 2
 
-        # Assert - snapshot was published to Kafka
-        mock_producer.send_and_wait.assert_called_once()
+        # Find the postgres upsert intent by checking payload intent_type
+        postgres_intents = [
+            i
+            for i in output.intents
+            if getattr(i.payload, "intent_type", None) == "postgres.upsert_registration"
+        ]
+        assert len(postgres_intents) == 1
+        postgres_intent = postgres_intents[0]
 
-        call_args = mock_producer.send_and_wait.call_args
-        topic = call_args[0][0]
-        key = call_args[1]["key"]
-        value = call_args[1]["value"]
+        # Verify postgres intent targets the correct node
+        assert postgres_intent.target == f"postgres://node_registrations/{node_id}"
 
-        # Verify topic is the snapshot topic
-        config = ModelSnapshotTopicConfig.default()
-        assert topic == config.topic
+        # Verify the projection record in the intent payload
+        record = postgres_intent.payload.record
+        record_data = record.model_dump()
+        assert record_data["current_state"] == "pending_registration"
+        assert record_data["entity_id"] == str(node_id)
 
-        # Verify key is the entity_id as UTF-8 bytes
-        assert key == str(node_id).encode("utf-8")
+        # Find the consul register intent
+        consul_intents = [
+            i
+            for i in output.intents
+            if getattr(i.payload, "intent_type", None) == "consul.register"
+        ]
+        assert len(consul_intents) == 1
+        consul_intent = consul_intents[0]
 
-        # Verify value is JSON with expected state
-        assert value is not None
-        snapshot_data = json.loads(value.decode("utf-8"))
-        assert snapshot_data["current_state"] == "pending_registration"
-        assert snapshot_data["entity_id"] == str(node_id)
-
-        # Cleanup
-        await publisher.stop()
+        # Verify consul intent targets the correct service
+        assert consul_intent.target == "consul://service/onex-effect"
 
     @pytest.mark.asyncio
     async def test_ack_publishes_snapshot(self) -> None:
