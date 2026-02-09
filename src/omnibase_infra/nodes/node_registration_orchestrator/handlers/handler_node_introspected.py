@@ -21,14 +21,14 @@ Decision Logic:
     - State is ACTIVE (already active - heartbeat should be used)
 
 Intent-Based Architecture (OMN-2050):
-    This handler performs ZERO direct I/O. Instead, it returns ModelIntent
+    This handler performs no direct write I/O. Instead, it returns ModelIntent
     objects that the effect layer executes via IntentExecutor:
 
     - ModelPayloadPostgresUpsertRegistration: Persists the projection
     - ModelPayloadConsulRegister: Registers with Consul for service discovery
 
-    This follows the ONEX four-node pattern where handlers (COMPUTE) produce
-    intents, and the EFFECT layer executes them.
+    Reads (projection state) are still direct I/O via ProjectionReaderRegistration.
+    Writes are delegated to the effect layer through intents.
 
 Coroutine Safety:
     This handler is stateless and coroutine-safe for concurrent calls
@@ -47,6 +47,7 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict
@@ -132,7 +133,8 @@ class HandlerNodeIntrospected:
         4. Returns ModelNodeRegistrationInitiated event
 
         The effect layer (IntentExecutor) handles persistence and
-        service discovery registration. This handler performs ZERO direct I/O.
+        service discovery registration. Reads are direct I/O; writes
+        are delegated through intents.
 
     State Decision Matrix:
         | Current State       | Action                          |
@@ -215,11 +217,11 @@ class HandlerNodeIntrospected:
     def handler_category(self) -> EnumHandlerTypeCategory:
         """Behavioral classification for this handler.
 
-        Returns COMPUTE because this handler performs pure decision logic:
-        reads projection state and emits intents for the effect layer.
-        No direct I/O is performed (OMN-2050).
+        Returns EFFECT because this handler reads from the PostgreSQL
+        projection store via ProjectionReaderRegistration.get_entity_state().
+        Writes are intent-based (OMN-2050) but reads are direct I/O.
         """
-        return EnumHandlerTypeCategory.COMPUTE
+        return EnumHandlerTypeCategory.EFFECT
 
     def _sanitize_tool_name(self, name: str) -> str:
         """Sanitize tool name for use in Consul tags.
@@ -435,11 +437,29 @@ class HandlerNodeIntrospected:
                 mcp_tool_name = self._sanitize_tool_name(mcp_tool_name_raw)
                 tags.extend(["mcp-enabled", f"mcp-tool:{mcp_tool_name}"])
 
+        # Extract address and port from endpoints if available
+        address: str | None = None
+        port: int | None = None
+        endpoints = event.endpoints
+        if endpoints:
+            health_url = endpoints.get("health") or endpoints.get("api")
+            if health_url:
+                try:
+                    parsed = urlparse(health_url)
+                    if parsed.hostname:
+                        address = parsed.hostname
+                    if parsed.port:
+                        port = parsed.port
+                except ValueError:
+                    pass
+
         consul_payload = ModelPayloadConsulRegister(
             correlation_id=correlation_id,
             service_id=service_id,
             service_name=service_name,
             tags=tags,
+            address=address,
+            port=port,
         )
 
         intents.append(

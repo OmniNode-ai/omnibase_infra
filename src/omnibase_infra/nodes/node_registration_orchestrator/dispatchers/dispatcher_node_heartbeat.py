@@ -202,7 +202,10 @@ class DispatcherNodeHeartbeat(MixinAsyncCircuitBreaker):
                 if isinstance(debug_trace, dict)
                 else None
             )
-            correlation_id = UUID(raw_corr) if raw_corr else uuid4()
+            try:
+                correlation_id = UUID(raw_corr) if raw_corr else uuid4()
+            except ValueError:
+                correlation_id = uuid4()
             raw_payload = envelope.get("payload", {})
         else:
             correlation_id = envelope.correlation_id or uuid4()

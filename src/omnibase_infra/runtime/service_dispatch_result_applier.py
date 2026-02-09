@@ -164,9 +164,7 @@ class DispatchResultApplier:
             )
 
         # Delegate intents to effect layer via IntentExecutor
-        # Uses getattr fallback for forward-compatibility with parallel agent adding
-        # the output_intents field to ModelDispatchResult
-        output_intents = getattr(result, "output_intents", ())
+        output_intents = result.output_intents
         if self._intent_executor is not None and output_intents:
             try:
                 await self._intent_executor.execute_all(
@@ -190,6 +188,11 @@ class DispatchResultApplier:
                         "intent_count": len(output_intents),
                     },
                 )
+                # Re-raise so the caller (EventBusSubcontractWiring) can
+                # classify the error and apply retry/DLQ logic. Swallowing
+                # intent errors here would cause Kafka offset commit despite
+                # failed PostgreSQL upserts, leading to data loss.
+                raise
 
 
 __all__: list[str] = ["DispatchResultApplier"]

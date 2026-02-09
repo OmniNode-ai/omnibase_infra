@@ -136,7 +136,7 @@ class IntentExecutor:
 
         handler = self._effect_handlers.get(intent_type)
         if handler is None:
-            logger.warning(
+            logger.debug(
                 "No effect handler registered for intent_type=%s correlation_id=%s",
                 intent_type,
                 str(correlation_id) if correlation_id else "none",
