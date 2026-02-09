@@ -1,15 +1,18 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Event Registry - Event type to Kafka topic mapping for Hook Event Daemon.
+"""Event Registry - Event type to Kafka topic mapping.
 
-This module provides the event registry that maps semantic event types
-(e.g., "prompt.submitted") to Kafka topics and handles metadata injection.
+This module provides a generic event registry that maps semantic event types
+to Kafka topics and handles metadata injection.
 
 The registry is the central configuration point for:
-- Event type → topic routing
+- Event type -> topic routing
 - Partition key extraction
 - Payload validation
 - Metadata injection (correlation IDs, timestamps, schema versions)
+
+The registry ships with no default registrations. Consumers must register
+their own event types via ``register()`` or ``register_batch()``.
 
 Example Usage:
     ```python
@@ -18,40 +21,46 @@ Example Usage:
         ModelEventRegistration,
     )
 
-    # Create registry with environment prefix
+    # Create registry
     registry = EventRegistry(environment="dev")
 
-    # Register a custom event type
-    registry.register(
+    # Register event types
+    registry.register_batch([
         ModelEventRegistration(
-            event_type="custom.event",
-            topic_template="onex.evt.custom.event.v1",
+            event_type="myapp.submitted",
+            topic_template="onex.evt.myapp.submitted.v1",
             partition_key_field="session_id",
-            required_fields=["session_id", "user_id"],
-        )
-    )
+            required_fields=["session_id", "payload"],
+        ),
+        ModelEventRegistration(
+            event_type="myapp.completed",
+            topic_template="onex.evt.myapp.completed.v1",
+            partition_key_field="session_id",
+            required_fields=["session_id"],
+        ),
+    ])
 
     # Resolve topic for event type (realm-agnostic, no env prefix)
-    topic = registry.resolve_topic("prompt.submitted")
-    # Returns: "onex.evt.omniclaude.prompt-submitted.v1"
+    topic = registry.resolve_topic("myapp.submitted")
+    # Returns: "onex.evt.myapp.submitted.v1"
 
     # Inject metadata into payload
     enriched = registry.inject_metadata(
-        event_type="prompt.submitted",
-        payload={"prompt": "Hello", "session_id": "abc123"},
+        event_type="myapp.submitted",
+        payload={"session_id": "abc123", "payload": "data"},
         correlation_id="corr-123",
     )
     # Returns payload with correlation_id, causation_id, emitted_at, schema_version
     ```
 
-Integration Points:
-- The emit daemon in omniclaude3 uses this registry to route events to Kafka topics
-- Hook events from OmniClaude are routed through this registry
-- Metadata injection ensures event traceability across the system
+Note:
+    Topics are realm-agnostic in ONEX. The environment/realm is enforced via
+    envelope identity, not topic naming.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -63,15 +72,14 @@ from omnibase_core.errors import OnexError
 class ModelEventRegistration(BaseModel):
     """Registration configuration for a single event type.
 
-    Defines how a semantic event type (e.g., "prompt.submitted") maps to
-    Kafka infrastructure including topic naming, partition keys, and
-    payload validation rules.
+    Defines how a semantic event type maps to Kafka infrastructure including
+    topic naming, partition keys, and payload validation rules.
 
     Attributes:
-        event_type: Semantic event type identifier (e.g., "prompt.submitted").
+        event_type: Semantic event type identifier (e.g., "myapp.submitted").
             This is the logical name used by event emitters.
         topic_template: Kafka topic name (realm-agnostic, no environment prefix).
-            Example: "onex.evt.omniclaude.prompt-submitted.v1"
+            Example: "onex.evt.myapp.submitted.v1"
             Note: Topics are realm-agnostic in ONEX. The environment/realm is
             enforced via envelope identity, not topic naming.
         partition_key_field: Optional field name in payload to use as partition key.
@@ -83,10 +91,10 @@ class ModelEventRegistration(BaseModel):
 
     Example:
         >>> reg = ModelEventRegistration(
-        ...     event_type="prompt.submitted",
-        ...     topic_template="onex.evt.omniclaude.prompt-submitted.v1",
+        ...     event_type="myapp.submitted",
+        ...     topic_template="onex.evt.myapp.submitted.v1",
         ...     partition_key_field="session_id",
-        ...     required_fields=["prompt", "session_id"],
+        ...     required_fields=["session_id", "payload"],
         ...     schema_version="1.0.0",
         ... )
     """
@@ -98,7 +106,7 @@ class ModelEventRegistration(BaseModel):
     )
 
     event_type: str = Field(
-        description="Semantic event type identifier (e.g., 'prompt.submitted')",
+        description="Semantic event type identifier (e.g., 'myapp.submitted')",
     )
     topic_template: str = Field(
         description="Kafka topic name (realm-agnostic, no environment prefix)",
@@ -124,28 +132,25 @@ class EventRegistry:
     including topic resolution, partition key extraction, payload validation,
     and metadata injection.
 
-    The registry is initialized with default OmniClaude event types and can
-    be extended with custom event registrations.
+    The registry starts empty. Consumers must register their own event types
+    via ``register()`` or ``register_batch()``.
 
     Attributes:
         environment: Deployment environment name (e.g., "dev", "staging", "prod").
-            Used to substitute {env} placeholder in topic templates.
+            Stored for potential use in consumer group derivation by related
+            components.
 
     Example:
         >>> registry = EventRegistry(environment="dev")
-        >>> topic = registry.resolve_topic("prompt.submitted")
-        >>> print(topic)
-        'onex.evt.omniclaude.prompt-submitted.v1'
-
-        >>> registry.validate_payload("prompt.submitted", {"prompt": "Hello"})
-        True
-
-        >>> enriched = registry.inject_metadata(
-        ...     "prompt.submitted",
-        ...     {"prompt": "Hello"},
+        >>> registry.register(
+        ...     ModelEventRegistration(
+        ...         event_type="myapp.submitted",
+        ...         topic_template="onex.evt.myapp.submitted.v1",
+        ...         required_fields=["payload"],
+        ...     )
         ... )
-        >>> "correlation_id" in enriched
-        True
+        >>> registry.resolve_topic("myapp.submitted")
+        'onex.evt.myapp.submitted.v1'
 
     Note:
         Topics are realm-agnostic in ONEX. The environment is stored for
@@ -154,124 +159,18 @@ class EventRegistry:
     """
 
     def __init__(self, environment: str = "dev") -> None:
-        """Initialize the event registry with environment prefix.
+        """Initialize an empty event registry.
 
         Args:
-            environment: Deployment environment name used to substitute
-                {env} placeholder in topic templates. Defaults to "dev".
-
-        Example:
-            >>> registry = EventRegistry(environment="staging")
-            >>> registry.resolve_topic("prompt.submitted")
-            'onex.evt.omniclaude.prompt-submitted.v1'
+            environment: Deployment environment name. Stored for potential
+                use in consumer group derivation. Defaults to "dev".
 
         Note:
-            The environment is stored for potential consumer group derivation
-            in related components. Topics themselves are realm-agnostic.
+            The registry starts with no registrations. Use ``register()``
+            or ``register_batch()`` to add event type mappings.
         """
         self._environment = environment
         self._registrations: dict[str, ModelEventRegistration] = {}
-        self._register_defaults()
-
-    def _register_defaults(self) -> None:
-        """Register default OmniClaude event types.
-
-        Registers the standard event types emitted by OmniClaude hooks:
-        - prompt.submitted: User prompt submission events
-        - session.started: Session initialization events
-        - session.ended: Session termination events
-        - session.outcome: Session outcome events
-        - tool.executed: Tool execution events
-        - routing.decision: Agent routing decision events (PR #92)
-        - injection.recorded: Manifest injection events (OMN-1673)
-        - context.utilization: Context window utilization events (OMN-1889)
-        - agent.match: Agent routing match events (OMN-1889)
-        - latency.breakdown: Latency breakdown events (OMN-1889)
-        - notification.blocked: Agent blocked waiting for human input (OMN-1831)
-        - notification.completed: Ticket work completion events (OMN-1831)
-        """
-        defaults = [
-            # Core session events
-            ModelEventRegistration(
-                event_type="prompt.submitted",
-                topic_template="onex.evt.omniclaude.prompt-submitted.v1",
-                partition_key_field="session_id",
-                required_fields=["prompt"],
-            ),
-            ModelEventRegistration(
-                event_type="session.started",
-                topic_template="onex.evt.omniclaude.session-started.v1",
-                partition_key_field="session_id",
-                required_fields=["session_id"],
-            ),
-            ModelEventRegistration(
-                event_type="session.ended",
-                topic_template="onex.evt.omniclaude.session-ended.v1",
-                partition_key_field="session_id",
-                required_fields=["session_id"],
-            ),
-            ModelEventRegistration(
-                event_type="session.outcome",
-                topic_template="onex.evt.omniclaude.session-outcome.v1",
-                partition_key_field="session_id",
-                required_fields=["session_id"],
-            ),
-            ModelEventRegistration(
-                event_type="tool.executed",
-                topic_template="onex.evt.omniclaude.tool-executed.v1",
-                partition_key_field="session_id",
-                required_fields=["tool_name"],
-            ),
-            # Routing observability (omniclaude3 PR #92)
-            ModelEventRegistration(
-                event_type="routing.decision",
-                topic_template="agent-routing-decisions",
-                partition_key_field="correlation_id",
-                required_fields=["correlation_id", "selected_agent"],
-            ),
-            # Injection tracking (OMN-1673)
-            ModelEventRegistration(
-                event_type="injection.recorded",
-                topic_template="onex.evt.omniclaude.injection-recorded.v1",
-                partition_key_field="session_id",
-                required_fields=["session_id"],
-            ),
-            # Observability metrics (OMN-1889)
-            ModelEventRegistration(
-                event_type="context.utilization",
-                topic_template="onex.evt.omniclaude.context-utilization.v1",
-                partition_key_field="session_id",
-                required_fields=["session_id"],
-            ),
-            ModelEventRegistration(
-                event_type="agent.match",
-                topic_template="onex.evt.omniclaude.agent-match.v1",
-                partition_key_field="session_id",
-                required_fields=["session_id"],
-            ),
-            ModelEventRegistration(
-                event_type="latency.breakdown",
-                topic_template="onex.evt.omniclaude.latency-breakdown.v1",
-                partition_key_field="session_id",
-                required_fields=["session_id"],
-            ),
-            # Notification events for Slack integration (OMN-1831)
-            # These events are consumed by the notification consumer and routed to Slack
-            ModelEventRegistration(
-                event_type="notification.blocked",
-                topic_template="onex.evt.omniclaude.notification-blocked.v1",
-                partition_key_field="session_id",
-                required_fields=["ticket_identifier", "reason", "repo", "session_id"],
-            ),
-            ModelEventRegistration(
-                event_type="notification.completed",
-                topic_template="onex.evt.omniclaude.notification-completed.v1",
-                partition_key_field="session_id",
-                required_fields=["ticket_identifier", "summary", "repo", "session_id"],
-            ),
-        ]
-        for registration in defaults:
-            self._registrations[registration.event_type] = registration
 
     def register(self, registration: ModelEventRegistration) -> None:
         """Register an event type mapping.
@@ -295,6 +194,34 @@ class EventRegistry:
         """
         self._registrations[registration.event_type] = registration
 
+    def register_batch(self, registrations: Iterable[ModelEventRegistration]) -> None:
+        """Register multiple event type mappings.
+
+        Convenience method to register multiple event types in a single call.
+        Each registration is added via ``register()``, overwriting existing
+        registrations for the same event type.
+
+        Args:
+            registrations: Iterable of event registration configurations.
+
+        Example:
+            >>> registry = EventRegistry()
+            >>> registry.register_batch([
+            ...     ModelEventRegistration(
+            ...         event_type="custom.one",
+            ...         topic_template="onex.evt.custom.one.v1",
+            ...     ),
+            ...     ModelEventRegistration(
+            ...         event_type="custom.two",
+            ...         topic_template="onex.evt.custom.two.v1",
+            ...     ),
+            ... ])
+            >>> registry.resolve_topic("custom.one")
+            'onex.evt.custom.one.v1'
+        """
+        for registration in registrations:
+            self.register(registration)
+
     def resolve_topic(self, event_type: str) -> str:
         """Get the Kafka topic for an event type (realm-agnostic).
 
@@ -312,9 +239,15 @@ class EventRegistry:
             OnexError: If the event type is not registered.
 
         Example:
-            >>> registry = EventRegistry(environment="prod")
-            >>> registry.resolve_topic("prompt.submitted")
-            'onex.evt.omniclaude.prompt-submitted.v1'
+            >>> registry = EventRegistry()
+            >>> registry.register(
+            ...     ModelEventRegistration(
+            ...         event_type="myapp.submitted",
+            ...         topic_template="onex.evt.myapp.submitted.v1",
+            ...     )
+            ... )
+            >>> registry.resolve_topic("myapp.submitted")
+            'onex.evt.myapp.submitted.v1'
         """
         registration = self._registrations.get(event_type)
         if registration is None:
@@ -347,11 +280,17 @@ class EventRegistry:
 
         Example:
             >>> registry = EventRegistry()
-            >>> key = registry.get_partition_key(
-            ...     "prompt.submitted",
-            ...     {"prompt": "Hello", "session_id": "sess-123"},
+            >>> registry.register(
+            ...     ModelEventRegistration(
+            ...         event_type="myapp.submitted",
+            ...         topic_template="onex.evt.myapp.submitted.v1",
+            ...         partition_key_field="session_id",
+            ...     )
             ... )
-            >>> print(key)
+            >>> registry.get_partition_key(
+            ...     "myapp.submitted",
+            ...     {"session_id": "sess-123"},
+            ... )
             'sess-123'
         """
         registration = self._registrations.get(event_type)
@@ -393,19 +332,15 @@ class EventRegistry:
 
         Example:
             >>> registry = EventRegistry()
-            >>> registry.validate_payload(
-            ...     "prompt.submitted",
-            ...     {"prompt": "Hello"},
+            >>> registry.register(
+            ...     ModelEventRegistration(
+            ...         event_type="myapp.submitted",
+            ...         topic_template="onex.evt.myapp.submitted.v1",
+            ...         required_fields=["payload"],
+            ...     )
             ... )
+            >>> registry.validate_payload("myapp.submitted", {"payload": "data"})
             True
-
-            >>> registry.validate_payload(
-            ...     "prompt.submitted",
-            ...     {},
-            ... )
-            Traceback (most recent call last):
-                ...
-            OnexError: Missing required fields for 'prompt.submitted': ['prompt']
         """
         registration = self._registrations.get(event_type)
         if registration is None:
@@ -450,19 +385,8 @@ class EventRegistry:
                 a new UUID will be generated.
             causation_id: Optional ID of the event that directly caused this event.
                 This parameter enables event chain tracing by linking derived events
-                back to their source. It should be populated when:
-
-                - An event handler processes event A and emits event B as a result
-                - A saga/workflow step emits a follow-up event
-                - Any event is produced as a direct consequence of another event
-
-                When None (the default), indicates this is a root event with no
-                direct cause in the event stream (e.g., user-initiated actions,
-                scheduled jobs, external triggers).
-
-                Note: This is an extension point for future event chain tracing
-                functionality. Current emit daemon usage passes None for all events
-                since hook events are root events initiated by user actions.
+                back to their source. When None (the default), indicates this is a
+                root event with no direct cause in the event stream.
 
         Returns:
             New dictionary with original payload plus injected metadata.
@@ -472,28 +396,21 @@ class EventRegistry:
 
         Example:
             >>> registry = EventRegistry()
-            >>> # Root event (no causation_id)
-            >>> root_event = registry.inject_metadata(
-            ...     "prompt.submitted",
-            ...     {"prompt": "Hello"},
+            >>> registry.register(
+            ...     ModelEventRegistration(
+            ...         event_type="myapp.submitted",
+            ...         topic_template="onex.evt.myapp.submitted.v1",
+            ...     )
+            ... )
+            >>> enriched = registry.inject_metadata(
+            ...     "myapp.submitted",
+            ...     {"data": "value"},
             ...     correlation_id="corr-123",
             ... )
-            >>> root_event["causation_id"] is None
-            True
-            >>>
-            >>> # Derived event (with causation_id linking to root)
-            >>> derived_event = registry.inject_metadata(
-            ...     "tool.executed",
-            ...     {"tool_name": "search"},
-            ...     correlation_id="corr-123",  # Same correlation for chain
-            ...     causation_id=root_event["correlation_id"],  # Links to cause
-            ... )
-            >>> derived_event["causation_id"]
+            >>> enriched["correlation_id"]
             'corr-123'
-            >>> "emitted_at" in derived_event
+            >>> enriched["causation_id"] is None
             True
-            >>> derived_event["schema_version"]
-            '1.0.0'
         """
         registration = self._registrations.get(event_type)
         if registration is None:
@@ -524,9 +441,16 @@ class EventRegistry:
 
         Example:
             >>> registry = EventRegistry()
-            >>> reg = registry.get_registration("prompt.submitted")
+            >>> registry.register(
+            ...     ModelEventRegistration(
+            ...         event_type="myapp.submitted",
+            ...         topic_template="onex.evt.myapp.submitted.v1",
+            ...         partition_key_field="session_id",
+            ...     )
+            ... )
+            >>> reg = registry.get_registration("myapp.submitted")
             >>> reg.topic_template
-            'onex.evt.omniclaude.prompt-submitted.v1'
+            'onex.evt.myapp.submitted.v1'
         """
         return self._registrations.get(event_type)
 
@@ -538,8 +462,13 @@ class EventRegistry:
 
         Example:
             >>> registry = EventRegistry()
-            >>> types = registry.list_event_types()
-            >>> "prompt.submitted" in types
+            >>> registry.register(
+            ...     ModelEventRegistration(
+            ...         event_type="myapp.submitted",
+            ...         topic_template="onex.evt.myapp.submitted.v1",
+            ...     )
+            ... )
+            >>> "myapp.submitted" in registry.list_event_types()
             True
         """
         return list(self._registrations.keys())

@@ -2,16 +2,17 @@
 # Copyright (c) 2025 OmniNode Team
 """Unit tests for EventRegistry - Event type to Kafka topic mapping.
 
-Tests the event registry that maps semantic event types (e.g., "prompt.submitted")
-to Kafka topics and handles metadata injection for the Hook Event Daemon (OMN-1610).
+Tests the generic event registry that maps semantic event types to Kafka topics
+and handles metadata injection.
 
 Test coverage includes:
-- Default event type registrations
-- Topic resolution with environment prefixes
-- Custom event registration and overrides
+- Empty-by-default behavior
+- Event type registration (single and batch)
+- Topic resolution
 - Partition key extraction
 - Payload validation
 - Metadata injection with deterministic mocking
+- Realm-agnostic topic resolution
 """
 
 from __future__ import annotations
@@ -32,6 +33,23 @@ from omnibase_infra.runtime.emit_daemon.event_registry import (
 FIXED_UUID = UUID("12345678-1234-5678-1234-567812345678")
 FIXED_TIMESTAMP = datetime(2025, 1, 15, 10, 30, 0, tzinfo=UTC)
 FIXED_ISO_TIMESTAMP = "2025-01-15T10:30:00+00:00"
+
+# Reusable sample registration for tests that need a populated registry
+SAMPLE_REGISTRATION = ModelEventRegistration(
+    event_type="test.event",
+    topic_template="onex.evt.test.topic.v1",
+    partition_key_field="session_id",
+    required_fields=["field_a"],
+    schema_version="1.0.0",
+)
+
+
+@pytest.fixture
+def populated_registry() -> EventRegistry:
+    """Registry pre-loaded with a sample event type for testing generic behavior."""
+    registry = EventRegistry(environment="dev")
+    registry.register(SAMPLE_REGISTRATION)
+    return registry
 
 
 @pytest.mark.unit
@@ -85,116 +103,36 @@ class TestModelEventRegistration:
 
 
 @pytest.mark.unit
-class TestEventRegistryDefaultRegistrations:
-    """Tests for default event type registrations."""
+class TestEventRegistryEmptyByDefault:
+    """Tests that the registry starts with no registrations."""
 
-    def test_prompt_submitted_default(self) -> None:
-        """Should register prompt.submitted with correct topic template."""
-        registry = EventRegistry(environment="dev")
-        topic = registry.resolve_topic("prompt.submitted")
-        assert topic == "onex.evt.omniclaude.prompt-submitted.v1"
-
-    def test_session_started_default(self) -> None:
-        """Should register session.started with correct topic template."""
-        registry = EventRegistry(environment="dev")
-        topic = registry.resolve_topic("session.started")
-        assert topic == "onex.evt.omniclaude.session-started.v1"
-
-    def test_session_ended_default(self) -> None:
-        """Should register session.ended with correct topic template."""
-        registry = EventRegistry(environment="dev")
-        topic = registry.resolve_topic("session.ended")
-        assert topic == "onex.evt.omniclaude.session-ended.v1"
-
-    def test_tool_executed_default(self) -> None:
-        """Should register tool.executed with correct topic template."""
-        registry = EventRegistry(environment="dev")
-        topic = registry.resolve_topic("tool.executed")
-        assert topic == "onex.evt.omniclaude.tool-executed.v1"
-
-    def test_routing_decision_default(self) -> None:
-        """Should register routing.decision with correct topic template."""
-        registry = EventRegistry(environment="dev")
-        topic = registry.resolve_topic("routing.decision")
-        assert topic == "agent-routing-decisions"
-
-    def test_session_outcome_default(self) -> None:
-        """Should register session.outcome with correct topic template."""
-        registry = EventRegistry(environment="dev")
-        topic = registry.resolve_topic("session.outcome")
-        assert topic == "onex.evt.omniclaude.session-outcome.v1"
-
-    def test_injection_recorded_default(self) -> None:
-        """Should register injection.recorded with correct topic template."""
-        registry = EventRegistry(environment="dev")
-        topic = registry.resolve_topic("injection.recorded")
-        assert topic == "onex.evt.omniclaude.injection-recorded.v1"
-
-    def test_context_utilization_default(self) -> None:
-        """Should register context.utilization with correct topic template."""
-        registry = EventRegistry(environment="dev")
-        topic = registry.resolve_topic("context.utilization")
-        assert topic == "onex.evt.omniclaude.context-utilization.v1"
-
-    def test_agent_match_default(self) -> None:
-        """Should register agent.match with correct topic template."""
-        registry = EventRegistry(environment="dev")
-        topic = registry.resolve_topic("agent.match")
-        assert topic == "onex.evt.omniclaude.agent-match.v1"
-
-    def test_latency_breakdown_default(self) -> None:
-        """Should register latency.breakdown with correct topic template."""
-        registry = EventRegistry(environment="dev")
-        topic = registry.resolve_topic("latency.breakdown")
-        assert topic == "onex.evt.omniclaude.latency-breakdown.v1"
-
-    def test_notification_blocked_default(self) -> None:
-        """Should register notification.blocked with correct topic template."""
-        registry = EventRegistry(environment="dev")
-        topic = registry.resolve_topic("notification.blocked")
-        assert topic == "onex.evt.omniclaude.notification-blocked.v1"
-
-    def test_notification_completed_default(self) -> None:
-        """Should register notification.completed with correct topic template."""
-        registry = EventRegistry(environment="dev")
-        topic = registry.resolve_topic("notification.completed")
-        assert topic == "onex.evt.omniclaude.notification-completed.v1"
-
-    def test_all_defaults_registered(self) -> None:
-        """Should register all default event types."""
+    def test_fresh_registry_has_no_registrations(self) -> None:
+        """A new EventRegistry should have zero event types registered."""
         registry = EventRegistry()
-        event_types = registry.list_event_types()
-        expected = [
-            # Core session events
-            "prompt.submitted",
-            "session.started",
-            "session.ended",
-            "session.outcome",
-            "tool.executed",
-            # Routing observability (PR #92)
-            "routing.decision",
-            # Injection tracking (OMN-1673)
-            "injection.recorded",
-            # Observability metrics (OMN-1889)
-            "context.utilization",
-            "agent.match",
-            "latency.breakdown",
-            # Slack notifications (OMN-1831)
-            "notification.blocked",
-            "notification.completed",
-        ]
-        assert sorted(event_types) == sorted(expected)
+        assert registry.list_event_types() == []
+
+    def test_fresh_registry_raises_on_resolve(self) -> None:
+        """Resolving any event type on a fresh registry should raise OnexError."""
+        registry = EventRegistry()
+        with pytest.raises(OnexError, match="Unknown event type"):
+            registry.resolve_topic("anything")
+
+    def test_fresh_registry_get_registration_returns_none(self) -> None:
+        """get_registration on a fresh registry should return None."""
+        registry = EventRegistry()
+        assert registry.get_registration("anything") is None
 
 
 @pytest.mark.unit
 class TestEventRegistryResolveTopic:
     """Tests for resolve_topic() method."""
 
-    def test_resolve_topic_with_environment_prefix(self) -> None:
-        """Should return correct topic with environment prefix."""
-        registry = EventRegistry(environment="staging")
-        topic = registry.resolve_topic("prompt.submitted")
-        assert topic == "onex.evt.omniclaude.prompt-submitted.v1"
+    def test_resolve_topic_returns_registered_template(
+        self, populated_registry: EventRegistry
+    ) -> None:
+        """Should return the topic template for a registered event type."""
+        topic = populated_registry.resolve_topic("test.event")
+        assert topic == "onex.evt.test.topic.v1"
 
     def test_resolve_topic_returns_template_unchanged(self) -> None:
         """Should return topic template unchanged (realm-agnostic)."""
@@ -214,14 +152,14 @@ class TestEventRegistryResolveTopic:
         with pytest.raises(OnexError, match=r"Unknown event type: 'unknown\.event'"):
             registry.resolve_topic("unknown.event")
 
-    def test_resolve_topic_error_includes_registered_types(self) -> None:
+    def test_resolve_topic_error_includes_registered_types(
+        self, populated_registry: EventRegistry
+    ) -> None:
         """Should include registered types in error message."""
-        registry = EventRegistry()
         with pytest.raises(OnexError) as exc_info:
-            registry.resolve_topic("unknown.event")
+            populated_registry.resolve_topic("unknown.event")
         error_message = str(exc_info.value)
-        assert "prompt.submitted" in error_message
-        assert "session.started" in error_message
+        assert "test.event" in error_message
 
 
 @pytest.mark.unit
@@ -241,20 +179,26 @@ class TestEventRegistryCustomRegistration:
         assert topic == "onex.evt.custom.topic.v1"
         assert "custom.event" in registry.list_event_types()
 
-    def test_register_can_override_default(self) -> None:
-        """Should allow overriding default registrations."""
-        registry = EventRegistry(environment="dev")
-
-        # Override prompt.submitted with custom topic
+    def test_register_can_override_existing(self) -> None:
+        """Should allow overriding existing registrations."""
+        registry = EventRegistry()
         registry.register(
             ModelEventRegistration(
-                event_type="prompt.submitted",
-                topic_template="onex.evt.custom.prompt.v2",
+                event_type="my.event",
+                topic_template="onex.evt.original.v1",
             )
         )
 
-        topic = registry.resolve_topic("prompt.submitted")
-        assert topic == "onex.evt.custom.prompt.v2"
+        # Override with new topic
+        registry.register(
+            ModelEventRegistration(
+                event_type="my.event",
+                topic_template="onex.evt.overridden.v2",
+            )
+        )
+
+        topic = registry.resolve_topic("my.event")
+        assert topic == "onex.evt.overridden.v2"
 
     def test_register_multiple_custom_types(self) -> None:
         """Should allow registering multiple custom event types."""
@@ -279,25 +223,106 @@ class TestEventRegistryCustomRegistration:
 
 
 @pytest.mark.unit
+class TestEventRegistryRegisterBatch:
+    """Tests for register_batch() method."""
+
+    def test_register_batch_registers_all(self) -> None:
+        """Should register all event types from the batch."""
+        registry = EventRegistry()
+        registrations = [
+            ModelEventRegistration(
+                event_type="batch.one",
+                topic_template="onex.evt.batch.one.v1",
+            ),
+            ModelEventRegistration(
+                event_type="batch.two",
+                topic_template="onex.evt.batch.two.v1",
+            ),
+            ModelEventRegistration(
+                event_type="batch.three",
+                topic_template="onex.evt.batch.three.v1",
+            ),
+        ]
+        registry.register_batch(registrations)
+
+        assert len(registry.list_event_types()) == 3
+        assert registry.resolve_topic("batch.one") == "onex.evt.batch.one.v1"
+        assert registry.resolve_topic("batch.two") == "onex.evt.batch.two.v1"
+        assert registry.resolve_topic("batch.three") == "onex.evt.batch.three.v1"
+
+    def test_register_batch_empty_iterable(self) -> None:
+        """Should be a no-op for empty iterable."""
+        registry = EventRegistry()
+        registry.register_batch([])
+        assert registry.list_event_types() == []
+
+    def test_register_batch_overrides_existing(self) -> None:
+        """Should override existing registrations with same event type."""
+        registry = EventRegistry()
+        registry.register(
+            ModelEventRegistration(
+                event_type="my.event",
+                topic_template="onex.evt.original.v1",
+            )
+        )
+
+        registry.register_batch(
+            [
+                ModelEventRegistration(
+                    event_type="my.event",
+                    topic_template="onex.evt.overridden.v2",
+                ),
+                ModelEventRegistration(
+                    event_type="new.event",
+                    topic_template="onex.evt.new.v1",
+                ),
+            ]
+        )
+
+        assert registry.resolve_topic("my.event") == "onex.evt.overridden.v2"
+        assert registry.resolve_topic("new.event") == "onex.evt.new.v1"
+
+    def test_register_batch_accepts_generator(self) -> None:
+        """Should accept any iterable, not just lists."""
+
+        def gen() -> Iterable[ModelEventRegistration]:
+            yield ModelEventRegistration(
+                event_type="gen.one",
+                topic_template="onex.evt.gen.one.v1",
+            )
+            yield ModelEventRegistration(
+                event_type="gen.two",
+                topic_template="onex.evt.gen.two.v1",
+            )
+
+        from collections.abc import Iterable
+
+        registry = EventRegistry()
+        registry.register_batch(gen())
+        assert len(registry.list_event_types()) == 2
+
+
+@pytest.mark.unit
 class TestEventRegistryGetPartitionKey:
     """Tests for get_partition_key() method."""
 
-    def test_extracts_partition_key_from_payload(self) -> None:
+    def test_extracts_partition_key_from_payload(
+        self, populated_registry: EventRegistry
+    ) -> None:
         """Should extract partition key based on configured field."""
-        registry = EventRegistry()
-        # prompt.submitted has partition_key_field="session_id"
-        key = registry.get_partition_key(
-            "prompt.submitted",
-            {"prompt": "Hello", "session_id": "sess-abc123"},
+        key = populated_registry.get_partition_key(
+            "test.event",
+            {"field_a": "value", "session_id": "sess-abc123"},
         )
         assert key == "sess-abc123"
 
-    def test_returns_none_when_field_not_in_payload(self) -> None:
+    def test_returns_none_when_field_not_in_payload(
+        self, populated_registry: EventRegistry
+    ) -> None:
         """Should return None when partition key field is missing from payload."""
-        registry = EventRegistry()
-        key = registry.get_partition_key(
-            "prompt.submitted",
-            {"prompt": "Hello"},  # No session_id
+        key = populated_registry.get_partition_key(
+            "test.event",
+            {"field_a": "value"},  # No session_id
         )
         assert key is None
 
@@ -336,12 +361,13 @@ class TestEventRegistryGetPartitionKey:
         with pytest.raises(OnexError, match="Unknown event type"):
             registry.get_partition_key("unknown.event", {"data": "value"})
 
-    def test_partition_key_returns_none_for_none_value(self) -> None:
+    def test_partition_key_returns_none_for_none_value(
+        self, populated_registry: EventRegistry
+    ) -> None:
         """Should return None when partition key field value is None."""
-        registry = EventRegistry()
-        key = registry.get_partition_key(
-            "prompt.submitted",
-            {"prompt": "Hello", "session_id": None},
+        key = populated_registry.get_partition_key(
+            "test.event",
+            {"field_a": "value", "session_id": None},
         )
         assert key is None
 
@@ -350,33 +376,37 @@ class TestEventRegistryGetPartitionKey:
 class TestEventRegistryValidatePayload:
     """Tests for validate_payload() method."""
 
-    def test_returns_true_when_all_required_fields_present(self) -> None:
+    def test_returns_true_when_all_required_fields_present(
+        self, populated_registry: EventRegistry
+    ) -> None:
         """Should return True when all required fields are present."""
-        registry = EventRegistry()
-        # prompt.submitted requires ["prompt"]
-        result = registry.validate_payload(
-            "prompt.submitted",
-            {"prompt": "Hello, world!"},
+        result = populated_registry.validate_payload(
+            "test.event",
+            {"field_a": "value"},
         )
         assert result is True
 
-    def test_returns_true_with_extra_fields(self) -> None:
+    def test_returns_true_with_extra_fields(
+        self, populated_registry: EventRegistry
+    ) -> None:
         """Should return True when extra fields are present beyond required."""
-        registry = EventRegistry()
-        result = registry.validate_payload(
-            "prompt.submitted",
-            {"prompt": "Hello", "session_id": "sess-123", "extra": "field"},
+        result = populated_registry.validate_payload(
+            "test.event",
+            {"field_a": "value", "session_id": "sess-123", "extra": "field"},
         )
         assert result is True
 
-    def test_raises_when_required_field_missing(self) -> None:
+    def test_raises_when_required_field_missing(
+        self, populated_registry: EventRegistry
+    ) -> None:
         """Should raise OnexError when required field is missing."""
-        registry = EventRegistry()
         with pytest.raises(
             OnexError,
-            match=r"Missing required fields for 'prompt\.submitted': \['prompt'\]",
+            match=r"Missing required fields for 'test\.event': \['field_a'\]",
         ):
-            registry.validate_payload("prompt.submitted", {"session_id": "sess-123"})
+            populated_registry.validate_payload(
+                "test.event", {"session_id": "sess-123"}
+            )
 
     def test_raises_with_all_missing_fields_listed(self) -> None:
         """Should list all missing required fields in error message."""
@@ -421,17 +451,18 @@ class TestEventRegistryInjectMetadata:
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.uuid4")
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.datetime")
     def test_adds_correlation_id_when_not_provided(
-        self, mock_datetime: object, mock_uuid4: object
+        self,
+        mock_datetime: object,
+        mock_uuid4: object,
+        populated_registry: EventRegistry,
     ) -> None:
         """Should generate correlation_id when not provided."""
-        # Configure mocks using setattr to avoid type issues
         mock_uuid4.return_value = FIXED_UUID  # type: ignore[attr-defined]
         mock_datetime.now.return_value = FIXED_TIMESTAMP  # type: ignore[attr-defined]
 
-        registry = EventRegistry()
-        enriched = registry.inject_metadata(
-            "prompt.submitted",
-            {"prompt": "Hello"},
+        enriched = populated_registry.inject_metadata(
+            "test.event",
+            {"field_a": "value"},
         )
 
         assert enriched["correlation_id"] == str(FIXED_UUID)
@@ -439,15 +470,17 @@ class TestEventRegistryInjectMetadata:
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.uuid4")
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.datetime")
     def test_uses_provided_correlation_id(
-        self, mock_datetime: object, mock_uuid4: object
+        self,
+        mock_datetime: object,
+        mock_uuid4: object,
+        populated_registry: EventRegistry,
     ) -> None:
         """Should use provided correlation_id instead of generating."""
         mock_datetime.now.return_value = FIXED_TIMESTAMP  # type: ignore[attr-defined]
 
-        registry = EventRegistry()
-        enriched = registry.inject_metadata(
-            "prompt.submitted",
-            {"prompt": "Hello"},
+        enriched = populated_registry.inject_metadata(
+            "test.event",
+            {"field_a": "value"},
             correlation_id="custom-corr-id",
         )
 
@@ -457,16 +490,18 @@ class TestEventRegistryInjectMetadata:
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.uuid4")
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.datetime")
     def test_adds_causation_id_when_provided(
-        self, mock_datetime: object, mock_uuid4: object
+        self,
+        mock_datetime: object,
+        mock_uuid4: object,
+        populated_registry: EventRegistry,
     ) -> None:
         """Should include causation_id when provided."""
         mock_uuid4.return_value = FIXED_UUID  # type: ignore[attr-defined]
         mock_datetime.now.return_value = FIXED_TIMESTAMP  # type: ignore[attr-defined]
 
-        registry = EventRegistry()
-        enriched = registry.inject_metadata(
-            "prompt.submitted",
-            {"prompt": "Hello"},
+        enriched = populated_registry.inject_metadata(
+            "test.event",
+            {"field_a": "value"},
             causation_id="cause-456",
         )
 
@@ -475,16 +510,18 @@ class TestEventRegistryInjectMetadata:
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.uuid4")
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.datetime")
     def test_causation_id_is_none_when_not_provided(
-        self, mock_datetime: object, mock_uuid4: object
+        self,
+        mock_datetime: object,
+        mock_uuid4: object,
+        populated_registry: EventRegistry,
     ) -> None:
         """Should set causation_id to None when not provided."""
         mock_uuid4.return_value = FIXED_UUID  # type: ignore[attr-defined]
         mock_datetime.now.return_value = FIXED_TIMESTAMP  # type: ignore[attr-defined]
 
-        registry = EventRegistry()
-        enriched = registry.inject_metadata(
-            "prompt.submitted",
-            {"prompt": "Hello"},
+        enriched = populated_registry.inject_metadata(
+            "test.event",
+            {"field_a": "value"},
         )
 
         assert enriched["causation_id"] is None
@@ -492,16 +529,18 @@ class TestEventRegistryInjectMetadata:
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.uuid4")
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.datetime")
     def test_adds_emitted_at_timestamp(
-        self, mock_datetime: object, mock_uuid4: object
+        self,
+        mock_datetime: object,
+        mock_uuid4: object,
+        populated_registry: EventRegistry,
     ) -> None:
         """Should add emitted_at with ISO format timestamp."""
         mock_uuid4.return_value = FIXED_UUID  # type: ignore[attr-defined]
         mock_datetime.now.return_value = FIXED_TIMESTAMP  # type: ignore[attr-defined]
 
-        registry = EventRegistry()
-        enriched = registry.inject_metadata(
-            "prompt.submitted",
-            {"prompt": "Hello"},
+        enriched = populated_registry.inject_metadata(
+            "test.event",
+            {"field_a": "value"},
         )
 
         assert enriched["emitted_at"] == FIXED_ISO_TIMESTAMP
@@ -534,16 +573,18 @@ class TestEventRegistryInjectMetadata:
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.uuid4")
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.datetime")
     def test_default_schema_version_is_1_0_0(
-        self, mock_datetime: object, mock_uuid4: object
+        self,
+        mock_datetime: object,
+        mock_uuid4: object,
+        populated_registry: EventRegistry,
     ) -> None:
         """Should use default schema_version of 1.0.0."""
         mock_uuid4.return_value = FIXED_UUID  # type: ignore[attr-defined]
         mock_datetime.now.return_value = FIXED_TIMESTAMP  # type: ignore[attr-defined]
 
-        registry = EventRegistry()
-        enriched = registry.inject_metadata(
-            "prompt.submitted",
-            {"prompt": "Hello"},
+        enriched = populated_registry.inject_metadata(
+            "test.event",
+            {"field_a": "value"},
         )
 
         assert enriched["schema_version"] == "1.0.0"
@@ -551,39 +592,43 @@ class TestEventRegistryInjectMetadata:
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.uuid4")
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.datetime")
     def test_preserves_original_payload_fields(
-        self, mock_datetime: object, mock_uuid4: object
+        self,
+        mock_datetime: object,
+        mock_uuid4: object,
+        populated_registry: EventRegistry,
     ) -> None:
         """Should preserve all original payload fields."""
         mock_uuid4.return_value = FIXED_UUID  # type: ignore[attr-defined]
         mock_datetime.now.return_value = FIXED_TIMESTAMP  # type: ignore[attr-defined]
 
-        registry = EventRegistry()
         original_payload = {
-            "prompt": "Hello, world!",
+            "field_a": "value",
             "session_id": "sess-123",
             "custom_field": {"nested": "value"},
         }
-        enriched = registry.inject_metadata(
-            "prompt.submitted",
+        enriched = populated_registry.inject_metadata(
+            "test.event",
             original_payload,
         )
 
-        assert enriched["prompt"] == "Hello, world!"
+        assert enriched["field_a"] == "value"
         assert enriched["session_id"] == "sess-123"
         assert enriched["custom_field"] == {"nested": "value"}
 
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.uuid4")
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.datetime")
     def test_does_not_modify_original_payload(
-        self, mock_datetime: object, mock_uuid4: object
+        self,
+        mock_datetime: object,
+        mock_uuid4: object,
+        populated_registry: EventRegistry,
     ) -> None:
         """Should not modify the original payload dictionary."""
         mock_uuid4.return_value = FIXED_UUID  # type: ignore[attr-defined]
         mock_datetime.now.return_value = FIXED_TIMESTAMP  # type: ignore[attr-defined]
 
-        registry = EventRegistry()
-        original_payload = {"prompt": "Hello"}
-        _ = registry.inject_metadata("prompt.submitted", original_payload)
+        original_payload = {"field_a": "value"}
+        _ = populated_registry.inject_metadata("test.event", original_payload)
 
         # Original payload should be unchanged
         assert "correlation_id" not in original_payload
@@ -592,7 +637,10 @@ class TestEventRegistryInjectMetadata:
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.uuid4")
     @patch("omnibase_infra.runtime.emit_daemon.event_registry.datetime")
     def test_overwrites_existing_metadata_fields(
-        self, mock_datetime: object, mock_uuid4: object
+        self,
+        mock_datetime: object,
+        mock_uuid4: object,
+        populated_registry: EventRegistry,
     ) -> None:
         """Should overwrite existing metadata fields in payload.
 
@@ -604,16 +652,15 @@ class TestEventRegistryInjectMetadata:
         mock_uuid4.return_value = FIXED_UUID  # type: ignore[attr-defined]
         mock_datetime.now.return_value = FIXED_TIMESTAMP  # type: ignore[attr-defined]
 
-        registry = EventRegistry()
         payload_with_existing = {
-            "prompt": "Hello",
+            "field_a": "value",
             "correlation_id": "old-corr-id",
             "emitted_at": "old-timestamp",
             "schema_version": "0.0.1",
         }
 
-        enriched = registry.inject_metadata(
-            "prompt.submitted",
+        enriched = populated_registry.inject_metadata(
+            "test.event",
             payload_with_existing,
         )
 
@@ -636,36 +683,41 @@ class TestEventRegistryRealmAgnostic:
     def test_dev_environment_topic_is_realm_agnostic(self) -> None:
         """Topic should be realm-agnostic regardless of dev environment."""
         registry = EventRegistry(environment="dev")
-        topic = registry.resolve_topic("prompt.submitted")
-        assert topic == "onex.evt.omniclaude.prompt-submitted.v1"
+        registry.register(SAMPLE_REGISTRATION)
+        topic = registry.resolve_topic("test.event")
+        assert topic == "onex.evt.test.topic.v1"
         assert not topic.startswith("dev.")
 
     def test_prod_environment_topic_is_realm_agnostic(self) -> None:
         """Topic should be realm-agnostic regardless of prod environment."""
         registry = EventRegistry(environment="prod")
-        topic = registry.resolve_topic("prompt.submitted")
-        assert topic == "onex.evt.omniclaude.prompt-submitted.v1"
+        registry.register(SAMPLE_REGISTRATION)
+        topic = registry.resolve_topic("test.event")
+        assert topic == "onex.evt.test.topic.v1"
         assert not topic.startswith("prod.")
 
     def test_staging_environment_topic_is_realm_agnostic(self) -> None:
         """Topic should be realm-agnostic regardless of staging environment."""
         registry = EventRegistry(environment="staging")
-        topic = registry.resolve_topic("prompt.submitted")
-        assert topic == "onex.evt.omniclaude.prompt-submitted.v1"
+        registry.register(SAMPLE_REGISTRATION)
+        topic = registry.resolve_topic("test.event")
+        assert topic == "onex.evt.test.topic.v1"
         assert not topic.startswith("staging.")
 
     def test_custom_environment_topic_is_realm_agnostic(self) -> None:
         """Topic should be realm-agnostic regardless of custom environment."""
         registry = EventRegistry(environment="my-custom-env")
-        topic = registry.resolve_topic("prompt.submitted")
-        assert topic == "onex.evt.omniclaude.prompt-submitted.v1"
+        registry.register(SAMPLE_REGISTRATION)
+        topic = registry.resolve_topic("test.event")
+        assert topic == "onex.evt.test.topic.v1"
         assert not topic.startswith("my-custom-env.")
 
     def test_default_environment_topic_is_realm_agnostic(self) -> None:
         """Topic should be realm-agnostic even with default environment."""
         registry = EventRegistry()
-        topic = registry.resolve_topic("prompt.submitted")
-        assert topic == "onex.evt.omniclaude.prompt-submitted.v1"
+        registry.register(SAMPLE_REGISTRATION)
+        topic = registry.resolve_topic("test.event")
+        assert topic == "onex.evt.test.topic.v1"
         assert not topic.startswith("dev.")
 
 
@@ -673,14 +725,15 @@ class TestEventRegistryRealmAgnostic:
 class TestEventRegistryListEventTypes:
     """Tests for list_event_types() method."""
 
-    def test_returns_all_default_event_types(self) -> None:
-        """Should return all default registered event types."""
+    def test_returns_empty_list_for_fresh_registry(self) -> None:
+        """Should return empty list for a fresh registry."""
         registry = EventRegistry()
-        event_types = registry.list_event_types()
-        assert "prompt.submitted" in event_types
-        assert "session.started" in event_types
-        assert "session.ended" in event_types
-        assert "tool.executed" in event_types
+        assert registry.list_event_types() == []
+
+    def test_includes_registered_types(self, populated_registry: EventRegistry) -> None:
+        """Should include registered event types in list."""
+        event_types = populated_registry.list_event_types()
+        assert "test.event" in event_types
 
     def test_includes_custom_registrations(self) -> None:
         """Should include custom registrations in list."""
@@ -703,7 +756,7 @@ class TestEventRegistryListEventTypes:
     def test_count_increases_with_registrations(self) -> None:
         """Should reflect new registrations in count."""
         registry = EventRegistry()
-        initial_count = len(registry.list_event_types())
+        assert len(registry.list_event_types()) == 0
 
         registry.register(
             ModelEventRegistration(
@@ -718,20 +771,20 @@ class TestEventRegistryListEventTypes:
             )
         )
 
-        final_count = len(registry.list_event_types())
-        assert final_count == initial_count + 2
+        assert len(registry.list_event_types()) == 2
 
 
 @pytest.mark.unit
 class TestEventRegistryGetRegistration:
     """Tests for get_registration() method."""
 
-    def test_returns_registration_for_known_type(self) -> None:
+    def test_returns_registration_for_known_type(
+        self, populated_registry: EventRegistry
+    ) -> None:
         """Should return registration for known event type."""
-        registry = EventRegistry()
-        registration = registry.get_registration("prompt.submitted")
+        registration = populated_registry.get_registration("test.event")
         assert registration is not None
-        assert registration.event_type == "prompt.submitted"
+        assert registration.event_type == "test.event"
         assert registration.partition_key_field == "session_id"
 
     def test_returns_none_for_unknown_type(self) -> None:
@@ -757,115 +810,3 @@ class TestEventRegistryGetRegistration:
         assert retrieved.partition_key_field == "custom_key"
         assert retrieved.required_fields == ["a", "b"]
         assert retrieved.schema_version == "3.0.0"
-
-
-@pytest.mark.unit
-class TestEventRegistryDefaultRegistrationDetails:
-    """Tests verifying specific details of default registrations."""
-
-    def test_prompt_submitted_partition_key(self) -> None:
-        """prompt.submitted should use session_id as partition key."""
-        registry = EventRegistry()
-        reg = registry.get_registration("prompt.submitted")
-        assert reg is not None
-        assert reg.partition_key_field == "session_id"
-
-    def test_prompt_submitted_required_fields(self) -> None:
-        """prompt.submitted should require prompt field."""
-        registry = EventRegistry()
-        reg = registry.get_registration("prompt.submitted")
-        assert reg is not None
-        assert "prompt" in reg.required_fields
-
-    def test_session_started_required_fields(self) -> None:
-        """session.started should require session_id field."""
-        registry = EventRegistry()
-        reg = registry.get_registration("session.started")
-        assert reg is not None
-        assert "session_id" in reg.required_fields
-
-    def test_session_ended_required_fields(self) -> None:
-        """session.ended should require session_id field."""
-        registry = EventRegistry()
-        reg = registry.get_registration("session.ended")
-        assert reg is not None
-        assert "session_id" in reg.required_fields
-
-    def test_tool_executed_required_fields(self) -> None:
-        """tool.executed should require tool_name field."""
-        registry = EventRegistry()
-        reg = registry.get_registration("tool.executed")
-        assert reg is not None
-        assert "tool_name" in reg.required_fields
-
-    def test_tool_executed_partition_key(self) -> None:
-        """tool.executed should use session_id as partition key."""
-        registry = EventRegistry()
-        reg = registry.get_registration("tool.executed")
-        assert reg is not None
-        assert reg.partition_key_field == "session_id"
-
-    # Routing decision tests (PR #92)
-
-    def test_routing_decision_partition_key(self) -> None:
-        """routing.decision should use correlation_id as partition key."""
-        registry = EventRegistry()
-        reg = registry.get_registration("routing.decision")
-        assert reg is not None
-        assert reg.partition_key_field == "correlation_id"
-
-    def test_routing_decision_required_fields(self) -> None:
-        """routing.decision should require correlation_id and selected_agent."""
-        registry = EventRegistry()
-        reg = registry.get_registration("routing.decision")
-        assert reg is not None
-        assert "correlation_id" in reg.required_fields
-        assert "selected_agent" in reg.required_fields
-
-    # Notification tests (OMN-1831)
-
-    def test_notification_blocked_required_fields(self) -> None:
-        """notification.blocked should require ticket_identifier, reason, repo, session_id."""
-        registry = EventRegistry()
-        reg = registry.get_registration("notification.blocked")
-        assert reg is not None
-        assert "ticket_identifier" in reg.required_fields
-        assert "reason" in reg.required_fields
-        assert "repo" in reg.required_fields
-        assert "session_id" in reg.required_fields
-
-    def test_notification_blocked_partition_key(self) -> None:
-        """notification.blocked should use session_id as partition key."""
-        registry = EventRegistry()
-        reg = registry.get_registration("notification.blocked")
-        assert reg is not None
-        assert reg.partition_key_field == "session_id"
-
-    def test_notification_blocked_topic(self) -> None:
-        """notification.blocked should have correct topic template."""
-        registry = EventRegistry()
-        topic = registry.resolve_topic("notification.blocked")
-        assert topic == "onex.evt.omniclaude.notification-blocked.v1"
-
-    def test_notification_completed_required_fields(self) -> None:
-        """notification.completed should require ticket_identifier, summary, repo, session_id."""
-        registry = EventRegistry()
-        reg = registry.get_registration("notification.completed")
-        assert reg is not None
-        assert "ticket_identifier" in reg.required_fields
-        assert "summary" in reg.required_fields
-        assert "repo" in reg.required_fields
-        assert "session_id" in reg.required_fields
-
-    def test_notification_completed_partition_key(self) -> None:
-        """notification.completed should use session_id as partition key."""
-        registry = EventRegistry()
-        reg = registry.get_registration("notification.completed")
-        assert reg is not None
-        assert reg.partition_key_field == "session_id"
-
-    def test_notification_completed_topic(self) -> None:
-        """notification.completed should have correct topic template."""
-        registry = EventRegistry()
-        topic = registry.resolve_topic("notification.completed")
-        assert topic == "onex.evt.omniclaude.notification-completed.v1"
