@@ -15,10 +15,11 @@ These tests verify:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+pytestmark = pytest.mark.unit
 
 from omnibase_infra.runtime.models.model_security_config import ModelSecurityConfig
 from omnibase_infra.runtime.protocol_domain_plugin import (
@@ -163,7 +164,6 @@ class TestValidatePluginNamespace:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestDiscoverFromEntryPoints:
     """Tests for RegistryDomainPlugin.discover_from_entry_points."""
 

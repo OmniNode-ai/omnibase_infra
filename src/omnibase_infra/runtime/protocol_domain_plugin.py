@@ -329,6 +329,9 @@ class ProtocolDomainPlugin(Protocol):
         Called after wire_dispatchers(). This method should start any
         event consumers the domain needs to process events from the bus.
 
+        Args:
+            config: Plugin configuration with container and event bus.
+
         Returns:
             Result with unsubscribe_callbacks for cleanup during shutdown.
         """
@@ -627,8 +630,7 @@ class RegistryDomainPlugin:
                 )
                 if strict:
                     raise ImportError(
-                        f"Failed to load plugin entry point '{ep.name}': "
-                        f"{type(exc).__name__}: {exc}"
+                        f"Failed to load plugin entry point '{ep.name}': {msg}"
                     ) from exc
                 continue
 
@@ -653,7 +655,7 @@ class RegistryDomainPlugin:
                 if strict:
                     raise TypeError(
                         f"Failed to instantiate plugin from entry point "
-                        f"'{ep.name}': {type(exc).__name__}: {exc}"
+                        f"'{ep.name}': {msg}"
                     ) from exc
                 continue
 
