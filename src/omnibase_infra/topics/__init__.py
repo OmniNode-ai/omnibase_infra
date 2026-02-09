@@ -4,11 +4,14 @@ This module provides platform-reserved topic suffix constants for ONEX infrastru
 components. Domain services should NOT import from this module - domain topics should
 be defined in domain contracts.
 
+IMPORTANT: ONEX topics are realm-agnostic. Environment prefixes (dev., prod., etc.)
+must NOT appear on the wire. Environment isolation is enforced via envelope identity
+and consumer group naming, not topic prefixing. The canonical resolution path is
+TopicResolver, which validates suffixes and returns them unchanged.
+
 Exports:
     Platform topic suffix constants (e.g., SUFFIX_NODE_REGISTRATION)
     ALL_PLATFORM_SUFFIXES: Complete tuple of all platform-reserved suffixes
-    build_full_topic: Compose full topic from env, namespace, and suffix
-    TopicCompositionError: Error raised when topic composition fails
     TopicResolver: Canonical resolver for topic suffix -> concrete Kafka topic
     TopicResolutionError: Error raised when topic resolution fails
 """
@@ -24,11 +27,6 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_RUNTIME_TICK,
 )
 from omnibase_infra.topics.topic_resolver import TopicResolutionError, TopicResolver
-from omnibase_infra.topics.util_topic_composition import (
-    MAX_NAMESPACE_LENGTH,
-    TopicCompositionError,
-    build_full_topic,
-)
 
 __all__: list[str] = [
     # Individual suffix constants
@@ -41,10 +39,6 @@ __all__: list[str] = [
     "SUFFIX_REGISTRATION_SNAPSHOTS",
     # Aggregate tuple
     "ALL_PLATFORM_SUFFIXES",
-    # Topic composition utilities
-    "build_full_topic",
-    "TopicCompositionError",
-    "MAX_NAMESPACE_LENGTH",
     # Topic resolution
     "TopicResolver",
     "TopicResolutionError",
