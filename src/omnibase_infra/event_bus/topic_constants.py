@@ -2,30 +2,25 @@
 # Copyright (c) 2025 OmniNode Team
 """Topic naming constants and utilities for ONEX event bus.
 
-This module defines topic naming conventions for the ONEX event-driven architecture,
-including Dead Letter Queue (DLQ) topics for permanently failed messages.
+This module defines DLQ (Dead Letter Queue) topic naming conventions and
+wiring health monitoring topic constants for the ONEX event-driven architecture.
 
-Topic Naming Conventions:
-    ONEX uses two primary topic naming formats:
+IMPORTANT: ONEX event topics are realm-agnostic -- environment prefixes (dev.,
+prod., etc.) must NOT appear on the wire for event routing topics. Environment
+isolation is enforced via envelope identity and consumer group naming.
+See ``omnibase_infra.topics.TopicResolver`` for the canonical resolution path.
 
-    1. **ONEX Kafka Format**: `onex.<domain>.<type>`
-       - Example: `onex.registration.events`
-       - Used for core ONEX system topics
-
-    2. **Environment-Aware Format**: `<env>.<domain>.<category>.<version>`
-       - Example: `dev.user.events.v1`, `prod.order.commands.v1`
-       - Used for application-level message routing
+DLQ topics are the sole exception: they use ``<env>.dlq.<category>.<version>``
+because dead letter storage is per-environment infrastructure, not event routing.
 
 DLQ Topic Naming:
-    Dead Letter Queue topics follow the Environment-Aware format with 'dlq' as the domain:
-
-    - **DLQ Topic Format**: `<env>.dlq.<category>.<version>`
-    - Example: `dev.dlq.intents.v1`, `prod.dlq.events.v1`
+    - **Format**: ``<env>.dlq.<category>.<version>``
+    - Example: ``prod.dlq.intents.v1``, ``staging.dlq.events.v1``
 
     This convention ensures:
     - DLQ topics are clearly identifiable by the 'dlq' domain
     - Category (intents, events, commands) is preserved for routing analysis
-    - Environment separation for multi-environment deployments
+    - Environment separation for multi-environment DLQ storage
     - Version control for DLQ message schema evolution
 
 Usage:
@@ -38,11 +33,6 @@ Usage:
     >>> topic = build_dlq_topic("prod", "intents")
     >>> print(topic)
     prod.dlq.intents.v1
-    >>>
-    >>> # Using pre-defined suffix
-    >>> topic = f"dev.{DLQ_INTENT_TOPIC_SUFFIX}"
-    >>> print(topic)
-    dev.dlq.intents.v1
 
 See Also:
     - ModelKafkaEventBusConfig.dead_letter_topic: DLQ configuration
