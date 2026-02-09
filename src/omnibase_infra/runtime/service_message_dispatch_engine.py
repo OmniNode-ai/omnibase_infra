@@ -1019,8 +1019,11 @@ class MessageDispatchEngine:
         #
         # Related: OMN-2037
         envelope_event_type: str | None = getattr(envelope, "event_type", None)
-        if envelope_event_type is not None and str(envelope_event_type).strip():
-            message_type = str(envelope_event_type).strip()
+        normalized_event_type = (
+            str(envelope_event_type).strip() if envelope_event_type is not None else ""
+        )
+        if normalized_event_type:
+            message_type = normalized_event_type
         else:
             message_type = type(envelope.payload).__name__
 
@@ -1032,11 +1035,7 @@ class MessageDispatchEngine:
         )
 
         # Log routing decision at DEBUG level
-        routing_source = (
-            "event_type"
-            if envelope_event_type is not None and str(envelope_event_type).strip()
-            else "payload_class"
-        )
+        routing_source = "event_type" if normalized_event_type else "payload_class"
         self._logger.debug(
             "Routing decision: %d dispatchers matched for message_type '%s' (source=%s)",
             len(matching_dispatchers),
