@@ -35,6 +35,7 @@ Related:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import socket
 from datetime import UTC, datetime
@@ -196,14 +197,25 @@ class BaseHandlerSwappingTests:
         assert register_result.success, "Registration failed"
         assert register_result.service_id == sample_service_info.service_id
 
-        # Discover the service
+        # Discover the service (retry to allow for eventual consistency in
+        # backends like Consul where catalog propagation is not instant).
+        # Mock handlers succeed on the first attempt with no delay.
         query = ModelDiscoveryQuery(
             service_name=sample_service_info.service_name,
             correlation_id=correlation_id,
         )
-        discover_result = await handler.discover_services(query)
+
+        max_attempts = 5
+        discover_result = None
+        for attempt in range(max_attempts):
+            discover_result = await handler.discover_services(query)
+            if discover_result.success and len(discover_result.services) >= 1:
+                break
+            if attempt < max_attempts - 1:
+                await asyncio.sleep(0.5)
 
         # Verify discovery returned the registered service
+        assert discover_result is not None, "Discovery was never attempted"
         assert discover_result.success, "Discovery failed"
         assert len(discover_result.services) >= 1
 
@@ -655,7 +667,14 @@ class TestConsulHandlerSwapping(BaseHandlerSwappingTests):
 
     @pytest.fixture
     def sample_service_info(self) -> ModelServiceInfo:
-        """Create a sample service info with unique name for Consul tests."""
+        """Create a sample service info with unique name for Consul tests.
+
+        Note: health_check_url is intentionally omitted so that Consul
+        does not register an HTTP health check pointing at an unreachable
+        address.  Without a check the service is considered passing
+        immediately, which lets discover_services(passing=True) find it
+        after catalog propagation.
+        """
         # Use unique service name to avoid conflicts in shared Consul
         return ModelServiceInfo(
             service_id=uuid4(),
@@ -664,7 +683,6 @@ class TestConsulHandlerSwapping(BaseHandlerSwappingTests):
             port=8080,
             tags=("api", "v1", "test"),
             metadata={"environment": "test"},
-            health_check_url="http://192.168.1.100:8080/health",
             registered_at=datetime.now(UTC),
             correlation_id=uuid4(),
         )

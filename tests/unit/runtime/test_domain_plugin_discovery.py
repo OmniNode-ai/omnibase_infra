@@ -133,9 +133,7 @@ class TestDiscoverFromEntryPoints:
         mock_entry_points.return_value = [ep]
 
         registry = RegistryDomainPlugin()
-        report = registry.discover_from_entry_points(
-            allowed_namespaces=TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
-        )
+        report = registry.discover_from_entry_points()
 
         assert len(report.accepted) == 1
         assert report.accepted[0] == "valid-plugin"
@@ -154,9 +152,7 @@ class TestDiscoverFromEntryPoints:
         mock_entry_points.return_value = [ep]
 
         registry = RegistryDomainPlugin()
-        report = registry.discover_from_entry_points(
-            allowed_namespaces=TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
-        )
+        report = registry.discover_from_entry_points()
 
         # Plugin should NOT be loaded (load() should not have been called)
         ep.load.assert_not_called()
@@ -181,9 +177,7 @@ class TestDiscoverFromEntryPoints:
         existing = ValidPlugin(plugin_id="valid-plugin")
         registry.register(existing)
 
-        report = registry.discover_from_entry_points(
-            allowed_namespaces=TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
-        )
+        report = registry.discover_from_entry_points()
 
         # Should still have only the original plugin
         assert len(registry) == 1
@@ -203,9 +197,7 @@ class TestDiscoverFromEntryPoints:
         mock_entry_points.return_value = [ep]
 
         registry = RegistryDomainPlugin()
-        report = registry.discover_from_entry_points(
-            allowed_namespaces=TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
-        )
+        report = registry.discover_from_entry_points()
 
         assert len(report.accepted) == 0
         assert len(registry) == 0
@@ -223,9 +215,7 @@ class TestDiscoverFromEntryPoints:
         mock_entry_points.return_value = [ep]
 
         registry = RegistryDomainPlugin()
-        report = registry.discover_from_entry_points(
-            allowed_namespaces=TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
-        )
+        report = registry.discover_from_entry_points()
 
         assert len(report.accepted) == 0
         assert len(registry) == 0
@@ -243,9 +233,7 @@ class TestDiscoverFromEntryPoints:
         mock_entry_points.return_value = [ep]
 
         registry = RegistryDomainPlugin()
-        report = registry.discover_from_entry_points(
-            allowed_namespaces=TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
-        )
+        report = registry.discover_from_entry_points()
 
         assert len(report.accepted) == 0
         assert len(registry) == 0
@@ -290,9 +278,7 @@ class TestDiscoverFromEntryPoints:
         mock_entry_points.return_value = [ep_valid, ep_rejected, ep_broken]
 
         registry = RegistryDomainPlugin()
-        report = registry.discover_from_entry_points(
-            allowed_namespaces=TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
-        )
+        report = registry.discover_from_entry_points()
 
         assert len(report.entries) == 3
         assert len(report.accepted) == 1
@@ -433,9 +419,7 @@ class TestDiscoveryReportIntegration:
         mock_entry_points.return_value = [ep_ok, ep_bad]
 
         registry = RegistryDomainPlugin()
-        report = registry.discover_from_entry_points(
-            allowed_namespaces=TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
-        )
+        report = registry.discover_from_entry_points()
 
         assert len(report.rejected) == 1
         assert report.rejected[0].entry_point_name == "bad"
