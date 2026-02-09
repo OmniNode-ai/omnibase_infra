@@ -4767,3 +4767,43 @@ class TestEventTypeRouting:
 
         assert result.status == EnumDispatchStatus.SUCCESS
         assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_dispatch_event_type_padded_whitespace_stripped(self) -> None:
+        """Padded event_type is stripped before routing, matching the registered key."""
+        engine = MessageDispatchEngine()
+        results: list[str] = []
+
+        async def handler(envelope: object) -> str:
+            results.append("handled")
+            return "output.v1"
+
+        engine.register_dispatcher(
+            dispatcher_id="handler",
+            dispatcher=handler,
+            category=EnumMessageCategory.EVENT,
+            message_types={"node.introspected.v1"},
+        )
+        engine.register_route(
+            ModelDispatchRoute(
+                route_id="route",
+                topic_pattern="*.node.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="handler",
+            )
+        )
+        engine.freeze()
+
+        # Envelope with whitespace-padded event_type - should be stripped to match
+        envelope = EnvelopeWithEventType(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            event_type="  node.introspected.v1  ",
+        )
+
+        result = await engine.dispatch(
+            "dev.node.events.v1",
+            envelope,  # type: ignore[arg-type]
+        )
+
+        assert result.status == EnumDispatchStatus.SUCCESS
+        assert len(results) == 1

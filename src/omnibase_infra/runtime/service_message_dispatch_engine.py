@@ -875,7 +875,7 @@ class MessageDispatchEngine:
         Dispatch Process:
             1. Parse topic to extract message category
             2. Validate envelope category matches topic category
-            3. Get message type from envelope payload
+            3. Get routing key from event_type (preferred) or payload class name
             4. Find all matching dispatchers (by category + message type)
             5. Execute dispatchers (fan-out)
             6. Collect outputs and return result
@@ -1020,7 +1020,7 @@ class MessageDispatchEngine:
         # Related: OMN-2037
         envelope_event_type: str | None = getattr(envelope, "event_type", None)
         if envelope_event_type is not None and str(envelope_event_type).strip():
-            message_type = str(envelope_event_type)
+            message_type = str(envelope_event_type).strip()
         else:
             message_type = type(envelope.payload).__name__
 
