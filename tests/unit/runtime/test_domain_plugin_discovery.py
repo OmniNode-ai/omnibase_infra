@@ -12,9 +12,9 @@ Comprehensive unit tests for the plugin discovery mechanism covering:
 
 Reuses MockPlugin pattern from test_domain_plugin_shutdown.py.
 
-Test classes and counts (31 total):
+Test classes and counts (32 total):
     - TestPluginNamespaceValidation: 4 tests
-    - TestDiscoverFromEntryPoints: 14 tests
+    - TestDiscoverFromEntryPoints: 15 tests
     - TestDiscoveryReport: 3 tests
     - TestSecurityConfigPluginNamespaces: 5 tests
     - TestSecurityPolicyEnforcement: 2 tests
@@ -195,7 +195,7 @@ class TestPluginNamespaceValidation:
 
 
 # ---------------------------------------------------------------------------
-# TestDiscoverFromEntryPoints (14 tests)
+# TestDiscoverFromEntryPoints (15 tests)
 # ---------------------------------------------------------------------------
 
 
@@ -284,6 +284,7 @@ class TestDiscoverFromEntryPoints:
         assert len(registry) == 0
         assert report.entries[0].status == "namespace_rejected"
         assert "evil_corp.plugins" in report.entries[0].reason
+        assert not report.has_errors
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
     def test_protocol_invalid_rejected(self, mock_entry_points: MagicMock) -> None:
@@ -302,6 +303,7 @@ class TestDiscoverFromEntryPoints:
         assert report.entries[0].status == "protocol_invalid"
         assert "ProtocolDomainPlugin" in report.entries[0].reason
         assert len(registry) == 0
+        assert not report.has_errors
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
     def test_import_error_graceful_non_strict(
@@ -413,6 +415,7 @@ class TestDiscoverFromEntryPoints:
         registry = RegistryDomainPlugin()
         report = registry.discover_from_entry_points()
 
+        assert report.discovered_count == 3
         assert len(report.accepted) == 3
         assert set(report.accepted) == {"alpha", "beta", "gamma"}
         assert len(registry) == 3
@@ -505,6 +508,32 @@ class TestDiscoverFromEntryPoints:
         mock_entry_points.assert_called_once_with(group="custom.group")
         assert report.group == "custom.group"
 
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_parse_module_path_no_colon(self, mock_entry_points: MagicMock) -> None:
+        """Entry point value without colon is used as-is for namespace validation.
+
+        When ``ep.value`` has no colon (e.g. ``"omnibase_infra.plugins.module_only"``),
+        ``_parse_module_path`` returns the entire string unchanged. This test
+        verifies that the no-colon path still flows through namespace validation
+        correctly -- a trusted module-only value is accepted, while an untrusted
+        one is rejected.
+        """
+        ep = _make_entry_point(
+            "module-only",
+            "omnibase_infra.plugins.module_only",
+            MockPlugin,
+        )
+        mock_entry_points.return_value = [ep]
+
+        registry = RegistryDomainPlugin()
+        report = registry.discover_from_entry_points()
+
+        assert report.discovered_count == 1
+        assert len(report.accepted) == 1
+        assert report.entries[0].status == "accepted"
+        # Module path stored without colon stripping
+        assert report.entries[0].module_path == "omnibase_infra.plugins.module_only"
+
 
 # ---------------------------------------------------------------------------
 # TestDiscoveryReport (3 tests)
@@ -569,6 +598,7 @@ class TestDiscoveryReport:
         registry = RegistryDomainPlugin()
         report = registry.discover_from_entry_points()
 
+        assert report.discovered_count == 3
         # has_errors is True due to import_error and instantiation_error
         assert report.has_errors
         statuses = {e.entry_point_name: e.status for e in report.entries}
