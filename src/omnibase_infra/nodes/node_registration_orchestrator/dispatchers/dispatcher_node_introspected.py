@@ -298,9 +298,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             # Delegate to wrapped handler
             handler_output = await self._handler.handle(handler_envelope)
             output_events = list(handler_output.events)
-            output_intents = (
-                handler_output.intents
-            )  # Already a tuple from ModelHandlerOutput
+            output_intents = handler_output.intents
 
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000

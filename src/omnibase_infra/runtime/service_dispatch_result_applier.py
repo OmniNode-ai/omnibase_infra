@@ -155,6 +155,10 @@ class DispatchResultApplier:
                             "dispatcher_id": result.dispatcher_id,
                         },
                     )
+                    # Re-raise so the caller can classify the error and
+                    # apply retry/DLQ logic. Swallowing publish failures
+                    # causes offset commit despite lost output events.
+                    raise
 
             logger.debug(
                 "Applied %d output events from dispatcher=%s (correlation_id=%s)",

@@ -50,8 +50,6 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict
-
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -69,6 +67,9 @@ from omnibase_infra.models.registration.events.model_node_registration_initiated
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_projection_record import (
+    ModelProjectionRecord,
+)
 from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
     ModelPayloadConsulRegister,
 )
@@ -81,18 +82,6 @@ from omnibase_infra.projectors.projection_reader_registration import (
 from omnibase_infra.utils import validate_timezone_aware_with_context
 
 logger = logging.getLogger(__name__)
-
-
-class ModelProjectionRecord(BaseModel):
-    """Minimal model for wrapping projection record dicts.
-
-    Uses extra='allow' so all dict keys are preserved as extra fields.
-    This allows the record to be stored as SerializeAsAny[BaseModel] in
-    ModelPayloadPostgresUpsertRegistration while retaining all data.
-    SerializeAsAny ensures model_dump() serializes all extra fields.
-    """
-
-    model_config = ConfigDict(extra="allow", frozen=True)
 
 
 # States that allow re-registration (node can try again)
