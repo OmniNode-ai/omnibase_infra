@@ -1,85 +1,107 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Tests for domain plugin entry_point discovery (OMN-2000).
+"""Tests for domain plugin discovery (OMN-2020).
 
-These tests verify:
-1. discover_from_entry_points() discovers and registers valid plugins
-2. Namespace rejection blocks untrusted modules BEFORE import
-3. Duplicate plugin_id handling (explicit registration wins)
-4. Protocol validation rejects non-conforming classes
-5. Import error handling for broken entry_points
-6. Instantiation error handling for failing constructors
-7. ModelSecurityConfig plugin namespace fields
-8. Integration with kernel bootstrap flow
+Comprehensive unit tests for the plugin discovery mechanism covering:
+
+1. Namespace validation (boundary-aware prefix matching)
+2. Entry-point discovery (importlib.metadata integration)
+3. Discovery report model (accepted/rejected/errors)
+4. Security config plugin namespace fields
+5. Security policy enforcement (end-to-end)
+
+Reuses MockPlugin pattern from test_domain_plugin_shutdown.py.
+
+Test classes and counts (32 total):
+    - TestPluginNamespaceValidation: 4 tests
+    - TestDiscoverFromEntryPoints: 15 tests
+    - TestDiscoveryReport: 3 tests
+    - TestSecurityConfigPluginNamespaces: 5 tests
+    - TestSecurityPolicyEnforcement: 2 tests
+    - TestSecurityConstants: 3 tests
 """
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from omnibase_infra.runtime.constants_security import (
     DOMAIN_PLUGIN_ENTRY_POINT_GROUP,
     TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
 )
-from omnibase_infra.runtime.models import ModelSecurityConfig
-from omnibase_infra.runtime.models.model_plugin_discovery_entry import (
-    ModelPluginDiscoveryEntry,
-)
 from omnibase_infra.runtime.models.model_plugin_discovery_report import (
     ModelPluginDiscoveryReport,
 )
+from omnibase_infra.runtime.models.model_security_config import ModelSecurityConfig
 from omnibase_infra.runtime.protocol_domain_plugin import (
     ModelDomainPluginConfig,
     ModelDomainPluginResult,
-    ProtocolDomainPlugin,
     RegistryDomainPlugin,
 )
 
 # ---------------------------------------------------------------------------
-# Test helpers
+# Test helpers (reusing MockPlugin pattern from test_domain_plugin_shutdown.py)
 # ---------------------------------------------------------------------------
 
 
-class ValidPlugin:
-    """A valid plugin that implements ProtocolDomainPlugin."""
+class MockPlugin:
+    """Mock plugin implementing ProtocolDomainPlugin for testing.
 
-    def __init__(self, plugin_id: str = "valid-plugin") -> None:
+    Reuses the pattern from test_domain_plugin_shutdown.py.
+    Satisfies ProtocolDomainPlugin via structural subtyping.
+    """
+
+    def __init__(
+        self, plugin_id: str = "mock-plugin", display_name: str | None = None
+    ) -> None:
+        """Initialize mock plugin with configurable identity."""
         self._plugin_id = plugin_id
+        self._display_name = display_name or plugin_id.title()
 
     @property
     def plugin_id(self) -> str:
+        """Return unique identifier for this plugin."""
         return self._plugin_id
 
     @property
     def display_name(self) -> str:
-        return "Valid Plugin"
+        """Return human-readable name for this plugin."""
+        return self._display_name
 
     def should_activate(self, config: ModelDomainPluginConfig) -> bool:
+        """Always activate for testing."""
         return True
 
     async def initialize(
         self, config: ModelDomainPluginConfig
     ) -> ModelDomainPluginResult:
+        """Initialize plugin resources (no-op for testing)."""
         return ModelDomainPluginResult.succeeded(plugin_id=self.plugin_id)
 
     async def wire_handlers(
         self, config: ModelDomainPluginConfig
     ) -> ModelDomainPluginResult:
+        """Wire handlers (no-op for testing)."""
         return ModelDomainPluginResult.succeeded(plugin_id=self.plugin_id)
 
     async def wire_dispatchers(
         self, config: ModelDomainPluginConfig
     ) -> ModelDomainPluginResult:
+        """Wire dispatchers (no-op for testing)."""
         return ModelDomainPluginResult.succeeded(plugin_id=self.plugin_id)
 
     async def start_consumers(
         self, config: ModelDomainPluginConfig
     ) -> ModelDomainPluginResult:
+        """Start consumers (no-op for testing)."""
         return ModelDomainPluginResult.succeeded(plugin_id=self.plugin_id)
 
     async def shutdown(
         self, config: ModelDomainPluginConfig
     ) -> ModelDomainPluginResult:
+        """Shut down plugin (no-op for testing)."""
         return ModelDomainPluginResult.succeeded(plugin_id=self.plugin_id)
 
 
@@ -100,9 +122,10 @@ def _make_entry_point(
     """Create a mock EntryPoint.
 
     Args:
-        name: Entry point name (e.g. "registration").
-        value: Module path string (e.g. "omnibase_infra.plugins:Plugin").
-        target_class: Class to return from .load(). If None, load() raises ImportError.
+        name: Entry point name (e.g. ``"registration"``).
+        value: Module path string (e.g. ``"omnibase_infra.plugins:Plugin"``).
+        target_class: Class to return from ``.load()``. If ``None``,
+            ``load()`` raises ``ImportError``.
     """
     ep = MagicMock()
     ep.name = name
@@ -115,20 +138,84 @@ def _make_entry_point(
 
 
 # ---------------------------------------------------------------------------
-# discover_from_entry_points tests
+# TestPluginNamespaceValidation (4 tests)
+# ---------------------------------------------------------------------------
+
+
+class TestPluginNamespaceValidation:
+    """Tests for namespace validation logic (_validate_plugin_namespace).
+
+    Verifies boundary-aware prefix matching that prevents typosquatting
+    attacks and ensures both dotted and non-dotted prefixes work correctly.
+    """
+
+    def test_dotted_prefix_matches_correctly(self) -> None:
+        """Dotted prefix 'omnibase_infra.' matches 'omnibase_infra.plugin'."""
+        assert RegistryDomainPlugin._validate_plugin_namespace(
+            "omnibase_infra.plugin",
+            ("omnibase_infra.",),
+        )
+
+    def test_typosquatting_rejected(self) -> None:
+        """Prefix 'omnibase_infra.' does NOT match 'omnibase_infra_evil.plugin'.
+
+        This is the critical typosquatting prevention test. A malicious
+        package named ``omnibase_infra_evil`` must not be accepted by the
+        prefix ``omnibase_infra.`` because the underscore breaks the boundary.
+        """
+        assert not RegistryDomainPlugin._validate_plugin_namespace(
+            "omnibase_infra_evil.plugin",
+            ("omnibase_infra.",),
+        )
+
+    def test_empty_allowlist_rejects_everything(self) -> None:
+        """Empty allowlist rejects all modules."""
+        assert not RegistryDomainPlugin._validate_plugin_namespace(
+            "omnibase_infra.plugins.foo",
+            (),
+        )
+
+    def test_non_dotted_prefix_uses_boundary_check(self) -> None:
+        """Non-dotted prefix uses boundary check: matches '.x' but not 'structure.x'.
+
+        The prefix ``"omnibase_infra"`` (no trailing dot) must match
+        ``"omnibase_infra.x"`` (next char is dot) but must NOT match
+        ``"omnibase_infrastructure.x"`` (no boundary at prefix end).
+        """
+        # Matches: next char after prefix is "."
+        assert RegistryDomainPlugin._validate_plugin_namespace(
+            "omnibase_infra.x",
+            ("omnibase_infra",),
+        )
+        # Does NOT match: "omnibase_infrastructure" extends beyond boundary
+        assert not RegistryDomainPlugin._validate_plugin_namespace(
+            "omnibase_infrastructure.x",
+            ("omnibase_infra",),
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestDiscoverFromEntryPoints (15 tests)
 # ---------------------------------------------------------------------------
 
 
 class TestDiscoverFromEntryPoints:
-    """Tests for RegistryDomainPlugin.discover_from_entry_points()."""
+    """Tests for RegistryDomainPlugin.discover_from_entry_points().
+
+    All tests mock ``importlib.metadata.entry_points`` to control discovery
+    inputs. Tests cover happy path, error handling, strict mode, deduplication,
+    and deterministic ordering.
+    """
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
-    def test_discover_valid_plugin(self, mock_entry_points: MagicMock) -> None:
+    def test_valid_plugin_discovered_and_registered(
+        self, mock_entry_points: MagicMock
+    ) -> None:
         """A valid plugin from a trusted namespace is discovered and registered."""
         ep = _make_entry_point(
             "test-plugin",
-            "omnibase_infra.plugins.test:ValidPlugin",
-            ValidPlugin,
+            "omnibase_infra.plugins.test:MockPlugin",
+            MockPlugin,
         )
         mock_entry_points.return_value = [ep]
 
@@ -136,59 +223,72 @@ class TestDiscoverFromEntryPoints:
         report = registry.discover_from_entry_points()
 
         assert len(report.accepted) == 1
-        assert report.accepted[0] == "valid-plugin"
+        assert report.accepted[0] == "mock-plugin"
         assert len(registry) == 1
-        assert registry.get("valid-plugin") is not None
+        assert registry.get("mock-plugin") is not None
         assert not report.has_errors
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
-    def test_namespace_rejection(self, mock_entry_points: MagicMock) -> None:
-        """Entry points from untrusted namespaces are rejected BEFORE import."""
-        ep = _make_entry_point(
-            "evil-plugin",
-            "evil_corp.plugins:MaliciousPlugin",
-            ValidPlugin,
-        )
-        mock_entry_points.return_value = [ep]
+    def test_explicit_registration_wins_on_duplicate(
+        self, mock_entry_points: MagicMock
+    ) -> None:
+        """Explicit registration wins on duplicate plugin_id -- no ValueError.
 
-        registry = RegistryDomainPlugin()
-        report = registry.discover_from_entry_points()
-
-        # Plugin should NOT be loaded (load() should not have been called)
-        ep.load.assert_not_called()
-        assert len(report.accepted) == 0
-        assert len(registry) == 0
-        assert len(report.rejected) == 1
-        assert report.entries[0].status == "namespace_rejected"
-        assert "evil_corp.plugins" in report.entries[0].reason
-
-    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
-    def test_duplicate_plugin_id_skipped(self, mock_entry_points: MagicMock) -> None:
-        """If a plugin_id is already registered, entry_point is skipped."""
+        When a plugin_id is already registered via explicit ``register()``,
+        the discovered plugin is silently skipped and logged as
+        ``duplicate_skipped``.
+        """
         ep = _make_entry_point(
             "registration",
-            "omnibase_infra.plugins:ValidPlugin",
-            ValidPlugin,
+            "omnibase_infra.plugins:MockPlugin",
+            MockPlugin,
         )
         mock_entry_points.return_value = [ep]
 
         registry = RegistryDomainPlugin()
-        # Pre-register a plugin with the same ID
-        existing = ValidPlugin(plugin_id="valid-plugin")
+        existing = MockPlugin(plugin_id="mock-plugin")
         registry.register(existing)
 
         report = registry.discover_from_entry_points()
 
-        # Should still have only the original plugin
+        # No ValueError raised; original plugin preserved
         assert len(registry) == 1
-        assert registry.get("valid-plugin") is existing
+        assert registry.get("mock-plugin") is existing
         assert len(report.accepted) == 0
         assert report.entries[0].status == "duplicate_skipped"
-        assert report.entries[0].plugin_id == "valid-plugin"
+        assert report.entries[0].plugin_id == "mock-plugin"
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
-    def test_protocol_validation_failure(self, mock_entry_points: MagicMock) -> None:
-        """Classes that don't implement ProtocolDomainPlugin are rejected."""
+    def test_namespace_rejected_load_not_called(
+        self, mock_entry_points: MagicMock
+    ) -> None:
+        """Namespace-rejected entry_point is skipped; .load() NOT called.
+
+        This verifies pre-import security enforcement: untrusted modules
+        are blocked BEFORE any import/load occurs, preventing side effects
+        at import time.
+        """
+        ep = _make_entry_point(
+            "evil-plugin",
+            "evil_corp.plugins:MaliciousPlugin",
+            MockPlugin,
+        )
+        mock_entry_points.return_value = [ep]
+
+        registry = RegistryDomainPlugin()
+        report = registry.discover_from_entry_points()
+
+        # Critical: load() must NOT have been called
+        ep.load.assert_not_called()
+        assert len(report.accepted) == 0
+        assert len(registry) == 0
+        assert report.entries[0].status == "namespace_rejected"
+        assert "evil_corp.plugins" in report.entries[0].reason
+        assert not report.has_errors
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_protocol_invalid_rejected(self, mock_entry_points: MagicMock) -> None:
+        """Non-protocol-compliant class rejected with protocol_invalid status."""
         ep = _make_entry_point(
             "invalid-plugin",
             "omnibase_infra.plugins:InvalidPlugin",
@@ -200,17 +300,20 @@ class TestDiscoverFromEntryPoints:
         report = registry.discover_from_entry_points()
 
         assert len(report.accepted) == 0
-        assert len(registry) == 0
         assert report.entries[0].status == "protocol_invalid"
         assert "ProtocolDomainPlugin" in report.entries[0].reason
+        assert len(registry) == 0
+        assert not report.has_errors
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
-    def test_import_error_handling(self, mock_entry_points: MagicMock) -> None:
-        """Entry points that fail to load are reported as import_error."""
+    def test_import_error_graceful_non_strict(
+        self, mock_entry_points: MagicMock
+    ) -> None:
+        """ImportError during .load() handled gracefully in non-strict mode."""
         ep = _make_entry_point(
             "broken-plugin",
             "omnibase_infra.plugins.broken:BrokenPlugin",
-            None,  # load() will raise ImportError
+            None,  # load() raises ImportError
         )
         mock_entry_points.return_value = [ep]
 
@@ -218,13 +321,61 @@ class TestDiscoverFromEntryPoints:
         report = registry.discover_from_entry_points()
 
         assert len(report.accepted) == 0
-        assert len(registry) == 0
         assert report.entries[0].status == "import_error"
         assert report.has_errors
+        assert len(registry) == 0
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
-    def test_instantiation_error_handling(self, mock_entry_points: MagicMock) -> None:
-        """Plugins whose constructors fail are reported as instantiation_error."""
+    def test_import_error_raises_in_strict_mode(
+        self, mock_entry_points: MagicMock
+    ) -> None:
+        """ImportError during .load() raises in strict mode."""
+        ep = _make_entry_point(
+            "broken-plugin",
+            "omnibase_infra.plugins.broken:BrokenPlugin",
+            None,  # load() raises ImportError
+        )
+        mock_entry_points.return_value = [ep]
+
+        registry = RegistryDomainPlugin()
+        with pytest.raises(ImportError, match="broken"):
+            registry.discover_from_entry_points(strict=True)
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_instantiation_error_raises_in_strict_mode(
+        self, mock_entry_points: MagicMock
+    ) -> None:
+        """Instantiation error raises TypeError in strict mode."""
+        ep = _make_entry_point(
+            "failing-plugin",
+            "omnibase_infra.plugins:FailingPlugin",
+            FailingConstructorPlugin,
+        )
+        mock_entry_points.return_value = [ep]
+
+        registry = RegistryDomainPlugin()
+        with pytest.raises(TypeError, match="failing-plugin"):
+            registry.discover_from_entry_points(strict=True)
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_protocol_invalid_raises_in_strict_mode(
+        self, mock_entry_points: MagicMock
+    ) -> None:
+        """Protocol-invalid class raises RuntimeError in strict mode."""
+        ep = _make_entry_point(
+            "invalid-plugin",
+            "omnibase_infra.plugins:InvalidPlugin",
+            InvalidPlugin,
+        )
+        mock_entry_points.return_value = [ep]
+
+        registry = RegistryDomainPlugin()
+        with pytest.raises(RuntimeError, match="ProtocolDomainPlugin"):
+            registry.discover_from_entry_points(strict=True)
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_instantiation_error_graceful(self, mock_entry_points: MagicMock) -> None:
+        """Instantiation error handled gracefully (non-strict mode)."""
         ep = _make_entry_point(
             "failing-plugin",
             "omnibase_infra.plugins:FailingPlugin",
@@ -236,15 +387,44 @@ class TestDiscoverFromEntryPoints:
         report = registry.discover_from_entry_points()
 
         assert len(report.accepted) == 0
-        assert len(registry) == 0
         assert report.entries[0].status == "instantiation_error"
         assert report.has_errors
+        assert len(registry) == 0
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
-    def test_empty_group_returns_empty_report(
-        self, mock_entry_points: MagicMock
-    ) -> None:
-        """When no entry_points exist in the group, report is empty."""
+    def test_multiple_valid_all_registered(self, mock_entry_points: MagicMock) -> None:
+        """Multiple valid entry_points all registered; returns correct plugin_id list."""
+
+        class PluginAlpha(MockPlugin):
+            def __init__(self) -> None:
+                super().__init__(plugin_id="alpha")
+
+        class PluginBeta(MockPlugin):
+            def __init__(self) -> None:
+                super().__init__(plugin_id="beta")
+
+        class PluginGamma(MockPlugin):
+            def __init__(self) -> None:
+                super().__init__(plugin_id="gamma")
+
+        ep_a = _make_entry_point("alpha", "omnibase_infra.a:PluginAlpha", PluginAlpha)
+        ep_b = _make_entry_point("beta", "omnibase_infra.b:PluginBeta", PluginBeta)
+        ep_g = _make_entry_point("gamma", "omnibase_infra.g:PluginGamma", PluginGamma)
+        mock_entry_points.return_value = [ep_a, ep_b, ep_g]
+
+        registry = RegistryDomainPlugin()
+        report = registry.discover_from_entry_points()
+
+        assert report.discovered_count == 3
+        assert len(report.accepted) == 3
+        assert set(report.accepted) == {"alpha", "beta", "gamma"}
+        assert len(registry) == 3
+        for pid in ("alpha", "beta", "gamma"):
+            assert registry.get(pid) is not None
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_no_entry_points_empty_report(self, mock_entry_points: MagicMock) -> None:
+        """No entry_points returns empty report with zero counts."""
         mock_entry_points.return_value = []
 
         registry = RegistryDomainPlugin()
@@ -256,119 +436,194 @@ class TestDiscoverFromEntryPoints:
         assert not report.has_errors
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
-    def test_multiple_plugins_mixed_outcomes(
-        self, mock_entry_points: MagicMock
-    ) -> None:
-        """Multiple entry_points with different outcomes are all tracked."""
-        ep_valid = _make_entry_point(
-            "valid",
-            "omnibase_infra.plugins:ValidPlugin",
-            ValidPlugin,
+    def test_deterministic_ordering(self, mock_entry_points: MagicMock) -> None:
+        """Two plugins always register in same order regardless of iteration order.
+
+        The discover method sorts entry points by ``(name, value)`` before
+        processing, ensuring reproducible ordering across runs.
+        """
+
+        class PluginFirst(MockPlugin):
+            def __init__(self) -> None:
+                super().__init__(plugin_id="first")
+
+        class PluginSecond(MockPlugin):
+            def __init__(self) -> None:
+                super().__init__(plugin_id="second")
+
+        ep_first = _make_entry_point(
+            "a_first", "omnibase_infra.first:PluginFirst", PluginFirst
         )
-        ep_rejected = _make_entry_point(
-            "rejected",
-            "evil.namespace:Plugin",
-            ValidPlugin,
+        ep_second = _make_entry_point(
+            "b_second", "omnibase_infra.second:PluginSecond", PluginSecond
         )
-        ep_broken = _make_entry_point(
-            "broken",
-            "omnibase_infra.broken:Plugin",
-            None,
-        )
-        mock_entry_points.return_value = [ep_valid, ep_rejected, ep_broken]
+
+        # Provide in reverse alphabetical order
+        mock_entry_points.return_value = [ep_second, ep_first]
 
         registry = RegistryDomainPlugin()
         report = registry.discover_from_entry_points()
 
-        assert len(report.entries) == 3
-        assert len(report.accepted) == 1
-        assert len(report.rejected) == 2
-        assert report.has_errors  # broken has import_error
+        # Sorted by name: a_first < b_second -> first, second
+        assert report.accepted == ("first", "second")
 
-        statuses = {e.entry_point_name: e.status for e in report.entries}
-        assert statuses["valid"] == "accepted"
-        assert statuses["rejected"] == "namespace_rejected"
-        assert statuses["broken"] == "import_error"
+        # Verify same result when input order is already sorted
+        mock_entry_points.return_value = [ep_first, ep_second]
+
+        registry2 = RegistryDomainPlugin()
+        report2 = registry2.discover_from_entry_points()
+
+        assert report2.accepted == ("first", "second")
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
     def test_default_group_name(self, mock_entry_points: MagicMock) -> None:
-        """Default group name matches DOMAIN_PLUGIN_ENTRY_POINT_GROUP."""
+        """Default group kwarg uses DOMAIN_PLUGIN_ENTRY_POINT_GROUP constant.
+
+        Verifies that calling ``discover_from_entry_points()`` without an
+        explicit ``group`` argument passes the canonical constant to
+        ``importlib.metadata.entry_points`` and that the report's ``group``
+        field reflects the same value.
+        """
         mock_entry_points.return_value = []
 
         registry = RegistryDomainPlugin()
         report = registry.discover_from_entry_points()
 
-        mock_entry_points.assert_called_once_with(
-            group=DOMAIN_PLUGIN_ENTRY_POINT_GROUP,
-        )
+        mock_entry_points.assert_called_once_with(group=DOMAIN_PLUGIN_ENTRY_POINT_GROUP)
         assert report.group == DOMAIN_PLUGIN_ENTRY_POINT_GROUP
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
     def test_custom_group_name(self, mock_entry_points: MagicMock) -> None:
-        """Custom group name is passed through to entry_points()."""
+        """Custom group string is forwarded to entry_points() and reflected in report.
+
+        Verifies that passing ``group="custom.group"`` forwards the value to
+        ``importlib.metadata.entry_points`` and that the resulting report
+        stores the custom group name.
+        """
         mock_entry_points.return_value = []
 
         registry = RegistryDomainPlugin()
-        report = registry.discover_from_entry_points(group="custom.plugins")
+        report = registry.discover_from_entry_points(group="custom.group")
 
-        mock_entry_points.assert_called_once_with(group="custom.plugins")
-        assert report.group == "custom.plugins"
+        mock_entry_points.assert_called_once_with(group="custom.group")
+        assert report.group == "custom.group"
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_parse_module_path_no_colon(self, mock_entry_points: MagicMock) -> None:
+        """Entry point value without colon is used as-is for namespace validation.
+
+        When ``ep.value`` has no colon (e.g. ``"omnibase_infra.plugins.module_only"``),
+        ``_parse_module_path`` returns the entire string unchanged. This test
+        verifies that the no-colon path still flows through namespace validation
+        correctly -- a trusted module-only value is accepted, while an untrusted
+        one is rejected.
+        """
+        ep = _make_entry_point(
+            "module-only",
+            "omnibase_infra.plugins.module_only",
+            MockPlugin,
+        )
+        mock_entry_points.return_value = [ep]
+
+        registry = RegistryDomainPlugin()
+        report = registry.discover_from_entry_points()
+
+        assert report.discovered_count == 1
+        assert len(report.accepted) == 1
+        assert report.entries[0].status == "accepted"
+        # Module path stored without colon stripping
+        assert report.entries[0].module_path == "omnibase_infra.plugins.module_only"
 
 
 # ---------------------------------------------------------------------------
-# ModelSecurityConfig plugin fields tests
+# TestDiscoveryReport (3 tests)
 # ---------------------------------------------------------------------------
 
 
-class TestModelSecurityConfigPluginFields:
+class TestDiscoveryReport:
+    """Tests for ModelPluginDiscoveryReport properties and filtering."""
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_accepted_matches_registered_plugin_ids(
+        self, mock_entry_points: MagicMock
+    ) -> None:
+        """Report accepted list matches registered plugin_ids."""
+        ep = _make_entry_point(
+            "my-plugin",
+            "omnibase_infra.plugins:MockPlugin",
+            MockPlugin,
+        )
+        mock_entry_points.return_value = [ep]
+
+        registry = RegistryDomainPlugin()
+        report = registry.discover_from_entry_points()
+
+        assert isinstance(report, ModelPluginDiscoveryReport)
+        assert report.accepted == ("mock-plugin",)
+        assert report.entries[0].plugin_id == "mock-plugin"
+        assert report.entries[0].status == "accepted"
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_rejected_filters_correctly(self, mock_entry_points: MagicMock) -> None:
+        """Report rejected property filters out accepted entries."""
+        ep_ok = _make_entry_point("ok", "omnibase_infra.x:MockPlugin", MockPlugin)
+        ep_bad = _make_entry_point("bad", "evil:Plugin", MockPlugin)
+        mock_entry_points.return_value = [ep_ok, ep_bad]
+
+        registry = RegistryDomainPlugin()
+        report = registry.discover_from_entry_points()
+
+        assert len(report.rejected) == 1
+        assert report.rejected[0].entry_point_name == "bad"
+        assert report.rejected[0].status == "namespace_rejected"
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_has_errors_detects_failures(self, mock_entry_points: MagicMock) -> None:
+        """Report has_errors detects import/instantiation failures.
+
+        Only ``import_error`` and ``instantiation_error`` count as errors.
+        ``namespace_rejected`` is a policy outcome, not an error.
+        """
+        ep_import = _make_entry_point(
+            "import-fail", "omnibase_infra.broken:Plugin", None
+        )
+        ep_inst = _make_entry_point(
+            "inst-fail",
+            "omnibase_infra.plugins:FailingPlugin",
+            FailingConstructorPlugin,
+        )
+        ep_ns = _make_entry_point("ns-reject", "evil:Plugin", MockPlugin)
+        mock_entry_points.return_value = [ep_import, ep_inst, ep_ns]
+
+        registry = RegistryDomainPlugin()
+        report = registry.discover_from_entry_points()
+
+        assert report.discovered_count == 3
+        # has_errors is True due to import_error and instantiation_error
+        assert report.has_errors
+        statuses = {e.entry_point_name: e.status for e in report.entries}
+        assert statuses["import-fail"] == "import_error"
+        assert statuses["inst-fail"] == "instantiation_error"
+        assert statuses["ns-reject"] == "namespace_rejected"
+
+
+# ---------------------------------------------------------------------------
+# TestSecurityConfigPluginNamespaces (5 tests)
+# ---------------------------------------------------------------------------
+
+
+class TestSecurityConfigPluginNamespaces:
     """Tests for plugin-related fields on ModelSecurityConfig."""
 
-    def test_default_plugin_discovery_disabled(self) -> None:
-        """By default, third-party plugin discovery is disabled."""
-        config = ModelSecurityConfig()
-
-        assert config.allow_third_party_plugins is False
-        assert config.allowed_plugin_namespaces == TRUSTED_PLUGIN_NAMESPACE_PREFIXES
-
-    def test_effective_plugin_namespaces_when_disabled(self) -> None:
-        """When disabled, effective namespaces are the trusted defaults."""
+    def test_default_returns_trusted_prefixes(self) -> None:
+        """Default config returns TRUSTED_PLUGIN_NAMESPACE_PREFIXES."""
         config = ModelSecurityConfig()
         effective = config.get_effective_plugin_namespaces()
 
         assert effective == TRUSTED_PLUGIN_NAMESPACE_PREFIXES
 
-    def test_effective_plugin_namespaces_when_enabled(self) -> None:
-        """When enabled, custom namespaces are returned."""
-        custom = ("mycompany.plugins.", "partner.plugins.")
-        config = ModelSecurityConfig(
-            allow_third_party_plugins=True,
-            allowed_plugin_namespaces=custom,
-        )
-        effective = config.get_effective_plugin_namespaces()
-
-        assert effective == custom
-
-    def test_enabled_but_default_namespaces(self) -> None:
-        """When enabled with defaults, trusted namespaces are returned."""
-        config = ModelSecurityConfig(allow_third_party_plugins=True)
-        effective = config.get_effective_plugin_namespaces()
-
-        assert effective == TRUSTED_PLUGIN_NAMESPACE_PREFIXES
-
-    def test_handler_and_plugin_namespaces_independent(self) -> None:
-        """Handler and plugin namespaces are configured independently."""
-        config = ModelSecurityConfig(
-            allow_third_party_handlers=True,
-            allowed_handler_namespaces=("handler.namespace.",),
-            allow_third_party_plugins=True,
-            allowed_plugin_namespaces=("plugin.namespace.",),
-        )
-
-        assert config.get_effective_namespaces() == ("handler.namespace.",)
-        assert config.get_effective_plugin_namespaces() == ("plugin.namespace.",)
-
-    def test_disabled_third_party_ignores_custom_namespaces(self) -> None:
-        """When disabled, custom namespaces are ignored."""
+    def test_third_party_disabled_ignores_custom(self) -> None:
+        """Third-party disabled ignores custom namespaces."""
         config = ModelSecurityConfig(
             allow_third_party_plugins=False,
             allowed_plugin_namespaces=("malicious.namespace.",),
@@ -378,78 +633,155 @@ class TestModelSecurityConfigPluginFields:
         assert effective == TRUSTED_PLUGIN_NAMESPACE_PREFIXES
         assert "malicious.namespace." not in effective
 
+    def test_third_party_enabled_returns_custom(self) -> None:
+        """Third-party enabled returns custom namespaces."""
+        custom = ("mycompany.plugins.", "partner.plugins.")
+        config = ModelSecurityConfig(
+            allow_third_party_plugins=True,
+            allowed_plugin_namespaces=custom,
+        )
+        effective = config.get_effective_plugin_namespaces()
+
+        assert effective == custom
+
+    def test_third_party_enabled_default_namespaces_returns_trusted(self) -> None:
+        """Third-party enabled WITHOUT custom namespaces returns trusted defaults.
+
+        When ``allow_third_party_plugins=True`` is set but
+        ``allowed_plugin_namespaces`` is not overridden, the field defaults to
+        ``TRUSTED_PLUGIN_NAMESPACE_PREFIXES``. This verifies that the
+        opt-in flag alone does not widen the namespace boundary.
+        """
+        config = ModelSecurityConfig(allow_third_party_plugins=True)
+        effective = config.get_effective_plugin_namespaces()
+
+        assert effective == TRUSTED_PLUGIN_NAMESPACE_PREFIXES
+
+    def test_handler_and_plugin_namespaces_independent(self) -> None:
+        """Handler and plugin namespaces return independent results.
+
+        When both ``allow_third_party_handlers`` and
+        ``allow_third_party_plugins`` are True with different namespace tuples,
+        ``get_effective_namespaces()`` and ``get_effective_plugin_namespaces()``
+        return their respective custom tuples independently.
+        """
+        handler_ns = ("mycompany.handlers.",)
+        plugin_ns = ("mycompany.plugins.", "partner.plugins.")
+        config = ModelSecurityConfig(
+            allow_third_party_handlers=True,
+            allowed_handler_namespaces=handler_ns,
+            allow_third_party_plugins=True,
+            allowed_plugin_namespaces=plugin_ns,
+        )
+
+        effective_handlers = config.get_effective_namespaces()
+        effective_plugins = config.get_effective_plugin_namespaces()
+
+        assert effective_handlers == handler_ns
+        assert effective_plugins == plugin_ns
+        assert effective_handlers != effective_plugins
+
 
 # ---------------------------------------------------------------------------
-# Integration-style test: discovery report model correctness
+# TestSecurityPolicyEnforcement (2 tests)
 # ---------------------------------------------------------------------------
 
 
-class TestDiscoveryReportIntegration:
-    """Tests that the report model works correctly with discovery."""
+class TestSecurityPolicyEnforcement:
+    """Tests for end-to-end security policy enforcement in discovery.
+
+    Verifies that the security_config parameter correctly controls which
+    namespaces are accepted during entry-point discovery.
+    """
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
-    def test_report_structure(self, mock_entry_points: MagicMock) -> None:
-        """Report contains correct group, counts, and entries."""
+    def test_no_args_default_security_only_trusted(
+        self, mock_entry_points: MagicMock
+    ) -> None:
+        """No args -> default security config -> only trusted namespaces loaded."""
+        ep_trusted = _make_entry_point(
+            "trusted", "omnibase_infra.plugins:MockPlugin", MockPlugin
+        )
+        ep_untrusted = _make_entry_point(
+            "untrusted", "third_party.plugins:Plugin", MockPlugin
+        )
+        mock_entry_points.return_value = [ep_trusted, ep_untrusted]
+
+        registry = RegistryDomainPlugin()
+        # No security_config argument -- bare call must be secure
+        report = registry.discover_from_entry_points()
+
+        assert len(report.accepted) == 1
+        assert report.accepted[0] == "mock-plugin"
+        rejected_names = [e.entry_point_name for e in report.rejected]
+        assert "untrusted" in rejected_names
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_custom_security_config_respects_third_party(
+        self, mock_entry_points: MagicMock
+    ) -> None:
+        """Custom security_config with third-party enabled -> custom namespaces respected."""
+
+        class CustomPlugin(MockPlugin):
+            def __init__(self) -> None:
+                super().__init__(plugin_id="custom-plugin")
+
         ep = _make_entry_point(
-            "my-plugin",
-            "omnibase_infra.plugins:ValidPlugin",
-            ValidPlugin,
+            "custom",
+            "mycompany.plugins.custom:CustomPlugin",
+            CustomPlugin,
         )
         mock_entry_points.return_value = [ep]
 
-        registry = RegistryDomainPlugin()
-        report = registry.discover_from_entry_points()
-
-        assert isinstance(report, ModelPluginDiscoveryReport)
-        assert report.group == DOMAIN_PLUGIN_ENTRY_POINT_GROUP
-        assert report.discovered_count == 1
-        assert len(report.entries) == 1
-
-        entry = report.entries[0]
-        assert isinstance(entry, ModelPluginDiscoveryEntry)
-        assert entry.entry_point_name == "my-plugin"
-        assert entry.status == "accepted"
-        assert entry.plugin_id == "valid-plugin"
-
-    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
-    def test_report_rejected_property(self, mock_entry_points: MagicMock) -> None:
-        """Report.rejected filters out accepted entries."""
-        ep_ok = _make_entry_point("ok", "omnibase_infra.x:ValidPlugin", ValidPlugin)
-        ep_bad = _make_entry_point("bad", "evil:Plugin", ValidPlugin)
-        mock_entry_points.return_value = [ep_ok, ep_bad]
+        config = ModelSecurityConfig(
+            allow_third_party_plugins=True,
+            allowed_plugin_namespaces=(
+                "omnibase_core.",
+                "omnibase_infra.",
+                "mycompany.plugins.",
+            ),
+        )
 
         registry = RegistryDomainPlugin()
-        report = registry.discover_from_entry_points()
+        report = registry.discover_from_entry_points(security_config=config)
 
-        assert len(report.rejected) == 1
-        assert report.rejected[0].entry_point_name == "bad"
+        assert len(report.accepted) == 1
+        assert report.accepted[0] == "custom-plugin"
+        assert registry.get("custom-plugin") is not None
 
 
 # ---------------------------------------------------------------------------
-# Constants verification
+# TestSecurityConstants (3 tests)
 # ---------------------------------------------------------------------------
 
 
 class TestSecurityConstants:
-    """Verify security constants are correctly defined."""
+    """Regression guards for security constants.
 
-    def test_domain_plugin_entry_point_group(self) -> None:
-        """Entry point group name matches expected value."""
+    Verifies that critical constants retain expected values and types.
+    Changes to these constants alter the security boundary and must be
+    intentional.
+    """
+
+    def test_domain_plugin_entry_point_group_value(self) -> None:
+        """DOMAIN_PLUGIN_ENTRY_POINT_GROUP is 'onex.domain_plugins'."""
         assert DOMAIN_PLUGIN_ENTRY_POINT_GROUP == "onex.domain_plugins"
 
-    def test_trusted_plugin_namespace_prefixes(self) -> None:
-        """Trusted plugin namespaces include core and infra."""
+    def test_trusted_plugin_namespace_prefixes_contains_core_and_infra(self) -> None:
+        """TRUSTED_PLUGIN_NAMESPACE_PREFIXES includes omnibase_core. and omnibase_infra."""
         assert "omnibase_core." in TRUSTED_PLUGIN_NAMESPACE_PREFIXES
         assert "omnibase_infra." in TRUSTED_PLUGIN_NAMESPACE_PREFIXES
 
-    def test_trusted_plugin_namespaces_are_immutable(self) -> None:
-        """Namespace tuple is a tuple (immutable)."""
+    def test_trusted_plugin_namespace_prefixes_is_tuple(self) -> None:
+        """TRUSTED_PLUGIN_NAMESPACE_PREFIXES is a tuple (immutable)."""
         assert isinstance(TRUSTED_PLUGIN_NAMESPACE_PREFIXES, tuple)
 
 
 __all__: list[str] = [
+    "TestPluginNamespaceValidation",
     "TestDiscoverFromEntryPoints",
-    "TestDiscoveryReportIntegration",
-    "TestModelSecurityConfigPluginFields",
+    "TestDiscoveryReport",
+    "TestSecurityConfigPluginNamespaces",
+    "TestSecurityPolicyEnforcement",
     "TestSecurityConstants",
 ]
