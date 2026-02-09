@@ -122,6 +122,7 @@ from omnibase_infra.errors.error_infra import (
     UnknownHandlerTypeError,
 )
 from omnibase_infra.errors.error_message_type_registry import MessageTypeRegistryError
+from omnibase_infra.errors.error_payload_registry import PayloadRegistryError
 from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
 from omnibase_infra.errors.error_vault import InfraVaultError
 from omnibase_infra.errors.repository import (
@@ -162,6 +163,8 @@ __all__: list[str] = [
     # Configuration models
     "ModelInfraErrorContext",
     "ModelTimeoutErrorContext",
+    # Payload registry errors
+    "PayloadRegistryError",
     "PolicyRegistryError",
     "ProtocolConfigurationError",
     # Protocol dependency resolution errors

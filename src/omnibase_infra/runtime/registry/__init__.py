@@ -18,6 +18,10 @@ Message Type Registry:
     - **ModelDomainConstraint**: Domain constraint and ownership rules
     - **ProtocolMessageTypeRegistry**: Protocol definition for the registry interface
 
+Payload Registry:
+    - **RegistryPayload**: Maps (payload_type, version) tuples to Pydantic model classes
+    - **ProtocolPayloadRegistry**: Protocol definition for the payload registry interface
+
 Key Features:
     - Protocol handler to handler type mapping
     - Event bus implementation registration
@@ -57,6 +61,10 @@ from omnibase_infra.runtime.registry.mixin_message_type_query import (
 from omnibase_infra.runtime.registry.mixin_message_type_registration import (
     MixinMessageTypeRegistration,
 )
+from omnibase_infra.runtime.registry.mixin_payload_query import MixinPayloadQuery
+from omnibase_infra.runtime.registry.mixin_payload_registration import (
+    MixinPayloadRegistration,
+)
 from omnibase_infra.runtime.registry.registry_event_bus_binding import (
     RegistryEventBusBinding,
 )
@@ -64,6 +72,9 @@ from omnibase_infra.runtime.registry.registry_message_type import (
     MessageTypeRegistryError,
     RegistryMessageType,
     extract_domain_from_topic,
+)
+from omnibase_infra.runtime.registry.registry_payload import (
+    RegistryPayload,
 )
 from omnibase_infra.runtime.registry.registry_protocol_binding import (
     RegistryError,
@@ -75,6 +86,8 @@ __all__: list[str] = [
     # Mixins
     "MixinMessageTypeQuery",
     "MixinMessageTypeRegistration",
+    "MixinPayloadQuery",
+    "MixinPayloadRegistration",
     "ModelDomainConstraint",
     # Models
     "ModelMessageTypeEntry",
@@ -86,6 +99,8 @@ __all__: list[str] = [
     "RegistryEventBusBinding",
     # Registry implementation
     "RegistryMessageType",
+    # Payload registry
+    "RegistryPayload",
     # Protocol binding registry
     "RegistryProtocolBinding",
     # Utility functions

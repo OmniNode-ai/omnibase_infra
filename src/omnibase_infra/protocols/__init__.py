@@ -85,6 +85,9 @@ from omnibase_infra.protocols.protocol_node_heartbeat import (
 from omnibase_infra.protocols.protocol_node_introspection import (
     ProtocolNodeIntrospection,
 )
+from omnibase_infra.protocols.protocol_payload_registry import (
+    ProtocolPayloadRegistry,
+)
 from omnibase_infra.protocols.protocol_plugin_compute import ProtocolPluginCompute
 from omnibase_infra.protocols.protocol_projector_schema_validator import (
     ProtocolProjectorSchemaValidator,
@@ -111,6 +114,7 @@ __all__: list[str] = [
     "ProtocolMessageTypeRegistry",
     "ProtocolNodeHeartbeat",
     "ProtocolNodeIntrospection",
+    "ProtocolPayloadRegistry",
     "ProtocolPluginCompute",
     "ProtocolProjectorSchemaValidator",
     "ProtocolRegistryMetrics",
