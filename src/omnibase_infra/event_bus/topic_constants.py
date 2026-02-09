@@ -174,9 +174,11 @@ def build_dlq_topic(
     Args:
         environment: Environment identifier (e.g., 'dev', 'prod', 'staging').
             Must be alphanumeric with optional underscores or hyphens.
-        category: Message category for the DLQ. Accepts both singular and
-            plural forms: 'intent'/'intents', 'event'/'events',
-            'command'/'commands'. Will be normalized to plural form.
+        category: DLQ category identifier. Accepts standard message categories
+            in singular or plural form ('intent'/'intents', 'event'/'events',
+            'command'/'commands') which are normalized to plural form, as well
+            as domain-based categories ('intelligence', 'platform', 'agent',
+            etc.) which pass through as-is.
         version: Optional topic version (e.g., 'v1', 'v2'). If not provided,
             defaults to DLQ_TOPIC_VERSION ('v1').
 
@@ -184,8 +186,8 @@ def build_dlq_topic(
         Fully-qualified DLQ topic name.
 
     Raises:
-        ValueError: If environment is empty/whitespace, has invalid format,
-            or category is invalid.
+        ProtocolConfigurationError: If environment is empty/whitespace, has
+            invalid format, or category is invalid.
 
     Example:
         >>> build_dlq_topic("dev", "intents")
@@ -462,8 +464,11 @@ def derive_dlq_topic_for_event_type(
         if _DLQ_CATEGORY_PATTERN.match(domain):
             return build_dlq_topic(environment, domain)
 
-        # Domain prefix is invalid (e.g., starts with digit) - fall through to
-        # topic-based routing
+        # Domain prefix is invalid (e.g., starts with digit) — cannot
+        # determine DLQ topic from event_type.  Return None rather than
+        # falling back to topic-based routing, because the presence of an
+        # event_type indicates the new routing model where the domain prefix
+        # is authoritative.
         return None
 
     # Legacy path: no event_type, use topic-based DLQ routing.

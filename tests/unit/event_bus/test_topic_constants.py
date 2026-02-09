@@ -486,6 +486,31 @@ class TestDeriveDlqTopicForEventType:
         # cannot determine the environment and returns None
         assert result is None
 
+    def test_invalid_domain_prefix_returns_none(self) -> None:
+        """Event type with invalid domain prefix (e.g., digit-leading) returns None."""
+        from omnibase_infra.event_bus.topic_constants import (
+            derive_dlq_topic_for_event_type,
+        )
+
+        # Domain starts with digit — fails _DLQ_CATEGORY_PATTERN
+        result = derive_dlq_topic_for_event_type(
+            "123.something.v1",
+            "dev.user.events.v1",
+        )
+        assert result is None
+
+    def test_dash_leading_domain_prefix_returns_none(self) -> None:
+        """Event type with dash-leading domain prefix returns None."""
+        from omnibase_infra.event_bus.topic_constants import (
+            derive_dlq_topic_for_event_type,
+        )
+
+        result = derive_dlq_topic_for_event_type(
+            "-bad.prefix.v1",
+            "dev.user.events.v1",
+        )
+        assert result is None
+
     def test_none_event_type_with_unknown_topic_returns_none(self) -> None:
         """Legacy path with unrecognizable topic returns None."""
         from omnibase_infra.event_bus.topic_constants import (
