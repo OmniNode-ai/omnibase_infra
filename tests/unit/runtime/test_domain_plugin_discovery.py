@@ -12,9 +12,9 @@ Comprehensive unit tests for the plugin discovery mechanism covering:
 
 Reuses MockPlugin pattern from test_domain_plugin_shutdown.py.
 
-Test classes and counts (29 total):
+Test classes and counts (31 total):
     - TestPluginNamespaceValidation: 4 tests
-    - TestDiscoverFromEntryPoints: 12 tests
+    - TestDiscoverFromEntryPoints: 14 tests
     - TestDiscoveryReport: 3 tests
     - TestSecurityConfigPluginNamespaces: 5 tests
     - TestSecurityPolicyEnforcement: 2 tests
@@ -29,7 +29,6 @@ import pytest
 
 from omnibase_infra.runtime.constants_security import (
     DOMAIN_PLUGIN_ENTRY_POINT_GROUP,
-    TRUSTED_HANDLER_NAMESPACE_PREFIXES,
     TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
 )
 from omnibase_infra.runtime.models.model_plugin_discovery_report import (
@@ -196,7 +195,7 @@ class TestPluginNamespaceValidation:
 
 
 # ---------------------------------------------------------------------------
-# TestDiscoverFromEntryPoints (12 tests)
+# TestDiscoverFromEntryPoints (14 tests)
 # ---------------------------------------------------------------------------
 
 
@@ -338,6 +337,38 @@ class TestDiscoverFromEntryPoints:
 
         registry = RegistryDomainPlugin()
         with pytest.raises(ImportError, match="broken"):
+            registry.discover_from_entry_points(strict=True)
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_instantiation_error_raises_in_strict_mode(
+        self, mock_entry_points: MagicMock
+    ) -> None:
+        """Instantiation error raises TypeError in strict mode."""
+        ep = _make_entry_point(
+            "failing-plugin",
+            "omnibase_infra.plugins:FailingPlugin",
+            FailingConstructorPlugin,
+        )
+        mock_entry_points.return_value = [ep]
+
+        registry = RegistryDomainPlugin()
+        with pytest.raises(TypeError, match="failing-plugin"):
+            registry.discover_from_entry_points(strict=True)
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_protocol_invalid_raises_in_strict_mode(
+        self, mock_entry_points: MagicMock
+    ) -> None:
+        """Protocol-invalid class raises RuntimeError in strict mode."""
+        ep = _make_entry_point(
+            "invalid-plugin",
+            "omnibase_infra.plugins:InvalidPlugin",
+            InvalidPlugin,
+        )
+        mock_entry_points.return_value = [ep]
+
+        registry = RegistryDomainPlugin()
+        with pytest.raises(RuntimeError, match="ProtocolDomainPlugin"):
             registry.discover_from_entry_points(strict=True)
 
     @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
@@ -547,7 +578,7 @@ class TestDiscoveryReport:
 
 
 # ---------------------------------------------------------------------------
-# TestSecurityConfigPluginNamespaces (3 tests)
+# TestSecurityConfigPluginNamespaces (5 tests)
 # ---------------------------------------------------------------------------
 
 
