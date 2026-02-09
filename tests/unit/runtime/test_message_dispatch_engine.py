@@ -24,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -4379,3 +4379,391 @@ class TestDispatcherSignatureInspection:
 
         # No warning should be logged (proper naming)
         assert len(caplog.records) == 0
+
+
+# ============================================================================
+# Event Type Routing Tests (OMN-2037)
+# ============================================================================
+
+
+class EnvelopeWithEventType:
+    """Envelope-like object with event_type attribute for testing.
+
+    Mimics ModelEventEnvelope but includes an explicit event_type field
+    for event_type-based routing. Used to test that dispatch() uses
+    event_type as primary routing key when present.
+    """
+
+    def __init__(
+        self,
+        payload: object,
+        event_type: str | None = None,
+        correlation_id: UUID | None = None,
+        trace_id: UUID | None = None,
+        span_id: UUID | None = None,
+    ) -> None:
+        self.payload = payload
+        self.event_type = event_type
+        self.correlation_id = correlation_id or uuid4()
+        self.trace_id = trace_id
+        self.span_id = span_id
+
+
+@pytest.mark.unit
+class TestEventTypeRouting:
+    """Tests for event_type-based routing in MessageDispatchEngine (OMN-2037).
+
+    Verifies that:
+    - envelope.event_type is used as primary routing key when present
+    - Fallback to payload class name works when event_type is None
+    - Existing message_type-based routing is unaffected
+    """
+
+    @pytest.mark.asyncio
+    async def test_dispatch_uses_event_type_as_primary_routing_key(self) -> None:
+        """When envelope has event_type, dispatchers registered for that type are called."""
+        engine = MessageDispatchEngine()
+        results: list[str] = []
+
+        async def handler(envelope: object) -> str:
+            results.append("event_type_handler")
+            return "output.v1"
+
+        # Register dispatcher for a specific event_type string
+        engine.register_dispatcher(
+            dispatcher_id="event-type-handler",
+            dispatcher=handler,
+            category=EnumMessageCategory.EVENT,
+            message_types={"node.introspected.v1"},
+        )
+        engine.register_route(
+            ModelDispatchRoute(
+                route_id="event-type-route",
+                topic_pattern="*.node.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="event-type-handler",
+            )
+        )
+        engine.freeze()
+
+        # Create envelope with event_type set
+        envelope = EnvelopeWithEventType(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            event_type="node.introspected.v1",
+        )
+
+        result = await engine.dispatch(
+            "dev.node.events.v1",
+            envelope,  # type: ignore[arg-type]
+        )
+
+        assert result.status == EnumDispatchStatus.SUCCESS
+        assert len(results) == 1
+        assert results[0] == "event_type_handler"
+
+    @pytest.mark.asyncio
+    async def test_dispatch_event_type_overrides_class_name(self) -> None:
+        """When event_type is present, it takes priority over payload class name.
+
+        A dispatcher registered for the class name should NOT be called
+        when event_type is present and does not match the class name.
+        """
+        engine = MessageDispatchEngine()
+        class_name_results: list[str] = []
+        event_type_results: list[str] = []
+
+        async def class_name_handler(envelope: object) -> str:
+            class_name_results.append("class_name")
+            return "class.output.v1"
+
+        async def event_type_handler(envelope: object) -> str:
+            event_type_results.append("event_type")
+            return "event_type.output.v1"
+
+        # Register one dispatcher for class name, one for event_type string
+        engine.register_dispatcher(
+            dispatcher_id="class-name-handler",
+            dispatcher=class_name_handler,
+            category=EnumMessageCategory.EVENT,
+            message_types={"UserCreatedEvent"},
+        )
+        engine.register_dispatcher(
+            dispatcher_id="event-type-handler",
+            dispatcher=event_type_handler,
+            category=EnumMessageCategory.EVENT,
+            message_types={"user.created.v2"},
+        )
+        engine.register_route(
+            ModelDispatchRoute(
+                route_id="class-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="class-name-handler",
+            )
+        )
+        engine.register_route(
+            ModelDispatchRoute(
+                route_id="event-type-route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="event-type-handler",
+            )
+        )
+        engine.freeze()
+
+        # Envelope with event_type set - should route to event_type_handler
+        envelope = EnvelopeWithEventType(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            event_type="user.created.v2",
+        )
+
+        result = await engine.dispatch(
+            "dev.user.events.v1",
+            envelope,  # type: ignore[arg-type]
+        )
+
+        assert result.status == EnumDispatchStatus.SUCCESS
+        # Only event_type handler should have been called
+        assert len(event_type_results) == 1
+        assert len(class_name_results) == 0
+
+    @pytest.mark.asyncio
+    async def test_dispatch_falls_back_to_class_name_when_event_type_is_none(
+        self,
+    ) -> None:
+        """When event_type is None, dispatch falls back to payload class name."""
+        engine = MessageDispatchEngine()
+        results: list[str] = []
+
+        async def handler(envelope: object) -> str:
+            results.append("class_name_handler")
+            return "output.v1"
+
+        engine.register_dispatcher(
+            dispatcher_id="class-handler",
+            dispatcher=handler,
+            category=EnumMessageCategory.EVENT,
+            message_types={"UserCreatedEvent"},
+        )
+        engine.register_route(
+            ModelDispatchRoute(
+                route_id="route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="class-handler",
+            )
+        )
+        engine.freeze()
+
+        # Envelope with event_type=None (explicit)
+        envelope = EnvelopeWithEventType(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            event_type=None,
+        )
+
+        result = await engine.dispatch(
+            "dev.user.events.v1",
+            envelope,  # type: ignore[arg-type]
+        )
+
+        assert result.status == EnumDispatchStatus.SUCCESS
+        assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_dispatch_falls_back_when_event_type_missing(self) -> None:
+        """When envelope has no event_type attribute, falls back to class name.
+
+        This tests backwards compatibility with standard ModelEventEnvelope
+        which does not have an event_type field.
+        """
+        engine = MessageDispatchEngine()
+        results: list[str] = []
+
+        async def handler(envelope: object) -> str:
+            results.append("handled")
+            return "output.v1"
+
+        engine.register_dispatcher(
+            dispatcher_id="handler",
+            dispatcher=handler,
+            category=EnumMessageCategory.EVENT,
+            message_types={"UserCreatedEvent"},
+        )
+        engine.register_route(
+            ModelDispatchRoute(
+                route_id="route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="handler",
+            )
+        )
+        engine.freeze()
+
+        # Standard ModelEventEnvelope - no event_type attribute
+        envelope = ModelEventEnvelope(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            correlation_id=uuid4(),
+        )
+
+        result = await engine.dispatch("dev.user.events.v1", envelope)
+
+        assert result.status == EnumDispatchStatus.SUCCESS
+        assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_dispatch_event_type_empty_string_falls_back(self) -> None:
+        """When event_type is empty string, falls back to class name routing."""
+        engine = MessageDispatchEngine()
+        results: list[str] = []
+
+        async def handler(envelope: object) -> str:
+            results.append("handled")
+            return "output.v1"
+
+        engine.register_dispatcher(
+            dispatcher_id="handler",
+            dispatcher=handler,
+            category=EnumMessageCategory.EVENT,
+            message_types={"UserCreatedEvent"},
+        )
+        engine.register_route(
+            ModelDispatchRoute(
+                route_id="route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="handler",
+            )
+        )
+        engine.freeze()
+
+        # Envelope with empty event_type - should fall back
+        envelope = EnvelopeWithEventType(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            event_type="",
+        )
+
+        result = await engine.dispatch(
+            "dev.user.events.v1",
+            envelope,  # type: ignore[arg-type]
+        )
+
+        assert result.status == EnumDispatchStatus.SUCCESS
+        assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_dispatch_event_type_whitespace_falls_back(self) -> None:
+        """When event_type is whitespace-only, falls back to class name routing."""
+        engine = MessageDispatchEngine()
+        results: list[str] = []
+
+        async def handler(envelope: object) -> str:
+            results.append("handled")
+            return "output.v1"
+
+        engine.register_dispatcher(
+            dispatcher_id="handler",
+            dispatcher=handler,
+            category=EnumMessageCategory.EVENT,
+            message_types={"UserCreatedEvent"},
+        )
+        engine.register_route(
+            ModelDispatchRoute(
+                route_id="route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="handler",
+            )
+        )
+        engine.freeze()
+
+        # Envelope with whitespace event_type - should fall back
+        envelope = EnvelopeWithEventType(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            event_type="   ",
+        )
+
+        result = await engine.dispatch(
+            "dev.user.events.v1",
+            envelope,  # type: ignore[arg-type]
+        )
+
+        assert result.status == EnumDispatchStatus.SUCCESS
+        assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_dispatch_event_type_no_match_returns_no_dispatcher(self) -> None:
+        """When event_type does not match any registered dispatcher, NO_DISPATCHER is returned."""
+        engine = MessageDispatchEngine()
+
+        async def handler(envelope: object) -> str:
+            return "output.v1"
+
+        # Register for a specific event_type
+        engine.register_dispatcher(
+            dispatcher_id="handler",
+            dispatcher=handler,
+            category=EnumMessageCategory.EVENT,
+            message_types={"user.created.v1"},
+        )
+        engine.register_route(
+            ModelDispatchRoute(
+                route_id="route",
+                topic_pattern="*.user.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="handler",
+            )
+        )
+        engine.freeze()
+
+        # Envelope with different event_type that does not match
+        envelope = EnvelopeWithEventType(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            event_type="order.placed.v1",
+        )
+
+        result = await engine.dispatch(
+            "dev.user.events.v1",
+            envelope,  # type: ignore[arg-type]
+        )
+
+        assert result.status == EnumDispatchStatus.NO_DISPATCHER
+
+    @pytest.mark.asyncio
+    async def test_dispatch_event_type_with_wildcard_dispatcher(self) -> None:
+        """Dispatcher with message_types=None (wildcard) matches any event_type."""
+        engine = MessageDispatchEngine()
+        results: list[str] = []
+
+        async def wildcard_handler(envelope: object) -> str:
+            results.append("wildcard")
+            return "output.v1"
+
+        # Register wildcard dispatcher (no message_types filter)
+        engine.register_dispatcher(
+            dispatcher_id="wildcard-handler",
+            dispatcher=wildcard_handler,
+            category=EnumMessageCategory.EVENT,
+        )
+        engine.register_route(
+            ModelDispatchRoute(
+                route_id="route",
+                topic_pattern="*.node.events.*",
+                message_category=EnumMessageCategory.EVENT,
+                dispatcher_id="wildcard-handler",
+            )
+        )
+        engine.freeze()
+
+        # Any event_type should match wildcard dispatcher
+        envelope = EnvelopeWithEventType(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            event_type="node.introspected.v1",
+        )
+
+        result = await engine.dispatch(
+            "dev.node.events.v1",
+            envelope,  # type: ignore[arg-type]
+        )
+
+        assert result.status == EnumDispatchStatus.SUCCESS
+        assert len(results) == 1
