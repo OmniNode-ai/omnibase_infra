@@ -123,6 +123,7 @@ class ModelDispatchResult(BaseModel):
         correlation_id: Correlation ID from the original message.
         trace_id: Distributed trace ID for observability.
         span_id: Trace span ID for this dispatch operation.
+        dlq_topic: Target DLQ topic for unroutable messages (if determinable).
         metadata: Optional additional metadata about the dispatch.
 
     Example:

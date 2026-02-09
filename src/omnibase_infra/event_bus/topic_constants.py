@@ -99,7 +99,7 @@ DLQ_CATEGORY_SUFFIXES: Final[dict[str, str]] = {
 # Validates DLQ topics in Environment-Aware format: <env>.dlq.<category>.<version>
 # - env: alphanumeric with underscores/hyphens (e.g., dev, staging, prod, test-1)
 # - domain: must be 'dlq'
-# - category: intents, events, or commands
+# - category: lowercase identifier (intents, events, commands, intelligence, platform, etc.)
 # - version: v followed by digits (e.g., v1, v2)
 
 DLQ_TOPIC_PATTERN: Final[re.Pattern[str]] = re.compile(
