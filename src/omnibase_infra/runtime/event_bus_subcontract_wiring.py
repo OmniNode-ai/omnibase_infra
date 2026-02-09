@@ -69,6 +69,7 @@ Topic Resolution:
 Related:
     - OMN-1621: Runtime consumes event_bus subcontract for contract-driven wiring
     - OMN-1740: Error classification (content vs infra) in wiring
+    - OMN-2038: Propagate event_type from contract topic metadata into envelopes
     - ModelEventBusSubcontract: Contract model defining subscribe/publish topics
     - MessageDispatchEngine: Dispatch engine that processes received messages
     - EventBusKafka: Kafka event bus implementation
@@ -76,6 +77,8 @@ Related:
 .. versionadded:: 0.2.5
 .. versionchanged:: 0.2.9
     Added error classification (content vs infrastructure) with DLQ integration.
+.. versionchanged:: 0.3.0
+    Propagate event_type from ONEX topic naming convention into deserialized envelopes.
 """
 
 from __future__ import annotations
@@ -587,7 +590,9 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
 
         Creates an async callback function that:
         1. Receives ProtocolEventMessage from the Kafka consumer
-        2. Deserializes the message value to ModelEventEnvelope
+        2. Deserializes the message value to ModelEventEnvelope, deriving
+           ``event_type`` from the ONEX topic convention if not already
+           present in the payload (see ``_deserialize_to_envelope``)
         3. Checks idempotency (if enabled) to skip duplicate messages
         4. Dispatches the envelope to the MessageDispatchEngine
         5. Classifies errors as content (DLQ) vs infrastructure (fail-fast)
@@ -621,7 +626,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
             correlation_id: UUID = uuid4()  # Default if not in envelope
 
             try:
-                envelope = self._deserialize_to_envelope(message)
+                envelope = self._deserialize_to_envelope(message, topic)
                 correlation_id = envelope.correlation_id or uuid4()
 
                 # Idempotency gate: check for duplicate messages
@@ -791,29 +796,76 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
 
         return callback
 
+    @staticmethod
+    def _derive_event_type_from_topic(topic: str) -> str | None:
+        """Derive event_type routing key from ONEX topic naming convention.
+
+        ONEX topics follow the convention::
+
+            onex.{kind}.{producer}.{event-name}.v{n}
+
+        This method extracts ``{producer}.{event-name}`` as a dot-path routing
+        key suitable for the ``ModelEventEnvelope.event_type`` field.
+
+        Args:
+            topic: Full topic name following ONEX naming convention
+                (e.g., ``'onex.evt.omniintelligence.intent-classified.v1'``).
+
+        Returns:
+            Derived event_type as ``'{producer}.{event-name}'``
+            (e.g., ``'omniintelligence.intent-classified'``), or ``None`` if
+            the topic does not follow the expected ONEX format (at least 5
+            dot-separated segments starting with ``onex``).
+
+        Example:
+            >>> EventBusSubcontractWiring._derive_event_type_from_topic(
+            ...     "onex.evt.omniintelligence.intent-classified.v1"
+            ... )
+            'omniintelligence.intent-classified'
+
+        .. versionadded:: 0.3.0
+        """
+        parts = topic.split(".")
+        if len(parts) >= 5 and parts[0] == "onex":
+            # onex.{kind}.{producer}.{event-name}.v{n}
+            producer = parts[2]
+            event_name = parts[3]
+            return f"{producer}.{event_name}"
+        return None
+
     def _deserialize_to_envelope(
         self,
         message: ProtocolEventMessage,
+        topic: str,
     ) -> ModelEventEnvelope[object]:
         """Deserialize Kafka message to event envelope.
 
         Converts the raw bytes in ProtocolEventMessage.value to a ModelEventEnvelope
-        that can be processed by the dispatch engine.
+        that can be processed by the dispatch engine. When the deserialized envelope
+        does not already have an ``event_type`` set, derives it from the ONEX topic
+        naming convention (``{producer}.{event-name}``).
 
         Deserialization Strategy:
             1. Decode message.value from UTF-8 bytes to string
             2. Parse JSON string to dict
             3. Validate and construct ModelEventEnvelope
+            4. If ``event_type`` is None, derive from topic and set on envelope
 
         Args:
             message: ProtocolEventMessage from Kafka consumer containing raw bytes.
+            topic: The full topic name used to derive event_type when not present
+                in the envelope payload.
 
         Returns:
-            Deserialized ModelEventEnvelope for dispatch.
+            Deserialized ModelEventEnvelope with event_type populated (either from
+            the original payload or derived from the topic).
 
         Raises:
             json.JSONDecodeError: If message value is not valid JSON.
             ValidationError: If JSON does not match ModelEventEnvelope schema.
+
+        .. versionchanged:: 0.3.0
+            Added topic parameter and event_type derivation from ONEX topic convention.
         """
         # Decode bytes to string
         json_str = message.value.decode("utf-8")
@@ -822,7 +874,25 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         data = json.loads(json_str)
 
         # Validate and construct envelope
-        return ModelEventEnvelope[object].model_validate(data)
+        envelope = ModelEventEnvelope[object].model_validate(data)
+
+        # Propagate event_type from topic if not already set in the envelope.
+        # This ensures all envelopes flowing through the wiring have event_type
+        # populated, even if the producer did not explicitly set it.
+        if envelope.event_type is None:
+            derived_event_type = self._derive_event_type_from_topic(topic)
+            if derived_event_type is not None:
+                envelope = envelope.model_copy(
+                    update={"event_type": derived_event_type}
+                )
+                self._logger.debug(
+                    "event_type_derived topic=%s event_type=%s correlation_id=%s",
+                    topic,
+                    derived_event_type,
+                    str(envelope.correlation_id) if envelope.correlation_id else "none",
+                )
+
+        return envelope
 
     async def cleanup(self) -> None:
         """Unsubscribe from all topics.

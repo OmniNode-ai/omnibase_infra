@@ -34,6 +34,8 @@ from omnibase_infra.runtime.event_bus_subcontract_wiring import (
     load_event_bus_subcontract,
 )
 
+pytestmark = pytest.mark.unit
+
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -800,7 +802,7 @@ class TestDeserialization:
             ),
         )
 
-        envelope = wiring._deserialize_to_envelope(message)
+        envelope = wiring._deserialize_to_envelope(message, "onex.evt.test.v1")
 
         assert envelope is not None
 
@@ -821,7 +823,242 @@ class TestDeserialization:
         )
 
         with pytest.raises(json.JSONDecodeError):
-            wiring._deserialize_to_envelope(message)
+            wiring._deserialize_to_envelope(message, "onex.evt.test.v1")
+
+
+# =============================================================================
+# Event Type Derivation Tests (OMN-2038)
+# =============================================================================
+
+
+class TestEventTypeDerivation:
+    """Tests for event_type derivation from ONEX topic naming convention.
+
+    Related: OMN-2038 - Propagate event_type through EventBusSubcontractWiring
+    """
+
+    def test_derive_event_type_from_standard_evt_topic(self) -> None:
+        """Test derivation from standard event topic."""
+        result = EventBusSubcontractWiring._derive_event_type_from_topic(
+            "onex.evt.omniintelligence.intent-classified.v1"
+        )
+        assert result == "omniintelligence.intent-classified"
+
+    def test_derive_event_type_from_cmd_topic(self) -> None:
+        """Test derivation from command topic."""
+        result = EventBusSubcontractWiring._derive_event_type_from_topic(
+            "onex.cmd.node.register.v1"
+        )
+        assert result == "node.register"
+
+    def test_derive_event_type_from_topic_with_higher_version(self) -> None:
+        """Test derivation works regardless of version segment."""
+        result = EventBusSubcontractWiring._derive_event_type_from_topic(
+            "onex.evt.platform.process-event.v3"
+        )
+        assert result == "platform.process-event"
+
+    def test_derive_event_type_returns_none_for_non_onex_topic(self) -> None:
+        """Test returns None for topics not following ONEX convention."""
+        result = EventBusSubcontractWiring._derive_event_type_from_topic(
+            "custom.topic.name"
+        )
+        assert result is None
+
+    def test_derive_event_type_returns_none_for_short_topic(self) -> None:
+        """Test returns None for topics with fewer than 5 segments."""
+        result = EventBusSubcontractWiring._derive_event_type_from_topic(
+            "onex.evt.short"
+        )
+        assert result is None
+
+    def test_derive_event_type_returns_none_for_empty_string(self) -> None:
+        """Test returns None for empty string."""
+        result = EventBusSubcontractWiring._derive_event_type_from_topic("")
+        assert result is None
+
+    def test_derive_event_type_returns_none_when_prefix_not_onex(self) -> None:
+        """Test returns None when topic has 5 segments but does not start with 'onex'."""
+        result = EventBusSubcontractWiring._derive_event_type_from_topic(
+            "other.evt.producer.event-name.v1"
+        )
+        assert result is None
+
+    def test_derive_event_type_from_topic_with_extra_segments(self) -> None:
+        """Test derivation still works with more than 5 segments."""
+        result = EventBusSubcontractWiring._derive_event_type_from_topic(
+            "onex.evt.producer.event-name.v1.extra"
+        )
+        assert result == "producer.event-name"
+
+    def test_deserialize_populates_event_type_when_not_in_payload(
+        self,
+        wiring: EventBusSubcontractWiring,
+    ) -> None:
+        """Test that event_type is derived from topic when not in the envelope payload."""
+        payload = {
+            "correlation_id": str(uuid4()),
+            "payload": {"key": "value"},
+            # event_type intentionally omitted
+        }
+        message = ModelEventMessage(
+            topic="onex.evt.omniintelligence.intent-classified.v1",
+            key=b"key",
+            value=json.dumps(payload).encode("utf-8"),
+            headers=ModelEventHeaders(
+                source="test",
+                event_type="test",
+                timestamp=datetime.now(UTC),
+            ),
+        )
+
+        envelope = wiring._deserialize_to_envelope(
+            message, "onex.evt.omniintelligence.intent-classified.v1"
+        )
+
+        assert envelope.event_type == "omniintelligence.intent-classified"
+
+    def test_deserialize_preserves_existing_event_type(
+        self,
+        wiring: EventBusSubcontractWiring,
+    ) -> None:
+        """Test that existing event_type in payload is NOT overwritten."""
+        payload = {
+            "event_type": "custom.explicit-type",
+            "correlation_id": str(uuid4()),
+            "payload": {"key": "value"},
+        }
+        message = ModelEventMessage(
+            topic="onex.evt.omniintelligence.intent-classified.v1",
+            key=b"key",
+            value=json.dumps(payload).encode("utf-8"),
+            headers=ModelEventHeaders(
+                source="test",
+                event_type="test",
+                timestamp=datetime.now(UTC),
+            ),
+        )
+
+        envelope = wiring._deserialize_to_envelope(
+            message, "onex.evt.omniintelligence.intent-classified.v1"
+        )
+
+        # Must preserve the original, not overwrite with derived
+        assert envelope.event_type == "custom.explicit-type"
+
+    def test_deserialize_no_event_type_with_non_onex_topic(
+        self,
+        wiring: EventBusSubcontractWiring,
+    ) -> None:
+        """Test that event_type remains None when topic is not ONEX format."""
+        payload = {
+            "correlation_id": str(uuid4()),
+            "payload": {"key": "value"},
+            # event_type intentionally omitted
+        }
+        message = ModelEventMessage(
+            topic="custom.topic",
+            key=b"key",
+            value=json.dumps(payload).encode("utf-8"),
+            headers=ModelEventHeaders(
+                source="test",
+                event_type="test",
+                timestamp=datetime.now(UTC),
+            ),
+        )
+
+        envelope = wiring._deserialize_to_envelope(message, "custom.topic")
+
+        assert envelope.event_type is None
+
+    @pytest.mark.asyncio
+    async def test_dispatched_envelope_has_event_type_from_topic(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+    ) -> None:
+        """End-to-end: envelope dispatched via callback has event_type populated.
+
+        This is the primary integration test for OMN-2038: when a message
+        arrives without event_type, the wiring derives it from the topic
+        and the dispatch engine receives the enriched envelope.
+        """
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="dev",
+            node_name="test-handler",
+            service="test-service",
+            version="v1",
+        )
+
+        topic = "onex.evt.node.introspected.v1"
+        callback = wiring._create_dispatch_callback(topic, "dev.test-handler")
+
+        # Message with no event_type in payload
+        payload = {
+            "correlation_id": str(uuid4()),
+            "payload": {"node_id": "abc"},
+        }
+        message = ModelEventMessage(
+            topic=topic,
+            key=b"key",
+            value=json.dumps(payload).encode("utf-8"),
+            headers=ModelEventHeaders(
+                source="test",
+                event_type="test",
+                timestamp=datetime.now(UTC),
+            ),
+        )
+
+        await callback(message)
+
+        # Verify dispatch was called and envelope has derived event_type
+        mock_dispatch_engine.dispatch.assert_called_once()
+        dispatched_envelope = mock_dispatch_engine.dispatch.call_args[0][1]
+        assert dispatched_envelope.event_type == "node.introspected"
+
+    @pytest.mark.asyncio
+    async def test_dispatched_envelope_preserves_existing_event_type(
+        self,
+        mock_event_bus: AsyncMock,
+        mock_dispatch_engine: AsyncMock,
+    ) -> None:
+        """End-to-end: envelope with explicit event_type is not overwritten."""
+        wiring = EventBusSubcontractWiring(
+            event_bus=mock_event_bus,
+            dispatch_engine=mock_dispatch_engine,
+            environment="dev",
+            node_name="test-handler",
+            service="test-service",
+            version="v1",
+        )
+
+        topic = "onex.evt.node.introspected.v1"
+        callback = wiring._create_dispatch_callback(topic, "dev.test-handler")
+
+        # Message WITH explicit event_type in payload
+        payload = {
+            "event_type": "custom.already-set",
+            "correlation_id": str(uuid4()),
+            "payload": {"node_id": "abc"},
+        }
+        message = ModelEventMessage(
+            topic=topic,
+            key=b"key",
+            value=json.dumps(payload).encode("utf-8"),
+            headers=ModelEventHeaders(
+                source="test",
+                event_type="test",
+                timestamp=datetime.now(UTC),
+            ),
+        )
+
+        await callback(message)
+
+        mock_dispatch_engine.dispatch.assert_called_once()
+        dispatched_envelope = mock_dispatch_engine.dispatch.call_args[0][1]
+        assert dispatched_envelope.event_type == "custom.already-set"
 
 
 # =============================================================================
