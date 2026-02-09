@@ -511,7 +511,9 @@ class TestHandlerNoBusAccess:
             }
         ).encode()
 
-        envelope = wiring._deserialize_to_envelope(mock_message)
+        envelope = wiring._deserialize_to_envelope(
+            mock_message, "onex.evt.test.test-event.v1"
+        )
 
         # The envelope is a ModelEventEnvelope, not the raw Kafka message
         # After JSON parsing, it's validated against the envelope model
@@ -552,7 +554,9 @@ class TestHandlerNoBusAccess:
             }
         ).encode()
 
-        envelope = wiring._deserialize_to_envelope(mock_message)
+        envelope = wiring._deserialize_to_envelope(
+            mock_message, "onex.evt.test.test-event.v1"
+        )
 
         # Verify it's a ModelEventEnvelope instance
         assert isinstance(envelope, ModelEventEnvelope)
