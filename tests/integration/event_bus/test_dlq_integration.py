@@ -188,11 +188,17 @@ class TestDlqTopicConstants:
         assert topic == "test.dlq.events.v2"
 
     def test_build_dlq_topic_invalid_category(self) -> None:
-        """Verify build_dlq_topic rejects invalid categories."""
+        """Verify build_dlq_topic rejects categories that violate the identifier pattern.
+
+        Valid categories: any lowercase identifier starting with a letter
+        (e.g., 'intents', 'intelligence', 'platform').
+        Invalid: starts with digit, starts with dash, empty, etc.
+        """
         from omnibase_infra.event_bus.topic_constants import build_dlq_topic
 
+        # Starts with digit — fails _DLQ_CATEGORY_PATTERN (^[a-z][a-z0-9_-]*$)
         with pytest.raises(ProtocolConfigurationError, match="Invalid category"):
-            build_dlq_topic("dev", "invalid")
+            build_dlq_topic("dev", "123abc")
 
     def test_build_dlq_topic_empty_environment(self) -> None:
         """Verify build_dlq_topic rejects empty environment."""

@@ -99,25 +99,31 @@ DLQ_CATEGORY_SUFFIXES: Final[dict[str, str]] = {
 # Validates DLQ topics in Environment-Aware format: <env>.dlq.<category>.<version>
 # - env: alphanumeric with underscores/hyphens (e.g., dev, staging, prod, test-1)
 # - domain: must be 'dlq'
-# - category: intents, events, or commands
+# - category: lowercase identifier (intents, events, commands, intelligence, platform, etc.)
 # - version: v followed by digits (e.g., v1, v2)
 
 DLQ_TOPIC_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^(?P<env>[\w-]+)\.dlq\.(?P<category>intents|events|commands)\.(?P<version>v\d+)$",
+    r"^(?P<env>[\w-]+)\.dlq\.(?P<category>[a-z][a-z0-9_-]*)\.(?P<version>v\d+)$",
     re.IGNORECASE,
 )
 """
 Regex pattern for validating DLQ topic names.
 
 Groups:
-    - env: Environment identifier (e.g., 'dev', 'prod')
-    - category: Message category (intents, events, commands)
+    - env: Environment identifier (e.g., 'dev', 'prod', 'onex')
+    - category: DLQ category (intents, events, commands, intelligence, platform, etc.)
     - version: Topic version (e.g., 'v1')
 
 Example matches:
     - dev.dlq.intents.v1
     - prod.dlq.events.v1
     - staging.dlq.commands.v2
+    - onex.dlq.intelligence.v1
+    - onex.dlq.platform.v1
+
+.. versionchanged:: 0.7.0
+    Expanded category pattern from ``intents|events|commands`` to any
+    lowercase identifier to support domain-based DLQ routing (OMN-2040).
 """
 
 # ==============================================================================
@@ -132,6 +138,25 @@ Regex pattern for validating environment identifiers.
 
 Valid examples: 'dev', 'prod', 'staging', 'test-1', 'my_env'
 Invalid examples: 'env.name', 'env name', 'env@name', ''
+"""
+
+# ==============================================================================
+# DLQ Category Validation Pattern
+# ==============================================================================
+# Validates DLQ category identifiers: starts with letter, followed by lowercase
+# letters, digits, hyphens, or underscores. This pattern is used by build_dlq_topic()
+# to accept both standard categories (intents, events, commands) and domain-based
+# categories (intelligence, platform, etc.).
+
+_DLQ_CATEGORY_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_-]*$")
+"""
+Regex pattern for validating DLQ category identifiers.
+
+Valid examples: 'intents', 'events', 'intelligence', 'platform', 'my-domain'
+Invalid examples: '123abc', '-starts-with-dash', '', 'UPPER'
+
+.. versionadded:: 0.7.0
+    Added for domain-based DLQ routing (OMN-2040).
 """
 
 
@@ -149,9 +174,11 @@ def build_dlq_topic(
     Args:
         environment: Environment identifier (e.g., 'dev', 'prod', 'staging').
             Must be alphanumeric with optional underscores or hyphens.
-        category: Message category for the DLQ. Accepts both singular and
-            plural forms: 'intent'/'intents', 'event'/'events',
-            'command'/'commands'. Will be normalized to plural form.
+        category: DLQ category identifier. Accepts standard message categories
+            in singular or plural form ('intent'/'intents', 'event'/'events',
+            'command'/'commands') which are normalized to plural form, as well
+            as domain-based categories ('intelligence', 'platform', 'agent',
+            etc.) which pass through as-is.
         version: Optional topic version (e.g., 'v1', 'v2'). If not provided,
             defaults to DLQ_TOPIC_VERSION ('v1').
 
@@ -159,8 +186,8 @@ def build_dlq_topic(
         Fully-qualified DLQ topic name.
 
     Raises:
-        ValueError: If environment is empty/whitespace, has invalid format,
-            or category is invalid.
+        ProtocolConfigurationError: If environment is empty/whitespace, has
+            invalid format, or category is invalid.
 
     Example:
         >>> build_dlq_topic("dev", "intents")
@@ -205,16 +232,29 @@ def build_dlq_topic(
             value=environment,
         )
 
-    # Normalize category to lowercase and look up suffix
+    # Normalize category to lowercase and validate format
     cat_lower = category.lower().strip()
-    if cat_lower not in DLQ_CATEGORY_SUFFIXES:
-        valid_categories = ", ".join(sorted(set(DLQ_CATEGORY_SUFFIXES.keys())))
+    if not cat_lower:
         context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.KAFKA,
             operation="build_dlq_topic",
         )
         raise ProtocolConfigurationError(
-            f"Invalid category '{category}'. Valid categories: {valid_categories}",
+            "category cannot be empty",
+            context=context,
+            parameter="category",
+        )
+
+    # Validate category format: must start with letter, then alphanumeric/hyphens/underscores
+    if not _DLQ_CATEGORY_PATTERN.match(cat_lower):
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="build_dlq_topic",
+        )
+        raise ProtocolConfigurationError(
+            f"Invalid category '{category}'. "
+            "Must start with a letter and contain only lowercase letters, digits, "
+            "hyphens, or underscores.",
             context=context,
             parameter="category",
             value=category,
@@ -223,7 +263,8 @@ def build_dlq_topic(
     # Determine version to use
     topic_version = version if version else DLQ_TOPIC_VERSION
 
-    # Normalize category to plural form for consistency
+    # Normalize standard categories to plural form for consistency;
+    # domain-based categories (e.g., "intelligence", "platform") pass through as-is.
     normalized_category = _normalize_category(cat_lower)
 
     return f"{env}.{DLQ_DOMAIN}.{normalized_category}.{topic_version}"
@@ -348,6 +389,96 @@ def get_dlq_topic_for_original(
     return build_dlq_topic(environment, category.topic_suffix)
 
 
+def derive_dlq_topic_for_event_type(
+    event_type: str | None,
+    original_topic: str,
+    *,
+    environment: str = "onex",
+) -> str | None:
+    """Derive the DLQ topic for an unroutable message based on its event_type.
+
+    When ``MessageDispatchEngine`` finds no registered dispatcher for an envelope,
+    this function determines which DLQ topic the message should be routed to.
+
+    The DLQ category is derived from the event_type domain prefix:
+
+    - ``intelligence.*`` -> ``{env}.dlq.intelligence.v1``
+    - ``platform.*`` -> ``{env}.dlq.platform.v1``
+    - ``agent.*`` -> ``{env}.dlq.agent.v1``
+
+    For messages with no event_type (Phase 1 legacy), the function falls back
+    to the existing topic-based DLQ routing via ``get_dlq_topic_for_original()``,
+    which uses the message category (events/commands/intents) from the topic name.
+
+    Args:
+        event_type: The event_type from the envelope. May be None or empty for
+            legacy messages that don't use event_type-based routing.
+        original_topic: The Kafka topic the message was consumed from. Used as
+            fallback for legacy DLQ routing when event_type is absent.
+        environment: Environment prefix for the DLQ topic when using event_type-based
+            routing. Defaults to "onex". This parameter is NOT used for the legacy
+            topic-based fallback path, which extracts the environment from the
+            original topic instead.
+
+    Returns:
+        The DLQ topic name (e.g., ``onex.dlq.intelligence.v1``), or None if
+        neither event_type nor topic-based DLQ routing can determine a target.
+
+    Example:
+        >>> derive_dlq_topic_for_event_type(
+        ...     "intelligence.code-analysis-completed.v1",
+        ...     "onex.evt.intelligence.code-analysis.v1",
+        ... )
+        'onex.dlq.intelligence.v1'
+        >>> derive_dlq_topic_for_event_type(
+        ...     "platform.node-registered.v1",
+        ...     "onex.evt.platform.node-registration.v1",
+        ... )
+        'onex.dlq.platform.v1'
+        >>> derive_dlq_topic_for_event_type(
+        ...     None,
+        ...     "dev.user.events.v1",
+        ... )
+        'dev.dlq.events.v1'
+        >>> derive_dlq_topic_for_event_type(
+        ...     "",
+        ...     "onex.registration.commands",
+        ... )  # Returns None (ONEX-format topic, environment not extractable)
+
+    .. versionadded:: 0.7.0
+        Added for DLQ routing of unknown event_type (OMN-2040).
+    """
+    # Normalize event_type
+    normalized = str(event_type).strip() if event_type is not None else ""
+
+    if normalized:
+        # Extract domain prefix: first segment before the first '.'
+        dot_index = normalized.find(".")
+        if dot_index > 0:
+            domain = normalized[:dot_index].lower()
+        else:
+            # Single-segment event_type (no dots) - use the whole string as domain
+            domain = normalized.lower()
+
+        # Validate domain is a valid category identifier
+        if _DLQ_CATEGORY_PATTERN.match(domain):
+            return build_dlq_topic(environment, domain)
+
+        # Domain prefix is invalid (e.g., starts with digit) — cannot
+        # determine DLQ topic from event_type.  Return None rather than
+        # falling back to topic-based routing, because the presence of an
+        # event_type indicates the new routing model where the domain prefix
+        # is authoritative.
+        return None
+
+    # Legacy path: no event_type, use topic-based DLQ routing.
+    # Do NOT pass the environment parameter here so that
+    # get_dlq_topic_for_original can extract it from the original topic.
+    # This ensures "dev.user.events.v1" produces "dev.dlq.events.v1"
+    # instead of using the default "onex" environment.
+    return get_dlq_topic_for_original(original_topic)
+
+
 # ==============================================================================
 # Wiring Health Monitoring Topics
 # ==============================================================================
@@ -433,6 +564,7 @@ __all__ = [
     "WIRING_HEALTH_MONITORED_TOPICS",
     # Functions
     "build_dlq_topic",
+    "derive_dlq_topic_for_event_type",
     "get_dlq_topic_for_original",
     "is_dlq_topic",
     "parse_dlq_topic",

@@ -28,6 +28,7 @@ Topic Constants:
     parse_dlq_topic: Parse a DLQ topic into components
     is_dlq_topic: Check if a topic is a DLQ topic
     get_dlq_topic_for_original: Get DLQ topic for an original topic
+    derive_dlq_topic_for_event_type: Derive DLQ topic from event_type domain prefix
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ from omnibase_infra.event_bus.topic_constants import (
     DLQ_TOPIC_PATTERN,
     DLQ_TOPIC_VERSION,
     build_dlq_topic,
+    derive_dlq_topic_for_event_type,
     get_dlq_topic_for_original,
     is_dlq_topic,
     parse_dlq_topic,
@@ -69,6 +71,7 @@ __all__: list[str] = [
     "TopicProvisioner",
     # Topic Functions
     "build_dlq_topic",
+    "derive_dlq_topic_for_event_type",
     "get_dlq_topic_for_original",
     "is_dlq_topic",
     "parse_dlq_topic",

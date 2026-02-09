@@ -123,6 +123,7 @@ class ModelDispatchResult(BaseModel):
         correlation_id: Correlation ID from the original message.
         trace_id: Distributed trace ID for observability.
         span_id: Trace span ID for this dispatch operation.
+        dlq_topic: Target DLQ topic for unroutable messages (if determinable).
         metadata: Optional additional metadata about the dispatch.
 
     Example:
@@ -217,6 +218,17 @@ class ModelDispatchResult(BaseModel):
             "List of output events produced by the dispatcher that need to be "
             "published to output_topic. These are raw Pydantic models that will "
             "be wrapped in ModelEventEnvelope by the kernel before publishing."
+        ),
+    )
+
+    # ---- DLQ Routing ----
+    dlq_topic: str | None = Field(
+        default=None,
+        description=(
+            "Target DLQ topic for unroutable messages. Set when status is "
+            "NO_DISPATCHER and a DLQ topic can be derived from the event_type "
+            "domain prefix or original topic category. Callers should publish "
+            "the original message to this topic for later analysis or retry."
         ),
     )
 

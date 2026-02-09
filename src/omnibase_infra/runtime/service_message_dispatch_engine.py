@@ -187,6 +187,47 @@ if TYPE_CHECKING:
     from omnibase_core.enums.enum_node_kind import EnumNodeKind
 
 
+def _derive_dlq_topic(
+    event_type: str | None,
+    original_topic: str,
+) -> str | None:
+    """Derive DLQ topic for an unroutable message.
+
+    Module-level helper that wraps ``derive_dlq_topic_for_event_type`` with
+    exception safety. DLQ topic derivation must never crash the dispatch engine.
+
+    Args:
+        event_type: The event_type from the envelope (may be None for legacy).
+        original_topic: The Kafka topic the message was consumed from.
+
+    Returns:
+        DLQ topic string, or None if derivation fails or is indeterminate.
+
+    .. versionadded:: 0.7.0
+        Added for DLQ routing of unknown event_type (OMN-2040).
+    """
+    try:
+        from omnibase_infra.event_bus.topic_constants import (
+            derive_dlq_topic_for_event_type,
+        )
+
+        return derive_dlq_topic_for_event_type(
+            event_type=event_type,
+            original_topic=original_topic,
+        )
+    except Exception:
+        # DLQ derivation must never crash the dispatch engine.
+        # If derivation fails, return None and the caller will handle
+        # the NO_DISPATCHER result without DLQ routing.
+        _module_logger.debug(
+            "DLQ topic derivation failed for event_type='%s', topic='%s'",
+            event_type,
+            original_topic,
+            exc_info=True,
+        )
+        return None
+
+
 class ModelLogContextKwargs(TypedDict, total=False):
     """TypedDict for _build_log_context kwargs to ensure type safety.
 
@@ -1066,11 +1107,20 @@ class MessageDispatchEngine:
                     topic=topic,
                 )
 
-            # Log warning
+            # Derive DLQ topic for unroutable message (OMN-2040)
+            # Uses event_type domain prefix when available, falls back to
+            # topic-based category routing for legacy messages without event_type.
+            dlq_topic = _derive_dlq_topic(
+                event_type=normalized_event_type if normalized_event_type else None,
+                original_topic=topic,
+            )
+
+            # Log warning with DLQ routing info
             self._logger.warning(
-                "No dispatcher found for category '%s' and message type '%s'",
+                "No dispatcher found for category '%s' and message type '%s'%s",
                 topic_category,
                 message_type,
+                f"; routing to DLQ topic '{dlq_topic}'" if dlq_topic else "",
                 extra=self._build_log_context(
                     topic=topic,
                     category=topic_category,
@@ -1092,6 +1142,7 @@ class MessageDispatchEngine:
                 started_at=started_at,
                 completed_at=completed_at,
                 duration_ms=duration_ms,
+                dlq_topic=dlq_topic,
                 error_message=f"No dispatcher registered for category '{topic_category}' "
                 f"and message type '{message_type}' matching topic '{topic}'.",
                 error_code=EnumCoreErrorCode.ITEM_NOT_REGISTERED,
