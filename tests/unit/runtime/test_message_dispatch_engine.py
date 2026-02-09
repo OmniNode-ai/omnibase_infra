@@ -4946,3 +4946,32 @@ class TestDispatchDlqRouting:
 
         assert result.status == EnumDispatchStatus.NO_DISPATCHER
         assert result.dlq_topic == "onex.dlq.agent.v1"
+
+    @pytest.mark.asyncio
+    async def test_derive_dlq_topic_exception_returns_none(self) -> None:
+        """DLQ derivation failure must not crash dispatch; dlq_topic is None."""
+        engine = MessageDispatchEngine()
+        engine.freeze()
+
+        envelope = EnvelopeWithEventType(
+            payload=UserCreatedEvent(user_id="u1", name="Test"),
+            event_type="intelligence.code-analysis-completed.v1",
+        )
+
+        def _raise(**_kw: object) -> str:
+            raise RuntimeError("boom")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "omnibase_infra.event_bus.topic_constants"
+                ".derive_dlq_topic_for_event_type",
+                _raise,
+            )
+
+            result = await engine.dispatch(
+                "dev.intelligence.events.v1",
+                envelope,  # type: ignore[arg-type]
+            )
+
+        assert result.status == EnumDispatchStatus.NO_DISPATCHER
+        assert result.dlq_topic is None
