@@ -4814,6 +4814,7 @@ class TestEventTypeRouting:
 # ============================================================================
 
 
+@pytest.mark.unit
 class TestDispatchDlqRouting:
     """Tests for DLQ topic derivation in NO_DISPATCHER results (OMN-2040).
 
