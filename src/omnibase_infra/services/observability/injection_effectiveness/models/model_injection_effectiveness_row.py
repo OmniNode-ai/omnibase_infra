@@ -54,6 +54,9 @@ class ModelInjectionEffectivenessRow(BaseModel):
     routing_path: str | None = Field(default=None, description="Routing path")
 
     # A/B testing
+    # Note: Intentionally `str | None` (not Literal) — the database may contain
+    # cohort values beyond what ModelInjectionEffectivenessQuery currently accepts.
+    # The query model enforces Literal['control', 'treatment'] at the filter boundary.
     cohort: str | None = Field(default=None, description="A/B test cohort")
     cohort_identity_type: str | None = Field(
         default=None, description="Cohort identity type"

@@ -243,6 +243,57 @@ class TestAppendSessionEntry:
             )
 
     @pytest.mark.asyncio
+    async def test_rejects_non_uuid_session_id(
+        self, mock_pool: MagicMock, sample_correlation_id
+    ) -> None:
+        """Raises TypeError when session_id is not UUID."""
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="session_id must be UUID"):
+            await sink.append_session_entry(
+                session_id="not-a-uuid",  # type: ignore[arg-type]
+                correlation_id=sample_correlation_id,
+                event_type="context_utilization",
+                event_payload=b"{}",
+                kafka_topic="test.topic",
+                kafka_partition=0,
+                kafka_offset=0,
+            )
+
+    @pytest.mark.asyncio
+    async def test_rejects_non_uuid_correlation_id(
+        self, mock_pool: MagicMock, sample_session_id
+    ) -> None:
+        """Raises TypeError when correlation_id is not UUID."""
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="correlation_id must be UUID"):
+            await sink.append_session_entry(
+                session_id=sample_session_id,
+                correlation_id="not-a-uuid",  # type: ignore[arg-type]
+                event_type="context_utilization",
+                event_payload=b"{}",
+                kafka_topic="test.topic",
+                kafka_partition=0,
+                kafka_offset=0,
+            )
+
+    @pytest.mark.asyncio
+    async def test_rejects_non_bytes_event_payload(
+        self, mock_pool: MagicMock, sample_session_id, sample_correlation_id
+    ) -> None:
+        """Raises TypeError when event_payload is not bytes."""
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="event_payload must be bytes"):
+            await sink.append_session_entry(
+                session_id=sample_session_id,
+                correlation_id=sample_correlation_id,
+                event_type="context_utilization",
+                event_payload='{"score": 0.85}',  # type: ignore[arg-type]
+                kafka_topic="test.topic",
+                kafka_partition=0,
+                kafka_offset=0,
+            )
+
+    @pytest.mark.asyncio
     async def test_sets_statement_timeout(
         self, mock_pool: MagicMock, sample_session_id, sample_correlation_id
     ) -> None:

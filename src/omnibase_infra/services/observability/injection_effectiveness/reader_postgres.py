@@ -245,6 +245,10 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         count_sql = f"SELECT COUNT(*) FROM injection_effectiveness WHERE {where_clause}"  # noqa: S608
 
         # Data query with pagination and deterministic ordering
+        limit_idx = param_idx
+        offset_idx = param_idx + 1
+        param_idx = offset_idx + 1  # Keep idx consistent for future appends
+
         data_sql = f"""
             SELECT session_id, correlation_id, realm, runtime_id, routing_path,
                    cohort, cohort_identity_type, total_injected_tokens, patterns_injected,
@@ -254,7 +258,7 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             FROM injection_effectiveness
             WHERE {where_clause}
             ORDER BY created_at DESC
-            LIMIT ${param_idx} OFFSET ${param_idx + 1}
+            LIMIT ${limit_idx} OFFSET ${offset_idx}
         """  # noqa: S608
 
         data_params = [*params, query.limit, query.offset]
@@ -410,6 +414,10 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
         where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
+        limit_idx = param_idx
+        offset_idx = param_idx + 1
+        param_idx = offset_idx + 1  # Keep idx consistent for future appends
+
         sql = f"""
             SELECT id, pattern_id, domain_id, utilization_method, utilization_score,
                    hit_count, miss_count, sample_count, confidence,
@@ -417,7 +425,7 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             FROM pattern_hit_rates
             WHERE {where_clause}
             ORDER BY updated_at DESC
-            LIMIT ${param_idx} OFFSET ${param_idx + 1}
+            LIMIT ${limit_idx} OFFSET ${offset_idx}
         """  # noqa: S608
 
         query_params = [*params, limit, offset]

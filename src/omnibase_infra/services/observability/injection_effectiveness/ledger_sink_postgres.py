@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
+from typing import NotRequired, TypedDict
 from uuid import UUID
 
 import asyncpg
@@ -47,6 +48,22 @@ logger = logging.getLogger(__name__)
 
 # Ledger source identifier for injection effectiveness events
 LEDGER_SOURCE = "injection-effectiveness-consumer"
+
+
+class LedgerEntryDict(TypedDict):
+    """Typed dict for ledger batch entries.
+
+    Required keys: session_id, event_type, event_payload, kafka_topic,
+    kafka_partition, kafka_offset. Optional: event_timestamp.
+    """
+
+    session_id: UUID
+    event_type: str
+    event_payload: bytes
+    kafka_topic: str
+    kafka_partition: int
+    kafka_offset: int
+    event_timestamp: NotRequired[datetime]
 
 
 class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
@@ -136,6 +153,15 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             InfraUnavailableError: If circuit breaker is open.
         """
         # Input validation: consistent with append_batch constraints
+        if not isinstance(session_id, UUID):
+            msg = f"session_id must be UUID, got {type(session_id).__name__}"
+            raise TypeError(msg)
+        if not isinstance(correlation_id, UUID):
+            msg = f"correlation_id must be UUID, got {type(correlation_id).__name__}"
+            raise TypeError(msg)
+        if not isinstance(event_payload, bytes):
+            msg = f"event_payload must be bytes, got {type(event_payload).__name__}"
+            raise TypeError(msg)
         if not isinstance(kafka_topic, str) or not kafka_topic:
             msg = f"kafka_topic must be a non-empty str, got {type(kafka_topic).__name__}: {kafka_topic!r}"
             raise TypeError(msg)
@@ -242,7 +268,7 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
     async def append_batch(
         self,
-        entries: list[dict[str, object]],
+        entries: list[LedgerEntryDict],
         correlation_id: UUID,
     ) -> int:
         """Append a batch of entries to the event ledger.
@@ -383,4 +409,4 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             return len(entries)
 
 
-__all__ = ["LedgerSinkInjectionEffectivenessPostgres"]
+__all__ = ["LedgerEntryDict", "LedgerSinkInjectionEffectivenessPostgres"]
