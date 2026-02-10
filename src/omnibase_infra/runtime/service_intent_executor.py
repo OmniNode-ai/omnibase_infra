@@ -32,6 +32,10 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
@@ -121,11 +125,18 @@ class IntentExecutor:
             )
             return
 
-        # Get intent_type from payload (typed payload pattern)
+        # Get intent_type from payload (typed payload pattern).
+        # Per architecture: payload.intent_type is the specific routing key;
+        # intent.intent_type is typically "extension" and not useful for routing.
         intent_type = getattr(payload, "intent_type", None)
         if intent_type is None:
-            # Fall back to intent-level intent_type
             intent_type = intent.intent_type
+            logger.warning(
+                "Payload has no intent_type, falling back to intent.intent_type=%s "
+                "(this may indicate a malformed intent payload) correlation_id=%s",
+                intent_type,
+                str(correlation_id) if correlation_id else "none",
+            )
 
         if intent_type is None:
             logger.warning(
@@ -136,13 +147,16 @@ class IntentExecutor:
 
         handler = self._effect_handlers.get(intent_type)
         if handler is None:
-            logger.warning(
-                "No effect handler registered for intent_type=%s correlation_id=%s "
-                "(intent skipped — possible misconfiguration)",
-                intent_type,
-                str(correlation_id) if correlation_id else "none",
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=None,
+                operation="intent_executor.resolve_handler",
             )
-            return
+            raise RuntimeHostError(
+                f"No effect handler registered for intent_type={intent_type!r} "
+                f"— intent would be lost (possible misconfiguration)",
+                context=context,
+            )
 
         try:
             # Duck-type: try execute() first, then handle()

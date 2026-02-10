@@ -35,6 +35,10 @@ from uuid import UUID, uuid4
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumDispatchStatus
+from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
@@ -170,13 +174,16 @@ class DispatchResultApplier:
         # Delegate intents to effect layer via IntentExecutor
         output_intents = result.output_intents
         if output_intents and self._intent_executor is None:
-            logger.warning(
-                "Dispatch result contains %d intent(s) but no IntentExecutor is "
-                "configured; intents will be dropped (dispatcher_id=%s "
-                "correlation_id=%s)",
-                len(output_intents),
-                result.dispatcher_id,
-                str(effective_correlation_id),
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=effective_correlation_id,
+                transport_type=None,
+                operation="dispatch_result_applier.apply_intents",
+            )
+            raise RuntimeHostError(
+                f"Dispatch result contains {len(output_intents)} intent(s) but no "
+                f"IntentExecutor is configured — intents would be lost "
+                f"(dispatcher_id={result.dispatcher_id})",
+                context=context,
             )
         if self._intent_executor is not None and output_intents:
             try:

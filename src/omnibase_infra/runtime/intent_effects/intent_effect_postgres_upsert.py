@@ -172,6 +172,8 @@ class IntentEffectPostgresUpsert:
                 str(effective_correlation_id),
             )
 
+        except RuntimeHostError:
+            raise
         except Exception as e:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=effective_correlation_id,

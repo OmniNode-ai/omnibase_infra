@@ -152,9 +152,7 @@ class TestIntentEffectPostgresUpsertExecute:
             record=record,
         )
 
-        with pytest.raises(
-            RuntimeHostError, match="Failed to execute PostgreSQL upsert"
-        ):
+        with pytest.raises(RuntimeHostError, match="missing required entity_id"):
             await effect.execute(payload, correlation_id=correlation_id)
 
         mock_projector.upsert_partial.assert_not_awaited()

@@ -26,7 +26,7 @@ class ModelProjectionRecord(BaseModel):
     SerializeAsAny ensures model_dump() serializes all extra fields.
     """
 
-    model_config = ConfigDict(extra="allow", frozen=True)
+    model_config = ConfigDict(extra="allow", frozen=True, from_attributes=True)
 
 
 __all__: list[str] = ["ModelProjectionRecord"]
