@@ -11,11 +11,12 @@
 
 | Metric | Value |
 |--------|-------|
-| Forward migrations scanned | 16 (14 docker + 2 src) |
+| Forward migrations scanned | 16 SQL files (14 docker + 2 src; excludes `000_create_multiple_databases.sh`) |
 | Rollback migrations scanned | 16 (14 docker + 2 src) |
 | Physical FK constraints found | 2 |
 | Cross-service FK violations | **0** |
-| Logical references (no FK) | 2 |
+| Cross-service logical references (no FK) | 1 (`pattern_hit_rates` → `learned_patterns`) |
+| Intra-service logical references (no FK) | 1 (`latency_breakdowns` → `injection_effectiveness`) |
 
 All `REFERENCES` / `FOREIGN KEY` constraints target tables owned by
 omnibase_infra. No resolution plan is required.
@@ -43,10 +44,13 @@ Found in `docker/migrations/forward/026_injection_effectiveness_tables.sql`:
 
 | Child Table | Column | Logical Parent | Reason for No FK |
 |-------------|--------|----------------|------------------|
-| `latency_breakdowns` | `session_id` | `injection_effectiveness` | Async Kafka events may arrive out-of-order |
-| `pattern_hit_rates` | `pattern_id` | (aggregated metric) | Eventual consistency for analytics |
+| `latency_breakdowns` | `session_id` | `injection_effectiveness` | Async Kafka events may arrive out-of-order (see migration lines 128-135) |
+| `pattern_hit_rates` | `pattern_id` | `learned_patterns` (cross-service) | Table owned by another service; no FK across service boundaries |
 
-Integrity is enforced at the application layer (see migration lines 128-135).
+For `latency_breakdowns`: integrity is enforced at the application layer
+(see migration 026, lines 128-135). For `pattern_hit_rates`: the
+`learned_patterns` table is not created by any omnibase_infra migration —
+it is an external table referenced by UUID only (migration 026, line 162).
 
 ---
 
@@ -87,7 +91,8 @@ Integrity is enforced at the application layer (see migration lines 128-135).
 1. `grep -rn 'REFERENCES\|FOREIGN KEY'` across both migration directories
 2. Manual review of each forward migration file
 3. Cross-referenced table names against other OmniNode repos (omniarchon,
-   omniclaude, omninode_bridge, omnidash, omnibase_core) — no shared tables
+   omniclaude, omninode_bridge, omnidash, omnibase_core) — one cross-service
+   logical reference found (`learned_patterns`), but no FK constraint exists
 
 ---
 
@@ -95,8 +100,9 @@ Integrity is enforced at the application layer (see migration lines 128-135).
 
 omnibase_infra has **zero cross-service foreign key violations**. The two
 physical FK constraints form a well-scoped aggregate within a single
-migration file. The intentional absence of FKs on async-event tables
-(migration 026) is correctly documented in-migration and follows the
-event-driven architecture pattern.
+migration file. One cross-service logical reference exists
+(`pattern_hit_rates.pattern_id` → `learned_patterns.id`), but no FK
+constraint is present — only a UUID column with a comment. This follows
+the event-driven architecture pattern for cross-service references.
 
-No remediation required.
+No remediation required for DB-SPLIT.
