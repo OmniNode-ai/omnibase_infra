@@ -93,7 +93,11 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             query_timeout: Timeout in seconds for queries (default: 30.0).
         """
         self._pool = pool
-        self._query_timeout = query_timeout or self.DEFAULT_QUERY_TIMEOUT_SECONDS
+        self._query_timeout = (
+            query_timeout
+            if query_timeout is not None
+            else self.DEFAULT_QUERY_TIMEOUT_SECONDS
+        )
 
         self._init_circuit_breaker(
             threshold=circuit_breaker_threshold,
@@ -152,7 +156,7 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker=self,
         ):
             async with self._pool.acquire() as conn:
-                async with conn.transaction():
+                async with conn.transaction(readonly=True):
                     timeout_ms = int(self._query_timeout * 1000)
                     await conn.execute(
                         "SET LOCAL statement_timeout = $1", str(timeout_ms)
@@ -254,7 +258,7 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker=self,
         ):
             async with self._pool.acquire() as conn:
-                async with conn.transaction():
+                async with conn.transaction(readonly=True):
                     timeout_ms = int(self._query_timeout * 1000)
                     await conn.execute(
                         "SET LOCAL statement_timeout = $1", str(timeout_ms)
@@ -331,7 +335,7 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker=self,
         ):
             async with self._pool.acquire() as conn:
-                async with conn.transaction():
+                async with conn.transaction(readonly=True):
                     timeout_ms = int(self._query_timeout * 1000)
                     await conn.execute(
                         "SET LOCAL statement_timeout = $1", str(timeout_ms)
@@ -417,7 +421,7 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker=self,
         ):
             async with self._pool.acquire() as conn:
-                async with conn.transaction():
+                async with conn.transaction(readonly=True):
                     timeout_ms = int(self._query_timeout * 1000)
                     await conn.execute(
                         "SET LOCAL statement_timeout = $1", str(timeout_ms)
