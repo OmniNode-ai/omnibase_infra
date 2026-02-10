@@ -344,7 +344,40 @@ class HandlerSlackWebhook:
                     duration_ms = (time.perf_counter() - start_time) * 1000
 
                     if response.status == 200:
-                        # Success
+                        # Slack webhooks return 200 with error text bodies
+                        # for some error conditions (e.g. "no_service",
+                        # "invalid_payload", "channel_is_archived").
+                        # Only "ok" indicates true success.
+                        body_text = await response.text()
+                        _WEBHOOK_ERROR_BODIES = {
+                            "no_service",
+                            "invalid_payload",
+                            "channel_not_found",
+                            "channel_is_archived",
+                            "action_prohibited",
+                            "posting_to_general_channel_denied",
+                        }
+                        if body_text.strip() in _WEBHOOK_ERROR_BODIES:
+                            duration_ms = (time.perf_counter() - start_time) * 1000
+                            last_error = f"Webhook error: {body_text.strip()[:100]}"
+                            last_error_code = "SLACK_WEBHOOK_ERROR"
+                            logger.warning(
+                                "Slack webhook returned error body on 200",
+                                extra={
+                                    "correlation_id": str(correlation_id),
+                                    "body": body_text.strip()[:100],
+                                    "attempt": attempt + 1,
+                                },
+                            )
+                            return ModelSlackAlertResult(
+                                success=False,
+                                duration_ms=duration_ms,
+                                correlation_id=correlation_id,
+                                error=last_error,
+                                error_code=last_error_code,
+                                retry_count=retry_count,
+                            )
+
                         logger.info(
                             "Slack alert delivered successfully",
                             extra={
@@ -397,6 +430,18 @@ class HandlerSlackWebhook:
                                 "attempt": attempt + 1,
                             },
                         )
+                        # 4xx errors (except 429, handled above) are
+                        # non-retryable client errors -- fail fast.
+                        if 400 <= response.status < 500:
+                            duration_ms = (time.perf_counter() - start_time) * 1000
+                            return ModelSlackAlertResult(
+                                success=False,
+                                duration_ms=duration_ms,
+                                correlation_id=correlation_id,
+                                error=last_error,
+                                error_code=last_error_code,
+                                retry_count=retry_count,
+                            )
 
             except TimeoutError:
                 last_error = "Request timeout"

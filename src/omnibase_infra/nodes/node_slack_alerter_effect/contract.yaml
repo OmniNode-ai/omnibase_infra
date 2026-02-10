@@ -136,6 +136,10 @@ error_handling:
       description: "Slack Web API returned ok=false with non-retryable error"
       recoverable: false
       retry_strategy: "none"
+    - name: "SLACK_WEBHOOK_ERROR"
+      description: "Slack webhook returned HTTP 200 with error body (e.g. invalid_payload, no_service)"
+      recoverable: false
+      retry_strategy: "none"
 # IO operations (EFFECT node specific)
 io_operations:
   - operation: "send_alert"

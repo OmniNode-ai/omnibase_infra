@@ -214,6 +214,7 @@ class TestHandlerSlackWebhook:
         """Test successful alert delivery."""
         mock_response = AsyncMock()
         mock_response.status = 200
+        mock_response.text = AsyncMock(return_value="ok")
         mock_response.__aenter__ = AsyncMock(return_value=mock_response)
         mock_response.__aexit__ = AsyncMock(return_value=None)
 
@@ -229,6 +230,28 @@ class TestHandlerSlackWebhook:
         assert result.correlation_id == alert.correlation_id
         assert result.retry_count == 0
         assert result.thread_ts is None  # Webhook mode doesn't return thread_ts
+
+    @pytest.mark.asyncio
+    async def test_handle_webhook_error_body(
+        self, handler: HandlerSlackWebhook, alert: ModelSlackAlert
+    ) -> None:
+        """Test webhook returns 200 with error text body (e.g. invalid_payload)."""
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.text = AsyncMock(return_value="invalid_payload")
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.post = MagicMock(return_value=mock_response)
+        mock_session.close = AsyncMock()
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            result = await handler.handle(alert)
+
+        assert result.success is False
+        assert result.error_code == "SLACK_WEBHOOK_ERROR"
+        assert "invalid_payload" in (result.error or "")
 
     @pytest.mark.asyncio
     async def test_handle_not_configured(self, alert: ModelSlackAlert) -> None:
@@ -248,11 +271,13 @@ class TestHandlerSlackWebhook:
         # First call returns 429, second returns 200
         mock_response_429 = AsyncMock()
         mock_response_429.status = 429
+        mock_response_429.headers = {}
         mock_response_429.__aenter__ = AsyncMock(return_value=mock_response_429)
         mock_response_429.__aexit__ = AsyncMock(return_value=None)
 
         mock_response_200 = AsyncMock()
         mock_response_200.status = 200
+        mock_response_200.text = AsyncMock(return_value="ok")
         mock_response_200.__aenter__ = AsyncMock(return_value=mock_response_200)
         mock_response_200.__aexit__ = AsyncMock(return_value=None)
 
@@ -275,6 +300,7 @@ class TestHandlerSlackWebhook:
         """Test failure when retries exhausted on rate limit."""
         mock_response = AsyncMock()
         mock_response.status = 429
+        mock_response.headers = {}
         mock_response.__aenter__ = AsyncMock(return_value=mock_response)
         mock_response.__aexit__ = AsyncMock(return_value=None)
 
@@ -770,6 +796,7 @@ class TestModeResolution:
 
         mock_response = AsyncMock()
         mock_response.status = 200
+        mock_response.text = AsyncMock(return_value="ok")
         mock_response.__aenter__ = AsyncMock(return_value=mock_response)
         mock_response.__aexit__ = AsyncMock(return_value=None)
 
