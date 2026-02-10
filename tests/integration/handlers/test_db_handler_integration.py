@@ -60,7 +60,7 @@ Environment Variables
 =====================
 
     OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
-        Example: postgresql://postgres:secret@localhost:5432/omninode_bridge
+        Example: postgresql://postgres:secret@localhost:5432/omnibase_infra
 
     Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
     POSTGRES_HOST: PostgreSQL server hostname (fallback - skip if neither is set)

@@ -503,10 +503,10 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | **Kafka/Redpanda**           |                                    |                                        |
 | `KAFKA_BOOTSTRAP_SERVERS`    | `localhost:9092`                   | Kafka/Redpanda broker addresses        |
 | **PostgreSQL**               |                                    |                                        |
-| `POSTGRES_HOST`              | `localhost`                        | PostgreSQL hostname                    |
-| `POSTGRES_PORT`              | `5432`                             | PostgreSQL port                        |
-| `OMNIBASE_INFRA_DB_URL`      | `postgresql://postgres:pass@postgres:5432/omnibase_infra` | Full PostgreSQL DSN for omnibase_infra |
-| `POSTGRES_USER`              | `postgres`                         | Database user                          |
+| `OMNIBASE_INFRA_DB_URL`      | `postgresql://postgres:pass@postgres:5432/omnibase_infra` | Full PostgreSQL DSN for omnibase_infra (primary) |
+| `POSTGRES_HOST`              | `localhost`                        | PostgreSQL hostname (legacy fallback)  |
+| `POSTGRES_PORT`              | `5432`                             | PostgreSQL port (legacy fallback)      |
+| `POSTGRES_USER`              | `postgres`                         | Database user (legacy fallback)        |
 | **Consul**                   |                                    |                                        |
 | `CONSUL_HOST`                | `localhost`                        | Consul agent hostname                  |
 | `CONSUL_PORT`                | `8500`                             | Consul HTTP port                       |

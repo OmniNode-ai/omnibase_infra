@@ -264,7 +264,7 @@ def _build_postgres_dsn() -> str:
 
     return (
         f"postgresql://{encoded_user}:{encoded_password}"
-        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/omninode_bridge"
+        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/omnibase_infra"
     )
 
 

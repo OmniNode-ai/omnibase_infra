@@ -21,7 +21,7 @@ Test Isolation:
 
 Environment Variables:
     OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
-        Example: postgresql://postgres:secret@localhost:5432/omninode_bridge
+        Example: postgresql://postgres:secret@localhost:5432/omnibase_infra
 
     Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
     POSTGRES_HOST: PostgreSQL hostname (fallback if OMNIBASE_INFRA_DB_URL not set)
@@ -80,7 +80,7 @@ def _get_postgres_dsn() -> str | None:
     if not host or not password:
         return None
 
-    return f"postgresql://{user}:{password}@{host}:{port}/omninode_bridge"
+    return f"postgresql://{user}:{password}@{host}:{port}/omnibase_infra"
 
 
 # Check PostgreSQL availability at module import

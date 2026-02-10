@@ -351,8 +351,8 @@ class PostgresConfig:
             )
             raise ProtocolConfigurationError(
                 f"PostgreSQL configuration incomplete. Missing: {', '.join(missing)}. "
-                "Hint: Set OMNIBASE_INFRA_DB_URL to a full PostgreSQL DSN, or ensure "
-                "POSTGRES_HOST and POSTGRES_PASSWORD environment variables are set.",
+                "Hint: Set OMNIBASE_INFRA_DB_URL to a full PostgreSQL DSN "
+                "(e.g., postgresql://user:pass@host:5432/omnibase_infra).",
                 context=context,
             )
 

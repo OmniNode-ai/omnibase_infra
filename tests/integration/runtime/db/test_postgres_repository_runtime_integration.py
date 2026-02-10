@@ -127,7 +127,7 @@ def get_dsn() -> str:
     port = os.environ["POSTGRES_PORT"]
     user = os.environ["POSTGRES_USER"]
     password = os.environ["POSTGRES_PASSWORD"]
-    return f"postgresql://{user}:{password}@{host}:{port}/omninode_bridge"
+    return f"postgresql://{user}:{password}@{host}:{port}/omnibase_infra"
 
 
 # Module-constant table name with random UUID suffix for test isolation.

@@ -74,9 +74,6 @@ Error Codes:
 
     Configuration Errors (CFG_*):
         CFG_AUTH_001: Missing OMNIBASE_INFRA_DB_URL
-        CFG_HOST_001: Invalid POSTGRES_HOST format
-        CFG_PORT_001: Invalid POSTGRES_PORT value
-        CFG_USER_001: Invalid POSTGRES_USER format
         CFG_DB_001: Invalid database name format
         CFG_TIMEOUT_001: Invalid BACKFILL_CONNECTION_TIMEOUT value
 
@@ -140,10 +137,9 @@ class ErrorCode:
     """
 
     # Configuration errors (CFG_xxx_xxx)
-    CFG_MISSING_PASSWORD = "CFG_AUTH_001"
+    CFG_MISSING_DB_URL = "CFG_AUTH_001"
     CFG_INVALID_HOST = "CFG_HOST_001"
     CFG_INVALID_PORT = "CFG_PORT_001"
-    CFG_INVALID_USER = "CFG_USER_001"
     CFG_INVALID_DATABASE = "CFG_DB_001"
     CFG_INVALID_TIMEOUT = "CFG_TIMEOUT_001"
 
@@ -349,7 +345,7 @@ def _get_validated_dsn() -> str:
         raise ConfigurationError(
             "OMNIBASE_INFRA_DB_URL environment variable is required. "
             "Example: postgresql://postgres:pass@host:5432/omnibase_infra",
-            error_code=ErrorCode.CFG_MISSING_PASSWORD,
+            error_code=ErrorCode.CFG_MISSING_DB_URL,
         )
 
     logger.debug("Using DSN from OMNIBASE_INFRA_DB_URL (credentials redacted)")
@@ -1038,7 +1034,7 @@ def main() -> int:
     dsn = os.getenv("OMNIBASE_INFRA_DB_URL")
     if dsn is None:
         print(
-            f"ERROR [{ErrorCode.CFG_MISSING_PASSWORD}]: "
+            f"ERROR [{ErrorCode.CFG_MISSING_DB_URL}]: "
             "OMNIBASE_INFRA_DB_URL environment variable is required"
         )
         print("  Action: Set OMNIBASE_INFRA_DB_URL before running this script.")
@@ -1046,7 +1042,7 @@ def main() -> int:
         return 1
     if dsn == "":
         print(
-            f"ERROR [{ErrorCode.CFG_MISSING_PASSWORD}]: "
+            f"ERROR [{ErrorCode.CFG_MISSING_DB_URL}]: "
             "OMNIBASE_INFRA_DB_URL environment variable is set but empty"
         )
         print("  Action: Set OMNIBASE_INFRA_DB_URL to a valid PostgreSQL DSN.")

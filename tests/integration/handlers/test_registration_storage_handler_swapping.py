@@ -79,6 +79,33 @@ POSTGRES_AVAILABLE = os.getenv("OMNIBASE_INFRA_DB_URL") is not None or (
 )
 
 
+def _resolve_postgres_config() -> dict[str, object]:
+    """Resolve PostgreSQL connection config from env vars.
+
+    Returns:
+        Dict with host, port, database, user, password keys.
+    """
+    from urllib.parse import urlparse
+
+    db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+    if db_url:
+        parsed = urlparse(db_url)
+        return {
+            "host": parsed.hostname or "localhost",
+            "port": parsed.port or 5432,
+            "database": (parsed.path or "").lstrip("/") or "omnibase_infra",
+            "user": parsed.username or "postgres",
+            "password": parsed.password or "",
+        }
+    return {
+        "host": os.getenv("POSTGRES_HOST", "localhost"),
+        "port": int(os.getenv("POSTGRES_PORT", "5432")),
+        "database": "omnibase_infra",
+        "user": os.getenv("POSTGRES_USER", "postgres"),
+        "password": os.getenv("POSTGRES_PASSWORD", ""),
+    }
+
+
 # =============================================================================
 # Test Fixtures
 # =============================================================================
@@ -441,34 +468,19 @@ class TestHandlerFactoryPattern:
         if handler_type == "mock":
             return HandlerRegistrationStorageMock()
         elif handler_type == "postgresql":
-            from urllib.parse import urlparse
-
             from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
                 HandlerRegistrationStoragePostgres,
             )
 
             mock_container = MagicMock(spec=ModelONEXContainer)
-            db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
-            if db_url:
-                parsed = urlparse(db_url)
-                _host = parsed.hostname or "localhost"
-                _port = parsed.port or 5432
-                _database = (parsed.path or "").lstrip("/") or "omnibase_infra"
-                _user = parsed.username or "postgres"
-                _password = parsed.password or ""
-            else:
-                _host = os.getenv("POSTGRES_HOST", "localhost")
-                _port = int(os.getenv("POSTGRES_PORT", "5432"))
-                _database = "omnibase_infra"
-                _user = os.getenv("POSTGRES_USER", "postgres")
-                _password = os.getenv("POSTGRES_PASSWORD", "")
+            pg = _resolve_postgres_config()
             return HandlerRegistrationStoragePostgres(
                 container=mock_container,
-                host=_host,
-                port=_port,
-                database=_database,
-                user=_user,
-                password=_password,
+                host=pg["host"],
+                port=pg["port"],
+                database=pg["database"],
+                user=pg["user"],
+                password=pg["password"],
             )
         else:
             raise ValueError(f"Unknown handler type: {handler_type}")
@@ -672,34 +684,19 @@ class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
     @pytest.fixture
     async def handler(self) -> AsyncGenerator[ProtocolRegistrationPersistence, None]:
         """Provide HandlerRegistrationStoragePostgres for testing."""
-        from urllib.parse import urlparse
-
         from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
             HandlerRegistrationStoragePostgres,
         )
 
         mock_container = MagicMock(spec=ModelONEXContainer)
-        db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
-        if db_url:
-            parsed = urlparse(db_url)
-            _host = parsed.hostname or "localhost"
-            _port = parsed.port or 5432
-            _database = (parsed.path or "").lstrip("/") or "omnibase_infra"
-            _user = parsed.username or "postgres"
-            _password = parsed.password or ""
-        else:
-            _host = os.getenv("POSTGRES_HOST", "localhost")
-            _port = int(os.getenv("POSTGRES_PORT", "5432"))
-            _database = "omnibase_infra"
-            _user = os.getenv("POSTGRES_USER", "postgres")
-            _password = os.getenv("POSTGRES_PASSWORD", "")
+        pg = _resolve_postgres_config()
         handler = HandlerRegistrationStoragePostgres(
             container=mock_container,
-            host=_host,
-            port=_port,
-            database=_database,
-            user=_user,
-            password=_password,
+            host=pg["host"],
+            port=pg["port"],
+            database=pg["database"],
+            user=pg["user"],
+            password=pg["password"],
         )
 
         yield handler

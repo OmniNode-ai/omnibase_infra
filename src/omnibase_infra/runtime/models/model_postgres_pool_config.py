@@ -103,14 +103,7 @@ class ModelPostgresPoolConfig(BaseModel):
         Raises:
             ValueError: If the DSN is malformed or missing required parts.
         """
-        try:
-            parsed = urlparse(dsn)
-        except Exception:
-            msg = (
-                "Failed to parse DSN: ensure it follows "
-                "postgresql://user:pass@host:port/dbname format"
-            )
-            raise ValueError(msg) from None
+        parsed = urlparse(dsn)
 
         database = (parsed.path or "").lstrip("/")
         if not database:

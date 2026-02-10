@@ -47,7 +47,7 @@ Fixture Dependency Graph:
 
 Environment Requirements:
     OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
-        Example: postgresql://postgres:secret@localhost:5436/omninode_bridge
+        Example: postgresql://postgres:secret@localhost:5436/omnibase_infra
 
     Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
     POSTGRES_HOST: PostgreSQL server hostname (fallback if OMNIBASE_INFRA_DB_URL not set)
