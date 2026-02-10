@@ -108,6 +108,7 @@ ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
         ".secretresolver_allowlist",
         ".secrets.baseline",
         # Special files
+        ".migration_freeze",
         ".mcp.json",
         ".tool-versions",
         ".python-version",

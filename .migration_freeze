@@ -1,0 +1,24 @@
+# Migration Freeze
+#
+# This file signals that schema migrations are FROZEN in this repository.
+# Do NOT add new migration files while this freeze is active.
+#
+# Parent ticket: OMN-2055 (DB-SPLIT-04: Schema freeze)
+# Repo ticket:   OMN-2071
+# Reason:        DB-per-repo refactor in progress
+#
+# Allowed during freeze:
+#   - Migration file moves (reorg between repos)
+#   - Table ownership fixes (transfers)
+#   - Rollback bug fixes (DB-SPLIT-01)
+#
+# NOT allowed:
+#   - New schema migrations
+#   - Column additions/removals
+#   - Index changes
+#   - Any DDL that creates new migration files
+#
+# To lift this freeze:
+#   1. Confirm DB boundary work is complete for this repo
+#   2. Remove this file
+#   3. Open a PR referencing the parent ticket OMN-2055

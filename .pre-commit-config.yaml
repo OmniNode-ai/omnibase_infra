@@ -80,6 +80,14 @@ repos:
   # ONEX Validation Hooks (infrastructure-specific)
   - repo: local
     hooks:
+      # Migration freeze enforcement - block new migrations during DB-per-repo refactor
+      - id: onex-validate-migration-freeze
+        name: ONEX Migration Freeze Enforcement
+        entry: poetry run python scripts/validate.py migration_freeze
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # Root directory cleanliness - no ephemeral files in root
       - id: onex-validate-clean-root
         name: ONEX Root Directory Cleanliness
@@ -218,4 +226,6 @@ ci:
   submodules: false
   # Skip ONEX validation hooks in CI that require omnibase_core imports
   # Note: onex-validate-clean-root is NOT skipped (standalone script, no omnibase_core dependency)
-  skip: [onex-validate-architecture, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types]
+  # Also skip migration freeze (checks staged files via git diff --cached, which is empty in CI;
+  # CI should run: poetry run python scripts/validation/validate_migration_freeze.py --check-committed)
+  skip: [onex-validate-architecture, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze]
