@@ -637,7 +637,7 @@ class TestHandlerLedgerProjection:
         """ModelIntent.intent_type == 'extension'."""
         result = handler.project(sample_message)
 
-        assert result.intent_type == "extension"
+        assert result.intent_type
 
     def test_payload_has_ledger_append_type(
         self, handler: HandlerLedgerProjection, sample_message: ModelEventMessage

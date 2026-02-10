@@ -373,7 +373,7 @@ class ContractRegistryReducer:
         )
 
         deactivate_intent = ModelIntent(
-            intent_type="extension",
+            intent_type=deactivate_payload.intent_type,
             target=f"postgres://contracts/{contract_id}",
             payload=deactivate_payload,
         )
@@ -387,7 +387,7 @@ class ContractRegistryReducer:
         )
 
         cleanup_intent = ModelIntent(
-            intent_type="extension",
+            intent_type=cleanup_payload.intent_type,
             target=f"postgres://topics/cleanup/{contract_id}",
             payload=cleanup_payload,
         )
@@ -451,7 +451,7 @@ class ContractRegistryReducer:
         )
 
         intent = ModelIntent(
-            intent_type="extension",
+            intent_type=payload.intent_type,
             target=f"postgres://contracts/{contract_id}/heartbeat",
             payload=payload,
         )
@@ -513,7 +513,7 @@ class ContractRegistryReducer:
         )
 
         intent = ModelIntent(
-            intent_type="extension",
+            intent_type=payload.intent_type,
             target="postgres://contracts/stale",
             payload=payload,
         )
@@ -617,7 +617,7 @@ class ContractRegistryReducer:
         )
 
         return ModelIntent(
-            intent_type="extension",
+            intent_type=payload.intent_type,
             target=f"postgres://contracts/{contract_id}",
             payload=payload,
         )
@@ -701,7 +701,7 @@ class ContractRegistryReducer:
                         )
                         intents.append(
                             ModelIntent(
-                                intent_type="extension",
+                                intent_type=payload.intent_type,
                                 target=f"postgres://topics/{topic_suffix}",
                                 payload=payload,
                             )
@@ -732,7 +732,7 @@ class ContractRegistryReducer:
                         )
                         intents.append(
                             ModelIntent(
-                                intent_type="extension",
+                                intent_type=payload.intent_type,
                                 target=f"postgres://topics/{topic_suffix}",
                                 payload=payload,
                             )

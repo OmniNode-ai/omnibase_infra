@@ -58,7 +58,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -70,15 +70,14 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
     EnumMessageCategory,
 )
-from omnibase_infra.errors import (
-    EnvelopeValidationError,
-    InfraUnavailableError,
-    ModelInfraErrorContext,
-)
+from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
+)
+from omnibase_infra.nodes.node_registration_orchestrator.dispatchers._util_envelope_extract import (
+    extract_envelope_fields,
 )
 from omnibase_infra.utils import sanitize_error_message
 
@@ -175,9 +174,10 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
         """Specific message types this dispatcher accepts.
 
         Returns:
-            set[str]: Set containing ModelNodeIntrospectionEvent type name.
+            set[str]: Set containing both Python class name and ONEX event_type
+                routing key for backwards compatibility and routing flexibility.
         """
-        return {"ModelNodeIntrospectionEvent"}
+        return {"ModelNodeIntrospectionEvent", "platform.node-introspection"}
 
     @property
     def node_kind(self) -> EnumNodeKind:
@@ -190,12 +190,16 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
 
     async def handle(
         self,
-        envelope: ModelEventEnvelope[object],
+        envelope: ModelEventEnvelope[object] | dict[str, object],
     ) -> ModelDispatchResult:
         """Handle introspection event and return dispatch result.
 
         Deserializes the envelope payload to ModelNodeIntrospectionEvent,
         delegates to the wrapped handler, and returns a structured result.
+
+        The dispatch engine materializes envelopes to dicts before calling
+        dispatchers (serialization boundary). This method accepts both
+        ModelEventEnvelope objects and materialized dicts.
 
         Circuit Breaker Integration:
             - Checks circuit state before processing (raises if OPEN)
@@ -204,7 +208,8 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             - InfraUnavailableError propagates to caller for DLQ handling
 
         Args:
-            envelope: Event envelope containing introspection payload.
+            envelope: Event envelope or materialized dict from dispatch engine.
+                Dict format: {"payload": {...}, "__bindings": {...}, "__debug_trace": {...}}
 
         Returns:
             ModelDispatchResult: Success with output events or error details.
@@ -212,8 +217,12 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
         Raises:
             InfraUnavailableError: If circuit breaker is OPEN.
         """
+        # NOTE: Both started_at and handler 'now' use direct datetime.now(UTC)
+        # instead of ModelDispatchContext.now due to protocol signature limitation.
+        # See TODO(OMN-2050) below for details.
         started_at = datetime.now(UTC)
-        correlation_id = envelope.correlation_id or uuid4()
+
+        correlation_id, raw_payload = extract_envelope_fields(envelope)
 
         # Check circuit breaker before processing (coroutine-safe)
         # If circuit is OPEN, raises InfraUnavailableError immediately
@@ -222,7 +231,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
 
         try:
             # Validate payload type
-            payload = envelope.payload
+            payload = raw_payload
             if not isinstance(payload, ModelNodeIntrospectionEvent):
                 # Try to construct from dict if payload is dict-like
                 if isinstance(payload, dict):
@@ -244,21 +253,19 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                         output_events=[],
                     )
 
-            # Explicit type guard (not assert) for production safety
-            # Type narrowing after isinstance/model_validate above
-            if not isinstance(payload, ModelNodeIntrospectionEvent):
-                context = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.KAFKA,
-                    operation="handle_introspection",
-                    correlation_id=correlation_id,
-                )
-                raise EnvelopeValidationError(
-                    f"Expected ModelNodeIntrospectionEvent after validation, "
-                    f"got {type(payload).__name__}",
-                    context=context,
-                )
+            # Type narrowing: the branch above guarantees payload is
+            # ModelNodeIntrospectionEvent (isinstance returned True, or model_validate
+            # succeeded, or we returned early). Use cast() instead of a redundant
+            # runtime isinstance check to satisfy mypy.
+            payload = cast("ModelNodeIntrospectionEvent", payload)
 
-            # Get current time for handler
+            # TODO(OMN-2050): Use injected time from ModelDispatchContext instead
+            # of datetime.now(UTC). Currently, the ProtocolMessageDispatcher.handle()
+            # signature accepts only the envelope, so there is no way to receive the
+            # dispatch engine's ModelDispatchContext.now timestamp. When the protocol
+            # is updated to pass ModelDispatchContext (or the envelope carries a
+            # dispatch_timestamp field), replace this direct clock access with the
+            # injected value for full time-injection compliance.
             now = datetime.now(UTC)
 
             # Create envelope for handler (ProtocolMessageHandler signature)
@@ -275,6 +282,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             # Delegate to wrapped handler
             handler_output = await self._handler.handle(handler_envelope)
             output_events = list(handler_output.events)
+            output_intents = handler_output.intents
 
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
@@ -303,6 +311,7 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                 duration_ms=duration_ms,
                 output_count=len(output_events),
                 output_events=output_events,
+                output_intents=output_intents,
                 correlation_id=correlation_id,
             )
 

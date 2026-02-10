@@ -669,7 +669,7 @@ class TestIntentEmissionControl:
         intent_types = {
             intent.payload.intent_type
             for intent in output.intents
-            if intent.intent_type == "extension"
+            if intent.intent_type
         }
         assert "consul.register" in intent_types
         assert "postgres.upsert_registration" in intent_types

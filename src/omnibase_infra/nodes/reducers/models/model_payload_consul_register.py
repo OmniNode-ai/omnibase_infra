@@ -71,6 +71,16 @@ class ModelPayloadConsulRegister(BaseModel):
         description="Service tags for filtering and categorization.",
     )
 
+    address: str | None = Field(
+        default=None,
+        description="Service address for Consul registration. Extracted from node endpoints.",
+    )
+
+    port: int | None = Field(
+        default=None,
+        description="Service port for Consul registration. Extracted from node endpoints.",
+    )
+
     health_check: dict[str, str] | None = Field(
         default=None,
         description="Optional health check configuration (HTTP, Interval, Timeout).",

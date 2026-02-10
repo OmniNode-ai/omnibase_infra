@@ -36,6 +36,9 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_i
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_postgres_upsert_intent import (
     ModelPostgresUpsertIntent,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_projection_record import (
+    ModelProjectionRecord,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_execution_result import (
     ModelReducerExecutionResult,
 )
@@ -66,6 +69,7 @@ __all__ = [
     "ModelOrchestratorOutput",
     "ModelPostgresIntentPayload",
     "ModelPostgresUpsertIntent",
+    "ModelProjectionRecord",
     "ModelReducerExecutionResult",
     "ModelReducerState",
     "ModelRegistrationIntent",

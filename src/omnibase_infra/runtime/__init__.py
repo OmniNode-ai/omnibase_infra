@@ -144,10 +144,10 @@ from omnibase_infra.runtime.util_container_wiring import (
 )
 
 # NOTE: Registration dispatchers (DispatcherNodeIntrospected, DispatcherRuntimeTick,
-# DispatcherNodeRegistrationAcked) and IntrospectionEventRouter moved to registration
-# domain (OMN-1346). Import directly from:
+# DispatcherNodeRegistrationAcked) moved to registration domain (OMN-1346).
+# IntrospectionEventRouter was replaced by EventBusSubcontractWiring +
+# MessageDispatchEngine (OMN-2050). Import dispatchers from:
 #   omnibase_infra.nodes.node_registration_orchestrator.dispatchers
-#   omnibase_infra.nodes.node_registration_orchestrator.introspection_event_router
 
 # Handler plugin loader (OMN-1132)
 from omnibase_infra.runtime.handler_plugin_loader import (

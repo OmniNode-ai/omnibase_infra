@@ -222,6 +222,22 @@ def _load_and_validate_contract_yaml(
         logger.error(msg)
         raise ProtocolConfigurationError(msg, context=ctx)
 
+    # Validate contract root is a dict (YAML can produce list, str, int, etc.)
+    if not isinstance(contract, dict):
+        ctx = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.FILESYSTEM,
+            operation=operation,
+            target_name=str(contract_path),
+        )
+        msg = (
+            f"Contract YAML root is not a dict in {contract_path}: "
+            f"got {type(contract).__name__}. "
+            f"The contract.yaml must be a YAML mapping at the top level. "
+            f"Error code: CONTRACT_NOT_DICT (HANDLER_LOADER_024)"
+        )
+        logger.error(msg)
+        raise ProtocolConfigurationError(msg, context=ctx)
+
     # Validate handler_routing section exists
     handler_routing = contract.get("handler_routing")
     if handler_routing is None:

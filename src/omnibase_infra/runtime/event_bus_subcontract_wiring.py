@@ -85,6 +85,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -122,6 +123,9 @@ from omnibase_infra.utils import compute_consumer_group_id
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+    from omnibase_infra.runtime.service_dispatch_result_applier import (
+        DispatchResultApplier,
+    )
     from omnibase_infra.runtime.service_message_dispatch_engine import (
         MessageDispatchEngine,
     )
@@ -208,6 +212,8 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         _dispatch_engine: Engine to dispatch received messages to handlers
         _environment: Environment identifier for consumer groups (e.g., 'dev', 'prod')
         _node_name: Name of the node/handler for consumer group and logging
+        _result_applier: Optional applier for processing dispatch results
+            (publishing output events and delegating intents)
         _idempotency_store: Optional store for tracking processed messages
         _idempotency_config: Configuration for idempotency behavior
         _dlq_config: Configuration for Dead Letter Queue behavior
@@ -231,6 +237,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         node_name: str,
         service: str,
         version: str,
+        result_applier: DispatchResultApplier | None = None,
         idempotency_store: ProtocolIdempotencyStore | None = None,
         idempotency_config: ModelIdempotencyConfig | None = None,
         dlq_config: ModelDlqConfig | None = None,
@@ -254,6 +261,11 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 Used to derive consumer group ID.
             version: Version string for node identity (e.g., 'v1', 'v1.0.0').
                 Used to derive consumer group ID.
+            result_applier: Optional DispatchResultApplier for processing
+                dispatch results. When provided, the wiring captures the return value
+                of dispatch_engine.dispatch() and passes it to the applier for output
+                event publishing and intent delegation. Duck-typed: must have an async
+                ``apply(result, correlation_id)`` method.
             idempotency_store: Optional idempotency store for message deduplication.
                 If provided with enabled config, messages are deduplicated by envelope_id.
             idempotency_config: Optional configuration for idempotency behavior.
@@ -288,6 +300,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         self._node_name = node_name
         self._service = service
         self._version = version
+        self._result_applier = result_applier
         self._idempotency_store = idempotency_store
         self._idempotency_config = idempotency_config or ModelIdempotencyConfig()
         self._dlq_config = dlq_config or ModelDlqConfig()
@@ -295,8 +308,15 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         self._offset_policy = offset_policy or ModelOffsetPolicyConfig()
         self._unsubscribe_callables: list[Callable[[], Awaitable[None]]] = []
         self._logger = logging.getLogger(__name__)
-        # Track retry attempts per correlation_id for infrastructure errors
-        self._retry_counts: dict[UUID, int] = {}
+        # Track retry attempts per correlation_id for infrastructure errors.
+        # Uses OrderedDict with move-to-end on access so that actively-retrying
+        # messages are never evicted by pruning. Pruning removes the oldest
+        # (least-recently-accessed) entries, which are truly stale.
+        # Bounded by _MAX_RETRY_ENTRIES to prevent unbounded growth from
+        # orphaned entries (e.g., messages with None correlation_id generate
+        # a new uuid4() each redelivery, never clearing the previous entry).
+        self._retry_counts: OrderedDict[UUID, int] = OrderedDict()
+        self._MAX_RETRY_ENTRIES: int = 10_000
 
         # Initialize consumption counter mixin (wiring health monitoring)
         self._init_consumption_counter()
@@ -541,16 +561,28 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
     def _get_retry_count(self, correlation_id: UUID) -> int:
         """Get current retry count for a correlation ID.
 
+        Moves the entry to end on access to keep actively-queried
+        correlation IDs safe from LRU pruning.
+
         Args:
             correlation_id: The correlation ID to check.
 
         Returns:
             Current retry count (0 if not tracked).
         """
-        return self._retry_counts.get(correlation_id, 0)
+        count = self._retry_counts.get(correlation_id, 0)
+        if count > 0:
+            self._retry_counts.move_to_end(correlation_id)
+        return count
 
     def _increment_retry_count(self, correlation_id: UUID) -> int:
         """Increment retry count for a correlation ID.
+
+        Uses OrderedDict with move-to-end on access so that actively-retrying
+        correlation IDs are always at the end (most-recently-used). Pruning
+        evicts the oldest half, which contains only stale/orphaned entries
+        that haven't been accessed recently. This prevents active retries
+        from losing their count due to eviction.
 
         Args:
             correlation_id: The correlation ID to increment.
@@ -558,8 +590,44 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         Returns:
             New retry count after increment.
         """
+        # Prune if over capacity -- evict the oldest (least-recently-accessed)
+        # entries. Because move_to_end keeps active retries at the tail, the
+        # oldest entries are typically stale/orphaned. We additionally protect
+        # entries with nonzero retry counts (active retries) from eviction,
+        # even if they happen to be at the old end of the OrderedDict.
+        if len(self._retry_counts) >= self._MAX_RETRY_ENTRIES:
+            target = len(self._retry_counts) // 2
+            evicted = 0
+            # Collect keys to evict from the oldest end, skipping active retries
+            keys_to_evict: list[UUID] = []
+            for cid, count in self._retry_counts.items():
+                if evicted >= target:
+                    break
+                if count == 0:
+                    keys_to_evict.append(cid)
+                    evicted += 1
+            # If we didn't find enough zero-count entries, evict oldest nonzero
+            # entries as a fallback to guarantee bounded growth
+            if evicted < target:
+                for cid in self._retry_counts:
+                    if evicted >= target:
+                        break
+                    if cid not in keys_to_evict:
+                        keys_to_evict.append(cid)
+                        evicted += 1
+            for cid in keys_to_evict:
+                del self._retry_counts[cid]
+            self._logger.warning(
+                "retry_counts pruned: evicted=%d (size was %d, max=%d)",
+                len(keys_to_evict),
+                len(self._retry_counts) + len(keys_to_evict),
+                self._MAX_RETRY_ENTRIES,
+            )
+
         current = self._retry_counts.get(correlation_id, 0)
         self._retry_counts[correlation_id] = current + 1
+        # Move to end so this actively-retrying entry is considered "recent"
+        self._retry_counts.move_to_end(correlation_id)
         return current + 1
 
     def _clear_retry_count(self, correlation_id: UUID) -> None:
@@ -666,7 +734,11 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                         return  # Skip dispatch
 
                 # Dispatch via ProtocolDispatchEngine interface
-                await self._dispatch_engine.dispatch(topic, envelope)
+                result = await self._dispatch_engine.dispatch(topic, envelope)
+
+                # Apply dispatch result (publish output events + delegate intents)
+                if self._result_applier is not None and result is not None:
+                    await self._result_applier.apply(result, correlation_id)
 
                 # Success - commit offset if policy requires and clear retry count
                 if self._should_commit_after_handler():
@@ -876,10 +948,20 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         # Validate and construct envelope
         envelope = ModelEventEnvelope[object].model_validate(data)
 
-        # Propagate event_type from topic if not already set in the envelope.
-        # This ensures all envelopes flowing through the wiring have event_type
-        # populated, even if the producer did not explicitly set it.
-        if envelope.event_type is None:
+        # FRAGILE: event_type is extracted from the raw dict because
+        # ModelEventEnvelope does not expose it as a model field.
+        # model_validate() strips unknown keys, so we recover it here.
+        # If ModelEventEnvelope ever adds event_type as a first-class field,
+        # this raw-dict lookup must be replaced with direct attribute access
+        # to avoid silently overriding the model's validated value.
+        assert not hasattr(ModelEventEnvelope, "event_type"), (
+            "ModelEventEnvelope now has an event_type field. "
+            "Remove the raw-dict lookup below and use envelope.event_type instead."
+        )
+        explicit_event_type = data.get("event_type")
+        if explicit_event_type:
+            envelope = envelope.model_copy(update={"event_type": explicit_event_type})
+        else:
             derived_event_type = self._derive_event_type_from_topic(topic)
             if derived_event_type is not None:
                 envelope = envelope.model_copy(
@@ -986,6 +1068,14 @@ def load_event_bus_subcontract(
             _logger.warning(
                 "Empty contract file: %s",
                 contract_path,
+            )
+            return None
+
+        if not isinstance(contract_data, dict):
+            _logger.warning(
+                "Contract YAML root is not a dict in %s: got %s",
+                contract_path,
+                type(contract_data).__name__,
             )
             return None
 

@@ -336,24 +336,30 @@ async def wire_registration_dispatchers(
         dispatchers_registered.append(dispatcher_acked.dispatcher_id)
 
         # 4. Register routes for topic-based routing
+        # Route patterns use ONEX 5-segment format:
+        #   onex.<kind>.<producer>.<event-name>.v<version>
+        # Wildcards: * matches any single segment
+
         # 4a. Route for introspection events
+        # message_type uses event_type string derived from ONEX topic:
+        #   onex.evt.platform.node-introspection.v1 → "platform.node-introspection"
         route_introspection = ModelDispatchRoute(
             route_id=ROUTE_ID_NODE_INTROSPECTION,
-            topic_pattern="*.node.introspection.events.*",
+            topic_pattern="*.evt.*.node-introspection.*",
             message_category=EnumMessageCategory.EVENT,
             dispatcher_id=dispatcher_introspected.dispatcher_id,
-            message_type="ModelNodeIntrospectionEvent",
+            message_type="platform.node-introspection",
         )
         engine.register_route(route_introspection)
         routes_registered.append(route_introspection.route_id)
 
-        # 4b. Route for runtime tick events
+        # 4b. Route for runtime tick intents
         route_runtime_tick = ModelDispatchRoute(
             route_id=ROUTE_ID_RUNTIME_TICK,
-            topic_pattern="*.runtime.tick.events.*",
-            message_category=EnumMessageCategory.EVENT,
+            topic_pattern="*.intent.*.runtime-tick.*",
+            message_category=EnumMessageCategory.INTENT,
             dispatcher_id=dispatcher_runtime_tick.dispatcher_id,
-            message_type="ModelRuntimeTick",
+            message_type="platform.runtime-tick",
         )
         engine.register_route(route_runtime_tick)
         routes_registered.append(route_runtime_tick.route_id)
@@ -361,10 +367,10 @@ async def wire_registration_dispatchers(
         # 4c. Route for registration ack commands
         route_acked = ModelDispatchRoute(
             route_id=ROUTE_ID_NODE_REGISTRATION_ACKED,
-            topic_pattern="*.node.registration.commands.*",
+            topic_pattern="*.cmd.*.node-registration-acked.*",
             message_category=EnumMessageCategory.COMMAND,
             dispatcher_id=dispatcher_acked.dispatcher_id,
-            message_type="ModelNodeRegistrationAcked",
+            message_type="platform.node-registration-acked",
         )
         engine.register_route(route_acked)
         routes_registered.append(route_acked.route_id)
@@ -383,10 +389,10 @@ async def wire_registration_dispatchers(
 
             route_heartbeat = ModelDispatchRoute(
                 route_id=ROUTE_ID_NODE_HEARTBEAT,
-                topic_pattern="*.node.heartbeat.events.*",
+                topic_pattern="*.evt.*.node-heartbeat.*",
                 message_category=EnumMessageCategory.EVENT,
                 dispatcher_id=dispatcher_heartbeat.dispatcher_id,
-                message_type="ModelNodeHeartbeatEvent",
+                message_type="platform.node-heartbeat",
             )
             engine.register_route(route_heartbeat)
             routes_registered.append(route_heartbeat.route_id)
@@ -532,9 +538,7 @@ async def wire_registration_handlers(
 
         handler_introspected = HandlerNodeIntrospected(
             projection_reader,
-            projector=projector,
-            consul_handler=consul_handler,
-            snapshot_publisher=snapshot_publisher,
+            consul_enabled=consul_handler is not None,
         )
         await container.service_registry.register_instance(
             interface=HandlerNodeIntrospected,
@@ -543,9 +547,6 @@ async def wire_registration_handlers(
             metadata={
                 "description": "Handler for NodeIntrospectionEvent",
                 "version": str(semver_default),
-                "has_projector": projector is not None,
-                "has_consul_handler": consul_handler is not None,
-                "has_snapshot_publisher": snapshot_publisher is not None,
             },
         )
         services_registered.append("HandlerNodeIntrospected")

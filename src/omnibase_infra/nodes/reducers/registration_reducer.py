@@ -849,8 +849,7 @@ class RegistrationReducer:
             correlation_id: Correlation ID for tracing.
 
         Returns:
-            ModelIntent with intent_type="extension" (dual-layer routing).
-            The routing key "consul.register" is in payload.intent_type.
+            ModelIntent with intent_type matching payload.intent_type for routing.
         """
         service_id = f"onex-{event.node_type.value}-{event.node_id}"
         service_name = f"onex-{event.node_type.value}"
@@ -881,7 +880,7 @@ class RegistrationReducer:
 
         # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
-            intent_type="extension",
+            intent_type=consul_payload.intent_type,
             target=f"consul://service/{service_name}",
             payload=consul_payload,
         )
@@ -901,19 +900,31 @@ class RegistrationReducer:
             correlation_id: Correlation ID for tracing.
 
         Returns:
-            ModelIntent with intent_type="extension" (dual-layer routing).
-            The routing key "postgres.upsert_registration" is in payload.intent_type.
+            ModelIntent with intent_type matching payload.intent_type for routing.
         """
         now = datetime.now(UTC)
 
-        # Build the registration record using strongly-typed models
-        # event.declared_capabilities and event.metadata are already typed as
-        # ModelNodeCapabilities and ModelNodeMetadata respectively
+        # Build the registration record using strongly-typed models.
+        # Capabilities serialization contract: capabilities are stored as JSONB in
+        # PostgreSQL. Both this reducer path and the handler path
+        # (HandlerNodeIntrospected) must produce the same wire format.
+        #
+        # Here, capabilities is stored as a ModelNodeCapabilities model inside
+        # ModelNodeRegistrationRecord. When IntentEffectPostgresUpsert.execute()
+        # calls record.model_dump() on the payload, Pydantic recursively serializes
+        # the nested ModelNodeCapabilities via model_dump(mode="json"), producing a
+        # JSON-safe dict identical to the handler's explicit
+        # capabilities.model_dump(mode="json") call.
+        capabilities = event.declared_capabilities
+        # Serialize to JSON-safe dict for JSONB column consistency.
+        # This matches HandlerNodeIntrospected's explicit model_dump(mode="json").
+        capabilities_data = capabilities.model_dump(mode="json") if capabilities else {}
+
         record = ModelNodeRegistrationRecord(
             node_id=event.node_id,
             node_type=event.node_type,
             node_version=event.node_version,
-            capabilities=event.declared_capabilities,
+            capabilities=capabilities_data,
             endpoints=dict(event.endpoints) if event.endpoints else {},
             metadata=event.metadata,
             health_endpoint=(
@@ -931,7 +942,7 @@ class RegistrationReducer:
 
         # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
-            intent_type="extension",
+            intent_type=postgres_payload.intent_type,
             target=f"postgres://node_registrations/{event.node_id}",
             payload=postgres_payload,
         )

@@ -95,7 +95,10 @@ class TestDispatcherNodeHeartbeat:
         """Dispatcher accepts ModelNodeHeartbeatEvent."""
         handler = MagicMock()
         dispatcher = DispatcherNodeHeartbeat(handler)
-        assert dispatcher.message_types == {"ModelNodeHeartbeatEvent"}
+        assert dispatcher.message_types == {
+            "ModelNodeHeartbeatEvent",
+            "platform.node-heartbeat",
+        }
 
     def test_node_kind_is_orchestrator(self) -> None:
         """Dispatcher belongs to ORCHESTRATOR node kind."""

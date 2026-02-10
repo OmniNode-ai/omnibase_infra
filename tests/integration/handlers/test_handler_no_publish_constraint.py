@@ -84,6 +84,8 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_i
 )
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
+pytestmark = pytest.mark.integration
+
 # ============================================================================
 # Module Constants for No-Publish Constraint Validation
 # ============================================================================
@@ -522,33 +524,26 @@ class TestHandlerNodeIntrospectedBusIsolation:
 
         Uses type-based detection via ProtocolEventBusLike (runtime_checkable)
         to verify no attribute implements the event bus protocol. This correctly
-        allows domain dependencies like _snapshot_publisher (which implements
-        ProtocolSnapshotPublisher, not ProtocolEventBusLike) while still
-        catching any actual bus dependency.
+        distinguishes domain dependencies from bus infrastructure.
+
+        Note: OMN-2050 simplified the handler to accept only projection_reader
+        and ack_timeout_seconds. Intent-based architecture moved Consul and
+        snapshot publishing to the effect layer via ModelIntent objects.
         """
         mock_reader = MagicMock()
-        mock_projector = MagicMock()
-        mock_consul = MagicMock()
-        mock_snapshot_publisher = MagicMock()
 
         handler = HandlerNodeIntrospected(
             projection_reader=mock_reader,
-            projector=mock_projector,
-            consul_handler=mock_consul,
             ack_timeout_seconds=60.0,
-            snapshot_publisher=mock_snapshot_publisher,
         )
 
         # Verify stored attributes are domain-specific
         assert handler._projection_reader is mock_reader
-        assert handler._projector is mock_projector
-        assert handler._consul_handler is mock_consul
         assert handler._ack_timeout_seconds == 60.0
-        assert handler._snapshot_publisher is mock_snapshot_publisher
 
         # Verify no attribute implements the event bus protocol.
         # Type-based detection is precise: it catches EventBusKafka,
-        # EventBusInmemory, etc. while allowing SnapshotPublisherRegistration.
+        # EventBusInmemory, etc. while allowing domain dependencies.
         for attr in dir(handler):
             if attr.startswith("__"):
                 continue
@@ -570,22 +565,20 @@ class TestHandlerNodeIntrospectedBusIsolation:
 
         Positive validation: handler DOES store the domain dependencies it
         was initialized with, proving dependency injection works correctly.
+
+        Note: OMN-2050 simplified the handler to accept only projection_reader
+        and ack_timeout_seconds. Consul registration and snapshot publishing
+        are now handled by the effect layer via intent-based architecture.
         """
         mock_reader = MagicMock()
-        mock_projector = MagicMock()
-        mock_consul = MagicMock()
 
         handler = HandlerNodeIntrospected(
             projection_reader=mock_reader,
-            projector=mock_projector,
-            consul_handler=mock_consul,
             ack_timeout_seconds=30.0,
         )
 
         # Verify all expected domain attributes exist
         assert hasattr(handler, "_projection_reader"), "Must store projection_reader"
-        assert hasattr(handler, "_projector"), "Must store projector"
-        assert hasattr(handler, "_consul_handler"), "Must store consul_handler"
         assert hasattr(handler, "_ack_timeout_seconds"), "Must store ack_timeout"
 
     def test_handler_has_required_domain_methods(
@@ -1491,6 +1484,7 @@ class TestOrchestratorBusAccessVerification:
 # ============================================================================
 
 
+@pytest.mark.integration
 class TestBusDetectionRegression:
     """Regression tests for type-based bus infrastructure detection.
 
@@ -1544,18 +1538,19 @@ class TestBusDetectionRegression:
         assert not _is_bus_infrastructure(42)
         assert not _is_bus_infrastructure(60.0)
 
-    def test_handler_with_snapshot_publisher_passes_constraint(self) -> None:
-        """HandlerNodeIntrospected with _snapshot_publisher passes the no-bus check.
+    def test_handler_with_all_dependencies_passes_constraint(self) -> None:
+        """HandlerNodeIntrospected with all dependencies passes the no-bus check.
 
-        End-to-end regression: instantiate handler with all dependencies
-        including snapshot_publisher, then verify no attribute is flagged.
+        End-to-end regression: instantiate handler with all accepted
+        dependencies, then verify no attribute is flagged as bus infrastructure.
+
+        Note: OMN-2050 simplified the handler signature. The old kwargs
+        (projector, consul_handler, snapshot_publisher) were removed because
+        the intent-based architecture delegates those concerns to the effect layer.
         """
         handler = HandlerNodeIntrospected(
             projection_reader=MagicMock(),
-            projector=MagicMock(),
-            consul_handler=MagicMock(),
             ack_timeout_seconds=60.0,
-            snapshot_publisher=MagicMock(),
         )
 
         for attr in dir(handler):

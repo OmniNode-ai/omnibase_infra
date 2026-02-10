@@ -33,6 +33,9 @@ from omnibase_infra.runtime.protocols.protocol_intent_executor import (
     PayloadT_contra,
     ProtocolIntentExecutor,
 )
+from omnibase_infra.runtime.protocols.protocol_intent_payload import (
+    ProtocolIntentPayload,
+)
 from omnibase_infra.runtime.protocols.protocol_runtime_scheduler import (
     ProtocolRuntimeScheduler,
 )
@@ -48,6 +51,7 @@ if TYPE_CHECKING:
 __all__: list[str] = [
     "PayloadT_contra",
     "ProtocolIntentExecutor",
+    "ProtocolIntentPayload",
     "ProtocolRuntimeScheduler",
     "ProtocolTransitionNotificationPublisher",
 ]

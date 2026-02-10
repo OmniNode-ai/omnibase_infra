@@ -998,12 +998,7 @@ class TestConsulIntentBuilding:
         output = reducer.reduce(initial_state, event)
 
         consul_intent = next(
-            (
-                i
-                for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "consul.register"
-            ),
+            (i for i in output.intents if i.intent_type == "consul.register"),
             None,
         )
         assert consul_intent is not None
@@ -1031,12 +1026,7 @@ class TestConsulIntentBuilding:
         output = reducer.reduce(initial_state, event)
 
         consul_intent = next(
-            (
-                i
-                for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "consul.register"
-            ),
+            (i for i in output.intents if i.intent_type == "consul.register"),
             None,
         )
         assert consul_intent is not None
@@ -1056,12 +1046,7 @@ class TestConsulIntentBuilding:
         output = reducer.reduce(initial_state, valid_event)
 
         consul_intent = next(
-            (
-                i
-                for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "consul.register"
-            ),
+            (i for i in output.intents if i.intent_type == "consul.register"),
             None,
         )
         assert consul_intent is not None
@@ -1083,12 +1068,7 @@ class TestConsulIntentBuilding:
         output = reducer.reduce(initial_state, event_without_health_endpoint)
 
         consul_intent = next(
-            (
-                i
-                for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "consul.register"
-            ),
+            (i for i in output.intents if i.intent_type == "consul.register"),
             None,
         )
         assert consul_intent is not None
@@ -1108,12 +1088,7 @@ class TestConsulIntentBuilding:
         output = reducer.reduce(initial_state, event)
 
         consul_intent = next(
-            (
-                i
-                for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "consul.register"
-            ),
+            (i for i in output.intents if i.intent_type == "consul.register"),
             None,
         )
         assert consul_intent is not None
@@ -1132,12 +1107,7 @@ class TestConsulIntentBuilding:
         output = reducer.reduce(initial_state, event)
 
         consul_intent = next(
-            (
-                i
-                for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "consul.register"
-            ),
+            (i for i in output.intents if i.intent_type == "consul.register"),
             None,
         )
         assert consul_intent is not None
@@ -1175,8 +1145,7 @@ class TestPostgresIntentBuilding:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )
@@ -1211,8 +1180,7 @@ class TestPostgresIntentBuilding:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )
@@ -1234,8 +1202,7 @@ class TestPostgresIntentBuilding:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )
@@ -1257,8 +1224,7 @@ class TestPostgresIntentBuilding:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )
@@ -1284,8 +1250,7 @@ class TestPostgresIntentBuilding:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )
@@ -1310,8 +1275,7 @@ class TestPostgresIntentBuilding:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )
@@ -1347,8 +1311,7 @@ class TestPostgresIntentBuilding:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )
@@ -1669,8 +1632,7 @@ class TestEdgeCases:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )
@@ -2675,7 +2637,7 @@ class TestCircuitBreakerNonApplicability:
 
         for intent in output.intents:
             # Intents are declarative descriptions using extension payload
-            assert intent.intent_type == "extension"
+            assert intent.intent_type
             assert intent.payload.intent_type in (
                 "consul.register",
                 "postgres.upsert_registration",
@@ -2854,10 +2816,7 @@ class TestDeterminismProperty:
             assert intent1.target == intent2.target
 
             # For postgres intents, exclude timestamp fields from comparison
-            if (
-                intent1.intent_type == "extension"
-                and intent1.payload.intent_type == "postgres.upsert_registration"
-            ):
+            if intent1.intent_type == "postgres.upsert_registration":
                 data1 = intent1.payload.model_dump(mode="json")
                 data2 = intent2.payload.model_dump(mode="json")
                 record1 = dict(data1.get("record", {}))
@@ -3014,10 +2973,7 @@ class TestDeterminismProperty:
             assert intent1.target == intent2.target
 
             # For postgres intents, exclude timestamp fields from comparison
-            if (
-                intent1.intent_type == "extension"
-                and intent1.payload.intent_type == "postgres.upsert_registration"
-            ):
+            if intent1.intent_type == "postgres.upsert_registration":
                 data1 = intent1.payload.model_dump(mode="json")
                 data2 = intent2.payload.model_dump(mode="json")
                 record1 = dict(data1.get("record", {}))
@@ -3082,10 +3038,7 @@ class TestDeterminismProperty:
                 assert intent1.target == intent2.target
 
                 # For postgres intents, exclude timestamp fields from comparison
-                if (
-                    intent1.intent_type == "extension"
-                    and intent1.payload.intent_type == "postgres.upsert_registration"
-                ):
+                if intent1.intent_type == "postgres.upsert_registration":
                     data1 = intent1.payload.model_dump(mode="json")
                     data2 = intent2.payload.model_dump(mode="json")
                     record1 = dict(data1.get("record", {}))
@@ -3241,12 +3194,7 @@ class TestEdgeCasesComprehensive:
 
         # Verify intents are still built correctly with minimal data
         consul_intent = next(
-            (
-                i
-                for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "consul.register"
-            ),
+            (i for i in output.intents if i.intent_type == "consul.register"),
             None,
         )
         assert consul_intent is not None
@@ -3256,8 +3204,7 @@ class TestEdgeCasesComprehensive:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )
@@ -3306,8 +3253,7 @@ class TestEdgeCasesComprehensive:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )
@@ -3350,12 +3296,7 @@ class TestEdgeCasesComprehensive:
 
         # Verify long version is preserved in tags
         consul_intent = next(
-            (
-                i
-                for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "consul.register"
-            ),
+            (i for i in output.intents if i.intent_type == "consul.register"),
             None,
         )
         assert consul_intent is not None
@@ -3505,12 +3446,7 @@ class TestEdgeCasesComprehensive:
 
         # Verify nil UUID appears in intents
         consul_intent = next(
-            (
-                i
-                for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "consul.register"
-            ),
+            (i for i in output.intents if i.intent_type == "consul.register"),
             None,
         )
         assert consul_intent is not None
@@ -3547,8 +3483,7 @@ class TestEdgeCasesComprehensive:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )
@@ -4026,8 +3961,8 @@ class TestCommandFoldingPrevention:
             # Extension format: intent_type="extension", intent_type="consul.register"
             # The intent_type uses namespace.action pattern (e.g., "consul.register")
             # Imperative would be: "RegisterInConsul" (commands action)
-            assert intent.intent_type == "extension", (
-                f"Intent type should be 'extension' for extension-based intents, "
+            assert intent.intent_type, (
+                f"Intent type should be set for extension-based intents, "
                 f"found '{intent.intent_type}'"
             )
             assert "." in intent.payload.intent_type, (
@@ -4120,9 +4055,7 @@ class TestCommandFoldingPrevention:
         # (it doesn't "do" anything, it describes what should be done)
         for intent in output.intents:
             # Intent types should be extension with proper intent_type
-            assert intent.intent_type == "extension", (
-                f"Unexpected intent type: {intent.intent_type}"
-            )
+            assert intent.intent_type, f"Unexpected intent type: {intent.intent_type}"
             assert intent.payload.intent_type in (
                 "consul.register",
                 "postgres.upsert_registration",
@@ -4369,10 +4302,7 @@ class TestEventReplayDeterminism:
                 }
 
                 # For postgres intents, exclude timestamp fields from data
-                if (
-                    intent.intent_type == "extension"
-                    and intent.payload.intent_type == "postgres.upsert_registration"
-                ):
+                if intent.intent_type == "postgres.upsert_registration":
                     data_copy = intent.payload.model_dump(mode="json")
                     if "record" in data_copy:
                         record_copy = dict(data_copy["record"])
@@ -5300,12 +5230,7 @@ class TestBoundaryConditions:
 
         # Verify max UUID appears correctly in intents
         consul_intent = next(
-            (
-                i
-                for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "consul.register"
-            ),
+            (i for i in output.intents if i.intent_type == "consul.register"),
             None,
         )
         assert consul_intent is not None
@@ -5315,8 +5240,7 @@ class TestBoundaryConditions:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )
@@ -5356,12 +5280,7 @@ class TestBoundaryConditions:
 
         # Verify min UUID appears correctly in intents
         consul_intent = next(
-            (
-                i
-                for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "consul.register"
-            ),
+            (i for i in output.intents if i.intent_type == "consul.register"),
             None,
         )
         assert consul_intent is not None
@@ -5415,12 +5334,7 @@ class TestBoundaryConditions:
 
         # Verify minimal version is preserved in intents
         consul_intent = next(
-            (
-                i
-                for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "consul.register"
-            ),
+            (i for i in output.intents if i.intent_type == "consul.register"),
             None,
         )
         assert consul_intent is not None
@@ -5472,12 +5386,7 @@ class TestBoundaryConditions:
 
         # Verify long URLs are preserved without truncation
         consul_intent = next(
-            (
-                i
-                for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "consul.register"
-            ),
+            (i for i in output.intents if i.intent_type == "consul.register"),
             None,
         )
         assert consul_intent is not None
@@ -5489,8 +5398,7 @@ class TestBoundaryConditions:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )
@@ -5536,8 +5444,7 @@ class TestBoundaryConditions:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )
@@ -5664,8 +5571,7 @@ class TestBoundaryConditions:
             (
                 i
                 for i in output.intents
-                if i.intent_type == "extension"
-                and i.payload.intent_type == "postgres.upsert_registration"
+                if i.intent_type == "postgres.upsert_registration"
             ),
             None,
         )

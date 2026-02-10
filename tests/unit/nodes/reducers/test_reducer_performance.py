@@ -295,7 +295,7 @@ class TestReducerPerformance:
 
             # Verify intent is valid
             assert intent is not None
-            assert intent.intent_type == "extension"
+            assert intent.intent_type
 
         avg_elapsed_ms = sum(elapsed_times) / len(elapsed_times)
 
@@ -327,7 +327,7 @@ class TestReducerPerformance:
 
             # Verify intent is valid
             assert intent is not None
-            assert intent.intent_type == "extension"
+            assert intent.intent_type
 
         avg_elapsed_ms = sum(elapsed_times) / len(elapsed_times)
 

@@ -141,8 +141,8 @@ class HandlerLedgerProjection:
             message: The incoming Kafka event message to transform.
 
         Returns:
-            ModelIntent with intent_type="extension" containing the ledger
-            append payload for the Effect layer.
+            ModelIntent with intent_type sourced from the payload's
+            intent_type field (e.g., "ledger.append") for Effect layer routing.
 
         Raises:
             RuntimeHostError: If message.value is None (event body is
@@ -156,7 +156,7 @@ class HandlerLedgerProjection:
         """
         payload = self._extract_ledger_metadata(message)
         return ModelIntent(
-            intent_type="extension",
+            intent_type=payload.intent_type,
             target=f"postgres://event_ledger/{payload.topic}/{payload.partition}/{payload.kafka_offset}",
             payload=payload,
         )

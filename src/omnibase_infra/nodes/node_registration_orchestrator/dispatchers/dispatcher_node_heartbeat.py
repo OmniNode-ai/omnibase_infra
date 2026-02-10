@@ -61,6 +61,9 @@ from omnibase_infra.errors import (
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
+from omnibase_infra.nodes.node_registration_orchestrator.dispatchers._util_envelope_extract import (
+    extract_envelope_fields,
+)
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
@@ -149,9 +152,10 @@ class DispatcherNodeHeartbeat(MixinAsyncCircuitBreaker):
         """Specific message types this dispatcher accepts.
 
         Returns:
-            set[str]: Set containing ModelNodeHeartbeatEvent type name.
+            set[str]: Set containing both Python class name and ONEX event_type
+                routing key for backwards compatibility and routing flexibility.
         """
-        return {"ModelNodeHeartbeatEvent"}
+        return {"ModelNodeHeartbeatEvent", "platform.node-heartbeat"}
 
     @property
     def node_kind(self) -> EnumNodeKind:
@@ -164,12 +168,16 @@ class DispatcherNodeHeartbeat(MixinAsyncCircuitBreaker):
 
     async def handle(
         self,
-        envelope: ModelEventEnvelope[object],
+        envelope: ModelEventEnvelope[object] | dict[str, object],
     ) -> ModelDispatchResult:
         """Handle heartbeat event and return dispatch result.
 
         Deserializes the envelope payload to ModelNodeHeartbeatEvent,
         delegates to the wrapped handler, and returns a structured result.
+
+        The dispatch engine materializes envelopes to dicts before calling
+        dispatchers (serialization boundary). This method accepts both
+        ModelEventEnvelope objects and materialized dicts.
 
         Circuit Breaker Integration:
             - Checks circuit state before processing (raises if OPEN)
@@ -178,7 +186,8 @@ class DispatcherNodeHeartbeat(MixinAsyncCircuitBreaker):
             - InfraUnavailableError propagates to caller for DLQ handling
 
         Args:
-            envelope: Event envelope containing heartbeat payload.
+            envelope: Event envelope or materialized dict from dispatch engine.
+                Dict format: {"payload": {...}, "__bindings": {...}, "__debug_trace": {...}}
 
         Returns:
             ModelDispatchResult: Success with output events or error details.
@@ -187,18 +196,8 @@ class DispatcherNodeHeartbeat(MixinAsyncCircuitBreaker):
             InfraUnavailableError: If circuit breaker is OPEN.
         """
         started_at = datetime.now(UTC)
-        # Prefer envelope correlation_id, then payload correlation_id, then generate
-        correlation_id = envelope.correlation_id
-        if correlation_id is None:
-            raw = envelope.payload
-            if isinstance(raw, dict):
-                cid = raw.get("correlation_id")
-            else:
-                cid = getattr(raw, "correlation_id", None)
-            if cid is not None:
-                correlation_id = cid
-        if correlation_id is None:
-            correlation_id = uuid4()
+
+        correlation_id, raw_payload = extract_envelope_fields(envelope)
 
         # Check circuit breaker before processing (coroutine-safe)
         # If circuit is OPEN, raises InfraUnavailableError immediately
@@ -207,7 +206,7 @@ class DispatcherNodeHeartbeat(MixinAsyncCircuitBreaker):
 
         try:
             # Validate payload type
-            payload = envelope.payload
+            payload = raw_payload
             if not isinstance(payload, ModelNodeHeartbeatEvent):
                 # Try to construct from dict if payload is dict-like
                 if isinstance(payload, dict):
@@ -246,6 +245,7 @@ class DispatcherNodeHeartbeat(MixinAsyncCircuitBreaker):
             # Delegate to wrapped handler
             handler_output = await self._handler.handle(handler_envelope)
             output_events = list(handler_output.events)
+            output_intents = handler_output.intents
 
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
@@ -274,6 +274,7 @@ class DispatcherNodeHeartbeat(MixinAsyncCircuitBreaker):
                 duration_ms=duration_ms,
                 output_count=len(output_events),
                 output_events=output_events,
+                output_intents=output_intents,
                 correlation_id=correlation_id,
             )
 

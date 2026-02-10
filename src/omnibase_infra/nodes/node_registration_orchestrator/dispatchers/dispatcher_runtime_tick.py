@@ -59,7 +59,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -71,13 +71,12 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
     EnumMessageCategory,
 )
-from omnibase_infra.errors import (
-    EnvelopeValidationError,
-    InfraUnavailableError,
-    ModelInfraErrorContext,
-)
+from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.nodes.node_registration_orchestrator.dispatchers._util_envelope_extract import (
+    extract_envelope_fields,
+)
 from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 from omnibase_infra.utils import sanitize_error_message
 
@@ -165,18 +164,20 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
         """Message category this dispatcher processes.
 
         Returns:
-            EnumMessageCategory: EVENT category (runtime tick events).
+            EnumMessageCategory: INTENT category (runtime tick intents routed
+                via ``*.intent.*.runtime-tick.*`` topic pattern).
         """
-        return EnumMessageCategory.EVENT
+        return EnumMessageCategory.INTENT
 
     @property
     def message_types(self) -> set[str]:
         """Specific message types this dispatcher accepts.
 
         Returns:
-            set[str]: Set containing ModelRuntimeTick type name.
+            set[str]: Set containing both Python class name and ONEX event_type
+                routing key for backwards compatibility and routing flexibility.
         """
-        return {"ModelRuntimeTick"}
+        return {"ModelRuntimeTick", "platform.runtime-tick"}
 
     @property
     def node_kind(self) -> EnumNodeKind:
@@ -189,12 +190,16 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
 
     async def handle(
         self,
-        envelope: ModelEventEnvelope[object],
+        envelope: ModelEventEnvelope[object] | dict[str, object],
     ) -> ModelDispatchResult:
         """Handle runtime tick event and return dispatch result.
 
         Deserializes the envelope payload to ModelRuntimeTick,
         delegates to the wrapped handler, and returns a structured result.
+
+        The dispatch engine materializes envelopes to dicts before calling
+        dispatchers (serialization boundary). This method accepts both
+        ModelEventEnvelope objects and materialized dicts.
 
         Circuit Breaker Integration:
             - Checks circuit state before processing (raises if OPEN)
@@ -203,7 +208,8 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
             - InfraUnavailableError propagates to caller for DLQ handling
 
         Args:
-            envelope: Event envelope containing runtime tick payload.
+            envelope: Event envelope or materialized dict from dispatch engine.
+                Dict format: {"payload": {...}, "__bindings": {...}, "__debug_trace": {...}}
 
         Returns:
             ModelDispatchResult: Success with output events or error details.
@@ -212,7 +218,8 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
             InfraUnavailableError: If circuit breaker is OPEN.
         """
         started_at = datetime.now(UTC)
-        correlation_id = envelope.correlation_id or uuid4()
+
+        correlation_id, raw_payload = extract_envelope_fields(envelope)
 
         # Check circuit breaker before processing (coroutine-safe)
         # If circuit is OPEN, raises InfraUnavailableError immediately
@@ -221,7 +228,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
 
         try:
             # Validate payload type
-            payload = envelope.payload
+            payload = raw_payload
             if not isinstance(payload, ModelRuntimeTick):
                 # Try to construct from dict if payload is dict-like
                 if isinstance(payload, dict):
@@ -243,19 +250,11 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
                         output_events=[],
                     )
 
-            # Explicit type guard (not assert) for production safety
-            # Type narrowing after isinstance/model_validate above
-            if not isinstance(payload, ModelRuntimeTick):
-                context = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.KAFKA,
-                    operation="handle_runtime_tick",
-                    correlation_id=correlation_id,
-                )
-                raise EnvelopeValidationError(
-                    f"Expected ModelRuntimeTick after validation, "
-                    f"got {type(payload).__name__}",
-                    context=context,
-                )
+            # Type narrowing: the branch above guarantees payload is
+            # ModelRuntimeTick (isinstance returned True, or model_validate
+            # succeeded, or we returned early). Use cast() instead of a redundant
+            # runtime isinstance check to satisfy mypy.
+            payload = cast("ModelRuntimeTick", payload)
 
             # Get current time for handler
             now = datetime.now(UTC)
@@ -272,6 +271,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
             # Delegate to wrapped handler
             handler_output = await self._handler.handle(handler_envelope)
             output_events = list(handler_output.events)
+            output_intents = handler_output.intents
 
             completed_at = datetime.now(UTC)
             duration_ms = (completed_at - started_at).total_seconds() * 1000
@@ -300,6 +300,7 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
                 duration_ms=duration_ms,
                 output_count=len(output_events),
                 output_events=output_events,
+                output_intents=output_intents,
                 correlation_id=correlation_id,
             )
 

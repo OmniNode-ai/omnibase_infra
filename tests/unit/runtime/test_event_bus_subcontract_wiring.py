@@ -969,7 +969,7 @@ class TestEventTypeDerivation:
 
         envelope = wiring._deserialize_to_envelope(message, "custom.topic")
 
-        assert envelope.event_type is None
+        assert getattr(envelope, "event_type", None) is None
 
     @pytest.mark.asyncio
     async def test_dispatched_envelope_has_event_type_from_topic(

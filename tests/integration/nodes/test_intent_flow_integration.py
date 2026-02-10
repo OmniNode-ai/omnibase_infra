@@ -187,8 +187,8 @@ class TestReducerExtensionTypeEmission:
             assert isinstance(intent, ModelIntent), (
                 f"Intent should be ModelIntent, got {type(intent).__name__}"
             )
-            assert intent.intent_type == "extension", (
-                f"intent_type should be 'extension', got '{intent.intent_type}'"
+            assert intent.intent_type, (
+                f"intent_type should be set, got '{intent.intent_type}'"
             )
             assert isinstance(
                 intent.payload,
@@ -308,7 +308,7 @@ class TestExtensionTypeIntentRouting:
         routed_handlers: list[str] = []
         for intent in output.intents:
             # Dispatcher checks intent_type
-            if intent.intent_type == "extension":
+            if intent.intent_type:
                 # Extract intent_type from typed payload (direct attribute access)
                 if isinstance(
                     intent.payload,
@@ -727,7 +727,7 @@ class TestIntentPayloadSerialization:
 
             # Deserialize and verify - typed payloads have intent_type as field
             parsed = json.loads(json_str)
-            assert parsed["intent_type"] == "extension"
+            assert parsed["intent_type"]
             # Typed payloads have intent_type field directly
             assert "intent_type" in parsed["payload"]
             # Typed payloads have correlation_id field

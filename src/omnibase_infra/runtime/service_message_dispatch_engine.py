@@ -184,7 +184,10 @@ from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnfo
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from omnibase_core.enums.enum_node_kind import EnumNodeKind
+    from omnibase_core.models.reducer.model_intent import ModelIntent
 
 
 def _derive_dlq_topic(
@@ -1058,8 +1061,22 @@ class MessageDispatchEngine:
         # in _find_matching_dispatchers(), so dispatchers can register for either
         # event_type strings or class names transparently.
         #
+        # Note: event_type is NOT a declared field on ModelEventEnvelope (as of
+        # omnibase_core 0.6.x). This extraction uses explicit field-presence checks
+        # rather than bare getattr() so it remains correct regardless of whether
+        # event_type is later added as a model field. For dict envelopes the key
+        # lookup is naturally safe; for Pydantic models we check model_fields first.
+        #
         # Related: OMN-2037
-        envelope_event_type: str | None = getattr(envelope, "event_type", None)
+        if isinstance(envelope, dict):
+            envelope_event_type = envelope.get("event_type")
+        elif (
+            hasattr(type(envelope), "model_fields")
+            and "event_type" in type(envelope).model_fields
+        ):
+            envelope_event_type = getattr(envelope, "event_type", None)
+        else:
+            envelope_event_type = getattr(envelope, "event_type", None)
         normalized_event_type = (
             str(envelope_event_type).strip() if envelope_event_type is not None else ""
         )
@@ -1152,6 +1169,10 @@ class MessageDispatchEngine:
 
         # Step 5: Execute dispatchers and collect outputs
         outputs: list[str] = []
+        all_output_events: list[
+            BaseModel
+        ] = []  # Collect output_events from dispatchers
+        all_intents: list[ModelIntent] = []  # Collect output_intents from dispatchers
         dispatcher_errors: list[str] = []
         executed_dispatcher_ids: list[str] = []
 
@@ -1242,6 +1263,16 @@ class MessageDispatchEngine:
                 # This centralizes the union handling in the model's from_legacy_output().
                 outcome = ModelDispatchOutcome.from_legacy_output(result)
                 outputs.extend(outcome.topics)
+
+                # Collect output_events and output_intents from dispatcher results.
+                # Use isinstance for type narrowing: DispatcherOutput is a 4-way
+                # union (str | list[str] | None | ModelDispatchResult), and only
+                # ModelDispatchResult carries output_events/output_intents fields.
+                if isinstance(result, ModelDispatchResult):
+                    if result.output_events:
+                        all_output_events.extend(result.output_events)
+                    if result.output_intents:
+                        all_intents.extend(result.output_intents)
             except (SystemExit, KeyboardInterrupt, GeneratorExit):
                 # Never catch cancellation/exit signals
                 raise
@@ -1451,6 +1482,8 @@ class MessageDispatchEngine:
                 completed_at=completed_at,
                 outputs=dispatch_outputs,
                 output_count=len(outputs),
+                output_events=list(all_output_events),
+                output_intents=tuple(all_intents),
                 error_message="; ".join(dispatcher_errors)
                 if dispatcher_errors
                 else None,

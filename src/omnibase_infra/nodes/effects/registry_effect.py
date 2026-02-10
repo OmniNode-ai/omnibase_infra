@@ -25,15 +25,14 @@ Intent Format Compatibility (OMN-1258):
     Orchestrator layer.
 
     The RegistrationReducer emits intents with typed payloads:
-        - intent_type="extension"
-        - payload.intent_type="consul.register" or "postgres.upsert_registration"
+        - intent_type is set to the payload's specific routing key
+          (e.g., "consul.register" or "postgres.upsert_registration")
 
     The Orchestrator/Runtime layer is responsible for:
         1. Consuming ModelIntent objects from reducer output
-        2. Checking intent_type == "extension"
-        3. Extracting payload.intent_type to determine target backend
-        4. Building a ModelRegistryRequest from payload.data
-        5. Calling NodeRegistryEffect.register_node(request)
+        2. Routing on intent_type to determine target backend
+        3. Building a ModelRegistryRequest from payload data
+        4. Calling NodeRegistryEffect.register_node(request)
 
     This design keeps the Effect layer focused on I/O execution without coupling
     to the intent format. Infrastructure handlers (ConsulHandler, DbHandler) work

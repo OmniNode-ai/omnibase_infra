@@ -464,6 +464,7 @@ class RuntimeHostProcess:
         contract_paths: list[str] | None = None,
         introspection_service: ProtocolNodeIntrospection | None = None,
         introspection_config: ModelRuntimeIntrospectionConfig | None = None,
+        dispatch_engine: MessageDispatchEngine | None = None,
     ) -> None:
         """Initialize the runtime host process.
 
@@ -642,6 +643,20 @@ class RuntimeHostProcess:
                     - enabled: Whether to enable auto-introspection (default: True)
                     - jitter_max_ms: Max jitter before publishing (default: 5000)
                     - throttle_min_interval_s: Min time between introspections (default: 10)
+
+            dispatch_engine: Optional MessageDispatchEngine for category-based routing.
+                Type: MessageDispatchEngine | None
+
+                Purpose:
+                    When provided, the runtime skips the legacy _on_message subscription
+                    on the input topic. Contract-declared topics are instead routed
+                    through EventBusSubcontractWiring to the dispatch engine. This
+                    is the OMN-2050 single-consumer-path architecture.
+
+                Lifecycle:
+                    The dispatch engine must be frozen (freeze() called) before
+                    RuntimeHostProcess.start() is invoked. The kernel handles this
+                    by freezing after all plugins have registered their dispatchers.
         """
         # Store container reference for dependency resolution
         self._container: ModelONEXContainer | None = container
@@ -866,10 +881,11 @@ class RuntimeHostProcess:
         # None until wired during start() when dispatch_engine is available.
         self._event_bus_wiring: EventBusSubcontractWiring | None = None
 
-        # Message dispatch engine for routing received messages (OMN-1621)
-        # Used by event_bus_wiring to dispatch messages to handlers.
-        # None = not configured, wiring will be skipped
-        self._dispatch_engine: MessageDispatchEngine | None = None
+        # Message dispatch engine for routing received messages (OMN-2050)
+        # When set, contract-declared topics are routed through
+        # EventBusSubcontractWiring and the legacy _on_message path is skipped.
+        # None = not configured, legacy subscription used instead.
+        self._dispatch_engine: MessageDispatchEngine | None = dispatch_engine
 
         # Baseline subscriptions for platform-reserved topics (OMN-1654)
         # Stores unsubscribe callbacks for contract registration/deregistration topics.
@@ -1293,13 +1309,30 @@ class RuntimeHostProcess:
         # Non-fatal - system operates without gateway if initialization fails.
         await self._initialize_gateway_from_config()
 
-        # Step 5: Subscribe to input topic
-        self._subscription = await self._event_bus.subscribe(
-            topic=self._input_topic,
-            node_identity=self._node_identity,
-            on_message=self._on_message,
-            purpose=EnumConsumerGroupPurpose.CONSUME,
-        )
+        # Step 5: Subscribe to input topic (legacy direct path)
+        # When the dispatch engine is active, contract-declared topics are
+        # handled by EventBusSubcontractWiring (OMN-2050). The legacy
+        # _on_message path is only needed when no dispatch engine is wired.
+        if self._dispatch_engine is not None and not self._dispatch_engine.is_frozen:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="validate_dispatch_engine",
+            )
+            raise ProtocolConfigurationError(
+                "dispatch_engine must be frozen before starting subscriptions. "
+                "An unfrozen engine will raise INVALID_STATE on first dispatch "
+                "and silently drop messages. Call dispatch_engine.freeze() before "
+                "passing it to RuntimeHostProcess or before calling start().",
+                context=context,
+            )
+
+        if self._dispatch_engine is None:
+            self._subscription = await self._event_bus.subscribe(
+                topic=self._input_topic,
+                node_identity=self._node_identity,
+                on_message=self._on_message,
+                purpose=EnumConsumerGroupPurpose.CONSUME,
+            )
 
         self._is_running = True
 

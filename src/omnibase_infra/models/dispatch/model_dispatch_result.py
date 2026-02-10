@@ -91,6 +91,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_core.enums import EnumCoreErrorCode
+from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_infra.enums import EnumDispatchStatus, EnumMessageCategory
 from omnibase_infra.models.dispatch.model_dispatch_metadata import ModelDispatchMetadata
 from omnibase_infra.models.dispatch.model_dispatch_outputs import ModelDispatchOutputs
@@ -218,6 +219,13 @@ class ModelDispatchResult(BaseModel):
             "List of output events produced by the dispatcher that need to be "
             "published to output_topic. These are raw Pydantic models that will "
             "be wrapped in ModelEventEnvelope by the kernel before publishing."
+        ),
+    )
+    output_intents: tuple[ModelIntent, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Intents produced by the handler for effect layer execution. "
+            "These are routed by IntentExecutor after dispatch."
         ),
     )
 
