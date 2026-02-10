@@ -46,10 +46,13 @@ class ModelProjectionRecord(BaseModel):
         ...,
         description=(
             "Entity UUID. Required for upsert conflict resolution "
-            "on the registration_projections table. Pydantic coerces "
-            "string UUIDs from model_validate() automatically."
+            "on the registration_projections table."
         ),
     )
+    # Note: entity_id accepts both UUID and string inputs via model_validate().
+    # Pydantic coerces strings to UUID automatically. model_dump() returns
+    # a native UUID object, which IntentEffectPostgresUpsert._normalize_for_asyncpg()
+    # passes through directly to asyncpg.
     current_state: str = Field(
         ...,
         description=(

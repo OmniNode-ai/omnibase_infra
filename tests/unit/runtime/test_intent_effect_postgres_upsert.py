@@ -281,7 +281,12 @@ class TestColumnSetsMatchSchema:
         )
 
     def test_all_schema_uuid_columns_covered_or_documented(self) -> None:
-        """All UUID columns in schema should be in _UUID_COLUMNS or documented as not-yet-covered."""
+        """All UUID columns in schema should be in _UUID_COLUMNS.
+
+        If this test fails, a new UUID column was added to the SQL schema
+        but not added to IntentEffectPostgresUpsert._UUID_COLUMNS or the
+        'COLUMNS NOT YET COVERED' documentation block.
+        """
         schema_path = (
             Path(__file__).parent.parent.parent.parent
             / "src"
@@ -291,11 +296,12 @@ class TestColumnSetsMatchSchema:
         )
         sql = schema_path.read_text()
         schema_uuid_cols = self._extract_uuid_columns_from_sql(sql)
-
-        # Current coverage + documented exclusions = full set
-        # If this test fails, a new UUID column was added to the schema but
-        # not to _UUID_COLUMNS or the "not yet covered" documentation.
         covered = IntentEffectPostgresUpsert._UUID_COLUMNS
-        assert covered.issubset(schema_uuid_cols), (
-            f"_UUID_COLUMNS has entries not in schema: {covered - schema_uuid_cols}"
+
+        # All schema UUID columns must be in _UUID_COLUMNS.
+        uncovered = schema_uuid_cols - covered
+        assert not uncovered, (
+            f"Schema has UUID columns not in _UUID_COLUMNS: {uncovered}. "
+            f"Add these to IntentEffectPostgresUpsert._UUID_COLUMNS or "
+            f"document them in the 'COLUMNS NOT YET COVERED' block."
         )

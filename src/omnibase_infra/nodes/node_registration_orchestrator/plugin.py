@@ -863,12 +863,14 @@ class PluginRegistration:
                 reason="dispatch_engine not available",
             )
 
-        # Check for subscribe capability using isinstance (not duck-typing).
-        # Both InMemoryEventBus and KafkaEventBus implement subscribe.
-        from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
-        from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+        # Check for subscribe capability via runtime-checkable protocol.
+        # ProtocolEventBusSubscriber is @runtime_checkable, so isinstance works
+        # without coupling to concrete InMemoryEventBus / KafkaEventBus.
+        from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
+            ProtocolEventBusSubscriber,
+        )
 
-        if not isinstance(config.event_bus, (InMemoryEventBus, KafkaEventBus)):
+        if not isinstance(config.event_bus, ProtocolEventBusSubscriber):
             return ModelDomainPluginResult.skipped(
                 plugin_id=self.plugin_id,
                 reason="Event bus does not support subscribe",
