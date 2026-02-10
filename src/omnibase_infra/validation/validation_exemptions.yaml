@@ -1546,6 +1546,15 @@ pattern_exemptions:
       - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
       - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
     ticket: OMN-1104
+  - file_pattern: 'model_payload_consul_deregister\.py'
+    violation_pattern: "Field 'service_id' should use UUID"
+    reason: >
+      service_id is Consul's native string format for service identifiers. Consul does not use UUIDs for service identification - it uses human-readable string IDs. Mirrors model_payload_consul_register.py.
+
+    documentation:
+      - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
+      - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
+    ticket: OMN-2115
   - file_pattern: 'model_payload_consul_register\.py'
     violation_pattern: "Field 'service_name' might reference an entity"
     reason: >
@@ -1555,6 +1564,20 @@ pattern_exemptions:
       - docs/architecture/REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md
       - HashiCorp Consul Service Discovery API (https://developer.hashicorp.com/consul/api-docs/agent/service)
     ticket: OMN-1104
+  # ==========================================================================
+  # Snapshot Topic Naming Exemption (OMN-2115)
+  # ==========================================================================
+  # The registration-snapshots topic uses a hyphenated suffix that predates
+  # the snapshot naming convention. Renaming would require a data migration
+  # of existing Redpanda topics on all environments.
+  - file_pattern: 'platform_topic_suffixes\.py'
+    violation_pattern: "Topic name 'onex.snapshot.platform.registration-snapshots.v1' does not follow ONEX snapshot topic naming convention"
+    reason: >
+      Pre-existing topic name deployed across all environments. Renaming would require a coordinated data migration. The topic functions correctly as a compacted snapshot topic regardless of the suffix format.
+
+    documentation:
+      - src/omnibase_infra/topics/platform_topic_suffixes.py
+    ticket: OMN-2115
   # ==========================================================================
   # Architecture Validator Semantic ID Exemptions (OMN-1138)
   # ==========================================================================

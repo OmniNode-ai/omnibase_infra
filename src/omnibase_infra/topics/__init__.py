@@ -16,8 +16,12 @@ Exports:
     TopicResolutionError: Error raised when topic resolution fails
 """
 
+from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 from omnibase_infra.topics.platform_topic_suffixes import (
     ALL_PLATFORM_SUFFIXES,
+    ALL_PLATFORM_TOPIC_SPECS,
+    SUFFIX_CONTRACT_DEREGISTERED,
+    SUFFIX_CONTRACT_REGISTERED,
     SUFFIX_FSM_STATE_TRANSITIONS,
     SUFFIX_NODE_HEARTBEAT,
     SUFFIX_NODE_INTROSPECTION,
@@ -37,8 +41,13 @@ __all__: list[str] = [
     "SUFFIX_FSM_STATE_TRANSITIONS",
     "SUFFIX_RUNTIME_TICK",
     "SUFFIX_REGISTRATION_SNAPSHOTS",
-    # Aggregate tuple
+    "SUFFIX_CONTRACT_REGISTERED",
+    "SUFFIX_CONTRACT_DEREGISTERED",
+    # Aggregate collections
     "ALL_PLATFORM_SUFFIXES",
+    "ALL_PLATFORM_TOPIC_SPECS",
+    # Topic spec model
+    "ModelTopicSpec",
     # Topic resolution
     "TopicResolver",
     "TopicResolutionError",

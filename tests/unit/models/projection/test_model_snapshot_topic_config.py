@@ -142,7 +142,7 @@ class TestModelSnapshotTopicConfigTopicValidation:
         """Test that non-standard topics are accepted but logged."""
         config = ModelSnapshotTopicConfig(topic="my-custom-topic")
         assert config.topic == "my-custom-topic"
-        assert "does not follow ONEX snapshot topic naming" in caplog.text
+        assert "does not contain 'snapshot' keyword" in caplog.text
 
 
 class TestModelSnapshotTopicConfigKafkaConfig:

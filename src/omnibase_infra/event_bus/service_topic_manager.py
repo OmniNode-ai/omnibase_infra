@@ -21,13 +21,16 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from omnibase_infra.models.projection.model_snapshot_topic_config import (
-    ModelSnapshotTopicConfig,
-)
-from omnibase_infra.topics import ALL_PLATFORM_SUFFIXES, SUFFIX_REGISTRATION_SNAPSHOTS
+from omnibase_infra.topics import ALL_PLATFORM_SUFFIXES, ALL_PLATFORM_TOPIC_SPECS
 from omnibase_infra.utils import sanitize_error_message
+
+if TYPE_CHECKING:
+    from omnibase_infra.models.projection.model_snapshot_topic_config import (
+        ModelSnapshotTopicConfig,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -135,48 +138,39 @@ class TopicProvisioner:
             )
             await admin.start()
 
-            # Load snapshot topic config
-            snapshot_config = ModelSnapshotTopicConfig.default()
-
-            for suffix in ALL_PLATFORM_SUFFIXES:
+            for spec in ALL_PLATFORM_TOPIC_SPECS:
                 try:
-                    if suffix == SUFFIX_REGISTRATION_SNAPSHOTS:
-                        # Snapshot topic with compaction config
-                        new_topic = NewTopic(
-                            name=suffix,
-                            num_partitions=snapshot_config.partition_count,
-                            replication_factor=snapshot_config.replication_factor,
-                            topic_configs=snapshot_config.to_kafka_config(),
-                        )
-                    else:
-                        # Standard event topic with defaults
-                        new_topic = NewTopic(
-                            name=suffix,
-                            num_partitions=DEFAULT_EVENT_TOPIC_PARTITIONS,
-                            replication_factor=DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR,
-                        )
+                    new_topic = NewTopic(
+                        name=spec.suffix,
+                        num_partitions=spec.partitions,
+                        replication_factor=spec.replication_factor,
+                        topic_configs=dict(spec.kafka_config)
+                        if spec.kafka_config
+                        else {},
+                    )
 
                     await admin.create_topics([new_topic])
-                    created.append(suffix)
+                    created.append(spec.suffix)
                     logger.info(
-                        "Created topic: %s",
-                        suffix,
+                        "Created topic: %s (partitions=%d)",
+                        spec.suffix,
+                        spec.partitions,
                         extra={"correlation_id": str(correlation_id)},
                     )
 
                 except TopicAlreadyExistsError:
-                    existing.append(suffix)
+                    existing.append(spec.suffix)
                     logger.debug(
                         "Topic already exists: %s",
-                        suffix,
+                        spec.suffix,
                         extra={"correlation_id": str(correlation_id)},
                     )
 
                 except Exception as e:
-                    failed.append(suffix)
+                    failed.append(spec.suffix)
                     logger.warning(
                         "Failed to create topic %s: %s",
-                        suffix,
+                        spec.suffix,
                         type(e).__name__,
                         extra={
                             "correlation_id": str(correlation_id),
@@ -345,6 +339,30 @@ class TopicProvisioner:
                     await admin.close()
                 except Exception:
                     pass
+
+
+def _cli_main() -> None:
+    """CLI entrypoint for manual topic provisioning without runtime.
+
+    Usage:
+        poetry run python -m omnibase_infra.event_bus.service_topic_manager
+
+    Useful for provisioning topics when running just Redpanda for development
+    without the full runtime stack.
+    """
+    import asyncio
+    import json
+
+    async def _run() -> None:
+        provisioner = TopicProvisioner()
+        result = await provisioner.ensure_platform_topics_exist()
+        print(json.dumps(result, indent=2))
+
+    asyncio.run(_run())
+
+
+if __name__ == "__main__":
+    _cli_main()
 
 
 __all__ = ["TopicProvisioner"]
