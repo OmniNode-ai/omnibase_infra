@@ -1,8 +1,8 @@
 -- SPDX-License-Identifier: Apache-2.0
 -- SPDX-FileCopyrightText: Copyright 2026 OmniNode Team
 --
--- Rollback Migration: 024_rollback_agent_detection_failures_table
--- Rolls Back: 024_create_agent_detection_failures_table.sql
+-- Rollback Migration: rollback_024_agent_detection_failures_table
+-- Rolls Back: forward/024_create_agent_detection_failures_table.sql
 -- Created: 2026-01-31
 --
 -- WARNING: THIS ROLLBACK WILL PERMANENTLY DELETE ALL DATA IN THE agent_detection_failures TABLE.

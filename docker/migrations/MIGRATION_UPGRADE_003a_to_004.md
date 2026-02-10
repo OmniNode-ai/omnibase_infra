@@ -45,9 +45,9 @@ For **new databases** or databases where **no ONEX migrations have been applied 
 
 ```bash
 # Apply all migrations in sequence
-psql -h $HOST -d $DB -f 001_registration_projection.sql
-psql -h $HOST -d $DB -f 002_updated_at_audit_index.sql
-psql -h $HOST -d $DB -f 003_capability_fields.sql
+psql -h $HOST -d $DB -f forward/001_registration_projection.sql
+psql -h $HOST -d $DB -f forward/002_updated_at_audit_index.sql
+psql -h $HOST -d $DB -f forward/003_capability_fields.sql
 
 # Done - migration 003 creates columns AND indexes
 # Migration 004 is NOT needed for fresh deployments
@@ -108,7 +108,7 @@ psql -h $HOST -d $DB -c "DROP INDEX IF EXISTS idx_registration_protocols;"
 psql -h $HOST -d $DB -c "DROP INDEX IF EXISTS idx_registration_contract_type_state;"
 
 # Apply concurrent indexes (cannot run in transaction block)
-psql -h $HOST -d $DB -f 004_capability_fields_concurrent.sql
+psql -h $HOST -d $DB -f forward/004_capability_fields_concurrent.sql
 ```
 
 ### Scenario 4: Migration Tracking System Records "003a"
@@ -129,9 +129,9 @@ If your deployment tracking (manual logs, wiki, etc.) shows "003a" as applied:
 To verify you have the correct version of each migration, compare SHA-256 checksums:
 
 ```bash
-# Generate checksums for your migration files
+# Generate checksums for your forward migration files
 cd docker/migrations/
-sha256sum *.sql
+sha256sum forward/*.sql
 ```
 
 The index creation SQL in `003_capability_fields.sql` and `004_capability_fields_concurrent.sql` should produce identical indexes (just using different creation methods).
@@ -352,7 +352,7 @@ WHERE NOT indisvalid
 
 -- Drop invalid index and recreate
 DROP INDEX <invalid_index_name>;
--- Then re-run 004_capability_fields_concurrent.sql
+-- Then re-run forward/004_capability_fields_concurrent.sql
 ```
 
 ### Missing Columns
@@ -363,14 +363,14 @@ If `004` fails because columns don't exist:
 ERROR: Missing columns: contract_type, intent_types, protocols, capability_tags
 ```
 
-You need to apply `003_capability_fields.sql` first to create the columns.
+You need to apply `forward/003_capability_fields.sql` first to create the columns.
 
 ## Related Documentation
 
 - `README.md` - Migration versioning conventions
 - `validate_migration_state.sql` - **Run this to validate current migration state**
-- `003_capability_fields.sql` - Column and standard index creation
-- `004_capability_fields_concurrent.sql` - Concurrent index creation
+- `forward/003_capability_fields.sql` - Column and standard index creation
+- `forward/004_capability_fields_concurrent.sql` - Concurrent index creation
 - `ADR-005-denormalize-capability-fields-in-registration-projections.md` - Design rationale
 
 ## Changelog

@@ -9,7 +9,7 @@
 -- Idempotency: INSERT ... ON CONFLICT (id) DO NOTHING
 -- TTL Column: created_at
 --
--- Rollback: DROP TABLE IF EXISTS agent_routing_decisions;
+-- Rollback: See rollback/rollback_021_agent_routing_decisions_table.sql
 
 -- ============================================================================
 -- AGENT_ROUTING_DECISIONS TABLE

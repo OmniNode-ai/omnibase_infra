@@ -10,7 +10,7 @@
 -- TTL Column: created_at
 -- Note: Uses correlation_id as PRIMARY KEY (not a separate id column)
 --
--- Rollback: DROP TABLE IF EXISTS agent_detection_failures;
+-- Rollback: See rollback/rollback_024_agent_detection_failures_table.sql
 
 -- ============================================================================
 -- AGENT_DETECTION_FAILURES TABLE

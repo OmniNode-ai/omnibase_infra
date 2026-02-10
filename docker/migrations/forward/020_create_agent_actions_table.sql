@@ -9,7 +9,7 @@
 -- Idempotency: INSERT ... ON CONFLICT (id) DO NOTHING
 -- TTL Column: created_at
 --
--- Rollback: DROP TABLE IF EXISTS agent_actions;
+-- Rollback: See rollback/rollback_020_agent_actions_table.sql
 
 -- ============================================================================
 -- AGENT_ACTIONS TABLE

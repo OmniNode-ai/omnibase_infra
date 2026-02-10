@@ -9,7 +9,7 @@
 -- Idempotency: INSERT ... ON CONFLICT (execution_id) DO UPDATE
 -- TTL Column: updated_at (NOT created_at - uses most recent update for TTL)
 --
--- Rollback: DROP TABLE IF EXISTS agent_execution_logs;
+-- Rollback: See rollback/rollback_025_agent_execution_logs_table.sql
 
 -- ============================================================================
 -- AGENT_EXECUTION_LOGS TABLE

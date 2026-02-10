@@ -1,8 +1,8 @@
 -- SPDX-License-Identifier: Apache-2.0
 -- SPDX-FileCopyrightText: Copyright 2026 OmniNode Team
 --
--- Rollback Migration: 027_rollback_agent_status_events_table
--- Rolls Back: 027_create_agent_status_events_table.sql
+-- Rollback Migration: rollback_027_agent_status_events_table
+-- Rolls Back: forward/027_create_agent_status_events_table.sql
 -- Created: 2026-02-07
 --
 -- WARNING: THIS ROLLBACK WILL PERMANENTLY DELETE ALL DATA IN THE agent_status_events TABLE.

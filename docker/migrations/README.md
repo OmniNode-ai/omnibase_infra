@@ -123,7 +123,14 @@ forward/
   004_capability_fields_concurrent.sql   # Main: concurrent indexes (production)
   005_create_contracts_topics.sql        # Main: contract/topic tables
   016_create_session_snapshots.sql       # Main: session snapshots
-  020-027_*.sql                          # Main: agent observability tables
+  020_create_agent_actions_table.sql                  # Main: agent actions
+  021_create_agent_routing_decisions_table.sql        # Main: routing decisions
+  022_create_agent_transformation_events_table.sql    # Main: transformation events
+  023_create_router_performance_metrics_table.sql     # Main: router metrics
+  024_create_agent_detection_failures_table.sql       # Main: detection failures
+  025_create_agent_execution_logs_table.sql           # Main: execution logs
+  026_injection_effectiveness_tables.sql              # Main: injection effectiveness
+  027_create_agent_status_events_table.sql            # Main: agent status events
 ```
 
 **Next available:** `028_*.sql`

@@ -1,8 +1,8 @@
 -- SPDX-License-Identifier: Apache-2.0
 -- SPDX-FileCopyrightText: Copyright 2026 OmniNode Team
 --
--- Rollback Migration: 023_rollback_router_performance_metrics_table
--- Rolls Back: 023_create_router_performance_metrics_table.sql
+-- Rollback Migration: rollback_023_router_performance_metrics_table
+-- Rolls Back: forward/023_create_router_performance_metrics_table.sql
 -- Created: 2026-01-31
 --
 -- WARNING: THIS ROLLBACK WILL PERMANENTLY DELETE ALL DATA IN THE router_performance_metrics TABLE.

@@ -9,7 +9,7 @@
 -- Idempotency: INSERT ... ON CONFLICT (id) DO NOTHING
 -- TTL Column: created_at
 --
--- Rollback: DROP TABLE IF EXISTS router_performance_metrics;
+-- Rollback: See rollback/rollback_023_router_performance_metrics_table.sql
 
 -- ============================================================================
 -- ROUTER_PERFORMANCE_METRICS TABLE

@@ -1,8 +1,8 @@
 -- SPDX-License-Identifier: Apache-2.0
 -- SPDX-FileCopyrightText: Copyright 2026 OmniNode Team
 --
--- Rollback Migration: 021_rollback_agent_routing_decisions_table
--- Rolls Back: 021_create_agent_routing_decisions_table.sql
+-- Rollback Migration: rollback_021_agent_routing_decisions_table
+-- Rolls Back: forward/021_create_agent_routing_decisions_table.sql
 -- Created: 2026-01-31
 --
 -- WARNING: THIS ROLLBACK WILL PERMANENTLY DELETE ALL DATA IN THE agent_routing_decisions TABLE.

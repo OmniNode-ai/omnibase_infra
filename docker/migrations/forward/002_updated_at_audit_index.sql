@@ -128,12 +128,7 @@ COMMENT ON INDEX idx_registration_state_updated_at IS
 -- =============================================================================
 -- ROLLBACK MIGRATION
 -- =============================================================================
--- To rollback this migration, execute the following:
---
---   DROP INDEX IF EXISTS idx_registration_updated_at;
---   DROP INDEX IF EXISTS idx_registration_state_updated_at;
---
--- Note: Dropping indexes is non-destructive (no data loss).
+-- See rollback/rollback_002_updated_at_audit_index.sql
 
 -- =============================================================================
 -- INDEX MAINTENANCE NOTES

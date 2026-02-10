@@ -3,7 +3,7 @@
 -- =============================================================================
 -- Ticket: OMN-1134 (Registry Projection Extensions for Capabilities)
 -- Version: 1.0.0
--- Companion to: 003_capability_fields.sql
+-- Companion to: forward/003_capability_fields.sql
 --
 -- PURPOSE:
 --   This script creates the same indexes as 003_capability_fields.sql but uses
@@ -268,14 +268,6 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_registration_contract_type_state
 -- =============================================================================
 -- ROLLBACK (if needed)
 -- =============================================================================
---
--- To remove these indexes:
---
---   DROP INDEX CONCURRENTLY IF EXISTS idx_registration_capability_tags;
---   DROP INDEX CONCURRENTLY IF EXISTS idx_registration_intent_types;
---   DROP INDEX CONCURRENTLY IF EXISTS idx_registration_protocols;
---   DROP INDEX CONCURRENTLY IF EXISTS idx_registration_contract_type_state;
---
--- Note: DROP INDEX CONCURRENTLY also cannot run inside a transaction block.
+-- See rollback/rollback_004_capability_fields_concurrent.sql
 --
 -- =============================================================================

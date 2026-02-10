@@ -5,7 +5,7 @@
 -- Purpose: NodeContractRegistryReducer materializes contract registry state from Kafka events.
 -- These tables store registered contracts and their associated topic suffixes for routing.
 --
--- Rollback: DROP TABLE IF EXISTS topics; DROP TABLE IF EXISTS contracts;
+-- Rollback: See rollback/rollback_005_create_contracts_topics.sql
 
 -- ============================================================================
 -- CONTRACTS TABLE

@@ -2,6 +2,7 @@
 -- Description: Create tables for Claude Code session context storage (OMN-1401)
 -- Created: 2026-01-24
 -- Moved to omnibase_infra: OMN-1526
+-- Rollback: See rollback/rollback_016_create_session_snapshots.sql
 
 -- Session snapshots table (main aggregate)
 CREATE TABLE IF NOT EXISTS claude_session_snapshots (
@@ -42,7 +43,8 @@ CREATE TABLE IF NOT EXISTS claude_session_snapshots (
 );
 
 -- Indexes for common queries
-CREATE INDEX IF NOT EXISTS idx_session_snapshots_session_id ON claude_session_snapshots(session_id);
+-- Note: session_id has a UNIQUE index below (idx_session_snapshots_session_id_unique)
+-- which also serves as a lookup index, so no separate non-unique index is needed.
 CREATE INDEX IF NOT EXISTS idx_session_snapshots_status ON claude_session_snapshots(status);
 CREATE INDEX IF NOT EXISTS idx_session_snapshots_working_directory ON claude_session_snapshots(working_directory);
 CREATE INDEX IF NOT EXISTS idx_session_snapshots_last_event_at ON claude_session_snapshots(last_event_at);
@@ -117,8 +119,9 @@ BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS update_session_snapshots_updated_at ON claude_session_snapshots;
 CREATE TRIGGER update_session_snapshots_updated_at
     BEFORE UPDATE ON claude_session_snapshots
     FOR EACH ROW
