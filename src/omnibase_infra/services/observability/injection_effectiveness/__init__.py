@@ -45,6 +45,7 @@ from omnibase_infra.services.observability.injection_effectiveness.consumer impo
     mask_dsn_password,
 )
 from omnibase_infra.services.observability.injection_effectiveness.ledger_sink_postgres import (
+    LedgerEntryDict,
     LedgerSinkInjectionEffectivenessPostgres,
 )
 from omnibase_infra.services.observability.injection_effectiveness.models import (
@@ -73,6 +74,7 @@ __all__ = [
     "ConsumerMetrics",
     "EnumHealthStatus",
     "InjectionEffectivenessConsumer",
+    "LedgerEntryDict",
     "LedgerSinkInjectionEffectivenessPostgres",
     "ModelAgentMatchEvent",
     "ModelContextUtilizationEvent",
