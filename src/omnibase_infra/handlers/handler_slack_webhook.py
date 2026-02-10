@@ -1,29 +1,37 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Slack Webhook Handler - Infrastructure alerting via Slack webhooks.
+"""Slack Webhook Handler - Infrastructure alerting via Slack.
 
-This handler sends alerts to Slack channels using incoming webhooks,
-with support for Block Kit formatting, retry with exponential backoff,
-and rate limit handling.
+This handler sends alerts to Slack channels using either incoming webhooks
+or the Slack Web API (chat.postMessage), with support for Block Kit
+formatting, retry with exponential backoff, rate limit handling, and
+message threading.
 
 Architecture:
     This handler follows the ONEX operation handler pattern:
     - Receives typed input (ModelSlackAlert)
-    - Executes a single responsibility (Slack webhook delivery)
+    - Executes a single responsibility (Slack message delivery)
     - Returns typed output (ModelSlackAlertResult)
     - Uses error sanitization for security
     - Stateless and coroutine-safe for concurrent calls
 
+Delivery Modes:
+    - **Web API mode** (preferred): When ``bot_token`` is configured, uses
+      ``chat.postMessage`` which returns a ``ts`` value for threading.
+    - **Webhook mode** (fallback): When only ``webhook_url`` is configured,
+      uses incoming webhooks. No threading support (webhooks don't return ts).
+
 Handler Responsibilities:
     - Format alerts as Slack Block Kit messages
-    - Send webhooks with configurable retry logic
+    - Send via Web API or webhook with configurable retry logic
     - Handle 429 rate limiting gracefully
     - Sanitize errors to prevent credential exposure
     - Track operation timing and retry counts
+    - Support message threading via thread_ts
 
 Configuration:
-    The webhook URL is resolved from the SLACK_WEBHOOK_URL environment
-    variable. This keeps credentials out of code and configuration files.
+    - Web API: SLACK_BOT_TOKEN + SLACK_CHANNEL_ID environment variables
+    - Webhook: SLACK_WEBHOOK_URL environment variable
 
 Coroutine Safety:
     This handler is stateless and coroutine-safe for concurrent calls
@@ -31,7 +39,8 @@ Coroutine Safety:
 
 Related Tickets:
     - OMN-1905: Add declarative Slack webhook handler to omnibase_infra
-    - OMN-1895: Wiring Health Monitor alerting (blocked by this)
+    - OMN-2157: Extend with Web API support for threading
+    - OMN-1895: Wiring Health Monitor alerting (blocked by OMN-1905)
 """
 
 from __future__ import annotations
@@ -69,6 +78,9 @@ _DEFAULT_MAX_RETRIES: int = 3
 _DEFAULT_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (1.0, 2.0, 4.0)
 _DEFAULT_TIMEOUT_SECONDS: float = 10.0
 
+# Slack Web API endpoint
+_SLACK_WEB_API_URL: str = "https://slack.com/api/chat.postMessage"
+
 # Slack Block Kit emoji mapping for severity levels
 _SEVERITY_EMOJI: dict[EnumAlertSeverity, str] = {
     EnumAlertSeverity.CRITICAL: ":red_circle:",
@@ -87,11 +99,18 @@ _SEVERITY_TITLES: dict[EnumAlertSeverity, str] = {
 
 
 class HandlerSlackWebhook:
-    """Handler for Slack webhook alert delivery.
+    """Handler for Slack alert delivery via webhook or Web API.
 
     Encapsulates all Slack-specific alerting logic for declarative
     node compliance. Supports Block Kit formatting, retry with exponential
-    backoff, and rate limit handling.
+    backoff, rate limit handling, and message threading (Web API mode).
+
+    Delivery Mode Resolution:
+        - If ``bot_token`` is set: uses Slack Web API (chat.postMessage).
+          Supports threading via ``thread_ts``.
+        - If only ``webhook_url`` is set: uses incoming webhooks (original
+          behavior). No threading support.
+        - If neither is set: returns SLACK_NOT_CONFIGURED error.
 
     Error Handling:
         All errors are sanitized before inclusion in the result to prevent
@@ -105,6 +124,8 @@ class HandlerSlackWebhook:
 
     Attributes:
         _webhook_url: Slack webhook URL (from env or constructor)
+        _bot_token: Slack Bot Token for Web API (from env or constructor)
+        _default_channel: Default channel ID for Web API posts
         _http_session: Optional shared aiohttp session
         _max_retries: Maximum retry attempts for failed requests
         _retry_backoff: Tuple of backoff delays in seconds
@@ -112,13 +133,18 @@ class HandlerSlackWebhook:
 
     Example:
         >>> import asyncio
-        >>> handler = HandlerSlackWebhook()
+        >>> # Web API mode (supports threading)
+        >>> handler = HandlerSlackWebhook(
+        ...     bot_token="xoxb-...",
+        ...     default_channel="C01234567",
+        ... )
         >>> alert = ModelSlackAlert(
         ...     severity=EnumAlertSeverity.ERROR,
         ...     message="Circuit breaker opened for Consul",
         ...     title="Infrastructure Alert",
         ... )
         >>> # result = await handler.handle(alert)
+        >>> # result.thread_ts  # ts of the posted message
     """
 
     def __init__(
@@ -128,8 +154,10 @@ class HandlerSlackWebhook:
         max_retries: int = _DEFAULT_MAX_RETRIES,
         retry_backoff: tuple[float, ...] = _DEFAULT_RETRY_BACKOFF_SECONDS,
         timeout: float = _DEFAULT_TIMEOUT_SECONDS,
+        bot_token: str | None = None,
+        default_channel: str | None = None,
     ) -> None:
-        """Initialize handler with webhook URL and optional HTTP session.
+        """Initialize handler with webhook URL or bot token.
 
         Args:
             webhook_url: Slack webhook URL. If not provided, reads from
@@ -141,23 +169,39 @@ class HandlerSlackWebhook:
             retry_backoff: Tuple of backoff delays in seconds for each
                 retry attempt. Default is (1.0, 2.0, 4.0).
             timeout: HTTP request timeout in seconds. Default is 10.0.
+            bot_token: Slack Bot Token for Web API mode. If not provided,
+                reads from SLACK_BOT_TOKEN environment variable.
+            default_channel: Default channel ID for Web API posts. If not
+                provided, reads from SLACK_CHANNEL_ID environment variable.
         """
         self._webhook_url: str = (
             webhook_url if webhook_url else os.getenv("SLACK_WEBHOOK_URL", "")
+        )
+        self._bot_token: str = (
+            bot_token if bot_token else os.getenv("SLACK_BOT_TOKEN", "")
+        )
+        self._default_channel: str = (
+            default_channel if default_channel else os.getenv("SLACK_CHANNEL_ID", "")
         )
         self._http_session = http_session
         self._max_retries = max_retries
         self._retry_backoff = retry_backoff
         self._timeout = timeout
 
+    @property
+    def uses_web_api(self) -> bool:
+        """Whether this handler uses the Slack Web API (vs webhook)."""
+        return bool(self._bot_token)
+
     async def handle(
         self,
         alert: ModelSlackAlert,
     ) -> ModelSlackAlertResult:
-        """Execute Slack webhook alert delivery.
+        """Execute Slack alert delivery via Web API or webhook.
 
-        Formats the alert as a Slack Block Kit message and sends it
-        to the configured webhook URL with retry logic.
+        Mode is resolved automatically: if ``bot_token`` is configured,
+        uses Web API (chat.postMessage) which supports threading. Otherwise
+        falls back to incoming webhook.
 
         Args:
             alert: Alert payload containing severity, message, and optional
@@ -171,6 +215,7 @@ class HandlerSlackWebhook:
                 - error: Sanitized error message (only on failure)
                 - error_code: Error code for programmatic handling
                 - retry_count: Number of retry attempts made
+                - thread_ts: Slack ts of the posted message (Web API only)
 
         Note:
             This handler does not raise exceptions during normal operation.
@@ -179,9 +224,19 @@ class HandlerSlackWebhook:
         """
         start_time = time.perf_counter()
         correlation_id = alert.correlation_id
-        retry_count = 0
 
-        # Validate webhook URL is configured
+        if self._bot_token:
+            return await self._handle_web_api(alert, start_time)
+        return await self._handle_webhook(alert, start_time)
+
+    async def _handle_webhook(
+        self,
+        alert: ModelSlackAlert,
+        start_time: float,
+    ) -> ModelSlackAlertResult:
+        """Send alert via incoming webhook (original behavior)."""
+        correlation_id = alert.correlation_id
+
         if not self._webhook_url:
             duration_ms = (time.perf_counter() - start_time) * 1000
             return ModelSlackAlertResult(
@@ -193,10 +248,8 @@ class HandlerSlackWebhook:
                 retry_count=0,
             )
 
-        # Format the alert as Block Kit message
         slack_payload = self._format_block_kit_message(alert)
 
-        # Create or use existing HTTP session
         session_created = False
         session = self._http_session
         if session is None:
@@ -204,18 +257,67 @@ class HandlerSlackWebhook:
             session_created = True
 
         try:
-            return await self._send_with_retry(
+            return await self._send_webhook_with_retry(
                 session=session,
                 slack_payload=slack_payload,
                 correlation_id=correlation_id,
                 start_time=start_time,
             )
         finally:
-            # Close session if we created it
             if session_created and session is not None:
                 await session.close()
 
-    async def _send_with_retry(
+    async def _handle_web_api(
+        self,
+        alert: ModelSlackAlert,
+        start_time: float,
+    ) -> ModelSlackAlertResult:
+        """Send alert via Slack Web API (chat.postMessage)."""
+        correlation_id = alert.correlation_id
+        channel = alert.channel or self._default_channel
+
+        if not channel:
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            return ModelSlackAlertResult(
+                success=False,
+                duration_ms=duration_ms,
+                correlation_id=correlation_id,
+                error="SLACK_CHANNEL_ID not configured (required for Web API mode)",
+                error_code="SLACK_NOT_CONFIGURED",
+                retry_count=0,
+            )
+
+        blocks = self._format_block_kit_message(alert)["blocks"]
+        emoji = _SEVERITY_EMOJI.get(alert.severity, ":white_circle:")
+        title = alert.title or _SEVERITY_TITLES.get(alert.severity, "Alert")
+        fallback_text = f"{emoji} {title}: {alert.message[:200]}"
+
+        api_payload: dict[str, object] = {
+            "channel": channel,
+            "blocks": blocks,
+            "text": fallback_text,
+        }
+        if alert.thread_ts:
+            api_payload["thread_ts"] = alert.thread_ts
+
+        session_created = False
+        session = self._http_session
+        if session is None:
+            session = aiohttp.ClientSession()
+            session_created = True
+
+        try:
+            return await self._send_web_api_with_retry(
+                session=session,
+                api_payload=api_payload,
+                correlation_id=correlation_id,
+                start_time=start_time,
+            )
+        finally:
+            if session_created and session is not None:
+                await session.close()
+
+    async def _send_webhook_with_retry(
         self,
         session: aiohttp.ClientSession,
         slack_payload: dict[str, object],
@@ -254,6 +356,7 @@ class HandlerSlackWebhook:
                                 "correlation_id": str(correlation_id),
                                 "duration_ms": round(duration_ms, 2),
                                 "retry_count": retry_count,
+                                "mode": "webhook",
                             },
                         )
                         return ModelSlackAlertResult(
@@ -349,6 +452,206 @@ class HandlerSlackWebhook:
                 "duration_ms": round(duration_ms, 2),
                 "retry_count": retry_count,
                 "error_code": last_error_code,
+                "mode": "webhook",
+            },
+        )
+
+        return ModelSlackAlertResult(
+            success=False,
+            duration_ms=duration_ms,
+            correlation_id=correlation_id,
+            error=last_error,
+            error_code=last_error_code,
+            retry_count=retry_count,
+        )
+
+    async def _send_web_api_with_retry(
+        self,
+        session: aiohttp.ClientSession,
+        api_payload: dict[str, object],
+        correlation_id: UUID,
+        start_time: float,
+    ) -> ModelSlackAlertResult:
+        """Send via Slack Web API with retry logic.
+
+        The Web API always returns HTTP 200 with a JSON body containing
+        ``ok: true/false``. On success, the response includes a ``ts``
+        field that can be used for threading.
+
+        Args:
+            session: aiohttp ClientSession for HTTP requests
+            api_payload: chat.postMessage payload
+            correlation_id: UUID for distributed tracing
+            start_time: Performance timer start for duration calculation
+
+        Returns:
+            ModelSlackAlertResult with operation outcome and thread_ts
+        """
+        retry_count = 0
+        last_error: str | None = None
+        last_error_code: str | None = None
+
+        headers = {
+            "Authorization": f"Bearer {self._bot_token}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+
+        for attempt in range(self._max_retries + 1):
+            try:
+                async with session.post(
+                    _SLACK_WEB_API_URL,
+                    json=api_payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=self._timeout),
+                ) as response:
+                    duration_ms = (time.perf_counter() - start_time) * 1000
+
+                    if response.status == 429:
+                        last_error = "Slack rate limit (429)"
+                        last_error_code = "SLACK_RATE_LIMITED"
+                        logger.warning(
+                            "Slack Web API rate limited, will retry",
+                            extra={
+                                "correlation_id": str(correlation_id),
+                                "attempt": attempt + 1,
+                                "max_attempts": self._max_retries + 1,
+                            },
+                        )
+                    elif response.status != 200:
+                        response_text = await response.text()
+                        last_error = f"HTTP {response.status}: {response_text[:100]}"
+                        last_error_code = f"SLACK_HTTP_{response.status}"
+                        logger.warning(
+                            "Slack Web API HTTP error",
+                            extra={
+                                "correlation_id": str(correlation_id),
+                                "status_code": response.status,
+                                "attempt": attempt + 1,
+                            },
+                        )
+                    else:
+                        # HTTP 200 - parse JSON response
+                        body = await response.json()
+                        if body.get("ok"):
+                            thread_ts = body.get("ts")
+                            logger.info(
+                                "Slack alert delivered successfully via Web API",
+                                extra={
+                                    "correlation_id": str(correlation_id),
+                                    "duration_ms": round(duration_ms, 2),
+                                    "retry_count": retry_count,
+                                    "thread_ts": thread_ts,
+                                    "mode": "web_api",
+                                },
+                            )
+                            return ModelSlackAlertResult(
+                                success=True,
+                                duration_ms=duration_ms,
+                                correlation_id=correlation_id,
+                                retry_count=retry_count,
+                                thread_ts=thread_ts,
+                            )
+                        else:
+                            # Slack API returned ok=false
+                            slack_error = body.get("error", "unknown_error")
+                            if slack_error == "ratelimited":
+                                last_error = "Slack rate limit (API)"
+                                last_error_code = "SLACK_RATE_LIMITED"
+                            else:
+                                last_error = f"Slack API error: {slack_error}"
+                                last_error_code = "SLACK_API_ERROR"
+                                logger.warning(
+                                    "Slack Web API returned error",
+                                    extra={
+                                        "correlation_id": str(correlation_id),
+                                        "slack_error": slack_error,
+                                        "attempt": attempt + 1,
+                                    },
+                                )
+                                # Non-retryable API errors (invalid_auth, channel_not_found, etc.)
+                                if slack_error in {
+                                    "invalid_auth",
+                                    "not_authed",
+                                    "account_inactive",
+                                    "token_revoked",
+                                    "channel_not_found",
+                                    "not_in_channel",
+                                    "is_archived",
+                                    "msg_too_long",
+                                    "no_text",
+                                }:
+                                    duration_ms = (
+                                        time.perf_counter() - start_time
+                                    ) * 1000
+                                    return ModelSlackAlertResult(
+                                        success=False,
+                                        duration_ms=duration_ms,
+                                        correlation_id=correlation_id,
+                                        error=last_error,
+                                        error_code=last_error_code,
+                                        retry_count=retry_count,
+                                    )
+
+            except TimeoutError:
+                last_error = "Request timeout"
+                last_error_code = "SLACK_TIMEOUT"
+                logger.warning(
+                    "Slack Web API timeout",
+                    extra={
+                        "correlation_id": str(correlation_id),
+                        "timeout_seconds": self._timeout,
+                        "attempt": attempt + 1,
+                    },
+                )
+
+            except aiohttp.ClientConnectorError as e:
+                last_error = sanitize_error_message(e)
+                last_error_code = "SLACK_CONNECTION_ERROR"
+                logger.warning(
+                    "Slack Web API connection error",
+                    extra={
+                        "correlation_id": str(correlation_id),
+                        "attempt": attempt + 1,
+                    },
+                )
+
+            except aiohttp.ClientError as e:
+                last_error = sanitize_error_message(e)
+                last_error_code = "SLACK_CLIENT_ERROR"
+                logger.warning(
+                    "Slack Web API client error",
+                    extra={
+                        "correlation_id": str(correlation_id),
+                        "attempt": attempt + 1,
+                        "error_type": type(e).__name__,
+                    },
+                )
+
+            # Retry with backoff if we have retries remaining
+            if attempt < self._max_retries:
+                backoff_index = min(attempt, len(self._retry_backoff) - 1)
+                backoff_seconds = self._retry_backoff[backoff_index]
+                logger.info(
+                    "Retrying Slack Web API",
+                    extra={
+                        "correlation_id": str(correlation_id),
+                        "backoff_seconds": backoff_seconds,
+                        "attempt": attempt + 1,
+                    },
+                )
+                await asyncio.sleep(backoff_seconds)
+                retry_count += 1
+
+        # All retries exhausted
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.error(
+            "Slack Web API delivery failed after retries",
+            extra={
+                "correlation_id": str(correlation_id),
+                "duration_ms": round(duration_ms, 2),
+                "retry_count": retry_count,
+                "error_code": last_error_code,
+                "mode": "web_api",
             },
         )
 

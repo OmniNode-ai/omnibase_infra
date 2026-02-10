@@ -16,17 +16,17 @@ contract_name: "node_slack_alerter_effect"
 node_name: "node_slack_alerter_effect"
 contract_version:
   major: 1
-  minor: 0
+  minor: 1
   patch: 0
 node_version:
   major: 1
-  minor: 0
+  minor: 1
   patch: 0
 # Node type
 node_type: "EFFECT_GENERIC"
 # Description
 description: >
-  Effect node for Slack webhook alerting. Sends infrastructure alerts to Slack channels using incoming webhooks with Block Kit formatting, retry with exponential backoff, and rate limit handling. Uses declarative operation routing to dispatch to the HandlerSlackWebhook.
+  Effect node for Slack alerting. Sends infrastructure alerts to Slack channels using either the Web API (chat.postMessage with threading support) or incoming webhooks, with Block Kit formatting, retry with exponential backoff, and rate limit handling. Uses declarative operation routing to dispatch to the HandlerSlackWebhook.
 
 # Strongly typed I/O models
 input_model:
@@ -132,6 +132,10 @@ error_handling:
       description: "Slack returned HTTP 5xx error"
       recoverable: true
       retry_strategy: "exponential_backoff"
+    - name: "SLACK_API_ERROR"
+      description: "Slack Web API returned ok=false with non-retryable error"
+      recoverable: false
+      retry_strategy: "none"
 # IO operations (EFFECT node specific)
 io_operations:
   - operation: "send_alert"
@@ -142,6 +146,7 @@ io_operations:
       - title
       - details
       - channel
+      - thread_ts
       - correlation_id
     output_fields:
       - success
@@ -150,11 +155,13 @@ io_operations:
       - error
       - error_code
       - retry_count
+      - thread_ts
   - operation: "send_message"
     description: "Send a plain text message to Slack"
     input_fields:
       - message
       - channel
+      - thread_ts
       - correlation_id
     output_fields:
       - success
@@ -163,17 +170,28 @@ io_operations:
       - error
       - error_code
       - retry_count
+      - thread_ts
 # Dependencies (protocols this node requires)
 dependencies:
   - name: "http_client"
     type: "library"
     library: "aiohttp"
-    description: "Async HTTP client for webhook requests"
+    description: "Async HTTP client for webhook and Web API requests"
   - name: "slack_webhook_url"
     type: "environment"
     env_var: "SLACK_WEBHOOK_URL"
-    description: "Slack incoming webhook URL"
-    required: true
+    description: "Slack incoming webhook URL (fallback mode)"
+    required: false
+  - name: "slack_bot_token"
+    type: "environment"
+    env_var: "SLACK_BOT_TOKEN"
+    description: "Slack Bot Token for Web API mode (preferred, supports threading)"
+    required: false
+  - name: "slack_channel_id"
+    type: "environment"
+    env_var: "SLACK_CHANNEL_ID"
+    description: "Default channel ID for Web API posts"
+    required: false
 # Capabilities provided by this node
 capabilities:
   - name: "slack_alerting"
@@ -184,6 +202,10 @@ capabilities:
     description: "Retry failed requests with exponential backoff"
   - name: "rate_limit_handling"
     description: "Handle Slack rate limiting gracefully"
+  - name: "message_threading"
+    description: "Thread messages using Slack ts values (Web API mode)"
+  - name: "web_api_mode"
+    description: "Send via Slack Web API (chat.postMessage) with bot token"
 # Model definitions
 definitions:
   ModelSlackAlert:
@@ -225,6 +247,11 @@ definitions:
         nullable: true
         default: null
         description: "Optional channel override"
+      thread_ts:
+        type: string
+        nullable: true
+        default: null
+        description: "Reply in this Slack thread (ts value)"
       correlation_id:
         type: uuid
         description: "UUID for distributed tracing"
@@ -263,6 +290,11 @@ definitions:
         description: "Number of retry attempts made"
         default: 0
         ge: 0
+      thread_ts:
+        type: string
+        nullable: true
+        default: null
+        description: "Slack ts of the posted message (Web API mode only)"
     required:
       - success
       - correlation_id
@@ -272,16 +304,17 @@ health_check:
   endpoint: "/health"
   interval_seconds: 30
   checks:
-    - name: "webhook_configured"
+    - name: "slack_configured"
       check_type: "environment"
-      env_var: "SLACK_WEBHOOK_URL"
-      description: "Verify SLACK_WEBHOOK_URL is configured"
+      env_var: "SLACK_BOT_TOKEN"
+      fallback_env_var: "SLACK_WEBHOOK_URL"
+      description: "Verify either SLACK_BOT_TOKEN or SLACK_WEBHOOK_URL is configured"
 # Metadata
 metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-02-04"
-  updated: "2026-02-04"
+  updated: "2026-02-10"
   tags:
     - effect
     - slack

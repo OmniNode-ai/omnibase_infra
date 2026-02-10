@@ -68,6 +68,10 @@ class ModelSlackAlert(BaseModel):
         default=None,
         description="Optional channel override (uses webhook default if not specified)",
     )
+    thread_ts: str | None = Field(
+        default=None,
+        description="Reply in this Slack thread (ts value). If None, creates new top-level message.",
+    )
     correlation_id: UUID = Field(
         default_factory=uuid4,
         description="UUID for distributed tracing",
