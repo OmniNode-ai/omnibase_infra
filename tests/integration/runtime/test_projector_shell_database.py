@@ -50,6 +50,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from urllib.parse import quote_plus, urlparse
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -126,8 +127,6 @@ def _get_database_dsn() -> str | None:
     db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
     if db_url:
         # Basic validation: ensure the user-provided DSN is well-formed
-        from urllib.parse import urlparse
-
         parsed = urlparse(db_url)
         if parsed.scheme not in ("postgresql", "postgres"):
             raise ValueError(
@@ -142,8 +141,6 @@ def _get_database_dsn() -> str | None:
                 "Example: postgresql://user:pass@host:5432/omnibase_infra"
             )
         return db_url
-
-    from urllib.parse import quote_plus
 
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")

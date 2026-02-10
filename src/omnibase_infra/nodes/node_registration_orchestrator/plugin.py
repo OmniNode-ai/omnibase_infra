@@ -64,6 +64,7 @@ import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -262,42 +263,33 @@ class PluginRegistration:
         try:
             # 1. Create PostgreSQL pool from OMNIBASE_INFRA_DB_URL
             postgres_dsn = os.getenv("OMNIBASE_INFRA_DB_URL", "")
+
+            # Shared error context for all DSN validation failures
+            pool_error_context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="create_postgres_pool",
+            )
+
             if not postgres_dsn:
-                context = ModelInfraErrorContext.with_correlation(
-                    correlation_id=correlation_id,
-                    transport_type=EnumInfraTransportType.DATABASE,
-                    operation="create_postgres_pool",
-                )
                 raise ContainerWiringError(
                     "OMNIBASE_INFRA_DB_URL is required but not set",
-                    context=context,
+                    context=pool_error_context,
                 )
 
             # Validate DSN scheme and database name before pool creation
-            from urllib.parse import urlparse
-
             parsed_dsn = urlparse(postgres_dsn)
             if parsed_dsn.scheme not in ("postgresql", "postgres"):
-                context = ModelInfraErrorContext.with_correlation(
-                    correlation_id=correlation_id,
-                    transport_type=EnumInfraTransportType.DATABASE,
-                    operation="create_postgres_pool",
-                )
                 raise ContainerWiringError(
                     f"OMNIBASE_INFRA_DB_URL has invalid scheme "
                     f"'{parsed_dsn.scheme}', expected 'postgresql' or 'postgres'",
-                    context=context,
+                    context=pool_error_context,
                 )
             dsn_database = (parsed_dsn.path or "").lstrip("/")
             if not dsn_database:
-                context = ModelInfraErrorContext.with_correlation(
-                    correlation_id=correlation_id,
-                    transport_type=EnumInfraTransportType.DATABASE,
-                    operation="create_postgres_pool",
-                )
                 raise ContainerWiringError(
                     "OMNIBASE_INFRA_DB_URL is missing a database name",
-                    context=context,
+                    context=pool_error_context,
                 )
 
             self._pool = await asyncpg.create_pool(

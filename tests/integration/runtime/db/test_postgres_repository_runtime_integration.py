@@ -36,7 +36,7 @@ import os
 import uuid
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 
 import pytest
 
@@ -134,8 +134,6 @@ def get_dsn() -> str:
     is_configured, error_msg = _check_postgres_env_vars()
     if not is_configured:
         raise ValueError(error_msg)
-
-    from urllib.parse import quote_plus
 
     host = os.environ["POSTGRES_HOST"]
     port = os.getenv("POSTGRES_PORT", "5432")
