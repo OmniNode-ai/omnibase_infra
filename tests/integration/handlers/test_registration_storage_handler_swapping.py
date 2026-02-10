@@ -39,6 +39,7 @@ import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import pytest
@@ -75,7 +76,13 @@ _db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
 if _db_url is not None:
     _db_url = _db_url.strip() or None
 
-POSTGRES_AVAILABLE = _db_url is not None or (
+# When DSN is set, also verify it contains a database name
+_db_url_has_database = False
+if _db_url is not None:
+    _parsed = urlparse(_db_url)
+    _db_url_has_database = bool((_parsed.path or "").lstrip("/"))
+
+POSTGRES_AVAILABLE = _db_url_has_database or (
     os.getenv("POSTGRES_HOST") is not None
     and os.getenv("POSTGRES_PASSWORD") is not None
 )
@@ -96,9 +103,8 @@ def _resolve_postgres_config() -> dict[str, object]:
     return {
         "host": config.host or "localhost",
         "port": config.port,
-        # Fallback to "omnibase_infra" is intentional: PostgresConfig.from_env()
-        # defaults the database to "omnibase_infra" when using individual
-        # POSTGRES_* env vars. This test module always targets that database.
+        # Default database is "omnibase_infra": PostgresConfig.from_env()
+        # sets this when using individual POSTGRES_* env vars per OMN-2065.
         "database": config.database or "omnibase_infra",
         "user": config.user,
         "password": config.password or "",

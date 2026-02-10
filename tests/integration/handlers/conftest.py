@@ -204,8 +204,14 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 if POSTGRES_PASSWORD and not POSTGRES_PASSWORD.strip():
     POSTGRES_PASSWORD = None
 
-# Check if PostgreSQL is available based on URL or host+password being set
-POSTGRES_AVAILABLE = bool(_OMNIBASE_INFRA_DB_URL) or (
+# When DSN is set, also verify it contains a database name
+_db_url_has_database = False
+if _OMNIBASE_INFRA_DB_URL is not None:
+    _parsed_url = urlparse(_OMNIBASE_INFRA_DB_URL)
+    _db_url_has_database = bool((_parsed_url.path or "").lstrip("/"))
+
+# Check if PostgreSQL is available based on URL (with database) or host+password being set
+POSTGRES_AVAILABLE = _db_url_has_database or (
     POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None
 )
 

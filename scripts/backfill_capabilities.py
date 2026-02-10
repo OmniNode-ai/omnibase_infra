@@ -75,7 +75,7 @@ Error Codes:
     Configuration Errors (CFG_*):
         CFG_URL_001: Missing OMNIBASE_INFRA_DB_URL
         CFG_SCHEME_001: Invalid DSN scheme (not postgresql://)
-        CFG_DB_001: Missing database name in DSN
+        CFG_DB_001: DSN is missing a database name (path component)
         CFG_TIMEOUT_001: Invalid BACKFILL_CONNECTION_TIMEOUT value
 
     Database Errors (DB_*):
@@ -257,6 +257,14 @@ def _get_validated_dsn() -> str:
             f"OMNIBASE_INFRA_DB_URL is missing a database name: {safe_dsn}. "
             "Example: postgresql://postgres:pass@host:5432/omnibase_infra",
             error_code=ErrorCode.CFG_MISSING_DB_NAME,
+        )
+
+    # Safety check: warn if database name doesn't match expected target
+    if database != "omnibase_infra":
+        logger.warning(
+            "Database name '%s' in OMNIBASE_INFRA_DB_URL is not 'omnibase_infra'. "
+            "Verify you are targeting the correct database before proceeding.",
+            database,
         )
 
     logger.debug("Using DSN from OMNIBASE_INFRA_DB_URL (credentials redacted)")
