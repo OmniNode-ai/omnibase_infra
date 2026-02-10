@@ -67,18 +67,7 @@
 -- See 004_capability_fields_concurrent.sql for full production deployment guide.
 -- -------------------------------------------------------------------------------------
 --
--- ROLLBACK:
---   ALTER TABLE registration_projections
---     DROP COLUMN IF EXISTS contract_type,
---     DROP COLUMN IF EXISTS intent_types,
---     DROP COLUMN IF EXISTS protocols,
---     DROP COLUMN IF EXISTS capability_tags,
---     DROP COLUMN IF EXISTS contract_version;
---
---   DROP INDEX IF EXISTS idx_registration_capability_tags;
---   DROP INDEX IF EXISTS idx_registration_intent_types;
---   DROP INDEX IF EXISTS idx_registration_protocols;
---   DROP INDEX IF EXISTS idx_registration_contract_type_state;
+-- Rollback: See rollback/rollback_003_capability_fields.sql
 --
 -- =============================================================================
 
