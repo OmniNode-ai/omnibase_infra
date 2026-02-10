@@ -186,6 +186,8 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         Returns:
             ModelInjectionEffectivenessQueryResult with pagination metadata.
         """
+        # Defense-in-depth: mirrors Pydantic constraints on ModelInjectionEffectivenessQuery
+        # (limit: ge=1, le=10000; offset: ge=0). Kept in sync manually.
         if query.limit < 1 or query.limit > 10000:
             msg = f"limit must be between 1 and 10000, got {query.limit}"
             raise ValueError(msg)

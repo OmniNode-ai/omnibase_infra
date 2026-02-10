@@ -134,7 +134,11 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             ProtocolConfigurationError: If circuit breaker parameters are invalid.
         """
         self._pool = pool
-        self._query_timeout = query_timeout or self.DEFAULT_QUERY_TIMEOUT_SECONDS
+        self._query_timeout = (
+            query_timeout
+            if query_timeout is not None
+            else self.DEFAULT_QUERY_TIMEOUT_SECONDS
+        )
         self._minimum_support_threshold = (
             minimum_support_threshold
             if minimum_support_threshold is not None

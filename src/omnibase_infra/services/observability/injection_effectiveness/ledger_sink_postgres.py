@@ -261,6 +261,15 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             if missing:
                 msg = f"Entry {i} missing required keys: {sorted(missing)}"
                 raise ValueError(msg)
+            if not isinstance(entry["session_id"], UUID):
+                msg = f"Entry {i} session_id must be UUID, got {type(entry['session_id']).__name__}"
+                raise TypeError(msg)
+            if not isinstance(entry["event_type"], str):
+                msg = f"Entry {i} event_type must be str, got {type(entry['event_type']).__name__}"
+                raise TypeError(msg)
+            if not isinstance(entry["event_payload"], bytes):
+                msg = f"Entry {i} event_payload must be bytes, got {type(entry['event_payload']).__name__}"
+                raise TypeError(msg)
             if not isinstance(entry["kafka_partition"], int):
                 msg = f"Entry {i} kafka_partition must be int, got {type(entry['kafka_partition']).__name__}"
                 raise TypeError(msg)
