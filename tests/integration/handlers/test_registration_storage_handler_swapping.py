@@ -71,7 +71,11 @@ if TYPE_CHECKING:
 # =============================================================================
 
 # Check if PostgreSQL is available for integration tests
-POSTGRES_AVAILABLE = os.getenv("OMNIBASE_INFRA_DB_URL") is not None or (
+_db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+if _db_url is not None:
+    _db_url = _db_url.strip() or None
+
+POSTGRES_AVAILABLE = _db_url is not None or (
     os.getenv("POSTGRES_HOST") is not None
     and os.getenv("POSTGRES_PASSWORD") is not None
 )
@@ -92,10 +96,10 @@ def _resolve_postgres_config() -> dict[str, object]:
     return {
         "host": config.host or "localhost",
         "port": config.port,
-        # Fallback to "omnibase_infra" is intentional: PostgresConfig.from_env()
-        # returns empty database when using individual POSTGRES_* env vars (by
-        # design - the database must come from the URL). This test module always
-        # targets the omnibase_infra database.
+        # PostgresConfig.from_env() hardcodes database="omnibase_infra" in the
+        # fallback path (individual POSTGRES_* vars). The "or" guard is retained
+        # for defensive coding in case from_env() returns empty database when
+        # OMNIBASE_INFRA_DB_URL is set without a path component.
         "database": config.database or "omnibase_infra",
         "user": config.user,
         "password": config.password or "",

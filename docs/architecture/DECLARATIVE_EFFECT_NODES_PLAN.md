@@ -1574,13 +1574,14 @@ def validate_all_contracts(contracts_dir: Path) -> dict[str, list[str]]:
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
+| `OMNIBASE_INFRA_DB_URL` | Full PostgreSQL DSN (primary) | (required) |
 | `USE_CONTRACT_DRIVEN_EFFECTS` | Migration mode | `contract` |
 | `USE_CONTRACT_DRIVEN_{NODE_NAME}` | Per-node override | `true` |
-| `POSTGRES_HOST` | PostgreSQL host | `localhost` |
-| `POSTGRES_PORT` | PostgreSQL port | `5432` |
-| `POSTGRES_DB` | Database name | `omnibase_infra` |
-| `POSTGRES_USER` | Database user | `omni` |
-| `POSTGRES_PASSWORD` | Database password | (required) |
+| `POSTGRES_HOST` | PostgreSQL host (fallback) | `localhost` |
+| `POSTGRES_PORT` | PostgreSQL port (fallback) | `5432` |
+| `POSTGRES_DB` | Database name (fallback) | `omnibase_infra` |
+| `POSTGRES_USER` | Database user (fallback) | `omni` |
+| `POSTGRES_PASSWORD` | Database password (fallback for Docker) | (see `.env`) |
 | `KAFKA_BOOTSTRAP_SERVERS` | Kafka brokers | `localhost:9092` |
 | `CONSUL_HOST` | Consul host | `localhost` |
 | `CONSUL_PORT` | Consul port | `8500` |

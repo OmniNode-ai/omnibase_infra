@@ -220,8 +220,10 @@ def _get_db_dsn() -> str:
 
     # Validate DSN scheme to catch obvious misconfigurations early
     if not db_url.startswith(("postgresql://", "postgres://")):
+        correlation_id = uuid4()
         raise click.ClickException(
-            f"OMNIBASE_INFRA_DB_URL has invalid scheme. "
+            f"OMNIBASE_INFRA_DB_URL has invalid scheme "
+            f"(correlation_id={correlation_id}). "
             f"Expected 'postgresql://' or 'postgres://', "
             f"got: {db_url.split('://', 1)[0] if '://' in db_url else '(none)'}://"
         )

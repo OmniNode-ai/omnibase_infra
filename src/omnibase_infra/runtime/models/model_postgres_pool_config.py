@@ -118,6 +118,9 @@ class ModelPostgresPoolConfig(BaseModel):
         Raises:
             ValueError: If the DSN is malformed or missing required parts.
         """
+        # Security: all error messages below are sanitised to prevent credential leaks.
+        # - Invalid scheme: shows only scheme prefix (no host/user/password)
+        # - Missing database: shows scheme://host:port/??? (password omitted)
         parsed = urlparse(dsn)
 
         if parsed.scheme not in ("postgresql", "postgres"):
@@ -136,6 +139,8 @@ class ModelPostgresPoolConfig(BaseModel):
             msg = f"DSN is missing a database name: {safe_dsn}"
             raise ValueError(msg)
 
+        # TODO(OMN-2065): DSN query params (sslmode, options, etc.) are currently
+        # discarded during parsing. If needed, add a `query_params: str` field.
         return cls(
             host=parsed.hostname or "localhost",
             port=parsed.port or 5432,

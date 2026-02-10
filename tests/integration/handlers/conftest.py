@@ -104,7 +104,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 import pytest
 
@@ -192,6 +192,9 @@ def _safe_int_env(name: str, default: int) -> int:
 # Read configuration from environment variables (set via docker-compose or .env)
 # Primary: OMNIBASE_INFRA_DB_URL (full DSN).  Fallback: individual POSTGRES_* vars.
 _OMNIBASE_INFRA_DB_URL = os.getenv("OMNIBASE_INFRA_DB_URL")
+# Normalize empty/whitespace-only values to None for consistent availability check
+if _OMNIBASE_INFRA_DB_URL is not None:
+    _OMNIBASE_INFRA_DB_URL = _OMNIBASE_INFRA_DB_URL.strip() or None
 POSTGRES_HOST = os.getenv("POSTGRES_HOST")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
@@ -232,8 +235,6 @@ def _build_postgres_dsn() -> str:
     """
     if _OMNIBASE_INFRA_DB_URL:
         # Basic validation: ensure the user-provided DSN is well-formed
-        from urllib.parse import urlparse
-
         parsed = urlparse(_OMNIBASE_INFRA_DB_URL)
         if parsed.scheme not in ("postgresql", "postgres"):
             raise ValueError(

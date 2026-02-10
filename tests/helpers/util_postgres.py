@@ -256,7 +256,8 @@ class PostgresConfig:
             database = (parsed.path or "").lstrip("/")
             if not database:
                 logger.warning(
-                    "%s is set but contains no database name; "
+                    "%s is set but contains no database name (e.g., path is missing "
+                    "from 'postgresql://user:pass@host:port/DBNAME'); "
                     "tests requiring a database will be skipped.",
                     db_url_var,
                 )

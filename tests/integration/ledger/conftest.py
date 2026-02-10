@@ -53,6 +53,13 @@ def _get_postgres_dsn() -> str | None:
                 f"OMNIBASE_INFRA_DB_URL has invalid scheme '{parsed.scheme}'. "
                 "Expected 'postgresql://' or 'postgres://'."
             )
+        # Validate database name is present in the DSN path
+        database = (parsed.path or "").lstrip("/")
+        if not database:
+            raise ValueError(
+                "OMNIBASE_INFRA_DB_URL is missing a database name. "
+                "Example: postgresql://user:pass@host:5432/omnibase_infra"
+            )
         return db_url
 
     host = os.getenv("POSTGRES_HOST")

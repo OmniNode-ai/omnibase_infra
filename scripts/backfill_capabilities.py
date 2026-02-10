@@ -107,6 +107,7 @@ import logging
 import os
 import sys
 from typing import NoReturn
+from urllib.parse import urlparse
 from uuid import UUID
 
 import asyncpg
@@ -217,6 +218,10 @@ def _get_connection_timeout() -> float:
 def _get_validated_dsn() -> str:
     """Get and validate database DSN from OMNIBASE_INFRA_DB_URL environment variable.
 
+    .. todo:: OMN-2065: DSN validation is duplicated across several integration
+       test conftest files and model_postgres_pool_config.py. Consider extracting
+       to a shared utility.
+
     Returns:
         Validated PostgreSQL DSN string
 
@@ -242,8 +247,6 @@ def _get_validated_dsn() -> str:
         )
 
     # Validate the DSN contains a database name (path component)
-    from urllib.parse import urlparse
-
     parsed = urlparse(dsn)
     database = (parsed.path or "").lstrip("/")
     if not database:
