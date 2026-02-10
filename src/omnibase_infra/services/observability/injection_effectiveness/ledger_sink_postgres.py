@@ -273,12 +273,21 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             if not isinstance(entry["kafka_topic"], str):
                 msg = f"Entry {i} kafka_topic must be str, got {type(entry['kafka_topic']).__name__}"
                 raise TypeError(msg)
-            if not isinstance(entry["kafka_partition"], int):
+            # Use `type(x) is int` to reject bool (bool is a subclass of int)
+            if type(entry["kafka_partition"]) is not int:
                 msg = f"Entry {i} kafka_partition must be int, got {type(entry['kafka_partition']).__name__}"
                 raise TypeError(msg)
-            if not isinstance(entry["kafka_offset"], int):
+            if entry["kafka_partition"] < 0:
+                msg = f"Entry {i} kafka_partition must be >= 0, got {entry['kafka_partition']}"
+                raise ValueError(msg)
+            if type(entry["kafka_offset"]) is not int:
                 msg = f"Entry {i} kafka_offset must be int, got {type(entry['kafka_offset']).__name__}"
                 raise TypeError(msg)
+            if entry["kafka_offset"] < 0:
+                msg = (
+                    f"Entry {i} kafka_offset must be >= 0, got {entry['kafka_offset']}"
+                )
+                raise ValueError(msg)
 
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(

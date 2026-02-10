@@ -318,6 +318,66 @@ class TestAppendBatch:
         with pytest.raises(TypeError, match="kafka_topic must be str"):
             await sink.append_batch(entries, sample_correlation_id)
 
+    @pytest.mark.asyncio
+    async def test_rejects_bool_as_kafka_partition(
+        self, mock_pool: MagicMock, sample_correlation_id
+    ) -> None:
+        """Raises TypeError when kafka_partition is bool (bool is subclass of int)."""
+        entries = [
+            {
+                "session_id": uuid4(),
+                "event_type": "context_utilization",
+                "event_payload": b"{}",
+                "kafka_topic": "test.topic",
+                "kafka_partition": True,  # bool, not int
+                "kafka_offset": 0,
+            }
+        ]
+
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="kafka_partition must be int"):
+            await sink.append_batch(entries, sample_correlation_id)
+
+    @pytest.mark.asyncio
+    async def test_rejects_negative_kafka_partition(
+        self, mock_pool: MagicMock, sample_correlation_id
+    ) -> None:
+        """Raises ValueError when kafka_partition is negative."""
+        entries = [
+            {
+                "session_id": uuid4(),
+                "event_type": "context_utilization",
+                "event_payload": b"{}",
+                "kafka_topic": "test.topic",
+                "kafka_partition": -1,
+                "kafka_offset": 0,
+            }
+        ]
+
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(ValueError, match="kafka_partition must be >= 0"):
+            await sink.append_batch(entries, sample_correlation_id)
+
+    @pytest.mark.asyncio
+    async def test_rejects_negative_kafka_offset(
+        self, mock_pool: MagicMock, sample_correlation_id
+    ) -> None:
+        """Raises ValueError when kafka_offset is negative."""
+        entries = [
+            {
+                "session_id": uuid4(),
+                "event_type": "context_utilization",
+                "event_payload": b"{}",
+                "kafka_topic": "test.topic",
+                "kafka_partition": 0,
+                "kafka_offset": -5,
+            }
+        ]
+
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(ValueError, match="kafka_offset must be >= 0"):
+            await sink.append_batch(entries, sample_correlation_id)
+
 
 class TestLedgerSinkInitialization:
     """Tests for initialization and configuration."""
