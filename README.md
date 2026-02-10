@@ -96,6 +96,16 @@ src/omnibase_infra/
 └── enums/             # Centralized enums
 ```
 
+## Schema Migration Freeze
+
+> **Schema migrations are currently frozen.** See [`.migration_freeze`](.migration_freeze) for details.
+
+A DB-per-repo refactor is in progress (OMN-2055). While the freeze is active:
+
+- **No new migrations** may be added
+- **Allowed**: migration file moves, table ownership fixes, rollback bug fixes
+- **To lift**: remove `.migration_freeze` and reference OMN-2055 in the PR
+
 ## Development
 
 ```bash
