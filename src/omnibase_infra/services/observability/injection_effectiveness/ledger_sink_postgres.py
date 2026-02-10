@@ -270,6 +270,9 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             if not isinstance(entry["event_payload"], bytes):
                 msg = f"Entry {i} event_payload must be bytes, got {type(entry['event_payload']).__name__}"
                 raise TypeError(msg)
+            if not isinstance(entry["kafka_topic"], str):
+                msg = f"Entry {i} kafka_topic must be str, got {type(entry['kafka_topic']).__name__}"
+                raise TypeError(msg)
             if not isinstance(entry["kafka_partition"], int):
                 msg = f"Entry {i} kafka_partition must be int, got {type(entry['kafka_partition']).__name__}"
                 raise TypeError(msg)

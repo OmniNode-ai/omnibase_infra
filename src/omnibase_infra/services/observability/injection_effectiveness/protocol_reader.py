@@ -10,7 +10,8 @@ Design Decisions:
     - Async methods: All operations are async for non-blocking I/O
     - Typed models: Uses Pydantic models for type safety
     - Deterministic ordering: All queries use ORDER BY for reproducible results
-      (created_at DESC for effectiveness/hit-rates, created_at ASC for latency)
+      (created_at DESC for effectiveness, updated_at DESC for hit-rates,
+      created_at ASC for latency)
 
 Related Tickets:
     - OMN-2078: Golden path: injection metrics + ledger storage

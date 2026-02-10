@@ -298,6 +298,26 @@ class TestAppendBatch:
         with pytest.raises(TypeError, match="event_payload must be bytes"):
             await sink.append_batch(entries, sample_correlation_id)
 
+    @pytest.mark.asyncio
+    async def test_rejects_entries_with_wrong_kafka_topic_type(
+        self, mock_pool: MagicMock, sample_correlation_id
+    ) -> None:
+        """Raises TypeError when kafka_topic is not str."""
+        entries = [
+            {
+                "session_id": uuid4(),
+                "event_type": "context_utilization",
+                "event_payload": b"{}",
+                "kafka_topic": 123,  # int instead of str
+                "kafka_partition": 0,
+                "kafka_offset": 0,
+            }
+        ]
+
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="kafka_topic must be str"):
+            await sink.append_batch(entries, sample_correlation_id)
+
 
 class TestLedgerSinkInitialization:
     """Tests for initialization and configuration."""
