@@ -285,7 +285,7 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                     )
 
                     raw_count = await conn.fetchval(count_sql, *params)
-                    total_count: int = raw_count if raw_count is not None else 0
+                    total_count: int = int(raw_count) if raw_count is not None else 0
                     rows = await conn.fetch(data_sql, *data_params)
 
             result_rows = tuple(ModelInjectionEffectivenessRow(**dict(r)) for r in rows)
