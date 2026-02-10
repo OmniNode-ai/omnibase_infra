@@ -307,8 +307,12 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         self._offset_policy = offset_policy or ModelOffsetPolicyConfig()
         self._unsubscribe_callables: list[Callable[[], Awaitable[None]]] = []
         self._logger = logging.getLogger(__name__)
-        # Track retry attempts per correlation_id for infrastructure errors
+        # Track retry attempts per correlation_id for infrastructure errors.
+        # Bounded by _MAX_RETRY_ENTRIES to prevent unbounded growth from
+        # orphaned entries (e.g., messages with None correlation_id generate
+        # a new uuid4() each redelivery, never clearing the previous entry).
         self._retry_counts: dict[UUID, int] = {}
+        self._MAX_RETRY_ENTRIES: int = 10_000
 
         # Initialize consumption counter mixin (wiring health monitoring)
         self._init_consumption_counter()
@@ -564,12 +568,29 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
     def _increment_retry_count(self, correlation_id: UUID) -> int:
         """Increment retry count for a correlation ID.
 
+        Prunes oldest entries when the dict exceeds ``_MAX_RETRY_ENTRIES``
+        to prevent unbounded memory growth from orphaned entries.
+
         Args:
             correlation_id: The correlation ID to increment.
 
         Returns:
             New retry count after increment.
         """
+        # Prune if over capacity — clear oldest half to amortize cost.
+        # Orphaned entries have low retry counts; active retries will be
+        # re-added on next failure with count reset to 1.
+        if len(self._retry_counts) >= self._MAX_RETRY_ENTRIES:
+            self._logger.warning(
+                "retry_counts pruned: size=%d exceeded max=%d",
+                len(self._retry_counts),
+                self._MAX_RETRY_ENTRIES,
+            )
+            # Keep the most recent half (dict preserves insertion order in 3.7+)
+            entries = list(self._retry_counts.items())
+            half = len(entries) // 2
+            self._retry_counts = dict(entries[half:])
+
         current = self._retry_counts.get(correlation_id, 0)
         self._retry_counts[correlation_id] = current + 1
         return current + 1
