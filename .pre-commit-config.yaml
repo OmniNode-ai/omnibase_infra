@@ -80,6 +80,14 @@ repos:
   # ONEX Validation Hooks (infrastructure-specific)
   - repo: local
     hooks:
+      # Migration freeze enforcement - block new migrations during DB-per-repo refactor
+      - id: onex-validate-migration-freeze
+        name: ONEX Migration Freeze Enforcement
+        entry: poetry run python scripts/validate.py migration_freeze
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       # Root directory cleanliness - no ephemeral files in root
       - id: onex-validate-clean-root
         name: ONEX Root Directory Cleanliness
