@@ -115,6 +115,13 @@ class DispatchResultApplier:
     ) -> None:
         """Process a dispatch result: publish output events and delegate intents.
 
+        At-Least-Once Semantics:
+            Output events are published sequentially. If event N fails, events
+            1..N-1 are already published with no compensation. The exception
+            propagates to the caller, preventing Kafka offset commit. On
+            redelivery, events 1..N-1 will be published again as duplicates.
+            Downstream consumers must be idempotent.
+
         Args:
             result: The dispatch result from the dispatch engine.
             correlation_id: Optional correlation ID for tracing.

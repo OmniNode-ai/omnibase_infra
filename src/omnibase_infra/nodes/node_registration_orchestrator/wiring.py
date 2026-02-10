@@ -538,6 +538,7 @@ async def wire_registration_handlers(
 
         handler_introspected = HandlerNodeIntrospected(
             projection_reader,
+            consul_enabled=consul_handler is not None,
         )
         await container.service_registry.register_instance(
             interface=HandlerNodeIntrospected,

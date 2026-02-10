@@ -145,11 +145,11 @@ class IntentExecutor:
 
         # Get intent_type from payload using isinstance guard (not bare getattr).
         # Typed payloads extend BaseModel with an explicit intent_type Literal field.
-        # Do NOT fall back to intent.intent_type — for infrastructure intents,
-        # intent.intent_type is always "extension" (the generic envelope marker),
-        # not the actual routing key (e.g., "consul.register"). Falling back
-        # would produce a confusing "no handler for 'extension'" error that
-        # masks the real problem: the payload is missing intent_type.
+        # Do NOT fall back to intent.intent_type — the authoritative routing key
+        # lives on the payload (e.g., "consul.register", "postgres.upsert_registration").
+        # While intent.intent_type may mirror the payload's value, the payload is
+        # the canonical source. Falling back to the envelope field would mask
+        # misconfigured payloads that lack an intent_type field.
         intent_type: str | None = None
         if isinstance(payload, BaseModel) and hasattr(payload, "intent_type"):
             intent_type = payload.intent_type

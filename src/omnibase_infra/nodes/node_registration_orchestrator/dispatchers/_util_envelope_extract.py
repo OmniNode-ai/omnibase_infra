@@ -9,9 +9,12 @@ objects and materialized dicts — this helper centralizes that logic.
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID, uuid4
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+logger = logging.getLogger(__name__)
 
 
 def extract_envelope_fields(
@@ -38,8 +41,20 @@ def extract_envelope_fields(
             correlation_id = UUID(raw_corr) if raw_corr else uuid4()
         except ValueError:
             correlation_id = uuid4()
+        if not raw_corr:
+            logger.debug(
+                "Generated fallback correlation_id=%s (dict envelope had no correlation_id)",
+                correlation_id,
+            )
         raw_payload = envelope.get("payload", {})
     else:
-        correlation_id = envelope.correlation_id or uuid4()
+        if envelope.correlation_id is None:
+            correlation_id = uuid4()
+            logger.debug(
+                "Generated fallback correlation_id=%s (envelope.correlation_id was None)",
+                correlation_id,
+            )
+        else:
+            correlation_id = envelope.correlation_id
         raw_payload = envelope.payload
     return correlation_id, raw_payload

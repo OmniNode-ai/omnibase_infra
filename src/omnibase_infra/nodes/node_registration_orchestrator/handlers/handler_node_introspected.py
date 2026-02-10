@@ -160,6 +160,7 @@ class HandlerNodeIntrospected:
         self,
         projection_reader: ProjectionReaderRegistration,
         ack_timeout_seconds: float | None = None,
+        consul_enabled: bool = True,
     ) -> None:
         """Initialize the handler with a projection reader.
 
@@ -167,6 +168,10 @@ class HandlerNodeIntrospected:
             projection_reader: Reader for querying registration projection state.
             ack_timeout_seconds: Timeout in seconds for node acknowledgment.
                 Default: 30 seconds. Used to calculate ack_deadline in intents.
+            consul_enabled: Whether to emit consul.register intents.
+                Set to False when Consul is not configured to avoid
+                IntentExecutor raising RuntimeHostError for unregistered
+                intent types. Default: True.
         """
         self._projection_reader = projection_reader
         self._ack_timeout_seconds = (
@@ -174,6 +179,7 @@ class HandlerNodeIntrospected:
             if ack_timeout_seconds is not None
             else self.DEFAULT_ACK_TIMEOUT_SECONDS
         )
+        self._consul_enabled = consul_enabled
 
     @property
     def handler_id(self) -> str:
@@ -373,6 +379,10 @@ class HandlerNodeIntrospected:
         # model_dump(mode="json") returns a JSON-safe dict (not a string).
         # asyncpg's JSONB codec expects Python dicts — passing a JSON string
         # would cause double-encoding (string wrapped in another JSON string).
+        # mode="json" guarantees only JSON-primitive types (str, int, float,
+        # bool, None, list, dict) — all of which asyncpg handles natively for
+        # JSONB columns. This dict is stored as an extra field in
+        # ModelProjectionRecord and passed through to asyncpg unchanged.
         capabilities_data = capabilities.model_dump(mode="json") if capabilities else {}
 
         # Serialization contract: values are JSON-serializable strings here.
@@ -412,60 +422,66 @@ class HandlerNodeIntrospected:
             )
         )
 
-        # Intent 2: Consul service registration
-        service_name = f"onex-{node_type.value}"
-        service_id = f"onex-{node_type.value}-{node_id}"
+        # Intent 2: Consul service registration (conditional on consul_enabled).
+        # When Consul is not configured, the IntentExecutor has no registered
+        # handler for "consul.register" and would raise RuntimeHostError,
+        # preventing Kafka offset commit and causing infinite redelivery.
+        if self._consul_enabled:
+            service_name = f"onex-{node_type.value}"
+            service_id = f"onex-{node_type.value}-{node_id}"
 
-        # Build tags
-        tags: list[str] = ["onex", f"node-type:{node_type.value}"]
+            # Build tags
+            tags: list[str] = ["onex", f"node-type:{node_type.value}"]
 
-        # Add MCP tags for orchestrators with MCP config enabled
-        mcp_config = (
-            event.declared_capabilities.mcp
-            if event.declared_capabilities is not None
-            else None
-        )
-        if node_type.value == "orchestrator" and mcp_config is not None:
-            if mcp_config.expose:
-                mcp_tool_name_raw = mcp_config.tool_name
-                if not mcp_tool_name_raw:
-                    node_name = event.metadata.description if event.metadata else None
-                    mcp_tool_name_raw = node_name or service_name
-                mcp_tool_name = self._sanitize_tool_name(mcp_tool_name_raw)
-                tags.extend(["mcp-enabled", f"mcp-tool:{mcp_tool_name}"])
-
-        # Extract address and port from endpoints if available
-        address: str | None = None
-        port: int | None = None
-        endpoints = event.endpoints
-        if endpoints:
-            health_url = endpoints.get("health") or endpoints.get("api")
-            if health_url:
-                try:
-                    parsed = urlparse(health_url)
-                    if parsed.hostname:
-                        address = parsed.hostname
-                    if parsed.port:
-                        port = parsed.port
-                except ValueError:
-                    pass
-
-        consul_payload = ModelPayloadConsulRegister(
-            correlation_id=correlation_id,
-            service_id=service_id,
-            service_name=service_name,
-            tags=tags,
-            address=address,
-            port=port,
-        )
-
-        intents.append(
-            ModelIntent(
-                intent_type=consul_payload.intent_type,
-                target=f"consul://service/{service_name}",
-                payload=consul_payload,
+            # Add MCP tags for orchestrators with MCP config enabled
+            mcp_config = (
+                event.declared_capabilities.mcp
+                if event.declared_capabilities is not None
+                else None
             )
-        )
+            if node_type.value == "orchestrator" and mcp_config is not None:
+                if mcp_config.expose:
+                    mcp_tool_name_raw = mcp_config.tool_name
+                    if not mcp_tool_name_raw:
+                        node_name = (
+                            event.metadata.description if event.metadata else None
+                        )
+                        mcp_tool_name_raw = node_name or service_name
+                    mcp_tool_name = self._sanitize_tool_name(mcp_tool_name_raw)
+                    tags.extend(["mcp-enabled", f"mcp-tool:{mcp_tool_name}"])
+
+            # Extract address and port from endpoints if available
+            address: str | None = None
+            port: int | None = None
+            endpoints = event.endpoints
+            if endpoints:
+                health_url = endpoints.get("health") or endpoints.get("api")
+                if health_url:
+                    try:
+                        parsed = urlparse(health_url)
+                        if parsed.hostname:
+                            address = parsed.hostname
+                        if parsed.port:
+                            port = parsed.port
+                    except ValueError:
+                        pass
+
+            consul_payload = ModelPayloadConsulRegister(
+                correlation_id=correlation_id,
+                service_id=service_id,
+                service_name=service_name,
+                tags=tags,
+                address=address,
+                port=port,
+            )
+
+            intents.append(
+                ModelIntent(
+                    intent_type=consul_payload.intent_type,
+                    target=f"consul://service/{service_name}",
+                    payload=consul_payload,
+                )
+            )
 
         logger.info(
             "Emitting NodeRegistrationInitiated with %d intents",
