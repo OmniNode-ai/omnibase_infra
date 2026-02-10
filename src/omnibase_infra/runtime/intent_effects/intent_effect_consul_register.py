@@ -145,6 +145,7 @@ class IntentEffectConsulRegister:
                 "operation": "consul.register",
                 "payload": register_payload,
                 "correlation_id": effective_correlation_id,
+                "envelope_id": str(uuid4()),
             }
             await self._consul_handler.execute(envelope)
 

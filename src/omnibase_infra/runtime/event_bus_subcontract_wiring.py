@@ -917,6 +917,9 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         # preserve any explicit event_type from the producer. ModelEventEnvelope
         # doesn't define event_type as a field, so model_validate() strips it.
         # Use model_copy() to attach it post-deserialization.
+        # NOTE: This relies on event_type NOT being a field on ModelEventEnvelope.
+        # If upstream adds event_type as a model field, this raw-dict lookup must
+        # be removed to avoid overriding the model's validated value.
         explicit_event_type = data.get("event_type")
         if explicit_event_type:
             envelope = envelope.model_copy(update={"event_type": explicit_event_type})

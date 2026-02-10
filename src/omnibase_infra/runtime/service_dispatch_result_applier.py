@@ -11,8 +11,8 @@ Architecture:
     The applier sits between the dispatch engine and the event bus:
 
     EventBusSubcontractWiring -> MessageDispatchEngine -> DispatchResultApplier
+                                                          |-> delegate intents (writes first)
                                                           |-> publish output events
-                                                          |-> delegate intents (Phase C)
 
     This separation keeps the dispatch engine pure (routing only) while the
     applier handles side effects (publishing, intent execution).
@@ -59,8 +59,8 @@ class DispatchResultApplier:
     EventBusSubcontractWiring. After the dispatch engine routes a message
     to a dispatcher and receives a ModelDispatchResult, this applier:
 
-    1. Publishes output events to the configured output topic
-    2. Delegates intents to IntentExecutor (Phase C)
+    1. Delegates intents to IntentExecutor (writes first)
+    2. Publishes output events to the configured output topic
     3. Records dispatch metrics for observability
 
     Thread Safety:
@@ -113,7 +113,13 @@ class DispatchResultApplier:
         result: ModelDispatchResult,
         correlation_id: UUID | None = None,
     ) -> None:
-        """Process a dispatch result: publish output events and delegate intents.
+        """Process a dispatch result: execute intents then publish output events.
+
+        Ordering Contract:
+            Intents (writes) execute BEFORE output events are published. This
+            ensures read models are consistent before downstream consumers can
+            observe the events. Matches the original handler ordering where
+            projection persistence preceded event emission.
 
         At-Least-Once Semantics:
             Output events are published sequentially. If event N fails, events
@@ -146,7 +152,52 @@ class DispatchResultApplier:
             )
             return
 
-        # Publish output events
+        # Phase 1: Execute intents (writes) BEFORE publishing output events.
+        # This ensures read models (PostgreSQL projections, Consul registrations)
+        # are consistent before downstream consumers can observe the events.
+        output_intents = result.output_intents
+        if output_intents and self._intent_executor is None:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=effective_correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="dispatch_result_applier.apply_intents",
+            )
+            raise RuntimeHostError(
+                f"Dispatch result contains {len(output_intents)} intent(s) but no "
+                f"IntentExecutor is configured — intents would be lost "
+                f"(dispatcher_id={result.dispatcher_id})",
+                context=context,
+            )
+        if self._intent_executor is not None and output_intents:
+            try:
+                await self._intent_executor.execute_all(
+                    output_intents,
+                    correlation_id=effective_correlation_id,
+                )
+                logger.debug(
+                    "Delegated %d intents from dispatcher=%s (correlation_id=%s)",
+                    len(output_intents),
+                    result.dispatcher_id,
+                    str(effective_correlation_id),
+                )
+            except Exception as intent_err:
+                logger.warning(
+                    "Failed to execute intents: %s (correlation_id=%s)",
+                    sanitize_error_message(intent_err),
+                    str(effective_correlation_id),
+                    extra={
+                        "error_type": type(intent_err).__name__,
+                        "dispatcher_id": result.dispatcher_id,
+                        "intent_count": len(output_intents),
+                    },
+                )
+                # Re-raise so the caller (EventBusSubcontractWiring) can
+                # classify the error and apply retry/DLQ logic. Swallowing
+                # intent errors here would cause Kafka offset commit despite
+                # failed PostgreSQL upserts, leading to data loss.
+                raise
+
+        # Phase 2: Publish output events AFTER intents have committed.
         if result.output_events:
             for idx, output_event in enumerate(result.output_events):
                 try:
@@ -200,49 +251,6 @@ class DispatchResultApplier:
                 result.dispatcher_id,
                 str(effective_correlation_id),
             )
-
-        # Delegate intents to effect layer via IntentExecutor
-        output_intents = result.output_intents
-        if output_intents and self._intent_executor is None:
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=effective_correlation_id,
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="dispatch_result_applier.apply_intents",
-            )
-            raise RuntimeHostError(
-                f"Dispatch result contains {len(output_intents)} intent(s) but no "
-                f"IntentExecutor is configured — intents would be lost "
-                f"(dispatcher_id={result.dispatcher_id})",
-                context=context,
-            )
-        if self._intent_executor is not None and output_intents:
-            try:
-                await self._intent_executor.execute_all(
-                    output_intents,
-                    correlation_id=effective_correlation_id,
-                )
-                logger.debug(
-                    "Delegated %d intents from dispatcher=%s (correlation_id=%s)",
-                    len(output_intents),
-                    result.dispatcher_id,
-                    str(effective_correlation_id),
-                )
-            except Exception as intent_err:
-                logger.warning(
-                    "Failed to execute intents: %s (correlation_id=%s)",
-                    sanitize_error_message(intent_err),
-                    str(effective_correlation_id),
-                    extra={
-                        "error_type": type(intent_err).__name__,
-                        "dispatcher_id": result.dispatcher_id,
-                        "intent_count": len(output_intents),
-                    },
-                )
-                # Re-raise so the caller (EventBusSubcontractWiring) can
-                # classify the error and apply retry/DLQ logic. Swallowing
-                # intent errors here would cause Kafka offset commit despite
-                # failed PostgreSQL upserts, leading to data loss.
-                raise
 
 
 __all__: list[str] = ["DispatchResultApplier"]
