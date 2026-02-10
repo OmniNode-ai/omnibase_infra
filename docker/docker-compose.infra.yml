@@ -85,16 +85,15 @@ x-runtime-base: &runtime-base
 x-runtime-env: &runtime-env
   # Kafka/Redpanda - use internal service name
   KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
-  # PostgreSQL - use internal service name
-  POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
-  POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+  # PostgreSQL - DSN-based configuration (OMN-2065)
   # NOTE: If OMNIBASE_INFRA_DB_URL is unset, falls back to constructing DSN from POSTGRES_PASSWORD.
   # POSTGRES_PASSWORD must be set (enforced by :? on the postgres service) for the fallback to work.
   # WARNING: The fallback DSN uses nested variable expansion (requires recent Compose v2).
-  # If POSTGRES_PASSWORD contains shell-special characters ($, `, \, !) or
-  # URI-special characters (@, :, /, %, #), the expansion may produce incorrect results.
-  # For passwords with special characters, set OMNIBASE_INFRA_DB_URL directly instead.
-  # RECOMMENDED: For production deployments, always set OMNIBASE_INFRA_DB_URL explicitly.
+  # Docker Compose cannot URL-encode variables, so the fallback path REQUIRES passwords
+  # containing only hex-safe characters (e.g., generated via `openssl rand -hex 32`).
+  # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
+  # shell-special characters ($, `, \, !), the expansion WILL produce a malformed DSN.
+  # RECOMMENDED: Always set OMNIBASE_INFRA_DB_URL explicitly in .env.
   OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for DB URL fallback}@postgres:5432/omnibase_infra}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

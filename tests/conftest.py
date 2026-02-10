@@ -942,7 +942,7 @@ async def cleanup_postgres_test_projections() -> AsyncGenerator[None, None]:
             return  # PostgreSQL not configured, skip cleanup
         from urllib.parse import quote_plus
 
-        port = os.getenv("POSTGRES_PORT", "5436")
+        port = os.getenv("POSTGRES_PORT", "5432")
         user = os.getenv("POSTGRES_USER", "postgres")
         encoded_user = quote_plus(user, safe="")
         encoded_password = quote_plus(password, safe="")

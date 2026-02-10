@@ -141,6 +141,11 @@ class ModelPostgresPoolConfig(BaseModel):
 
         # TODO(OMN-2065): DSN query params (sslmode, options, etc.) are currently
         # discarded during parsing. If needed, add a `query_params: str` field.
+        #
+        # NOTE: Missing password defaults to "" (the field default). This is
+        # intentional — from_env() is the production entry point and requires a
+        # fully-formed DSN with credentials.  from_dsn() is a lower-level
+        # parser that tolerates password-less DSNs for dev/test flexibility.
         return cls(
             host=parsed.hostname or "localhost",
             port=parsed.port or 5432,

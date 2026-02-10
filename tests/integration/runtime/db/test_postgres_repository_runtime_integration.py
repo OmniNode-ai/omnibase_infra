@@ -92,8 +92,6 @@ def _check_postgres_env_vars() -> tuple[bool, str]:
 
     required_vars = [
         "POSTGRES_HOST",
-        "POSTGRES_PORT",
-        "POSTGRES_USER",
         "POSTGRES_PASSWORD",
     ]
     missing = [var for var in required_vars if not os.getenv(var)]
@@ -126,8 +124,8 @@ def get_dsn() -> str:
     from urllib.parse import quote_plus
 
     host = os.environ["POSTGRES_HOST"]
-    port = os.environ["POSTGRES_PORT"]
-    user = os.environ["POSTGRES_USER"]
+    port = os.getenv("POSTGRES_PORT", "5432")
+    user = os.getenv("POSTGRES_USER", "postgres")
     password = os.environ["POSTGRES_PASSWORD"]
 
     # URL-encode credentials to handle special characters (@, :, /, %, etc.)

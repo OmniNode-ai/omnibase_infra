@@ -236,7 +236,7 @@ class ProtocolDomainPlugin(Protocol):
             ```python
             def should_activate(self, config: ModelDomainPluginConfig) -> bool:
                 # Only activate if PostgreSQL is configured
-                return bool(os.getenv("POSTGRES_HOST"))
+                return bool(os.getenv("OMNIBASE_INFRA_DB_URL"))
             ```
         """
         ...
