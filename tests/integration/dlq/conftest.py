@@ -94,14 +94,14 @@ POSTGRES_AVAILABLE = _postgres_config.is_configured
 
 
 def _build_postgres_dsn() -> str:
-    """Build PostgreSQL DSN from environment variables.
+    """Build PostgreSQL DSN by delegating to PostgresConfig.build_dsn().
 
     Returns:
         PostgreSQL connection string in standard format.
 
-    Note:
-        This function should only be called after verifying
-        POSTGRES_PASSWORD is set.
+    Raises:
+        ProtocolConfigurationError: If configuration is incomplete
+            (host, password, or database missing).
     """
     return _postgres_config.build_dsn()
 
