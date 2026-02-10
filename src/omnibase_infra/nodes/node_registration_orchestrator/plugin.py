@@ -1015,7 +1015,13 @@ class PluginRegistration:
         registered_count = 0
 
         for intent_type in routing_table:
-            if intent_type.startswith("postgres.") and self._projector is not None:
+            # Extract protocol prefix (segment before first dot) for adapter
+            # dispatch. Convention: intent_type = "{protocol}.{operation}".
+            protocol = (
+                intent_type.split(".", 1)[0] if "." in intent_type else intent_type
+            )
+
+            if protocol == "postgres" and self._projector is not None:
                 from omnibase_infra.runtime.intent_effects import (
                     IntentEffectPostgresUpsert,
                 )
@@ -1030,7 +1036,7 @@ class PluginRegistration:
                     correlation_id,
                 )
 
-            elif intent_type.startswith("consul.") and self._consul_handler is not None:
+            elif protocol == "consul" and self._consul_handler is not None:
                 from omnibase_infra.runtime.intent_effects import (
                     IntentEffectConsulRegister,
                 )

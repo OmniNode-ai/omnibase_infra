@@ -189,9 +189,19 @@ class IntentExecutor:
     ) -> None:
         """Execute multiple intents sequentially.
 
+        Intents are executed in order. If an intent fails, earlier intents
+        that already executed (e.g., Consul register, PostgreSQL upsert)
+        are **not** rolled back. The exception propagates to the caller,
+        which prevents Kafka offset commit so the message will be redelivered.
+        Effect adapters must therefore be idempotent.
+
         Args:
             intents: Sequence of intents to execute.
             correlation_id: Optional correlation ID for tracing.
+
+        Raises:
+            Exception: Re-raised from the failing intent's effect handler.
+                Earlier intents remain committed (no compensation/rollback).
         """
         for intent in intents:
             await self.execute(intent, correlation_id=correlation_id)
