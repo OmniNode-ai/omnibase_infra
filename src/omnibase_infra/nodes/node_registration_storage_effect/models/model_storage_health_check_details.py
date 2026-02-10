@@ -57,7 +57,7 @@ class ModelStorageHealthCheckDetails(BaseModel):
         ...     waiting_connections=0,
         ...     server_version="PostgreSQL 16.1",
         ...     is_primary=True,
-        ...     database_name="omninode_bridge",
+        ...     database_name="omnibase_infra",
         ...     schema_name="public",
         ... )
         >>> details.pool_size

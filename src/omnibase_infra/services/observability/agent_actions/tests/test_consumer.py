@@ -211,9 +211,9 @@ class TestMaskDsnPassword:
 
     def test_mask_dsn_ipv4_host(self) -> None:
         """DSN with IPv4 host should be handled correctly."""
-        dsn = "postgresql://postgres:mysecret@192.168.1.100:5436/omninode_bridge"
+        dsn = "postgresql://postgres:mysecret@192.168.1.100:5436/omnibase_infra"
         result = mask_dsn_password(dsn)
-        assert result == "postgresql://postgres:***@192.168.1.100:5436/omninode_bridge"
+        assert result == "postgresql://postgres:***@192.168.1.100:5436/omnibase_infra"
 
 
 # =============================================================================
