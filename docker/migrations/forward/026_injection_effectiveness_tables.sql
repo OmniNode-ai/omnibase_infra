@@ -13,7 +13,7 @@
 --
 -- TTL Column: updated_at for injection_effectiveness, created_at for others
 --
--- Rollback: See 026_injection_effectiveness_tables_rollback.sql
+-- Rollback: See rollback/rollback_026_injection_effectiveness_tables.sql
 
 -- ============================================================================
 -- INJECTION_EFFECTIVENESS TABLE (session-level summary)

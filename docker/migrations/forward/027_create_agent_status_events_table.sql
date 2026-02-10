@@ -9,7 +9,7 @@
 -- Idempotency: INSERT ... ON CONFLICT (id) DO NOTHING
 -- TTL Column: created_at
 --
--- Rollback: See 027_rollback_agent_status_events_table.sql
+-- Rollback: See rollback/rollback_027_agent_status_events_table.sql
 
 -- ============================================================================
 -- AGENT_STATUS_EVENTS TABLE
