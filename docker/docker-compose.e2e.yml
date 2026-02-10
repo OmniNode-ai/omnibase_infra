@@ -270,7 +270,8 @@ services:
         condition: service_completed_successfully
     environment:
       # PostgreSQL - primary DSN (used by omnibase_infra application code)
-      OMNIBASE_INFRA_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-test-password}@postgres:5432/omnibase_infra
+      # Allows host-level override; falls back to constructing DSN from POSTGRES_PASSWORD.
+      OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://postgres:${POSTGRES_PASSWORD:-test-password}@postgres:5432/omnibase_infra}
       # Legacy individual vars - retained for agent-actions-consumer and session storage
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432

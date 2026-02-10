@@ -73,7 +73,7 @@ Error Codes:
     The script uses error codes for debugging and actionable error messages:
 
     Configuration Errors (CFG_*):
-        CFG_AUTH_001: Missing OMNIBASE_INFRA_DB_URL
+        CFG_URL_001: Missing OMNIBASE_INFRA_DB_URL
         CFG_DB_001: Invalid database name format
         CFG_TIMEOUT_001: Invalid BACKFILL_CONNECTION_TIMEOUT value
 
@@ -135,7 +135,7 @@ class ErrorCode:
     """
 
     # Configuration errors (CFG_xxx_xxx)
-    CFG_MISSING_DB_URL = "CFG_AUTH_001"
+    CFG_MISSING_DB_URL = "CFG_URL_001"
     CFG_INVALID_DSN_SCHEME = "CFG_DB_001"
     CFG_INVALID_TIMEOUT = "CFG_TIMEOUT_001"
 

@@ -298,6 +298,15 @@ def _build_postgres_dsn() -> str:
         >>> # Returns: postgresql://user%40domain:p%40ss%3Aword%23123@host:port/db
     """
     if _OMNIBASE_INFRA_DB_URL:
+        # Basic validation: ensure the user-provided DSN is well-formed
+        from urllib.parse import urlparse as _urlparse
+
+        parsed = _urlparse(_OMNIBASE_INFRA_DB_URL)
+        if parsed.scheme not in ("postgresql", "postgres"):
+            raise ValueError(
+                f"OMNIBASE_INFRA_DB_URL has invalid scheme '{parsed.scheme}'. "
+                "Expected 'postgresql://' or 'postgres://'."
+            )
         return _OMNIBASE_INFRA_DB_URL
 
     if not POSTGRES_HOST:

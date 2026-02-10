@@ -256,8 +256,9 @@ class PostgresConfig:
             database = (parsed.path or "").lstrip("/")
             if not database:
                 logger.warning(
-                    "OMNIBASE_INFRA_DB_URL is set but contains no database name; "
-                    "tests requiring a database will be skipped."
+                    "%s is set but contains no database name; "
+                    "tests requiring a database will be skipped.",
+                    db_url_var,
                 )
             return cls(
                 host=parsed.hostname or "localhost",

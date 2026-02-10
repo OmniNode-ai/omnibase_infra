@@ -80,27 +80,21 @@ POSTGRES_AVAILABLE = os.getenv("OMNIBASE_INFRA_DB_URL") is not None or (
 def _resolve_postgres_config() -> dict[str, object]:
     """Resolve PostgreSQL connection config from env vars.
 
+    Delegates to the shared ``PostgresConfig.from_env()`` utility to avoid
+    duplicating DSN parsing logic. See ``tests/helpers/util_postgres.py``.
+
     Returns:
         Dict with host, port, database, user, password keys.
     """
-    from urllib.parse import unquote, urlparse
+    from tests.helpers.util_postgres import PostgresConfig
 
-    db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
-    if db_url:
-        parsed = urlparse(db_url)
-        return {
-            "host": parsed.hostname or "localhost",
-            "port": parsed.port or 5432,
-            "database": (parsed.path or "").lstrip("/") or "omnibase_infra",
-            "user": unquote(parsed.username) if parsed.username else "postgres",
-            "password": unquote(parsed.password) if parsed.password else "",
-        }
+    config = PostgresConfig.from_env()
     return {
-        "host": os.getenv("POSTGRES_HOST", "localhost"),
-        "port": int(os.getenv("POSTGRES_PORT", "5432")),
-        "database": "omnibase_infra",
-        "user": os.getenv("POSTGRES_USER", "postgres"),
-        "password": os.getenv("POSTGRES_PASSWORD", ""),
+        "host": config.host or "localhost",
+        "port": config.port,
+        "database": config.database or "omnibase_infra",
+        "user": config.user,
+        "password": config.password or "",
     }
 
 
