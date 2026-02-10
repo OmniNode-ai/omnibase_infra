@@ -9,6 +9,7 @@ Centralises environment-resolution functions used by multiple subcommands
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse
 
 
 def get_broker() -> str:
@@ -60,6 +61,16 @@ def get_postgres_dsn() -> str:
             f"OMNIBASE_INFRA_DB_URL has invalid scheme. "
             f"Expected 'postgresql://' or 'postgres://', "
             f"got: {db_url.split('://', 1)[0] if '://' in db_url else '(none)'}://"
+        )
+        raise ValueError(msg)
+
+    # Validate DSN contains a database name (path component)
+    parsed = urlparse(db_url)
+    database = (parsed.path or "").lstrip("/")
+    if not database:
+        msg = (
+            "OMNIBASE_INFRA_DB_URL is missing a database name. "
+            "Example: postgresql://user:pass@host:5432/omnibase_infra"
         )
         raise ValueError(msg)
 

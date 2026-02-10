@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import click
@@ -226,6 +227,17 @@ def _get_db_dsn() -> str:
             f"(correlation_id={correlation_id}). "
             f"Expected 'postgresql://' or 'postgres://', "
             f"got: {db_url.split('://', 1)[0] if '://' in db_url else '(none)'}://"
+        )
+
+    # Validate DSN contains a database name (path component)
+    parsed = urlparse(db_url)
+    database = (parsed.path or "").lstrip("/")
+    if not database:
+        correlation_id = uuid4()
+        raise click.ClickException(
+            f"OMNIBASE_INFRA_DB_URL is missing a database name "
+            f"(correlation_id={correlation_id}). "
+            "Example: postgresql://user:pass@host:5432/omnibase_infra"
         )
 
     return db_url

@@ -87,3 +87,17 @@ class TestGetPostgresDsn:
         with patch.dict("os.environ", env, clear=True):
             with pytest.raises(ValueError, match="invalid scheme"):
                 get_postgres_dsn()
+
+    def test_missing_database_name_raises(self) -> None:
+        """Rejects DSN with no database name in path."""
+        env = {"OMNIBASE_INFRA_DB_URL": "postgresql://user:pass@host:5432/"}
+        with patch.dict("os.environ", env, clear=True):
+            with pytest.raises(ValueError, match="missing a database name"):
+                get_postgres_dsn()
+
+    def test_missing_database_name_no_slash_raises(self) -> None:
+        """Rejects DSN with no path at all."""
+        env = {"OMNIBASE_INFRA_DB_URL": "postgresql://user:pass@host:5432"}
+        with patch.dict("os.environ", env, clear=True):
+            with pytest.raises(ValueError, match="missing a database name"):
+                get_postgres_dsn()
