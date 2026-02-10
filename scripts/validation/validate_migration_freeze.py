@@ -6,11 +6,12 @@ prevents new migration files from being committed. This enforces the schema
 freeze during the DB-per-repo refactor (OMN-2055).
 
 The freeze allows:
-  - Modifying existing migration files (bug fixes, moves)
+  - Modifying existing migration files (bug fixes, comments)
   - Deleting migration files (cleanup)
 
 The freeze blocks:
   - Adding NEW migration files (forward or rollback)
+  - Renaming files into migration directories (treated as new migrations)
 
 Usage:
     python scripts/validation/validate_migration_freeze.py
@@ -32,7 +33,8 @@ from pathlib import Path
 
 # Directories containing migration files.
 # A single prefix is sufficient — startswith() matches all subdirectories
-# (forward/, rollback/, etc.) under docker/migrations/.
+# (docker/migrations/forward/, docker/migrations/rollback/, etc.).
+# This covers the complete migration layout for this repository.
 MIGRATION_DIRS: tuple[str, ...] = ("docker/migrations/",)
 
 # File extensions considered migration files
@@ -74,10 +76,15 @@ class FreezeValidationResult:
 
 
 def _get_new_staged_files(repo_path: Path) -> list[str]:
-    """Get files that are newly added in the staging area (git diff --cached --diff-filter=A)."""
+    """Get files that are newly added or renamed in the staging area.
+
+    Uses ``--diff-filter=AR`` to match the bash CI script behavior:
+    Added (A) files are new migrations, Renamed (R) files are treated as
+    new migrations in their destination directory.
+    """
     try:
         result = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--diff-filter=A"],
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=AR"],
             capture_output=True,
             text=True,
             cwd=str(repo_path),
@@ -115,7 +122,11 @@ def _get_merge_base(repo_path: Path) -> str:
 
 
 def _get_new_committed_files(repo_path: Path, base_ref: str | None = None) -> list[str]:
-    """Get files that are newly added in committed changes.
+    """Get files that are newly added or renamed in committed changes.
+
+    Uses ``--diff-filter=AR`` to match the bash CI script behavior:
+    Added (A) files are new migrations, Renamed (R) files are treated as
+    new migrations in their destination directory.
 
     Args:
         repo_path: Repository root path.
@@ -126,7 +137,7 @@ def _get_new_committed_files(repo_path: Path, base_ref: str | None = None) -> li
         base_ref = _get_merge_base(repo_path)
     try:
         result = subprocess.run(
-            ["git", "diff", "--name-only", "--diff-filter=A", f"{base_ref}..HEAD"],
+            ["git", "diff", "--name-only", "--diff-filter=AR", f"{base_ref}..HEAD"],
             capture_output=True,
             text=True,
             cwd=str(repo_path),
