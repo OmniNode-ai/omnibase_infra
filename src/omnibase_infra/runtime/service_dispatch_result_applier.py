@@ -33,6 +33,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from pydantic import BaseModel
+
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumDispatchStatus, EnumInfraTransportType
 from omnibase_infra.errors import RuntimeHostError
@@ -128,7 +130,7 @@ class DispatchResultApplier:
         if result.output_events:
             for output_event in result.output_events:
                 try:
-                    output_envelope = ModelEventEnvelope(  # type: ignore[var-annotated]
+                    output_envelope: ModelEventEnvelope[BaseModel] = ModelEventEnvelope(
                         payload=output_event,
                         correlation_id=effective_correlation_id,
                         envelope_timestamp=datetime.now(UTC),

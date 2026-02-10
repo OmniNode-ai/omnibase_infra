@@ -32,8 +32,10 @@ import logging
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
+from pydantic import BaseModel
 from typing_extensions import runtime_checkable
 
+from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
@@ -49,7 +51,7 @@ if TYPE_CHECKING:
 class ProtocolIntentEffect(Protocol):
     """Protocol for intent effect handlers.
 
-    Effect handlers must implement either ``execute()`` or ``handle()``
+    Effect handlers must implement ``execute()``
     with the signature ``(payload, *, correlation_id) -> None``.
     """
 
@@ -101,8 +103,8 @@ class IntentExecutor:
         Args:
             container: ONEX container for handler resolution.
             effect_handlers: Optional mapping of intent_type to handler objects.
-                Each handler must implement an async `execute()` or `handle()`
-                method that accepts the intent payload.
+                Each handler must implement the ProtocolIntentEffect protocol
+                (async `execute()` method).
         """
         self._container = container
         self._effect_handlers: dict[str, ProtocolIntentEffect] = effect_handlers or {}
@@ -112,7 +114,7 @@ class IntentExecutor:
 
         Args:
             intent_type: The intent_type string to route (e.g., "consul.register").
-            handler: Handler object with async execute() or handle() method.
+            handler: Handler implementing ProtocolIntentEffect (async execute()).
         """
         self._effect_handlers[intent_type] = handler
         logger.debug(
@@ -141,16 +143,18 @@ class IntentExecutor:
             )
             return
 
-        # Get intent_type from payload (typed payload pattern).
-        # Per architecture: payload.intent_type is the specific routing key
-        # (e.g., "consul.register", "postgres.upsert_registration").
-        # Fallback to intent.intent_type only if payload lacks intent_type.
-        intent_type = getattr(payload, "intent_type", None)
-        if intent_type is None:
+        # Get intent_type from payload using isinstance guard (not bare getattr).
+        # Typed payloads extend BaseModel with an explicit intent_type Literal field.
+        # A non-BaseModel payload (e.g., plain dict) is caught by the guard.
+        intent_type: str | None = None
+        if isinstance(payload, BaseModel) and hasattr(payload, "intent_type"):
+            intent_type = payload.intent_type
+        else:
             intent_type = intent.intent_type
             logger.warning(
-                "Payload has no intent_type, falling back to intent.intent_type=%s "
-                "(this may indicate a malformed intent payload) correlation_id=%s",
+                "Payload %s has no intent_type field, "
+                "falling back to intent.intent_type=%s correlation_id=%s",
+                type(payload).__name__,
                 intent_type,
                 str(correlation_id) if correlation_id else "none",
             )
@@ -158,7 +162,7 @@ class IntentExecutor:
         if intent_type is None:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
-                transport_type=None,
+                transport_type=EnumInfraTransportType.RUNTIME,
                 operation="intent_executor.resolve_intent_type",
             )
             raise RuntimeHostError(
@@ -171,7 +175,7 @@ class IntentExecutor:
         if handler is None:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
-                transport_type=None,
+                transport_type=EnumInfraTransportType.RUNTIME,
                 operation="intent_executor.resolve_handler",
             )
             raise RuntimeHostError(
@@ -181,26 +185,10 @@ class IntentExecutor:
             )
 
         try:
-            # Duck-type: try execute() first, then handle()
-            execute_fn = getattr(handler, "execute", None)
-            if execute_fn is not None and callable(execute_fn):
-                await execute_fn(payload, correlation_id=correlation_id)
-            else:
-                handle_fn = getattr(handler, "handle", None)
-                if handle_fn is not None and callable(handle_fn):
-                    await handle_fn(payload, correlation_id=correlation_id)
-                else:
-                    context = ModelInfraErrorContext.with_correlation(
-                        correlation_id=correlation_id,
-                        transport_type=None,
-                        operation="intent_executor.invoke_handler",
-                    )
-                    raise RuntimeHostError(
-                        f"Effect handler for intent_type={intent_type!r} "
-                        f"({type(handler).__name__}) has no execute() or handle() "
-                        f"method — intent would be lost",
-                        context=context,
-                    )
+            # Direct protocol call — all handlers implement ProtocolIntentEffect
+            # which declares execute(). No duck-type fallback needed since
+            # register_handler() accepts ProtocolIntentEffect.
+            await handler.execute(payload, correlation_id=correlation_id)
 
             logger.info(
                 "Intent executed: intent_type=%s handler=%s correlation_id=%s",
