@@ -15,16 +15,16 @@ These tests verify ProjectorShell against a real PostgreSQL database to validate
 
 Environment Variables:
     OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
-        Example: postgresql://postgres:secret@localhost:5432/postgres
+        Example: postgresql://postgres:secret@localhost:5432/omnibase_infra
 
     Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
     POSTGRES_HOST: Database host (default: localhost)
     POSTGRES_PORT: Database port (default: 5432)
     POSTGRES_USER: Database user (default: postgres)
-    POSTGRES_PASSWORD: Database password (REQUIRED - no default, tests skip if unset)
+    POSTGRES_PASSWORD: Database password (fallback - tests skip if unset)
 
     For remote OmniNode infrastructure, set:
-        OMNIBASE_INFRA_DB_URL=postgresql://postgres:secret@your-infra-server-ip:5436/omninode_bridge
+        OMNIBASE_INFRA_DB_URL=postgresql://postgres:secret@your-infra-server-ip:5436/omnibase_infra
 
 Test Isolation:
     Each test creates a unique table (test_projector_{uuid8}) and drops it
@@ -135,7 +135,7 @@ def _get_database_dsn() -> str | None:
     if not password:
         return None
 
-    return f"postgresql://{user}:{password}@{host}:{port}/postgres"
+    return f"postgresql://{user}:{password}@{host}:{port}/omnibase_infra"
 
 
 @pytest.fixture

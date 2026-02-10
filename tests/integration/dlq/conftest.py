@@ -19,14 +19,14 @@ Environment Variables
 =====================
 
     OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
-        Example: postgresql://postgres:secret@localhost:5436/omninode_bridge
+        Example: postgresql://postgres:secret@localhost:5436/omnibase_infra
 
     Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
-    POSTGRES_HOST: PostgreSQL server hostname (required - skip if not set)
+    POSTGRES_HOST: PostgreSQL server hostname (fallback - skip if not set)
         Example: localhost or your-server-ip
     POSTGRES_PORT: PostgreSQL server port (default: 5436)
     POSTGRES_USER: Database username (default: postgres)
-    POSTGRES_PASSWORD: Database password (required - tests skip if not set)
+    POSTGRES_PASSWORD: Database password (fallback - tests skip if not set)
 
 Related Ticket: OMN-1032 - Complete DLQ Replay PostgreSQL Tracking Integration
 """

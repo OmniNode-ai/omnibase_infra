@@ -73,7 +73,10 @@ if TYPE_CHECKING:
 # Check if PostgreSQL is available for integration tests
 POSTGRES_HOST = os.getenv("POSTGRES_HOST")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
-POSTGRES_AVAILABLE = POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None
+POSTGRES_AVAILABLE = os.getenv("OMNIBASE_INFRA_DB_URL") is not None or (
+    os.getenv("POSTGRES_HOST") is not None
+    and os.getenv("POSTGRES_PASSWORD") is not None
+)
 
 
 # =============================================================================
@@ -450,13 +453,13 @@ class TestHandlerFactoryPattern:
                 parsed = urlparse(db_url)
                 _host = parsed.hostname or "localhost"
                 _port = parsed.port or 5432
-                _database = (parsed.path or "").lstrip("/") or "omninode_bridge"
+                _database = (parsed.path or "").lstrip("/") or "omnibase_infra"
                 _user = parsed.username or "postgres"
                 _password = parsed.password or ""
             else:
                 _host = os.getenv("POSTGRES_HOST", "localhost")
                 _port = int(os.getenv("POSTGRES_PORT", "5432"))
-                _database = "omninode_bridge"
+                _database = "omnibase_infra"
                 _user = os.getenv("POSTGRES_USER", "postgres")
                 _password = os.getenv("POSTGRES_PASSWORD", "")
             return HandlerRegistrationStoragePostgres(
@@ -480,7 +483,7 @@ class TestHandlerFactoryPattern:
 
     @pytest.mark.skipif(
         not POSTGRES_AVAILABLE,
-        reason="PostgreSQL not available (POSTGRES_HOST/POSTGRES_PASSWORD not set)",
+        reason="PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST+POSTGRES_PASSWORD)",
     )
     def test_factory_creates_postgres_handler(self) -> None:
         """Factory creates HandlerRegistrationStoragePostgres for 'postgresql' type."""
@@ -657,7 +660,7 @@ class TestRuntimeHandlerSwapping:
 
 @pytest.mark.skipif(
     not POSTGRES_AVAILABLE,
-    reason="PostgreSQL not available (POSTGRES_HOST/POSTGRES_PASSWORD not set)",
+    reason="PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST+POSTGRES_PASSWORD)",
 )
 class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
     """Test handler swapping with HandlerRegistrationStoragePostgres.
@@ -681,13 +684,13 @@ class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
             parsed = urlparse(db_url)
             _host = parsed.hostname or "localhost"
             _port = parsed.port or 5432
-            _database = (parsed.path or "").lstrip("/") or "omninode_bridge"
+            _database = (parsed.path or "").lstrip("/") or "omnibase_infra"
             _user = parsed.username or "postgres"
             _password = parsed.password or ""
         else:
             _host = os.getenv("POSTGRES_HOST", "localhost")
             _port = int(os.getenv("POSTGRES_PORT", "5432"))
-            _database = "omninode_bridge"
+            _database = "omnibase_infra"
             _user = os.getenv("POSTGRES_USER", "postgres")
             _password = os.getenv("POSTGRES_PASSWORD", "")
         handler = HandlerRegistrationStoragePostgres(

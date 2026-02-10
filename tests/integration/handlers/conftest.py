@@ -61,12 +61,11 @@ Requirements: pytest-httpserver must be installed: pip install pytest-httpserver
 Database Handlers
 =================
 
-Environment Variables (required):
-    POSTGRES_HOST: PostgreSQL hostname (required)
-    POSTGRES_PASSWORD: Database password (required)
 Environment Variables (preferred):
     OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
-Environment Variables (fallback):
+Environment Variables (fallback - used only if OMNIBASE_INFRA_DB_URL is not set):
+    POSTGRES_HOST: PostgreSQL hostname (fallback if OMNIBASE_INFRA_DB_URL not set)
+    POSTGRES_PASSWORD: Database password (fallback - tests skip if neither is set)
     POSTGRES_PORT: PostgreSQL port (default: 5432)
     POSTGRES_USER: Database username (default: postgres)
 

@@ -63,11 +63,11 @@ Environment Variables
         Example: postgresql://postgres:secret@localhost:5432/omninode_bridge
 
     Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
-    POSTGRES_HOST: PostgreSQL server hostname (required - skip if not set)
+    POSTGRES_HOST: PostgreSQL server hostname (fallback - skip if neither is set)
         Example: localhost or ${REMOTE_INFRA_HOST}
     POSTGRES_PORT: PostgreSQL server port (default: 5432)
     POSTGRES_USER: Database username (default: postgres)
-    POSTGRES_PASSWORD: Database password (required - tests skip if not set)
+    POSTGRES_PASSWORD: Database password (fallback - tests skip if neither is set)
 
     See tests/infrastructure_config.py for REMOTE_INFRA_HOST default.
 

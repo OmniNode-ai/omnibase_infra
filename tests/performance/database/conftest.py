@@ -50,10 +50,10 @@ Environment Requirements:
         Example: postgresql://postgres:secret@localhost:5436/omninode_bridge
 
     Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
-    POSTGRES_HOST: PostgreSQL server hostname
+    POSTGRES_HOST: PostgreSQL server hostname (fallback if OMNIBASE_INFRA_DB_URL not set)
     POSTGRES_PORT: PostgreSQL server port (default: 5436)
     POSTGRES_USER: Database user (default: postgres)
-    POSTGRES_PASSWORD: Database password (required)
+    POSTGRES_PASSWORD: Database password (fallback - tests skip if neither is set)
 
 Related:
     - PR #101: Query performance tests with EXPLAIN ANALYZE

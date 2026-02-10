@@ -27,6 +27,9 @@ Migration Skip Pattern:
     ...     logger.debug("Skipping production-only migration")
     ...     continue
 """
+# NOTE: This module is the canonical location for PostgreSQL test utilities.
+# Use PostgresConfig.from_env() and build_dsn() instead of inlining DSN
+# construction in individual test conftest files.
 
 from __future__ import annotations
 
@@ -251,10 +254,15 @@ class PostgresConfig:
         if db_url:
             parsed = urlparse(db_url)
             database = (parsed.path or "").lstrip("/")
+            if not database:
+                logger.warning(
+                    "OMNIBASE_INFRA_DB_URL is set but contains no database name; "
+                    "tests requiring a database will be skipped."
+                )
             return cls(
                 host=parsed.hostname or "localhost",
                 port=parsed.port or DEFAULT_POSTGRES_PORT,
-                database=database or "omninode_bridge",
+                database=database,
                 user=parsed.username or default_user,
                 password=parsed.password,
             )

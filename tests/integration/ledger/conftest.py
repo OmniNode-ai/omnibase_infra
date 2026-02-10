@@ -55,7 +55,7 @@ def _get_postgres_dsn() -> str | None:
     port = os.getenv("POSTGRES_PORT", "5436")
     user = os.getenv("POSTGRES_USER", "postgres")
 
-    return f"postgresql://{user}:{password}@{host}:{port}/omninode_bridge"
+    return f"postgresql://{user}:{password}@{host}:{port}/omnibase_infra"
 
 
 @pytest.fixture
@@ -71,7 +71,7 @@ def postgres_dsn() -> str:
     dsn = _get_postgres_dsn()
     if dsn is None:
         pytest.skip(
-            "PostgreSQL not configured (missing POSTGRES_HOST or POSTGRES_PASSWORD)"
+            "PostgreSQL not configured (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST+POSTGRES_PASSWORD)"
         )
     return dsn
 

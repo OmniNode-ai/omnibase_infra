@@ -68,6 +68,8 @@ class ModelPostgresPoolConfig(BaseModel):
                 or contains an invalid DSN.
         """
         db_url = os.getenv(db_url_var)
+        if db_url is not None:
+            db_url = db_url.strip()
         if not db_url:
             msg = (
                 f"{db_url_var} is required but not set. "
@@ -103,9 +105,12 @@ class ModelPostgresPoolConfig(BaseModel):
         """
         try:
             parsed = urlparse(dsn)
-        except Exception as e:
-            msg = f"Failed to parse DSN: {e}"
-            raise ValueError(msg) from e
+        except Exception:
+            msg = (
+                "Failed to parse DSN: ensure it follows "
+                "postgresql://user:pass@host:port/dbname format"
+            )
+            raise ValueError(msg) from None
 
         database = (parsed.path or "").lstrip("/")
         if not database:

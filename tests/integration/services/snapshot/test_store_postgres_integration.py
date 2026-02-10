@@ -24,10 +24,10 @@ Environment Variables:
         Example: postgresql://postgres:secret@localhost:5432/omninode_bridge
 
     Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
-    POSTGRES_HOST: PostgreSQL hostname (required)
+    POSTGRES_HOST: PostgreSQL hostname (fallback if OMNIBASE_INFRA_DB_URL not set)
     POSTGRES_PORT: PostgreSQL port (default: 5432)
     POSTGRES_USER: Database username (default: postgres)
-    POSTGRES_PASSWORD: Database password (required - tests skip if unset)
+    POSTGRES_PASSWORD: Database password (fallback - tests skip if neither is set)
 
 CI/CD Graceful Skip Behavior:
     Tests skip gracefully when PostgreSQL is unavailable:

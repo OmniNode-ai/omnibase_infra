@@ -210,8 +210,10 @@ def _get_db_dsn() -> str:
     """
     db_url = os.environ.get("OMNIBASE_INFRA_DB_URL")
     if not db_url:
+        correlation_id = uuid4()
         raise click.ClickException(
-            "OMNIBASE_INFRA_DB_URL is required but not set. "
+            f"OMNIBASE_INFRA_DB_URL is required but not set "
+            f"(correlation_id={correlation_id}). "
             "Set it to a PostgreSQL DSN, e.g. "
             "postgresql://user:pass@host:5432/omnibase_infra"
         )
