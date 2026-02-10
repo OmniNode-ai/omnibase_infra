@@ -107,6 +107,142 @@ class TestAppendSessionEntry:
         assert params[8] == LEDGER_SOURCE  # source
 
     @pytest.mark.asyncio
+    async def test_rejects_bool_as_kafka_partition(
+        self, mock_pool: MagicMock, sample_session_id, sample_correlation_id
+    ) -> None:
+        """Raises TypeError when kafka_partition is bool (bool is subclass of int)."""
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="kafka_partition must be int"):
+            await sink.append_session_entry(
+                session_id=sample_session_id,
+                correlation_id=sample_correlation_id,
+                event_type="context_utilization",
+                event_payload=b"{}",
+                kafka_topic="test.topic",
+                kafka_partition=True,
+                kafka_offset=0,
+            )
+
+    @pytest.mark.asyncio
+    async def test_rejects_negative_kafka_partition(
+        self, mock_pool: MagicMock, sample_session_id, sample_correlation_id
+    ) -> None:
+        """Raises ValueError when kafka_partition is negative."""
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(ValueError, match="kafka_partition must be >= 0"):
+            await sink.append_session_entry(
+                session_id=sample_session_id,
+                correlation_id=sample_correlation_id,
+                event_type="context_utilization",
+                event_payload=b"{}",
+                kafka_topic="test.topic",
+                kafka_partition=-1,
+                kafka_offset=0,
+            )
+
+    @pytest.mark.asyncio
+    async def test_rejects_negative_kafka_offset(
+        self, mock_pool: MagicMock, sample_session_id, sample_correlation_id
+    ) -> None:
+        """Raises ValueError when kafka_offset is negative."""
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(ValueError, match="kafka_offset must be >= 0"):
+            await sink.append_session_entry(
+                session_id=sample_session_id,
+                correlation_id=sample_correlation_id,
+                event_type="context_utilization",
+                event_payload=b"{}",
+                kafka_topic="test.topic",
+                kafka_partition=0,
+                kafka_offset=-5,
+            )
+
+    @pytest.mark.asyncio
+    async def test_rejects_bool_as_kafka_offset(
+        self, mock_pool: MagicMock, sample_session_id, sample_correlation_id
+    ) -> None:
+        """Raises TypeError when kafka_offset is bool."""
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="kafka_offset must be int"):
+            await sink.append_session_entry(
+                session_id=sample_session_id,
+                correlation_id=sample_correlation_id,
+                event_type="context_utilization",
+                event_payload=b"{}",
+                kafka_topic="test.topic",
+                kafka_partition=0,
+                kafka_offset=False,
+            )
+
+    @pytest.mark.asyncio
+    async def test_rejects_empty_kafka_topic(
+        self, mock_pool: MagicMock, sample_session_id, sample_correlation_id
+    ) -> None:
+        """Raises TypeError when kafka_topic is empty string."""
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="kafka_topic must be a non-empty str"):
+            await sink.append_session_entry(
+                session_id=sample_session_id,
+                correlation_id=sample_correlation_id,
+                event_type="context_utilization",
+                event_payload=b"{}",
+                kafka_topic="",
+                kafka_partition=0,
+                kafka_offset=0,
+            )
+
+    @pytest.mark.asyncio
+    async def test_rejects_empty_event_type(
+        self, mock_pool: MagicMock, sample_session_id, sample_correlation_id
+    ) -> None:
+        """Raises TypeError when event_type is empty string."""
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="event_type must be a non-empty str"):
+            await sink.append_session_entry(
+                session_id=sample_session_id,
+                correlation_id=sample_correlation_id,
+                event_type="",
+                event_payload=b"{}",
+                kafka_topic="test.topic",
+                kafka_partition=0,
+                kafka_offset=0,
+            )
+
+    @pytest.mark.asyncio
+    async def test_rejects_non_str_kafka_topic(
+        self, mock_pool: MagicMock, sample_session_id, sample_correlation_id
+    ) -> None:
+        """Raises TypeError when kafka_topic is not a string."""
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="kafka_topic must be a non-empty str"):
+            await sink.append_session_entry(
+                session_id=sample_session_id,
+                correlation_id=sample_correlation_id,
+                event_type="context_utilization",
+                event_payload=b"{}",
+                kafka_topic=123,  # type: ignore[arg-type]
+                kafka_partition=0,
+                kafka_offset=0,
+            )
+
+    @pytest.mark.asyncio
+    async def test_rejects_non_str_event_type(
+        self, mock_pool: MagicMock, sample_session_id, sample_correlation_id
+    ) -> None:
+        """Raises TypeError when event_type is not a string."""
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="event_type must be a non-empty str"):
+            await sink.append_session_entry(
+                session_id=sample_session_id,
+                correlation_id=sample_correlation_id,
+                event_type=42,  # type: ignore[arg-type]
+                event_payload=b"{}",
+                kafka_topic="test.topic",
+                kafka_partition=0,
+                kafka_offset=0,
+            )
+
+    @pytest.mark.asyncio
     async def test_sets_statement_timeout(
         self, mock_pool: MagicMock, sample_session_id, sample_correlation_id
     ) -> None:

@@ -187,12 +187,12 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             ModelInjectionEffectivenessQueryResult with pagination metadata.
         """
         # Defense-in-depth: mirrors Pydantic constraints on ModelInjectionEffectivenessQuery
-        # (limit: ge=1, le=10000; offset: ge=0). Kept in sync manually.
+        # (limit: ge=1, le=10000; offset: ge=0, le=1000000). Kept in sync manually.
         if query.limit < 1 or query.limit > 10000:
             msg = f"limit must be between 1 and 10000, got {query.limit}"
             raise ValueError(msg)
-        if query.offset < 0:
-            msg = f"offset must be >= 0, got {query.offset}"
+        if query.offset < 0 or query.offset > 1000000:
+            msg = f"offset must be between 0 and 1000000, got {query.offset}"
             raise ValueError(msg)
 
         if correlation_id is None:

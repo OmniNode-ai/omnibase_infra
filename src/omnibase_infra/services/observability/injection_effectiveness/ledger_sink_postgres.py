@@ -135,6 +135,27 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             InfraTimeoutError: If operation times out.
             InfraUnavailableError: If circuit breaker is open.
         """
+        # Input validation: match append_batch constraints for consistency
+        if not isinstance(kafka_topic, str) or not kafka_topic:
+            msg = f"kafka_topic must be a non-empty str, got {type(kafka_topic).__name__}: {kafka_topic!r}"
+            raise TypeError(msg)
+        if not isinstance(event_type, str) or not event_type:
+            msg = f"event_type must be a non-empty str, got {type(event_type).__name__}: {event_type!r}"
+            raise TypeError(msg)
+        # Use `type(x) is int` to reject bool (bool is a subclass of int)
+        if type(kafka_partition) is not int:
+            msg = f"kafka_partition must be int, got {type(kafka_partition).__name__}"
+            raise TypeError(msg)
+        if kafka_partition < 0:
+            msg = f"kafka_partition must be >= 0, got {kafka_partition}"
+            raise ValueError(msg)
+        if type(kafka_offset) is not int:
+            msg = f"kafka_offset must be int, got {type(kafka_offset).__name__}"
+            raise TypeError(msg)
+        if kafka_offset < 0:
+            msg = f"kafka_offset must be >= 0, got {kafka_offset}"
+            raise ValueError(msg)
+
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(
                 operation="append_session_entry",

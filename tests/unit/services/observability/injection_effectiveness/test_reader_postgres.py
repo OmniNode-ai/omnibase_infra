@@ -139,6 +139,23 @@ class TestQuery:
         assert "control" in count_call_args.args
 
     @pytest.mark.asyncio
+    async def test_rejects_offset_above_max(self, mock_pool: MagicMock) -> None:
+        """Raises ValueError when offset > 1000000."""
+        reader = ReaderInjectionEffectivenessPostgres(mock_pool)
+        query = ModelInjectionEffectivenessQuery.model_construct(
+            limit=100,
+            offset=1000001,
+            session_id=None,
+            correlation_id=None,
+            cohort=None,
+            utilization_method=None,
+            start_time=None,
+            end_time=None,
+        )
+        with pytest.raises(ValueError, match="offset must be between 0 and 1000000"):
+            await reader.query(query)
+
+    @pytest.mark.asyncio
     async def test_rows_are_typed_models(self, mock_pool: MagicMock) -> None:
         """Result rows are ModelInjectionEffectivenessRow instances."""
         rows = [make_effectiveness_row()]
