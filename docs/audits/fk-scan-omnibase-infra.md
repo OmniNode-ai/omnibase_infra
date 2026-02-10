@@ -11,8 +11,8 @@
 
 | Metric | Value |
 |--------|-------|
-| Forward migrations scanned | 17 (15 docker + 2 src) |
-| Rollback migrations scanned | 17 (15 docker + 2 src) |
+| Forward migrations scanned | 16 (14 docker + 2 src) |
+| Rollback migrations scanned | 16 (14 docker + 2 src) |
 | Physical FK constraints found | 2 |
 | Cross-service FK violations | **0** |
 | Logical references (no FK) | 2 |
@@ -78,7 +78,7 @@ Integrity is enforced at the application layer (see migration lines 128-135).
 | 001 | `event_ledger` |
 | 002 | `validation_event_ledger` |
 
-**Total: 18 tables, all owned by omnibase_infra.**
+**Total: 19 tables, all owned by omnibase_infra.**
 
 ---
 
