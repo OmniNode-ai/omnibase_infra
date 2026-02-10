@@ -224,6 +224,23 @@ class TestModelPostgresPoolConfig:
             with pytest.raises(ValueError, match="Port could not be cast"):
                 ModelPostgresPoolConfig.from_env()
 
+    def test_from_env_missing_url_raises(self) -> None:
+        """Fail-fast: from_env() raises when OMNIBASE_INFRA_DB_URL is not set."""
+        with patch.dict("os.environ", {}, clear=True):
+            with pytest.raises(ValueError, match="OMNIBASE_INFRA_DB_URL is required"):
+                ModelPostgresPoolConfig.from_env()
+
+    def test_from_dsn_missing_database_raises(self) -> None:
+        """from_dsn() raises when DSN has no database path."""
+        with pytest.raises(ValueError, match="missing a database name"):
+            ModelPostgresPoolConfig.from_dsn("postgresql://user:pass@host:5432/")
+
+    def test_from_dsn_missing_database_sanitizes_password(self) -> None:
+        """Error message for missing database does not leak the password."""
+        with pytest.raises(ValueError, match="missing a database name") as exc_info:
+            ModelPostgresPoolConfig.from_dsn("postgresql://user:secret@host:5432")
+        assert "secret" not in str(exc_info.value)
+
 
 class TestModelKafkaProducerConfig:
     """Tests for Kafka producer configuration."""

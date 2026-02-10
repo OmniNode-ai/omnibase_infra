@@ -109,7 +109,11 @@ class ModelPostgresPoolConfig(BaseModel):
 
         database = (parsed.path or "").lstrip("/")
         if not database:
-            msg = f"DSN is missing a database name: {dsn!r}"
+            # Sanitise DSN to avoid leaking credentials in error messages
+            safe_dsn = (
+                f"{parsed.scheme}://{parsed.hostname or '?'}:{parsed.port or '?'}/???"
+            )
+            msg = f"DSN is missing a database name: {safe_dsn}"
             raise ValueError(msg)
 
         return cls(
