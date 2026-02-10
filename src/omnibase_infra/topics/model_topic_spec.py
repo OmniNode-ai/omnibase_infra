@@ -22,6 +22,7 @@ Related:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
@@ -47,7 +48,7 @@ class ModelTopicSpec:
     suffix: str
     partitions: int = DEFAULT_EVENT_TOPIC_PARTITIONS
     replication_factor: int = DEFAULT_EVENT_TOPIC_REPLICATION_FACTOR
-    kafka_config: MappingProxyType[str, str] | None = field(default=None)
+    kafka_config: Mapping[str, str] | None = field(default=None)
 
     def __post_init__(self) -> None:
         """Freeze mutable kafka_config dict passed at construction time."""
