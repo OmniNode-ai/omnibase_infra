@@ -933,23 +933,12 @@ async def cleanup_postgres_test_projections() -> AsyncGenerator[None, None]:
     yield  # Let the test run
 
     # Check if PostgreSQL is configured via OMNIBASE_INFRA_DB_URL or fallback vars
-    postgres_dsn = os.getenv("OMNIBASE_INFRA_DB_URL")
-    if not postgres_dsn:
-        # Fallback: build DSN from individual POSTGRES_* env vars
-        host = os.getenv("POSTGRES_HOST")
-        password = os.getenv("POSTGRES_PASSWORD")
-        if not host or not password:
-            return  # PostgreSQL not configured, skip cleanup
-        from urllib.parse import quote_plus
+    from tests.helpers.util_postgres import PostgresConfig
 
-        port = os.getenv("POSTGRES_PORT", "5432")
-        user = os.getenv("POSTGRES_USER", "postgres")
-        encoded_user = quote_plus(user, safe="")
-        encoded_password = quote_plus(password, safe="")
-        postgres_dsn = (
-            f"postgresql://{encoded_user}:{encoded_password}"
-            f"@{host}:{port}/omnibase_infra"
-        )
+    pg_config = PostgresConfig.from_env()
+    if not pg_config.is_configured:
+        return  # PostgreSQL not configured, skip cleanup
+    postgres_dsn = pg_config.build_dsn()
 
     try:
         import asyncpg

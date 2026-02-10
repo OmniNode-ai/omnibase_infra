@@ -8,10 +8,13 @@ Updated in OMN-2065: Per-service DB URL contract (DB-SPLIT-02).
 
 from __future__ import annotations
 
+import logging
 import os
 from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 class ModelPostgresPoolConfig(BaseModel):
@@ -139,8 +142,17 @@ class ModelPostgresPoolConfig(BaseModel):
             msg = f"DSN is missing a database name: {safe_dsn}"
             raise ValueError(msg)
 
-        # TODO(OMN-2065): DSN query params (sslmode, options, etc.) are currently
-        # discarded during parsing. If needed, add a `query_params: str` field.
+        # DSN query params (sslmode, options, connect_timeout, etc.) are
+        # currently discarded during parsing. Log a warning when this happens
+        # so operators are aware that params like sslmode=require will not
+        # take effect via this config path.
+        if parsed.query:
+            logger.warning(
+                "DSN query parameters detected but will be discarded: %s. "
+                "Parameters like sslmode are not yet forwarded to asyncpg. "
+                "To enforce SSL, configure it at the asyncpg pool level.",
+                parsed.query,
+            )
         #
         # NOTE: Missing password defaults to "" (the field default). This is
         # intentional — from_env() is the production entry point and requires a

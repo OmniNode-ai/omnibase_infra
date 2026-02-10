@@ -36,6 +36,7 @@ import os
 import uuid
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 import pytest
 
@@ -111,10 +112,23 @@ def get_dsn() -> str:
 
     Raises:
         ValueError: If neither OMNIBASE_INFRA_DB_URL nor required
-            individual vars are set.
+            individual vars are set, or if the DSN has an invalid scheme
+            or is missing a database name.
     """
     db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
     if db_url:
+        # Validate scheme and database name (consistent with other DSN consumers)
+        parsed = urlparse(db_url)
+        if parsed.scheme not in ("postgresql", "postgres"):
+            msg = (
+                f"OMNIBASE_INFRA_DB_URL has invalid scheme '{parsed.scheme}', "
+                "expected 'postgresql' or 'postgres'"
+            )
+            raise ValueError(msg)
+        database = (parsed.path or "").lstrip("/")
+        if not database:
+            msg = "OMNIBASE_INFRA_DB_URL is missing a database name"
+            raise ValueError(msg)
         return db_url
 
     is_configured, error_msg = _check_postgres_env_vars()

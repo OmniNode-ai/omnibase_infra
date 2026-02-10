@@ -30,7 +30,7 @@ cd omnibase_infra
 # Start infrastructure services with Docker
 cd docker
 cp .env.example .env
-# Edit .env - set POSTGRES_PASSWORD (required); OMNIBASE_INFRA_DB_URL is optional (has fallback)
+# Edit .env - set POSTGRES_PASSWORD (required for Docker); set OMNIBASE_INFRA_DB_URL for the runtime
 
 docker compose -f docker-compose.infra.yml up -d
 

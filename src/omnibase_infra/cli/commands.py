@@ -209,9 +209,10 @@ def _get_db_dsn() -> str:
     Raises:
         click.ClickException: If OMNIBASE_INFRA_DB_URL is not set (fail-fast).
     """
+    correlation_id = uuid4()
+
     db_url = os.environ.get("OMNIBASE_INFRA_DB_URL")
     if not db_url:
-        correlation_id = uuid4()
         raise click.ClickException(
             f"OMNIBASE_INFRA_DB_URL is required but not set "
             f"(correlation_id={correlation_id}). "
@@ -221,7 +222,6 @@ def _get_db_dsn() -> str:
 
     # Validate DSN scheme to catch obvious misconfigurations early
     if not db_url.startswith(("postgresql://", "postgres://")):
-        correlation_id = uuid4()
         raise click.ClickException(
             f"OMNIBASE_INFRA_DB_URL has invalid scheme "
             f"(correlation_id={correlation_id}). "
@@ -233,7 +233,6 @@ def _get_db_dsn() -> str:
     parsed = urlparse(db_url)
     database = (parsed.path or "").lstrip("/")
     if not database:
-        correlation_id = uuid4()
         raise click.ClickException(
             f"OMNIBASE_INFRA_DB_URL is missing a database name "
             f"(correlation_id={correlation_id}). "

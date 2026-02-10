@@ -273,6 +273,33 @@ class PluginRegistration:
                     context=context,
                 )
 
+            # Validate DSN scheme and database name before pool creation
+            from urllib.parse import urlparse
+
+            parsed_dsn = urlparse(postgres_dsn)
+            if parsed_dsn.scheme not in ("postgresql", "postgres"):
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="create_postgres_pool",
+                )
+                raise ContainerWiringError(
+                    f"OMNIBASE_INFRA_DB_URL has invalid scheme "
+                    f"'{parsed_dsn.scheme}', expected 'postgresql' or 'postgres'",
+                    context=context,
+                )
+            dsn_database = (parsed_dsn.path or "").lstrip("/")
+            if not dsn_database:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="create_postgres_pool",
+                )
+                raise ContainerWiringError(
+                    "OMNIBASE_INFRA_DB_URL is missing a database name",
+                    context=context,
+                )
+
             self._pool = await asyncpg.create_pool(
                 postgres_dsn,
                 min_size=2,
