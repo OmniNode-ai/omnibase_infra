@@ -9,7 +9,8 @@ Design Decisions:
     - runtime_checkable: Enables isinstance() checks for duck typing
     - Async methods: All operations are async for non-blocking I/O
     - Typed models: Uses Pydantic models for type safety
-    - Deterministic ordering: All queries use ORDER BY created_at DESC
+    - Deterministic ordering: All queries use ORDER BY for reproducible results
+      (created_at DESC for effectiveness/hit-rates, created_at ASC for latency)
 
 Related Tickets:
     - OMN-2078: Golden path: injection metrics + ledger storage

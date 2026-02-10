@@ -186,6 +186,13 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         Returns:
             ModelInjectionEffectivenessQueryResult with pagination metadata.
         """
+        if query.limit < 1 or query.limit > 10000:
+            msg = f"limit must be between 1 and 10000, got {query.limit}"
+            raise ValueError(msg)
+        if query.offset < 0:
+            msg = f"offset must be >= 0, got {query.offset}"
+            raise ValueError(msg)
+
         if correlation_id is None:
             correlation_id = uuid4()
 

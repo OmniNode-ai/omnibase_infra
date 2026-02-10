@@ -9,8 +9,6 @@ Each session gets a single ledger entry summarising the injection outcome.
 Design Decisions:
     - Pool injection: asyncpg.Pool is injected, not created/managed
     - Idempotent writes: Uses ON CONFLICT (topic, partition, kafka_offset) DO NOTHING
-    - Synthetic Kafka position: When events arrive without Kafka offsets (e.g.,
-      during direct writes), uses a synthetic position based on session_id hash
     - Event value: JSON-serialized injection effectiveness summary
     - Circuit breaker: MixinAsyncCircuitBreaker for resilience
 
@@ -189,7 +187,9 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                         correlation_id,
                         event_type,
                         LEDGER_SOURCE,
-                        event_timestamp or datetime.now(UTC),
+                        event_timestamp
+                        if event_timestamp is not None
+                        else datetime.now(UTC),
                     )
                     result: UUID | None = raw_result
 
@@ -236,7 +236,9 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             correlation_id: Correlation ID for tracing.
 
         Returns:
-            Count of entries in the batch (executemany doesn't return affected rows).
+            Number of entries submitted (not necessarily inserted; duplicates
+            are silently skipped by ON CONFLICT DO NOTHING and executemany
+            does not report per-row affected counts).
 
         Raises:
             InfraConnectionError: If database connection fails.
@@ -318,7 +320,9 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                                 correlation_id,
                                 e["event_type"],
                                 LEDGER_SOURCE,
-                                e.get("event_timestamp") or now,
+                                e.get("event_timestamp")
+                                if e.get("event_timestamp") is not None
+                                else now,
                             )
                             for e in entries
                         ],
