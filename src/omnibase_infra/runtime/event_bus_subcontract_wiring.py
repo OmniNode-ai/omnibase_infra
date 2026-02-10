@@ -682,9 +682,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
 
                 # Apply dispatch result (publish output events + delegate intents)
                 if self._result_applier is not None and result is not None:
-                    apply_fn = getattr(self._result_applier, "apply", None)
-                    if apply_fn is not None and callable(apply_fn):
-                        await apply_fn(result, correlation_id)
+                    await self._result_applier.apply(result, correlation_id)
 
                 # Success - commit offset if policy requires and clear retry count
                 if self._should_commit_after_handler():

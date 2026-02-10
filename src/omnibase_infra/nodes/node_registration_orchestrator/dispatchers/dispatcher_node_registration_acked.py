@@ -59,7 +59,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from pydantic import ValidationError
 
@@ -79,6 +79,9 @@ from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.models.registration.commands.model_node_registration_acked import (
     ModelNodeRegistrationAcked,
+)
+from omnibase_infra.nodes.node_registration_orchestrator.dispatchers._util_envelope_extract import (
+    extract_envelope_fields,
 )
 from omnibase_infra.utils import sanitize_error_message
 
@@ -220,22 +223,7 @@ class DispatcherNodeRegistrationAcked(MixinAsyncCircuitBreaker):
         """
         started_at = datetime.now(UTC)
 
-        # Handle both ModelEventEnvelope and materialized dict from dispatch engine
-        if isinstance(envelope, dict):
-            debug_trace = envelope.get("__debug_trace", {})
-            raw_corr = (
-                debug_trace.get("correlation_id")
-                if isinstance(debug_trace, dict)
-                else None
-            )
-            try:
-                correlation_id = UUID(raw_corr) if raw_corr else uuid4()
-            except ValueError:
-                correlation_id = uuid4()
-            raw_payload = envelope.get("payload", {})
-        else:
-            correlation_id = envelope.correlation_id or uuid4()
-            raw_payload = envelope.payload
+        correlation_id, raw_payload = extract_envelope_fields(envelope)
 
         # Check circuit breaker before processing (coroutine-safe)
         # If circuit is OPEN, raises InfraUnavailableError immediately

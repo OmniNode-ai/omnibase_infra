@@ -424,9 +424,8 @@ class HandlerNodeIntrospected:
             else None
         )
         if node_type.value == "orchestrator" and mcp_config is not None:
-            mcp_expose = getattr(mcp_config, "expose", False)
-            if mcp_expose:
-                mcp_tool_name_raw = getattr(mcp_config, "tool_name", None)
+            if mcp_config.expose:
+                mcp_tool_name_raw = mcp_config.tool_name
                 if not mcp_tool_name_raw:
                     node_name = event.metadata.description if event.metadata else None
                     mcp_tool_name_raw = node_name or service_name

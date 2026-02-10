@@ -142,8 +142,9 @@ class IntentExecutor:
             return
 
         # Get intent_type from payload (typed payload pattern).
-        # Per architecture: payload.intent_type is the specific routing key;
-        # intent.intent_type is typically "extension" and not useful for routing.
+        # Per architecture: payload.intent_type is the specific routing key
+        # (e.g., "consul.register", "postgres.upsert_registration").
+        # Fallback to intent.intent_type only if payload lacks intent_type.
         intent_type = getattr(payload, "intent_type", None)
         if intent_type is None:
             intent_type = intent.intent_type
