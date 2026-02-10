@@ -117,10 +117,10 @@ class TestIntentEffectPostgresUpsertExecute:
         assert call_kwargs.kwargs["correlation_id"] == payload_correlation_id
 
     @pytest.mark.asyncio
-    async def test_execute_skips_when_record_is_none(
+    async def test_execute_raises_when_record_is_none(
         self, effect: IntentEffectPostgresUpsert, mock_projector: MagicMock
     ) -> None:
-        """Should skip upsert when record is None."""
+        """Should raise RuntimeHostError when record is None to prevent silent data loss."""
         correlation_id = uuid4()
 
         # Create payload with None record by using model_construct to bypass validation
@@ -130,7 +130,8 @@ class TestIntentEffectPostgresUpsertExecute:
             record=None,
         )
 
-        await effect.execute(payload, correlation_id=correlation_id)
+        with pytest.raises(RuntimeHostError, match="no record"):
+            await effect.execute(payload, correlation_id=correlation_id)
 
         mock_projector.upsert_partial.assert_not_awaited()
 

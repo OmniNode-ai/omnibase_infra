@@ -24,6 +24,13 @@ class ModelProjectionRecord(BaseModel):
     This allows the record to be stored as SerializeAsAny[BaseModel] in
     ModelPayloadPostgresUpsertRegistration while retaining all data.
     SerializeAsAny ensures model_dump() serializes all extra fields.
+
+    Warning:
+        **Non-standard ``extra`` config**: Uses ``extra="allow"`` instead of the
+        project convention ``extra="forbid"`` (see CLAUDE.md Pydantic Model
+        Standards). This is intentional — the model acts as a pass-through
+        wrapper for arbitrary projection column dicts whose keys vary by
+        projector schema. ``extra="forbid"`` would reject unknown columns.
     """
 
     model_config = ConfigDict(extra="allow", frozen=True, from_attributes=True)

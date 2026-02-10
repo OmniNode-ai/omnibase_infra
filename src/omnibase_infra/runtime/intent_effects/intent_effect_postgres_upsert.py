@@ -124,11 +124,16 @@ class IntentEffectPostgresUpsert:
             # Serialize the record to a dict of column values
             record = payload.record
             if record is None:
-                logger.warning(
-                    "Intent payload has no record, skipping upsert correlation_id=%s",
-                    str(effective_correlation_id),
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=effective_correlation_id,
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="upsert_registration",
                 )
-                return
+                raise RuntimeHostError(
+                    "Intent payload has no record — upsert would be lost "
+                    "(malformed intent payload)",
+                    context=context,
+                )
 
             # model_dump() preserves all fields including extra fields
             # from ModelProjectionRecord (extra="allow")
@@ -194,15 +199,21 @@ class IntentEffectPostgresUpsert:
             ) from e
 
     # Columns that are UUID in the registration_projections table.
-    # Must stay in sync with:
-    #   src/omnibase_infra/schemas/schema_registration_projection.sql
+    # Must stay in sync with schema_registration_projection.sql.
+    # Schema columns: entity_id UUID, last_applied_event_id UUID, correlation_id UUID
+    # Validated by: tests/unit/runtime/test_intent_effect_postgres_upsert.py
     _UUID_COLUMNS: frozenset[str] = frozenset(
         {"entity_id", "last_applied_event_id", "correlation_id"}
     )
 
     # Columns that are TIMESTAMPTZ in the registration_projections table.
-    # Must stay in sync with:
-    #   src/omnibase_infra/schemas/schema_registration_projection.sql
+    # Must stay in sync with schema_registration_projection.sql.
+    # Schema columns: ack_deadline, liveness_deadline, last_heartbeat_at,
+    #   ack_timeout_emitted_at, liveness_timeout_emitted_at, registered_at, updated_at
+    # Note: Only columns used by the registration upsert intent are listed here.
+    # Additional TIMESTAMPTZ columns (liveness_deadline, last_heartbeat_at, etc.)
+    # are managed by other handlers and should be added when those intent types
+    # are wired.
     _TIMESTAMP_COLUMNS: frozenset[str] = frozenset(
         {"ack_deadline", "registered_at", "updated_at"}
     )

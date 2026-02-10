@@ -1200,8 +1200,10 @@ class PluginRegistration:
         return f"enabled ({' + '.join(parts)})"
 
 
-# Verify protocol compliance at module load time
-_: ProtocolDomainPlugin = PluginRegistration()
+# Verify protocol compliance at type-check time (mypy/pyright).
+# No runtime instantiation needed — avoids side-effects at import time.
+if TYPE_CHECKING:
+    _: ProtocolDomainPlugin = PluginRegistration()
 
 __all__: list[str] = [
     "PROJECTOR_CONTRACTS_DEFAULT_DIR",

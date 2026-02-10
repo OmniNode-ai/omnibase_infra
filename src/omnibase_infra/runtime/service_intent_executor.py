@@ -29,8 +29,10 @@ Related:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
+
+from typing_extensions import runtime_checkable
 
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
@@ -41,6 +43,20 @@ from omnibase_infra.utils import sanitize_error_message
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
     from omnibase_core.models.reducer.model_intent import ModelIntent
+
+
+@runtime_checkable
+class ProtocolIntentEffect(Protocol):
+    """Protocol for intent effect handlers.
+
+    Effect handlers must implement either ``execute()`` or ``handle()``
+    with the signature ``(payload, *, correlation_id) -> None``.
+    """
+
+    async def execute(
+        self, payload: object, *, correlation_id: UUID | None = None
+    ) -> None: ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +94,7 @@ class IntentExecutor:
     def __init__(
         self,
         container: ModelONEXContainer,
-        effect_handlers: dict[str, object] | None = None,
+        effect_handlers: dict[str, ProtocolIntentEffect] | None = None,
     ) -> None:
         """Initialize the intent executor.
 
@@ -89,9 +105,9 @@ class IntentExecutor:
                 method that accepts the intent payload.
         """
         self._container = container
-        self._effect_handlers: dict[str, object] = effect_handlers or {}
+        self._effect_handlers: dict[str, ProtocolIntentEffect] = effect_handlers or {}
 
-    def register_handler(self, intent_type: str, handler: object) -> None:
+    def register_handler(self, intent_type: str, handler: ProtocolIntentEffect) -> None:
         """Register an effect handler for an intent type.
 
         Args:
@@ -192,6 +208,8 @@ class IntentExecutor:
                 str(correlation_id) if correlation_id else "none",
             )
 
+        except RuntimeHostError:
+            raise
         except Exception as e:
             logger.warning(
                 "Intent execution failed: intent_type=%s error=%s correlation_id=%s",
@@ -230,4 +248,4 @@ class IntentExecutor:
             await self.execute(intent, correlation_id=correlation_id)
 
 
-__all__: list[str] = ["IntentExecutor"]
+__all__: list[str] = ["IntentExecutor", "ProtocolIntentEffect"]

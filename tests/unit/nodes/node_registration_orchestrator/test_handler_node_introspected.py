@@ -704,7 +704,7 @@ class TestHandlerNodeIntrospectedIntents:
             if isinstance(i.payload, ModelPayloadPostgresUpsertRegistration)
         ]
         record = postgres_intents[0].payload.record.model_dump()
-        assert record["capabilities"] == capabilities.model_dump_json()
+        assert record["capabilities"] == capabilities.model_dump(mode="json")
         assert record["node_version"] == "2.0.0"
 
 

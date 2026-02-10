@@ -368,7 +368,10 @@ class HandlerNodeIntrospected:
         node_type = event.node_type
         node_version = event.node_version
         capabilities = event.declared_capabilities
-        capabilities_json = capabilities.model_dump_json() if capabilities else "{}"
+        # model_dump(mode="json") returns a JSON-safe dict (not a string).
+        # asyncpg's JSONB codec expects Python dicts — passing a JSON string
+        # would cause double-encoding (string wrapped in another JSON string).
+        capabilities_data = capabilities.model_dump(mode="json") if capabilities else {}
 
         # Serialization contract: values are JSON-serializable strings here.
         # ModelProjectionRecord (extra="allow") passes them through unchanged.
@@ -381,7 +384,7 @@ class HandlerNodeIntrospected:
                 "current_state": EnumRegistrationState.PENDING_REGISTRATION.value,
                 "node_type": node_type.value,
                 "node_version": str(node_version) if node_version else None,
-                "capabilities": capabilities_json,
+                "capabilities": capabilities_data,
                 "contract_type": None,
                 "intent_types": [],
                 "protocols": [],
