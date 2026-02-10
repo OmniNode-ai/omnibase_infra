@@ -84,7 +84,7 @@ def load_intent_routing_table(
         return {}
 
     try:
-        with contract_path.open() as f:
+        with contract_path.open(encoding="utf-8") as f:
             contract_data = yaml.safe_load(f)
 
         if contract_data is None:

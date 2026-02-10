@@ -904,14 +904,27 @@ class RegistrationReducer:
         """
         now = datetime.now(UTC)
 
-        # Build the registration record using strongly-typed models
-        # event.declared_capabilities and event.metadata are already typed as
-        # ModelNodeCapabilities and ModelNodeMetadata respectively
+        # Build the registration record using strongly-typed models.
+        # Capabilities serialization contract: capabilities are stored as JSONB in
+        # PostgreSQL. Both this reducer path and the handler path
+        # (HandlerNodeIntrospected) must produce the same wire format.
+        #
+        # Here, capabilities is stored as a ModelNodeCapabilities model inside
+        # ModelNodeRegistrationRecord. When IntentEffectPostgresUpsert.execute()
+        # calls record.model_dump() on the payload, Pydantic recursively serializes
+        # the nested ModelNodeCapabilities via model_dump(mode="json"), producing a
+        # JSON-safe dict identical to the handler's explicit
+        # capabilities.model_dump(mode="json") call.
+        capabilities = event.declared_capabilities
+        # Serialize to JSON-safe dict for JSONB column consistency.
+        # This matches HandlerNodeIntrospected's explicit model_dump(mode="json").
+        capabilities_data = capabilities.model_dump(mode="json") if capabilities else {}
+
         record = ModelNodeRegistrationRecord(
             node_id=event.node_id,
             node_type=event.node_type,
             node_version=event.node_version,
-            capabilities=event.declared_capabilities,
+            capabilities=capabilities_data,
             endpoints=dict(event.endpoints) if event.endpoints else {},
             metadata=event.metadata,
             health_endpoint=(

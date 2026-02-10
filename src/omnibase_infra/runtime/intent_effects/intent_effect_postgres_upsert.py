@@ -198,22 +198,42 @@ class IntentEffectPostgresUpsert:
                 context=context,
             ) from e
 
-    # Columns that are UUID in the registration_projections table.
-    # Must stay in sync with schema_registration_projection.sql.
-    # Schema columns: entity_id UUID, last_applied_event_id UUID, correlation_id UUID
+    # -------------------------------------------------------------------------
+    # Column type sets for asyncpg normalization.
+    #
+    # These sets MUST stay in sync with schema_registration_projection.sql.
+    # When wiring a NEW intent type that writes to registration_projections,
+    # check if it introduces columns not listed here and add them:
+    #
+    #   1. Open schema_registration_projection.sql
+    #   2. Find all UUID and TIMESTAMPTZ columns in the CREATE TABLE statement
+    #   3. If your new intent writes to any of those columns, ensure the column
+    #      name appears in the appropriate set below
+    #   4. Add a test case in tests/unit/runtime/test_intent_effect_postgres_upsert.py
+    #      that verifies normalization for the new columns
+    #
+    # CURRENT INTENT COVERAGE:
+    #   - postgres.upsert_registration (HandlerNodeIntrospected)
+    #     UUID cols: entity_id, last_applied_event_id, correlation_id
+    #     TIMESTAMPTZ cols: ack_deadline, registered_at, updated_at
+    #
+    # COLUMNS NOT YET COVERED (add when their intent types are wired):
+    #   UUID cols: (none pending)
+    #   TIMESTAMPTZ cols: liveness_deadline, last_heartbeat_at,
+    #     ack_timeout_emitted_at, liveness_timeout_emitted_at
+    # -------------------------------------------------------------------------
+
+    # UUID columns in registration_projections.
+    # Schema reference: entity_id UUID, last_applied_event_id UUID, correlation_id UUID
     # Validated by: tests/unit/runtime/test_intent_effect_postgres_upsert.py
     _UUID_COLUMNS: frozenset[str] = frozenset(
         {"entity_id", "last_applied_event_id", "correlation_id"}
     )
 
-    # Columns that are TIMESTAMPTZ in the registration_projections table.
-    # Must stay in sync with schema_registration_projection.sql.
-    # Schema columns: ack_deadline, liveness_deadline, last_heartbeat_at,
-    #   ack_timeout_emitted_at, liveness_timeout_emitted_at, registered_at, updated_at
-    # Note: Only columns used by the registration upsert intent are listed here.
-    # Additional TIMESTAMPTZ columns (liveness_deadline, last_heartbeat_at, etc.)
-    # are managed by other handlers and should be added when those intent types
-    # are wired.
+    # TIMESTAMPTZ columns currently used by wired intent types.
+    # Schema reference: ack_deadline, registered_at, updated_at (used by registration upsert)
+    # Not yet wired: liveness_deadline, last_heartbeat_at,
+    #   ack_timeout_emitted_at, liveness_timeout_emitted_at
     _TIMESTAMP_COLUMNS: frozenset[str] = frozenset(
         {"ack_deadline", "registered_at", "updated_at"}
     )

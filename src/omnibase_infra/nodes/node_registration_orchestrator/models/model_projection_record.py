@@ -14,7 +14,7 @@ Related:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelProjectionRecord(BaseModel):
@@ -25,6 +25,10 @@ class ModelProjectionRecord(BaseModel):
     ModelPayloadPostgresUpsertRegistration while retaining all data.
     SerializeAsAny ensures model_dump() serializes all extra fields.
 
+    The ``domain`` field acts as a discriminator so the model has at least
+    one declared field, giving consumers a known key to identify what type
+    of projection record this wraps (e.g., ``"registration"``).
+
     Warning:
         **Non-standard ``extra`` config**: Uses ``extra="allow"`` instead of the
         project convention ``extra="forbid"`` (see CLAUDE.md Pydantic Model
@@ -34,6 +38,15 @@ class ModelProjectionRecord(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow", frozen=True, from_attributes=True)
+
+    domain: str = Field(
+        default="registration",
+        description=(
+            "Projection domain discriminator. Identifies the projector schema "
+            "this record belongs to, enabling consumers to distinguish between "
+            "different projection record types."
+        ),
+    )
 
 
 __all__: list[str] = ["ModelProjectionRecord"]

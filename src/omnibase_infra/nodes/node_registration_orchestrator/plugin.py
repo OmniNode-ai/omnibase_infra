@@ -1064,6 +1064,39 @@ class PluginRegistration:
                     correlation_id,
                 )
 
+        # Startup validation: warn about intent_types declared in the routing
+        # table that have no registered handler.  These will cause RuntimeHostError
+        # at runtime when DispatchResultApplier calls IntentExecutor.execute().
+        # We log at WARNING (not ERROR) so the system still starts, but operators
+        # can quickly identify missing infrastructure.
+        unwired_intents: list[str] = []
+        for intent_type in routing_table:
+            protocol = (
+                intent_type.split(".", 1)[0] if "." in intent_type else intent_type
+            )
+            is_wired = (protocol == "postgres" and self._projector is not None) or (
+                protocol == "consul" and self._consul_handler is not None
+            )
+            if not is_wired:
+                unwired_intents.append(intent_type)
+
+        if unwired_intents:
+            logger.warning(
+                "Intent routing table declares %d intent type(s) with no "
+                "registered effect handler: %s. Intents of these types will "
+                "raise RuntimeHostError at runtime. Check that the required "
+                "infrastructure (projector, consul_handler) is available. "
+                "(correlation_id=%s)",
+                len(unwired_intents),
+                unwired_intents,
+                correlation_id,
+                extra={
+                    "unwired_intent_types": unwired_intents,
+                    "routing_table_size": len(routing_table),
+                    "registered_count": registered_count,
+                },
+            )
+
         logger.info(
             "Wired %d intent effect adapter(s) from contract routing table "
             "(correlation_id=%s)",

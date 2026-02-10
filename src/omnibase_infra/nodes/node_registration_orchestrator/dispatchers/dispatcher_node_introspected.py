@@ -218,6 +218,9 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
         Raises:
             InfraUnavailableError: If circuit breaker is OPEN.
         """
+        # NOTE: Both started_at and handler 'now' use direct datetime.now(UTC)
+        # instead of ModelDispatchContext.now due to protocol signature limitation.
+        # See TODO(OMN-2050) below for details.
         started_at = datetime.now(UTC)
 
         # Handle both ModelEventEnvelope and materialized dict from dispatch engine
@@ -281,7 +284,13 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
                     context=context,
                 )
 
-            # Get current time for handler
+            # TODO(OMN-2050): Use injected time from ModelDispatchContext instead
+            # of datetime.now(UTC). Currently, the ProtocolMessageDispatcher.handle()
+            # signature accepts only the envelope, so there is no way to receive the
+            # dispatch engine's ModelDispatchContext.now timestamp. When the protocol
+            # is updated to pass ModelDispatchContext (or the envelope carries a
+            # dispatch_timestamp field), replace this direct clock access with the
+            # injected value for full time-injection compliance.
             now = datetime.now(UTC)
 
             # Create envelope for handler (ProtocolMessageHandler signature)
