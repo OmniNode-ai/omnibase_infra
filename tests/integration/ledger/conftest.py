@@ -61,11 +61,19 @@ def _get_postgres_dsn() -> str | None:
     if not host or not password:
         return None
 
+    from urllib.parse import quote_plus
+
     # 5436 = external port on remote infra server (192.168.86.200)
     port = os.getenv("POSTGRES_PORT", "5436")
     user = os.getenv("POSTGRES_USER", "postgres")
 
-    return f"postgresql://{user}:{password}@{host}:{port}/omnibase_infra"
+    # URL-encode credentials to handle special characters (@, :, /, %, etc.)
+    encoded_user = quote_plus(user, safe="")
+    encoded_password = quote_plus(password, safe="")
+
+    return (
+        f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/omnibase_infra"
+    )
 
 
 @pytest.fixture

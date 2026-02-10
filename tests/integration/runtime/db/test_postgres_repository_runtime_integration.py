@@ -123,11 +123,20 @@ def get_dsn() -> str:
     if not is_configured:
         raise ValueError(error_msg)
 
+    from urllib.parse import quote_plus
+
     host = os.environ["POSTGRES_HOST"]
     port = os.environ["POSTGRES_PORT"]
     user = os.environ["POSTGRES_USER"]
     password = os.environ["POSTGRES_PASSWORD"]
-    return f"postgresql://{user}:{password}@{host}:{port}/omnibase_infra"
+
+    # URL-encode credentials to handle special characters (@, :, /, %, etc.)
+    encoded_user = quote_plus(user, safe="")
+    encoded_password = quote_plus(password, safe="")
+
+    return (
+        f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/omnibase_infra"
+    )
 
 
 # Module-constant table name with random UUID suffix for test isolation.

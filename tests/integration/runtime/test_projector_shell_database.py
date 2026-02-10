@@ -127,6 +127,8 @@ def _get_database_dsn() -> str | None:
     if db_url:
         return db_url
 
+    from urllib.parse import quote_plus
+
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
     user = os.getenv("POSTGRES_USER", "postgres")
@@ -135,7 +137,13 @@ def _get_database_dsn() -> str | None:
     if not password:
         return None
 
-    return f"postgresql://{user}:{password}@{host}:{port}/omnibase_infra"
+    # URL-encode credentials to handle special characters (@, :, /, %, etc.)
+    encoded_user = quote_plus(user, safe="")
+    encoded_password = quote_plus(password, safe="")
+
+    return (
+        f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/omnibase_infra"
+    )
 
 
 @pytest.fixture

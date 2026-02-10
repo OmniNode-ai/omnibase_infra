@@ -92,6 +92,10 @@ def _resolve_postgres_config() -> dict[str, object]:
     return {
         "host": config.host or "localhost",
         "port": config.port,
+        # Fallback to "omnibase_infra" is intentional: PostgresConfig.from_env()
+        # returns empty database when using individual POSTGRES_* env vars (by
+        # design - the database must come from the URL). This test module always
+        # targets the omnibase_infra database.
         "database": config.database or "omnibase_infra",
         "user": config.user,
         "password": config.password or "",

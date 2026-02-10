@@ -53,4 +53,14 @@ def get_postgres_dsn() -> str:
             "postgresql://user:pass@host:5432/omnibase_infra"
         )
         raise ValueError(msg)
+
+    # Validate DSN scheme to catch obvious misconfigurations early
+    if not db_url.startswith(("postgresql://", "postgres://")):
+        msg = (
+            f"OMNIBASE_INFRA_DB_URL has invalid scheme. "
+            f"Expected 'postgresql://' or 'postgres://', "
+            f"got: {db_url.split('://', 1)[0] if '://' in db_url else '(none)'}://"
+        )
+        raise ValueError(msg)
+
     return db_url
