@@ -22,6 +22,8 @@ from omnibase_infra.services.observability.injection_effectiveness.ledger_sink_p
     LedgerSinkInjectionEffectivenessPostgres,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestAppendSessionEntry:
     """Tests for append_session_entry()."""
@@ -123,7 +125,7 @@ class TestAppendSessionEntry:
         )
 
         mock_pool._test_conn.execute.assert_any_call(
-            "SET statement_timeout = $1", "10000"
+            "SET LOCAL statement_timeout = $1", "10000"
         )
 
 

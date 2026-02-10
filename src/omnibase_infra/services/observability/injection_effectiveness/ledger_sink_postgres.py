@@ -168,23 +168,26 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker=self,
         ):
             async with self._pool.acquire() as conn:
-                timeout_ms = int(self._query_timeout * 1000)
-                await conn.execute("SET statement_timeout = $1", str(timeout_ms))
+                async with conn.transaction():
+                    timeout_ms = int(self._query_timeout * 1000)
+                    await conn.execute(
+                        "SET LOCAL statement_timeout = $1", str(timeout_ms)
+                    )
 
-                raw_result = await conn.fetchval(
-                    sql,
-                    kafka_topic,
-                    kafka_partition,
-                    kafka_offset,
-                    str(session_id).encode(),  # event_key as BYTEA
-                    event_payload,  # event_value as BYTEA
-                    onex_headers,  # onex_headers as JSONB
-                    correlation_id,
-                    event_type,
-                    LEDGER_SOURCE,
-                    event_timestamp or datetime.now(UTC),
-                )
-                result: UUID | None = raw_result
+                    raw_result = await conn.fetchval(
+                        sql,
+                        kafka_topic,
+                        kafka_partition,
+                        kafka_offset,
+                        str(session_id).encode(),  # event_key as BYTEA
+                        event_payload,  # event_value as BYTEA
+                        onex_headers,  # onex_headers as JSONB
+                        correlation_id,
+                        event_type,
+                        LEDGER_SOURCE,
+                        event_timestamp or datetime.now(UTC),
+                    )
+                    result: UUID | None = raw_result
 
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
@@ -266,33 +269,36 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker=self,
         ):
             async with self._pool.acquire() as conn:
-                timeout_ms = int(self._query_timeout * 1000)
-                await conn.execute("SET statement_timeout = $1", str(timeout_ms))
+                async with conn.transaction():
+                    timeout_ms = int(self._query_timeout * 1000)
+                    await conn.execute(
+                        "SET LOCAL statement_timeout = $1", str(timeout_ms)
+                    )
 
-                await conn.executemany(
-                    sql,
-                    [
-                        (
-                            e["kafka_topic"],
-                            e["kafka_partition"],
-                            e["kafka_offset"],
-                            str(e["session_id"]).encode(),
-                            e["event_payload"],
-                            json.dumps(
-                                {
-                                    "session_id": str(e["session_id"]),
-                                    "source": LEDGER_SOURCE,
-                                    "event_type": e["event_type"],
-                                }
-                            ),
-                            correlation_id,
-                            e["event_type"],
-                            LEDGER_SOURCE,
-                            e.get("event_timestamp", now),
-                        )
-                        for e in entries
-                    ],
-                )
+                    await conn.executemany(
+                        sql,
+                        [
+                            (
+                                e["kafka_topic"],
+                                e["kafka_partition"],
+                                e["kafka_offset"],
+                                str(e["session_id"]).encode(),
+                                e["event_payload"],
+                                json.dumps(
+                                    {
+                                        "session_id": str(e["session_id"]),
+                                        "source": LEDGER_SOURCE,
+                                        "event_type": e["event_type"],
+                                    }
+                                ),
+                                correlation_id,
+                                e["event_type"],
+                                LEDGER_SOURCE,
+                                e.get("event_timestamp") or now,
+                            )
+                            for e in entries
+                        ],
+                    )
 
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()

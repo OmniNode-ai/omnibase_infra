@@ -28,7 +28,7 @@ class ModelInjectionEffectivenessQueryResult(BaseModel):
         query: The original query for reference.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     rows: tuple[ModelInjectionEffectivenessRow, ...] = Field(
         default_factory=tuple, description="Matching rows"

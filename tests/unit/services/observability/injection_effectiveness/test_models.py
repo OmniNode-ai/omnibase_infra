@@ -24,6 +24,8 @@ from omnibase_infra.services.observability.injection_effectiveness.models import
     ModelPatternHitRateRow,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestModelInjectionEffectivenessRow:
     """Tests for ModelInjectionEffectivenessRow."""

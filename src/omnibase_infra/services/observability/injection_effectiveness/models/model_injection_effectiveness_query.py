@@ -35,7 +35,7 @@ class ModelInjectionEffectivenessQuery(BaseModel):
         offset: Number of rows to skip for pagination.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     session_id: UUID | None = Field(default=None, description="Filter by session ID")
     correlation_id: UUID | None = Field(

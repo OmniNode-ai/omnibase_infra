@@ -35,7 +35,7 @@ Example:
 from __future__ import annotations
 
 import logging
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import asyncpg
 
@@ -125,6 +125,9 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         Returns:
             ModelInjectionEffectivenessRow if found, None otherwise.
         """
+        if correlation_id is None:
+            correlation_id = uuid4()
+
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(
                 operation="query_by_session_id",
@@ -176,6 +179,9 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         Returns:
             ModelInjectionEffectivenessQueryResult with pagination metadata.
         """
+        if correlation_id is None:
+            correlation_id = uuid4()
+
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(
                 operation="query",
@@ -282,6 +288,9 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         Returns:
             List of ModelLatencyBreakdownRow ordered by created_at ASC.
         """
+        if correlation_id is None:
+            correlation_id = uuid4()
+
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(
                 operation="query_latency_breakdowns",
@@ -336,6 +345,9 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         Returns:
             List of ModelPatternHitRateRow ordered by updated_at DESC.
         """
+        if correlation_id is None:
+            correlation_id = uuid4()
+
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(
                 operation="query_pattern_hit_rates",
