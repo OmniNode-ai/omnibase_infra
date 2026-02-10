@@ -259,6 +259,12 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             if missing:
                 msg = f"Entry {i} missing required keys: {sorted(missing)}"
                 raise ValueError(msg)
+            if not isinstance(entry["kafka_partition"], int):
+                msg = f"Entry {i} kafka_partition must be int, got {type(entry['kafka_partition']).__name__}"
+                raise TypeError(msg)
+            if not isinstance(entry["kafka_offset"], int):
+                msg = f"Entry {i} kafka_offset must be int, got {type(entry['kafka_offset']).__name__}"
+                raise TypeError(msg)
 
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(

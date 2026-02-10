@@ -198,6 +198,46 @@ class TestAppendBatch:
         with pytest.raises(ValueError, match="Entry 0 missing required keys"):
             await sink.append_batch(entries, sample_correlation_id)
 
+    @pytest.mark.asyncio
+    async def test_rejects_entries_with_wrong_partition_type(
+        self, mock_pool: MagicMock, sample_correlation_id
+    ) -> None:
+        """Raises TypeError when kafka_partition is not int."""
+        entries = [
+            {
+                "session_id": uuid4(),
+                "event_type": "context_utilization",
+                "event_payload": b"{}",
+                "kafka_topic": "test.topic",
+                "kafka_partition": "0",  # string instead of int
+                "kafka_offset": 0,
+            }
+        ]
+
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="kafka_partition must be int"):
+            await sink.append_batch(entries, sample_correlation_id)
+
+    @pytest.mark.asyncio
+    async def test_rejects_entries_with_wrong_offset_type(
+        self, mock_pool: MagicMock, sample_correlation_id
+    ) -> None:
+        """Raises TypeError when kafka_offset is not int."""
+        entries = [
+            {
+                "session_id": uuid4(),
+                "event_type": "context_utilization",
+                "event_payload": b"{}",
+                "kafka_topic": "test.topic",
+                "kafka_partition": 0,
+                "kafka_offset": "42",  # string instead of int
+            }
+        ]
+
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="kafka_offset must be int"):
+            await sink.append_batch(entries, sample_correlation_id)
+
 
 class TestLedgerSinkInitialization:
     """Tests for initialization and configuration."""

@@ -108,13 +108,14 @@ class ProtocolInjectionEffectivenessReader(Protocol):
         Args:
             session_id: Session identifier.
             correlation_id: Correlation ID for tracing (auto-generated if None).
-            limit: Maximum rows to return (default: 100).
-            offset: Pagination offset (default: 0).
+            limit: Maximum rows to return (1-10000, default: 100).
+            offset: Pagination offset (>= 0, default: 0).
 
         Returns:
             List of ModelLatencyBreakdownRow for the session.
 
         Raises:
+            ValueError: If limit or offset is out of bounds.
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If operation times out.
             InfraUnavailableError: If circuit breaker is open.
@@ -136,13 +137,14 @@ class ProtocolInjectionEffectivenessReader(Protocol):
             confident_only: If True, only return patterns with confidence != NULL
                 (sample_count >= minimum support threshold).
             correlation_id: Correlation ID for tracing (auto-generated if None).
-            limit: Maximum rows to return (default: 100).
-            offset: Pagination offset (default: 0).
+            limit: Maximum rows to return (1-10000, default: 100).
+            offset: Pagination offset (>= 0, default: 0).
 
         Returns:
             List of ModelPatternHitRateRow ordered by updated_at DESC.
 
         Raises:
+            ValueError: If limit or offset is out of bounds.
             InfraConnectionError: If database connection fails.
             InfraTimeoutError: If operation times out.
             InfraUnavailableError: If circuit breaker is open.
