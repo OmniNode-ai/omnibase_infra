@@ -605,6 +605,24 @@ class TestAppendBatch:
         with pytest.raises(ValueError, match="kafka_offset must be >= 0"):
             await sink.append_batch(entries, sample_correlation_id)
 
+    @pytest.mark.asyncio
+    async def test_rejects_non_uuid_correlation_id(self, mock_pool: MagicMock) -> None:
+        """Raises TypeError when correlation_id is not UUID."""
+        entries = [
+            {
+                "session_id": uuid4(),
+                "event_type": "context_utilization",
+                "event_payload": b"{}",
+                "kafka_topic": "test.topic",
+                "kafka_partition": 0,
+                "kafka_offset": 0,
+            }
+        ]
+
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="correlation_id must be UUID"):
+            await sink.append_batch(entries, "not-a-uuid")  # type: ignore[arg-type]
+
 
 class TestLedgerSinkInitialization:
     """Tests for initialization and configuration."""

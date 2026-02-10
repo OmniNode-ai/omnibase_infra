@@ -295,6 +295,10 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         if not entries:
             return 0
 
+        if not isinstance(correlation_id, UUID):
+            msg = f"correlation_id must be UUID, got {type(correlation_id).__name__}"
+            raise TypeError(msg)
+
         required_keys = {
             "session_id",
             "event_type",

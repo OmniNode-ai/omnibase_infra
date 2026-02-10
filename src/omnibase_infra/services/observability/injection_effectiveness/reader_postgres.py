@@ -164,13 +164,20 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
                     row = await conn.fetchrow(sql, session_id)
 
+            if row is None:
+                async with self._circuit_breaker_lock:
+                    await self._reset_circuit_breaker()
+                return None
+
+            # Note: Circuit breaker reset after model construction so that
+            # a Pydantic ValidationError from schema drift doesn't record
+            # the operation as a success before the error propagates.
+            result = ModelInjectionEffectivenessRow(**dict(row))
+
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
-            if row is None:
-                return None
-
-            return ModelInjectionEffectivenessRow(**dict(row))
+            return result
 
     async def query(
         self,
@@ -281,17 +288,19 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                     total_count: int = raw_count if raw_count is not None else 0
                     rows = await conn.fetch(data_sql, *data_params)
 
-            async with self._circuit_breaker_lock:
-                await self._reset_circuit_breaker()
-
             result_rows = tuple(ModelInjectionEffectivenessRow(**dict(r)) for r in rows)
 
-            return ModelInjectionEffectivenessQueryResult(
+            result = ModelInjectionEffectivenessQueryResult(
                 rows=result_rows,
                 total_count=total_count,
                 has_more=(query.offset + query.limit) < total_count,
                 query=query,
             )
+
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+
+            return result
 
     async def query_latency_breakdowns(
         self,
@@ -356,10 +365,12 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
                     rows = await conn.fetch(sql, session_id, limit, offset)
 
+            result = [ModelLatencyBreakdownRow(**dict(r)) for r in rows]
+
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
-            return [ModelLatencyBreakdownRow(**dict(r)) for r in rows]
+            return result
 
     async def query_pattern_hit_rates(
         self,
@@ -446,10 +457,12 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
                     rows = await conn.fetch(sql, *query_params)
 
+            result = [ModelPatternHitRateRow(**dict(r)) for r in rows]
+
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
-            return [ModelPatternHitRateRow(**dict(r)) for r in rows]
+            return result
 
 
 __all__ = ["ReaderInjectionEffectivenessPostgres"]
