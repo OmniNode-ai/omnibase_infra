@@ -187,6 +187,17 @@ class TestAppendBatch:
         assert "INSERT INTO event_ledger" in sql
         assert "ON CONFLICT" in sql
 
+    @pytest.mark.asyncio
+    async def test_rejects_entries_with_missing_keys(
+        self, mock_pool: MagicMock, sample_correlation_id
+    ) -> None:
+        """Raises ValueError when entry is missing required keys."""
+        entries = [{"session_id": uuid4(), "event_type": "test"}]  # missing keys
+
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(ValueError, match="Entry 0 missing required keys"):
+            await sink.append_batch(entries, sample_correlation_id)
+
 
 class TestLedgerSinkInitialization:
     """Tests for initialization and configuration."""

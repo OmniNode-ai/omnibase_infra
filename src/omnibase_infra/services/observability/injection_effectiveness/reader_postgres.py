@@ -261,7 +261,7 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                     )
 
                     raw_count = await conn.fetchval(count_sql, *params)
-                    total_count: int = raw_count
+                    total_count: int = raw_count if raw_count is not None else 0
                     rows = await conn.fetch(data_sql, *data_params)
 
             async with self._circuit_breaker_lock:
@@ -288,12 +288,22 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         Args:
             session_id: Session identifier.
             correlation_id: Correlation ID for tracing.
-            limit: Maximum rows to return.
-            offset: Pagination offset.
+            limit: Maximum rows to return (1-10000).
+            offset: Pagination offset (>= 0).
 
         Returns:
             List of ModelLatencyBreakdownRow ordered by created_at ASC.
+
+        Raises:
+            ValueError: If limit or offset is out of bounds.
         """
+        if limit < 1 or limit > 10000:
+            msg = f"limit must be between 1 and 10000, got {limit}"
+            raise ValueError(msg)
+        if offset < 0:
+            msg = f"offset must be >= 0, got {offset}"
+            raise ValueError(msg)
+
         if correlation_id is None:
             correlation_id = uuid4()
 
@@ -348,12 +358,22 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             pattern_id: Filter by pattern ID (None = all).
             confident_only: Only return patterns with confidence != NULL.
             correlation_id: Correlation ID for tracing.
-            limit: Maximum rows to return.
-            offset: Pagination offset.
+            limit: Maximum rows to return (1-10000).
+            offset: Pagination offset (>= 0).
 
         Returns:
             List of ModelPatternHitRateRow ordered by updated_at DESC.
+
+        Raises:
+            ValueError: If limit or offset is out of bounds.
         """
+        if limit < 1 or limit > 10000:
+            msg = f"limit must be between 1 and 10000, got {limit}"
+            raise ValueError(msg)
+        if offset < 0:
+            msg = f"offset must be >= 0, got {offset}"
+            raise ValueError(msg)
+
         if correlation_id is None:
             correlation_id = uuid4()
 

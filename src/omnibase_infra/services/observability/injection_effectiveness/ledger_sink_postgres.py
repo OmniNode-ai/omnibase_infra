@@ -242,6 +242,20 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         if not entries:
             return 0
 
+        required_keys = {
+            "session_id",
+            "event_type",
+            "event_payload",
+            "kafka_topic",
+            "kafka_partition",
+            "kafka_offset",
+        }
+        for i, entry in enumerate(entries):
+            missing = required_keys - entry.keys()
+            if missing:
+                msg = f"Entry {i} missing required keys: {sorted(missing)}"
+                raise ValueError(msg)
+
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(
                 operation="append_batch",

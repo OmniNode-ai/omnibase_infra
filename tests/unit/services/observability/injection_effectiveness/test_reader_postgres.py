@@ -179,6 +179,27 @@ class TestQueryLatencyBreakdowns:
         assert all(isinstance(r, ModelLatencyBreakdownRow) for r in result)
         assert all(r.session_id == sample_session_id for r in result)
 
+    @pytest.mark.asyncio
+    async def test_rejects_limit_below_one(self, mock_pool: MagicMock) -> None:
+        """Raises ValueError when limit < 1."""
+        reader = ReaderInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(ValueError, match="limit must be between 1 and 10000"):
+            await reader.query_latency_breakdowns(uuid4(), limit=0)
+
+    @pytest.mark.asyncio
+    async def test_rejects_limit_above_max(self, mock_pool: MagicMock) -> None:
+        """Raises ValueError when limit > 10000."""
+        reader = ReaderInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(ValueError, match="limit must be between 1 and 10000"):
+            await reader.query_latency_breakdowns(uuid4(), limit=10001)
+
+    @pytest.mark.asyncio
+    async def test_rejects_negative_offset(self, mock_pool: MagicMock) -> None:
+        """Raises ValueError when offset < 0."""
+        reader = ReaderInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(ValueError, match="offset must be >= 0"):
+            await reader.query_latency_breakdowns(uuid4(), offset=-1)
+
 
 class TestQueryPatternHitRates:
     """Tests for query_pattern_hit_rates()."""
@@ -246,6 +267,27 @@ class TestQueryPatternHitRates:
         result = await reader.query_pattern_hit_rates()
 
         assert result[0].confidence is None
+
+    @pytest.mark.asyncio
+    async def test_rejects_limit_below_one(self, mock_pool: MagicMock) -> None:
+        """Raises ValueError when limit < 1."""
+        reader = ReaderInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(ValueError, match="limit must be between 1 and 10000"):
+            await reader.query_pattern_hit_rates(limit=0)
+
+    @pytest.mark.asyncio
+    async def test_rejects_limit_above_max(self, mock_pool: MagicMock) -> None:
+        """Raises ValueError when limit > 10000."""
+        reader = ReaderInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(ValueError, match="limit must be between 1 and 10000"):
+            await reader.query_pattern_hit_rates(limit=10001)
+
+    @pytest.mark.asyncio
+    async def test_rejects_negative_offset(self, mock_pool: MagicMock) -> None:
+        """Raises ValueError when offset < 0."""
+        reader = ReaderInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(ValueError, match="offset must be >= 0"):
+            await reader.query_pattern_hit_rates(offset=-1)
 
 
 class TestReaderProtocolCompliance:
