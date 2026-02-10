@@ -631,6 +631,59 @@ class TestHandlerWebApiMode:
         assert result.retry_count == 1
 
     @pytest.mark.asyncio
+    async def test_web_api_retry_after_header_respected(
+        self, handler: HandlerSlackWebhook, alert: ModelSlackAlert
+    ) -> None:
+        """Test that Retry-After header from 429 is respected."""
+        mock_response_429 = AsyncMock()
+        mock_response_429.status = 429
+        mock_response_429.headers = {"Retry-After": "0.01"}
+        mock_response_429.__aenter__ = AsyncMock(return_value=mock_response_429)
+        mock_response_429.__aexit__ = AsyncMock(return_value=None)
+
+        mock_response_ok = AsyncMock()
+        mock_response_ok.status = 200
+        mock_response_ok.json = AsyncMock(return_value={"ok": True, "ts": "123.456"})
+        mock_response_ok.__aenter__ = AsyncMock(return_value=mock_response_ok)
+        mock_response_ok.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.post = MagicMock(side_effect=[mock_response_429, mock_response_ok])
+        mock_session.close = AsyncMock()
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            result = await handler.handle(alert)
+
+        assert result.success is True
+        assert result.retry_count == 1
+
+    @pytest.mark.asyncio
+    async def test_web_api_non_json_response_handled(
+        self, handler: HandlerSlackWebhook, alert: ModelSlackAlert
+    ) -> None:
+        """Test that non-JSON HTTP 200 response is handled gracefully."""
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(
+            side_effect=aiohttp.ContentTypeError(
+                MagicMock(), MagicMock(), message="Attempt to decode JSON"
+            )
+        )
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.post = MagicMock(return_value=mock_response)
+        mock_session.close = AsyncMock()
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            result = await handler.handle(alert)
+
+        assert result.success is False
+        assert result.error_code == "SLACK_API_ERROR"
+        assert "non-JSON" in (result.error or "")
+
+    @pytest.mark.asyncio
     async def test_web_api_includes_fallback_text(
         self, handler: HandlerSlackWebhook, alert: ModelSlackAlert
     ) -> None:

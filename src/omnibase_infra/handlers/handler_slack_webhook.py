@@ -167,13 +167,17 @@ class HandlerSlackWebhook:
                 provided, reads from SLACK_CHANNEL_ID environment variable.
         """
         self._webhook_url: str = (
-            webhook_url if webhook_url else os.getenv("SLACK_WEBHOOK_URL", "")
+            webhook_url
+            if webhook_url is not None
+            else os.getenv("SLACK_WEBHOOK_URL", "")
         )
         self._bot_token: str = (
-            bot_token if bot_token else os.getenv("SLACK_BOT_TOKEN", "")
+            bot_token if bot_token is not None else os.getenv("SLACK_BOT_TOKEN", "")
         )
         self._default_channel: str = (
-            default_channel if default_channel else os.getenv("SLACK_CHANNEL_ID", "")
+            default_channel
+            if default_channel is not None
+            else os.getenv("SLACK_CHANNEL_ID", "")
         )
         self._http_session = http_session
         self._max_retries = max_retries
@@ -359,6 +363,7 @@ class HandlerSlackWebhook:
 
                     elif response.status == 429:
                         # Rate limited - retry with backoff
+                        retry_after = response.headers.get("Retry-After")
                         last_error = "Slack rate limit (429)"
                         last_error_code = "SLACK_RATE_LIMITED"
                         logger.warning(
@@ -367,8 +372,17 @@ class HandlerSlackWebhook:
                                 "correlation_id": str(correlation_id),
                                 "attempt": attempt + 1,
                                 "max_attempts": self._max_retries + 1,
+                                "retry_after": retry_after,
                             },
                         )
+                        # Respect Slack's Retry-After header if present
+                        if retry_after and attempt < self._max_retries:
+                            try:
+                                await asyncio.sleep(float(retry_after))
+                                retry_count += 1
+                                continue
+                            except (ValueError, TypeError):
+                                pass  # Fall through to default backoff
 
                     elif response.status >= 400:
                         # Other HTTP error
@@ -482,6 +496,8 @@ class HandlerSlackWebhook:
         last_error: str | None = None
         last_error_code: str | None = None
 
+        # Auth header constructed per-call (not stored on self) to limit
+        # exposure surface.  The token is intentionally never logged.
         headers = {
             "Authorization": f"Bearer {self._bot_token}",
             "Content-Type": "application/json; charset=utf-8",
@@ -599,6 +615,8 @@ class HandlerSlackWebhook:
                                     "is_archived",
                                     "msg_too_long",
                                     "no_text",
+                                    "ekm_access_denied",
+                                    "team_access_not_granted",
                                 }:
                                     duration_ms = (
                                         time.perf_counter() - start_time
