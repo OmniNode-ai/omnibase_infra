@@ -266,17 +266,16 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker=self,
         ):
             async with self._pool.acquire() as conn:
-                # Apply statement_timeout for query timeout enforcement
-                # Convert seconds to milliseconds for PostgreSQL
-                # Use parameterized query for defense in depth (even though int() cast
-                # already guarantees numeric output, parameterized is the preferred pattern)
-                timeout_ms = int(self._query_timeout * 1000)
-                await conn.execute("SET statement_timeout = $1", str(timeout_ms))
-
                 # Wrap both writes in an explicit transaction for atomicity.
                 # If pattern_hit_rates write fails after injection_effectiveness succeeds,
                 # both are rolled back to prevent partial data.
                 async with conn.transaction():
+                    # SET LOCAL scopes timeout to this transaction (pool-safe)
+                    timeout_ms = int(self._query_timeout * 1000)
+                    await conn.execute(
+                        "SET LOCAL statement_timeout = $1", str(timeout_ms)
+                    )
+
                     # Write to injection_effectiveness
                     await conn.executemany(
                         sql_effectiveness,
@@ -409,25 +408,27 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker=self,
         ):
             async with self._pool.acquire() as conn:
-                # Apply statement_timeout for query timeout enforcement
-                # Use parameterized query for defense in depth
-                timeout_ms = int(self._query_timeout * 1000)
-                await conn.execute("SET statement_timeout = $1", str(timeout_ms))
+                async with conn.transaction():
+                    # SET LOCAL scopes timeout to this transaction (pool-safe)
+                    timeout_ms = int(self._query_timeout * 1000)
+                    await conn.execute(
+                        "SET LOCAL statement_timeout = $1", str(timeout_ms)
+                    )
 
-                await conn.executemany(
-                    sql,
-                    [
-                        (
-                            e.session_id,
-                            e.correlation_id,
-                            e.agent_match_score,
-                            e.expected_agent,
-                            e.actual_agent,
-                            e.created_at,
-                        )
-                        for e in events
-                    ],
-                )
+                    await conn.executemany(
+                        sql,
+                        [
+                            (
+                                e.session_id,
+                                e.correlation_id,
+                                e.agent_match_score,
+                                e.expected_agent,
+                                e.actual_agent,
+                                e.created_at,
+                            )
+                            for e in events
+                        ],
+                    )
 
             # Record success - reset circuit breaker after successful write
             async with self._circuit_breaker_lock:
@@ -512,11 +513,6 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker=self,
         ):
             async with self._pool.acquire() as conn:
-                # Apply statement_timeout for query timeout enforcement
-                # Use parameterized query for defense in depth
-                timeout_ms = int(self._query_timeout * 1000)
-                await conn.execute("SET statement_timeout = $1", str(timeout_ms))
-
                 # IMPORTANT: Upsert to injection_effectiveness FIRST to satisfy FK constraint
                 # If latency event arrives before utilization/agent-match events, we need
                 # the parent row to exist before inserting the child row.
@@ -537,6 +533,12 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 # If latency_breakdowns insert fails after injection_effectiveness upsert,
                 # both are rolled back to prevent partial data.
                 async with conn.transaction():
+                    # SET LOCAL scopes timeout to this transaction (pool-safe)
+                    timeout_ms = int(self._query_timeout * 1000)
+                    await conn.execute(
+                        "SET LOCAL statement_timeout = $1", str(timeout_ms)
+                    )
+
                     # 1. First: Upsert to injection_effectiveness (creates parent row if needed)
                     await conn.executemany(
                         sql_effectiveness,

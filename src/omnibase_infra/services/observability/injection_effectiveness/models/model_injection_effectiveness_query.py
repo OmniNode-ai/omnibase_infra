@@ -54,7 +54,7 @@ class ModelInjectionEffectivenessQuery(BaseModel):
         default=None, description="Filter created_at < end_time"
     )
     limit: int = Field(default=100, ge=1, le=10000, description="Max rows to return")
-    offset: int = Field(default=0, ge=0, description="Pagination offset")
+    offset: int = Field(default=0, ge=0, le=1000000, description="Pagination offset")
 
 
 __all__ = ["ModelInjectionEffectivenessQuery"]
