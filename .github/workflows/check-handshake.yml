@@ -1,0 +1,53 @@
+name: Check Architecture Handshake
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - '.claude/architecture-handshake.md'
+      - '.github/workflows/check-handshake.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - '.claude/architecture-handshake.md'
+      - '.github/workflows/check-handshake.yml'
+  workflow_dispatch:
+
+jobs:
+  check-handshake:
+    name: Check architecture handshake
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Checkout omnibase_core
+        uses: actions/checkout@v4
+        with:
+          repository: OmniNode-ai/omnibase_core
+          # Pinned to omnibase_core main as of 2026-02-10.
+          # Update by running: gh api repos/OmniNode-ai/omnibase_core/commits/main --jq '.sha'
+          ref: 4dc7a0adf299e47eef57ab9950b0f0a587638a3e
+          path: omnibase_core
+          # OMNIBASE_CORE_TOKEN is required when omnibase_core is private.
+          # GITHUB_TOKEN only has read access to the current repo by default.
+          token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Verify omnibase_core checkout
+        run: |
+          if [ ! -f omnibase_core/architecture-handshakes/check-handshake.sh ]; then
+            echo "::error::Failed to checkout omnibase_core or check-handshake.sh not found."
+            echo ""
+            echo "Diagnostic information:"
+            echo "  omnibase_core directory exists: $([ -d omnibase_core ] && echo 'yes' || echo 'no')"
+            echo "  omnibase_core is empty: $([ -z "$(ls -A omnibase_core 2>/dev/null)" ] && echo 'yes' || echo 'no')"
+            echo ""
+            echo "If omnibase_core is private, GITHUB_TOKEN does not have cross-repo access."
+            echo "Set the OMNIBASE_CORE_TOKEN repository secret with a PAT that has repo scope."
+            exit 1
+          fi
+
+      - name: Check architecture handshake
+        run: bash omnibase_core/architecture-handshakes/check-handshake.sh

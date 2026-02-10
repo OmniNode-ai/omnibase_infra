@@ -12,7 +12,7 @@ The EventBusKafka provides production-grade message streaming using Apache Kafka
 - **Circuit breaker** for connection failure protection
 - **Retry with exponential backoff** on publish failures
 - **Dead letter queue (DLQ)** for failed message processing
-- **Graceful degradation** when Kafka is unavailable
+- **Resilience** against transient broker failures (per platform-wide rule #8: Kafka is required infrastructure)
 
 **Source Location**: `src/omnibase_infra/event_bus/event_bus_kafka.py`
 
@@ -57,7 +57,7 @@ All configuration is managed through environment variables with sensible default
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | - | Comma-separated broker addresses |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | - | Comma-separated broker addresses. **Must be overridden** — per rule #7 localhost defaults are for local development only; per rule #8 Kafka is required infrastructure. |
 | `KAFKA_ENVIRONMENT` | `local` | - | Environment identifier (e.g., `dev`, `staging`, `prod`) |
 | `KAFKA_GROUP` | `default` | - | Consumer group identifier |
 
