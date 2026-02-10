@@ -174,7 +174,7 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
         dsn: str | None = None,
         host: str = "localhost",
         port: int = 5432,
-        database: str = "omninode_bridge",
+        database: str = "omnibase_infra",
         user: str = "postgres",
         password: str | None = None,
         pool_size: int = DEFAULT_POOL_SIZE,
@@ -193,7 +193,7 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
             dsn: Optional PostgreSQL connection DSN (overrides host/port/etc).
             host: PostgreSQL server hostname (default: "localhost").
             port: PostgreSQL server port (default: 5432).
-            database: Database name (default: "omninode_bridge").
+            database: Database name (default: "omnibase_infra").
             user: Database user (default: "postgres").
             password: Optional database password.
             pool_size: Connection pool size (default: 10).

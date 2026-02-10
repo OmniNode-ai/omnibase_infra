@@ -493,6 +493,7 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | Variable                  | Description                                         | Security Level | Profile    |
 |---------------------------|-----------------------------------------------------|----------------|------------|
 | `POSTGRES_PASSWORD`       | PostgreSQL database password                        | Secret         | (default)  |
+| `OMNIBASE_INFRA_DB_URL`  | Full PostgreSQL DSN for omnibase_infra (has docker-compose fallback, but required for scripts/runtime) | Secret | (default) |
 | `INFISICAL_ENCRYPTION_KEY`| Hex-encoded AES key (32 or 64 hex chars)            | Secret         | secrets    |
 | `INFISICAL_AUTH_SECRET`   | JWT signing secret for authentication               | Secret         | secrets    |
 
@@ -503,7 +504,6 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | **Kafka/Redpanda**           |                                    |                                        |
 | `KAFKA_BOOTSTRAP_SERVERS`    | `localhost:9092`                   | Kafka/Redpanda broker addresses        |
 | **PostgreSQL**               |                                    |                                        |
-| `OMNIBASE_INFRA_DB_URL`      | `postgresql://postgres:pass@postgres:5432/omnibase_infra` | Full PostgreSQL DSN for omnibase_infra (primary) |
 | `POSTGRES_HOST`              | `localhost`                        | PostgreSQL hostname (legacy fallback)  |
 | `POSTGRES_PORT`              | `5432`                             | PostgreSQL port (legacy fallback)      |
 | `POSTGRES_USER`              | `postgres`                         | Database user (legacy fallback)        |

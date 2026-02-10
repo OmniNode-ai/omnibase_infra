@@ -136,6 +136,7 @@ class ErrorCode:
 
     # Configuration errors (CFG_xxx_xxx)
     CFG_MISSING_DB_URL = "CFG_AUTH_001"
+    CFG_INVALID_DSN_SCHEME = "CFG_DB_001"
     CFG_INVALID_TIMEOUT = "CFG_TIMEOUT_001"
 
     # Database errors (DB_xxx_xxx)
@@ -227,6 +228,13 @@ def _get_validated_dsn() -> str:
             "OMNIBASE_INFRA_DB_URL environment variable is required. "
             "Example: postgresql://postgres:pass@host:5432/omnibase_infra",
             error_code=ErrorCode.CFG_MISSING_DB_URL,
+        )
+
+    if not dsn.startswith(("postgresql://", "postgres://")):
+        raise ConfigurationError(
+            "OMNIBASE_INFRA_DB_URL must start with 'postgresql://' or 'postgres://'. "
+            f"Got scheme: {dsn.split('://', 1)[0] if '://' in dsn else '(none)'}",
+            error_code=ErrorCode.CFG_INVALID_DSN_SCHEME,
         )
 
     logger.debug("Using DSN from OMNIBASE_INFRA_DB_URL (credentials redacted)")

@@ -88,7 +88,9 @@ x-runtime-env: &runtime-env
   # PostgreSQL - use internal service name
   POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
   POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-  OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/omnibase_infra}
+  # NOTE: If OMNIBASE_INFRA_DB_URL is unset, falls back to constructing DSN from POSTGRES_PASSWORD.
+  # POSTGRES_PASSWORD must be set (enforced by :? on the postgres service) for the fallback to work.
+  OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for DB URL fallback}@postgres:5432/omnibase_infra}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
   # Consul - use internal service name

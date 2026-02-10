@@ -38,7 +38,7 @@ class ConfigSessionStorage(BaseSettings):
         description="PostgreSQL port",
     )
     postgres_database: str = Field(
-        default="omninode_bridge",
+        default="omnibase_infra",
         description="PostgreSQL database name",
     )
     postgres_user: str = Field(

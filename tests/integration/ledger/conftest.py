@@ -52,6 +52,7 @@ def _get_postgres_dsn() -> str | None:
     if not host or not password:
         return None
 
+    # 5436 = external port on remote infra server (192.168.86.200)
     port = os.getenv("POSTGRES_PORT", "5436")
     user = os.getenv("POSTGRES_USER", "postgres")
 
