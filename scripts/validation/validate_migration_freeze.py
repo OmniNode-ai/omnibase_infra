@@ -37,8 +37,11 @@ from pathlib import Path
 # This covers the complete migration layout for this repository.
 MIGRATION_DIRS: tuple[str, ...] = ("docker/migrations/",)
 
-# File extensions considered migration files
-MIGRATION_EXTENSIONS: frozenset[str] = frozenset({".sql"})
+# File extensions considered migration files.
+# Includes .sh because some migrations are shell scripts (e.g.,
+# 000_create_multiple_databases.sh). Matches the bash CI script which
+# checks all Added/Renamed files regardless of extension.
+MIGRATION_EXTENSIONS: frozenset[str] = frozenset({".sql", ".sh"})
 
 
 @dataclass
