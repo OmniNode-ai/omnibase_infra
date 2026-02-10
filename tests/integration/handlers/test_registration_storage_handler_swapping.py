@@ -86,25 +86,22 @@ class _PostgresConfigDict(TypedDict):
 
 
 def _resolve_postgres_config() -> _PostgresConfigDict:
-    """Resolve PostgreSQL connection config from env vars.
+    """Resolve PostgreSQL connection config from the module-level _postgres_config.
 
-    Delegates to the shared ``PostgresConfig.from_env()`` utility to avoid
-    duplicating DSN parsing logic. See ``tests/helpers/util_postgres.py``.
+    Reuses the module-level ``_postgres_config`` (created via
+    ``PostgresConfig.from_env()``) to avoid redundant environment parsing.
 
     Returns:
         Dict with host, port, database, user, password keys.
     """
-    from tests.helpers.util_postgres import PostgresConfig
-
-    config = PostgresConfig.from_env()
     return {
-        "host": config.host or "localhost",
-        "port": config.port,
+        "host": _postgres_config.host or "localhost",
+        "port": _postgres_config.port,
         # Default database is "omnibase_infra": PostgresConfig.from_env()
         # sets this when using individual POSTGRES_* env vars per OMN-2065.
-        "database": config.database or "omnibase_infra",
-        "user": config.user,
-        "password": config.password or "",
+        "database": _postgres_config.database or "omnibase_infra",
+        "user": _postgres_config.user,
+        "password": _postgres_config.password or "",
     }
 
 
