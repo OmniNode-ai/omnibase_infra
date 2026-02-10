@@ -41,4 +41,4 @@ class EnumLlmFinishReason(str, Enum):
     UNKNOWN = "unknown"
 
 
-__all__ = ["EnumLlmFinishReason"]
+__all__: list[str] = ["EnumLlmFinishReason"]

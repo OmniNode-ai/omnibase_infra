@@ -32,4 +32,4 @@ class EnumLlmOperationType(str, Enum):
     EMBEDDING = "embedding"
 
 
-__all__ = ["EnumLlmOperationType"]
+__all__: list[str] = ["EnumLlmOperationType"]
