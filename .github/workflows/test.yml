@@ -152,11 +152,27 @@ jobs:
           echo "================================================================"
           poetry run python scripts/validate.py markdown_links --verbose
 
+  # Migration freeze enforcement - blocks new migrations when .migration_freeze exists
+  # Part of DB-per-repo refactor (OMN-2055), tracking: OMN-2071
+  migration-freeze:
+    name: Migration Freeze Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check migration freeze
+        run: ./scripts/check_migration_freeze.sh --ci
+
   # Parallel test execution - 10 splits for ~927 tests each
   # Split strategy: 9265 tests / 10 = ~927 tests per split (~3-4 min each)
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/10)
-    needs: [lint, onex-validation]
+    needs: [lint, onex-validation, migration-freeze]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -229,7 +245,7 @@ jobs:
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
-    needs: [test-parallel, lint, onex-validation]
+    needs: [test-parallel, lint, onex-validation, migration-freeze]
     if: always()
 
     steps:
@@ -238,19 +254,23 @@ jobs:
           parallel="${{ needs.test-parallel.result }}"
           lint="${{ needs.lint.result }}"
           onex="${{ needs.onex-validation.result }}"
+          migrationfreeze="${{ needs.migration-freeze.result }}"
 
           if [[ "$parallel" == "success" ]] && \
              [[ "$lint" == "success" ]] && \
-             [[ "$onex" == "success" ]]; then
+             [[ "$onex" == "success" ]] && \
+             [[ "$migrationfreeze" == "success" ]]; then
             echo "All tests passed successfully"
             echo "Parallel Tests (10 splits): Passed"
             echo "Code Quality: Passed"
             echo "ONEX Validators: Passed"
+            echo "Migration Freeze: Passed"
             exit 0
           else
             echo "Tests failed"
             echo "Parallel Tests: $parallel"
             echo "Lint: $lint"
             echo "ONEX Validators: $onex"
+            echo "Migration Freeze: $migrationfreeze"
             exit 1
           fi
