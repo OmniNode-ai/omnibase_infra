@@ -123,7 +123,8 @@ forward/
   004_capability_fields_concurrent.sql   # Main: concurrent indexes (production)
   005_create_contracts_topics.sql        # Main: contract/topic tables
   016_create_session_snapshots.sql       # Main: session snapshots
-  020-027_*.sql                          # Main: agent observability tables
+  020_create_agent_actions_table.sql      # Main: agent observability tables
+  021-027_*.sql                          # Main: additional agent analytics tables
 ```
 
 **Next available:** `028_*.sql`

@@ -323,15 +323,7 @@ COMMENT ON COLUMN registration_projections.last_applied_partition IS
 -- =============================================================================
 -- ROLLBACK MIGRATION
 -- =============================================================================
--- CAUTION: Rollback will DROP DATA. Only use if migration was applied in error.
---
--- To rollback this migration, execute the following:
---
---   DROP TABLE IF EXISTS registration_projections CASCADE;
---   DROP TYPE IF EXISTS registration_state CASCADE;
---
--- Note: CASCADE will drop dependent objects (indexes, constraints).
--- Consider backing up data before rollback: COPY registration_projections TO '/tmp/backup.csv' CSV HEADER;
+-- See rollback/rollback_001_registration_projection.sql
 
 -- =============================================================================
 -- INDEX MAINTENANCE NOTES
