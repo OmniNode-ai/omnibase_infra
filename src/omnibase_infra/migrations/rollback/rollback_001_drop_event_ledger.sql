@@ -1,5 +1,5 @@
--- Migration: 001_drop_event_ledger.sql
--- Purpose: Rollback for 001_create_event_ledger.sql
+-- Rollback: forward/001_create_event_ledger.sql
+-- Purpose: Drop event_ledger table (rollback for forward/001_create_event_ledger.sql)
 -- Author: ONEX Infrastructure Team
 -- Date: 2026-01-29
 --

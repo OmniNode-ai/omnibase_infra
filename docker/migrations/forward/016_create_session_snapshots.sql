@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS claude_session_snapshots (
 );
 
 -- Indexes for common queries
-CREATE INDEX IF NOT EXISTS idx_session_snapshots_session_id ON claude_session_snapshots(session_id);
+-- Note: session_id has a UNIQUE index below (idx_session_snapshots_session_id_unique)
+-- which also serves as a lookup index, so no separate non-unique index is needed.
 CREATE INDEX IF NOT EXISTS idx_session_snapshots_status ON claude_session_snapshots(status);
 CREATE INDEX IF NOT EXISTS idx_session_snapshots_working_directory ON claude_session_snapshots(working_directory);
 CREATE INDEX IF NOT EXISTS idx_session_snapshots_last_event_at ON claude_session_snapshots(last_event_at);

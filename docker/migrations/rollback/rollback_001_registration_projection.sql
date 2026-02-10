@@ -1,4 +1,4 @@
--- Rollback: 001_registration_projection.sql
+-- Rollback: forward/001_registration_projection.sql
 -- Purpose: Drop registration projection table and enum type
 --
 -- WARNING: This migration is DESTRUCTIVE. All data in registration_projections will be lost.
