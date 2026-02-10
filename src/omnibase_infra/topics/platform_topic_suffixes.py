@@ -4,12 +4,12 @@ WARNING: These are platform-reserved suffixes. Domain services must NOT
 import from this module. Domain topics should be defined in domain contracts.
 
 Topic Suffix Format:
-    onex.<kind>.<producer>.<event-name>.v<version>
+    onex.<kind>.<domain>.<event-name>.v<version>
 
     Structure:
         - onex: Required prefix for all ONEX topics
         - kind: Message category (evt, cmd, intent, snapshot, dlq)
-        - producer: Service/module that produces the message
+        - domain: Routing domain -- ``platform`` for infrastructure
         - event-name: Descriptive name using kebab-case
         - version: Semantic version (v1, v2, etc.)
 
@@ -34,10 +34,14 @@ Usage:
 See Also:
     omnibase_core.validation.validate_topic_suffix - Validation function
     omnibase_core.validation.compose_full_topic - Topic composition utility
+    model_topic_spec.ModelTopicSpec - Per-topic creation spec
 """
+
+from __future__ import annotations
 
 from omnibase_core.errors import OnexError
 from omnibase_core.validation import validate_topic_suffix
+from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
 
 # =============================================================================
 # PLATFORM-RESERVED TOPIC SUFFIXES
@@ -97,25 +101,69 @@ Published periodically with aggregated registration state. Used for
 dashboard displays and monitoring systems.
 """
 
+# Contract lifecycle events (used by ContractRegistrationEventRouter in kernel)
+SUFFIX_CONTRACT_REGISTERED: str = "onex.evt.platform.contract-registered.v1"
+"""Topic suffix for contract registration events.
+
+Published when a node contract is registered with the runtime.
+"""
+
+SUFFIX_CONTRACT_DEREGISTERED: str = "onex.evt.platform.contract-deregistered.v1"
+"""Topic suffix for contract deregistration events.
+
+Published when a node contract is deregistered from the runtime.
+"""
+
 # =============================================================================
-# AGGREGATE TUPLE
+# PLATFORM TOPIC SPEC REGISTRY
 # =============================================================================
 
-ALL_PLATFORM_SUFFIXES: tuple[str, ...] = (
-    SUFFIX_NODE_REGISTRATION,
-    SUFFIX_NODE_INTROSPECTION,
-    SUFFIX_NODE_HEARTBEAT,
-    SUFFIX_REQUEST_INTROSPECTION,
-    SUFFIX_FSM_STATE_TRANSITIONS,
-    SUFFIX_RUNTIME_TICK,
-    SUFFIX_REGISTRATION_SNAPSHOTS,
+
+# Build snapshot topic kafka_config from ModelSnapshotTopicConfig.default().
+# Deferred import to avoid circular dependency; lazy initialization is safe
+# because this module is only imported at startup.
+def _snapshot_kafka_config() -> dict[str, str]:
+    """Build Kafka config for the snapshot topic from ModelSnapshotTopicConfig."""
+    from omnibase_infra.models.projection.model_snapshot_topic_config import (
+        ModelSnapshotTopicConfig,
+    )
+
+    return ModelSnapshotTopicConfig.default().to_kafka_config()
+
+
+ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
+    ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION, partitions=6),
+    ModelTopicSpec(suffix=SUFFIX_NODE_INTROSPECTION, partitions=6),
+    ModelTopicSpec(suffix=SUFFIX_NODE_HEARTBEAT, partitions=6),
+    ModelTopicSpec(suffix=SUFFIX_REQUEST_INTROSPECTION, partitions=6),
+    ModelTopicSpec(suffix=SUFFIX_FSM_STATE_TRANSITIONS, partitions=6),
+    ModelTopicSpec(suffix=SUFFIX_RUNTIME_TICK, partitions=1),
+    ModelTopicSpec(
+        suffix=SUFFIX_REGISTRATION_SNAPSHOTS,
+        partitions=1,
+        kafka_config=_snapshot_kafka_config(),
+    ),
+    ModelTopicSpec(suffix=SUFFIX_CONTRACT_REGISTERED, partitions=6),
+    ModelTopicSpec(suffix=SUFFIX_CONTRACT_DEREGISTERED, partitions=6),
+)
+"""Complete tuple of all platform topic specs with per-topic configuration.
+
+Each spec defines the topic suffix, partition count, replication factor, and
+optional Kafka config overrides. TopicProvisioner iterates this registry
+to create topics on startup.
+"""
+
+# =============================================================================
+# AGGREGATE SUFFIX TUPLE (derived from specs for backwards compat)
+# =============================================================================
+
+ALL_PLATFORM_SUFFIXES: tuple[str, ...] = tuple(
+    spec.suffix for spec in ALL_PLATFORM_TOPIC_SPECS
 )
 """Complete tuple of all platform-reserved topic suffixes.
 
-Use this tuple for:
-    - Validating that domain topics don't conflict with platform topics
-    - Iterating over all platform topics for subscription setup
-    - Documentation and discovery
+Derived from ALL_PLATFORM_TOPIC_SPECS for backwards compatibility with
+validation code that iterates suffix strings.
 """
 
 # =============================================================================

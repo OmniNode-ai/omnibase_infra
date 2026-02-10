@@ -1146,7 +1146,7 @@ class PluginRegistration:
                     correlation_id,
                 )
 
-            elif protocol == "consul" and self._consul_handler is not None:
+            elif intent_type == "consul.register" and self._consul_handler is not None:
                 from omnibase_infra.runtime.intent_effects import (
                     IntentEffectConsulRegister,
                 )
@@ -1161,6 +1161,31 @@ class PluginRegistration:
                 registered_count += 1
                 logger.debug(
                     "Registered IntentEffectConsulRegister for intent_type=%s "
+                    "(correlation_id=%s)",
+                    intent_type,
+                    correlation_id,
+                )
+
+            elif (
+                intent_type == "consul.deregister" and self._consul_handler is not None
+            ):
+                from omnibase_infra.runtime.intent_effects import (
+                    IntentEffectConsulDeregister,
+                )
+
+                deregister_effect = IntentEffectConsulDeregister(
+                    consul_handler=self._consul_handler,
+                )
+                intent_executor.register_handler(intent_type, deregister_effect)
+                await self._register_effect_in_container(
+                    config,
+                    IntentEffectConsulDeregister,
+                    deregister_effect,
+                    correlation_id,
+                )
+                registered_count += 1
+                logger.debug(
+                    "Registered IntentEffectConsulDeregister for intent_type=%s "
                     "(correlation_id=%s)",
                     intent_type,
                     correlation_id,

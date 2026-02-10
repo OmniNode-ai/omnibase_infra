@@ -149,7 +149,7 @@ class AuditReport:
         """
         lines: list[str] = []
         lines.append(f"Bus Audit Report -- {self.broker}")
-        lines.append(f"Overall EnumVerdict: {self.overall_verdict.value.upper()}")
+        lines.append(f"Overall Verdict: {self.overall_verdict.value.upper()}")
         lines.append("")
 
         for th in self.topics:
@@ -159,7 +159,7 @@ class AuditReport:
                 f"    Status: {th.status.value}  |  Partitions: {th.partition_count}  |  Messages: {th.total_messages}"
             )
             lines.append(
-                f"    Naming: {th.naming.value}  |  EnumVerdict: {th.verdict.value.upper()}"
+                f"    Naming: {th.naming.value}  |  Verdict: {th.verdict.value.upper()}"
             )
 
             if th.envelope_stats is not None:
@@ -238,8 +238,5 @@ __all__: list[str] = [
     "AuditReport",
     "DomainValidationResult",
     "EnvelopeStats",
-    "EnumNamingCompliance",
     "TopicHealth",
-    "EnumTopicStatus",
-    "EnumVerdict",
 ]

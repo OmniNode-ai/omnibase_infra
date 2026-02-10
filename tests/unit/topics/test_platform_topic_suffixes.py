@@ -5,6 +5,8 @@ import pytest
 from omnibase_core.validation import validate_topic_suffix
 from omnibase_infra.topics import (
     ALL_PLATFORM_SUFFIXES,
+    SUFFIX_CONTRACT_DEREGISTERED,
+    SUFFIX_CONTRACT_REGISTERED,
     SUFFIX_FSM_STATE_TRANSITIONS,
     SUFFIX_NODE_HEARTBEAT,
     SUFFIX_NODE_INTROSPECTION,
@@ -34,6 +36,8 @@ class TestPlatformTopicSuffixes:
             SUFFIX_FSM_STATE_TRANSITIONS,
             SUFFIX_RUNTIME_TICK,
             SUFFIX_REGISTRATION_SNAPSHOTS,
+            SUFFIX_CONTRACT_REGISTERED,
+            SUFFIX_CONTRACT_DEREGISTERED,
         }
         assert set(ALL_PLATFORM_SUFFIXES) == expected_suffixes
 

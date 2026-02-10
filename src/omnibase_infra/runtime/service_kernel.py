@@ -122,6 +122,8 @@ from omnibase_infra.runtime.util_container_wiring import (
 # See also: omnibase_infra/services/__init__.py "ServiceHealth Import Guide" section
 from omnibase_infra.runtime.util_validation import validate_runtime_config
 from omnibase_infra.topics import (
+    SUFFIX_CONTRACT_DEREGISTERED,
+    SUFFIX_CONTRACT_REGISTERED,
     SUFFIX_NODE_HEARTBEAT,
     TopicResolutionError,
     TopicResolver,
@@ -620,6 +622,45 @@ async def bootstrap() -> int:
                 "consumer_group": config.consumer_group,
             },
         )
+
+        # 3.5. Provision platform topics (best-effort, never blocks startup)
+        if use_kafka:
+            try:
+                from omnibase_infra.event_bus.service_topic_manager import (
+                    TopicProvisioner,
+                )
+
+                topic_provisioner = TopicProvisioner(
+                    bootstrap_servers=kafka_bootstrap_servers,
+                )
+                provisioning_result = (
+                    await topic_provisioner.ensure_platform_topics_exist(
+                        correlation_id=correlation_id,
+                    )
+                )
+                log_level = (
+                    logging.WARNING
+                    if provisioning_result["status"] != "success"
+                    else logging.INFO
+                )
+                logger.log(
+                    log_level,
+                    "Topic provisioning: status=%s created=%d existing=%d failed=%d "
+                    "failed_topics=%s (correlation_id=%s)",
+                    provisioning_result["status"],
+                    len(provisioning_result["created"]),
+                    len(provisioning_result["existing"]),
+                    len(provisioning_result["failed"]),
+                    provisioning_result["failed"] or "none",
+                    correlation_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Topic provisioning failed (best-effort, non-blocking) "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                    exc_info=True,
+                )
 
         # 4. Create and wire container for dependency injection
         container_start_time = time.time()
@@ -1336,11 +1377,11 @@ async def bootstrap() -> int:
             topic_resolver = TopicResolver()
             try:
                 contract_registered_topic = topic_resolver.resolve(
-                    "onex.evt.platform.contract-registered.v1",
+                    SUFFIX_CONTRACT_REGISTERED,
                     correlation_id=correlation_id,
                 )
                 contract_deregistered_topic = topic_resolver.resolve(
-                    "onex.evt.platform.contract-deregistered.v1",
+                    SUFFIX_CONTRACT_DEREGISTERED,
                     correlation_id=correlation_id,
                 )
                 node_heartbeat_topic = topic_resolver.resolve(

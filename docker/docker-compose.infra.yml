@@ -185,53 +185,14 @@ services:
       - "com.omninode.service=redpanda"
       - "com.omninode.layer=infrastructure"
   # ==========================================================================
-  # Redpanda Topic Manager - Automatic Topic Creation
+  # Topic Provisioning
   # ==========================================================================
-  redpanda-topic-manager:
-    image: redpandadata/redpanda:v24.2.7
-    container_name: omnibase-infra-topic-manager
-    depends_on:
-      redpanda:
-        condition: service_healthy
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - |
-        echo "Waiting for Redpanda to be ready..."
-        sleep 5
-
-        # Create core ONEX topics
-        echo "Creating ONEX topics..."
-        rpk topic create requests --brokers redpanda:9092 -p 3 -r 1 || true
-        rpk topic create responses --brokers redpanda:9092 -p 3 -r 1 || true
-        rpk topic create effect-requests --brokers redpanda:9092 -p 3 -r 1 || true
-        rpk topic create effect-responses --brokers redpanda:9092 -p 3 -r 1 || true
-        rpk topic create worker-requests --brokers redpanda:9092 -p 3 -r 1 || true
-        rpk topic create worker-responses --brokers redpanda:9092 -p 3 -r 1 || true
-
-        # Create observability topics
-        echo "Creating observability topics..."
-        rpk topic create agent-actions --brokers redpanda:9092 -p 3 -r 1 || true
-        rpk topic create agent-transformation-events --brokers redpanda:9092 -p 3 -r 1 || true
-        rpk topic create router-performance-metrics --brokers redpanda:9092 -p 3 -r 1 || true
-
-        # Create registration topics
-        echo "Creating registration topics..."
-        rpk topic create node-introspection-events --brokers redpanda:9092 -p 3 -r 1 || true
-        rpk topic create node-registration-events --brokers redpanda:9092 -p 3 -r 1 || true
-
-        # List all topics
-        echo "Topics created:"
-        rpk topic list --brokers redpanda:9092
-
-        echo "Topic manager completed successfully."
-    networks:
-      - omnibase-infra-network
-    logging: *logging-defaults
-    restart: "no"
-    labels:
-      - "com.omninode.service=topic-manager"
-      - "com.omninode.layer=infrastructure"
+  # Topics are provisioned by TopicProvisioner on runtime boot (service_kernel.py).
+  # The single source of truth for topic names and config is ALL_PLATFORM_TOPIC_SPECS
+  # in src/omnibase_infra/topics/platform_topic_suffixes.py.
+  #
+  # For manual provisioning without the runtime (e.g., development with just Redpanda):
+  #   poetry run python -m omnibase_infra.event_bus.service_topic_manager
   # ==========================================================================
   # Valkey - Redis-Compatible Cache and Pub/Sub
   # ==========================================================================

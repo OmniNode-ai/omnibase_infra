@@ -58,7 +58,11 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.topics import SUFFIX_REGISTRATION_SNAPSHOTS
+
+# Import from the leaf module (not the package) to avoid circular import:
+#   topics/__init__ -> platform_topic_suffixes -> _snapshot_kafka_config()
+#   -> model_snapshot_topic_config -> topics/__init__  (cycle!)
+from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_REGISTRATION_SNAPSHOTS
 
 if TYPE_CHECKING:
     from omnibase_infra.errors.error_infra import ProtocolConfigurationError
@@ -315,12 +319,11 @@ class ModelSnapshotTopicConfig(BaseModel):
                 value=v,
             )
 
-        # Validate topic contains "snapshots" suffix (per ONEX taxonomy)
-        if not topic.endswith(".snapshots") and ".snapshots." not in topic:
+        # Validate topic contains "snapshot" keyword (per ONEX taxonomy)
+        if "snapshot" not in topic:
             logger.warning(
-                "Topic name '%s' does not follow ONEX snapshot topic naming "
-                "convention (should end with '.snapshots' or contain '.snapshots.'). "
-                "Expected patterns: 'onex.<domain>.snapshots' or "
+                "Topic name '%s' does not contain 'snapshot' keyword. "
+                "Expected patterns: 'onex.snapshot.<domain>.*' or "
                 "'<env>.<domain>.snapshots.v<version>'",
                 topic,
             )
