@@ -39,7 +39,13 @@ jobs:
         run: |
           if [ ! -f omnibase_core/architecture-handshakes/check-handshake.sh ]; then
             echo "::error::Failed to checkout omnibase_core or check-handshake.sh not found."
-            echo "If omnibase_core is private, ensure OMNIBASE_CORE_TOKEN secret is set."
+            echo ""
+            echo "Diagnostic information:"
+            echo "  omnibase_core directory exists: $([ -d omnibase_core ] && echo 'yes' || echo 'no')"
+            echo "  omnibase_core is empty: $([ -z "$(ls -A omnibase_core 2>/dev/null)" ] && echo 'yes' || echo 'no')"
+            echo ""
+            echo "If omnibase_core is private, GITHUB_TOKEN does not have cross-repo access."
+            echo "Set the OMNIBASE_CORE_TOKEN repository secret with a PAT that has repo scope."
             exit 1
           fi
 

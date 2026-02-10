@@ -29,7 +29,8 @@ class ProviderKafkaProducer:
     across all contracts that declare kafka_producer dependencies.
 
     Per platform-wide rule #8: Kafka is required infrastructure.
-    Uses async patterns to avoid blocking the calling thread.
+    Creation failures propagate to the caller — callers must treat them
+    as fatal. Uses async patterns to avoid blocking the calling thread.
     """
 
     def __init__(self, config: ModelKafkaProducerConfig) -> None:

@@ -484,12 +484,13 @@ class EventBusKafka(
         """Start the event bus and connect to Kafka.
 
         Initializes the Kafka producer with connection retry and circuit
-        breaker protection. If connection fails, the bus operates in
-        degraded mode where publishes will fail gracefully.
+        breaker protection. Per platform-wide rule #8, Kafka is required
+        infrastructure — connection failures raise and must be treated as
+        fatal by the caller.
 
         Raises:
-            InfraConnectionError: If connection fails after all retries and
-                circuit breaker is open
+            InfraTimeoutError: If connection times out
+            InfraConnectionError: If connection fails after retries
         """
         if self._started:
             logger.debug("EventBusKafka already started")

@@ -57,7 +57,7 @@ All configuration is managed through environment variables with sensible default
 
 | Variable | Default | Range | Description |
 |----------|---------|-------|-------------|
-| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | - | Comma-separated broker addresses |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | - | Comma-separated broker addresses. **Must be overridden** — per rule #7 localhost defaults are for local development only; per rule #8 Kafka is required infrastructure. |
 | `KAFKA_ENVIRONMENT` | `local` | - | Environment identifier (e.g., `dev`, `staging`, `prod`) |
 | `KAFKA_GROUP` | `default` | - | Consumer group identifier |
 
