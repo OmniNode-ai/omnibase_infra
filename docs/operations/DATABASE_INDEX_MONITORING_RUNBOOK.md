@@ -8,7 +8,7 @@ Operational guide for monitoring GIN index performance on the `registration_proj
 
 The `registration_projections` table uses 4 indexes (3 GIN, 1 B-tree) to enable fast capability-based discovery queries. GIN (Generalized Inverted Index) indexes provide efficient array containment queries but add overhead to write operations.
 
-**Source Migration**: `docker/migrations/003_capability_fields.sql`
+**Source Migration**: `docker/migrations/forward/003_capability_fields.sql`
 **Related Ticket**: OMN-1134 (Registry Projection Extensions for Capabilities)
 
 ### Index Inventory

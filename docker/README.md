@@ -982,7 +982,8 @@ CONSUL_PORT = 8500
 | `docker-compose.e2e.yml`    | E2E testing with infrastructure services           |
 | `.env.example`              | Environment variable template (copy to `.env`)     |
 | `.env.e2e`                  | E2E testing environment template                   |
-| `init-scripts/`             | PostgreSQL initialization scripts                  |
+| `migrations/forward/`       | Forward migrations (auto-applied on first start)   |
+| `migrations/rollback/`      | Rollback scripts (manual execution only)           |
 | `README.md`                 | This documentation                                 |
 
 ## Related Documentation

@@ -11,7 +11,7 @@ Table Schema:
     - claude_session_tools: Child table for tool execution records
     - claude_session_event_idempotency: Deduplication tracking
 
-See migrations/016_create_session_snapshots.sql for full schema.
+See docker/migrations/forward/016_create_session_snapshots.sql for full schema.
 
 Idempotency Cleanup:
     The idempotency table has a 24-hour TTL. Call cleanup_expired_idempotency()
