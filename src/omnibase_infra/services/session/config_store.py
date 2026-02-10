@@ -144,8 +144,9 @@ class ConfigSessionStorage(BaseSettings):
         Returns:
             PostgreSQL connection string with password replaced by ***.
         """
+        encoded_user = quote_plus(self.postgres_user, safe="")
         return (
-            f"postgresql://{self.postgres_user}:***"
+            f"postgresql://{encoded_user}:***"
             f"@{self.postgres_host}:{self.postgres_port}"
             f"/{self.postgres_database}"
         )

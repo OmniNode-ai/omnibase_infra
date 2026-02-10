@@ -307,8 +307,6 @@ def _build_postgres_dsn() -> str:
     """
     if _OMNIBASE_INFRA_DB_URL:
         # Basic validation: ensure the user-provided DSN is well-formed
-        from urllib.parse import urlparse
-
         parsed = urlparse(_OMNIBASE_INFRA_DB_URL)
         if parsed.scheme not in ("postgresql", "postgres"):
             raise ValueError(
