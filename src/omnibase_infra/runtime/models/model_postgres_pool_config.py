@@ -35,7 +35,10 @@ class ModelPostgresPoolConfig(BaseModel):
         description="PostgreSQL password (never logged or included in repr)",
     )
     database: str = Field(
-        description="PostgreSQL database name (required; use from_env() or from_dsn() factories)",
+        description=(
+            "PostgreSQL database name (required — no default). "
+            "Use from_env() or from_dsn() factories which always provide this."
+        ),
     )
     min_size: int = Field(default=2, ge=1, le=100, description="Minimum pool size")
     max_size: int = Field(default=10, ge=1, le=100, description="Maximum pool size")

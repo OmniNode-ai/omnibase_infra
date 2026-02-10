@@ -253,6 +253,22 @@ class PostgresConfig:
         db_url: str | None = os.getenv(db_url_var)
         if db_url:
             parsed = urlparse(db_url)
+            # Validate scheme for consistency with other DSN consumers
+            if parsed.scheme not in ("postgresql", "postgres"):
+                logger.warning(
+                    "%s has invalid scheme '%s' (expected 'postgresql' or "
+                    "'postgres'). The resulting PostgresConfig.is_configured "
+                    "will be False and tests will be skipped.",
+                    db_url_var,
+                    parsed.scheme,
+                )
+                return cls(
+                    host=parsed.hostname or "localhost",
+                    port=parsed.port or DEFAULT_POSTGRES_PORT,
+                    database="",
+                    user=default_user,
+                    password=None,
+                )
             database = (parsed.path or "").lstrip("/")
             if not database:
                 logger.warning(
