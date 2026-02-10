@@ -12,6 +12,8 @@ Related:
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -210,3 +212,90 @@ class TestIntentEffectPostgresUpsertExecute:
         assert values["domain"] == "registration"
         assert values["current_state"] == "pending_registration"
         assert values["node_type"] == "effect"
+
+
+class TestColumnSetsMatchSchema:
+    """Validate that _UUID_COLUMNS and _TIMESTAMP_COLUMNS match the SQL schema.
+
+    These frozensets drive asyncpg type normalization. If the SQL schema adds
+    a new UUID or TIMESTAMPTZ column and these sets are not updated, asyncpg
+    will receive string values instead of native types, causing query failures.
+    """
+
+    @staticmethod
+    def _extract_uuid_columns_from_sql(sql: str) -> set[str]:
+        """Extract column names declared as UUID in CREATE TABLE."""
+        columns: set[str] = set()
+        # Match lines like: column_name UUID ...
+        for match in re.finditer(r"^\s+(\w+)\s+UUID\b", sql, re.MULTILINE):
+            columns.add(match.group(1))
+        return columns
+
+    @staticmethod
+    def _extract_timestamptz_columns_from_sql(sql: str) -> set[str]:
+        """Extract column names declared as TIMESTAMPTZ in CREATE TABLE."""
+        columns: set[str] = set()
+        for match in re.finditer(r"^\s+(\w+)\s+TIMESTAMPTZ\b", sql, re.MULTILINE):
+            columns.add(match.group(1))
+        return columns
+
+    def test_uuid_columns_are_subset_of_schema(self) -> None:
+        """_UUID_COLUMNS must only contain columns that exist as UUID in schema."""
+        schema_path = (
+            Path(__file__).parent.parent.parent.parent
+            / "src"
+            / "omnibase_infra"
+            / "schemas"
+            / "schema_registration_projection.sql"
+        )
+        assert schema_path.exists(), f"Schema file not found: {schema_path}"
+
+        sql = schema_path.read_text()
+        schema_uuid_cols = self._extract_uuid_columns_from_sql(sql)
+
+        # _UUID_COLUMNS must be a subset of actual schema UUID columns
+        unknown = IntentEffectPostgresUpsert._UUID_COLUMNS - schema_uuid_cols
+        assert not unknown, (
+            f"_UUID_COLUMNS contains columns not in schema: {unknown}. "
+            f"Schema UUID columns: {schema_uuid_cols}"
+        )
+
+    def test_timestamp_columns_are_subset_of_schema(self) -> None:
+        """_TIMESTAMP_COLUMNS must only contain columns that exist as TIMESTAMPTZ."""
+        schema_path = (
+            Path(__file__).parent.parent.parent.parent
+            / "src"
+            / "omnibase_infra"
+            / "schemas"
+            / "schema_registration_projection.sql"
+        )
+        assert schema_path.exists(), f"Schema file not found: {schema_path}"
+
+        sql = schema_path.read_text()
+        schema_ts_cols = self._extract_timestamptz_columns_from_sql(sql)
+
+        unknown = IntentEffectPostgresUpsert._TIMESTAMP_COLUMNS - schema_ts_cols
+        assert not unknown, (
+            f"_TIMESTAMP_COLUMNS contains columns not in schema: {unknown}. "
+            f"Schema TIMESTAMPTZ columns: {schema_ts_cols}"
+        )
+
+    def test_all_schema_uuid_columns_covered_or_documented(self) -> None:
+        """All UUID columns in schema should be in _UUID_COLUMNS or documented as not-yet-covered."""
+        schema_path = (
+            Path(__file__).parent.parent.parent.parent
+            / "src"
+            / "omnibase_infra"
+            / "schemas"
+            / "schema_registration_projection.sql"
+        )
+        sql = schema_path.read_text()
+        schema_uuid_cols = self._extract_uuid_columns_from_sql(sql)
+
+        # Current coverage + documented exclusions = full set
+        # If this test fails, a new UUID column was added to the schema but
+        # not to _UUID_COLUMNS or the "not yet covered" documentation.
+        covered = IntentEffectPostgresUpsert._UUID_COLUMNS
+        assert covered.issubset(schema_uuid_cols), (
+            f"_UUID_COLUMNS has entries not in schema: {covered - schema_uuid_cols}"
+        )

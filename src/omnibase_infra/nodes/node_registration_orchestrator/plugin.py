@@ -863,11 +863,12 @@ class PluginRegistration:
                 reason="dispatch_engine not available",
             )
 
-        # Duck typing: check for subscribe capability rather than concrete type
-        if not (
-            hasattr(config.event_bus, "subscribe")
-            and callable(getattr(config.event_bus, "subscribe", None))
-        ):
+        # Check for subscribe capability using isinstance (not duck-typing).
+        # Both InMemoryEventBus and KafkaEventBus implement subscribe.
+        from omnibase_infra.event_bus.inmemory_event_bus import InMemoryEventBus
+        from omnibase_infra.event_bus.kafka_event_bus import KafkaEventBus
+
+        if not isinstance(config.event_bus, (InMemoryEventBus, KafkaEventBus)):
             return ModelDomainPluginResult.skipped(
                 plugin_id=self.plugin_id,
                 reason="Event bus does not support subscribe",
@@ -989,7 +990,6 @@ class PluginRegistration:
 
         Args:
             intent_executor: IntentExecutor to register handlers with.
-                Duck-typed: must have register_handler(intent_type, handler).
             contract_path: Path to the contract YAML with intent_routing_table.
             correlation_id: Correlation ID for logging.
         """
@@ -1006,14 +1006,8 @@ class PluginRegistration:
             )
             return
 
-        register_fn = getattr(intent_executor, "register_handler", None)
-        if register_fn is None or not callable(register_fn):
-            logger.warning(
-                "IntentExecutor does not support register_handler, "
-                "skipping effect wiring (correlation_id=%s)",
-                correlation_id,
-            )
-            return
+        # IntentExecutor is a known type with register_handler() — direct call,
+        # no getattr duck-typing needed.
 
         registered_count = 0
 
@@ -1030,7 +1024,7 @@ class PluginRegistration:
                 )
 
                 pg_effect = IntentEffectPostgresUpsert(projector=self._projector)
-                register_fn(intent_type, pg_effect)
+                intent_executor.register_handler(intent_type, pg_effect)
                 registered_count += 1
                 logger.debug(
                     "Registered IntentEffectPostgresUpsert for intent_type=%s "
@@ -1047,7 +1041,7 @@ class PluginRegistration:
                 consul_effect = IntentEffectConsulRegister(
                     consul_handler=self._consul_handler,
                 )
-                register_fn(intent_type, consul_effect)
+                intent_executor.register_handler(intent_type, consul_effect)
                 registered_count += 1
                 logger.debug(
                     "Registered IntentEffectConsulRegister for intent_type=%s "

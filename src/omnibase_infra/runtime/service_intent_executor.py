@@ -145,18 +145,25 @@ class IntentExecutor:
 
         # Get intent_type from payload using isinstance guard (not bare getattr).
         # Typed payloads extend BaseModel with an explicit intent_type Literal field.
-        # A non-BaseModel payload (e.g., plain dict) is caught by the guard.
+        # Do NOT fall back to intent.intent_type — for infrastructure intents,
+        # intent.intent_type is always "extension" (the generic envelope marker),
+        # not the actual routing key (e.g., "consul.register"). Falling back
+        # would produce a confusing "no handler for 'extension'" error that
+        # masks the real problem: the payload is missing intent_type.
         intent_type: str | None = None
         if isinstance(payload, BaseModel) and hasattr(payload, "intent_type"):
             intent_type = payload.intent_type
         else:
-            intent_type = intent.intent_type
-            logger.warning(
-                "Payload %s has no intent_type field, "
-                "falling back to intent.intent_type=%s correlation_id=%s",
-                type(payload).__name__,
-                intent_type,
-                str(correlation_id) if correlation_id else "none",
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="intent_executor.resolve_intent_type",
+            )
+            raise RuntimeHostError(
+                f"Payload {type(payload).__name__} has no intent_type field — "
+                f"cannot route intent. All typed payloads must extend BaseModel "
+                f"with an explicit intent_type Literal field.",
+                context=context,
             )
 
         if intent_type is None:

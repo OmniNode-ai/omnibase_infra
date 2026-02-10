@@ -29,6 +29,7 @@ Related:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -89,6 +90,7 @@ class DispatchResultApplier:
         event_bus: ProtocolEventBusLike,
         output_topic: str,
         intent_executor: IntentExecutor | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         """Initialize the dispatch result applier.
 
@@ -98,10 +100,13 @@ class DispatchResultApplier:
             intent_executor: Optional intent executor for delegating intents
                 to effect layer handlers. When provided, intents from dispatch
                 results are forwarded to the executor for effect layer processing.
+            clock: Optional callable returning current UTC datetime. Defaults to
+                ``datetime.now(UTC)``. Inject for deterministic replay/testing.
         """
         self._event_bus = event_bus
         self._output_topic = output_topic
         self._intent_executor = intent_executor
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     async def apply(
         self,
@@ -133,7 +138,7 @@ class DispatchResultApplier:
                     output_envelope: ModelEventEnvelope[BaseModel] = ModelEventEnvelope(
                         payload=output_event,
                         correlation_id=effective_correlation_id,
-                        envelope_timestamp=datetime.now(UTC),
+                        envelope_timestamp=self._clock(),
                     )
 
                     await self._event_bus.publish_envelope(

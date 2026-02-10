@@ -537,7 +537,7 @@ class TestHandlerNodeIntrospectedIntents:
         # Verify record contains expected fields
         # record is a BaseModel subclass (extra="allow"); convert to dict for access
         record = postgres_payload.record.model_dump()
-        assert record["entity_id"] == str(node_id)
+        assert record["entity_id"] == node_id
         assert record["domain"] == "registration"
         assert (
             record["current_state"] == EnumRegistrationState.PENDING_REGISTRATION.value
@@ -795,3 +795,81 @@ class TestSanitizeToolName:
         # All special characters
         result = handler._sanitize_tool_name("@#$%^&*()")
         assert result == ""
+
+
+class TestCapabilitiesJsonbCompatibility:
+    """Test that capabilities serialization produces asyncpg-compatible JSONB values.
+
+    The handler uses model_dump(mode="json") for capabilities. asyncpg's
+    JSONB codec expects Python dicts, not JSON strings. This test ensures
+    the serialization contract holds.
+    """
+
+    @pytest.mark.asyncio
+    async def test_capabilities_model_dump_json_returns_dict(self) -> None:
+        """model_dump(mode='json') must return a dict (not a JSON string) for JSONB."""
+        mock_reader = create_mock_projection_reader()
+        mock_reader.get_entity_state.return_value = None
+
+        handler = HandlerNodeIntrospected(mock_reader)
+
+        capabilities = ModelNodeCapabilities(
+            postgres=True,
+            read=True,
+            write=True,
+        )
+        introspection_event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type=EnumNodeKind.EFFECT,
+            declared_capabilities=capabilities,
+            correlation_id=uuid4(),
+            timestamp=TEST_NOW,
+        )
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
+
+        output = await handler.handle(envelope)
+
+        # Find postgres intent and inspect capabilities
+        postgres_intents = [
+            i
+            for i in output.intents
+            if isinstance(i.payload, ModelPayloadPostgresUpsertRegistration)
+        ]
+        assert len(postgres_intents) == 1
+
+        record = postgres_intents[0].payload.record.model_dump()
+        caps = record["capabilities"]
+
+        # asyncpg JSONB codec expects a Python dict, not a JSON string
+        assert isinstance(caps, dict), (
+            f"Expected dict for JSONB, got {type(caps).__name__}: {caps!r}"
+        )
+
+        # Verify the dict contains expected capability fields
+        assert caps.get("postgres") is True
+        assert caps.get("read") is True
+        assert caps.get("write") is True
+
+    @pytest.mark.asyncio
+    async def test_empty_capabilities_returns_empty_dict(self) -> None:
+        """Default capabilities should serialize to empty dict for JSONB."""
+        mock_reader = create_mock_projection_reader()
+        mock_reader.get_entity_state.return_value = None
+
+        handler = HandlerNodeIntrospected(mock_reader)
+
+        introspection_event = create_introspection_event()
+        envelope = create_envelope(introspection_event, now=TEST_NOW)
+
+        output = await handler.handle(envelope)
+
+        postgres_intents = [
+            i
+            for i in output.intents
+            if isinstance(i.payload, ModelPayloadPostgresUpsertRegistration)
+        ]
+        record = postgres_intents[0].payload.record.model_dump()
+        caps = record["capabilities"]
+
+        assert isinstance(caps, dict)
+        # Default ModelNodeCapabilities with no params should produce a dict

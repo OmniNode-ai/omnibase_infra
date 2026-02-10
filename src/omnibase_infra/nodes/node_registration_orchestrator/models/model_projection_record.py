@@ -14,6 +14,8 @@ Related:
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -25,9 +27,10 @@ class ModelProjectionRecord(BaseModel):
     ModelPayloadPostgresUpsertRegistration while retaining all data.
     SerializeAsAny ensures model_dump() serializes all extra fields.
 
-    The ``domain`` field acts as a discriminator so the model has at least
-    one declared field, giving consumers a known key to identify what type
-    of projection record this wraps (e.g., ``"registration"``).
+    Critical columns (``entity_id``, ``current_state``, ``domain``) are
+    declared explicitly so that typos in these required fields fail
+    validation instead of silently passing through as extra fields.
+    Non-critical columns remain as extra fields.
 
     Warning:
         **Non-standard ``extra`` config**: Uses ``extra="allow"`` instead of the
@@ -39,6 +42,21 @@ class ModelProjectionRecord(BaseModel):
 
     model_config = ConfigDict(extra="allow", frozen=True, from_attributes=True)
 
+    entity_id: UUID = Field(
+        ...,
+        description=(
+            "Entity UUID. Required for upsert conflict resolution "
+            "on the registration_projections table. Pydantic coerces "
+            "string UUIDs from model_validate() automatically."
+        ),
+    )
+    current_state: str = Field(
+        ...,
+        description=(
+            "FSM state value (e.g., 'pending_registration'). Required for "
+            "registration projection state tracking."
+        ),
+    )
     domain: str = Field(
         default="registration",
         description=(
