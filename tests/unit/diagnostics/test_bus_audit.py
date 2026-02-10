@@ -20,6 +20,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
+pytestmark = pytest.mark.unit
+
 from omnibase_infra.diagnostics.bus_audit import (
     AuditConfig,
     _classify_naming,
@@ -402,21 +404,19 @@ class TestComputeEnumVerdict:
             has_payload=0,
         )
         v = _compute_verdict(
-            topic="exempt-topic",
+            topic="onex.evt.platform.node-registration.v1",
             status=EnumTopicStatus.FOUND_ACTIVE,
             naming=EnumNamingCompliance.COMPLIANT,
             envelope_stats=es,
             domain_validation=None,
             config=AuditConfig(
                 broker="localhost:9092",
-                envelope_exempt_topics=frozenset({"exempt-topic"}),
+                envelope_exempt_topics=frozenset(
+                    {"onex.evt.platform.node-registration.v1"}
+                ),
             ),
         )
-        # Exempt from envelope check, naming is compliant... but wait,
-        # "exempt-topic" is not ONEX compliant
-        # Actually the naming check will catch it
-        # Let's use a compliant name instead
-        assert v in (EnumVerdict.PASS, EnumVerdict.WARN)
+        assert v == EnumVerdict.PASS
 
     def test_all_good_is_pass(self) -> None:
         es = EnvelopeStats(
