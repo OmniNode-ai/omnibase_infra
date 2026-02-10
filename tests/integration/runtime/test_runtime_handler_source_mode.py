@@ -28,6 +28,7 @@ Note:
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -180,6 +181,20 @@ class TestBootstrapModeLoadsOnlyBootstrapHandlers:
     3. Register all 5 core infrastructure handlers (consul, db, http, mcp, vault)
     """
 
+    @pytest.fixture(autouse=True)
+    def _skip_materialize_dependencies(self) -> Generator[None, None, None]:
+        """Skip dependency materialization which requires OMNIBASE_INFRA_DB_URL.
+
+        These tests exercise handler source mode resolution, not infrastructure
+        dependency materialization (tested in test_dependency_materializer.py).
+        """
+        with patch(
+            "omnibase_infra.runtime.service_runtime_host_process"
+            ".RuntimeHostProcess._materialize_dependencies",
+            new_callable=AsyncMock,
+        ):
+            yield
+
     @pytest.mark.asyncio
     async def test_bootstrap_mode_loads_only_bootstrap_handlers(self) -> None:
         """Verify BOOTSTRAP mode loads only hardcoded bootstrap handlers.
@@ -299,6 +314,20 @@ class TestContractModeLoadsOnlyContractHandlers:
     3. Register handlers found in contract files
     """
 
+    @pytest.fixture(autouse=True)
+    def _skip_materialize_dependencies(self) -> Generator[None, None, None]:
+        """Skip dependency materialization which requires OMNIBASE_INFRA_DB_URL.
+
+        These tests exercise handler source mode resolution, not infrastructure
+        dependency materialization (tested in test_dependency_materializer.py).
+        """
+        with patch(
+            "omnibase_infra.runtime.service_runtime_host_process"
+            ".RuntimeHostProcess._materialize_dependencies",
+            new_callable=AsyncMock,
+        ):
+            yield
+
     @pytest.mark.asyncio
     async def test_contract_mode_loads_only_contract_handlers(
         self,
@@ -401,6 +430,20 @@ class TestHybridModeContractFirstBootstrapFallback:
     2. Contract handlers take precedence for same handler_id
     3. Bootstrap handlers serve as fallback when no contract match
     """
+
+    @pytest.fixture(autouse=True)
+    def _skip_materialize_dependencies(self) -> Generator[None, None, None]:
+        """Skip dependency materialization which requires OMNIBASE_INFRA_DB_URL.
+
+        These tests exercise handler source mode resolution, not infrastructure
+        dependency materialization (tested in test_dependency_materializer.py).
+        """
+        with patch(
+            "omnibase_infra.runtime.service_runtime_host_process"
+            ".RuntimeHostProcess._materialize_dependencies",
+            new_callable=AsyncMock,
+        ):
+            yield
 
     @pytest.mark.asyncio
     async def test_hybrid_mode_contract_first_bootstrap_fallback(
