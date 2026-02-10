@@ -171,7 +171,7 @@ class TestSnapshotStateTransitions:
         record = postgres_intent.payload.record
         record_data = record.model_dump()
         assert record_data["current_state"] == "pending_registration"
-        assert record_data["entity_id"] == str(node_id)
+        assert record_data["entity_id"] == node_id
 
         # Find the consul register intent
         consul_intents = [
