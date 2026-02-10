@@ -53,14 +53,6 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 
-from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import (
-    InfraConnectionError,
-    InfraTimeoutError,
-    InfraUnavailableError,
-    ModelInfraErrorContext,
-    ProtocolConfigurationError,
-)
 from omnibase_infra.handlers.models.model_slack_alert import (
     EnumAlertSeverity,
     ModelSlackAlert,
@@ -223,7 +215,6 @@ class HandlerSlackWebhook:
             to support graceful degradation in alerting scenarios.
         """
         start_time = time.perf_counter()
-        correlation_id = alert.correlation_id
 
         if self._bot_token:
             return await self._handle_web_api(alert, start_time)
