@@ -1,6 +1,10 @@
--- Rollback: 003_capability_fields
+-- Rollback: forward/003_capability_fields.sql
 -- Description: Remove capability fields and indexes from registration_projections
--- Forward migration: forward/003_capability_fields.sql
+--
+-- NOTE: These indexes are shared with forward/004_capability_fields_concurrent.sql.
+-- If migration 004 was applied (replacing standard indexes with concurrent ones),
+-- these DROP INDEX statements still work correctly via IF EXISTS.
+-- Running rollback_003 after rollback_004 is safe (indexes already dropped).
 
 -- Drop indexes first (before removing columns they reference)
 DROP INDEX IF EXISTS idx_registration_capability_tags;
