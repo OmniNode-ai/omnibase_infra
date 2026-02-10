@@ -1,8 +1,8 @@
 <!-- HANDSHAKE_METADATA
 source: omnibase_core/architecture-handshakes/repos/omnibase_infra.md
-source_version: 0.13.1
-source_sha256: cb694fe620ef8224ebbe53852d7fd7b498aab3249913bc4d07c8c3cbb7552762
-installed_at: 2026-02-03T14:43:13Z
+source_version: 0.16.0
+source_sha256: 1ffa2bd30b553ea05cd62444800a4ae5215826be9f073480254c3f408580e93f
+installed_at: 2026-02-10T17:46:59Z
 installed_by: jonah
 -->
 
@@ -25,6 +25,18 @@ installed_by: jonah
 - Handler implementations
 - Infrastructure adapters
 
+## Platform-Wide Rules
+
+1. **No backwards compatibility** - Breaking changes always acceptable. No deprecation periods, shims, or migration paths.
+2. **Delete old code immediately** - Never leave deprecated code "for reference." If unused, delete it.
+3. **No speculative refactors** - Only make changes that are directly requested or clearly necessary.
+4. **No silent schema changes** - All schema changes must be explicit and deliberate.
+5. **Frozen event schemas** - All models crossing boundaries (events, intents, actions, envelopes, projections) must use `frozen=True`. Internal mutable state is fine.
+6. **Explicit timestamps** - Never use `datetime.now()` defaults. Inject timestamps explicitly.
+7. **No hardcoded configuration** - All config via `.env` or Pydantic Settings. No localhost defaults.
+8. **Kafka is required infrastructure** - Use async/non-blocking patterns. Never block the calling thread waiting for Kafka acks.
+9. **No `# type: ignore` without justification** - Requires explanation comment and ticket reference.
+
 ## Rules the Agent Must Obey
 
 1. **Nodes MUST be declarative** - `node.py` extends base class with NO custom logic
@@ -33,11 +45,9 @@ installed_by: jonah
 4. **Orchestrators emit, never return** - Cannot return `result`
 5. **Contracts are source of truth** - YAML contracts define behavior
 6. **Container injection required** - All services via `ModelONEXContainer`
-7. **Never block on Kafka** - Kafka is optional; operations must succeed without it
 
 ## Non-Goals (DO NOT)
 
-- ❌ No backwards compatibility - change freely, no deprecation periods
 - ❌ No versioned directories (`v1_0_0/`, `v2/`) - version through contract.yaml fields only
 - ❌ No convenience over correctness - contract violations fail loudly
 - ❌ No business logic in nodes - nodes coordinate, handlers compute
@@ -48,11 +58,10 @@ installed_by: jonah
 - Custom logic in `node.py` beyond base class extension
 - Error handling in nodes (belongs in handlers)
 - Direct Kafka/Postgres calls in nodes (use effect handlers)
-- Leaving deprecated code "for reference" - DELETE IT
 
 ## Layer Boundaries
 
-```text
+```
 omnibase_core (contracts, models)
     ↑ imported by
 omnibase_spi (protocols)
