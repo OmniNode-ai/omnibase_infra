@@ -105,7 +105,7 @@ error_handling:
   # Error type definitions
   error_types:
     - name: "SLACK_NOT_CONFIGURED"
-      description: "SLACK_WEBHOOK_URL environment variable not set"
+      description: "Neither SLACK_BOT_TOKEN (Web API) nor SLACK_WEBHOOK_URL (webhook) is configured, or SLACK_CHANNEL_ID is missing for Web API mode"
       recoverable: false
       retry_strategy: "none"
     - name: "SLACK_RATE_LIMITED"

@@ -498,6 +498,7 @@ class HandlerSlackWebhook:
                     duration_ms = (time.perf_counter() - start_time) * 1000
 
                     if response.status == 429:
+                        retry_after = response.headers.get("Retry-After")
                         last_error = "Slack rate limit (429)"
                         last_error_code = "SLACK_RATE_LIMITED"
                         logger.warning(
@@ -506,8 +507,17 @@ class HandlerSlackWebhook:
                                 "correlation_id": str(correlation_id),
                                 "attempt": attempt + 1,
                                 "max_attempts": self._max_retries + 1,
+                                "retry_after": retry_after,
                             },
                         )
+                        # Respect Slack's Retry-After header if present
+                        if retry_after and attempt < self._max_retries:
+                            try:
+                                await asyncio.sleep(float(retry_after))
+                                retry_count += 1
+                                continue
+                            except (ValueError, TypeError):
+                                pass  # Fall through to default backoff
                     elif response.status != 200:
                         response_text = await response.text()
                         last_error = f"HTTP {response.status}: {response_text[:100]}"
@@ -522,7 +532,26 @@ class HandlerSlackWebhook:
                         )
                     else:
                         # HTTP 200 - parse JSON response
-                        body = await response.json()
+                        try:
+                            body = await response.json()
+                        except (aiohttp.ContentTypeError, ValueError):
+                            last_error = "Slack Web API returned non-JSON response"
+                            last_error_code = "SLACK_API_ERROR"
+                            logger.warning(
+                                "Slack Web API returned non-JSON body for HTTP 200",
+                                extra={
+                                    "correlation_id": str(correlation_id),
+                                    "attempt": attempt + 1,
+                                },
+                            )
+                            if attempt < self._max_retries:
+                                backoff_index = min(
+                                    attempt, len(self._retry_backoff) - 1
+                                )
+                                await asyncio.sleep(self._retry_backoff[backoff_index])
+                                retry_count += 1
+                                continue
+                            break
                         if body.get("ok"):
                             thread_ts = body.get("ts")
                             logger.info(
