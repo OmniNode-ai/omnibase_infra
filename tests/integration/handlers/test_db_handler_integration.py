@@ -17,8 +17,7 @@ CI/CD Graceful Skip Behavior
 These tests skip gracefully in CI/CD environments without database access:
 
 Skip Conditions:
-    - Skips if POSTGRES_HOST not set
-    - Skips if POSTGRES_PASSWORD not set
+    - Skips if OMNIBASE_INFRA_DB_URL (or POSTGRES_HOST/POSTGRES_PASSWORD fallback) not set
     - Module-level ``pytestmark`` with ``pytest.mark.skipif`` used
 
 Example CI/CD Output::

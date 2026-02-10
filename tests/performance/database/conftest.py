@@ -122,7 +122,7 @@ if TYPE_CHECKING:
 # Use shared PostgresConfig for consistent configuration management
 _postgres_config = PostgresConfig.from_env()
 
-# Export individual values for backwards compatibility with existing code
+# Export individual values for use in availability checks and diagnostics
 POSTGRES_HOST = _postgres_config.host
 POSTGRES_PORT = _postgres_config.port
 POSTGRES_USER = _postgres_config.user

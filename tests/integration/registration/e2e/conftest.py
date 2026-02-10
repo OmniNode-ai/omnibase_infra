@@ -342,7 +342,8 @@ async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
 
     if not POSTGRES_AVAILABLE:
         pytest.skip(
-            "PostgreSQL not available (POSTGRES_HOST or POSTGRES_PASSWORD not set)"
+            "PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or "
+            "POSTGRES_HOST/POSTGRES_PASSWORD)"
         )
 
     dsn = _build_postgres_dsn()
@@ -1126,7 +1127,7 @@ async def cleanup_projections(
         entity_id (unique_node_id) which should be a test-generated UUID.
 
         - NEVER run E2E tests against a production database
-        - Always verify POSTGRES_HOST points to a test/dev environment
+        - Always verify OMNIBASE_INFRA_DB_URL points to a test/dev environment
         - Use .env.docker or dedicated test infrastructure
         - Production databases should have network isolation
     """
@@ -1175,7 +1176,7 @@ async def cleanup_node_ids(
         entity_ids which should be test-generated UUIDs.
 
         - NEVER run E2E tests against a production database
-        - Always verify POSTGRES_HOST points to a test/dev environment
+        - Always verify OMNIBASE_INFRA_DB_URL points to a test/dev environment
         - Use .env.docker or dedicated test infrastructure
         - Production databases should have network isolation
     """

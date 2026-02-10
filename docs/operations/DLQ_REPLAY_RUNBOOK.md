@@ -28,7 +28,8 @@ export KAFKA_BOOTSTRAP_SERVERS="<infrastructure-host>:29092"
 **Optional (for PostgreSQL tracking)**:
 ```bash
 # PostgreSQL tracking configuration (required if --enable-tracking is used)
-export OMNIBASE_INFRA_DB_URL="postgresql://postgres:your_password@<infrastructure-host>:5436/omnibase_infra"
+# Use the role configured in your OMNIBASE_INFRA_DB_URL (see .env.example).
+export OMNIBASE_INFRA_DB_URL="postgresql://role_omnibase_infra:your_password@<infrastructure-host>:5436/omnibase_infra"
 ```
 
 ### Network Access
@@ -232,7 +233,8 @@ Enable PostgreSQL-based tracking to persist replay attempt history for auditing 
 Set the required environment variable:
 
 ```bash
-export OMNIBASE_INFRA_DB_URL="postgresql://postgres:your_password@<infrastructure-host>:5436/omnibase_infra"
+# Use the per-service role matching your OMNIBASE_INFRA_DB_URL configuration.
+export OMNIBASE_INFRA_DB_URL="postgresql://role_omnibase_infra:your_password@<infrastructure-host>:5436/omnibase_infra"
 ```
 
 ### Usage

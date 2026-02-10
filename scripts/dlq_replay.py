@@ -539,6 +539,7 @@ class ModelReplayConfig(BaseModel):
         if not self.enable_tracking:
             return None
         if not self.postgres_dsn:
+            logger.warning("OMNIBASE_INFRA_DB_URL not set; tracking will be disabled")
             return None
         return self.postgres_dsn
 

@@ -9,7 +9,7 @@ Updated in OMN-2065: Per-service DB URL contract (DB-SPLIT-02).
 from __future__ import annotations
 
 import os
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -78,10 +78,23 @@ class ModelPostgresPoolConfig(BaseModel):
             )
             raise ValueError(msg)
 
+        min_size_raw = os.getenv("POSTGRES_POOL_MIN_SIZE", "2")
+        max_size_raw = os.getenv("POSTGRES_POOL_MAX_SIZE", "10")
+        try:
+            min_size = int(min_size_raw)
+        except ValueError:
+            msg = f"POSTGRES_POOL_MIN_SIZE must be an integer, got '{min_size_raw}'"
+            raise ValueError(msg)
+        try:
+            max_size = int(max_size_raw)
+        except ValueError:
+            msg = f"POSTGRES_POOL_MAX_SIZE must be an integer, got '{max_size_raw}'"
+            raise ValueError(msg)
+
         return cls.from_dsn(
             db_url,
-            min_size=int(os.getenv("POSTGRES_POOL_MIN_SIZE", "2")),
-            max_size=int(os.getenv("POSTGRES_POOL_MAX_SIZE", "10")),
+            min_size=min_size,
+            max_size=max_size,
         )
 
     @classmethod
@@ -105,6 +118,13 @@ class ModelPostgresPoolConfig(BaseModel):
         """
         parsed = urlparse(dsn)
 
+        if parsed.scheme not in ("postgresql", "postgres"):
+            msg = (
+                f"Invalid DSN scheme '{parsed.scheme}', "
+                f"expected 'postgresql' or 'postgres'"
+            )
+            raise ValueError(msg)
+
         database = (parsed.path or "").lstrip("/")
         if not database:
             # Sanitise DSN to avoid leaking credentials in error messages
@@ -117,8 +137,8 @@ class ModelPostgresPoolConfig(BaseModel):
         return cls(
             host=parsed.hostname or "localhost",
             port=parsed.port or 5432,
-            user=parsed.username or "postgres",
-            password=parsed.password or "",
+            user=unquote(parsed.username) if parsed.username else "postgres",
+            password=unquote(parsed.password) if parsed.password else "",
             database=database,
             min_size=min_size,
             max_size=max_size,

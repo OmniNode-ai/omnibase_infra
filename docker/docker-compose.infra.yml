@@ -131,7 +131,7 @@ services:
       # SECURITY: Password is required and must be explicitly set (no default)
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: omnibase_infra
-      POSTGRES_MULTIPLE_DATABASES: "omninode_bridge,infisical_db"
+      POSTGRES_MULTIPLE_DATABASES: "infisical_db"
     ports:
       - "${POSTGRES_EXTERNAL_PORT:-5436}:5432"
     volumes:

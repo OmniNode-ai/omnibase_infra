@@ -12,8 +12,7 @@ These integration tests are designed to skip gracefully when infrastructure
 is unavailable, enabling CI/CD pipelines to run without hard failures.
 
 Skip Conditions:
-    - Skips if POSTGRES_HOST not set
-    - Skips if POSTGRES_PASSWORD not set
+    - Skips if OMNIBASE_INFRA_DB_URL (or POSTGRES_HOST/POSTGRES_PASSWORD fallback) not set
 
 Environment Variables
 =====================
@@ -78,14 +77,14 @@ POSTGRES_PORT = str(_postgres_config.port)
 POSTGRES_USER = _postgres_config.user
 POSTGRES_PASSWORD = _postgres_config.password
 
-# Defensive check: warn if POSTGRES_PASSWORD is missing or empty
-if not POSTGRES_PASSWORD:
+# Defensive check: warn if PostgreSQL is not configured at all
+if not _postgres_config.is_configured:
     import warnings
 
     warnings.warn(
-        "POSTGRES_PASSWORD environment variable not set or empty - DLQ tracking "
-        "integration tests will be skipped. Set POSTGRES_PASSWORD in your .env file "
-        "or environment to enable database tests.",
+        "PostgreSQL not configured - DLQ tracking integration tests will be skipped. "
+        "Set OMNIBASE_INFRA_DB_URL (preferred) or POSTGRES_HOST/POSTGRES_PASSWORD in "
+        "your .env file or environment to enable database tests.",
         UserWarning,
         stacklevel=1,
     )
@@ -120,7 +119,8 @@ def dlq_tracking_config() -> ModelDlqTrackingConfig:
     test isolation and prevent conflicts between parallel test executions.
 
     Skip Conditions (CI/CD Graceful Degradation):
-        - Skips if POSTGRES_PASSWORD environment variable is not set
+        - Skips if PostgreSQL is not available (neither OMNIBASE_INFRA_DB_URL
+          nor POSTGRES_HOST/POSTGRES_PASSWORD is set)
 
     Returns:
         ModelDlqTrackingConfig with test-specific table name.
@@ -129,8 +129,11 @@ def dlq_tracking_config() -> ModelDlqTrackingConfig:
         >>> config = dlq_tracking_config()
         >>> config.storage_table  # 'dlq_replay_history_test_a1b2c3d4'
     """
-    if not POSTGRES_PASSWORD:
-        pytest.skip("POSTGRES_PASSWORD not set")
+    if not POSTGRES_AVAILABLE:
+        pytest.skip(
+            "PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or "
+            "POSTGRES_HOST/POSTGRES_PASSWORD)"
+        )
 
     return ModelDlqTrackingConfig(
         dsn=_build_postgres_dsn(),

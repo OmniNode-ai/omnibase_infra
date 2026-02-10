@@ -222,6 +222,8 @@ def _get_validated_dsn() -> str:
         ConfigurationError: If OMNIBASE_INFRA_DB_URL is not set or empty
     """
     dsn = os.getenv("OMNIBASE_INFRA_DB_URL", "")
+    if dsn:
+        dsn = dsn.strip()
 
     if not dsn:
         raise ConfigurationError(

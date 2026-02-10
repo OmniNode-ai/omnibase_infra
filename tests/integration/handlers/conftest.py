@@ -19,8 +19,7 @@ infrastructure (e.g., GitHub Actions without VPN access to internal servers).
 Skip Conditions by Handler:
 
     **PostgreSQL (HandlerDb)**:
-        - Skips if POSTGRES_HOST not set
-        - Skips if POSTGRES_PASSWORD not set
+        - Skips if OMNIBASE_INFRA_DB_URL (or POSTGRES_HOST/POSTGRES_PASSWORD fallback) not set
         - Tests use module-level ``pytestmark`` with ``pytest.mark.skipif``
 
     **Vault (HandlerVault)**:
@@ -47,8 +46,8 @@ Example CI/CD Behavior::
     tests/.../test_consul_handler_integration.py::TestHandlerConsulConnection::test_consul_describe SKIPPED
     tests/.../test_http_handler_integration.py::TestHttpRestHandlerIntegration::test_simple_get_request PASSED
 
-    # With infrastructure access (using REMOTE_INFRA_HOST server):
-    $ export POSTGRES_HOST=$REMOTE_INFRA_HOST POSTGRES_PASSWORD=xxx ...
+    # With infrastructure access (using OMNIBASE_INFRA_DB_URL or fallback vars):
+    $ export OMNIBASE_INFRA_DB_URL=postgresql://postgres:xxx@$REMOTE_INFRA_HOST:5436/omnibase_infra
     $ pytest tests/integration/handlers/ -v
     tests/.../test_db_handler_integration.py::TestHandlerDbConnection::test_db_describe PASSED
 
@@ -198,19 +197,8 @@ POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 
-# Defensive check: warn if POSTGRES_PASSWORD is missing or empty to avoid silent failures
-# Handles None, empty string, and whitespace-only values
-if not POSTGRES_PASSWORD or not POSTGRES_PASSWORD.strip():
-    import warnings
-
-    warnings.warn(
-        "POSTGRES_PASSWORD environment variable not set or empty - database integration "
-        "tests will be skipped. Set POSTGRES_PASSWORD in your .env file or environment "
-        "to enable database tests.",
-        UserWarning,
-        stacklevel=1,
-    )
-    # Normalize to None for consistent availability check
+# Normalize empty/whitespace-only password to None for consistent availability check
+if POSTGRES_PASSWORD and not POSTGRES_PASSWORD.strip():
     POSTGRES_PASSWORD = None
 
 # Check if PostgreSQL is available based on URL or host+password being set
@@ -323,8 +311,8 @@ def db_config() -> dict[str, JsonType]:
     where database infrastructure may not be available.
 
     Skip Conditions (CI/CD Graceful Degradation):
-        - Skips immediately if POSTGRES_PASSWORD environment variable is not set
-        - Combined with module-level pytestmark skipif for POSTGRES_HOST
+        - Skips if PostgreSQL is not available (neither OMNIBASE_INFRA_DB_URL
+          nor POSTGRES_HOST/POSTGRES_PASSWORD is set)
 
     Returns:
         Configuration dict with 'dsn' key for HandlerDb.initialize().
@@ -336,12 +324,15 @@ def db_config() -> dict[str, JsonType]:
 
     Example:
         >>> # In CI without database access:
-        >>> # Test is skipped with message "POSTGRES_PASSWORD not set"
+        >>> # Test is skipped with message "PostgreSQL not available"
         >>> # In development with database:
         >>> config = db_config()  # Returns valid DSN configuration
     """
-    if not POSTGRES_PASSWORD:
-        pytest.skip("POSTGRES_PASSWORD not set")
+    if not POSTGRES_AVAILABLE:
+        pytest.skip(
+            "PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or "
+            "POSTGRES_HOST/POSTGRES_PASSWORD)"
+        )
 
     return {
         "dsn": _build_postgres_dsn(),

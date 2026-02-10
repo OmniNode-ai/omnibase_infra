@@ -493,7 +493,7 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | Variable                  | Description                                         | Security Level | Profile    |
 |---------------------------|-----------------------------------------------------|----------------|------------|
 | `POSTGRES_PASSWORD`       | PostgreSQL database password                        | Secret         | (default)  |
-| `OMNIBASE_INFRA_DB_URL`  | Full PostgreSQL DSN for omnibase_infra (has docker-compose fallback, but required for scripts/runtime) | Secret | (default) |
+| `OMNIBASE_INFRA_DB_URL`  | Full PostgreSQL DSN for omnibase_infra. Required for scripts. Has docker-compose fallback for container runtime. | Secret | (default) |
 | `INFISICAL_ENCRYPTION_KEY`| Hex-encoded AES key (32 or 64 hex chars)            | Secret         | secrets    |
 | `INFISICAL_AUTH_SECRET`   | JWT signing secret for authentication               | Secret         | secrets    |
 
