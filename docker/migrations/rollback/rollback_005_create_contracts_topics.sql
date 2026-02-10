@@ -1,8 +1,8 @@
 -- SPDX-License-Identifier: Apache-2.0
 -- SPDX-FileCopyrightText: Copyright 2026 OmniNode Team
 --
--- Rollback Migration: 005_rollback_create_contracts_topics
--- Rolls Back: 005_create_contracts_topics.sql
+-- Rollback Migration: rollback_005_create_contracts_topics
+-- Rolls Back: forward/005_create_contracts_topics.sql
 -- Created: 2026-01-29
 --
 -- WARNING: THIS ROLLBACK WILL PERMANENTLY DELETE ALL DATA IN THE contracts AND topics TABLES.
