@@ -39,7 +39,7 @@ def extract_envelope_fields(
         )
         try:
             correlation_id = UUID(raw_corr) if raw_corr else uuid4()
-        except ValueError:
+        except (ValueError, AttributeError):
             correlation_id = uuid4()
         if not raw_corr:
             logger.debug(

@@ -25,6 +25,8 @@ from omnibase_infra.runtime.intent_effects.intent_effect_consul_register import 
     IntentEffectConsulRegister,
 )
 
+pytestmark = [pytest.mark.unit]
+
 
 class TestIntentEffectConsulRegisterInit:
     """Tests for IntentEffectConsulRegister initialization."""

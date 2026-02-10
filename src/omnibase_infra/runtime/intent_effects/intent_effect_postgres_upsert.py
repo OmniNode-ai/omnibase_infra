@@ -84,6 +84,7 @@ class IntentEffectPostgresUpsert:
         """
         if projector is None:
             context = ModelInfraErrorContext.with_correlation(
+                correlation_id=uuid4(),
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="intent_effect_init",
             )
@@ -118,9 +119,16 @@ class IntentEffectPostgresUpsert:
         Raises:
             RuntimeHostError: If the upsert operation fails.
         """
+        # Compute effective correlation_id before type checks so error contexts
+        # always carry a non-None ID, preserving any ID from the payload when
+        # available and falling back to uuid4() only as a last resort.
+        effective_correlation_id = (
+            correlation_id or getattr(payload, "correlation_id", None) or uuid4()
+        )
+
         if not isinstance(payload, ModelPayloadPostgresUpsertRegistration):
             context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
+                correlation_id=effective_correlation_id,
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="intent_effect_postgres_upsert",
             )
@@ -129,8 +137,6 @@ class IntentEffectPostgresUpsert:
                 f"got {type(payload).__name__}",
                 context=context,
             )
-
-        effective_correlation_id = correlation_id or payload.correlation_id or uuid4()
 
         try:
             # Serialize the record to a dict of column values
@@ -147,9 +153,12 @@ class IntentEffectPostgresUpsert:
                     context=context,
                 )
 
-            # model_dump() preserves all fields including extra fields
-            # from ModelProjectionRecord (extra="allow")
+            # model_dump() returns explicit fields + the ``data`` dict.
+            # Merge ``data`` into top-level so the projector receives a flat
+            # column dict matching the database schema.
             record_dict = record.model_dump()
+            data_fields = record_dict.pop("data", {})
+            record_dict.update(data_fields)
 
             # Normalize types for asyncpg: handler sends JSON-serializable
             # strings but asyncpg requires native Python types for UUID,

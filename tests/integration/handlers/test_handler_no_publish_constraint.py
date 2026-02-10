@@ -84,6 +84,8 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_i
 )
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
+pytestmark = pytest.mark.integration
+
 # ============================================================================
 # Module Constants for No-Publish Constraint Validation
 # ============================================================================

@@ -21,6 +21,8 @@ from omnibase_infra.runtime.service_intent_routing_loader import (
     load_intent_routing_table,
 )
 
+pytestmark = [pytest.mark.unit]
+
 
 class TestLoadIntentRoutingTable:
     """Tests for load_intent_routing_table function."""

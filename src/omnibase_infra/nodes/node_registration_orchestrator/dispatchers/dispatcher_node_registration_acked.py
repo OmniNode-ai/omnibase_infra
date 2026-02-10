@@ -254,9 +254,12 @@ class DispatcherNodeRegistrationAcked(MixinAsyncCircuitBreaker):
                         output_events=[],
                     )
 
-            # Explicit type guard (not assert) for production safety
-            # Type narrowing after isinstance/model_validate above
-            if not isinstance(payload, ModelNodeRegistrationAcked):
+            # mypy type-narrowing guard: the branch above guarantees payload is
+            # ModelNodeRegistrationAcked (isinstance returned True, or model_validate
+            # succeeded, or we returned early). This second isinstance is logically
+            # unreachable at runtime but is required for mypy to narrow the type
+            # from ``ModelNodeRegistrationAcked | object`` to ``ModelNodeRegistrationAcked``.
+            if not isinstance(payload, ModelNodeRegistrationAcked):  # pragma: no cover
                 context = ModelInfraErrorContext(
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="handle_registration_acked",

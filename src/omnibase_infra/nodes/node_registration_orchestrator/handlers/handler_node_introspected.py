@@ -162,6 +162,14 @@ class HandlerNodeIntrospected:
     ) -> None:
         """Initialize the handler with a projection reader.
 
+        Direct injection is used here instead of resolving through
+        ``ModelONEXContainer`` because orchestrator handlers require
+        explicit reader dependencies for testability. This allows tests
+        to inject mock projection readers without wiring a full DI
+        container, and makes the handler's read-side dependency visible
+        in the constructor signature rather than hidden behind a
+        service-locator call.
+
         Args:
             projection_reader: Reader for querying registration projection state.
             ack_timeout_seconds: Timeout in seconds for node acknowledgment.
@@ -384,16 +392,17 @@ class HandlerNodeIntrospected:
         capabilities_data = capabilities.model_dump(mode="json") if capabilities else {}
 
         # Pass native types directly to avoid fragile string round-trips.
-        # ModelProjectionRecord validates entity_id/current_state/domain
-        # explicitly; remaining columns flow through as extra fields.
-        # IntentEffectPostgresUpsert._normalize_for_asyncpg() passes native
-        # UUID/datetime values through unchanged (no string parsing needed).
-        projection_record = ModelProjectionRecord.model_validate(
-            {
-                "entity_id": node_id,
-                "domain": "registration",
-                "current_state": EnumRegistrationState.PENDING_REGISTRATION.value,
-                "node_type": node_type.value,
+        # ModelProjectionRecord validates entity_id/current_state/domain/node_type
+        # explicitly; remaining columns are stored in the ``data`` dict field.
+        # IntentEffectPostgresUpsert merges ``data`` into the top-level record
+        # dict and _normalize_for_asyncpg() passes native UUID/datetime values
+        # through unchanged (no string parsing needed).
+        projection_record = ModelProjectionRecord(
+            entity_id=node_id,
+            domain="registration",
+            current_state=EnumRegistrationState.PENDING_REGISTRATION.value,
+            node_type=node_type.value,
+            data={
                 "node_version": str(node_version) if node_version is not None else None,
                 "capabilities": capabilities_data,
                 "contract_type": None,
@@ -406,7 +415,7 @@ class HandlerNodeIntrospected:
                 "registered_at": now,
                 "updated_at": now,
                 "correlation_id": correlation_id,
-            }
+            },
         )
         postgres_payload = ModelPayloadPostgresUpsertRegistration(
             correlation_id=correlation_id,

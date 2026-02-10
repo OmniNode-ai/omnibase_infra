@@ -85,6 +85,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -308,10 +309,13 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         self._unsubscribe_callables: list[Callable[[], Awaitable[None]]] = []
         self._logger = logging.getLogger(__name__)
         # Track retry attempts per correlation_id for infrastructure errors.
+        # Uses OrderedDict with move-to-end on access so that actively-retrying
+        # messages are never evicted by pruning. Pruning removes the oldest
+        # (least-recently-accessed) entries, which are truly stale.
         # Bounded by _MAX_RETRY_ENTRIES to prevent unbounded growth from
         # orphaned entries (e.g., messages with None correlation_id generate
         # a new uuid4() each redelivery, never clearing the previous entry).
-        self._retry_counts: dict[UUID, int] = {}
+        self._retry_counts: OrderedDict[UUID, int] = OrderedDict()
         self._MAX_RETRY_ENTRIES: int = 10_000
 
         # Initialize consumption counter mixin (wiring health monitoring)
@@ -557,19 +561,28 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
     def _get_retry_count(self, correlation_id: UUID) -> int:
         """Get current retry count for a correlation ID.
 
+        Moves the entry to end on access to keep actively-queried
+        correlation IDs safe from LRU pruning.
+
         Args:
             correlation_id: The correlation ID to check.
 
         Returns:
             Current retry count (0 if not tracked).
         """
-        return self._retry_counts.get(correlation_id, 0)
+        count = self._retry_counts.get(correlation_id, 0)
+        if count > 0:
+            self._retry_counts.move_to_end(correlation_id)
+        return count
 
     def _increment_retry_count(self, correlation_id: UUID) -> int:
         """Increment retry count for a correlation ID.
 
-        Prunes oldest entries when the dict exceeds ``_MAX_RETRY_ENTRIES``
-        to prevent unbounded memory growth from orphaned entries.
+        Uses OrderedDict with move-to-end on access so that actively-retrying
+        correlation IDs are always at the end (most-recently-used). Pruning
+        evicts the oldest half, which contains only stale/orphaned entries
+        that haven't been accessed recently. This prevents active retries
+        from losing their count due to eviction.
 
         Args:
             correlation_id: The correlation ID to increment.
@@ -577,22 +590,23 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         Returns:
             New retry count after increment.
         """
-        # Prune if over capacity — clear oldest half to amortize cost.
-        # Orphaned entries have low retry counts; active retries will be
-        # re-added on next failure with count reset to 1.
+        # Prune if over capacity -- evict the oldest (least-recently-accessed)
+        # half. Because move_to_end keeps active retries at the tail, only
+        # truly stale entries are removed.
         if len(self._retry_counts) >= self._MAX_RETRY_ENTRIES:
             self._logger.warning(
                 "retry_counts pruned: size=%d exceeded max=%d",
                 len(self._retry_counts),
                 self._MAX_RETRY_ENTRIES,
             )
-            # Keep the most recent half (dict preserves insertion order in 3.7+)
-            entries = list(self._retry_counts.items())
-            half = len(entries) // 2
-            self._retry_counts = dict(entries[half:])
+            half = len(self._retry_counts) // 2
+            for _ in range(half):
+                self._retry_counts.popitem(last=False)
 
         current = self._retry_counts.get(correlation_id, 0)
         self._retry_counts[correlation_id] = current + 1
+        # Move to end so this actively-retrying entry is considered "recent"
+        self._retry_counts.move_to_end(correlation_id)
         return current + 1
 
     def _clear_retry_count(self, correlation_id: UUID) -> None:
@@ -913,13 +927,16 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         # Validate and construct envelope
         envelope = ModelEventEnvelope[object].model_validate(data)
 
-        # Propagate event_type: check the RAW data dict (not the envelope) to
-        # preserve any explicit event_type from the producer. ModelEventEnvelope
-        # doesn't define event_type as a field, so model_validate() strips it.
-        # Use model_copy() to attach it post-deserialization.
-        # NOTE: This relies on event_type NOT being a field on ModelEventEnvelope.
-        # If upstream adds event_type as a model field, this raw-dict lookup must
-        # be removed to avoid overriding the model's validated value.
+        # FRAGILE: event_type is extracted from the raw dict because
+        # ModelEventEnvelope does not expose it as a model field.
+        # model_validate() strips unknown keys, so we recover it here.
+        # If ModelEventEnvelope ever adds event_type as a first-class field,
+        # this raw-dict lookup must be replaced with direct attribute access
+        # to avoid silently overriding the model's validated value.
+        assert not hasattr(ModelEventEnvelope, "event_type"), (
+            "ModelEventEnvelope now has an event_type field. "
+            "Remove the raw-dict lookup below and use envelope.event_type instead."
+        )
         explicit_event_type = data.get("event_type")
         if explicit_event_type:
             envelope = envelope.model_copy(update={"event_type": explicit_event_type})

@@ -883,6 +883,7 @@ class PluginRegistration:
             )
 
         try:
+            from omnibase_core.enums import EnumInjectionScope
             from omnibase_infra.runtime.event_bus_subcontract_wiring import (
                 EventBusSubcontractWiring,
                 load_event_bus_subcontract,
@@ -905,14 +906,36 @@ class PluginRegistration:
                 )
 
             # Create intent executor for effect layer delegation (Phase C)
+            # and register in the DI container for consistent service resolution.
             intent_executor = IntentExecutor(container=config.container)
 
-            # Wire intent effect adapters from contract-driven routing table
+            # Wire intent effect adapters from contract-driven routing table.
+            # Effect adapters are registered with the intent_executor and also
+            # placed into the DI container for discoverability.
             self._wire_intent_effects(
                 intent_executor=intent_executor,
                 contract_path=contract_path,
                 correlation_id=correlation_id,
             )
+
+            # Register IntentExecutor in the DI container so downstream services
+            # can resolve it via container.service_registry.resolve_service()
+            # rather than receiving direct references. This follows the
+            # container-based DI pattern required by coding guidelines.
+            if config.container.service_registry is not None:
+                await config.container.service_registry.register_instance(
+                    interface=IntentExecutor,
+                    instance=intent_executor,
+                    scope=EnumInjectionScope.GLOBAL,
+                    metadata={
+                        "description": "Intent executor for registration domain",
+                        "plugin_id": self.plugin_id,
+                    },
+                )
+                logger.debug(
+                    "Registered IntentExecutor in container (correlation_id=%s)",
+                    correlation_id,
+                )
 
             # Create dispatch result applier for output event publishing + intent delegation
             # ProtocolEventBusSubscriber satisfies ProtocolEventBusLike structurally
@@ -923,6 +946,23 @@ class PluginRegistration:
                 output_topic=config.output_topic,
                 intent_executor=intent_executor,
             )
+
+            # Register DispatchResultApplier in the DI container for the same
+            # container-based DI consistency.
+            if config.container.service_registry is not None:
+                await config.container.service_registry.register_instance(
+                    interface=DispatchResultApplier,
+                    instance=result_applier,
+                    scope=EnumInjectionScope.GLOBAL,
+                    metadata={
+                        "description": "Dispatch result applier for registration domain",
+                        "plugin_id": self.plugin_id,
+                    },
+                )
+                logger.debug(
+                    "Registered DispatchResultApplier in container (correlation_id=%s)",
+                    correlation_id,
+                )
 
             # Create EventBusSubcontractWiring with dispatch engine and result applier
             self._wiring = EventBusSubcontractWiring(
@@ -1014,11 +1054,31 @@ class PluginRegistration:
         # IntentExecutor is a known type with register_handler() — direct call,
         # no getattr duck-typing needed.
 
+        # Build set of wirable intent_types based on available infrastructure.
+        # This avoids duplicating the protocol-match conditional in both the
+        # registration loop and the post-registration validation.
+        _protocol_resources = {
+            "postgres": self._projector is not None,
+            "consul": self._consul_handler is not None,
+        }
+        wirable_intent_types: set[str] = set()
+        for it in routing_table:
+            protocol = it.split(".", 1)[0] if "." in it else it
+            if _protocol_resources.get(protocol, False):
+                wirable_intent_types.add(it)
+
         registered_count = 0
 
         for intent_type in routing_table:
-            # Extract protocol prefix (segment before first dot) for adapter
-            # dispatch. Convention: intent_type = "{protocol}.{operation}".
+            if intent_type not in wirable_intent_types:
+                logger.debug(
+                    "Skipping intent_type=%s (no matching adapter or resource "
+                    "unavailable) (correlation_id=%s)",
+                    intent_type,
+                    correlation_id,
+                )
+                continue
+
             protocol = (
                 intent_type.split(".", 1)[0] if "." in intent_type else intent_type
             )
@@ -1055,29 +1115,12 @@ class PluginRegistration:
                     correlation_id,
                 )
 
-            else:
-                logger.debug(
-                    "Skipping intent_type=%s (no matching adapter or resource "
-                    "unavailable) (correlation_id=%s)",
-                    intent_type,
-                    correlation_id,
-                )
-
         # Startup validation: warn about intent_types declared in the routing
         # table that have no registered handler.  These will cause RuntimeHostError
         # at runtime when DispatchResultApplier calls IntentExecutor.execute().
         # We log at WARNING (not ERROR) so the system still starts, but operators
         # can quickly identify missing infrastructure.
-        unwired_intents: list[str] = []
-        for intent_type in routing_table:
-            protocol = (
-                intent_type.split(".", 1)[0] if "." in intent_type else intent_type
-            )
-            is_wired = (protocol == "postgres" and self._projector is not None) or (
-                protocol == "consul" and self._consul_handler is not None
-            )
-            if not is_wired:
-                unwired_intents.append(intent_type)
+        unwired_intents = [it for it in routing_table if it not in wirable_intent_types]
 
         if unwired_intents:
             logger.warning(

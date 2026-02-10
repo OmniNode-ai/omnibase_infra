@@ -535,7 +535,7 @@ class TestHandlerNodeIntrospectedIntents:
         assert postgres_payload.correlation_id == correlation_id
 
         # Verify record contains expected fields
-        # record is a BaseModel subclass (extra="allow"); convert to dict for access
+        # record is a ModelProjectionRecord; convert to dict for access
         record = postgres_payload.record.model_dump()
         assert record["entity_id"] == node_id
         assert record["domain"] == "registration"
@@ -649,7 +649,7 @@ class TestHandlerNodeIntrospectedIntents:
 
         record = postgres_intents[0].payload.record.model_dump()
         expected_deadline = TEST_NOW + timedelta(seconds=ack_timeout_seconds)
-        assert record["ack_deadline"] == expected_deadline
+        assert record["data"]["ack_deadline"] == expected_deadline
 
     @pytest.mark.asyncio
     async def test_default_ack_timeout_in_intent(self) -> None:
@@ -671,7 +671,7 @@ class TestHandlerNodeIntrospectedIntents:
         ]
         record = postgres_intents[0].payload.record.model_dump()
         expected_deadline = TEST_NOW + timedelta(seconds=30.0)
-        assert record["ack_deadline"] == expected_deadline
+        assert record["data"]["ack_deadline"] == expected_deadline
 
     @pytest.mark.asyncio
     async def test_capabilities_in_postgres_intent(self) -> None:
@@ -704,8 +704,8 @@ class TestHandlerNodeIntrospectedIntents:
             if isinstance(i.payload, ModelPayloadPostgresUpsertRegistration)
         ]
         record = postgres_intents[0].payload.record.model_dump()
-        assert record["capabilities"] == capabilities.model_dump(mode="json")
-        assert record["node_version"] == "2.0.0"
+        assert record["data"]["capabilities"] == capabilities.model_dump(mode="json")
+        assert record["data"]["node_version"] == "2.0.0"
 
 
 class TestSanitizeToolName:
@@ -838,7 +838,7 @@ class TestCapabilitiesJsonbCompatibility:
         assert len(postgres_intents) == 1
 
         record = postgres_intents[0].payload.record.model_dump()
-        caps = record["capabilities"]
+        caps = record["data"]["capabilities"]
 
         # asyncpg JSONB codec expects a Python dict, not a JSON string
         assert isinstance(caps, dict), (
@@ -869,7 +869,11 @@ class TestCapabilitiesJsonbCompatibility:
             if isinstance(i.payload, ModelPayloadPostgresUpsertRegistration)
         ]
         record = postgres_intents[0].payload.record.model_dump()
-        caps = record["capabilities"]
+        caps = record["data"]["capabilities"]
 
         assert isinstance(caps, dict)
         # Default ModelNodeCapabilities with no params should produce a dict
+        # with all capability flags at their default (falsy) values
+        assert caps.get("postgres") is False
+        assert caps.get("read") is False
+        assert caps.get("write") is False

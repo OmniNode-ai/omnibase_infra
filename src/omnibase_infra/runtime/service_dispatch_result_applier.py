@@ -174,7 +174,7 @@ class DispatchResultApplier:
                     output_intents,
                     correlation_id=effective_correlation_id,
                 )
-                logger.debug(
+                logger.info(
                     "Delegated %d intents from dispatcher=%s (correlation_id=%s)",
                     len(output_intents),
                     result.dispatcher_id,

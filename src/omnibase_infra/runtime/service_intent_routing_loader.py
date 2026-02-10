@@ -94,6 +94,14 @@ def load_intent_routing_table(
             )
             return {}
 
+        if not isinstance(contract_data, dict):
+            _logger.warning(
+                "Contract YAML root is not a dict in %s: got %s",
+                contract_path,
+                type(contract_data).__name__,
+            )
+            return {}
+
         intent_consumption = contract_data.get("intent_consumption")
         if not intent_consumption:
             _logger.debug(

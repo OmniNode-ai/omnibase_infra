@@ -1313,6 +1313,19 @@ class RuntimeHostProcess:
         # When the dispatch engine is active, contract-declared topics are
         # handled by EventBusSubcontractWiring (OMN-2050). The legacy
         # _on_message path is only needed when no dispatch engine is wired.
+        if self._dispatch_engine is not None and not self._dispatch_engine.is_frozen:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="validate_dispatch_engine",
+            )
+            raise RuntimeHostError(
+                "dispatch_engine must be frozen before starting subscriptions. "
+                "An unfrozen engine will raise INVALID_STATE on first dispatch "
+                "and silently drop messages. Call dispatch_engine.freeze() before "
+                "passing it to RuntimeHostProcess or before calling start().",
+                context=context,
+            )
+
         if self._dispatch_engine is None:
             self._subscription = await self._event_bus.subscribe(
                 topic=self._input_topic,

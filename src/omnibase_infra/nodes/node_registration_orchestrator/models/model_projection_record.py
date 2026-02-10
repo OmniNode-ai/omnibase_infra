@@ -2,18 +2,20 @@
 # Copyright (c) 2025 OmniNode Team
 """Minimal projection record wrapper model.
 
-This model wraps arbitrary projection record dicts into a Pydantic BaseModel
-for use with ModelPayloadPostgresUpsertRegistration. Uses extra='allow' so
-all dict keys are preserved as extra fields, and SerializeAsAny ensures
-model_dump() serializes all extra fields.
+This model wraps projection record data into a Pydantic BaseModel for use
+with ModelPayloadPostgresUpsertRegistration. Critical columns are declared
+as explicit fields for validation. Dynamic projection columns (which vary
+by projector schema) are stored in the ``data`` dict field.
 
 Related:
     - HandlerNodeIntrospected: Primary consumer of this model
     - ModelPayloadPostgresUpsertRegistration: Uses this as record field type
+    - IntentEffectPostgresUpsert: Merges ``data`` into top-level record dict
 """
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,25 +24,17 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelProjectionRecord(BaseModel):
     """Minimal model for wrapping projection record dicts.
 
-    Uses extra='allow' so all dict keys are preserved as extra fields.
-    This allows the record to be stored as SerializeAsAny[BaseModel] in
-    ModelPayloadPostgresUpsertRegistration while retaining all data.
-    SerializeAsAny ensures model_dump() serializes all extra fields.
+    Critical columns (``entity_id``, ``current_state``, ``domain``,
+    ``node_type``) are declared explicitly so that typos in these required
+    fields fail validation instead of silently being ignored.
 
-    Critical columns (``entity_id``, ``current_state``, ``domain``) are
-    declared explicitly so that typos in these required fields fail
-    validation instead of silently passing through as extra fields.
-    Non-critical columns remain as extra fields.
-
-    Warning:
-        **Non-standard ``extra`` config**: Uses ``extra="allow"`` instead of the
-        project convention ``extra="forbid"`` (see CLAUDE.md Pydantic Model
-        Standards). This is intentional — the model acts as a pass-through
-        wrapper for arbitrary projection column dicts whose keys vary by
-        projector schema. ``extra="forbid"`` would reject unknown columns.
+    Dynamic projection columns that vary by projector schema are stored in
+    the ``data`` dict field. Consumers (e.g., IntentEffectPostgresUpsert)
+    merge ``data`` into the top-level record dict before passing to the
+    projector for database upsert.
     """
 
-    model_config = ConfigDict(extra="allow", frozen=True, from_attributes=True)
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     entity_id: UUID = Field(
         ...,
@@ -73,6 +67,18 @@ class ModelProjectionRecord(BaseModel):
         description=(
             "Node type value (e.g., 'effect', 'compute'). Required NOT NULL "
             "in schema_registration_projection.sql."
+        ),
+    )
+    # ONEX_EXCLUDE: any_type - dict[str, Any] required for dynamic projection columns
+    # that vary by projector schema. Cannot use a typed model because columns differ
+    # per projector (e.g., ack_deadline, capabilities, node_version).
+    data: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Dynamic projection columns that vary by projector schema. "
+            "Consumers merge this dict into the top-level record dict "
+            "before database upsert. Replaces the previous extra='allow' "
+            "approach with an explicit, schema-compliant field."
         ),
     )
 

@@ -104,9 +104,16 @@ class IntentEffectConsulRegister:
         Raises:
             RuntimeHostError: If the Consul registration fails.
         """
+        # Compute effective correlation_id before type checks so error contexts
+        # always carry a non-None ID, preserving any ID from the payload when
+        # available and falling back to uuid4() only as a last resort.
+        effective_correlation_id = (
+            correlation_id or getattr(payload, "correlation_id", None) or uuid4()
+        )
+
         if not isinstance(payload, ModelPayloadConsulRegister):
             context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
+                correlation_id=effective_correlation_id,
                 transport_type=EnumInfraTransportType.CONSUL,
                 operation="intent_effect_consul_register",
             )
@@ -114,8 +121,6 @@ class IntentEffectConsulRegister:
                 f"Expected ModelPayloadConsulRegister, got {type(payload).__name__}",
                 context=context,
             )
-
-        effective_correlation_id = correlation_id or payload.correlation_id or uuid4()
 
         try:
             # Build the payload dict expected by HandlerConsul._register_service

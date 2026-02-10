@@ -433,6 +433,12 @@ async def bootstrap() -> int:
     plugin_registry: RegistryDomainPlugin | None = None
     registration_plugin: PluginRegistration | None = None
     activated_plugins: list[ProtocolDomainPlugin] = []
+    # ready_plugins tracks plugins that completed handler wiring successfully.
+    # Only these plugins should have consumers started in Pass 2. Plugins in
+    # activated_plugins but NOT in ready_plugins had successful init (so need
+    # shutdown for cleanup) but failed wire_handlers/wire_dispatchers (so must
+    # not start consumers with no handlers/dispatchers wired).
+    ready_plugins: list[ProtocolDomainPlugin] = []
     plugin_unsubscribe_callbacks: list[Callable[[], Awaitable[None]]] = []
     # Contract registry unsubscribe functions and router (separate domain)
     contract_router: ContractRegistrationEventRouter | None = None
@@ -895,7 +901,8 @@ async def bootstrap() -> int:
                 wire_result = await plugin.wire_handlers(plugin_config)
                 if not wire_result:
                     logger.warning(
-                        "Plugin '%s' handler wiring failed: %s (correlation_id=%s)",
+                        "Plugin '%s' handler wiring failed: %s — consumers will "
+                        "NOT be started for this plugin (correlation_id=%s)",
                         plugin_id,
                         wire_result.get_error_message_or_default(),
                         correlation_id,
@@ -911,6 +918,12 @@ async def bootstrap() -> int:
                         dispatch_result.get_error_message_or_default(),
                         correlation_id,
                     )
+
+                # Plugin completed handler wiring successfully — safe to start
+                # consumers in Pass 2. Plugins that failed wire_handlers() are
+                # excluded via the `continue` above, preventing consumers from
+                # starting with no handlers/dispatchers wired.
+                ready_plugins.append(plugin)
 
                 logger.info(
                     "Plugin '%s' wiring completed (correlation_id=%s)",
@@ -951,8 +964,11 @@ async def bootstrap() -> int:
             correlation_id,
         )
 
-        # --- Pass 2: Start consumers for all activated plugins ---
-        for plugin in activated_plugins:
+        # --- Pass 2: Start consumers for ready plugins only ---
+        # ready_plugins is a subset of activated_plugins: only plugins that
+        # completed wire_handlers() successfully. This prevents starting
+        # consumers for plugins with no handlers/dispatchers wired.
+        for plugin in ready_plugins:
             plugin_id = plugin.plugin_id
             try:
                 consumer_result = await plugin.start_consumers(plugin_config)

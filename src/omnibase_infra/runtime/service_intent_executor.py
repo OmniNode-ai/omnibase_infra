@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from typing_extensions import runtime_checkable
 
@@ -136,12 +136,17 @@ class IntentExecutor:
             intent: The intent to execute.
             correlation_id: Optional correlation ID for tracing.
         """
+        # Ensure correlation_id is always non-None so all downstream error
+        # contexts and log messages carry a traceable ID.  uuid4() is used
+        # only as a last-resort fallback.
+        effective_correlation_id = correlation_id or uuid4()
+
         # Extract intent_type from payload
         payload = intent.payload
         if payload is None:
             logger.warning(
                 "Intent has no payload, skipping execution correlation_id=%s",
-                str(correlation_id) if correlation_id else "none",
+                str(effective_correlation_id),
             )
             return
 
@@ -157,7 +162,7 @@ class IntentExecutor:
             intent_type = payload.intent_type
         else:
             context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
+                correlation_id=effective_correlation_id,
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="intent_executor.resolve_intent_type",
             )
@@ -170,7 +175,7 @@ class IntentExecutor:
 
         if intent_type is None:
             context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
+                correlation_id=effective_correlation_id,
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="intent_executor.resolve_intent_type",
             )
@@ -183,7 +188,7 @@ class IntentExecutor:
         handler = self._effect_handlers.get(intent_type)
         if handler is None:
             context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
+                correlation_id=effective_correlation_id,
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="intent_executor.resolve_handler",
             )
@@ -197,13 +202,13 @@ class IntentExecutor:
             # Direct protocol call — all handlers implement ProtocolIntentEffect
             # which declares execute(). No duck-type fallback needed since
             # register_handler() accepts ProtocolIntentEffect.
-            await handler.execute(payload, correlation_id=correlation_id)
+            await handler.execute(payload, correlation_id=effective_correlation_id)
 
             logger.info(
                 "Intent executed: intent_type=%s handler=%s correlation_id=%s",
                 intent_type,
                 type(handler).__name__,
-                str(correlation_id) if correlation_id else "none",
+                str(effective_correlation_id),
             )
 
         except RuntimeHostError:
@@ -213,7 +218,7 @@ class IntentExecutor:
                 "Intent execution failed: intent_type=%s error=%s correlation_id=%s",
                 intent_type,
                 sanitize_error_message(e),
-                str(correlation_id) if correlation_id else "none",
+                str(effective_correlation_id),
                 extra={
                     "error_type": type(e).__name__,
                     "intent_type": intent_type,

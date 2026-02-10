@@ -122,23 +122,31 @@ class EnumMessageCategory(str, Enum):
         """
         Infer the message category from a topic string.
 
-        Examines the topic for category keywords (events, commands, intents)
-        as complete segments and returns the corresponding category. Handles both
+        Examines the topic for category keywords as complete segments and
+        returns the corresponding category. Recognises both long plural
+        suffixes (``"events"``, ``"commands"``, ``"intents"``) and short
+        ONEX forms (``"evt"``, ``"cmd"``, ``"intent"``). Handles both
         ONEX Kafka format (onex.<domain>.<type>) and Environment-Aware format
         (<env>.<domain>.<category>.<version>).
 
         The matching is segment-based to prevent false positives. For example:
         - "onex.user.events" matches EVENT (segment "events" exists)
+        - "onex.evt.platform.node-introspection.v1" matches EVENT (segment "evt")
         - "dev.eventsource.data.v1" does NOT match ("eventsource" != "events")
 
         Args:
-            topic: The topic string to analyze
+            topic: The topic string to analyze. Both long suffixes
+                ("events"/"commands"/"intents") and short ONEX suffixes
+                ("evt"/"cmd"/"intent") are recognised as valid category
+                segments.
 
         Returns:
             EnumMessageCategory if a category can be inferred, None otherwise
 
         Example:
             >>> EnumMessageCategory.from_topic("onex.user.events")
+            <EnumMessageCategory.EVENT: 'event'>
+            >>> EnumMessageCategory.from_topic("onex.evt.platform.node-introspection.v1")
             <EnumMessageCategory.EVENT: 'event'>
             >>> EnumMessageCategory.from_topic("dev.order.commands.v1")
             <EnumMessageCategory.COMMAND: 'command'>
@@ -167,8 +175,11 @@ class EnumMessageCategory(str, Enum):
         """
         Get the category from a topic suffix.
 
+        Accepts both long plural forms and short ONEX forms.
+
         Args:
-            suffix: The suffix to look up (e.g., "events", "commands", "intents")
+            suffix: The suffix to look up (e.g., "events"/"evt",
+                "commands"/"cmd", "intents"/"intent").
 
         Returns:
             EnumMessageCategory if the suffix is valid, None otherwise
@@ -176,7 +187,11 @@ class EnumMessageCategory(str, Enum):
         Example:
             >>> EnumMessageCategory.from_suffix("events")
             <EnumMessageCategory.EVENT: 'event'>
+            >>> EnumMessageCategory.from_suffix("evt")
+            <EnumMessageCategory.EVENT: 'event'>
             >>> EnumMessageCategory.from_suffix("commands")
+            <EnumMessageCategory.COMMAND: 'command'>
+            >>> EnumMessageCategory.from_suffix("cmd")
             <EnumMessageCategory.COMMAND: 'command'>
             >>> EnumMessageCategory.from_suffix("unknown")
             None
