@@ -233,8 +233,8 @@ class PostgresConfig:
                database.
             2. Otherwise, individual ``POSTGRES_*`` env vars are read as a
                fallback (host, port, user, password). The database name
-               **must** come from the URL; there is no individual env var
-               fallback for the database.
+               defaults to ``"omnibase_infra"`` per OMN-2065 when using
+               the fallback path.
 
         Args:
             db_url_var: Environment variable holding a full PostgreSQL DSN.
@@ -289,7 +289,7 @@ class PostgresConfig:
         return cls(
             host=host,
             port=int(os.getenv(port_var, str(DEFAULT_POSTGRES_PORT))),
-            database="",
+            database="omnibase_infra",
             user=os.getenv(user_var, default_user),
             password=password,
         )
