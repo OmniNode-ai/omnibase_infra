@@ -33,7 +33,7 @@ if [ "$MODE" = "--ci" ]; then
     BASE_BRANCH="${GITHUB_BASE_REF:-main}"
     # Defensive fetch: ensure origin/<base> ref is up-to-date even if
     # the CI runner's checkout didn't fully resolve it.
-    git fetch origin "${BASE_BRANCH}" --quiet 2>/dev/null || true
+    git fetch origin "${BASE_BRANCH}" --quiet 2>/dev/null || echo "Warning: could not fetch origin/${BASE_BRANCH} (may already be available from checkout)" >&2
     # Detect added (A) or renamed (R) files in the migrations directory.
     # Modified (M) files are intentionally allowed — fixing existing
     # migrations (rollback bug fixes, comment tweaks) is safe during freeze.
