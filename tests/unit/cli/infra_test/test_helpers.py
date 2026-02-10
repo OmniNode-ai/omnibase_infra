@@ -80,3 +80,10 @@ class TestGetPostgresDsn:
         with patch.dict("os.environ", {}, clear=True):
             with pytest.raises(ValueError, match="OMNIBASE_INFRA_DB_URL is required"):
                 get_postgres_dsn()
+
+    def test_invalid_scheme_raises(self) -> None:
+        """Rejects non-postgresql:// schemes."""
+        env = {"OMNIBASE_INFRA_DB_URL": "mysql://user:pass@host:3306/db"}
+        with patch.dict("os.environ", env, clear=True):
+            with pytest.raises(ValueError, match="invalid scheme"):
+                get_postgres_dsn()

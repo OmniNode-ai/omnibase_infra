@@ -313,6 +313,11 @@ def _build_postgres_dsn() -> str:
                 f"OMNIBASE_INFRA_DB_URL has invalid scheme '{parsed.scheme}'. "
                 "Expected 'postgresql://' or 'postgres://'."
             )
+        if not parsed.path or parsed.path == "/":
+            raise ValueError(
+                "OMNIBASE_INFRA_DB_URL is missing a database name. "
+                "Expected e.g. postgresql://user:pass@host:5432/omnibase_infra"
+            )
         return _OMNIBASE_INFRA_DB_URL
 
     if not POSTGRES_HOST:
