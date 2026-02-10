@@ -126,7 +126,15 @@ class DispatchResultApplier:
             result: The dispatch result from the dispatch engine.
             correlation_id: Optional correlation ID for tracing.
         """
-        effective_correlation_id = correlation_id or result.correlation_id or uuid4()
+        effective_correlation_id = correlation_id or result.correlation_id
+        if effective_correlation_id is None:
+            effective_correlation_id = uuid4()
+            logger.warning(
+                "No correlation_id available — generated uuid4() fallback. "
+                "Deterministic envelope_id deduplication will not work for "
+                "this dispatch result (dispatcher_id=%s).",
+                result.dispatcher_id,
+            )
 
         if result.status != EnumDispatchStatus.SUCCESS:
             logger.debug(

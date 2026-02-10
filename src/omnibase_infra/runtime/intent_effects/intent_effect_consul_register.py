@@ -37,13 +37,13 @@ from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
+from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
+    ModelPayloadConsulRegister,
+)
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers import HandlerConsul
-    from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
-        ModelPayloadConsulRegister,
-    )
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +104,17 @@ class IntentEffectConsulRegister:
         Raises:
             RuntimeHostError: If the Consul registration fails.
         """
+        if not isinstance(payload, ModelPayloadConsulRegister):
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.CONSUL,
+                operation="intent_effect_consul_register",
+            )
+            raise RuntimeHostError(
+                f"Expected ModelPayloadConsulRegister, got {type(payload).__name__}",
+                context=context,
+            )
+
         effective_correlation_id = correlation_id or payload.correlation_id or uuid4()
 
         try:

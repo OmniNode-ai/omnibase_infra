@@ -394,7 +394,7 @@ class HandlerNodeIntrospected:
                 "domain": "registration",
                 "current_state": EnumRegistrationState.PENDING_REGISTRATION.value,
                 "node_type": node_type.value,
-                "node_version": str(node_version) if node_version else None,
+                "node_version": str(node_version) if node_version is not None else None,
                 "capabilities": capabilities_data,
                 "contract_type": None,
                 "intent_types": [],
