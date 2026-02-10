@@ -36,7 +36,9 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 from confluent_kafka import Consumer, TopicPartition
 from confluent_kafka.admin import AdminClient, ClusterMetadata
@@ -91,12 +93,29 @@ class AuditConfig:
     """
 
     broker: str
-    expected_topics: tuple[str, ...] = field(default_factory=tuple)
+    expected_topics: frozenset[str] = field(default_factory=frozenset)
     legacy_topics: frozenset[str] = field(default_factory=frozenset)
-    topic_schema_map: dict[str, type[BaseModel]] = field(default_factory=dict)
+    topic_schema_map: Mapping[str, type[BaseModel]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
     sample_per_partition: int = _DEFAULT_SAMPLE_PER_PARTITION
     poll_timeout: float = _DEFAULT_POLL_TIMEOUT
     envelope_exempt_topics: frozenset[str] = field(default_factory=frozenset)
+
+    def __post_init__(self) -> None:
+        """Freeze mutable fields passed at construction time."""
+        if not isinstance(self.expected_topics, frozenset):
+            object.__setattr__(
+                self,
+                "expected_topics",
+                frozenset(self.expected_topics),
+            )
+        if not isinstance(self.topic_schema_map, MappingProxyType):
+            object.__setattr__(
+                self,
+                "topic_schema_map",
+                MappingProxyType(dict(self.topic_schema_map)),
+            )
 
 
 # =============================================================================
@@ -141,8 +160,7 @@ def run_audit(config: AuditConfig) -> AuditReport:
         topic_results.append(th)
 
     # Phase 5: Unexpected topics
-    expected_set = set(config.expected_topics)
-    unexpected = tuple(sorted(broker_topics - expected_set))
+    unexpected = tuple(sorted(broker_topics - config.expected_topics))
 
     # Phase 6: Overall verdict
     overall = EnumVerdict.PASS
@@ -283,11 +301,16 @@ def _build_topic_health(
     if topic not in broker_topics:
         status = EnumTopicStatus.NOT_FOUND
         naming = _classify_naming(topic, config.legacy_topics)
-        verdict = (
-            EnumVerdict.FAIL if topic in config.expected_topics else EnumVerdict.WARN
-        )
         if topic in config.expected_topics:
             issues.append(f"Expected topic not found on broker: {topic}")
+        verdict = _compute_verdict(
+            topic=topic,
+            status=status,
+            naming=naming,
+            envelope_stats=None,
+            domain_validation=None,
+            config=config,
+        )
         return TopicHealth(
             topic=topic,
             status=status,

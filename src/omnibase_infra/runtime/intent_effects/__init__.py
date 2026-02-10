@@ -22,6 +22,9 @@ Related:
 .. versionadded:: 0.7.0
 """
 
+from omnibase_infra.runtime.intent_effects.intent_effect_consul_deregister import (
+    IntentEffectConsulDeregister,
+)
 from omnibase_infra.runtime.intent_effects.intent_effect_consul_register import (
     IntentEffectConsulRegister,
 )
@@ -30,6 +33,7 @@ from omnibase_infra.runtime.intent_effects.intent_effect_postgres_upsert import 
 )
 
 __all__: list[str] = [
+    "IntentEffectConsulDeregister",
     "IntentEffectConsulRegister",
     "IntentEffectPostgresUpsert",
 ]
