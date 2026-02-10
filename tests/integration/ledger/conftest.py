@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import os
 from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -23,6 +22,9 @@ from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+
+from tests.helpers.util_postgres import PostgresConfig
+from tests.infrastructure_config import REMOTE_INFRA_HOST
 
 if TYPE_CHECKING:
     import asyncpg
@@ -34,7 +36,7 @@ pytestmark = [pytest.mark.postgres]
 
 
 def _get_postgres_dsn() -> str | None:
-    """Build PostgreSQL DSN from environment variables.
+    """Build PostgreSQL DSN using shared PostgresConfig utility.
 
     Primary source: ``OMNIBASE_INFRA_DB_URL``.
     Fallback: individual ``POSTGRES_*`` env vars.
@@ -42,45 +44,10 @@ def _get_postgres_dsn() -> str | None:
     Returns:
         DSN string if configuration is available, None otherwise.
     """
-    db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
-    if db_url:
-        # Basic validation: ensure the user-provided DSN is well-formed
-        from urllib.parse import urlparse
-
-        parsed = urlparse(db_url)
-        if parsed.scheme not in ("postgresql", "postgres"):
-            raise ValueError(
-                f"OMNIBASE_INFRA_DB_URL has invalid scheme '{parsed.scheme}'. "
-                "Expected 'postgresql://' or 'postgres://'."
-            )
-        # Validate database name is present in the DSN path
-        database = (parsed.path or "").lstrip("/")
-        if not database:
-            raise ValueError(
-                "OMNIBASE_INFRA_DB_URL is missing a database name. "
-                "Example: postgresql://user:pass@host:5432/omnibase_infra"
-            )
-        return db_url
-
-    host = os.getenv("POSTGRES_HOST")
-    password = os.getenv("POSTGRES_PASSWORD")
-
-    if not host or not password:
+    config = PostgresConfig.from_env(fallback_host=REMOTE_INFRA_HOST)
+    if not config.is_configured:
         return None
-
-    from urllib.parse import quote_plus
-
-    # 5436 = external port on remote infra server (192.168.86.200)
-    port = os.getenv("POSTGRES_PORT", "5436")
-    user = os.getenv("POSTGRES_USER", "postgres")
-
-    # URL-encode credentials to handle special characters (@, :, /, %, etc.)
-    encoded_user = quote_plus(user, safe="")
-    encoded_password = quote_plus(password, safe="")
-
-    return (
-        f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/omnibase_infra"
-    )
+    return config.build_dsn()
 
 
 @pytest.fixture

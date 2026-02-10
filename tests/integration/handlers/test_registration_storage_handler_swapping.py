@@ -96,10 +96,9 @@ def _resolve_postgres_config() -> dict[str, object]:
     return {
         "host": config.host or "localhost",
         "port": config.port,
-        # PostgresConfig.from_env() hardcodes database="omnibase_infra" in the
-        # fallback path (individual POSTGRES_* vars). The "or" guard is retained
-        # for defensive coding in case from_env() returns empty database when
-        # OMNIBASE_INFRA_DB_URL is set without a path component.
+        # Fallback to "omnibase_infra" is intentional: PostgresConfig.from_env()
+        # defaults the database to "omnibase_infra" when using individual
+        # POSTGRES_* env vars. This test module always targets that database.
         "database": config.database or "omnibase_infra",
         "user": config.user,
         "password": config.password or "",

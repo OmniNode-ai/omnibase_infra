@@ -245,13 +245,13 @@ def _build_postgres_dsn() -> str:
 
     if not POSTGRES_HOST:
         raise ValueError(
-            "POSTGRES_HOST is required but not set. "
+            "POSTGRES_HOST is required (when OMNIBASE_INFRA_DB_URL is not set) but not set. "
             "Set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST environment variable "
             "to enable database tests."
         )
     if not POSTGRES_PASSWORD:
         raise ValueError(
-            "POSTGRES_PASSWORD is required but not set. "
+            "POSTGRES_PASSWORD is required (when OMNIBASE_INFRA_DB_URL is not set) but not set. "
             "Set OMNIBASE_INFRA_DB_URL or POSTGRES_PASSWORD environment variable "
             "to enable database tests."
         )

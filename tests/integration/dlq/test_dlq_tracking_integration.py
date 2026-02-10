@@ -69,7 +69,7 @@ from .conftest import POSTGRES_AVAILABLE
 pytestmark = [
     pytest.mark.skipif(
         not POSTGRES_AVAILABLE,
-        reason="PostgreSQL not available (POSTGRES_PASSWORD not set)",
+        reason="PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST+POSTGRES_PASSWORD)",
     ),
 ]
 
