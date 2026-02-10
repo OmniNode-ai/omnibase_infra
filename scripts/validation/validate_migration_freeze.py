@@ -34,6 +34,7 @@ from pathlib import Path
 MIGRATION_DIRS: tuple[str, ...] = (
     "docker/migrations/forward/",
     "docker/migrations/rollback/",
+    "docker/migrations/",
 )
 
 # File extensions considered migration files
@@ -85,8 +86,35 @@ def _get_new_staged_files(repo_path: Path) -> list[str]:
         return []
 
 
-def _get_new_committed_files(repo_path: Path, base_ref: str = "HEAD~1") -> list[str]:
-    """Get files that are newly added in committed changes."""
+def _get_merge_base(repo_path: Path) -> str:
+    """Auto-detect the merge base against origin/main (or origin/master)."""
+    for branch in ("origin/main", "origin/master"):
+        try:
+            result = subprocess.run(
+                ["git", "merge-base", "HEAD", branch],
+                capture_output=True,
+                text=True,
+                cwd=str(repo_path),
+                timeout=10,
+                check=False,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            continue
+    return "HEAD~1"
+
+
+def _get_new_committed_files(repo_path: Path, base_ref: str | None = None) -> list[str]:
+    """Get files that are newly added in committed changes.
+
+    Args:
+        repo_path: Repository root path.
+        base_ref: Base ref for comparison. If None, auto-detects merge base
+                  against origin/main to cover all commits on the branch.
+    """
+    if base_ref is None:
+        base_ref = _get_merge_base(repo_path)
     try:
         result = subprocess.run(
             ["git", "diff", "--name-only", "--diff-filter=A", f"{base_ref}..HEAD"],
@@ -128,7 +156,7 @@ def validate_migration_freeze(
         repo_path: Path to the repository root.
         verbose: Enable verbose output.
         check_staged: If True, check staged files (pre-commit mode).
-                      If False, check committed files against HEAD~1.
+                      If False, check committed files against merge base.
 
     Returns:
         FreezeValidationResult with any violations found.

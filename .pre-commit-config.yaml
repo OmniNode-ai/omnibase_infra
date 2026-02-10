@@ -226,4 +226,6 @@ ci:
   submodules: false
   # Skip ONEX validation hooks in CI that require omnibase_core imports
   # Note: onex-validate-clean-root is NOT skipped (standalone script, no omnibase_core dependency)
-  skip: [onex-validate-architecture, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types]
+  # Also skip migration freeze (checks staged files via git diff --cached, which is empty in CI;
+  # CI should run: poetry run python scripts/validate.py migration_freeze --check-committed)
+  skip: [onex-validate-architecture, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze]

@@ -1,7 +1,7 @@
 # Migration Freeze
 #
 # This file signals that schema migrations are FROZEN in this repository.
-# Do NOT add, modify, or remove migration files while this freeze is active.
+# Do NOT add new migration files while this freeze is active.
 #
 # Parent ticket: OMN-2055 (DB-SPLIT-04: Schema freeze)
 # Repo ticket:   OMN-2071
