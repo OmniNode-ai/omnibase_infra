@@ -74,7 +74,7 @@ class TestQueryBySessionId:
         await reader.query_by_session_id(sample_session_id)
 
         mock_pool._test_conn.execute.assert_any_call(
-            "SET statement_timeout = $1", "15000"
+            "SET LOCAL statement_timeout = $1", "15000"
         )
 
 

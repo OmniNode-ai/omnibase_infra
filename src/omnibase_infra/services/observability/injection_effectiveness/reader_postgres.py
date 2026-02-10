@@ -152,10 +152,13 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker=self,
         ):
             async with self._pool.acquire() as conn:
-                timeout_ms = int(self._query_timeout * 1000)
-                await conn.execute("SET statement_timeout = $1", str(timeout_ms))
+                async with conn.transaction():
+                    timeout_ms = int(self._query_timeout * 1000)
+                    await conn.execute(
+                        "SET LOCAL statement_timeout = $1", str(timeout_ms)
+                    )
 
-                row = await conn.fetchrow(sql, session_id)
+                    row = await conn.fetchrow(sql, session_id)
 
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
@@ -251,12 +254,15 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker=self,
         ):
             async with self._pool.acquire() as conn:
-                timeout_ms = int(self._query_timeout * 1000)
-                await conn.execute("SET statement_timeout = $1", str(timeout_ms))
+                async with conn.transaction():
+                    timeout_ms = int(self._query_timeout * 1000)
+                    await conn.execute(
+                        "SET LOCAL statement_timeout = $1", str(timeout_ms)
+                    )
 
-                raw_count = await conn.fetchval(count_sql, *params)
-                total_count: int = raw_count
-                rows = await conn.fetch(data_sql, *data_params)
+                    raw_count = await conn.fetchval(count_sql, *params)
+                    total_count: int = raw_count
+                    rows = await conn.fetch(data_sql, *data_params)
 
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
@@ -315,10 +321,13 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker=self,
         ):
             async with self._pool.acquire() as conn:
-                timeout_ms = int(self._query_timeout * 1000)
-                await conn.execute("SET statement_timeout = $1", str(timeout_ms))
+                async with conn.transaction():
+                    timeout_ms = int(self._query_timeout * 1000)
+                    await conn.execute(
+                        "SET LOCAL statement_timeout = $1", str(timeout_ms)
+                    )
 
-                rows = await conn.fetch(sql, session_id, limit, offset)
+                    rows = await conn.fetch(sql, session_id, limit, offset)
 
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
@@ -388,10 +397,13 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker=self,
         ):
             async with self._pool.acquire() as conn:
-                timeout_ms = int(self._query_timeout * 1000)
-                await conn.execute("SET statement_timeout = $1", str(timeout_ms))
+                async with conn.transaction():
+                    timeout_ms = int(self._query_timeout * 1000)
+                    await conn.execute(
+                        "SET LOCAL statement_timeout = $1", str(timeout_ms)
+                    )
 
-                rows = await conn.fetch(sql, *query_params)
+                    rows = await conn.fetch(sql, *query_params)
 
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
