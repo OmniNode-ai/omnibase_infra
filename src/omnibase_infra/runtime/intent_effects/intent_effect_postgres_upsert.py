@@ -194,13 +194,15 @@ class IntentEffectPostgresUpsert:
             ) from e
 
     # Columns that are UUID in the registration_projections table.
-    # Must stay in sync with schema_registration_projection.sql.
+    # Must stay in sync with:
+    #   src/omnibase_infra/schemas/schema_registration_projection.sql
     _UUID_COLUMNS: frozenset[str] = frozenset(
         {"entity_id", "last_applied_event_id", "correlation_id"}
     )
 
     # Columns that are TIMESTAMPTZ in the registration_projections table.
-    # Must stay in sync with schema_registration_projection.sql.
+    # Must stay in sync with:
+    #   src/omnibase_infra/schemas/schema_registration_projection.sql
     _TIMESTAMP_COLUMNS: frozenset[str] = frozenset(
         {"ack_deadline", "registered_at", "updated_at"}
     )

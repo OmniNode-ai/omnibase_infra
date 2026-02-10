@@ -165,9 +165,10 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
         """Message category this dispatcher processes.
 
         Returns:
-            EnumMessageCategory: EVENT category (runtime tick events).
+            EnumMessageCategory: INTENT category (runtime tick intents routed
+                via ``*.intent.*.runtime-tick.*`` topic pattern).
         """
-        return EnumMessageCategory.EVENT
+        return EnumMessageCategory.INTENT
 
     @property
     def message_types(self) -> set[str]:

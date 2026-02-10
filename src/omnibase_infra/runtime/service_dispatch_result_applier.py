@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.enums import EnumDispatchStatus
+from omnibase_infra.enums import EnumDispatchStatus, EnumInfraTransportType
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
@@ -176,7 +176,7 @@ class DispatchResultApplier:
         if output_intents and self._intent_executor is None:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=effective_correlation_id,
-                transport_type=None,
+                transport_type=EnumInfraTransportType.RUNTIME,
                 operation="dispatch_result_applier.apply_intents",
             )
             raise RuntimeHostError(

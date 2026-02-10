@@ -139,11 +139,16 @@ class IntentExecutor:
             )
 
         if intent_type is None:
-            logger.warning(
-                "Intent has no intent_type, skipping execution correlation_id=%s",
-                str(correlation_id) if correlation_id else "none",
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=None,
+                operation="intent_executor.resolve_intent_type",
             )
-            return
+            raise RuntimeHostError(
+                "Intent has no intent_type on payload or envelope — "
+                "intent would be lost (malformed intent)",
+                context=context,
+            )
 
         handler = self._effect_handlers.get(intent_type)
         if handler is None:
@@ -168,13 +173,17 @@ class IntentExecutor:
                 if handle_fn is not None and callable(handle_fn):
                     await handle_fn(payload, correlation_id=correlation_id)
                 else:
-                    logger.warning(
-                        "Effect handler for intent_type=%s has no execute() or "
-                        "handle() method correlation_id=%s",
-                        intent_type,
-                        str(correlation_id) if correlation_id else "none",
+                    context = ModelInfraErrorContext.with_correlation(
+                        correlation_id=correlation_id,
+                        transport_type=None,
+                        operation="intent_executor.invoke_handler",
                     )
-                    return
+                    raise RuntimeHostError(
+                        f"Effect handler for intent_type={intent_type!r} "
+                        f"({type(handler).__name__}) has no execute() or handle() "
+                        f"method — intent would be lost",
+                        context=context,
+                    )
 
             logger.info(
                 "Intent executed: intent_type=%s handler=%s correlation_id=%s",

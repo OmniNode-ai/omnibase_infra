@@ -70,6 +70,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     import asyncpg
 
     from omnibase_infra.handlers import HandlerConsul
@@ -80,6 +82,7 @@ if TYPE_CHECKING:
         EventBusSubcontractWiring,
     )
     from omnibase_infra.runtime.projector_shell import ProjectorShell
+    from omnibase_infra.runtime.service_intent_executor import IntentExecutor
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ContainerWiringError
@@ -973,9 +976,9 @@ class PluginRegistration:
 
     def _wire_intent_effects(
         self,
-        intent_executor: object,
+        intent_executor: IntentExecutor,
         contract_path: Path,
-        correlation_id: object,
+        correlation_id: UUID | None,
     ) -> None:
         """Wire intent effect adapters from contract-driven routing table.
 
