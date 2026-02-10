@@ -248,7 +248,8 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 timeout_ms = int(self._query_timeout * 1000)
                 await conn.execute("SET statement_timeout = $1", str(timeout_ms))
 
-                total_count = await conn.fetchval(count_sql, *params)
+                raw_count = await conn.fetchval(count_sql, *params)
+                total_count: int = raw_count
                 rows = await conn.fetch(data_sql, *data_params)
 
             async with self._circuit_breaker_lock:
