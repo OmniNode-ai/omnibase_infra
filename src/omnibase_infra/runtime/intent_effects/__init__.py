@@ -12,7 +12,7 @@ Architecture:
 
     IntentEffects are registered with IntentExecutor via the contract's
     intent_routing_table. Each effect adapter exposes an async ``execute()``
-    method matching IntentExecutor's duck-typed handler protocol.
+    method matching the ProtocolIntentEffect protocol.
 
 Related:
     - OMN-2050: Wire MessageDispatchEngine as single consumer path

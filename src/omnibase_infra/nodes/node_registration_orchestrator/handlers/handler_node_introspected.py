@@ -50,6 +50,8 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
+from pydantic import BaseModel
+
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -473,7 +475,11 @@ class HandlerNodeIntrospected:
                 "registration_attempt_id": str(initiated_event.registration_attempt_id),
                 "correlation_id": str(correlation_id),
                 "intent_types": [
-                    getattr(i.payload, "intent_type", "unknown") for i in intents
+                    i.payload.intent_type
+                    if isinstance(i.payload, BaseModel)
+                    and hasattr(i.payload, "intent_type")
+                    else "unknown"
+                    for i in intents
                 ],
             },
         )
