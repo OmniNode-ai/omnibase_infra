@@ -31,6 +31,8 @@ Exports:
     EnumInfraTransportType: Infrastructure transport type enumeration
     EnumIntrospectionReason: Introspection event reasons (STARTUP, SHUTDOWN, etc.)
     EnumKafkaAcks: Kafka producer acknowledgment policy (ALL, NONE, LEADER, ALL_REPLICAS)
+    EnumLlmFinishReason: LLM finish reasons (STOP, LENGTH, ERROR, CONTENT_FILTER, TOOL_CALLS, UNKNOWN)
+    EnumLlmOperationType: LLM operation types (CHAT_COMPLETION, COMPLETION, EMBEDDING)
     EnumMessageCategory: Message categories (EVENT, COMMAND, INTENT)
     EnumNodeArchetype: 4-node architecture (EFFECT, COMPUTE, REDUCER, ORCHESTRATOR)
     EnumNodeOutputType: Node output types for execution shape validation
@@ -78,6 +80,8 @@ from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportTyp
 from omnibase_infra.enums.enum_introspection_reason import EnumIntrospectionReason
 from omnibase_infra.enums.enum_kafka_acks import EnumKafkaAcks
 from omnibase_infra.enums.enum_ledger_sink_drop_policy import EnumLedgerSinkDropPolicy
+from omnibase_infra.enums.enum_llm_finish_reason import EnumLlmFinishReason
+from omnibase_infra.enums.enum_llm_operation_type import EnumLlmOperationType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
 from omnibase_infra.enums.enum_node_archetype import EnumNodeArchetype
 from omnibase_infra.enums.enum_node_output_type import EnumNodeOutputType
@@ -124,6 +128,8 @@ __all__: list[str] = [
     "EnumIntrospectionReason",
     "EnumKafkaAcks",
     "EnumLedgerSinkDropPolicy",
+    "EnumLlmFinishReason",
+    "EnumLlmOperationType",
     "EnumMessageCategory",
     "EnumNodeArchetype",
     "EnumNodeOutputType",
