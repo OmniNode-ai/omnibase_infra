@@ -2,6 +2,7 @@
 -- Description: Create tables for Claude Code session context storage (OMN-1401)
 -- Created: 2026-01-24
 -- Moved to omnibase_infra: OMN-1526
+-- Rollback: See rollback/rollback_016_create_session_snapshots.sql
 
 -- Session snapshots table (main aggregate)
 CREATE TABLE IF NOT EXISTS claude_session_snapshots (

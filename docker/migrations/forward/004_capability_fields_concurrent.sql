@@ -3,7 +3,7 @@
 -- =============================================================================
 -- Ticket: OMN-1134 (Registry Projection Extensions for Capabilities)
 -- Version: 1.0.0
--- Companion to: 003_capability_fields.sql
+-- Companion to: forward/003_capability_fields.sql
 --
 -- PURPOSE:
 --   This script creates the same indexes as 003_capability_fields.sql but uses
