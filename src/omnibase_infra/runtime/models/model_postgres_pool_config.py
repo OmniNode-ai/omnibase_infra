@@ -84,14 +84,14 @@ class ModelPostgresPoolConfig(BaseModel):
         max_size_raw = os.getenv("POSTGRES_POOL_MAX_SIZE", "10")
         try:
             min_size = int(min_size_raw)
-        except ValueError:
+        except ValueError as e:
             msg = f"POSTGRES_POOL_MIN_SIZE must be an integer, got '{min_size_raw}'"
-            raise ValueError(msg)
+            raise ValueError(msg) from e
         try:
             max_size = int(max_size_raw)
-        except ValueError:
+        except ValueError as e:
             msg = f"POSTGRES_POOL_MAX_SIZE must be an integer, got '{max_size_raw}'"
-            raise ValueError(msg)
+            raise ValueError(msg) from e
 
         return cls.from_dsn(
             db_url,
