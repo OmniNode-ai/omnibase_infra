@@ -217,7 +217,7 @@ ON registration_projections USING GIN(capabilities);
 
 ### Key Files
 
-- `src/omnibase_infra/migrations/005_add_capability_columns.sql`: Schema migration
+- `docker/migrations/forward/003_capability_fields.sql`: Schema migration
 - `src/omnibase_infra/nodes/registry_projection_effect/node.py`: Capability extraction
 - `tests/integration/registry/test_capability_queries.py`: Query pattern tests
 
