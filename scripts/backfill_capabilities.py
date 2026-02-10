@@ -239,6 +239,21 @@ def _get_validated_dsn() -> str:
             error_code=ErrorCode.CFG_INVALID_DSN_SCHEME,
         )
 
+    # Validate the DSN contains a database name (path component)
+    from urllib.parse import urlparse
+
+    parsed = urlparse(dsn)
+    database = (parsed.path or "").lstrip("/")
+    if not database:
+        safe_dsn = (
+            f"{parsed.scheme}://{parsed.hostname or '?'}:{parsed.port or '?'}/???"
+        )
+        raise ConfigurationError(
+            f"OMNIBASE_INFRA_DB_URL is missing a database name: {safe_dsn}. "
+            "Example: postgresql://postgres:pass@host:5432/omnibase_infra",
+            error_code=ErrorCode.CFG_INVALID_DSN_SCHEME,
+        )
+
     logger.debug("Using DSN from OMNIBASE_INFRA_DB_URL (credentials redacted)")
 
     return dsn

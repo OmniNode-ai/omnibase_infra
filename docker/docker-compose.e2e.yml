@@ -269,10 +269,11 @@ services:
       redpanda-topic-manager:
         condition: service_completed_successfully
     environment:
-      # PostgreSQL
+      # PostgreSQL - primary DSN (used by omnibase_infra application code)
+      OMNIBASE_INFRA_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-test-password}@postgres:5432/omnibase_infra
+      # Legacy individual vars - retained for agent-actions-consumer and session storage
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      OMNIBASE_INFRA_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-test-password}@postgres:5432/omnibase_infra
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test-password}
       # Kafka (internal address)

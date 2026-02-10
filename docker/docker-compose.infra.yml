@@ -90,6 +90,9 @@ x-runtime-env: &runtime-env
   POSTGRES_PORT: ${POSTGRES_PORT:-5432}
   # NOTE: If OMNIBASE_INFRA_DB_URL is unset, falls back to constructing DSN from POSTGRES_PASSWORD.
   # POSTGRES_PASSWORD must be set (enforced by :? on the postgres service) for the fallback to work.
+  # WARNING: The fallback DSN uses nested variable expansion. If POSTGRES_PASSWORD contains
+  # shell-special characters ($, `, \, !) the expansion may produce incorrect results.
+  # For passwords with special characters, set OMNIBASE_INFRA_DB_URL directly instead.
   OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for DB URL fallback}@postgres:5432/omnibase_infra}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

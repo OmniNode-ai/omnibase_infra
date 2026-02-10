@@ -2,6 +2,12 @@
 
 Loads from environment variables with OMNIBASE_INFRA_SESSION_STORAGE_ prefix.
 
+Note: This module intentionally uses individual POSTGRES_* env vars (via
+pydantic-settings prefix) rather than a single DSN. The session storage uses
+a separate env prefix (OMNIBASE_INFRA_SESSION_STORAGE_) and may target a
+different database than the main OMNIBASE_INFRA_DB_URL. Migration to DSN-based
+configuration is tracked separately from the OMN-2065 DB split.
+
 Moved from omniclaude as part of OMN-1526 architectural cleanup.
 """
 

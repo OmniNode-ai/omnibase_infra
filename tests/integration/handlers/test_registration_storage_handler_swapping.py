@@ -71,8 +71,6 @@ if TYPE_CHECKING:
 # =============================================================================
 
 # Check if PostgreSQL is available for integration tests
-POSTGRES_HOST = os.getenv("POSTGRES_HOST")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 POSTGRES_AVAILABLE = os.getenv("OMNIBASE_INFRA_DB_URL") is not None or (
     os.getenv("POSTGRES_HOST") is not None
     and os.getenv("POSTGRES_PASSWORD") is not None
@@ -85,7 +83,7 @@ def _resolve_postgres_config() -> dict[str, object]:
     Returns:
         Dict with host, port, database, user, password keys.
     """
-    from urllib.parse import urlparse
+    from urllib.parse import unquote, urlparse
 
     db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
     if db_url:
@@ -94,8 +92,8 @@ def _resolve_postgres_config() -> dict[str, object]:
             "host": parsed.hostname or "localhost",
             "port": parsed.port or 5432,
             "database": (parsed.path or "").lstrip("/") or "omnibase_infra",
-            "user": parsed.username or "postgres",
-            "password": parsed.password or "",
+            "user": unquote(parsed.username) if parsed.username else "postgres",
+            "password": unquote(parsed.password) if parsed.password else "",
         }
     return {
         "host": os.getenv("POSTGRES_HOST", "localhost"),
