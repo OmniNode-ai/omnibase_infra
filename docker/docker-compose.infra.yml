@@ -431,6 +431,9 @@ services:
       # NOTE: Uses dedicated OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN rather than
       # OMNIBASE_INFRA_DB_URL because this consumer uses pydantic-settings with the
       # OMNIBASE_INFRA_AGENT_ACTIONS_ prefix and may use a different DB role.
+      # WARNING: Variable expansion does not URL-encode POSTGRES_PASSWORD.
+      # If POSTGRES_PASSWORD contains special characters ($, `, \, !, @, :),
+      # set OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN explicitly in .env instead.
       OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/omnibase_infra
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_SIZE: ${AGENT_ACTIONS_BATCH_SIZE:-100}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_TIMEOUT_MS: ${AGENT_ACTIONS_BATCH_TIMEOUT_MS:-1000}

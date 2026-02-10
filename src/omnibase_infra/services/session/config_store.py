@@ -13,6 +13,8 @@ Moved from omniclaude as part of OMN-1526 architectural cleanup.
 
 from __future__ import annotations
 
+from urllib.parse import quote_plus
+
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -99,12 +101,18 @@ class ConfigSessionStorage(BaseSettings):
     def dsn(self) -> str:
         """Build PostgreSQL DSN from components.
 
+        Credentials are URL-encoded using quote_plus() to handle special
+        characters like @, :, /, %, etc. that would otherwise break the DSN.
+
         Returns:
             PostgreSQL connection string.
         """
-        password = self.postgres_password.get_secret_value()
+        encoded_user = quote_plus(self.postgres_user, safe="")
+        encoded_password = quote_plus(
+            self.postgres_password.get_secret_value(), safe=""
+        )
         return (
-            f"postgresql://{self.postgres_user}:{password}"
+            f"postgresql://{encoded_user}:{encoded_password}"
             f"@{self.postgres_host}:{self.postgres_port}"
             f"/{self.postgres_database}"
         )
@@ -113,12 +121,18 @@ class ConfigSessionStorage(BaseSettings):
     def dsn_async(self) -> str:
         """Build async PostgreSQL DSN for asyncpg.
 
+        Credentials are URL-encoded using quote_plus() to handle special
+        characters like @, :, /, %, etc. that would otherwise break the DSN.
+
         Returns:
             PostgreSQL connection string with postgresql+asyncpg scheme.
         """
-        password = self.postgres_password.get_secret_value()
+        encoded_user = quote_plus(self.postgres_user, safe="")
+        encoded_password = quote_plus(
+            self.postgres_password.get_secret_value(), safe=""
+        )
         return (
-            f"postgresql+asyncpg://{self.postgres_user}:{password}"
+            f"postgresql+asyncpg://{encoded_user}:{encoded_password}"
             f"@{self.postgres_host}:{self.postgres_port}"
             f"/{self.postgres_database}"
         )

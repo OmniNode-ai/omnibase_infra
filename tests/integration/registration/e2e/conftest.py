@@ -55,7 +55,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 from unittest.mock import MagicMock
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 from uuid import UUID, uuid4
 
 import pytest
@@ -190,6 +190,9 @@ def wrap_event_in_envelope(
 
 # PostgreSQL availability
 _OMNIBASE_INFRA_DB_URL = os.getenv("OMNIBASE_INFRA_DB_URL")
+# Normalize empty/whitespace-only values to None for consistent availability check
+if _OMNIBASE_INFRA_DB_URL is not None:
+    _OMNIBASE_INFRA_DB_URL = _OMNIBASE_INFRA_DB_URL.strip() or None
 POSTGRES_HOST = os.getenv("POSTGRES_HOST")
 POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", str(DEFAULT_POSTGRES_PORT)))
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
@@ -199,9 +202,14 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 if POSTGRES_PASSWORD and not POSTGRES_PASSWORD.strip():
     POSTGRES_PASSWORD = None
 
-POSTGRES_AVAILABLE = bool(_OMNIBASE_INFRA_DB_URL) or bool(
-    POSTGRES_HOST and POSTGRES_PASSWORD
-)
+# When DSN is set, also verify it contains a database name
+_db_url_has_database = False
+if _OMNIBASE_INFRA_DB_URL is not None:
+    _parsed_url = urlparse(_OMNIBASE_INFRA_DB_URL)
+    _db_url_has_database = bool((_parsed_url.path or "").lstrip("/"))
+
+# Check if PostgreSQL is available based on URL (with database) or host+password being set
+POSTGRES_AVAILABLE = _db_url_has_database or bool(POSTGRES_HOST and POSTGRES_PASSWORD)
 
 # Kafka availability
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
