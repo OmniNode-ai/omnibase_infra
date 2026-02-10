@@ -1,9 +1,9 @@
--- Rollback: 026_injection_effectiveness_tables
+-- Rollback: forward/026_injection_effectiveness_tables.sql
 -- Description: Remove injection effectiveness tables (OMN-1890)
 -- Created: 2026-02-04
 --
 -- Usage: Execute this script to completely remove all objects created by
---        026_injection_effectiveness_tables.sql
+--        forward/026_injection_effectiveness_tables.sql
 --
 -- Order: Objects are dropped in reverse dependency order to avoid errors.
 
