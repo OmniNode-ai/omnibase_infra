@@ -546,6 +546,18 @@ class HandlerSlackWebhook:
                                 "attempt": attempt + 1,
                             },
                         )
+                        # 4xx errors (except 429, handled above) are
+                        # non-retryable client errors -- fail fast.
+                        if 400 <= response.status < 500:
+                            duration_ms = (time.perf_counter() - start_time) * 1000
+                            return ModelSlackAlertResult(
+                                success=False,
+                                duration_ms=duration_ms,
+                                correlation_id=correlation_id,
+                                error=last_error,
+                                error_code=last_error_code,
+                                retry_count=retry_count,
+                            )
                     else:
                         # HTTP 200 - parse JSON response
                         try:
@@ -593,6 +605,14 @@ class HandlerSlackWebhook:
                             if slack_error == "ratelimited":
                                 last_error = "Slack rate limit (API)"
                                 last_error_code = "SLACK_RATE_LIMITED"
+                                logger.warning(
+                                    "Slack Web API rate limited (ok=false)",
+                                    extra={
+                                        "correlation_id": str(correlation_id),
+                                        "attempt": attempt + 1,
+                                        "max_attempts": self._max_retries + 1,
+                                    },
+                                )
                             else:
                                 last_error = f"Slack API error: {slack_error}"
                                 last_error_code = "SLACK_API_ERROR"
