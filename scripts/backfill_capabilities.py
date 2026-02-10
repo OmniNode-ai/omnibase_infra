@@ -418,7 +418,7 @@ def _handle_database_error(exc: BaseException) -> NoReturn:
     if isinstance(exc, asyncpg.InvalidPasswordError):
         error_code = ErrorCode.DB_AUTH_FAILED
         message = "Database authentication failed"
-        guidance = "Verify POSTGRES_PASSWORD is correct for the specified user."
+        guidance = "Verify the credentials in OMNIBASE_INFRA_DB_URL are correct."
     elif isinstance(exc, asyncpg.InvalidCatalogNameError):
         error_code = ErrorCode.DB_NOT_FOUND
         message = "Database not found"
@@ -435,14 +435,14 @@ def _handle_database_error(exc: BaseException) -> NoReturn:
         error_code = ErrorCode.DB_CONNECTION_REFUSED
         message = "Connection refused"
         guidance = (
-            "Verify POSTGRES_HOST and POSTGRES_PORT are correct. "
+            "Verify the host and port in OMNIBASE_INFRA_DB_URL are correct. "
             "Ensure the database server is running and accepting connections."
         )
     elif isinstance(exc, asyncpg.PostgresConnectionError):
         error_code = ErrorCode.DB_CONNECTION_REFUSED
         message = "Database connection failed"
         guidance = (
-            "Verify POSTGRES_HOST and POSTGRES_PORT are correct. "
+            "Verify the host and port in OMNIBASE_INFRA_DB_URL are correct. "
             "Check network connectivity and firewall rules."
         )
     elif isinstance(exc, asyncpg.InterfaceError):

@@ -497,7 +497,7 @@ class TestLearnedPatternsTable:
         contract = ModelDbRepositoryContract(
             name="learned_patterns_repo",
             engine="postgres",
-            database_ref="omninode_bridge",
+            database_ref="omnibase_infra",
             tables=["learned_patterns"],
             models={"LearnedPattern": "dict"},
             ops={

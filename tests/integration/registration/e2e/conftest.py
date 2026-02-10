@@ -7,7 +7,7 @@ orchestrator against real infrastructure (Kafka, Consul, PostgreSQL).
 
 Infrastructure Requirements:
     Tests require ALL infrastructure services to be available:
-    - PostgreSQL: POSTGRES_HOST:5436 (database: omninode_bridge)
+    - PostgreSQL: OMNIBASE_INFRA_DB_URL (database: omnibase_infra)
     - Consul: CONSUL_HOST:28500
     - Kafka/Redpanda: KAFKA_BOOTSTRAP_SERVERS
 

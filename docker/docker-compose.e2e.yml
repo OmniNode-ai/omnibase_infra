@@ -53,7 +53,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test-password}
       POSTGRES_DB: omnibase_infra
-      POSTGRES_MULTIPLE_DATABASES: "omnibase_infra,infisical_db"
+      POSTGRES_MULTIPLE_DATABASES: "infisical_db"
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     networks:
