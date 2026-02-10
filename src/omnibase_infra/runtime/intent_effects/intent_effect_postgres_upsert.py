@@ -95,7 +95,7 @@ class IntentEffectPostgresUpsert:
 
     async def execute(
         self,
-        payload: ModelPayloadPostgresUpsertRegistration,
+        payload: object,
         *,
         correlation_id: UUID | None = None,
     ) -> None:
@@ -111,7 +111,7 @@ class IntentEffectPostgresUpsert:
 
         Args:
             payload: The ModelPayloadPostgresUpsertRegistration intent payload.
-                Must have a non-None ``record`` field with serializable data.
+                Validated via isinstance at entry.
             correlation_id: Optional correlation ID for tracing.
                 Falls back to payload.correlation_id if not provided.
 

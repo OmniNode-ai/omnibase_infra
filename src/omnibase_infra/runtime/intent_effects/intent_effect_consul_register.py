@@ -83,7 +83,7 @@ class IntentEffectConsulRegister:
 
     async def execute(
         self,
-        payload: ModelPayloadConsulRegister,
+        payload: object,
         *,
         correlation_id: UUID | None = None,
     ) -> None:
@@ -97,7 +97,7 @@ class IntentEffectConsulRegister:
 
         Args:
             payload: The ModelPayloadConsulRegister intent payload.
-                Must have service_id, service_name, and tags fields.
+                Validated via isinstance at entry.
             correlation_id: Optional correlation ID for tracing.
                 Falls back to payload.correlation_id if not provided.
 

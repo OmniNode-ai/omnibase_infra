@@ -915,8 +915,11 @@ class PluginRegistration:
             )
 
             # Create dispatch result applier for output event publishing + intent delegation
+            # ProtocolEventBusSubscriber satisfies ProtocolEventBusLike structurally
+            # (both define publish_envelope) but mypy can't infer this across
+            # unrelated protocol hierarchies.
             result_applier = DispatchResultApplier(
-                event_bus=config.event_bus,
+                event_bus=config.event_bus,  # type: ignore[arg-type]
                 output_topic=config.output_topic,
                 intent_executor=intent_executor,
             )
