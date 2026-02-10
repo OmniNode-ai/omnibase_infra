@@ -1199,13 +1199,15 @@ class MessageDispatchEngine:
                 outcome = ModelDispatchOutcome.from_legacy_output(result)
                 outputs.extend(outcome.topics)
 
-                # Collect output_events and output_intents from dispatcher results
-                dispatcher_events = getattr(result, "output_events", [])
-                if dispatcher_events:
-                    all_output_events.extend(dispatcher_events)
-                dispatcher_intents = getattr(result, "output_intents", ())
-                if dispatcher_intents:
-                    all_intents.extend(dispatcher_intents)
+                # Collect output_events and output_intents from dispatcher results.
+                # Use isinstance for type narrowing: DispatcherOutput is a 4-way
+                # union (str | list[str] | None | ModelDispatchResult), and only
+                # ModelDispatchResult carries output_events/output_intents fields.
+                if isinstance(result, ModelDispatchResult):
+                    if result.output_events:
+                        all_output_events.extend(result.output_events)
+                    if result.output_intents:
+                        all_intents.extend(result.output_intents)
             except (SystemExit, KeyboardInterrupt, GeneratorExit):
                 # Never catch cancellation/exit signals
                 raise

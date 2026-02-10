@@ -122,6 +122,9 @@ from omnibase_infra.utils import compute_consumer_group_id
 if TYPE_CHECKING:
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
     from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+    from omnibase_infra.runtime.service_dispatch_result_applier import (
+        DispatchResultApplier,
+    )
     from omnibase_infra.runtime.service_message_dispatch_engine import (
         MessageDispatchEngine,
     )
@@ -233,7 +236,7 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
         node_name: str,
         service: str,
         version: str,
-        result_applier: object | None = None,
+        result_applier: DispatchResultApplier | None = None,
         idempotency_store: ProtocolIdempotencyStore | None = None,
         idempotency_config: ModelIdempotencyConfig | None = None,
         dlq_config: ModelDlqConfig | None = None,
