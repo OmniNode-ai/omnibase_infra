@@ -37,11 +37,9 @@ from pathlib import Path
 # This covers the complete migration layout for this repository.
 MIGRATION_DIRS: tuple[str, ...] = ("docker/migrations/",)
 
-# File extensions considered migration files.
-# Includes .sh because some migrations are shell scripts (e.g.,
-# 000_create_multiple_databases.sh). Matches the bash CI script which
-# checks all Added/Renamed files regardless of extension.
-MIGRATION_EXTENSIONS: frozenset[str] = frozenset({".sql", ".sh"})
+# No extension filter — any new file in a migration directory during a
+# freeze is suspicious. Matches the bash CI script (check_migration_freeze.sh)
+# which checks all Added/Renamed files regardless of extension.
 
 
 @dataclass
@@ -155,16 +153,17 @@ def _get_new_committed_files(repo_path: Path, base_ref: str | None = None) -> li
 
 
 def _is_migration_file(file_path: str) -> tuple[bool, str]:
-    """Check if a file is a migration file in a watched directory.
+    """Check if a file is in a watched migration directory.
+
+    No extension filter — any new file in a migration directory during a
+    freeze is treated as a violation. This matches the bash CI script.
 
     Returns:
         Tuple of (is_migration, migration_dir).
     """
     for migration_dir in MIGRATION_DIRS:
         if file_path.startswith(migration_dir):
-            ext = Path(file_path).suffix.lower()
-            if ext in MIGRATION_EXTENSIONS:
-                return True, migration_dir
+            return True, migration_dir
     return False, ""
 
 
