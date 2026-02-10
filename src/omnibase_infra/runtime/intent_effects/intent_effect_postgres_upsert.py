@@ -139,15 +139,20 @@ class IntentEffectPostgresUpsert:
             # TIMESTAMPTZ, etc. columns.
             record_dict = self._normalize_for_asyncpg(record_dict)
 
-            # Extract entity_id for the projector's aggregate_id parameter
+            # Extract entity_id for the projector's aggregate_id parameter.
+            # Missing entity_id is a data integrity error — raise so the caller
+            # prevents Kafka offset commit rather than silently losing the upsert.
             entity_id = record_dict.get("entity_id")
             if entity_id is None:
-                logger.warning(
-                    "Intent record missing entity_id, skipping upsert "
-                    "correlation_id=%s",
-                    str(effective_correlation_id),
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=effective_correlation_id,
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="upsert_registration",
                 )
-                return
+                raise RuntimeHostError(
+                    "Intent record missing required entity_id field",
+                    context=context,
+                )
 
             # Convert to UUID (may arrive as str from model_dump)
             aggregate_id = UUID(entity_id) if isinstance(entity_id, str) else entity_id

@@ -135,10 +135,10 @@ class TestIntentEffectPostgresUpsertExecute:
         mock_projector.upsert_partial.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_execute_skips_when_entity_id_missing(
+    async def test_execute_raises_when_entity_id_missing(
         self, effect: IntentEffectPostgresUpsert, mock_projector: MagicMock
     ) -> None:
-        """Should skip upsert when record has no entity_id."""
+        """Should raise RuntimeHostError when record has no entity_id."""
         correlation_id = uuid4()
 
         # Record without entity_id
@@ -152,7 +152,10 @@ class TestIntentEffectPostgresUpsertExecute:
             record=record,
         )
 
-        await effect.execute(payload, correlation_id=correlation_id)
+        with pytest.raises(
+            RuntimeHostError, match="Failed to execute PostgreSQL upsert"
+        ):
+            await effect.execute(payload, correlation_id=correlation_id)
 
         mock_projector.upsert_partial.assert_not_awaited()
 

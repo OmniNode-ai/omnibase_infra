@@ -136,9 +136,9 @@ class IntentExecutor:
 
         handler = self._effect_handlers.get(intent_type)
         if handler is None:
-            logger.info(
+            logger.warning(
                 "No effect handler registered for intent_type=%s correlation_id=%s "
-                "(intent skipped)",
+                "(intent skipped — possible misconfiguration)",
                 intent_type,
                 str(correlation_id) if correlation_id else "none",
             )

@@ -184,7 +184,10 @@ from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnfo
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from omnibase_core.enums.enum_node_kind import EnumNodeKind
+    from omnibase_core.models.reducer.model_intent import ModelIntent
 
 
 class ModelLogContextKwargs(TypedDict, total=False):
@@ -1101,8 +1104,10 @@ class MessageDispatchEngine:
 
         # Step 5: Execute dispatchers and collect outputs
         outputs: list[str] = []
-        all_output_events: list[object] = []  # Collect output_events from dispatchers
-        all_intents: list[object] = []  # Collect output_intents from dispatchers
+        all_output_events: list[
+            BaseModel
+        ] = []  # Collect output_events from dispatchers
+        all_intents: list[ModelIntent] = []  # Collect output_intents from dispatchers
         dispatcher_errors: list[str] = []
         executed_dispatcher_ids: list[str] = []
 

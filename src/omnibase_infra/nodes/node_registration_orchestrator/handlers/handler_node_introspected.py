@@ -370,6 +370,10 @@ class HandlerNodeIntrospected:
         capabilities = event.declared_capabilities
         capabilities_json = capabilities.model_dump_json() if capabilities else "{}"
 
+        # Serialization contract: values are JSON-serializable strings here.
+        # ModelProjectionRecord (extra="allow") passes them through unchanged.
+        # IntentEffectPostgresUpsert._normalize_for_asyncpg() converts strings
+        # to native UUID/datetime types required by asyncpg.
         projection_record = ModelProjectionRecord.model_validate(
             {
                 "entity_id": str(node_id),

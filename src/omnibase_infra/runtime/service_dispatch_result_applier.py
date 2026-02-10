@@ -169,6 +169,15 @@ class DispatchResultApplier:
 
         # Delegate intents to effect layer via IntentExecutor
         output_intents = result.output_intents
+        if output_intents and self._intent_executor is None:
+            logger.warning(
+                "Dispatch result contains %d intent(s) but no IntentExecutor is "
+                "configured; intents will be dropped (dispatcher_id=%s "
+                "correlation_id=%s)",
+                len(output_intents),
+                result.dispatcher_id,
+                str(effective_correlation_id),
+            )
         if self._intent_executor is not None and output_intents:
             try:
                 await self._intent_executor.execute_all(
