@@ -411,7 +411,7 @@ class TestAppendBatch:
         ]
 
         sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
-        with pytest.raises(TypeError, match="event_type must be str"):
+        with pytest.raises(TypeError, match="event_type must be a non-empty str"):
             await sink.append_batch(entries, sample_correlation_id)
 
     @pytest.mark.asyncio
@@ -451,7 +451,47 @@ class TestAppendBatch:
         ]
 
         sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
-        with pytest.raises(TypeError, match="kafka_topic must be str"):
+        with pytest.raises(TypeError, match="kafka_topic must be a non-empty str"):
+            await sink.append_batch(entries, sample_correlation_id)
+
+    @pytest.mark.asyncio
+    async def test_rejects_empty_kafka_topic_in_batch(
+        self, mock_pool: MagicMock, sample_correlation_id
+    ) -> None:
+        """Raises TypeError when kafka_topic is empty string in batch."""
+        entries = [
+            {
+                "session_id": uuid4(),
+                "event_type": "context_utilization",
+                "event_payload": b"{}",
+                "kafka_topic": "",
+                "kafka_partition": 0,
+                "kafka_offset": 0,
+            }
+        ]
+
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="kafka_topic must be a non-empty str"):
+            await sink.append_batch(entries, sample_correlation_id)
+
+    @pytest.mark.asyncio
+    async def test_rejects_empty_event_type_in_batch(
+        self, mock_pool: MagicMock, sample_correlation_id
+    ) -> None:
+        """Raises TypeError when event_type is empty string in batch."""
+        entries = [
+            {
+                "session_id": uuid4(),
+                "event_type": "",
+                "event_payload": b"{}",
+                "kafka_topic": "test.topic",
+                "kafka_partition": 0,
+                "kafka_offset": 0,
+            }
+        ]
+
+        sink = LedgerSinkInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(TypeError, match="event_type must be a non-empty str"):
             await sink.append_batch(entries, sample_correlation_id)
 
     @pytest.mark.asyncio

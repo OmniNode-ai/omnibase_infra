@@ -135,7 +135,7 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             InfraTimeoutError: If operation times out.
             InfraUnavailableError: If circuit breaker is open.
         """
-        # Input validation: match append_batch constraints for consistency
+        # Input validation: consistent with append_batch constraints
         if not isinstance(kafka_topic, str) or not kafka_topic:
             msg = f"kafka_topic must be a non-empty str, got {type(kafka_topic).__name__}: {kafka_topic!r}"
             raise TypeError(msg)
@@ -285,14 +285,14 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             if not isinstance(entry["session_id"], UUID):
                 msg = f"Entry {i} session_id must be UUID, got {type(entry['session_id']).__name__}"
                 raise TypeError(msg)
-            if not isinstance(entry["event_type"], str):
-                msg = f"Entry {i} event_type must be str, got {type(entry['event_type']).__name__}"
+            if not isinstance(entry["event_type"], str) or not entry["event_type"]:
+                msg = f"Entry {i} event_type must be a non-empty str, got {type(entry['event_type']).__name__}: {entry['event_type']!r}"
                 raise TypeError(msg)
             if not isinstance(entry["event_payload"], bytes):
                 msg = f"Entry {i} event_payload must be bytes, got {type(entry['event_payload']).__name__}"
                 raise TypeError(msg)
-            if not isinstance(entry["kafka_topic"], str):
-                msg = f"Entry {i} kafka_topic must be str, got {type(entry['kafka_topic']).__name__}"
+            if not isinstance(entry["kafka_topic"], str) or not entry["kafka_topic"]:
+                msg = f"Entry {i} kafka_topic must be a non-empty str, got {type(entry['kafka_topic']).__name__}: {entry['kafka_topic']!r}"
                 raise TypeError(msg)
             # Use `type(x) is int` to reject bool (bool is a subclass of int)
             if type(entry["kafka_partition"]) is not int:

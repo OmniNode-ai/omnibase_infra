@@ -214,8 +214,15 @@ class TestQueryLatencyBreakdowns:
     async def test_rejects_negative_offset(self, mock_pool: MagicMock) -> None:
         """Raises ValueError when offset < 0."""
         reader = ReaderInjectionEffectivenessPostgres(mock_pool)
-        with pytest.raises(ValueError, match="offset must be >= 0"):
+        with pytest.raises(ValueError, match="offset must be between 0 and 1000000"):
             await reader.query_latency_breakdowns(uuid4(), offset=-1)
+
+    @pytest.mark.asyncio
+    async def test_rejects_offset_above_max(self, mock_pool: MagicMock) -> None:
+        """Raises ValueError when offset > 1000000."""
+        reader = ReaderInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(ValueError, match="offset must be between 0 and 1000000"):
+            await reader.query_latency_breakdowns(uuid4(), offset=1000001)
 
 
 class TestQueryPatternHitRates:
@@ -303,8 +310,15 @@ class TestQueryPatternHitRates:
     async def test_rejects_negative_offset(self, mock_pool: MagicMock) -> None:
         """Raises ValueError when offset < 0."""
         reader = ReaderInjectionEffectivenessPostgres(mock_pool)
-        with pytest.raises(ValueError, match="offset must be >= 0"):
+        with pytest.raises(ValueError, match="offset must be between 0 and 1000000"):
             await reader.query_pattern_hit_rates(offset=-1)
+
+    @pytest.mark.asyncio
+    async def test_rejects_offset_above_max(self, mock_pool: MagicMock) -> None:
+        """Raises ValueError when offset > 1000000."""
+        reader = ReaderInjectionEffectivenessPostgres(mock_pool)
+        with pytest.raises(ValueError, match="offset must be between 0 and 1000000"):
+            await reader.query_pattern_hit_rates(offset=1000001)
 
 
 class TestReaderProtocolCompliance:

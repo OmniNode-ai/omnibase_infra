@@ -313,8 +313,8 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         if limit < 1 or limit > 10000:
             msg = f"limit must be between 1 and 10000, got {limit}"
             raise ValueError(msg)
-        if offset < 0:
-            msg = f"offset must be >= 0, got {offset}"
+        if offset < 0 or offset > 1000000:
+            msg = f"offset must be between 0 and 1000000, got {offset}"
             raise ValueError(msg)
 
         if correlation_id is None:
@@ -383,8 +383,8 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         if limit < 1 or limit > 10000:
             msg = f"limit must be between 1 and 10000, got {limit}"
             raise ValueError(msg)
-        if offset < 0:
-            msg = f"offset must be >= 0, got {offset}"
+        if offset < 0 or offset > 1000000:
+            msg = f"offset must be between 0 and 1000000, got {offset}"
             raise ValueError(msg)
 
         if correlation_id is None:
