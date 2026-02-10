@@ -60,9 +60,8 @@ services:
       - omnibase-infra-network
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Initialize databases (including infisical_db) on first start
-      # Note: For E2E tests, schema migrations may be applied separately during test setup
-      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+      # Forward migrations only (rollbacks are in a separate directory, never auto-applied)
+      - ./migrations/forward:/docker-entrypoint-initdb.d:ro
     # Performance optimizations for testing (faster, less durable)
     command: |
       postgres

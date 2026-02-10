@@ -134,7 +134,7 @@ services:
       - "${POSTGRES_EXTERNAL_PORT:-5436}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+      - ./migrations/forward:/docker-entrypoint-initdb.d:ro
     networks:
       - omnibase-infra-network
     healthcheck:

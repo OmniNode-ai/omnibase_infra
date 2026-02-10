@@ -198,7 +198,7 @@ If omnibase-core adds composite key support in the future:
 
 ## References
 
-- `docker/migrations/001_registration_projection.sql` - Schema with workaround (lines 89-94)
+- `docker/migrations/forward/001_registration_projection.sql` - Schema with workaround (lines 89-94)
 - `src/omnibase_infra/projectors/contracts/registration_projector.yaml` - Declarative contract
 - `omnibase-core/src/omnibase_core/projectors/projector_shell.py` - ProjectorShell implementation
 - `omnibase-core/src/omnibase_core/projectors/models/model_projector_contract.py` - Contract model

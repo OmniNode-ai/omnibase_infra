@@ -1,19 +1,48 @@
 # Migration Versioning Convention
 
-This document describes the versioning scheme for database migrations in the ONEX infrastructure.
+This document describes the versioning scheme and directory convention for database migrations in the ONEX infrastructure.
+
+## Directory Structure
+
+Migrations are separated into `forward/` and `rollback/` directories to prevent rollback scripts from being auto-applied by PostgreSQL's `docker-entrypoint-initdb.d` mechanism.
+
+```
+docker/migrations/
+  forward/                                # ONLY this directory is mounted to docker-entrypoint-initdb.d
+    000_create_multiple_databases.sh      # Database initialization (runs first)
+    NNN_description.sql                   # Forward migrations (auto-applied on first start)
+  rollback/                               # NEVER auto-applied
+    rollback_NNN_description.sql          # Rollback scripts (manual execution only)
+  README.md                               # This file
+  validate_migration_state.sql            # Validation utility
+  MIGRATION_UPGRADE_003a_to_004.md        # Historical upgrade notes
+```
+
+**Why this matters**: PostgreSQL's Docker image executes ALL `.sql` and `.sh` files in `docker-entrypoint-initdb.d` alphabetically on first start. If rollback scripts (which contain `DROP TABLE`) live alongside forward migrations, they will execute and destroy the tables that were just created.
+
+**Rule**: Only `forward/` is volume-mounted. Rollback scripts in `rollback/` are never auto-applied and must be run manually when needed.
 
 ## File Naming Pattern
 
-Migrations follow the format: `NNN[a-z]_description[_modifier].sql`
+### Forward Migrations (`forward/NNN_description.sql`)
+
+Forward migrations follow the format: `NNN[a-z]_description[_modifier].sql`
 
 | Component | Format | Example | Description |
 |-----------|--------|---------|-------------|
 | **Sequence** | `NNN` | `001`, `002`, `003` | Three-digit main migration number |
-| **Sub-sequence** | `[a-z]` | `003a`, `003b` | Optional letter suffix for related migrations (see note below) |
+| **Sub-sequence** | `[a-z]` | `003a`, `003b` | Optional letter suffix for related migrations |
 | **Description** | `_snake_case` | `_capability_fields` | Descriptive name of the change |
 | **Modifier** | `_concurrent` | `_concurrent` | Optional suffix indicating special execution mode |
 
-> **Note on Sub-sequences**: Letter suffixes are suitable for optional variants (e.g., rollback scripts). For production-recommended variants like concurrent indexes, prefer main sequence numbers (see migration 004).
+### Rollback Migrations (`rollback/rollback_NNN_description.sql`)
+
+Rollback files always use the `rollback_` prefix followed by the migration number they reverse:
+
+| Forward | Rollback |
+|---------|----------|
+| `forward/020_create_agent_actions_table.sql` | `rollback/rollback_020_agent_actions_table.sql` |
+| `forward/026_injection_effectiveness_tables.sql` | `rollback/rollback_026_injection_effectiveness_tables.sql` |
 
 ## Migration Types
 
@@ -25,6 +54,9 @@ Main migrations represent a logical unit of schema change. They are numbered seq
 - `002_updated_at_audit_index.sql` - Audit query indexes
 - `003_capability_fields.sql` - Capability discovery columns and standard indexes
 - `004_capability_fields_concurrent.sql` - Production concurrent indexes (companion to 003)
+- `005_create_contracts_topics.sql` - Contract and topic tracking tables
+- `016_create_session_snapshots.sql` - Session snapshot tables
+- `020-027` - Agent observability and analytics tables
 
 **When to increment the main number:**
 - New tables or major schema changes
@@ -39,19 +71,12 @@ Sub-migrations are companion scripts related to a main migration. They share the
 > **Historical Note**: Migration `003a_capability_fields_concurrent.sql` was renamed to `004_capability_fields_concurrent.sql` to use main sequence numbering for production-recommended variants. See `MIGRATION_UPGRADE_003a_to_004.md` for upgrade details.
 
 **When to use letter suffixes:**
-- Rollback or cleanup scripts for a main migration (e.g., `003a_rollback.sql`)
 - Alternative implementations for specific environments
 - Split migrations that must run in a specific order
 
 **When to use main sequence instead:**
 - Production-recommended variants (e.g., concurrent indexes) should use the next main number
 - Independent features should use the next main number
-
-**Ordering:**
-- Sub-migrations (`003a`, `003b`, etc.) always relate to their parent (`003`)
-- Execute in alphabetical order: `003` -> `003a` -> `003b` (when multiple sub-migrations exist)
-- Check migration header comments for specific ordering requirements
-- Example: A rollback script `003a_rollback.sql` would execute after `003_capability_fields.sql`
 
 ## Modifier Suffixes
 
@@ -60,8 +85,8 @@ Sub-migrations are companion scripts related to a main migration. They share the
 Indicates a migration designed for **production environments with live traffic**:
 
 ```
-003_capability_fields.sql              # Standard version (may lock tables)
-004_capability_fields_concurrent.sql   # Production version (non-blocking)
+forward/003_capability_fields.sql              # Standard version (may lock tables)
+forward/004_capability_fields_concurrent.sql   # Production version (non-blocking)
 ```
 
 **Characteristics of `_concurrent` migrations:**
@@ -84,29 +109,24 @@ Indicates a migration designed for **production environments with live traffic**
 ## Determining the Next Migration Number
 
 **For a new independent feature:**
-- Use the next sequential number: `005_new_feature.sql`
+- Use the next sequential number in `forward/`: e.g., `forward/028_new_feature.sql`
 
-**For a companion to an existing migration (e.g., rollback script):**
-- Use the letter suffix matching the parent migration: e.g., `003a_rollback.sql` for migration 003
-- The `003a` slot is currently available (see "Slot availability" note below)
+**For a rollback script:**
+- Place in `rollback/` with `rollback_` prefix: e.g., `rollback/rollback_028_new_feature.sql`
 
 **Current state:**
 ```
-001_registration_projection.sql        # Main: initial schema
-002_updated_at_audit_index.sql         # Main: audit indexes
-003_capability_fields.sql              # Main: capability columns + standard indexes
-004_capability_fields_concurrent.sql   # Main: concurrent indexes (production)
+forward/
+  001_registration_projection.sql        # Main: initial schema
+  002_updated_at_audit_index.sql         # Main: audit indexes
+  003_capability_fields.sql              # Main: capability columns + standard indexes
+  004_capability_fields_concurrent.sql   # Main: concurrent indexes (production)
+  005_create_contracts_topics.sql        # Main: contract/topic tables
+  016_create_session_snapshots.sql       # Main: session snapshots
+  020-027_*.sql                          # Main: agent observability tables
 ```
 
-**Next available:**
-- Next main migration: `005_*.sql`
-- Sub-migrations for rollback/companion scripts: `003a_*.sql`, `004a_*.sql`
-
-> **Slot availability**: Both `003a` and `004a` are available for rollback or companion scripts. The original `003a_capability_fields_concurrent.sql` was promoted to main sequence `004`, freeing the `003a` slot.
->
-> **Best practice**: Use main sequence numbers (`005`, `006`, etc.) for new features. Reserve letter suffixes for rollback scripts or optional companions that are tightly coupled to their parent migration.
->
-> **Upgrade path from 003a to 004**: If your database has the old `003a` applied, no action is needed - the SQL is identical to `004`. See `MIGRATION_UPGRADE_003a_to_004.md` for verification steps.
+**Next available:** `028_*.sql`
 
 ## Migration Header Requirements
 
@@ -129,7 +149,7 @@ Every migration should include a header comment with:
 --   3. MONITOR execution time and locks
 --
 -- ROLLBACK:
---   SQL statements to reverse this migration
+--   See rollback/rollback_NNN_description.sql
 --
 -- =============================================================================
 ```
@@ -140,17 +160,24 @@ Every migration should include a header comment with:
 
 ```bash
 # Can run in a transaction (for CI/CD with rollback support)
-psql -h $HOST -d $DB -f 003_capability_fields.sql
+psql -h $HOST -d $DB -f forward/003_capability_fields.sql
 ```
 
 ### Concurrent Migrations
 
 ```bash
 # MUST run outside transaction block (autocommit mode)
-psql -h $HOST -d $DB -f 004_capability_fields_concurrent.sql
+psql -h $HOST -d $DB -f forward/004_capability_fields_concurrent.sql
 
 # DO NOT wrap in BEGIN/COMMIT - will error:
 # "CREATE INDEX CONCURRENTLY cannot run inside a transaction block"
+```
+
+### Running Rollbacks (Manual Only)
+
+```bash
+# Rollbacks are NEVER auto-applied. Run manually when reverting a migration:
+psql -h $HOST -d $DB -f rollback/rollback_020_agent_actions_table.sql
 ```
 
 ### Monitoring Concurrent Index Creation
@@ -172,17 +199,18 @@ WHERE NOT indisvalid;
 
 ## Summary
 
-| Pattern | Example | Use Case |
-|---------|---------|----------|
-| `NNN_desc.sql` | `005_new_table.sql` | New independent feature |
-| `NNNa_desc.sql` | `003a_rollback.sql` | Companion/rollback to NNN |
-| `NNN_*_concurrent.sql` | `004_*_concurrent.sql` | Non-blocking production variant |
+| Pattern | Location | Example | Use Case |
+|---------|----------|---------|----------|
+| `NNN_desc.sql` | `forward/` | `forward/028_new_table.sql` | New independent feature |
+| `NNNa_desc.sql` | `forward/` | `forward/003a_variant.sql` | Companion to NNN |
+| `NNN_*_concurrent.sql` | `forward/` | `forward/004_*_concurrent.sql` | Non-blocking production variant |
+| `rollback_NNN_desc.sql` | `rollback/` | `rollback/rollback_028_new_table.sql` | Revert a forward migration |
 
 **Decision tree for next migration:**
 
-1. Is this a production-optimized variant? -> Use next main number with `_concurrent` suffix
-2. Is this a rollback/cleanup for an existing migration? -> Use letter suffix (e.g., `003a_rollback.sql` for migration 003)
-3. Otherwise -> Use next main number (`005`)
+1. Is this a forward migration? -> Place in `forward/` with next main number
+2. Is this a rollback? -> Place in `rollback/` with `rollback_` prefix matching the forward migration number
+3. Is this a production-optimized variant? -> Use next main number with `_concurrent` suffix in `forward/`
 
 ## Migration Validation
 
@@ -209,6 +237,6 @@ See the "Migration Gap Detection" section in `MIGRATION_UPGRADE_003a_to_004.md` 
 The `003a_capability_fields_concurrent.sql` migration was renamed to `004_capability_fields_concurrent.sql`.
 
 - **If you have 003a applied**: No database changes needed; the SQL is identical
-- **For new deployments**: Use `004_capability_fields_concurrent.sql`
+- **For new deployments**: Use `forward/004_capability_fields_concurrent.sql`
 - **Full details**: See `MIGRATION_UPGRADE_003a_to_004.md`
 - **Validation**: Run `validate_migration_state.sql` to check current state
