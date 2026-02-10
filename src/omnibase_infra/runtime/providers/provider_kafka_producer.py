@@ -3,7 +3,8 @@
 """Kafka producer provider.
 
 Creates AIOKafkaProducer instances from environment-driven configuration.
-Respects architecture constraint #7: Never block on Kafka.
+Respects platform-wide rule #8: Kafka is required infrastructure —
+use async/non-blocking patterns.
 
 Part of OMN-1976: Contract dependency materialization.
 """
@@ -27,8 +28,8 @@ class ProviderKafkaProducer:
     Producers are created from KAFKA_* environment variables and shared
     across all contracts that declare kafka_producer dependencies.
 
-    Per architecture constraint #7: Kafka is optional. Creation failures
-    are logged but do not block startup.
+    Per platform-wide rule #8: Kafka is required infrastructure.
+    Uses async patterns to avoid blocking the calling thread.
     """
 
     def __init__(self, config: ModelKafkaProducerConfig) -> None:

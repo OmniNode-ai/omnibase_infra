@@ -31,6 +31,8 @@ jobs:
           # Update by running: gh api repos/OmniNode-ai/omnibase_core/commits/main --jq '.sha'
           ref: 4dc7a0adf299e47eef57ab9950b0f0a587638a3e
           path: omnibase_core
+          # OMNIBASE_CORE_TOKEN is required when omnibase_core is private.
+          # GITHUB_TOKEN only has read access to the current repo by default.
           token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Verify omnibase_core checkout

@@ -12,7 +12,7 @@ Features:
     - Circuit breaker for connection failure protection
     - Retry with exponential backoff on publish failures
     - Dead letter queue (DLQ) for failed message processing
-    - Graceful degradation when Kafka is unavailable
+    - Resilience against transient Kafka broker failures (per platform-wide rule #8)
     - Support for environment/group-based routing
     - Proper producer/consumer lifecycle management
 
@@ -220,8 +220,8 @@ class EventBusKafka(
 
     Implements ProtocolEventBus interface using Apache Kafka (via aiokafka)
     with resilience patterns including circuit breaker, retry with exponential
-    backoff, dead letter queue support, and graceful degradation when Kafka
-    is unavailable.
+    backoff, dead letter queue support, and resilience against transient
+    broker failures (per platform-wide rule #8: Kafka is required infrastructure).
 
     Features:
         - Topic-based message routing with Kafka partitioning

@@ -12,7 +12,7 @@ The EventBusKafka provides production-grade message streaming using Apache Kafka
 - **Circuit breaker** for connection failure protection
 - **Retry with exponential backoff** on publish failures
 - **Dead letter queue (DLQ)** for failed message processing
-- **Graceful degradation** when Kafka is unavailable
+- **Resilience** against transient broker failures (per platform-wide rule #8: Kafka is required infrastructure)
 
 **Source Location**: `src/omnibase_infra/event_bus/event_bus_kafka.py`
 
