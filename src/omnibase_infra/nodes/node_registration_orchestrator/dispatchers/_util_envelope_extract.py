@@ -39,13 +39,21 @@ def extract_envelope_fields(
         )
         try:
             correlation_id = UUID(raw_corr) if raw_corr else uuid4()
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, TypeError):
             correlation_id = uuid4()
-        if not raw_corr:
-            logger.debug(
-                "Generated fallback correlation_id=%s (dict envelope had no correlation_id)",
+            logger.warning(
+                "Malformed correlation_id in __debug_trace, generated fallback=%s "
+                "(raw_value=%r)",
                 correlation_id,
+                raw_corr,
             )
+        else:
+            if not raw_corr:
+                logger.debug(
+                    "Generated fallback correlation_id=%s "
+                    "(dict envelope had no correlation_id)",
+                    correlation_id,
+                )
         raw_payload = envelope.get("payload", {})
     else:
         if envelope.correlation_id is None:

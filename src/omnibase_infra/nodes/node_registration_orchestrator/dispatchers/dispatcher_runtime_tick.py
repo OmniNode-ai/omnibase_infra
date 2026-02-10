@@ -59,7 +59,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -71,11 +71,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
     EnumMessageCategory,
 )
-from omnibase_infra.errors import (
-    EnvelopeValidationError,
-    InfraUnavailableError,
-    ModelInfraErrorContext,
-)
+from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers._util_envelope_extract import (
@@ -254,19 +250,11 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
                         output_events=[],
                     )
 
-            # Explicit type guard (not assert) for production safety
-            # Type narrowing after isinstance/model_validate above
-            if not isinstance(payload, ModelRuntimeTick):
-                context = ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.KAFKA,
-                    operation="handle_runtime_tick",
-                    correlation_id=correlation_id,
-                )
-                raise EnvelopeValidationError(
-                    f"Expected ModelRuntimeTick after validation, "
-                    f"got {type(payload).__name__}",
-                    context=context,
-                )
+            # Type narrowing: the branch above guarantees payload is
+            # ModelRuntimeTick (isinstance returned True, or model_validate
+            # succeeded, or we returned early). Use cast() instead of a redundant
+            # runtime isinstance check to satisfy mypy.
+            payload = cast("ModelRuntimeTick", payload)
 
             # Get current time for handler
             now = datetime.now(UTC)

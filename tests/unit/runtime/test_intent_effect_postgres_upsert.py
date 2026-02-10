@@ -28,6 +28,8 @@ from omnibase_infra.runtime.intent_effects.intent_effect_postgres_upsert import 
     IntentEffectPostgresUpsert,
 )
 
+pytestmark = [pytest.mark.unit]
+
 
 class MockProjectionRecord(BaseModel):
     """Mock projection record for testing."""
@@ -35,6 +37,7 @@ class MockProjectionRecord(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
 
 
+@pytest.mark.unit
 class TestIntentEffectPostgresUpsertInit:
     """Tests for IntentEffectPostgresUpsert initialization."""
 
@@ -52,6 +55,7 @@ class TestIntentEffectPostgresUpsertInit:
             IntentEffectPostgresUpsert(projector=None)  # type: ignore[arg-type]
 
 
+@pytest.mark.unit
 class TestIntentEffectPostgresUpsertExecute:
     """Tests for IntentEffectPostgresUpsert.execute method."""
 
@@ -214,6 +218,7 @@ class TestIntentEffectPostgresUpsertExecute:
         assert values["node_type"] == "effect"
 
 
+@pytest.mark.unit
 class TestColumnSetsMatchSchema:
     """Validate that _UUID_COLUMNS and _TIMESTAMP_COLUMNS match the SQL schema.
 

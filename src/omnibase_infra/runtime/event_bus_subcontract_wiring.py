@@ -591,17 +591,38 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
             New retry count after increment.
         """
         # Prune if over capacity -- evict the oldest (least-recently-accessed)
-        # half. Because move_to_end keeps active retries at the tail, only
-        # truly stale entries are removed.
+        # entries. Because move_to_end keeps active retries at the tail, the
+        # oldest entries are typically stale/orphaned. We additionally protect
+        # entries with nonzero retry counts (active retries) from eviction,
+        # even if they happen to be at the old end of the OrderedDict.
         if len(self._retry_counts) >= self._MAX_RETRY_ENTRIES:
+            target = len(self._retry_counts) // 2
+            evicted = 0
+            # Collect keys to evict from the oldest end, skipping active retries
+            keys_to_evict: list[UUID] = []
+            for cid, count in self._retry_counts.items():
+                if evicted >= target:
+                    break
+                if count == 0:
+                    keys_to_evict.append(cid)
+                    evicted += 1
+            # If we didn't find enough zero-count entries, evict oldest nonzero
+            # entries as a fallback to guarantee bounded growth
+            if evicted < target:
+                for cid in self._retry_counts:
+                    if evicted >= target:
+                        break
+                    if cid not in keys_to_evict:
+                        keys_to_evict.append(cid)
+                        evicted += 1
+            for cid in keys_to_evict:
+                del self._retry_counts[cid]
             self._logger.warning(
-                "retry_counts pruned: size=%d exceeded max=%d",
-                len(self._retry_counts),
+                "retry_counts pruned: evicted=%d (size was %d, max=%d)",
+                len(keys_to_evict),
+                len(self._retry_counts) + len(keys_to_evict),
                 self._MAX_RETRY_ENTRIES,
             )
-            half = len(self._retry_counts) // 2
-            for _ in range(half):
-                self._retry_counts.popitem(last=False)
 
         current = self._retry_counts.get(correlation_id, 0)
         self._retry_counts[correlation_id] = current + 1
@@ -1047,6 +1068,14 @@ def load_event_bus_subcontract(
             _logger.warning(
                 "Empty contract file: %s",
                 contract_path,
+            )
+            return None
+
+        if not isinstance(contract_data, dict):
+            _logger.warning(
+                "Contract YAML root is not a dict in %s: got %s",
+                contract_path,
+                type(contract_data).__name__,
             )
             return None
 

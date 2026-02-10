@@ -28,6 +28,7 @@ from omnibase_infra.runtime.intent_effects.intent_effect_consul_register import 
 pytestmark = [pytest.mark.unit]
 
 
+@pytest.mark.unit
 class TestIntentEffectConsulRegisterInit:
     """Tests for IntentEffectConsulRegister initialization."""
 
@@ -40,6 +41,7 @@ class TestIntentEffectConsulRegisterInit:
         assert effect._consul_handler is mock_handler
 
 
+@pytest.mark.unit
 class TestIntentEffectConsulRegisterExecute:
     """Tests for IntentEffectConsulRegister.execute method."""
 

@@ -635,6 +635,16 @@ def load_operation_bindings_subcontract(
     if contract_data is None:
         contract_data = {}
 
+    # Validate contract root is a dict (YAML can produce list, str, int, etc.)
+    if not isinstance(contract_data, dict):
+        raise ProtocolConfigurationError(
+            f"Contract YAML root is not a dict in {contract_path}: "
+            f"got {type(contract_data).__name__}. "
+            f"The contract.yaml must be a YAML mapping at the top level. "
+            f"Error code: CONTRACT_NOT_DICT ({ERROR_CODE_YAML_PARSE_ERROR})",
+            context=ctx,
+        )
+
     # Get operation_bindings section (optional - return empty if missing)
     bindings_section = contract_data.get("operation_bindings", {})
     if not bindings_section:

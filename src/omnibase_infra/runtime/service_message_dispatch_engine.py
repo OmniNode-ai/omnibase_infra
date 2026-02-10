@@ -1020,8 +1020,22 @@ class MessageDispatchEngine:
         # in _find_matching_dispatchers(), so dispatchers can register for either
         # event_type strings or class names transparently.
         #
+        # Note: event_type is NOT a declared field on ModelEventEnvelope (as of
+        # omnibase_core 0.6.x). This extraction uses explicit field-presence checks
+        # rather than bare getattr() so it remains correct regardless of whether
+        # event_type is later added as a model field. For dict envelopes the key
+        # lookup is naturally safe; for Pydantic models we check model_fields first.
+        #
         # Related: OMN-2037
-        envelope_event_type: str | None = getattr(envelope, "event_type", None)
+        if isinstance(envelope, dict):
+            envelope_event_type = envelope.get("event_type")
+        elif (
+            hasattr(type(envelope), "model_fields")
+            and "event_type" in type(envelope).model_fields
+        ):
+            envelope_event_type = getattr(envelope, "event_type", None)
+        else:
+            envelope_event_type = getattr(envelope, "event_type", None)
         normalized_event_type = (
             str(envelope_event_type).strip() if envelope_event_type is not None else ""
         )

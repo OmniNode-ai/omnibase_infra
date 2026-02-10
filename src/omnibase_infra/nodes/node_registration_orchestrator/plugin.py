@@ -185,6 +185,7 @@ class PluginRegistration:
         self._snapshot_publisher: SnapshotPublisherRegistration | None = None
         self._wiring: EventBusSubcontractWiring | None = None
         self._shutdown_in_progress: bool = False
+        self._handler_wiring_succeeded: bool = False
 
     @property
     def plugin_id(self) -> str:
@@ -729,6 +730,10 @@ class PluginRegistration:
                 extra={"services": registration_summary["services"]},
             )
 
+            # Mark handler wiring as successful so start_consumers() knows
+            # it is safe to start event consumers.
+            self._handler_wiring_succeeded = True
+
             # WiringResult TypedDict provides precise typing - direct key access is safe
             return ModelDomainPluginResult(
                 plugin_id=self.plugin_id,
@@ -857,6 +862,21 @@ class PluginRegistration:
         start_time = time.time()
         correlation_id = config.correlation_id
 
+        # Guard: do not start consumers if handler wiring failed. Starting
+        # consumers without wired handlers would route messages to an empty
+        # dispatch engine, causing silent message loss or RuntimeHostError.
+        if not self._handler_wiring_succeeded:
+            logger.warning(
+                "Skipping consumer startup: handler wiring did not succeed "
+                "for plugin '%s' (correlation_id=%s)",
+                self.plugin_id,
+                correlation_id,
+            )
+            return ModelDomainPluginResult.skipped(
+                plugin_id=self.plugin_id,
+                reason="Handler wiring did not succeed — consumers not started",
+            )
+
         if config.dispatch_engine is None:
             return ModelDomainPluginResult.skipped(
                 plugin_id=self.plugin_id,
@@ -912,10 +932,11 @@ class PluginRegistration:
             # Wire intent effect adapters from contract-driven routing table.
             # Effect adapters are registered with the intent_executor and also
             # placed into the DI container for discoverability.
-            self._wire_intent_effects(
+            await self._wire_intent_effects(
                 intent_executor=intent_executor,
                 contract_path=contract_path,
                 correlation_id=correlation_id,
+                config=config,
             )
 
             # Register IntentExecutor in the DI container so downstream services
@@ -975,6 +996,24 @@ class PluginRegistration:
                 result_applier=result_applier,
             )
 
+            # Register EventBusSubcontractWiring in the DI container for
+            # consistent service resolution and discoverability.
+            if config.container.service_registry is not None:
+                await config.container.service_registry.register_instance(
+                    interface=EventBusSubcontractWiring,
+                    instance=self._wiring,
+                    scope=EnumInjectionScope.GLOBAL,
+                    metadata={
+                        "description": "Event bus subcontract wiring for registration domain",
+                        "plugin_id": self.plugin_id,
+                    },
+                )
+                logger.debug(
+                    "Registered EventBusSubcontractWiring in container "
+                    "(correlation_id=%s)",
+                    correlation_id,
+                )
+
             # Wire subscriptions from contract-declared topics
             await self._wiring.wire_subscriptions(
                 subcontract=subcontract,
@@ -1020,11 +1059,12 @@ class PluginRegistration:
                 duration_seconds=duration,
             )
 
-    def _wire_intent_effects(
+    async def _wire_intent_effects(
         self,
         intent_executor: IntentExecutor,
         contract_path: Path,
         correlation_id: UUID | None,
+        config: ModelDomainPluginConfig | None = None,
     ) -> None:
         """Wire intent effect adapters from contract-driven routing table.
 
@@ -1033,10 +1073,15 @@ class PluginRegistration:
         are created only for intent types where the required infrastructure
         resources (projector, consul_handler) are available.
 
+        When a config with a service_registry is available, effect adapters
+        are also registered in the DI container for discoverability and
+        consistent service resolution.
+
         Args:
             intent_executor: IntentExecutor to register handlers with.
             contract_path: Path to the contract YAML with intent_routing_table.
             correlation_id: Correlation ID for logging.
+            config: Optional plugin config for DI container registration.
         """
         from omnibase_infra.runtime.service_intent_routing_loader import (
             load_intent_routing_table,
@@ -1090,6 +1135,9 @@ class PluginRegistration:
 
                 pg_effect = IntentEffectPostgresUpsert(projector=self._projector)
                 intent_executor.register_handler(intent_type, pg_effect)
+                await self._register_effect_in_container(
+                    config, IntentEffectPostgresUpsert, pg_effect, correlation_id
+                )
                 registered_count += 1
                 logger.debug(
                     "Registered IntentEffectPostgresUpsert for intent_type=%s "
@@ -1107,6 +1155,9 @@ class PluginRegistration:
                     consul_handler=self._consul_handler,
                 )
                 intent_executor.register_handler(intent_type, consul_effect)
+                await self._register_effect_in_container(
+                    config, IntentEffectConsulRegister, consul_effect, correlation_id
+                )
                 registered_count += 1
                 logger.debug(
                     "Registered IntentEffectConsulRegister for intent_type=%s "
@@ -1148,6 +1199,52 @@ class PluginRegistration:
                 "routing_table_size": len(routing_table),
                 "registered_count": registered_count,
             },
+        )
+
+    @staticmethod
+    async def _register_effect_in_container(
+        config: ModelDomainPluginConfig | None,
+        interface: type,
+        instance: object,
+        correlation_id: UUID | None,
+    ) -> None:
+        """Register an intent effect adapter in the DI container.
+
+        Best-effort registration: if the service_registry is not available,
+        the effect is still registered with the IntentExecutor (the primary
+        routing mechanism) and a debug message is logged.
+
+        Args:
+            config: Plugin config providing the container. None is tolerated
+                for backwards compatibility with callers that do not pass config.
+            interface: The class/type to use as the DI interface key.
+            instance: The effect adapter instance to register.
+            correlation_id: Correlation ID for logging.
+        """
+        if config is None or config.container.service_registry is None:
+            logger.debug(
+                "Skipping DI registration for %s (no service_registry) "
+                "(correlation_id=%s)",
+                interface.__name__,
+                correlation_id,
+            )
+            return
+
+        from omnibase_core.enums import EnumInjectionScope
+
+        await config.container.service_registry.register_instance(
+            interface=interface,
+            instance=instance,
+            scope=EnumInjectionScope.GLOBAL,
+            metadata={
+                "description": f"Intent effect adapter: {interface.__name__}",
+                "plugin_id": "registration",
+            },
+        )
+        logger.debug(
+            "Registered %s in DI container (correlation_id=%s)",
+            interface.__name__,
+            correlation_id,
         )
 
     async def shutdown(

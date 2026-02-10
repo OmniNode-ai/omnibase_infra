@@ -1318,7 +1318,7 @@ class RuntimeHostProcess:
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="validate_dispatch_engine",
             )
-            raise RuntimeHostError(
+            raise ProtocolConfigurationError(
                 "dispatch_engine must be frozen before starting subscriptions. "
                 "An unfrozen engine will raise INVALID_STATE on first dispatch "
                 "and silently drop messages. Call dispatch_engine.freeze() before "

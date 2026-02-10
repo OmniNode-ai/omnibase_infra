@@ -1484,6 +1484,7 @@ class TestOrchestratorBusAccessVerification:
 # ============================================================================
 
 
+@pytest.mark.integration
 class TestBusDetectionRegression:
     """Regression tests for type-based bus infrastructure detection.
 

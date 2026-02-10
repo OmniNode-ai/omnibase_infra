@@ -4,7 +4,7 @@
 
 This module provides the IntentExecutor, which routes intents
 produced by handlers to the appropriate effect layer handlers. The routing
-is driven by the contract's `intent_routing_table` section, not hardcoded
+is driven by the contract's ``intent_routing_table`` section, not hardcoded
 if/else chains.
 
 Architecture:
@@ -16,6 +16,19 @@ Architecture:
     1. Look up intent_type in the routing table
     2. Resolve the target handler from the DI container
     3. Execute the handler with the intent payload
+
+Intent Type Convention:
+    Intent types use a short-form ``{service}.{operation}`` suffix convention
+    where ``{service}`` identifies the infrastructure backend and ``{operation}``
+    describes the action. The authoritative routing key lives on the **payload**
+    model's ``intent_type`` Literal field, not on the outer ``ModelIntent``
+    envelope.
+
+    Examples of short-form suffixes:
+        - ``consul.register`` -- Register a service in Consul
+        - ``consul.deregister`` -- Deregister a service from Consul
+        - ``postgres.upsert_registration`` -- Upsert a registration projection
+        - ``ledger.append`` -- Append an entry to the event ledger
 
 Related:
     - OMN-2050: Wire MessageDispatchEngine as single consumer path
@@ -69,8 +82,18 @@ class IntentExecutor:
     """Runtime-level intent executor with contract-driven routing.
 
     Routes intents from handlers to effect layer handlers based on the
-    `intent_type` field of the intent payload. The routing table maps
-    intent_type strings to effect handler callables.
+    ``intent_type`` field of the intent **payload** (not the outer
+    ``ModelIntent`` envelope). The routing table maps short-form
+    ``{service}.{operation}`` intent_type strings to effect handler
+    callables.
+
+    Payload-Driven Routing:
+        The authoritative routing key is ``payload.intent_type``, a Literal
+        field on each typed payload model (e.g., ``ModelPayloadConsulRegister``).
+        While ``ModelIntent.intent_type`` may mirror the payload value, the
+        executor deliberately does **not** fall back to the envelope field.
+        This ensures that misconfigured payloads lacking an ``intent_type``
+        field fail loudly rather than silently routing via the envelope.
 
     Thread Safety:
         This class is designed for single-threaded async use. Effect handlers
@@ -239,16 +262,27 @@ class IntentExecutor:
         which prevents Kafka offset commit so the message will be redelivered.
         Effect adapters must therefore be idempotent.
 
+        A single correlation_id is generated (if not provided) and shared
+        across all intents in the batch so that distributed traces remain
+        coherent.
+
         Args:
             intents: Sequence of intents to execute.
-            correlation_id: Optional correlation ID for tracing.
+            correlation_id: Optional correlation ID for tracing. When ``None``,
+                a single ``uuid4()`` is generated and reused for every intent
+                in the batch.
 
         Raises:
             Exception: Re-raised from the failing intent's effect handler.
                 Earlier intents remain committed (no compensation/rollback).
         """
+        # Generate a single correlation_id for the entire batch so all
+        # intents share the same trace.  Without this, each execute() call
+        # would independently generate its own uuid4(), breaking batch-level
+        # traceability.
+        effective_correlation_id = correlation_id or uuid4()
         for intent in intents:
-            await self.execute(intent, correlation_id=correlation_id)
+            await self.execute(intent, correlation_id=effective_correlation_id)
 
 
 __all__: list[str] = ["IntentExecutor", "ProtocolIntentEffect"]
