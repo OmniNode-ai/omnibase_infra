@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 from unittest.mock import MagicMock
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -88,7 +88,15 @@ POSTGRES_AVAILABLE = _db_url_has_database or (
 )
 
 
-def _resolve_postgres_config() -> dict[str, object]:
+class _PostgresConfigDict(TypedDict):
+    host: str
+    port: int
+    database: str
+    user: str
+    password: str
+
+
+def _resolve_postgres_config() -> _PostgresConfigDict:
     """Resolve PostgreSQL connection config from env vars.
 
     Delegates to the shared ``PostgresConfig.from_env()`` utility to avoid
