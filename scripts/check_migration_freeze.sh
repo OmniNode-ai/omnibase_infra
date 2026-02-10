@@ -25,7 +25,11 @@ echo "Migration freeze is ACTIVE ($FREEZE_FILE exists)"
 MODE="${1:-precommit}"
 
 if [ "$MODE" = "--ci" ]; then
-    # CI mode: compare against base branch
+    # CI mode: compare against base branch.
+    # On push events (not PRs), GITHUB_BASE_REF is empty; defaults to 'main'.
+    # This means on direct pushes to main, origin/main...HEAD diff is typically
+    # empty — the check is effectively a no-op, which is correct (the freeze
+    # should only block PR merges, not post-merge pushes).
     BASE_BRANCH="${GITHUB_BASE_REF:-main}"
     # Defensive fetch: ensure origin/<base> ref is up-to-date even if
     # the CI runner's checkout didn't fully resolve it.

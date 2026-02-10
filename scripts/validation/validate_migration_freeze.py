@@ -30,12 +30,10 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Directories containing migration files
-MIGRATION_DIRS: tuple[str, ...] = (
-    "docker/migrations/forward/",
-    "docker/migrations/rollback/",
-    "docker/migrations/",
-)
+# Directories containing migration files.
+# A single prefix is sufficient — startswith() matches all subdirectories
+# (forward/, rollback/, etc.) under docker/migrations/.
+MIGRATION_DIRS: tuple[str, ...] = ("docker/migrations/",)
 
 # File extensions considered migration files
 MIGRATION_EXTENSIONS: frozenset[str] = frozenset({".sql"})
@@ -65,6 +63,13 @@ class FreezeValidationResult:
         return len(self.violations) == 0
 
     def __bool__(self) -> bool:
+        """Allow using result in boolean context.
+
+        Warning:
+            **Non-standard __bool__ behavior**: Returns ``True`` only when
+            ``is_valid`` is True (no violations). Differs from typical
+            dataclass behavior where any instance is truthy.
+        """
         return self.is_valid
 
 
@@ -102,6 +107,10 @@ def _get_merge_base(repo_path: Path) -> str:
                 return result.stdout.strip()
         except (subprocess.TimeoutExpired, FileNotFoundError):
             continue
+    # Fallback: HEAD~1 may not exist in shallow clones or single-commit repos,
+    # causing git diff to return an empty list (no violations detected). This is
+    # acceptable because CI uses check_migration_freeze.sh with GITHUB_BASE_REF
+    # instead, and pre-commit mode uses --check-staged (not merge-base).
     return "HEAD~1"
 
 
