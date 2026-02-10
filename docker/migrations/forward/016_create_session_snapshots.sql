@@ -118,8 +118,9 @@ BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS update_session_snapshots_updated_at ON claude_session_snapshots;
 CREATE TRIGGER update_session_snapshots_updated_at
     BEFORE UPDATE ON claude_session_snapshots
     FOR EACH ROW
