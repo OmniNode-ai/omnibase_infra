@@ -50,8 +50,6 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel
-
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -385,13 +383,14 @@ class HandlerNodeIntrospected:
         # ModelProjectionRecord and passed through to asyncpg unchanged.
         capabilities_data = capabilities.model_dump(mode="json") if capabilities else {}
 
-        # Serialization contract: values are JSON-serializable strings here.
-        # ModelProjectionRecord (extra="allow") passes them through unchanged.
-        # IntentEffectPostgresUpsert._normalize_for_asyncpg() converts strings
-        # to native UUID/datetime types required by asyncpg.
+        # Pass native types directly to avoid fragile string round-trips.
+        # ModelProjectionRecord validates entity_id/current_state/domain
+        # explicitly; remaining columns flow through as extra fields.
+        # IntentEffectPostgresUpsert._normalize_for_asyncpg() passes native
+        # UUID/datetime values through unchanged (no string parsing needed).
         projection_record = ModelProjectionRecord.model_validate(
             {
-                "entity_id": str(node_id),
+                "entity_id": node_id,
                 "domain": "registration",
                 "current_state": EnumRegistrationState.PENDING_REGISTRATION.value,
                 "node_type": node_type.value,
@@ -402,11 +401,11 @@ class HandlerNodeIntrospected:
                 "protocols": [],
                 "capability_tags": [],
                 "contract_version": None,
-                "ack_deadline": ack_deadline.isoformat(),
-                "last_applied_event_id": str(registration_attempt_id),
-                "registered_at": now.isoformat(),
-                "updated_at": now.isoformat(),
-                "correlation_id": str(correlation_id),
+                "ack_deadline": ack_deadline,
+                "last_applied_event_id": registration_attempt_id,
+                "registered_at": now,
+                "updated_at": now,
+                "correlation_id": correlation_id,
             }
         )
         postgres_payload = ModelPayloadPostgresUpsertRegistration(
@@ -490,13 +489,7 @@ class HandlerNodeIntrospected:
                 "node_id": str(node_id),
                 "registration_attempt_id": str(initiated_event.registration_attempt_id),
                 "correlation_id": str(correlation_id),
-                "intent_types": [
-                    i.payload.intent_type
-                    if isinstance(i.payload, BaseModel)
-                    and hasattr(i.payload, "intent_type")
-                    else "unknown"
-                    for i in intents
-                ],
+                "intent_types": [i.intent_type for i in intents],
             },
         )
 

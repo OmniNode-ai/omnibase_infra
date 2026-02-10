@@ -68,6 +68,13 @@ class ModelProjectionRecord(BaseModel):
             "different projection record types."
         ),
     )
+    node_type: str = Field(
+        ...,
+        description=(
+            "Node type value (e.g., 'effect', 'compute'). Required NOT NULL "
+            "in schema_registration_projection.sql."
+        ),
+    )
 
 
 __all__: list[str] = ["ModelProjectionRecord"]

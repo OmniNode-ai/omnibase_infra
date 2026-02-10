@@ -305,3 +305,29 @@ class TestColumnSetsMatchSchema:
             f"Add these to IntentEffectPostgresUpsert._UUID_COLUMNS or "
             f"document them in the 'COLUMNS NOT YET COVERED' block."
         )
+
+    def test_all_schema_timestamptz_columns_covered_or_documented(self) -> None:
+        """All TIMESTAMPTZ columns in schema should be in _TIMESTAMP_COLUMNS.
+
+        If this test fails, a new TIMESTAMPTZ column was added to the SQL
+        schema but not added to IntentEffectPostgresUpsert._TIMESTAMP_COLUMNS
+        or the 'COLUMNS NOT YET COVERED' documentation block.
+        """
+        schema_path = (
+            Path(__file__).parent.parent.parent.parent
+            / "src"
+            / "omnibase_infra"
+            / "schemas"
+            / "schema_registration_projection.sql"
+        )
+        sql = schema_path.read_text()
+        schema_ts_cols = self._extract_timestamptz_columns_from_sql(sql)
+        covered = IntentEffectPostgresUpsert._TIMESTAMP_COLUMNS
+
+        uncovered = schema_ts_cols - covered
+        assert not uncovered, (
+            f"Schema has TIMESTAMPTZ columns not in _TIMESTAMP_COLUMNS: "
+            f"{uncovered}. Add these to "
+            f"IntentEffectPostgresUpsert._TIMESTAMP_COLUMNS or document "
+            f"them in the 'COLUMNS NOT YET COVERED' block."
+        )

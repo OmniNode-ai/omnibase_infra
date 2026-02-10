@@ -217,10 +217,10 @@ class IntentEffectPostgresUpsert:
     #     UUID cols: entity_id, last_applied_event_id, correlation_id
     #     TIMESTAMPTZ cols: ack_deadline, registered_at, updated_at
     #
-    # COLUMNS NOT YET COVERED (add when their intent types are wired):
-    #   UUID cols: (none pending)
-    #   TIMESTAMPTZ cols: liveness_deadline, last_heartbeat_at,
-    #     ack_timeout_emitted_at, liveness_timeout_emitted_at
+    # All schema UUID and TIMESTAMPTZ columns are included in the sets
+    # below. The normalizer is a no-op for None values, so including
+    # columns not yet written by any intent type is safe and prevents
+    # silent corruption when new intent types are wired.
     # -------------------------------------------------------------------------
 
     # UUID columns in registration_projections.
@@ -230,12 +230,19 @@ class IntentEffectPostgresUpsert:
         {"entity_id", "last_applied_event_id", "correlation_id"}
     )
 
-    # TIMESTAMPTZ columns currently used by wired intent types.
-    # Schema reference: ack_deadline, registered_at, updated_at (used by registration upsert)
-    # Not yet wired: liveness_deadline, last_heartbeat_at,
-    #   ack_timeout_emitted_at, liveness_timeout_emitted_at
+    # TIMESTAMPTZ columns in registration_projections.
+    # Schema reference: all TIMESTAMPTZ columns from schema_registration_projection.sql
+    # Validated by: tests/unit/runtime/test_intent_effect_postgres_upsert.py
     _TIMESTAMP_COLUMNS: frozenset[str] = frozenset(
-        {"ack_deadline", "registered_at", "updated_at"}
+        {
+            "ack_deadline",
+            "liveness_deadline",
+            "last_heartbeat_at",
+            "ack_timeout_emitted_at",
+            "liveness_timeout_emitted_at",
+            "registered_at",
+            "updated_at",
+        }
     )
 
     @staticmethod

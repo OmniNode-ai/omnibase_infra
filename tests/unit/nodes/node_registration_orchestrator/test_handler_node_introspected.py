@@ -649,7 +649,7 @@ class TestHandlerNodeIntrospectedIntents:
 
         record = postgres_intents[0].payload.record.model_dump()
         expected_deadline = TEST_NOW + timedelta(seconds=ack_timeout_seconds)
-        assert record["ack_deadline"] == expected_deadline.isoformat()
+        assert record["ack_deadline"] == expected_deadline
 
     @pytest.mark.asyncio
     async def test_default_ack_timeout_in_intent(self) -> None:
@@ -671,7 +671,7 @@ class TestHandlerNodeIntrospectedIntents:
         ]
         record = postgres_intents[0].payload.record.model_dump()
         expected_deadline = TEST_NOW + timedelta(seconds=30.0)
-        assert record["ack_deadline"] == expected_deadline.isoformat()
+        assert record["ack_deadline"] == expected_deadline
 
     @pytest.mark.asyncio
     async def test_capabilities_in_postgres_intent(self) -> None:

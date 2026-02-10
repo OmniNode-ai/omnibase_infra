@@ -32,7 +32,7 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from pydantic import BaseModel
 
@@ -140,9 +140,17 @@ class DispatchResultApplier:
 
         # Publish output events
         if result.output_events:
-            for output_event in result.output_events:
+            for idx, output_event in enumerate(result.output_events):
                 try:
+                    # Deterministic envelope_id: uuid5(correlation_id, "type:index")
+                    # ensures redeliveries produce identical IDs, enabling
+                    # downstream consumers to deduplicate at-least-once events.
+                    deterministic_id = uuid5(
+                        effective_correlation_id,
+                        f"{type(output_event).__name__}:{idx}",
+                    )
                     output_envelope: ModelEventEnvelope[BaseModel] = ModelEventEnvelope(
+                        envelope_id=deterministic_id,
                         payload=output_event,
                         correlation_id=effective_correlation_id,
                         envelope_timestamp=self._clock(),

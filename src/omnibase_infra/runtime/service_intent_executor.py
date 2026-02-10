@@ -32,13 +32,15 @@ import logging
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
-from pydantic import BaseModel
 from typing_extensions import runtime_checkable
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
+)
+from omnibase_infra.runtime.protocols.protocol_intent_payload import (
+    ProtocolIntentPayload,
 )
 from omnibase_infra.utils import sanitize_error_message
 
@@ -143,7 +145,7 @@ class IntentExecutor:
             )
             return
 
-        # Get intent_type from payload using isinstance guard (not bare getattr).
+        # Get intent_type from payload using protocol-based isinstance check.
         # Typed payloads extend BaseModel with an explicit intent_type Literal field.
         # Do NOT fall back to intent.intent_type — the authoritative routing key
         # lives on the payload (e.g., "consul.register", "postgres.upsert_registration").
@@ -151,7 +153,7 @@ class IntentExecutor:
         # the canonical source. Falling back to the envelope field would mask
         # misconfigured payloads that lack an intent_type field.
         intent_type: str | None = None
-        if isinstance(payload, BaseModel) and hasattr(payload, "intent_type"):
+        if isinstance(payload, ProtocolIntentPayload):
             intent_type = payload.intent_type
         else:
             context = ModelInfraErrorContext.with_correlation(
