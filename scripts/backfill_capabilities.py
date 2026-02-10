@@ -101,11 +101,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import ipaddress
 import json
 import logging
 import os
-import re
 import sys
 from typing import NoReturn
 from uuid import UUID
@@ -138,9 +136,6 @@ class ErrorCode:
 
     # Configuration errors (CFG_xxx_xxx)
     CFG_MISSING_DB_URL = "CFG_AUTH_001"
-    CFG_INVALID_HOST = "CFG_HOST_001"
-    CFG_INVALID_PORT = "CFG_PORT_001"
-    CFG_INVALID_DATABASE = "CFG_DB_001"
     CFG_INVALID_TIMEOUT = "CFG_TIMEOUT_001"
 
     # Database errors (DB_xxx_xxx)
@@ -170,120 +165,6 @@ class ConfigurationError(Exception):
 
     def __str__(self) -> str:
         return f"[{self.error_code}] {self.message}"
-
-
-def _validate_hostname(value: str) -> str:
-    """Validate hostname or IP address format.
-
-    Args:
-        value: The hostname or IP address to validate
-
-    Returns:
-        The validated value
-
-    Raises:
-        ConfigurationError: If the value is not a valid hostname or IP
-    """
-    # Try to parse as IP address first
-    try:
-        ipaddress.ip_address(value)
-        return value
-    except ValueError:
-        pass
-
-    # Validate as hostname (RFC 1123)
-    # - Max 253 characters total
-    # - Labels separated by dots, each 1-63 chars
-    # - Labels contain only alphanumerics and hyphens
-    # - Labels cannot start or end with hyphen
-    if len(value) > 253:
-        raise ConfigurationError(
-            "POSTGRES_HOST: hostname exceeds 253 characters",
-            error_code=ErrorCode.CFG_INVALID_HOST,
-        )
-
-    hostname_pattern = re.compile(
-        r"^(?!-)[a-zA-Z0-9-]{1,63}(?<!-)(?:\.(?!-)[a-zA-Z0-9-]{1,63}(?<!-))*$"
-    )
-    if not hostname_pattern.match(value):
-        raise ConfigurationError(
-            "POSTGRES_HOST: invalid hostname format (must be valid hostname or IP). "
-            "Check the POSTGRES_HOST environment variable.",
-            error_code=ErrorCode.CFG_INVALID_HOST,
-        )
-
-    return value
-
-
-def _validate_port(value: str) -> int:
-    """Validate port number.
-
-    Args:
-        value: The port string to validate
-
-    Returns:
-        The validated port as integer
-
-    Raises:
-        ConfigurationError: If the value is not a valid port number
-    """
-    try:
-        port = int(value)
-    except ValueError:
-        raise ConfigurationError(
-            "POSTGRES_PORT: must be a valid integer. "
-            "Check the POSTGRES_PORT environment variable.",
-            error_code=ErrorCode.CFG_INVALID_PORT,
-        )
-
-    if not 1 <= port <= 65535:
-        raise ConfigurationError(
-            "POSTGRES_PORT: must be between 1 and 65535. "
-            "Check the POSTGRES_PORT environment variable.",
-            error_code=ErrorCode.CFG_INVALID_PORT,
-        )
-
-    return port
-
-
-def _validate_identifier(value: str, name: str, error_code: str) -> str:
-    """Validate database identifier (user or database name).
-
-    Args:
-        value: The identifier to validate
-        name: The name of the parameter (for error messages)
-        error_code: Error code to use for validation failures
-
-    Returns:
-        The validated value
-
-    Raises:
-        ConfigurationError: If the value contains invalid characters
-    """
-    # PostgreSQL identifiers: alphanumerics, underscores, max 63 chars
-    # First character must be letter or underscore
-    if not value:
-        raise ConfigurationError(
-            f"{name}: cannot be empty. Check the {name} environment variable.",
-            error_code=error_code,
-        )
-
-    if len(value) > 63:
-        raise ConfigurationError(
-            f"{name}: exceeds 63 characters. Check the {name} environment variable.",
-            error_code=error_code,
-        )
-
-    identifier_pattern = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-    if not identifier_pattern.match(value):
-        raise ConfigurationError(
-            f"{name}: invalid format (must start with letter or underscore, "
-            f"contain only alphanumerics and underscores). "
-            f"Check the {name} environment variable.",
-            error_code=error_code,
-        )
-
-    return value
 
 
 def _get_connection_timeout() -> float:

@@ -99,7 +99,7 @@ pytestmark = [
     pytest.mark.postgres,
     pytest.mark.skipif(
         not POSTGRES_AVAILABLE,
-        reason="PostgreSQL not available (POSTGRES_HOST or POSTGRES_PASSWORD not set)",
+        reason="PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST+POSTGRES_PASSWORD)",
     ),
 ]
 

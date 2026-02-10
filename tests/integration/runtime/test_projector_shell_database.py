@@ -146,12 +146,14 @@ async def db_pool() -> AsyncGenerator[asyncpg.Pool, None]:
         asyncpg.Pool connected to the test database.
 
     Raises:
-        pytest.skip: If database is not reachable or POSTGRES_PASSWORD not set.
+        pytest.skip: If database is not configured or not reachable.
     """
     dsn = _get_database_dsn()
 
     if not dsn:
-        pytest.skip("POSTGRES_PASSWORD environment variable not set")
+        pytest.skip(
+            "Database not configured (set OMNIBASE_INFRA_DB_URL or POSTGRES_PASSWORD)"
+        )
 
     try:
         pool = await asyncpg.create_pool(
