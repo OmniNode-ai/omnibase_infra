@@ -433,11 +433,11 @@ services:
       # NOTE: Uses dedicated OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN rather than
       # OMNIBASE_INFRA_DB_URL because this consumer uses pydantic-settings with the
       # OMNIBASE_INFRA_AGENT_ACTIONS_ prefix and may use a different DB role.
-      # WARNING: Variable expansion does not URL-encode POSTGRES_PASSWORD and
-      # nested expansion requires recent Compose v2. If POSTGRES_PASSWORD contains
-      # URI-special characters (@, :, /, %, #) or shell-special characters ($, `, \, !),
-      # set OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN explicitly in .env instead.
-      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for agent-actions DSN}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/omnibase_infra
+      # WARNING: The fallback DSN uses nested variable expansion (requires recent Compose v2).
+      # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
+      # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
+      # RECOMMENDED: Set OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN explicitly in .env instead.
+      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: ${OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for agent-actions DSN}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/omnibase_infra}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_SIZE: ${AGENT_ACTIONS_BATCH_SIZE:-100}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_TIMEOUT_MS: ${AGENT_ACTIONS_BATCH_TIMEOUT_MS:-1000}
       OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_PORT: "8087"

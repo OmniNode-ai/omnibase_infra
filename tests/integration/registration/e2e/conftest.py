@@ -55,7 +55,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 from unittest.mock import MagicMock
-from urllib.parse import quote_plus, urlparse
 from uuid import UUID, uuid4
 
 import pytest
@@ -69,7 +68,7 @@ from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.utils import sanitize_error_message
 from tests.conftest import check_service_registry_available
-from tests.infrastructure_config import DEFAULT_CONSUL_PORT, DEFAULT_POSTGRES_PORT
+from tests.infrastructure_config import DEFAULT_CONSUL_PORT
 
 # Load environment configuration with layered priority:
 # 1. .env in project root (base configuration - credentials, shared settings)
@@ -188,28 +187,12 @@ def wrap_event_in_envelope(
 # Infrastructure Availability Checks
 # =============================================================================
 
-# PostgreSQL availability
-_OMNIBASE_INFRA_DB_URL = os.getenv("OMNIBASE_INFRA_DB_URL")
-# Normalize empty/whitespace-only values to None for consistent availability check
-if _OMNIBASE_INFRA_DB_URL is not None:
-    _OMNIBASE_INFRA_DB_URL = _OMNIBASE_INFRA_DB_URL.strip() or None
-POSTGRES_HOST = os.getenv("POSTGRES_HOST")
-POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", str(DEFAULT_POSTGRES_PORT)))
-POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+# PostgreSQL availability - delegates to shared PostgresConfig utility
+# See tests/helpers/util_postgres.py for canonical DSN parsing logic
+from tests.helpers.util_postgres import PostgresConfig
 
-# Normalize empty password to None for consistent checking
-if POSTGRES_PASSWORD and not POSTGRES_PASSWORD.strip():
-    POSTGRES_PASSWORD = None
-
-# When DSN is set, also verify it contains a database name
-_db_url_has_database = False
-if _OMNIBASE_INFRA_DB_URL is not None:
-    _parsed_url = urlparse(_OMNIBASE_INFRA_DB_URL)
-    _db_url_has_database = bool((_parsed_url.path or "").lstrip("/"))
-
-# Check if PostgreSQL is available based on URL (with database) or host+password being set
-POSTGRES_AVAILABLE = _db_url_has_database or bool(POSTGRES_HOST and POSTGRES_PASSWORD)
+_postgres_config = PostgresConfig.from_env()
+POSTGRES_AVAILABLE = _postgres_config.is_configured
 
 # Kafka availability
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
@@ -283,70 +266,16 @@ SCHEMA_FILE = (
 
 
 def _build_postgres_dsn() -> str:
-    """Build PostgreSQL DSN from environment variables.
-
-    Primary source: ``OMNIBASE_INFRA_DB_URL`` (full DSN).
-    Fallback: individual ``POSTGRES_*`` env vars.
-
-    Credentials (user and password) are URL-encoded using quote_plus() to handle
-    special characters like @, :, /, %, etc. that would otherwise break the DSN
-    format.
+    """Build PostgreSQL DSN by delegating to PostgresConfig.build_dsn().
 
     Returns:
         PostgreSQL connection string in standard format.
 
     Raises:
-        ValueError: If neither OMNIBASE_INFRA_DB_URL nor
-            POSTGRES_HOST/POSTGRES_PASSWORD are set.
-
-    Example:
-        >>> # With special characters in credentials
-        >>> # user="user@domain", password="p@ss:word#123"
-        >>> dsn = _build_postgres_dsn()
-        >>> # Returns: postgresql://user%40domain:p%40ss%3Aword%23123@host:port/db
+        ProtocolConfigurationError: If configuration is incomplete
+            (host, password, or database missing).
     """
-    if _OMNIBASE_INFRA_DB_URL:
-        # Basic validation: ensure the user-provided DSN is well-formed
-        parsed = urlparse(_OMNIBASE_INFRA_DB_URL)
-        if parsed.scheme not in ("postgresql", "postgres"):
-            raise ValueError(
-                f"OMNIBASE_INFRA_DB_URL has invalid scheme '{parsed.scheme}'. "
-                "Expected 'postgresql://' or 'postgres://'."
-            )
-        if not parsed.hostname:
-            raise ValueError(
-                "OMNIBASE_INFRA_DB_URL appears malformed (no hostname detected). "
-                "If your password contains @, :, or other special characters, "
-                "ensure they are URL-encoded (e.g., @ -> %40, : -> %3A)."
-            )
-        if not parsed.path or parsed.path == "/":
-            raise ValueError(
-                "OMNIBASE_INFRA_DB_URL is missing a database name. "
-                "Expected e.g. postgresql://user:pass@host:5432/omnibase_infra"
-            )
-        return _OMNIBASE_INFRA_DB_URL
-
-    if not POSTGRES_HOST:
-        raise ValueError(
-            "POSTGRES_HOST is required (when OMNIBASE_INFRA_DB_URL is not set) but not set. "
-            "Set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST environment variable "
-            "to enable E2E tests."
-        )
-    if not POSTGRES_PASSWORD:
-        raise ValueError(
-            "POSTGRES_PASSWORD is required (when OMNIBASE_INFRA_DB_URL is not set) but not set. "
-            "Set OMNIBASE_INFRA_DB_URL or POSTGRES_PASSWORD environment variable "
-            "to enable E2E tests."
-        )
-
-    # URL-encode credentials to handle special characters (@, :, /, %, etc.)
-    encoded_user = quote_plus(POSTGRES_USER, safe="")
-    encoded_password = quote_plus(POSTGRES_PASSWORD, safe="")
-
-    return (
-        f"postgresql://{encoded_user}:{encoded_password}"
-        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/omnibase_infra"
-    )
+    return _postgres_config.build_dsn()
 
 
 @pytest.fixture

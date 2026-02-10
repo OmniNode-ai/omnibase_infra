@@ -35,11 +35,9 @@ Related:
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict
 from unittest.mock import MagicMock
-from urllib.parse import urlparse
 from uuid import uuid4
 
 import pytest
@@ -71,21 +69,12 @@ if TYPE_CHECKING:
 # Environment Configuration
 # =============================================================================
 
-# Check if PostgreSQL is available for integration tests
-_db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
-if _db_url is not None:
-    _db_url = _db_url.strip() or None
+# Delegate to shared PostgresConfig for consistent availability checks.
+# See tests/helpers/util_postgres.py for the canonical implementation.
+from tests.helpers.util_postgres import PostgresConfig
 
-# When DSN is set, also verify it contains a database name
-_db_url_has_database = False
-if _db_url is not None:
-    _parsed = urlparse(_db_url)
-    _db_url_has_database = bool((_parsed.path or "").lstrip("/"))
-
-POSTGRES_AVAILABLE = _db_url_has_database or (
-    os.getenv("POSTGRES_HOST") is not None
-    and os.getenv("POSTGRES_PASSWORD") is not None
-)
+_postgres_config = PostgresConfig.from_env()
+POSTGRES_AVAILABLE = _postgres_config.is_configured
 
 
 class _PostgresConfigDict(TypedDict):

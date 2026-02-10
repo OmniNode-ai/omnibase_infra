@@ -218,9 +218,10 @@ def _get_connection_timeout() -> float:
 def _get_validated_dsn() -> str:
     """Get and validate database DSN from OMNIBASE_INFRA_DB_URL environment variable.
 
-    .. todo:: OMN-2065: DSN validation is duplicated across several integration
-       test conftest files and model_postgres_pool_config.py. Consider extracting
-       to a shared utility.
+    .. note:: Test conftest files now use the shared ``PostgresConfig.from_env()``
+       utility from ``tests/helpers/util_postgres.py``. This script retains its own
+       validation because it uses ``ConfigurationError`` with ``ErrorCode`` rather than
+       ``ProtocolConfigurationError``, which is appropriate for CLI scripts.
 
     Returns:
         Validated PostgreSQL DSN string
