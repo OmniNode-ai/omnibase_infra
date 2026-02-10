@@ -60,7 +60,7 @@ def get_postgres_dsn() -> str:
         msg = (
             f"OMNIBASE_INFRA_DB_URL has invalid scheme. "
             f"Expected 'postgresql://' or 'postgres://', "
-            f"got: {db_url.split('://', 1)[0] if '://' in db_url else '(none)'}://"
+            f"got: {urlparse(db_url).scheme or '(none)'}://"
         )
         raise ValueError(msg)
 

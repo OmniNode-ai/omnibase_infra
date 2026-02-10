@@ -242,7 +242,7 @@ def _get_validated_dsn() -> str:
     if not dsn.startswith(("postgresql://", "postgres://")):
         raise ConfigurationError(
             "OMNIBASE_INFRA_DB_URL must start with 'postgresql://' or 'postgres://'. "
-            f"Got scheme: {dsn.split('://', 1)[0] if '://' in dsn else '(none)'}",
+            f"Got scheme: {urlparse(dsn).scheme or '(none)'}",
             error_code=ErrorCode.CFG_INVALID_DSN_SCHEME,
         )
 

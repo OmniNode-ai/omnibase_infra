@@ -94,6 +94,7 @@ x-runtime-env: &runtime-env
   # If POSTGRES_PASSWORD contains shell-special characters ($, `, \, !) or
   # URI-special characters (@, :, /, %, #), the expansion may produce incorrect results.
   # For passwords with special characters, set OMNIBASE_INFRA_DB_URL directly instead.
+  # RECOMMENDED: For production deployments, always set OMNIBASE_INFRA_DB_URL explicitly.
   OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for DB URL fallback}@postgres:5432/omnibase_infra}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
