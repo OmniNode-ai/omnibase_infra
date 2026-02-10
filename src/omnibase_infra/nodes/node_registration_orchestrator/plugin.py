@@ -23,11 +23,7 @@ Design Pattern:
 
 Configuration:
     The plugin activates based on environment variables:
-    - POSTGRES_HOST: Required for plugin activation
-    - POSTGRES_PORT: Optional (default: 5432)
-    - POSTGRES_USER: Optional (default: postgres)
-    - POSTGRES_PASSWORD: Required when POSTGRES_HOST is set
-    - POSTGRES_DATABASE: Optional (default: omninode_bridge)
+    - OMNIBASE_INFRA_DB_URL: Required for plugin activation (PostgreSQL DSN)
     - CONSUL_HOST: Optional, enables Consul dual-registration
     - CONSUL_PORT: Optional (default: 8500)
 
@@ -220,19 +216,19 @@ class PluginRegistration:
     def should_activate(self, config: ModelDomainPluginConfig) -> bool:
         """Check if Registration should activate based on environment.
 
-        Returns True if POSTGRES_HOST is set, indicating PostgreSQL
+        Returns True if OMNIBASE_INFRA_DB_URL is set, indicating PostgreSQL
         is configured for registration support.
 
         Args:
             config: Plugin configuration (not used for this check).
 
         Returns:
-            True if POSTGRES_HOST environment variable is set.
+            True if OMNIBASE_INFRA_DB_URL environment variable is set.
         """
-        postgres_host = os.getenv("POSTGRES_HOST")
-        if not postgres_host:
+        db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+        if not db_url:
             logger.debug(
-                "Registration plugin inactive: POSTGRES_HOST not set "
+                "Registration plugin inactive: OMNIBASE_INFRA_DB_URL not set "
                 "(correlation_id=%s)",
                 config.correlation_id,
             )
@@ -264,15 +260,18 @@ class PluginRegistration:
         correlation_id = config.correlation_id
 
         try:
-            # 1. Create PostgreSQL pool
-            postgres_host = os.getenv("POSTGRES_HOST")
-            postgres_dsn = (
-                f"postgresql://{os.getenv('POSTGRES_USER', 'postgres')}:"
-                f"{os.getenv('POSTGRES_PASSWORD', '')}@"
-                f"{postgres_host}:"
-                f"{os.getenv('POSTGRES_PORT', '5432')}/"
-                f"{os.getenv('POSTGRES_DATABASE', 'omninode_bridge')}"
-            )
+            # 1. Create PostgreSQL pool from OMNIBASE_INFRA_DB_URL
+            postgres_dsn = os.getenv("OMNIBASE_INFRA_DB_URL", "")
+            if not postgres_dsn:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="create_postgres_pool",
+                )
+                raise ContainerWiringError(
+                    "OMNIBASE_INFRA_DB_URL is required but not set",
+                    context=context,
+                )
 
             self._pool = await asyncpg.create_pool(
                 postgres_dsn,
@@ -295,11 +294,7 @@ class PluginRegistration:
             logger.info(
                 "PostgreSQL pool created (correlation_id=%s)",
                 correlation_id,
-                extra={
-                    "host": postgres_host,
-                    "port": os.getenv("POSTGRES_PORT", "5432"),
-                    "database": os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
-                },
+                extra={"dsn_var": "OMNIBASE_INFRA_DB_URL"},
             )
 
             # 2. Load projectors from contracts via ProjectorPluginLoader

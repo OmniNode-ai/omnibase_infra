@@ -52,8 +52,8 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test-password}
-      POSTGRES_DB: omninode_bridge
-      POSTGRES_MULTIPLE_DATABASES: "omninode_bridge,infisical_db"
+      POSTGRES_DB: omnibase_infra
+      POSTGRES_MULTIPLE_DATABASES: "omnibase_infra,infisical_db"
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     networks:
@@ -72,7 +72,7 @@ services:
         -c shared_buffers=128MB
     healthcheck:
       !!merge <<: *healthcheck-defaults
-      test: ["CMD-SHELL", "pg_isready -U postgres -d omninode_bridge"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omnibase_infra"]
     labels:
       - "com.omninode.service=postgres"
       - "com.omninode.role=infrastructure"
@@ -272,7 +272,7 @@ services:
       # PostgreSQL
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DATABASE: omninode_bridge
+      OMNIBASE_INFRA_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD:-test-password}@postgres:5432/omnibase_infra
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test-password}
       # Kafka (internal address)

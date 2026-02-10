@@ -18,10 +18,13 @@ Skip Conditions:
 Environment Variables
 =====================
 
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
+        Example: postgresql://postgres:secret@localhost:5436/omninode_bridge
+
+    Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
     POSTGRES_HOST: PostgreSQL server hostname (required - skip if not set)
         Example: localhost or your-server-ip
     POSTGRES_PORT: PostgreSQL server port (default: 5436)
-    POSTGRES_DATABASE: Database name (default: omninode_bridge)
     POSTGRES_USER: Database username (default: postgres)
     POSTGRES_PASSWORD: Database password (required - tests skip if not set)
 
@@ -69,10 +72,9 @@ from tests.infrastructure_config import REMOTE_INFRA_HOST
 # Use shared PostgresConfig for consistent configuration management
 _postgres_config = PostgresConfig.from_env(fallback_host=REMOTE_INFRA_HOST)
 
-# Export individual values for backwards compatibility with existing code
+# Export individual values for use in availability checks and diagnostics
 POSTGRES_HOST = _postgres_config.host
 POSTGRES_PORT = str(_postgres_config.port)
-POSTGRES_DATABASE = _postgres_config.database
 POSTGRES_USER = _postgres_config.user
 POSTGRES_PASSWORD = _postgres_config.password
 

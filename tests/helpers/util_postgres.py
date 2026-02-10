@@ -35,7 +35,7 @@ import os
 import re
 import socket
 from dataclasses import dataclass
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -214,24 +214,31 @@ class PostgresConfig:
     def from_env(
         cls,
         *,
+        db_url_var: str = "OMNIBASE_INFRA_DB_URL",
         host_var: str = "POSTGRES_HOST",
         port_var: str = "POSTGRES_PORT",
-        database_var: str = "POSTGRES_DATABASE",
         user_var: str = "POSTGRES_USER",
         password_var: str = "POSTGRES_PASSWORD",  # noqa: S107 (env var name, not a password)
-        default_database: str = "omninode_bridge",
         default_user: str = "postgres",
         fallback_host: str | None = None,
     ) -> PostgresConfig:
         """Create PostgresConfig from environment variables.
 
+        Resolution order:
+            1. If ``db_url_var`` (default ``OMNIBASE_INFRA_DB_URL``) is set,
+               the DSN is parsed to extract host, port, user, password, and
+               database.
+            2. Otherwise, individual ``POSTGRES_*`` env vars are read as a
+               fallback (host, port, user, password). The database name
+               **must** come from the URL; there is no individual env var
+               fallback for the database.
+
         Args:
-            host_var: Environment variable name for host.
-            port_var: Environment variable name for port.
-            database_var: Environment variable name for database.
-            user_var: Environment variable name for user.
-            password_var: Environment variable name for password.
-            default_database: Default database name if not set.
+            db_url_var: Environment variable holding a full PostgreSQL DSN.
+            host_var: Environment variable name for host (fallback).
+            port_var: Environment variable name for port (fallback).
+            user_var: Environment variable name for user (fallback).
+            password_var: Environment variable name for password (fallback).
             default_user: Default username if not set.
             fallback_host: Fallback host if POSTGRES_HOST not set. If None,
                 uses REMOTE_INFRA_HOST from infrastructure_config.
@@ -239,6 +246,20 @@ class PostgresConfig:
         Returns:
             PostgresConfig instance with values from environment.
         """
+        # --- Primary: full DSN from db_url_var ---
+        db_url: str | None = os.getenv(db_url_var)
+        if db_url:
+            parsed = urlparse(db_url)
+            database = (parsed.path or "").lstrip("/")
+            return cls(
+                host=parsed.hostname or "localhost",
+                port=parsed.port or DEFAULT_POSTGRES_PORT,
+                database=database or "omninode_bridge",
+                user=parsed.username or default_user,
+                password=parsed.password,
+            )
+
+        # --- Fallback: individual env vars ---
         host: str | None = os.getenv(host_var)
         # Normalize empty or whitespace-only host to None
         # This prevents malformed DSN like "postgresql://user:pass@:5432/db"
@@ -259,7 +280,7 @@ class PostgresConfig:
         return cls(
             host=host,
             port=int(os.getenv(port_var, str(DEFAULT_POSTGRES_PORT))),
-            database=os.getenv(database_var, default_database),
+            database="",
             user=os.getenv(user_var, default_user),
             password=password,
         )
@@ -269,9 +290,11 @@ class PostgresConfig:
         """Check if the configuration is complete for database connections.
 
         Returns:
-            True if host and password are set, False otherwise.
+            True if host, password, and database are all set, False otherwise.
         """
-        return self.host is not None and self.password is not None
+        return (
+            self.host is not None and self.password is not None and bool(self.database)
+        )
 
     def build_dsn(self) -> str:
         """Build PostgreSQL DSN from configuration.
@@ -307,6 +330,8 @@ class PostgresConfig:
                 missing.append("host")
             if self.password is None:
                 missing.append("password")
+            if not self.database:
+                missing.append("database")
 
             # Create error context with correlation ID for tracing
             correlation_id = uuid4()
@@ -314,12 +339,12 @@ class PostgresConfig:
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="build_dsn",
-                target_name=self.database,
+                target_name=self.database or "(unset)",
             )
             raise ProtocolConfigurationError(
                 f"PostgreSQL configuration incomplete. Missing: {', '.join(missing)}. "
-                "Hint: Ensure POSTGRES_HOST and POSTGRES_PASSWORD environment variables "
-                "are set, or provide them explicitly in PostgresConfig.",
+                "Hint: Set OMNIBASE_INFRA_DB_URL to a full PostgreSQL DSN, or ensure "
+                "POSTGRES_HOST and POSTGRES_PASSWORD environment variables are set.",
                 context=context,
             )
 

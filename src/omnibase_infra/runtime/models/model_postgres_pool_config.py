@@ -3,11 +3,13 @@
 """PostgreSQL connection pool configuration.
 
 Part of OMN-1976: Contract dependency materialization.
+Updated in OMN-2065: Per-service DB URL contract (DB-SPLIT-02).
 """
 
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -15,7 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class ModelPostgresPoolConfig(BaseModel):
     """PostgreSQL connection pool configuration.
 
-    Sources configuration from POSTGRES_* environment variables.
+    Sources configuration from a ``*_DB_URL`` environment variable.
+    Fail-fast: raises ``ValueError`` when the required URL is missing.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -28,7 +31,7 @@ class ModelPostgresPoolConfig(BaseModel):
         repr=False,
         description="PostgreSQL password (never logged or included in repr)",
     )
-    database: str = Field(default="omninode_bridge", description="PostgreSQL database")
+    database: str = Field(description="PostgreSQL database name")
     min_size: int = Field(default=2, ge=1, le=100, description="Minimum pool size")
     max_size: int = Field(default=10, ge=1, le=100, description="Maximum pool size")
 
@@ -47,25 +50,77 @@ class ModelPostgresPoolConfig(BaseModel):
         return self
 
     @classmethod
-    def from_env(cls) -> ModelPostgresPoolConfig:
-        """Create config from POSTGRES_* environment variables.
+    def from_env(
+        cls,
+        db_url_var: str = "OMNIBASE_INFRA_DB_URL",
+    ) -> ModelPostgresPoolConfig:
+        """Create config from a ``*_DB_URL`` environment variable.
+
+        Parses the DSN to extract host, port, user, password, and database.
+        Pool-size overrides are still read from ``POSTGRES_POOL_*`` env vars.
+
+        Args:
+            db_url_var: Name of the environment variable holding the DSN.
+                Defaults to ``OMNIBASE_INFRA_DB_URL``.
 
         Raises:
-            ValueError: If environment configuration is invalid.
+            ValueError: If the environment variable is not set (fail-fast)
+                or contains an invalid DSN.
+        """
+        db_url = os.getenv(db_url_var)
+        if not db_url:
+            msg = (
+                f"{db_url_var} is required but not set. "
+                f"Set it to a PostgreSQL DSN, e.g. "
+                f"postgresql://user:pass@host:5432/dbname"
+            )
+            raise ValueError(msg)
+
+        return cls.from_dsn(
+            db_url,
+            min_size=int(os.getenv("POSTGRES_POOL_MIN_SIZE", "2")),
+            max_size=int(os.getenv("POSTGRES_POOL_MAX_SIZE", "10")),
+        )
+
+    @classmethod
+    def from_dsn(
+        cls,
+        dsn: str,
+        *,
+        min_size: int = 2,
+        max_size: int = 10,
+    ) -> ModelPostgresPoolConfig:
+        """Create config by parsing a PostgreSQL DSN string.
+
+        Args:
+            dsn: PostgreSQL connection string
+                (``postgresql://user:pass@host:port/database``).
+            min_size: Minimum pool size.
+            max_size: Maximum pool size.
+
+        Raises:
+            ValueError: If the DSN is malformed or missing required parts.
         """
         try:
-            return cls(
-                host=os.getenv("POSTGRES_HOST", "localhost"),
-                port=int(os.getenv("POSTGRES_PORT", "5432")),
-                user=os.getenv("POSTGRES_USER", "postgres"),
-                password=os.getenv("POSTGRES_PASSWORD", ""),
-                database=os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
-                min_size=int(os.getenv("POSTGRES_POOL_MIN_SIZE", "2")),
-                max_size=int(os.getenv("POSTGRES_POOL_MAX_SIZE", "10")),
-            )
-        except (ValueError, TypeError) as e:
-            msg = f"Invalid PostgreSQL pool configuration: {e}"
+            parsed = urlparse(dsn)
+        except Exception as e:
+            msg = f"Failed to parse DSN: {e}"
             raise ValueError(msg) from e
+
+        database = (parsed.path or "").lstrip("/")
+        if not database:
+            msg = f"DSN is missing a database name: {dsn!r}"
+            raise ValueError(msg)
+
+        return cls(
+            host=parsed.hostname or "localhost",
+            port=parsed.port or 5432,
+            user=parsed.username or "postgres",
+            password=parsed.password or "",
+            database=database,
+            min_size=min_size,
+            max_size=max_size,
+        )
 
 
 __all__ = ["ModelPostgresPoolConfig"]

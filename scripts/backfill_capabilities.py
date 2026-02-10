@@ -56,17 +56,14 @@ Usage:
     python scripts/backfill_capabilities.py --batch-size 500
 
     # With custom connection
-    POSTGRES_HOST=localhost POSTGRES_PORT=5432 python scripts/backfill_capabilities.py
+    OMNIBASE_INFRA_DB_URL="postgresql://postgres:pass@localhost:5432/omnibase_infra" python scripts/backfill_capabilities.py
 
     # Enable debug logging (for troubleshooting)
     BACKFILL_DEBUG=1 python scripts/backfill_capabilities.py
 
 Environment Variables:
-    POSTGRES_HOST: Database host (default: localhost)
-    POSTGRES_PORT: Database port (default: 5432)
-    POSTGRES_DATABASE: Database name (default: omninode_bridge)
-    POSTGRES_USER: Database user (default: postgres)
-    POSTGRES_PASSWORD: Database password (required)
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (required)
+        e.g., postgresql://postgres:pass@host:5432/omnibase_infra
     BACKFILL_DEBUG: Enable debug logging to stderr (optional)
     BACKFILL_CONNECTION_TIMEOUT: Connection timeout in seconds (default: 30.0).
         Must be a positive number, maximum 600 seconds. Increase for very large
@@ -76,11 +73,11 @@ Error Codes:
     The script uses error codes for debugging and actionable error messages:
 
     Configuration Errors (CFG_*):
-        CFG_AUTH_001: Missing POSTGRES_PASSWORD
+        CFG_AUTH_001: Missing OMNIBASE_INFRA_DB_URL
         CFG_HOST_001: Invalid POSTGRES_HOST format
         CFG_PORT_001: Invalid POSTGRES_PORT value
         CFG_USER_001: Invalid POSTGRES_USER format
-        CFG_DB_001: Invalid POSTGRES_DATABASE format
+        CFG_DB_001: Invalid database name format
         CFG_TIMEOUT_001: Invalid BACKFILL_CONNECTION_TIMEOUT value
 
     Database Errors (DB_*):
@@ -337,42 +334,31 @@ def _get_connection_timeout() -> float:
     return timeout
 
 
-def _get_validated_config() -> dict[str, str | int]:
-    """Get and validate database connection configuration from environment.
+def _get_validated_dsn() -> str:
+    """Get and validate database DSN from OMNIBASE_INFRA_DB_URL environment variable.
 
     Returns:
-        Dictionary with validated connection parameters
+        Validated PostgreSQL DSN string
 
     Raises:
-        ConfigurationError: If any configuration is invalid
+        ConfigurationError: If OMNIBASE_INFRA_DB_URL is not set or empty
     """
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port_str = os.getenv("POSTGRES_PORT", "5432")
-    user = os.getenv("POSTGRES_USER", "postgres")
-    database = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
-    password = os.getenv("POSTGRES_PASSWORD", "")
+    dsn = os.getenv("OMNIBASE_INFRA_DB_URL", "")
 
-    logger.debug(
-        "Validating configuration (host=%s, port=%s, user=%s, database=%s)",
-        host,
-        port_str,
-        user,
-        database,
-    )
+    if not dsn:
+        raise ConfigurationError(
+            "OMNIBASE_INFRA_DB_URL environment variable is required. "
+            "Example: postgresql://postgres:pass@host:5432/omnibase_infra",
+            error_code=ErrorCode.CFG_MISSING_PASSWORD,
+        )
 
-    return {
-        "host": _validate_hostname(host),
-        "port": _validate_port(port_str),
-        "user": _validate_identifier(user, "POSTGRES_USER", ErrorCode.CFG_INVALID_USER),
-        "database": _validate_identifier(
-            database, "POSTGRES_DATABASE", ErrorCode.CFG_INVALID_DATABASE
-        ),
-        "password": password,
-    }
+    logger.debug("Using DSN from OMNIBASE_INFRA_DB_URL (credentials redacted)")
+
+    return dsn
 
 
 async def get_connection() -> asyncpg.Connection:
-    """Create database connection from validated environment variables.
+    """Create database connection from OMNIBASE_INFRA_DB_URL.
 
     Returns:
         Asyncpg connection object
@@ -381,24 +367,16 @@ async def get_connection() -> asyncpg.Connection:
         ConfigurationError: If environment configuration is invalid
         asyncpg.PostgresError: If connection fails
     """
-    config = _get_validated_config()
+    dsn = _get_validated_dsn()
     timeout = _get_connection_timeout()
 
     logger.debug(
-        "Attempting database connection to %s:%s/%s (timeout=%.1fs)",
-        config["host"],
-        config["port"],
-        config["database"],
+        "Attempting database connection via DSN (timeout=%.1fs)",
         timeout,
     )
 
-    # Use explicit parameters instead of DSN string for safer construction
     return await asyncpg.connect(
-        host=config["host"],
-        port=config["port"],
-        user=config["user"],
-        database=config["database"],
-        password=config["password"],
+        dsn=dsn,
         timeout=timeout,
     )
 
@@ -559,7 +537,7 @@ def _handle_database_error(exc: BaseException) -> NoReturn:
     elif isinstance(exc, asyncpg.InvalidCatalogNameError):
         error_code = ErrorCode.DB_NOT_FOUND
         message = "Database not found"
-        guidance = "Verify POSTGRES_DATABASE exists and is spelled correctly."
+        guidance = "Verify the database name in OMNIBASE_INFRA_DB_URL exists and is spelled correctly."
     elif isinstance(exc, asyncpg.CannotConnectNowError):
         error_code = ErrorCode.DB_CONNECTION_REFUSED
         message = "Database server not ready for connections"
@@ -600,7 +578,7 @@ def _handle_database_error(exc: BaseException) -> NoReturn:
         message = "Table 'registration_projections' not found"
         guidance = (
             "Run database migrations to create required tables. "
-            "Check POSTGRES_DATABASE is the correct database."
+            "Check the database name in OMNIBASE_INFRA_DB_URL is correct."
         )
     elif isinstance(exc, asyncpg.UndefinedColumnError):
         error_code = ErrorCode.DB_QUERY_FAILED
@@ -1057,20 +1035,21 @@ def main() -> int:
     if args.batch_size > 100000:
         print("WARNING: Large batch sizes (>100000) may cause memory issues")
 
-    password = os.getenv("POSTGRES_PASSWORD")
-    if password is None:
+    dsn = os.getenv("OMNIBASE_INFRA_DB_URL")
+    if dsn is None:
         print(
             f"ERROR [{ErrorCode.CFG_MISSING_PASSWORD}]: "
-            "POSTGRES_PASSWORD environment variable is required"
+            "OMNIBASE_INFRA_DB_URL environment variable is required"
         )
-        print("  Action: Set POSTGRES_PASSWORD before running this script.")
+        print("  Action: Set OMNIBASE_INFRA_DB_URL before running this script.")
+        print("  Example: postgresql://postgres:pass@host:5432/omnibase_infra")
         return 1
-    if password == "":
+    if dsn == "":
         print(
             f"ERROR [{ErrorCode.CFG_MISSING_PASSWORD}]: "
-            "POSTGRES_PASSWORD environment variable is set but empty"
+            "OMNIBASE_INFRA_DB_URL environment variable is set but empty"
         )
-        print("  Action: Set POSTGRES_PASSWORD to a non-empty value.")
+        print("  Action: Set OMNIBASE_INFRA_DB_URL to a valid PostgreSQL DSN.")
         return 1
 
     try:

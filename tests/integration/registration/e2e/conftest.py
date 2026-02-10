@@ -12,7 +12,7 @@ Infrastructure Requirements:
     - Kafka/Redpanda: KAFKA_BOOTSTRAP_SERVERS
 
     Environment variables required:
-    - POSTGRES_HOST, POSTGRES_PASSWORD (for PostgreSQL)
+    - OMNIBASE_INFRA_DB_URL (preferred) or POSTGRES_HOST, POSTGRES_PASSWORD (for PostgreSQL)
     - CONSUL_HOST (for Consul)
     - KAFKA_BOOTSTRAP_SERVERS (for Kafka)
 
@@ -189,9 +189,9 @@ def wrap_event_in_envelope(
 # =============================================================================
 
 # PostgreSQL availability
+_OMNIBASE_INFRA_DB_URL = os.getenv("OMNIBASE_INFRA_DB_URL")
 POSTGRES_HOST = os.getenv("POSTGRES_HOST")
 POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", str(DEFAULT_POSTGRES_PORT)))
-POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 
@@ -199,7 +199,9 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 if POSTGRES_PASSWORD and not POSTGRES_PASSWORD.strip():
     POSTGRES_PASSWORD = None
 
-POSTGRES_AVAILABLE = bool(POSTGRES_HOST and POSTGRES_PASSWORD)
+POSTGRES_AVAILABLE = bool(_OMNIBASE_INFRA_DB_URL) or bool(
+    POSTGRES_HOST and POSTGRES_PASSWORD
+)
 
 # Kafka availability
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
@@ -250,7 +252,7 @@ pytestmark = [
             "Full infrastructure required for E2E tests. "
             f"Kafka: {'available' if KAFKA_AVAILABLE else 'MISSING (set KAFKA_BOOTSTRAP_SERVERS)'}. "
             f"Consul: {'available' if CONSUL_AVAILABLE else 'MISSING (set CONSUL_HOST or unreachable)'}. "
-            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set POSTGRES_HOST and POSTGRES_PASSWORD)'}. "
+            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST and POSTGRES_PASSWORD)'}. "
             f"ServiceRegistry: {'available' if SERVICE_REGISTRY_AVAILABLE else 'MISSING (omnibase_core circular import issue)'}."
         ),
     ),
@@ -275,6 +277,9 @@ SCHEMA_FILE = (
 def _build_postgres_dsn() -> str:
     """Build PostgreSQL DSN from environment variables.
 
+    Primary source: ``OMNIBASE_INFRA_DB_URL`` (full DSN).
+    Fallback: individual ``POSTGRES_*`` env vars.
+
     Credentials (user and password) are URL-encoded using quote_plus() to handle
     special characters like @, :, /, %, etc. that would otherwise break the DSN
     format.
@@ -283,11 +288,8 @@ def _build_postgres_dsn() -> str:
         PostgreSQL connection string in standard format.
 
     Raises:
-        ValueError: If POSTGRES_HOST or POSTGRES_PASSWORD is not set.
-
-    Note:
-        This function should only be called after verifying
-        POSTGRES_PASSWORD is set.
+        ValueError: If neither OMNIBASE_INFRA_DB_URL nor
+            POSTGRES_HOST/POSTGRES_PASSWORD are set.
 
     Example:
         >>> # With special characters in credentials
@@ -295,15 +297,20 @@ def _build_postgres_dsn() -> str:
         >>> dsn = _build_postgres_dsn()
         >>> # Returns: postgresql://user%40domain:p%40ss%3Aword%23123@host:port/db
     """
+    if _OMNIBASE_INFRA_DB_URL:
+        return _OMNIBASE_INFRA_DB_URL
+
     if not POSTGRES_HOST:
         raise ValueError(
             "POSTGRES_HOST is required but not set. "
-            "Set POSTGRES_HOST environment variable to enable E2E tests."
+            "Set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST environment variable "
+            "to enable E2E tests."
         )
     if not POSTGRES_PASSWORD:
         raise ValueError(
             "POSTGRES_PASSWORD is required but not set. "
-            "Set POSTGRES_PASSWORD environment variable to enable E2E tests."
+            "Set OMNIBASE_INFRA_DB_URL or POSTGRES_PASSWORD environment variable "
+            "to enable E2E tests."
         )
 
     # URL-encode credentials to handle special characters (@, :, /, %, etc.)
@@ -312,7 +319,7 @@ def _build_postgres_dsn() -> str:
 
     return (
         f"postgresql://{encoded_user}:{encoded_password}"
-        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"
+        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/omninode_bridge"
     )
 
 

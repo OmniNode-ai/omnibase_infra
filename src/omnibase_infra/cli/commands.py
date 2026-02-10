@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-from urllib.parse import quote_plus
 from uuid import uuid4
 
 import click
@@ -204,18 +203,19 @@ def registry() -> None:
 
 
 def _get_db_dsn() -> str:
-    """Build PostgreSQL DSN from environment variables."""
-    host = os.environ.get("POSTGRES_HOST", "192.168.86.200")
-    port = os.environ.get("POSTGRES_PORT", "5436")
-    user = os.environ.get("POSTGRES_USER", "postgres")
-    password = os.environ.get("POSTGRES_PASSWORD", "")
-    database = os.environ.get("POSTGRES_DATABASE", "omninode_bridge")
-    if not password:
-        click.echo(
-            "Warning: POSTGRES_PASSWORD not set. Set it via environment or .env file.",
-            err=True,
+    """Get PostgreSQL DSN from OMNIBASE_INFRA_DB_URL.
+
+    Raises:
+        click.ClickException: If OMNIBASE_INFRA_DB_URL is not set (fail-fast).
+    """
+    db_url = os.environ.get("OMNIBASE_INFRA_DB_URL")
+    if not db_url:
+        raise click.ClickException(
+            "OMNIBASE_INFRA_DB_URL is required but not set. "
+            "Set it to a PostgreSQL DSN, e.g. "
+            "postgresql://user:pass@host:5432/omnibase_infra"
         )
-    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}"
+    return db_url
 
 
 def _sanitize_dsn(dsn: str) -> str:

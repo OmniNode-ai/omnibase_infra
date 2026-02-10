@@ -3,7 +3,7 @@
 """Integration tests for PostgresRepositoryRuntime against real PostgreSQL.
 
 These tests require a running PostgreSQL instance configured via environment variables:
-    POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DATABASE, POSTGRES_USER, POSTGRES_PASSWORD
+    OMNIBASE_INFRA_DB_URL (preferred) or POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_PASSWORD
 
 Run with: pytest -m postgres tests/integration/runtime/db/
 
@@ -81,48 +81,53 @@ def event_loop() -> Iterator[asyncio.AbstractEventLoop]:
 def _check_postgres_env_vars() -> tuple[bool, str]:
     """Check if required PostgreSQL environment variables are set.
 
+    Primary: ``OMNIBASE_INFRA_DB_URL``.
+    Fallback: individual ``POSTGRES_*`` vars.
+
     Returns:
         Tuple of (all_set, missing_vars_message)
     """
+    if os.getenv("OMNIBASE_INFRA_DB_URL"):
+        return True, ""
+
     required_vars = [
         "POSTGRES_HOST",
         "POSTGRES_PORT",
-        "POSTGRES_DATABASE",
         "POSTGRES_USER",
         "POSTGRES_PASSWORD",
     ]
     missing = [var for var in required_vars if not os.getenv(var)]
     if missing:
-        return False, f"Missing required environment variables: {', '.join(missing)}"
+        return False, (
+            f"Missing OMNIBASE_INFRA_DB_URL and required fallback variables: "
+            f"{', '.join(missing)}"
+        )
     return True, ""
 
 
 def get_dsn() -> str:
     """Build PostgreSQL DSN from environment variables.
 
-    All environment variables are REQUIRED - no defaults are provided
-    to prevent accidental credential exposure in source code.
-
-    Required env vars:
-        POSTGRES_HOST: Database host
-        POSTGRES_PORT: Database port
-        POSTGRES_DATABASE: Database name
-        POSTGRES_USER: Database user
-        POSTGRES_PASSWORD: Database password
+    Primary: ``OMNIBASE_INFRA_DB_URL`` (full DSN).
+    Fallback: individual ``POSTGRES_*`` env vars.
 
     Raises:
-        ValueError: If any required environment variable is not set.
+        ValueError: If neither OMNIBASE_INFRA_DB_URL nor required
+            individual vars are set.
     """
+    db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+    if db_url:
+        return db_url
+
     is_configured, error_msg = _check_postgres_env_vars()
     if not is_configured:
         raise ValueError(error_msg)
 
     host = os.environ["POSTGRES_HOST"]
     port = os.environ["POSTGRES_PORT"]
-    database = os.environ["POSTGRES_DATABASE"]
     user = os.environ["POSTGRES_USER"]
     password = os.environ["POSTGRES_PASSWORD"]
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    return f"postgresql://{user}:{password}@{host}:{port}/omninode_bridge"
 
 
 # Module-constant table name with random UUID suffix for test isolation.

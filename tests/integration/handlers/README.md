@@ -65,13 +65,15 @@ REMOTE_INFRA_HOST=localhost  # or your-server-ip for remote infrastructure
 ### PostgreSQL (HandlerDb)
 
 ```bash
-# Required
+# Preferred: full DSN (overrides all individual vars)
+OMNIBASE_INFRA_DB_URL=postgresql://postgres:your_secure_password@${REMOTE_INFRA_HOST}:5432/omninode_bridge
+
+# Fallback: individual vars (used only if OMNIBASE_INFRA_DB_URL is not set)
 POSTGRES_HOST=${REMOTE_INFRA_HOST}  # or localhost, or specific IP
 POSTGRES_PASSWORD=your_secure_password
 
 # Optional (defaults shown)
 POSTGRES_PORT=5432
-POSTGRES_DATABASE=omninode_bridge
 POSTGRES_USER=postgres
 ```
 

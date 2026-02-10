@@ -46,9 +46,12 @@ Fixture Dependency Graph:
                 -> query_analyzer
 
 Environment Requirements:
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
+        Example: postgresql://postgres:secret@localhost:5436/omninode_bridge
+
+    Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
     POSTGRES_HOST: PostgreSQL server hostname
     POSTGRES_PORT: PostgreSQL server port (default: 5436)
-    POSTGRES_DATABASE: Database name (default: omninode_bridge)
     POSTGRES_USER: Database user (default: postgres)
     POSTGRES_PASSWORD: Database password (required)
 
@@ -122,7 +125,6 @@ _postgres_config = PostgresConfig.from_env()
 # Export individual values for backwards compatibility with existing code
 POSTGRES_HOST = _postgres_config.host
 POSTGRES_PORT = _postgres_config.port
-POSTGRES_DATABASE = _postgres_config.database
 POSTGRES_USER = _postgres_config.user
 POSTGRES_PASSWORD = _postgres_config.password
 

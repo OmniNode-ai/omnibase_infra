@@ -175,11 +175,11 @@ class TestModelPostgresPoolConfig:
     """Tests for PostgreSQL pool configuration."""
 
     def test_default_values(self) -> None:
-        config = ModelPostgresPoolConfig()
+        config = ModelPostgresPoolConfig(database="testdb")
         assert config.host == "localhost"
         assert config.port == 5432
         assert config.user == "postgres"
-        assert config.database == "omninode_bridge"
+        assert config.database == "testdb"
         assert config.min_size == 2
         assert config.max_size == 10
 
@@ -187,11 +187,7 @@ class TestModelPostgresPoolConfig:
         with patch.dict(
             "os.environ",
             {
-                "POSTGRES_HOST": "envhost",
-                "POSTGRES_PORT": "5555",
-                "POSTGRES_USER": "envuser",
-                "POSTGRES_PASSWORD": "envpass",
-                "POSTGRES_DATABASE": "envdb",
+                "OMNIBASE_INFRA_DB_URL": "postgresql://envuser:envpass@envhost:5555/envdb",
             },
         ):
             config = ModelPostgresPoolConfig.from_env()
@@ -202,7 +198,7 @@ class TestModelPostgresPoolConfig:
             assert config.database == "envdb"
 
     def test_frozen(self) -> None:
-        config = ModelPostgresPoolConfig()
+        config = ModelPostgresPoolConfig(database="testdb")
         with pytest.raises(Exception):
             config.host = "other"  # type: ignore[misc]
 
@@ -220,11 +216,12 @@ class TestModelPostgresPoolConfig:
             )
 
     def test_from_env_invalid_port(self) -> None:
-        """Non-numeric POSTGRES_PORT raises ValueError."""
-        with patch.dict("os.environ", {"POSTGRES_PORT": "not_a_number"}):
-            with pytest.raises(
-                ValueError, match="Invalid PostgreSQL pool configuration"
-            ):
+        """DSN with non-numeric port raises ValueError."""
+        with patch.dict(
+            "os.environ",
+            {"OMNIBASE_INFRA_DB_URL": "postgresql://user:pass@host:notaport/db"},
+        ):
+            with pytest.raises(ValueError, match="Port could not be cast"):
                 ModelPostgresPoolConfig.from_env()
 
 
@@ -293,14 +290,16 @@ class TestModelMaterializerConfig:
         with patch.dict(
             "os.environ",
             {
-                "POSTGRES_HOST": "testhost",
-                "POSTGRES_PORT": "5555",
+                "OMNIBASE_INFRA_DB_URL": "postgresql://pguser:pgpass@testhost:5555/testdb",
                 "KAFKA_BOOTSTRAP_SERVERS": "broker:9092",
             },
         ):
             config = ModelMaterializerConfig.from_env()
             assert config.postgres.host == "testhost"
             assert config.postgres.port == 5555
+            assert config.postgres.user == "pguser"
+            assert config.postgres.password == "pgpass"
+            assert config.postgres.database == "testdb"
             assert config.kafka.bootstrap_servers == "broker:9092"
 
 

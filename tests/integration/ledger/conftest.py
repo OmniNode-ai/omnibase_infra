@@ -36,9 +36,16 @@ pytestmark = [pytest.mark.postgres]
 def _get_postgres_dsn() -> str | None:
     """Build PostgreSQL DSN from environment variables.
 
+    Primary source: ``OMNIBASE_INFRA_DB_URL``.
+    Fallback: individual ``POSTGRES_*`` env vars.
+
     Returns:
-        DSN string if all required vars are set, None otherwise.
+        DSN string if configuration is available, None otherwise.
     """
+    db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+    if db_url:
+        return db_url
+
     host = os.getenv("POSTGRES_HOST")
     password = os.getenv("POSTGRES_PASSWORD")
 
@@ -46,10 +53,9 @@ def _get_postgres_dsn() -> str | None:
         return None
 
     port = os.getenv("POSTGRES_PORT", "5436")
-    database = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
     user = os.getenv("POSTGRES_USER", "postgres")
 
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    return f"postgresql://{user}:{password}@{host}:{port}/omninode_bridge"
 
 
 @pytest.fixture

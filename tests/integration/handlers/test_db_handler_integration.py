@@ -59,10 +59,13 @@ Example pattern used in these tests::
 Environment Variables
 =====================
 
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
+        Example: postgresql://postgres:secret@localhost:5432/omninode_bridge
+
+    Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
     POSTGRES_HOST: PostgreSQL server hostname (required - skip if not set)
         Example: localhost or ${REMOTE_INFRA_HOST}
     POSTGRES_PORT: PostgreSQL server port (default: 5432)
-    POSTGRES_DATABASE: Database name (default: omninode_bridge)
     POSTGRES_USER: Database username (default: postgres)
     POSTGRES_PASSWORD: Database password (required - tests skip if not set)
 

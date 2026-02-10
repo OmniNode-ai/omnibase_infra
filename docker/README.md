@@ -505,7 +505,7 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | **PostgreSQL**               |                                    |                                        |
 | `POSTGRES_HOST`              | `localhost`                        | PostgreSQL hostname                    |
 | `POSTGRES_PORT`              | `5432`                             | PostgreSQL port                        |
-| `POSTGRES_DATABASE`          | `omninode_bridge`                  | Database name                          |
+| `OMNIBASE_INFRA_DB_URL`      | `postgresql://postgres:pass@postgres:5432/omnibase_infra` | Full PostgreSQL DSN for omnibase_infra |
 | `POSTGRES_USER`              | `postgres`                         | Database user                          |
 | **Consul**                   |                                    |                                        |
 | `CONSUL_HOST`                | `localhost`                        | Consul agent hostname                  |

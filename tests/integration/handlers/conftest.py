@@ -64,9 +64,10 @@ Database Handlers
 Environment Variables (required):
     POSTGRES_HOST: PostgreSQL hostname (required)
     POSTGRES_PASSWORD: Database password (required)
-Environment Variables (optional):
+Environment Variables (preferred):
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
+Environment Variables (fallback):
     POSTGRES_PORT: PostgreSQL port (default: 5432)
-    POSTGRES_DATABASE: Database name (default: omninode_bridge)
     POSTGRES_USER: Database username (default: postgres)
 
 DSN Format: postgresql://{user}:{password}@{host}:{port}/{database}
@@ -191,9 +192,10 @@ def _safe_int_env(name: str, default: int) -> int:
 # =============================================================================
 
 # Read configuration from environment variables (set via docker-compose or .env)
+# Primary: OMNIBASE_INFRA_DB_URL (full DSN).  Fallback: individual POSTGRES_* vars.
+_OMNIBASE_INFRA_DB_URL = os.getenv("OMNIBASE_INFRA_DB_URL")
 POSTGRES_HOST = os.getenv("POSTGRES_HOST")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
-POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 
@@ -212,12 +214,17 @@ if not POSTGRES_PASSWORD or not POSTGRES_PASSWORD.strip():
     # Normalize to None for consistent availability check
     POSTGRES_PASSWORD = None
 
-# Check if PostgreSQL is available based on host and password being set
-POSTGRES_AVAILABLE = POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None
+# Check if PostgreSQL is available based on URL or host+password being set
+POSTGRES_AVAILABLE = bool(_OMNIBASE_INFRA_DB_URL) or (
+    POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None
+)
 
 
 def _build_postgres_dsn() -> str:
     """Build PostgreSQL DSN from environment variables.
+
+    Primary source: ``OMNIBASE_INFRA_DB_URL`` (full DSN).
+    Fallback: individual ``POSTGRES_*`` environment variables.
 
     Credentials (user and password) are URL-encoded using quote_plus() to handle
     special characters like @, :, /, %, etc. that would otherwise break the DSN
@@ -227,11 +234,8 @@ def _build_postgres_dsn() -> str:
         PostgreSQL connection string in standard format.
 
     Raises:
-        ValueError: If POSTGRES_HOST or POSTGRES_PASSWORD is not set.
-
-    Note:
-        This function should only be called after verifying
-        POSTGRES_PASSWORD is set.
+        ValueError: If neither OMNIBASE_INFRA_DB_URL nor
+            POSTGRES_HOST/POSTGRES_PASSWORD are set.
 
     Example:
         >>> # With special characters in credentials
@@ -239,15 +243,20 @@ def _build_postgres_dsn() -> str:
         >>> dsn = _build_postgres_dsn()
         >>> # Returns: postgresql://user%40domain:p%40ss%3Aword%23123@host:port/db
     """
+    if _OMNIBASE_INFRA_DB_URL:
+        return _OMNIBASE_INFRA_DB_URL
+
     if not POSTGRES_HOST:
         raise ValueError(
             "POSTGRES_HOST is required but not set. "
-            "Set POSTGRES_HOST environment variable to enable database tests."
+            "Set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST environment variable "
+            "to enable database tests."
         )
     if not POSTGRES_PASSWORD:
         raise ValueError(
             "POSTGRES_PASSWORD is required but not set. "
-            "Set POSTGRES_PASSWORD environment variable to enable database tests."
+            "Set OMNIBASE_INFRA_DB_URL or POSTGRES_PASSWORD environment variable "
+            "to enable database tests."
         )
 
     # URL-encode credentials to handle special characters (@, :, /, %, etc.)
@@ -256,7 +265,7 @@ def _build_postgres_dsn() -> str:
 
     return (
         f"postgresql://{encoded_user}:{encoded_password}"
-        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"
+        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/omninode_bridge"
     )
 
 
