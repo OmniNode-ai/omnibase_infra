@@ -18,6 +18,7 @@ import os
 from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote_plus
 from uuid import UUID, uuid4
 
 import pytest
@@ -51,7 +52,7 @@ def _get_postgres_dsn() -> str | None:
     database = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
     user = os.getenv("POSTGRES_USER", "postgres")
 
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}"
 
 
 @pytest.fixture
@@ -142,7 +143,7 @@ async def cleanup_injection_test_data(
             )
             logger.debug("Cleaned up %d pattern_hit_rates rows", len(valid_pattern_ids))
 
-        # Delete latency_breakdowns (FK → injection_effectiveness) before parent
+        # Delete latency_breakdowns and injection_effectiveness (FK order: children first)
         if tracker["session_ids"]:
             valid_session_ids = [str(sid) for sid in tracker["session_ids"]]
             await conn.execute(
@@ -152,9 +153,6 @@ async def cleanup_injection_test_data(
             logger.debug(
                 "Cleaned up latency_breakdowns for %d sessions", len(valid_session_ids)
             )
-
-        # Delete injection_effectiveness rows for test sessions
-        if tracker["session_ids"]:
             await conn.execute(
                 "DELETE FROM injection_effectiveness WHERE session_id = ANY($1::uuid[])",
                 valid_session_ids,
