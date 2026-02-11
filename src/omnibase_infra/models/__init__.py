@@ -72,6 +72,14 @@ from omnibase_infra.models.routing import (
     ModelRoutingEntry,
     ModelRoutingSubcontract,
 )
+from omnibase_infra.models.rrh import (
+    ModelRRHEnvironmentData,
+    ModelRRHProfile,
+    ModelRRHRepoState,
+    ModelRRHResult,
+    ModelRRHRuntimeTarget,
+    ModelRRHToolchainVersions,
+)
 from omnibase_infra.models.runtime import ModelLoadedHandler
 from omnibase_infra.models.security import (
     ModelEnvironmentPolicy,
@@ -104,6 +112,13 @@ __all__: list[str] = [
     "ModelBackendResult",
     # Resilience models
     "ModelCircuitBreakerConfig",
+    # RRH models
+    "ModelRRHEnvironmentData",
+    "ModelRRHProfile",
+    "ModelRRHRepoState",
+    "ModelRRHResult",
+    "ModelRRHRuntimeTarget",
+    "ModelRRHToolchainVersions",
     # Validation models
     "ModelCoverageMetrics",
     "ModelDispatchLogContext",

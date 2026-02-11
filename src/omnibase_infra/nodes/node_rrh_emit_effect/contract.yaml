@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: MIT
+# ONEX Contract: node_rrh_emit_effect
+# Ticket: OMN-2136
+name: "node_rrh_emit_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+node_type: "EFFECT_GENERIC"
+description: >
+  Effect node that collects environment data for Release Readiness Handshake (RRH) validation.  Three handlers gather independent data dimensions: repository git state, deployment runtime targets, and build-toolchain versions.  The composite output feeds into node_rrh_validate_compute.
+
+input_model:
+  name: "ModelRRHEmitRequest"
+  module: "omnibase_infra.nodes.node_rrh_emit_effect.models.model_rrh_emit_request"
+  description: >
+    Trigger request containing the repository path and optional runtime/environment overrides.
+
+output_model:
+  name: "ModelRRHEnvironmentData"
+  module: "omnibase_infra.models.rrh.model_rrh_environment_data"
+  description: >
+    Composite environment snapshot with repo state, runtime target, and toolchain versions.
+
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "repo_state"
+      handler:
+        name: "HandlerRepoStateCollect"
+        module: "omnibase_infra.nodes.node_rrh_emit_effect.handlers.handler_repo_state_collect"
+      supported_operations:
+        - "rrh.collect.repo_state"
+      description: "Collect git repository state (branch, SHA, dirty flag)."
+    - handler_type: "runtime_target"
+      handler:
+        name: "HandlerRuntimeTargetCollect"
+        module: "omnibase_infra.nodes.node_rrh_emit_effect.handlers.handler_runtime_target_collect"
+      supported_operations:
+        - "rrh.collect.runtime_target"
+      description: "Collect deployment target context (env, Kafka, k8s)."
+    - handler_type: "toolchain"
+      handler:
+        name: "HandlerToolchainCollect"
+        module: "omnibase_infra.nodes.node_rrh_emit_effect.handlers.handler_toolchain_collect"
+      supported_operations:
+        - "rrh.collect.toolchain"
+      description: "Collect build-tool versions (pre-commit, ruff, pytest, mypy)."
+capabilities:
+  - name: "rrh.collect"
+    description: "Collect environment data for RRH validation"
+    version: "1.0.0"
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-11"
+  ticket: "OMN-2136"
+  tags:
+    - effect
+    - rrh
+    - environment
+    - collection
