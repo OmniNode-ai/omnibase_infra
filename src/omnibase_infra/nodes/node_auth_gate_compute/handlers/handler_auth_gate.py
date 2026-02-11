@@ -54,6 +54,11 @@ EXPECTED_OPERATION: str = "auth_gate.evaluate"
 # Tools that target files and therefore require a non-empty target_path.
 # If a file-targeting tool is invoked with an empty target_path, the auth
 # gate denies the request rather than silently skipping the path check.
+#
+# MAINTENANCE: Any new tool that operates on files MUST be added here.
+# Tools NOT in this set with an empty target_path skip the path check
+# entirely (step 7). Forgetting to add a file-targeting tool here would
+# allow it to bypass path authorization silently.
 FILE_TARGETING_TOOLS: frozenset[str] = frozenset(
     {
         "Edit",
@@ -69,11 +74,18 @@ FILE_TARGETING_TOOLS: frozenset[str] = frozenset(
 # NOTE: Matched via fnmatch where * matches across / (intentionally permissive).
 # For authorization path checks, _path_matches_globs uses _glob_to_regex where
 # * does NOT match / (stricter). Do not confuse the two matching systems.
+#
+# ACCEPTED RISK: "*.plan.md" matches any file ending in .plan.md at any depth.
+# This is intentional — plan files are lightweight spec documents that may live
+# at any location (e.g., /workspace/my_feature.plan.md). The _MAX_WHITELIST_DEPTH
+# guard limits abuse from extremely deep paths. Shallow abuse paths (e.g.,
+# "src/secrets.plan.md") are accepted because plan files are text-only specs
+# with no security-sensitive content by convention.
 WHITELISTED_PATH_PATTERNS: tuple[str, ...] = (
     "*.plan.md",
     "*/.claude/memory/*",
     "*/.claude/projects/*/memory/*",
-    "*/MEMORY.md",
+    "*/.claude/**/MEMORY.md",
 )
 
 EMERGENCY_BANNER: str = (
@@ -181,13 +193,13 @@ class HandlerAuthGate:
                     ),
                     reason_code="emergency_no_reason",
                 )
+            # Truncate and strip control characters from user-supplied reason
+            # to prevent log injection or display issues in downstream consumers.
+            safe_reason = request.emergency_override_reason[:500]
             return ModelAuthGateDecision(
                 decision=EnumAuthDecision.SOFT_DENY,
                 step=2,
-                reason=(
-                    f"Emergency override active. "
-                    f"Reason: {request.emergency_override_reason}"
-                ),
+                reason=(f"Emergency override active. Reason: {safe_reason}"),
                 reason_code="emergency_override",
                 banner=EMERGENCY_BANNER,
             )
@@ -313,10 +325,14 @@ class HandlerAuthGate:
         Returns:
             ModelHandlerOutput wrapping ModelAuthGateDecision.
         """
+        # NOTE: ValueError is intentional for programming errors below.
+        # EnvelopeValidationError is explicitly "NOT a handler-specific error"
+        # (see error_infra.py). These are caller bugs (wrong operation routed,
+        # missing payload), not infrastructure failures.
         operation = envelope.get("operation")
         if operation != EXPECTED_OPERATION:
             msg = (
-                f"Unsupported operation: {operation!r}. "
+                f"[{HANDLER_ID_AUTH_GATE}] Unsupported operation: {operation!r}. "
                 f"This handler only supports '{EXPECTED_OPERATION}'."
             )
             raise ValueError(msg)
@@ -332,7 +348,10 @@ class HandlerAuthGate:
 
         payload_raw = envelope.get("payload")
         if payload_raw is None:
-            msg = "Envelope missing required 'payload' key for auth gate evaluation."
+            msg = (
+                f"[{HANDLER_ID_AUTH_GATE}] Envelope missing required 'payload' "
+                f"key for auth gate evaluation."
+            )
             raise ValueError(msg)
         if isinstance(payload_raw, ModelAuthGateRequest):
             request = payload_raw

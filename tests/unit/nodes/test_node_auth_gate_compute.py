@@ -1260,26 +1260,3 @@ class TestHandlerProperties:
         await handler.initialize({})
         await handler.shutdown()
         assert handler._initialized is False
-
-
-__all__: list[str] = [
-    "TestContractValidation",
-    "TestContractWorkAuthorizationExpiry",
-    "TestEnumAuthDecision",
-    "TestGlobToRegexEdgeCases",
-    "TestHandlerExecute",
-    "TestHandlerProperties",
-    "TestModelAuthGateDecisionBool",
-    "TestNodeDeclarativePattern",
-    "TestRegistryInfraAuthGateCompute",
-    "TestStep10AllChecksPassed",
-    "TestStep1WhitelistedPaths",
-    "TestStep2EmergencyOverride",
-    "TestStep3NoRunId",
-    "TestStep4NoAuthorization",
-    "TestStep5RunIdMismatch",
-    "TestStep6ToolNotAllowed",
-    "TestStep7PathNotAllowed",
-    "TestStep8RepoNotInScope",
-    "TestStep9AuthExpired",
-]
