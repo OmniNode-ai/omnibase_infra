@@ -46,14 +46,28 @@ class EnumCheckpointPhase(str, Enum):
 
     @property
     def phase_number(self) -> int:
-        """Return the 1-based ordinal position of this phase."""
-        ordered = list(EnumCheckpointPhase)
-        return ordered.index(self) + 1
+        """Return the stable 1-based ordinal for this phase.
+
+        These ordinals are baked into checkpoint filenames on disk
+        (``phase_{N}_{value}_a{attempt}.yaml``).  They MUST NOT change
+        even if enum members are reordered or new members are inserted.
+        """
+        return _PHASE_ORDINALS[self]
 
     @property
     def filename(self) -> str:
         """Return the canonical checkpoint filename for this phase."""
         return f"phase_{self.phase_number}_{self.value}.yaml"
+
+
+# Explicit mapping — add new phases at the end with the next available ordinal.
+_PHASE_ORDINALS: dict[EnumCheckpointPhase, int] = {
+    EnumCheckpointPhase.IMPLEMENT: 1,
+    EnumCheckpointPhase.LOCAL_REVIEW: 2,
+    EnumCheckpointPhase.CREATE_PR: 3,
+    EnumCheckpointPhase.PR_RELEASE_READY: 4,
+    EnumCheckpointPhase.READY_FOR_MERGE: 5,
+}
 
 
 __all__: list[str] = ["EnumCheckpointPhase"]

@@ -199,15 +199,15 @@ class HandlerCheckpointWrite:
             if tmp_path_str and Path(tmp_path_str).exists():
                 Path(tmp_path_str).unlink()
 
+        # Return relative path from base_dir
+        relative_path = str(target_path.relative_to(base_dir))
+
         logger.info(
             "Checkpoint written: %s (phase=%s, attempt=%d)",
-            target_path,
+            relative_path,
             checkpoint.phase.value,
             checkpoint.attempt_number,
         )
-
-        # Return relative path from base_dir
-        relative_path = str(target_path.relative_to(base_dir))
 
         result = ModelCheckpointEffectOutput(
             success=True,

@@ -137,6 +137,10 @@ class HandlerCheckpointList:
         for scan_dir in scan_dirs:
             if not scan_dir.is_dir():
                 continue
+            # Guard against symlinks escaping the checkpoint root
+            if not scan_dir.resolve().is_relative_to(base_dir.resolve()):
+                logger.warning("Skipping escaped path: %s", scan_dir.name)
+                continue
             for yaml_file in sorted(scan_dir.glob("phase_*.yaml"), key=_attempt_number):
                 try:
                     raw_data = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))

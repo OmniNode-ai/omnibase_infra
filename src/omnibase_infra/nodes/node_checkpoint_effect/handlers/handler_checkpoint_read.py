@@ -27,6 +27,9 @@ from omnibase_infra.enums import (
 from omnibase_infra.enums.enum_checkpoint_phase import EnumCheckpointPhase
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.models.checkpoint.model_checkpoint import ModelCheckpoint
+from omnibase_infra.nodes.node_checkpoint_effect.handlers.handler_checkpoint_list import (
+    _attempt_number,
+)
 from omnibase_infra.nodes.node_checkpoint_effect.models.model_checkpoint_effect_output import (
     ModelCheckpointEffectOutput,
 )
@@ -37,15 +40,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_DIR = Path.home() / ".claude" / "checkpoints"
-
-
-def _attempt_number(path: Path) -> int:
-    """Extract numeric attempt from filename like ``phase_1_implement_a3.yaml``."""
-    stem = path.stem
-    after_a = stem.rsplit("_a", maxsplit=1)
-    if len(after_a) == 2 and after_a[1].isdigit():
-        return int(after_a[1])
-    return 0
 
 
 class HandlerCheckpointRead:
@@ -126,7 +120,8 @@ class HandlerCheckpointRead:
         base_dir_raw = envelope.get("base_dir")
         base_dir = Path(str(base_dir_raw)) if base_dir_raw else _DEFAULT_BASE_DIR
 
-        # Scan for matching files (with path traversal guard)
+        # Path traversal guard: covers ticket_id AND run_id components.
+        # run_id is additionally constrained by UUID() coercion above.
         target_dir = base_dir / str(ticket_id) / str(run_id_val)
         if not target_dir.resolve().is_relative_to(base_dir.resolve()):
             raise RuntimeHostError(
@@ -165,7 +160,7 @@ class HandlerCheckpointRead:
                 ),
             )
 
-        # Read the latest attempt (last file alphabetically = highest attempt)
+        # Read the latest attempt (last by numeric attempt_number sort)
         latest_file = matching_files[-1]
         try:
             raw_data = yaml.safe_load(latest_file.read_text(encoding="utf-8"))
