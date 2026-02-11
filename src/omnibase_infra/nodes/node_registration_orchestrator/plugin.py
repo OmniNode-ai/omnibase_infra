@@ -262,7 +262,7 @@ class PluginRegistration:
 
         try:
             # 1. Create PostgreSQL pool from OMNIBASE_INFRA_DB_URL
-            postgres_dsn = os.getenv("OMNIBASE_INFRA_DB_URL", "")
+            postgres_dsn = os.getenv("OMNIBASE_INFRA_DB_URL")
 
             # Shared error context for all DSN validation failures
             pool_error_context = ModelInfraErrorContext.with_correlation(

@@ -1097,37 +1097,10 @@ async def full_infrastructure_cleanup(
 # =============================================================================
 # Dependency Materialization Skip Fixture
 # =============================================================================
-# RuntimeHostProcess._materialize_dependencies() requires OMNIBASE_INFRA_DB_URL
-# and a live PostgreSQL connection. Most runtime tests exercise handler discovery,
-# bootstrap, source mode resolution, or kernel lifecycle -- not dependency
-# materialization (which has its own dedicated tests in
-# test_dependency_materializer.py). This shared fixture patches the method to
-# avoid requiring a live database in unrelated tests.
-#
-# Previously duplicated across 8+ test classes in 4+ files.
+# Moved to tests/unit/conftest.py to scope to unit tests only.
+# Integration tests that need this mock should define their own local fixture.
+# See tests/unit/conftest.py for the implementation.
 # =============================================================================
-
-
-@pytest.fixture(autouse=True)
-def _skip_materialize_dependencies() -> Generator[None, None, None]:
-    """Skip dependency materialization which requires OMNIBASE_INFRA_DB_URL.
-
-    This fixture patches RuntimeHostProcess._materialize_dependencies with an
-    AsyncMock so that tests exercising handler registration, source mode
-    resolution, bootstrap flow, or kernel lifecycle do not need a live
-    PostgreSQL connection.
-
-    The fixture is ``autouse=True`` at function scope. Tests or classes that
-    need real dependency materialization can override this by defining their
-    own ``_skip_materialize_dependencies`` fixture that yields without
-    patching.
-    """
-    with patch(
-        "omnibase_infra.runtime.service_runtime_host_process"
-        ".RuntimeHostProcess._materialize_dependencies",
-        new_callable=AsyncMock,
-    ):
-        yield
 
 
 # =============================================================================

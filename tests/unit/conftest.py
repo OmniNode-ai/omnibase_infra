@@ -26,6 +26,9 @@ Related:
     - tests/conftest.py: Global test fixtures
 """
 
+from collections.abc import Generator
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 
@@ -56,3 +59,40 @@ def pytest_collection_modifyitems(
             # Only add marker if not already present
             if not any(marker.name == "unit" for marker in item.iter_markers()):
                 item.add_marker(unit_marker)
+
+
+# =============================================================================
+# Dependency Materialization Skip Fixture (unit tests only)
+# =============================================================================
+# RuntimeHostProcess._materialize_dependencies() requires OMNIBASE_INFRA_DB_URL
+# and a live PostgreSQL connection. Unit tests exercise handler discovery,
+# bootstrap, source mode resolution, or kernel lifecycle -- not dependency
+# materialization (which has its own dedicated tests in
+# test_dependency_materializer.py). This fixture patches the method to
+# avoid requiring a live database in unrelated unit tests.
+#
+# Scoped to tests/unit/ only. Integration tests that need this mock should
+# define their own local fixture.
+# =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def _skip_materialize_dependencies() -> Generator[None, None, None]:
+    """Skip dependency materialization which requires OMNIBASE_INFRA_DB_URL.
+
+    This fixture patches RuntimeHostProcess._materialize_dependencies with an
+    AsyncMock so that unit tests exercising handler registration, source mode
+    resolution, bootstrap flow, or kernel lifecycle do not need a live
+    PostgreSQL connection.
+
+    This fixture is ``autouse=True`` but scoped to ``tests/unit/`` only.
+    Integration tests that need this mock should define a local fixture.
+    Tests that need real materialization can override by defining their own
+    ``_skip_materialize_dependencies`` fixture that yields without patching.
+    """
+    with patch(
+        "omnibase_infra.runtime.service_runtime_host_process"
+        ".RuntimeHostProcess._materialize_dependencies",
+        new_callable=AsyncMock,
+    ):
+        yield

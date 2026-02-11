@@ -99,7 +99,7 @@ x-runtime-env: &runtime-env
   # RECOMMENDED: Always set OMNIBASE_INFRA_DB_URL explicitly in .env.
   OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for DB URL fallback}@postgres:5432/omnibase_infra}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
-  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   # Consul - use internal service name
   CONSUL_HOST: ${CONSUL_HOST:-consul}
   CONSUL_PORT: ${CONSUL_PORT:-8500}

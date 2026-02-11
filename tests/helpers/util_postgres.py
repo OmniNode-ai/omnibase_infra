@@ -298,6 +298,10 @@ class PostgresConfig:
                 # Note: empty-string username (e.g., postgresql://:pass@host/db)
                 # is falsy, correctly falling back to default_user.
                 user=unquote(parsed.username) if parsed.username else default_user,
+                # Note: explicitly empty passwords (e.g., peer/trust auth DSNs like
+                # postgresql://user:@host/db) are falsy, so password becomes None and
+                # is_configured returns False — those DSNs require POSTGRES_PASSWORD
+                # fallback or an explicit non-empty password in the DSN.
                 password=unquote(parsed.password) if parsed.password else None,
             )
 

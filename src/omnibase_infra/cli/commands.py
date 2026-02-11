@@ -209,13 +209,10 @@ def _get_db_dsn() -> str:
     Raises:
         click.ClickException: If OMNIBASE_INFRA_DB_URL is not set (fail-fast).
     """
-    correlation_id = uuid4()
-
     db_url = os.environ.get("OMNIBASE_INFRA_DB_URL")
     if not db_url:
         raise click.ClickException(
-            f"OMNIBASE_INFRA_DB_URL is required but not set "
-            f"(correlation_id={correlation_id}). "
+            "OMNIBASE_INFRA_DB_URL is required but not set. "
             "Set it to a PostgreSQL DSN, e.g. "
             "postgresql://user:pass@host:5432/omnibase_infra"
         )
@@ -223,8 +220,7 @@ def _get_db_dsn() -> str:
     # Validate DSN scheme to catch obvious misconfigurations early
     if not db_url.startswith(("postgresql://", "postgres://")):
         raise click.ClickException(
-            f"OMNIBASE_INFRA_DB_URL has invalid scheme "
-            f"(correlation_id={correlation_id}). "
+            "OMNIBASE_INFRA_DB_URL has invalid scheme. "
             f"Expected 'postgresql://' or 'postgres://', "
             f"got: {urlparse(db_url).scheme or '(none)'}://"
         )
@@ -234,15 +230,13 @@ def _get_db_dsn() -> str:
     database = (parsed.path or "").lstrip("/")
     if not database:
         raise click.ClickException(
-            f"OMNIBASE_INFRA_DB_URL is missing a database name "
-            f"(correlation_id={correlation_id}). "
+            "OMNIBASE_INFRA_DB_URL is missing a database name. "
             "Example: postgresql://user:pass@host:5432/omnibase_infra"
         )
     if "/" in database:
         raise click.ClickException(
             f"Invalid database name '{database}' extracted from DSN: "
-            f"sub-paths are not valid PostgreSQL database names "
-            f"(correlation_id={correlation_id})"
+            "sub-paths are not valid PostgreSQL database names"
         )
 
     return db_url
