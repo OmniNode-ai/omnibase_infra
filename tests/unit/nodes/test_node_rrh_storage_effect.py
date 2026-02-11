@@ -230,6 +230,32 @@ class TestSymlinks:
 
 class TestErrorHandling:
     @pytest.mark.anyio
+    async def test_rejects_relative_output_dir(
+        self,
+        handler: HandlerRRHStorageWrite,
+        sample_result: ModelRRHResult,
+    ) -> None:
+        request = ModelRRHStorageRequest(
+            result=sample_result, output_dir="relative/path"
+        )
+        result = await handler.handle(request)
+        assert result.success is False
+        assert "absolute" in result.error.lower()
+
+    @pytest.mark.anyio
+    async def test_rejects_dotdot_in_output_dir(
+        self,
+        handler: HandlerRRHStorageWrite,
+        sample_result: ModelRRHResult,
+    ) -> None:
+        request = ModelRRHStorageRequest(
+            result=sample_result, output_dir="/safe/rrh/../escape"
+        )
+        result = await handler.handle(request)
+        assert result.success is False
+        assert ".." in result.error
+
+    @pytest.mark.anyio
     async def test_handles_write_failure(
         self,
         handler: HandlerRRHStorageWrite,

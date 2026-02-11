@@ -94,6 +94,20 @@ class TestHandlerRepoStateCollect:
         assert handler.handler_category == EnumHandlerTypeCategory.EFFECT
 
     @pytest.mark.anyio
+    async def test_repo_state_rejects_relative_path(
+        self, handler: HandlerRepoStateCollect
+    ) -> None:
+        with pytest.raises(ValueError, match="non-empty absolute path"):
+            await handler.handle("relative/path")
+
+    @pytest.mark.anyio
+    async def test_repo_state_rejects_empty_path(
+        self, handler: HandlerRepoStateCollect
+    ) -> None:
+        with pytest.raises(ValueError, match="non-empty absolute path"):
+            await handler.handle("")
+
+    @pytest.mark.anyio
     async def test_handles_invalid_path(self, handler: HandlerRepoStateCollect) -> None:
         result = await handler.handle("/nonexistent/path")
         assert isinstance(result, ModelRRHRepoState)
