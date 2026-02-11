@@ -185,7 +185,15 @@ class HandlerAuthGate:
 
         # Step 2: Emergency override
         if request.emergency_override_active:
-            if not request.emergency_override_reason:
+            # Sanitize FIRST, then check emptiness. A reason consisting only
+            # of control characters (e.g., "\n\r") or whitespace must be
+            # treated as empty after sanitization, not silently permitted.
+            safe_reason = re.sub(
+                r"[\x00-\x1f\x7f\u200b-\u200f\u2028-\u202f\u2060-\u2069\ufeff]",
+                "",
+                request.emergency_override_reason[:500],
+            ).strip()
+            if not safe_reason:
                 return ModelAuthGateDecision(
                     decision=EnumAuthDecision.DENY,
                     step=2,
@@ -195,15 +203,6 @@ class HandlerAuthGate:
                     ),
                     reason_code="emergency_no_reason",
                 )
-            # Truncate and strip control/format characters from user-supplied
-            # reason to prevent log injection or display manipulation in
-            # downstream consumers. Covers ASCII C0/DEL, Unicode directional
-            # overrides (U+202A-202E), zero-width chars, and BOM.
-            safe_reason = re.sub(
-                r"[\x00-\x1f\x7f\u200b-\u200f\u2028-\u202f\u2060-\u2069\ufeff]",
-                "",
-                request.emergency_override_reason[:500],
-            )
             return ModelAuthGateDecision(
                 decision=EnumAuthDecision.SOFT_DENY,
                 step=2,
