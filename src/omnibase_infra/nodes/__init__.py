@@ -51,10 +51,10 @@ from omnibase_infra.nodes.node_registration_reducer import (
 from omnibase_infra.nodes.reducers import RegistrationReducer
 
 __all__: list[str] = [
-    "NodeAuthGateCompute",
     "ModelBackendResult",
     "ModelRegistryRequest",
     "ModelRegistryResponse",
+    "NodeAuthGateCompute",
     "NodeLedgerProjectionCompute",
     "NodeRegistrationOrchestrator",
     "NodeRegistrationReducer",
