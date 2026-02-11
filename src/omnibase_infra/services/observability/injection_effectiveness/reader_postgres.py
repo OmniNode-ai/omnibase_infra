@@ -157,6 +157,8 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         ):
             async with self._pool.acquire() as conn:
                 async with conn.transaction(readonly=True):
+                    # Note: SET LOCAL does not support parameterized queries ($1)
+                    # in PostgreSQL. int() cast guarantees numeric-only output.
                     timeout_ms = int(self._query_timeout * 1000)
                     await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
 
@@ -277,6 +279,8 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         ):
             async with self._pool.acquire() as conn:
                 async with conn.transaction(readonly=True):
+                    # Note: SET LOCAL does not support parameterized queries ($1)
+                    # in PostgreSQL. int() cast guarantees numeric-only output.
                     timeout_ms = int(self._query_timeout * 1000)
                     await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
 
@@ -354,6 +358,8 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         ):
             async with self._pool.acquire() as conn:
                 async with conn.transaction(readonly=True):
+                    # Note: SET LOCAL does not support parameterized queries ($1)
+                    # in PostgreSQL. int() cast guarantees numeric-only output.
                     timeout_ms = int(self._query_timeout * 1000)
                     await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
 
@@ -444,6 +450,8 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         ):
             async with self._pool.acquire() as conn:
                 async with conn.transaction(readonly=True):
+                    # Note: SET LOCAL does not support parameterized queries ($1)
+                    # in PostgreSQL. int() cast guarantees numeric-only output.
                     timeout_ms = int(self._query_timeout * 1000)
                     await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
 

@@ -26,6 +26,10 @@ from uuid import UUID, uuid4
 
 import pytest
 
+# Explicitly mark all tests in this module as postgres-dependent.
+# NOTE: pytestmark in conftest.py does NOT propagate to other files.
+pytestmark = [pytest.mark.postgres]
+
 if TYPE_CHECKING:
     import asyncpg
 
