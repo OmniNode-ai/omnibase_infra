@@ -360,8 +360,10 @@ class HandlerRRHValidate:
                 rule_id="RRH-1201",
                 message="Kafka broker not configured but interfaces_touched includes 'topics'.",
             )
-        # Validate host:port format.
-        if re.fullmatch(r"[a-zA-Z0-9.\-]+:\d+", broker):
+        # Validate host:port format(s). Supports comma-separated broker lists,
+        # underscores in hostnames, and IPv6 bracket notation.
+        parts = broker.split(",")
+        if all(re.fullmatch(r"[^\s,]+:\d{1,5}", p.strip()) for p in parts):
             return ModelRuleCheckResult(passed=True, rule_id="RRH-1201")
         return ModelRuleCheckResult(
             passed=False,
@@ -479,6 +481,10 @@ class HandlerRRHValidate:
 
         Checks that the repo root path and remote URL are consistent,
         and that the repo name matches expected scope.
+
+        Handles both HTTPS URLs (``https://github.com/org/repo.git``)
+        and SSH URLs (``git@github.com:org/repo.git``).  Comparison is
+        case-insensitive to accommodate macOS case-insensitive filesystems.
         """
         if not env.repo_state.repo_root:
             return ModelRuleCheckResult(
@@ -490,12 +496,14 @@ class HandlerRRHValidate:
         repo_dir = Path(env.repo_state.repo_root).name
         # If remote URL is set, check that it references the same repo.
         if env.repo_state.remote_url:
-            remote_repo = (
-                env.repo_state.remote_url.rstrip("/")
-                .rsplit("/", 1)[-1]
-                .removesuffix(".git")
-            )
-            if remote_repo and remote_repo != repo_dir:
+            # Handle both HTTPS (path separator /) and SSH (path separator :).
+            url = env.repo_state.remote_url.rstrip("/")
+            # For SSH URLs like git@github.com:org/repo.git, split on ":"
+            # first to isolate the path portion.
+            if ":" in url and not url.startswith(("http://", "https://")):
+                url = url.rsplit(":", 1)[-1]
+            remote_repo = url.rsplit("/", 1)[-1].removesuffix(".git")
+            if remote_repo and remote_repo.lower() != repo_dir.lower():
                 return ModelRuleCheckResult(
                     passed=False,
                     rule_id="RRH-1701",

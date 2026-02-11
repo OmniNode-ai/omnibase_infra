@@ -8,7 +8,7 @@ Tests collection of repo state, runtime targets, and toolchain versions.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -86,6 +86,7 @@ class TestHandlerRepoStateCollect:
     def handler(self) -> HandlerRepoStateCollect:
         return HandlerRepoStateCollect()
 
+    @pytest.mark.integration
     @pytest.mark.anyio
     async def test_collects_from_real_repo(
         self, handler: HandlerRepoStateCollect
@@ -98,8 +99,7 @@ class TestHandlerRepoStateCollect:
         assert result.head_sha  # Should have a SHA
         assert result.repo_root  # Should have a root path
 
-    @pytest.mark.anyio
-    async def test_handler_type(self, handler: HandlerRepoStateCollect) -> None:
+    def test_handler_type(self, handler: HandlerRepoStateCollect) -> None:
         from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 
         assert handler.handler_type == EnumHandlerType.INFRA_HANDLER

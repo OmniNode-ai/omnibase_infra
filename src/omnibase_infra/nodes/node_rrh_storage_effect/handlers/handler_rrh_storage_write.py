@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -129,10 +130,17 @@ class HandlerRRHStorageWrite:
             link_path = symlink_dir / safe_name
             # Compute relative target for portable symlinks.
             rel_target = Path("..") / "artifacts" / target.name
-            # Atomic replace: unlink then symlink.
-            if link_path.is_symlink() or link_path.exists():
-                link_path.unlink()
-            link_path.symlink_to(rel_target)
+            # Atomic symlink replacement: create temp link, then rename over target.
+            tmp_link = symlink_dir / f".tmp_{safe_name}_{os.getpid()}"
+            try:
+                tmp_link.symlink_to(rel_target)
+                tmp_link.rename(link_path)
+            except OSError:
+                # Fallback: non-atomic if rename fails (e.g., cross-device).
+                tmp_link.unlink(missing_ok=True)
+                if link_path.is_symlink() or link_path.exists():
+                    link_path.unlink()
+                link_path.symlink_to(rel_target)
             return str(link_path)
         except OSError as exc:
             logger.debug("Failed to update symlink %s: %s", name, exc)

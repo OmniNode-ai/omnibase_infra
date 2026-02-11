@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.rrh.model_rrh_repo_state import ModelRRHRepoState
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +60,16 @@ class HandlerRepoStateCollect:
             head_sha=head_sha.strip(),
             is_dirty=is_dirty,
             repo_root=root.strip(),
-            remote_url=remote_url.strip(),
+            remote_url=self._sanitize_remote_url(remote_url.strip()),
         )
+
+    @staticmethod
+    def _sanitize_remote_url(url: str) -> str:
+        """Strip embedded credentials from a git remote URL.
+
+        Transforms ``https://user:pass@host/repo`` into ``https://host/repo``.
+        """
+        return re.sub(r"://[^@]+@", "://", url)
 
     @staticmethod
     async def _git(repo_path: str, *args: str) -> str:
@@ -70,6 +80,7 @@ class HandlerRepoStateCollect:
 
         Returns empty string on any failure.
         """
+        proc: asyncio.subprocess.Process | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 "git",
@@ -85,12 +96,22 @@ class HandlerRepoStateCollect:
                     "git %s failed (rc=%d): %s",
                     " ".join(args),
                     proc.returncode,
-                    stderr.decode(errors="replace").strip(),
+                    sanitize_error_string(stderr.decode(errors="replace").strip()),
                 )
                 return ""
             return stdout.decode(errors="replace")
-        except (TimeoutError, FileNotFoundError, OSError) as exc:
-            logger.debug("git %s error: %s", " ".join(args), exc)
+        except TimeoutError:
+            if proc is not None:
+                proc.kill()
+                await proc.wait()
+            logger.debug("git %s error: timed out after 10s", " ".join(args))
+            return ""
+        except (FileNotFoundError, OSError) as exc:
+            logger.debug(
+                "git %s error: %s",
+                " ".join(args),
+                sanitize_error_string(str(exc)),
+            )
             return ""
 
 
