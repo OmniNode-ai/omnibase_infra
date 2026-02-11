@@ -72,13 +72,18 @@ class ModelSessionIndex(BaseModel):
     @field_validator("recent_run_ids")
     @classmethod
     def _validate_run_ids_safe(cls, v: tuple[str, ...]) -> tuple[str, ...]:
-        """Reject run IDs with unsafe filesystem characters.
+        """Reject run IDs with unsafe filesystem characters and deduplicate.
 
         Uses an allowlist (alphanumeric, dot, hyphen, underscore) rather than
         a denylist, mirroring the validation in ``ModelRunContext``.
+
+        Duplicate run IDs (e.g. from corrupted or hand-edited session.json)
+        are silently deduplicated while preserving order.
         """
         for rid in v:
             validate_run_id(rid)
+        if len(set(v)) != len(v):
+            v = tuple(dict.fromkeys(v))
         return v
 
     # ------------------------------------------------------------------

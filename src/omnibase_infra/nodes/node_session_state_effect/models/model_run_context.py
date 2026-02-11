@@ -108,7 +108,15 @@ class ModelRunContext(BaseModel):
 
     @model_validator(mode="after")
     def _freeze_metadata(self) -> ModelRunContext:
-        """Create a defensive copy of metadata to prevent mutation via original reference."""
+        """Create a defensive copy of the metadata dict container.
+
+        This copies the ``dict`` object so that callers who hold a reference
+        to the original dict cannot mutate this model's metadata through that
+        reference.  A shallow copy is sufficient here because
+        ``StrictJsonPrimitive`` restricts values to immutable JSON primitives
+        (``str``, ``int``, ``float``, ``bool``, ``None``), so only the dict
+        container itself needs to be duplicated.
+        """
         if self.metadata:
             object.__setattr__(self, "metadata", dict(self.metadata))
         return self

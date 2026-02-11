@@ -14,6 +14,8 @@ import logging
 from pathlib import Path
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from omnibase_infra.nodes.node_session_state_effect.models import (
     ModelSessionIndex,
     ModelSessionStateResult,
@@ -111,7 +113,7 @@ class HandlerSessionIndexRead:
                     files_affected=1,
                 ),
             )
-        except (json.JSONDecodeError, ValueError) as e:
+        except (json.JSONDecodeError, ValueError, ValidationError) as e:
             logger.warning("Failed to parse session.json: %s", e)
             return (
                 None,

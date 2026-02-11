@@ -40,6 +40,7 @@ class HandlerRunContextWrite:
             state_dir: Root directory for session state (e.g. ``~/.claude/state``).
         """
         self._state_dir = state_dir
+        self._runs_dir = (state_dir / "runs").resolve()
 
     async def handle(
         self,
@@ -73,7 +74,7 @@ class HandlerRunContextWrite:
                 error_code="RUN_CONTEXT_INVALID_ID",
             )
 
-        runs_dir = self._state_dir / "runs"
+        runs_dir = self._runs_dir
 
         try:
             runs_dir.mkdir(parents=True, exist_ok=True)
@@ -81,7 +82,7 @@ class HandlerRunContextWrite:
             run_path = runs_dir / f"{context.run_id}.json"
 
             # Defense-in-depth: verify resolved path stays within runs directory
-            if run_path.resolve().parent != runs_dir.resolve():
+            if run_path.resolve().parent != runs_dir:
                 return ModelSessionStateResult(
                     success=False,
                     operation="run_context_write",

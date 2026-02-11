@@ -80,6 +80,7 @@ class HandlerStaleRunGC:
         """Synchronous GC logic, executed off the event loop."""
         runs_dir = self._state_dir / "runs"
         deleted_ids: list[str] = []
+        files_deleted: int = 0
 
         if not runs_dir.exists():
             return (
@@ -107,7 +108,7 @@ class HandlerStaleRunGC:
         run_files = sorted(runs_dir.glob("*.json"), key=_safe_mtime)
 
         for run_file in run_files:
-            if len(deleted_ids) >= self._max_deletions:
+            if files_deleted >= self._max_deletions:
                 logger.info(
                     "GC: reached max_deletions=%d, stopping", self._max_deletions
                 )
@@ -130,9 +131,11 @@ class HandlerStaleRunGC:
                 ctx = ModelRunContext.model_validate(data)
 
                 if ctx.is_stale(self._ttl_seconds):
-                    # Record IDs before unlink so they're tracked even if
-                    # an unexpected error occurs after deletion.
                     stem = run_file.stem
+                    run_file.unlink(missing_ok=True)
+                    files_deleted += 1
+                    # Record IDs after successful unlink so deleted_ids
+                    # only contains IDs whose files were actually removed.
                     deleted_ids.append(ctx.run_id)
                     if stem != ctx.run_id:
                         logger.warning(
@@ -141,7 +144,6 @@ class HandlerStaleRunGC:
                             ctx.run_id,
                         )
                         deleted_ids.append(stem)
-                    run_file.unlink(missing_ok=True)
                     logger.info(
                         "GC'd stale run %s (age=%.0fs, ttl=%.0fs)",
                         ctx.run_id,
@@ -156,10 +158,11 @@ class HandlerStaleRunGC:
                 logger.warning(
                     "GC: removing malformed run file %s: %s", run_file.name, e
                 )
-                # Track stem before unlink (defensive, consistent with stale path)
                 stem = run_file.stem
-                deleted_ids.append(stem)
                 run_file.unlink(missing_ok=True)
+                files_deleted += 1
+                # Record stem after successful unlink only
+                deleted_ids.append(stem)
             except OSError as e:
                 logger.warning("GC: failed to process %s: %s", run_file.name, e)
 
@@ -169,7 +172,7 @@ class HandlerStaleRunGC:
                 success=True,
                 operation="stale_run_gc",
                 correlation_id=correlation_id,
-                files_affected=len(deleted_ids),
+                files_affected=files_deleted,
             ),
         )
 
