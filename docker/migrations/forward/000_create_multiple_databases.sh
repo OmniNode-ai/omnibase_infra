@@ -160,23 +160,24 @@ revoke_cross_db_access() {
     validate_identifier "$role_name" "Role name" || return 1
     validate_identifier "$own_database" "Database name" || return 1
     echo "  Revoking cross-DB access for $role_name (allowed: $own_database only)"
+    # Note: explicit || return 1 because set -e is disabled when caller uses ||
     for entry in "${SERVICE_DB_MAP[@]}"; do
         IFS=':' read -r db _ _ <<< "$entry"
         if [ "$db" != "$own_database" ]; then
-            psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+            psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL || return 1
                 REVOKE CONNECT ON DATABASE "$db" FROM "$role_name";
 EOSQL
         fi
     done
     # Also revoke from infrastructure databases
     for db in "${INFRA_DATABASES[@]}"; do
-        psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+        psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL || return 1
             REVOKE CONNECT ON DATABASE "$db" FROM "$role_name";
 EOSQL
     done
     # Also revoke from the default database (if different from own_database)
     if [ "$POSTGRES_DB" != "$own_database" ]; then
-        psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+        psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL || return 1
             REVOKE CONNECT ON DATABASE "$POSTGRES_DB" FROM "$role_name";
 EOSQL
     fi
@@ -301,7 +302,9 @@ for entry in "${SERVICE_DB_MAP[@]}"; do
         continue
     fi
 
-    revoke_cross_db_access "$role_name" "$db"
+    revoke_cross_db_access "$role_name" "$db" || {
+        echo "  WARNING: revoke_cross_db_access failed for $role_name" >&2
+    }
 done
 
 echo ""
