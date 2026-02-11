@@ -105,11 +105,13 @@ class TestInfraValidatorConstants:
           - dict[str, list[str] | str] for topic provisioning result
         - 120 (2026-02-10): OMN-2117 session state nodes (+1 union)
           - ModelRunContext.metadata: dict[str, Any] union typing
+        - 121 (2026-02-11): OMN-2117 atomic read-modify-write handler (+1 union)
+          - Callable[[ModelSessionIndex], ModelSessionIndex] transform parameter
 
-        Current: 120 (as of OMN-2117). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
+        Current: 121 (as of OMN-2117). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 120, (
-            "INFRA_MAX_UNIONS should be 120 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 121, (
+            "INFRA_MAX_UNIONS should be 121 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

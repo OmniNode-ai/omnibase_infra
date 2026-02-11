@@ -118,7 +118,8 @@ class HandlerStaleRunGC:
                 ctx = ModelRunContext.model_validate(data)
 
                 if ctx.is_stale(self._ttl_seconds):
-                    run_file.unlink(missing_ok=True)
+                    # Record IDs before unlink so they're tracked even if
+                    # an unexpected error occurs after deletion.
                     stem = run_file.stem
                     deleted_ids.append(ctx.run_id)
                     if stem != ctx.run_id:
@@ -128,6 +129,7 @@ class HandlerStaleRunGC:
                             ctx.run_id,
                         )
                         deleted_ids.append(stem)
+                    run_file.unlink(missing_ok=True)
                     logger.info(
                         "GC'd stale run %s (age=%.0fs, ttl=%.0fs)",
                         ctx.run_id,

@@ -27,6 +27,15 @@ class HandlerSessionIndexRead:
 
     This handler reads ``session.json`` from the configured state directory.
     If the file does not exist, it returns a default empty ``ModelSessionIndex``.
+
+    Note:
+        Reads are **not** protected by ``flock``. This is safe because the
+        write handler uses atomic rename (POSIX guarantees the file is either
+        the old or new version, never partial). However, a standalone read
+        may return pre-transaction state if a concurrent
+        ``handle_read_modify_write()`` is in progress. If the caller needs
+        a consistent snapshot, use ``HandlerSessionIndexWrite.handle_read_modify_write()``
+        which holds the lock for the full read-transform-write cycle.
     """
 
     def __init__(self, state_dir: Path) -> None:
