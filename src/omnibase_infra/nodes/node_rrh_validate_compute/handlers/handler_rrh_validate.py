@@ -360,10 +360,17 @@ class HandlerRRHValidate:
                 rule_id="RRH-1201",
                 message="Kafka broker not configured but interfaces_touched includes 'topics'.",
             )
-        # Validate host:port format(s). Supports comma-separated broker lists,
-        # underscores in hostnames, and IPv6 bracket notation.
+        # Validate host:port format(s). Supports comma-separated broker lists
+        # and underscores in hostnames. Basic format check only (not full
+        # URI validation).
         parts = broker.split(",")
-        if all(re.fullmatch(r"[^\s,]+:\d{1,5}", p.strip()) for p in parts):
+        valid = True
+        for p in parts:
+            m = re.fullmatch(r"[^\s,]+:(\d{1,5})", p.strip())
+            if not m or not (1 <= int(m.group(1)) <= 65535):
+                valid = False
+                break
+        if valid:
             return ModelRuleCheckResult(passed=True, rule_id="RRH-1201")
         return ModelRuleCheckResult(
             passed=False,

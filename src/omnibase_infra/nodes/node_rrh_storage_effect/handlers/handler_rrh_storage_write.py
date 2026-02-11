@@ -26,6 +26,7 @@ from omnibase_infra.nodes.node_rrh_storage_effect.models.model_rrh_storage_reque
 from omnibase_infra.nodes.node_rrh_storage_effect.models.model_rrh_storage_result import (
     ModelRRHStorageResult,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ class HandlerRRHStorageWrite:
             return ModelRRHStorageResult(
                 artifact_path="",
                 success=False,
-                error=str(exc),
+                error=sanitize_error_message(exc),
                 correlation_id=request.correlation_id,
             )
 

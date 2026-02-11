@@ -3,7 +3,10 @@
 """Tests for the RRH validate compute node.
 
 Covers:
-- All 13 rules (RRH-1001 through RRH-1701) pass and fail paths
+- All 13 rules (RRH-1001 through RRH-1701) pass and fail paths.
+  Fail paths for conditional rules (RRH-1201, RRH-1301, RRH-1403)
+  are tested via contract tightening governance.  RRH-1701 uses
+  seam-ticket profile.
 - Profile loading and selection
 - Contract tightening enforcement
 - Seam-ticket profile override
@@ -20,7 +23,7 @@ import pytest
 import yaml
 
 from omnibase_infra.diagnostics.enum_verdict import EnumVerdict
-from omnibase_infra.models.rrh.model_rrh_environment_data import (
+from omnibase_infra.models.rrh import (
     ModelRRHEnvironmentData,
     ModelRRHRepoState,
     ModelRRHRuntimeTarget,
@@ -260,6 +263,23 @@ class TestRRH1101EnvironmentTarget:
         assert not check.passed
 
 
+class TestRRH1102KafkaBrokerConfigured:
+    def test_empty_broker_fails(
+        self, handler: HandlerRRHValidate, clean_env: ModelRRHEnvironmentData
+    ) -> None:
+        no_broker = clean_env.model_copy(
+            update={
+                "runtime_target": clean_env.runtime_target.model_copy(
+                    update={"kafka_broker": ""}
+                )
+            }
+        )
+        request = _make_request(no_broker, "ticket-pipeline")
+        result = handler.handle(request)
+        check = next(c for c in result.checks if c.rule_id == "RRH-1102")
+        assert not check.passed
+
+
 class TestRRH1201KafkaReachable:
     def test_topics_activates_kafka_check(
         self, handler: HandlerRRHValidate, clean_env: ModelRRHEnvironmentData
@@ -289,6 +309,52 @@ class TestRRH1201KafkaReachable:
         assert not check.passed
 
 
+class TestRRH1301K8sContextValid:
+    def test_empty_k8s_context_fails(
+        self, handler: HandlerRRHValidate, clean_env: ModelRRHEnvironmentData
+    ) -> None:
+        no_k8s = clean_env.model_copy(
+            update={
+                "runtime_target": clean_env.runtime_target.model_copy(
+                    update={"kubernetes_context": ""}
+                )
+            }
+        )
+        gov = ModelRRHContractGovernance(deployment_targets=("k8s",))
+        request = _make_request(no_k8s, governance=gov)
+        result = handler.handle(request)
+        check = next(c for c in result.checks if c.rule_id == "RRH-1301")
+        assert not check.passed
+
+
+class TestRRH1401PrecommitPresent:
+    def test_no_precommit_fails(
+        self, handler: HandlerRRHValidate, clean_env: ModelRRHEnvironmentData
+    ) -> None:
+        no_precommit = clean_env.model_copy(
+            update={
+                "toolchain": clean_env.toolchain.model_copy(update={"pre_commit": ""})
+            }
+        )
+        request = _make_request(no_precommit, "ticket-pipeline")
+        result = handler.handle(request)
+        check = next(c for c in result.checks if c.rule_id == "RRH-1401")
+        assert not check.passed
+
+
+class TestRRH1402RuffPresent:
+    def test_no_ruff_fails(
+        self, handler: HandlerRRHValidate, clean_env: ModelRRHEnvironmentData
+    ) -> None:
+        no_ruff = clean_env.model_copy(
+            update={"toolchain": clean_env.toolchain.model_copy(update={"ruff": ""})}
+        )
+        request = _make_request(no_ruff, "ticket-pipeline")
+        result = handler.handle(request)
+        check = next(c for c in result.checks if c.rule_id == "RRH-1402")
+        assert not check.passed
+
+
 class TestRRH1403PytestConditional:
     def test_tests_evidence_activates_pytest_check(
         self, handler: HandlerRRHValidate, clean_env: ModelRRHEnvironmentData
@@ -310,6 +376,19 @@ class TestRRH1403PytestConditional:
         request = _make_request(no_pytest, governance=gov)
         result = handler.handle(request)
         check = next(c for c in result.checks if c.rule_id == "RRH-1403")
+        assert not check.passed
+
+
+class TestRRH1404MypyPresent:
+    def test_no_mypy_fails(
+        self, handler: HandlerRRHValidate, clean_env: ModelRRHEnvironmentData
+    ) -> None:
+        no_mypy = clean_env.model_copy(
+            update={"toolchain": clean_env.toolchain.model_copy(update={"mypy": ""})}
+        )
+        request = _make_request(no_mypy, "ticket-pipeline")
+        result = handler.handle(request)
+        check = next(c for c in result.checks if c.rule_id == "RRH-1404")
         assert not check.passed
 
 
@@ -351,6 +430,90 @@ class TestRRH1601DisallowedFields:
         assert not check.passed
         assert check.details is not None
         assert "dangerous_field" in check.details["disallowed_fields"]
+
+
+class TestRRH1701RepoBoundary:
+    """RRH-1701 is only enabled in seam-ticket profile; use is_seam_ticket governance."""
+
+    def test_empty_repo_root_fails(
+        self, handler: HandlerRRHValidate, clean_env: ModelRRHEnvironmentData
+    ) -> None:
+        no_root = clean_env.model_copy(
+            update={
+                "repo_state": clean_env.repo_state.model_copy(update={"repo_root": ""})
+            }
+        )
+        gov = ModelRRHContractGovernance(is_seam_ticket=True, ticket_id="OMN-2136")
+        request = _make_request(no_root, governance=gov)
+        result = handler.handle(request)
+        check = next(c for c in result.checks if c.rule_id == "RRH-1701")
+        assert not check.passed
+
+    def test_mismatched_remote_url_fails(
+        self, handler: HandlerRRHValidate, clean_env: ModelRRHEnvironmentData
+    ) -> None:
+        mismatch = clean_env.model_copy(
+            update={
+                "repo_state": clean_env.repo_state.model_copy(
+                    update={"remote_url": "https://github.com/org/different_repo.git"}
+                )
+            }
+        )
+        gov = ModelRRHContractGovernance(is_seam_ticket=True, ticket_id="OMN-2136")
+        request = _make_request(mismatch, governance=gov)
+        result = handler.handle(request)
+        check = next(c for c in result.checks if c.rule_id == "RRH-1701")
+        assert not check.passed
+        assert check.details is not None
+        assert check.details["remote_repo"] == "different_repo"
+
+    def test_ssh_url_mismatch_fails(
+        self, handler: HandlerRRHValidate, clean_env: ModelRRHEnvironmentData
+    ) -> None:
+        ssh_mismatch = clean_env.model_copy(
+            update={
+                "repo_state": clean_env.repo_state.model_copy(
+                    update={"remote_url": "git@github.com:org/other_repo.git"}
+                )
+            }
+        )
+        gov = ModelRRHContractGovernance(is_seam_ticket=True, ticket_id="OMN-2136")
+        request = _make_request(ssh_mismatch, governance=gov)
+        result = handler.handle(request)
+        check = next(c for c in result.checks if c.rule_id == "RRH-1701")
+        assert not check.passed
+
+    def test_ssh_url_match_passes(
+        self, handler: HandlerRRHValidate, clean_env: ModelRRHEnvironmentData
+    ) -> None:
+        ssh_match = clean_env.model_copy(
+            update={
+                "repo_state": clean_env.repo_state.model_copy(
+                    update={"remote_url": "git@github.com:org/omnibase_infra2.git"}
+                )
+            }
+        )
+        gov = ModelRRHContractGovernance(is_seam_ticket=True, ticket_id="OMN-2136")
+        request = _make_request(ssh_match, governance=gov)
+        result = handler.handle(request)
+        check = next(c for c in result.checks if c.rule_id == "RRH-1701")
+        assert check.passed
+
+    def test_case_insensitive_match(
+        self, handler: HandlerRRHValidate, clean_env: ModelRRHEnvironmentData
+    ) -> None:
+        upper_url = clean_env.model_copy(
+            update={
+                "repo_state": clean_env.repo_state.model_copy(
+                    update={"remote_url": "https://github.com/org/Omnibase_Infra2.git"}
+                )
+            }
+        )
+        gov = ModelRRHContractGovernance(is_seam_ticket=True, ticket_id="OMN-2136")
+        request = _make_request(upper_url, governance=gov)
+        result = handler.handle(request)
+        check = next(c for c in result.checks if c.rule_id == "RRH-1701")
+        assert check.passed
 
 
 # ---------------------------------------------------------------

@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from omnibase_infra.models.rrh.model_rrh_environment_data import (
+from omnibase_infra.models.rrh import (
     ModelRRHRepoState,
     ModelRRHRuntimeTarget,
     ModelRRHToolchainVersions,
@@ -86,7 +86,6 @@ class TestHandlerRepoStateCollect:
     def handler(self) -> HandlerRepoStateCollect:
         return HandlerRepoStateCollect()
 
-    @pytest.mark.integration
     @pytest.mark.anyio
     async def test_collects_from_real_repo(
         self, handler: HandlerRepoStateCollect
