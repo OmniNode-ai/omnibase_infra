@@ -290,7 +290,11 @@ class HandlerSlackWebhook:
         blocks = self._format_block_kit_message(alert)["blocks"]
         emoji = _SEVERITY_EMOJI.get(alert.severity, ":white_circle:")
         title = alert.title or _SEVERITY_TITLES.get(alert.severity, "Alert")
-        fallback_text = f"{emoji} {title}: {alert.message[:200]}"
+        # Strip markdown formatting for clean notification previews
+        plain_message = (
+            alert.message[:200].replace("*", "").replace("_", "").replace("`", "")
+        )
+        fallback_text = f"{emoji} {title}: {plain_message}"
 
         api_payload: dict[str, object] = {
             "channel": channel,
@@ -451,6 +455,27 @@ class HandlerSlackWebhook:
                             },
                         )
 
+                    else:
+                        # Unexpected status (1xx, 2xx non-200, 3xx)
+                        last_error = f"Unexpected HTTP {response.status}"
+                        last_error_code = f"SLACK_HTTP_{response.status}"
+                        logger.warning(
+                            "Slack webhook unexpected status code",
+                            extra={
+                                "correlation_id": str(correlation_id),
+                                "status_code": response.status,
+                                "attempt": attempt + 1,
+                            },
+                        )
+                        return ModelSlackAlertResult(
+                            success=False,
+                            duration_ms=duration_ms,
+                            correlation_id=correlation_id,
+                            error=last_error,
+                            error_code=last_error_code,
+                            retry_count=retry_count,
+                        )
+
             except TimeoutError:
                 last_error = "Request timeout"
                 last_error_code = "SLACK_TIMEOUT"
@@ -553,7 +578,6 @@ class HandlerSlackWebhook:
         # exposure surface.  The token is intentionally never logged.
         headers = {
             "Authorization": f"Bearer {self._bot_token}",
-            "Content-Type": "application/json; charset=utf-8",
         }
 
         for attempt in range(self._max_retries + 1):
@@ -716,6 +740,27 @@ class HandlerSlackWebhook:
                                         error_code=last_error_code,
                                         retry_count=retry_count,
                                     )
+
+                    else:
+                        # Unexpected status (1xx, 2xx non-200, 3xx)
+                        last_error = f"Unexpected HTTP {response.status}"
+                        last_error_code = f"SLACK_HTTP_{response.status}"
+                        logger.warning(
+                            "Slack Web API unexpected status code",
+                            extra={
+                                "correlation_id": str(correlation_id),
+                                "status_code": response.status,
+                                "attempt": attempt + 1,
+                            },
+                        )
+                        return ModelSlackAlertResult(
+                            success=False,
+                            duration_ms=duration_ms,
+                            correlation_id=correlation_id,
+                            error=last_error,
+                            error_code=last_error_code,
+                            retry_count=retry_count,
+                        )
 
             except TimeoutError:
                 last_error = "Request timeout"

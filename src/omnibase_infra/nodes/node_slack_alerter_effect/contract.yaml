@@ -124,14 +124,10 @@ error_handling:
       description: "HTTP client error during request"
       recoverable: true
       retry_strategy: "exponential_backoff"
-    - name: "SLACK_HTTP_4XX"
-      description: "Slack returned HTTP 4xx error (non-429)"
-      recoverable: false
-      retry_strategy: "none"
-    - name: "SLACK_HTTP_5XX"
-      description: "Slack returned HTTP 5xx error"
+    - name: "SLACK_HTTP_{status}"
+      description: "Slack returned HTTP error. Handler emits SLACK_HTTP_{status_code} (e.g. SLACK_HTTP_400, SLACK_HTTP_500). 4xx (non-429) are non-retryable; 5xx are retried with backoff."
       recoverable: true
-      retry_strategy: "exponential_backoff"
+      retry_strategy: "conditional"
     - name: "SLACK_API_ERROR"
       description: "Slack Web API returned ok=false with non-retryable error"
       recoverable: false
