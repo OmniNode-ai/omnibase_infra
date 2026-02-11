@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -232,7 +233,7 @@ class HandlerRRHValidate:
         gov: ModelRRHContractGovernance,
     ) -> ModelRuleCheckResult:
         """Dispatch to the appropriate rule checker."""
-        dispatcher: dict[str, object] = {
+        dispatcher: dict[str, Callable[..., ModelRuleCheckResult]] = {
             "RRH-1001": self._check_1001_clean_tree,
             "RRH-1002": self._check_1002_expected_branch,
             "RRH-1101": self._check_1101_env_target_valid,
@@ -254,7 +255,7 @@ class HandlerRRHValidate:
                 rule_id=rule_id,
                 message=f"Unknown rule: {rule_id}",
             )
-        return checker(env, gov)  # type: ignore[operator]
+        return checker(env, gov)
 
     # ------------------------------------------------------------------
     # Individual rule implementations
