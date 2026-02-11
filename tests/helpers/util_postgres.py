@@ -253,6 +253,27 @@ class PostgresConfig:
         db_url: str | None = os.getenv(db_url_var)
         if db_url:
             parsed = urlparse(db_url)
+
+            # Safely extract port — urlparse raises ValueError for non-numeric
+            # ports (e.g., "postgresql://host:abc/db"). Gracefully fall back to
+            # default so test collection isn't crashed by a malformed DSN.
+            try:
+                port = parsed.port or DEFAULT_POSTGRES_PORT
+            except ValueError:
+                logger.warning(
+                    "%s contains a non-numeric port. "
+                    "The resulting PostgresConfig.is_configured will be False "
+                    "and all tests that require a database will be skipped.",
+                    db_url_var,
+                )
+                return cls(
+                    host=parsed.hostname or "localhost",
+                    port=DEFAULT_POSTGRES_PORT,
+                    database="",
+                    user=default_user,
+                    password=None,
+                )
+
             # Validate scheme for consistency with other DSN consumers
             if parsed.scheme not in ("postgresql", "postgres"):
                 logger.warning(
@@ -264,7 +285,7 @@ class PostgresConfig:
                 )
                 return cls(
                     host=parsed.hostname or "localhost",
-                    port=parsed.port or DEFAULT_POSTGRES_PORT,
+                    port=port,
                     database="",
                     user=default_user,
                     password=None,
@@ -293,7 +314,7 @@ class PostgresConfig:
                 database = ""
             return cls(
                 host=parsed.hostname or "localhost",
-                port=parsed.port or DEFAULT_POSTGRES_PORT,
+                port=port,
                 database=database,
                 # Note: empty-string username (e.g., postgresql://:pass@host/db)
                 # is falsy, correctly falling back to default_user.

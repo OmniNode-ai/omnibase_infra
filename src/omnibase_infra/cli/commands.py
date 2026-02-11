@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-from urllib.parse import urlparse
 from uuid import uuid4
 
 import click
@@ -207,8 +206,12 @@ def _get_db_dsn() -> str:
     """Get PostgreSQL DSN from OMNIBASE_INFRA_DB_URL.
 
     Raises:
-        click.ClickException: If OMNIBASE_INFRA_DB_URL is not set (fail-fast).
+        click.ClickException: If OMNIBASE_INFRA_DB_URL is not set or invalid.
     """
+    from omnibase_infra.runtime.models.model_postgres_pool_config import (
+        ModelPostgresPoolConfig,
+    )
+
     db_url = os.environ.get("OMNIBASE_INFRA_DB_URL")
     if not db_url:
         raise click.ClickException(
@@ -217,29 +220,10 @@ def _get_db_dsn() -> str:
             "postgresql://user:pass@host:5432/omnibase_infra"
         )
 
-    # Validate DSN scheme to catch obvious misconfigurations early
-    if not db_url.startswith(("postgresql://", "postgres://")):
-        raise click.ClickException(
-            "OMNIBASE_INFRA_DB_URL has invalid scheme. "
-            f"Expected 'postgresql://' or 'postgres://', "
-            f"got: {urlparse(db_url).scheme or '(none)'}://"
-        )
-
-    # Validate DSN contains a database name (path component)
-    parsed = urlparse(db_url)
-    database = (parsed.path or "").lstrip("/")
-    if not database:
-        raise click.ClickException(
-            "OMNIBASE_INFRA_DB_URL is missing a database name. "
-            "Example: postgresql://user:pass@host:5432/omnibase_infra"
-        )
-    if "/" in database:
-        raise click.ClickException(
-            f"Invalid database name '{database}' extracted from DSN: "
-            "sub-paths are not valid PostgreSQL database names"
-        )
-
-    return db_url
+    try:
+        return ModelPostgresPoolConfig.validate_dsn(db_url)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def _sanitize_dsn(dsn: str) -> str:

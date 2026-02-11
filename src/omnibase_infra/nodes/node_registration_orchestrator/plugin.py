@@ -64,7 +64,10 @@ import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
+
+from omnibase_infra.runtime.models.model_postgres_pool_config import (
+    ModelPostgresPoolConfig,
+)
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -278,25 +281,13 @@ class PluginRegistration:
                 )
 
             # Validate DSN scheme and database name before pool creation
-            parsed_dsn = urlparse(postgres_dsn)
-            if parsed_dsn.scheme not in ("postgresql", "postgres"):
+            try:
+                ModelPostgresPoolConfig.validate_dsn(postgres_dsn)
+            except ValueError as exc:
                 raise ContainerWiringError(
-                    f"OMNIBASE_INFRA_DB_URL has invalid scheme "
-                    f"'{parsed_dsn.scheme}', expected 'postgresql' or 'postgres'",
+                    str(exc),
                     context=pool_error_context,
-                )
-            dsn_database = (parsed_dsn.path or "").lstrip("/")
-            if not dsn_database:
-                raise ContainerWiringError(
-                    "OMNIBASE_INFRA_DB_URL is missing a database name",
-                    context=pool_error_context,
-                )
-            if "/" in dsn_database:
-                raise ContainerWiringError(
-                    f"Invalid database name '{dsn_database}' extracted from DSN: "
-                    "sub-paths are not valid PostgreSQL database names",
-                    context=pool_error_context,
-                )
+                ) from exc
 
             self._pool = await asyncpg.create_pool(
                 postgres_dsn,

@@ -106,6 +106,50 @@ class ModelPostgresPoolConfig(BaseModel):
             max_size=max_size,
         )
 
+    @staticmethod
+    def validate_dsn(dsn: str) -> str:
+        """Validate a PostgreSQL DSN string (scheme, database name, sub-paths).
+
+        Use this to validate a DSN without creating a full config object.
+        Callers that need a different exception type should catch ``ValueError``
+        and re-raise.
+
+        Args:
+            dsn: PostgreSQL connection string to validate.
+
+        Returns:
+            The validated DSN string (unchanged).
+
+        Raises:
+            ValueError: If the DSN has an invalid scheme, is missing a database
+                name, or contains sub-paths in the database name.
+        """
+        # Security: error messages are sanitised to prevent credential leaks.
+        parsed = urlparse(dsn)
+
+        if parsed.scheme not in ("postgresql", "postgres"):
+            msg = (
+                f"Invalid DSN scheme '{parsed.scheme}', "
+                f"expected 'postgresql' or 'postgres'"
+            )
+            raise ValueError(msg)
+
+        database = (parsed.path or "").lstrip("/")
+        if not database:
+            safe_dsn = (
+                f"{parsed.scheme}://{parsed.hostname or '?'}:{parsed.port or '?'}/???"
+            )
+            msg = f"DSN is missing a database name: {safe_dsn}"
+            raise ValueError(msg)
+        if "/" in database:
+            msg = (
+                f"Invalid database name '{database}' extracted from DSN: "
+                "sub-paths are not valid PostgreSQL database names"
+            )
+            raise ValueError(msg)
+
+        return dsn
+
     @classmethod
     def from_dsn(
         cls,
@@ -125,32 +169,10 @@ class ModelPostgresPoolConfig(BaseModel):
         Raises:
             ValueError: If the DSN is malformed or missing required parts.
         """
-        # Security: all error messages below are sanitised to prevent credential leaks.
-        # - Invalid scheme: shows only scheme prefix (no host/user/password)
-        # - Missing database: shows scheme://host:port/??? (password omitted)
+        cls.validate_dsn(dsn)
+
         parsed = urlparse(dsn)
-
-        if parsed.scheme not in ("postgresql", "postgres"):
-            msg = (
-                f"Invalid DSN scheme '{parsed.scheme}', "
-                f"expected 'postgresql' or 'postgres'"
-            )
-            raise ValueError(msg)
-
         database = (parsed.path or "").lstrip("/")
-        if not database:
-            # Sanitise DSN to avoid leaking credentials in error messages
-            safe_dsn = (
-                f"{parsed.scheme}://{parsed.hostname or '?'}:{parsed.port or '?'}/???"
-            )
-            msg = f"DSN is missing a database name: {safe_dsn}"
-            raise ValueError(msg)
-        if "/" in database:
-            msg = (
-                f"Invalid database name '{database}' extracted from DSN: "
-                "sub-paths are not valid PostgreSQL database names"
-            )
-            raise ValueError(msg)
 
         # DSN query params (sslmode, options, connect_timeout, etc.) are not
         # reflected in the returned config fields. Log a warning so operators

@@ -9,7 +9,10 @@ Centralises environment-resolution functions used by multiple subcommands
 from __future__ import annotations
 
 import os
-from urllib.parse import urlparse
+
+from omnibase_infra.runtime.models.model_postgres_pool_config import (
+    ModelPostgresPoolConfig,
+)
 
 
 def get_broker() -> str:
@@ -41,10 +44,10 @@ def get_postgres_dsn() -> str:
     """Get PostgreSQL DSN from OMNIBASE_INFRA_DB_URL.
 
     Raises:
-        ValueError: If OMNIBASE_INFRA_DB_URL is not set (fail-fast).
+        ValueError: If OMNIBASE_INFRA_DB_URL is not set or invalid.
 
     Returns:
-        PostgreSQL connection string.
+        Validated PostgreSQL connection string.
     """
     db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
     if not db_url:
@@ -55,29 +58,4 @@ def get_postgres_dsn() -> str:
         )
         raise ValueError(msg)
 
-    # Validate DSN scheme to catch obvious misconfigurations early
-    if not db_url.startswith(("postgresql://", "postgres://")):
-        msg = (
-            f"OMNIBASE_INFRA_DB_URL has invalid scheme. "
-            f"Expected 'postgresql://' or 'postgres://', "
-            f"got: {urlparse(db_url).scheme or '(none)'}://"
-        )
-        raise ValueError(msg)
-
-    # Validate DSN contains a database name (path component)
-    parsed = urlparse(db_url)
-    database = (parsed.path or "").lstrip("/")
-    if not database:
-        msg = (
-            "OMNIBASE_INFRA_DB_URL is missing a database name. "
-            "Example: postgresql://user:pass@host:5432/omnibase_infra"
-        )
-        raise ValueError(msg)
-    if "/" in database:
-        msg = (
-            f"Invalid database name '{database}' extracted from DSN: "
-            "sub-paths are not valid PostgreSQL database names"
-        )
-        raise ValueError(msg)
-
-    return db_url
+    return ModelPostgresPoolConfig.validate_dsn(db_url)
