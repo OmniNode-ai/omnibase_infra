@@ -80,7 +80,7 @@ def _get_postgres_dsn() -> str | None:
     if not host or not password or not database:
         return None
 
-    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}"
+    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{quote_plus(database)}"
 
 
 # Check PostgreSQL availability at module import

@@ -327,13 +327,14 @@ class PluginRegistration:
                     context=context,
                 )
             resources_created.append("postgres_pool")
+            _from_url = bool(os.getenv("OMNIBASE_INFRA_DB_URL"))
             logger.info(
                 "PostgreSQL pool created (correlation_id=%s)",
                 correlation_id,
                 extra={
-                    "host": postgres_host or "(from OMNIBASE_INFRA_DB_URL)",
-                    "port": postgres_port or "(from OMNIBASE_INFRA_DB_URL)",
-                    "database": postgres_database or "(from OMNIBASE_INFRA_DB_URL)",
+                    "host": "(from OMNIBASE_INFRA_DB_URL)" if _from_url else postgres_host,
+                    "port": "(from OMNIBASE_INFRA_DB_URL)" if _from_url else postgres_port,
+                    "database": "(from OMNIBASE_INFRA_DB_URL)" if _from_url else postgres_database,
                 },
             )
 

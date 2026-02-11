@@ -196,7 +196,7 @@ if _OMNIBASE_INFRA_DB_URL:
     _parsed = _urlparse(_OMNIBASE_INFRA_DB_URL)
     POSTGRES_HOST: str | None = _parsed.hostname
     POSTGRES_PORT = _parsed.port or DEFAULT_POSTGRES_PORT
-    POSTGRES_DATABASE = (_parsed.path or "").lstrip("/") or ""
+    POSTGRES_DATABASE = unquote((_parsed.path or "").lstrip("/")) or ""
     POSTGRES_USER = unquote(_parsed.username or "postgres")
     POSTGRES_PASSWORD: str | None = unquote(_parsed.password) if _parsed.password else None
 else:
@@ -317,13 +317,14 @@ def _build_postgres_dsn() -> str:
             "Set POSTGRES_PASSWORD environment variable to enable E2E tests."
         )
 
-    # URL-encode credentials to handle special characters (@, :, /, %, etc.)
+    # URL-encode credentials and database to handle special characters (@, :, /, %, etc.)
     encoded_user = quote_plus(POSTGRES_USER, safe="")
     encoded_password = quote_plus(POSTGRES_PASSWORD, safe="")
+    encoded_database = quote_plus(POSTGRES_DATABASE, safe="")
 
     return (
         f"postgresql://{encoded_user}:{encoded_password}"
-        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"
+        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{encoded_database}"
     )
 
 

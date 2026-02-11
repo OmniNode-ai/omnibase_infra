@@ -252,7 +252,7 @@ class PostgresConfig:
             return cls(
                 host=parsed.hostname or None,
                 port=parsed.port or DEFAULT_POSTGRES_PORT,
-                database=(parsed.path or "").lstrip("/") or default_database,
+                database=unquote((parsed.path or "").lstrip("/")) or default_database,
                 user=unquote(parsed.username or default_user),
                 password=unquote(parsed.password) if parsed.password else None,
             )

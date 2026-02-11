@@ -100,7 +100,7 @@ class ModelPostgresPoolConfig(BaseModel):
             msg = f"Invalid OMNIBASE_INFRA_DB_URL: {exc}"
             raise ValueError(msg) from exc
 
-        database = parsed.path.lstrip("/") if parsed.path else ""
+        database = unquote(parsed.path.lstrip("/")) if parsed.path else ""
         if not database:
             msg = (
                 "OMNIBASE_INFRA_DB_URL is missing the database name "

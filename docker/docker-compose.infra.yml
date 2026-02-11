@@ -1,6 +1,8 @@
 # docker-compose.infra.yml
 # ONEX Infrastructure & Runtime Services
 #
+# Requires: Docker Compose v2.20+ (nested variable substitution in defaults).
+#
 # This compose file provides the complete ONEX platform: infrastructure services
 # (PostgreSQL, Redpanda, Valkey) and runtime services (kernel, effects, workers).
 #

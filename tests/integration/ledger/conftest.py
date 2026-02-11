@@ -59,7 +59,7 @@ def _get_postgres_dsn() -> str | None:
         return None  # Database not configured
     user = os.getenv("POSTGRES_USER", "postgres")
 
-    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}"
+    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{quote_plus(database)}"
 
 
 @pytest.fixture
