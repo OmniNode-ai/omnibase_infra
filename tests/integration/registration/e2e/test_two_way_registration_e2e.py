@@ -18,12 +18,12 @@ Test Suites:
 
 Infrastructure Requirements:
     Tests require ALL infrastructure services to be available:
-    - PostgreSQL: POSTGRES_HOST:5436 (database: omninode_bridge)
+    - PostgreSQL: OMNIBASE_INFRA_DB_URL (database: omnibase_infra)
     - Consul: CONSUL_HOST:28500
     - Kafka/Redpanda: KAFKA_BOOTSTRAP_SERVERS
 
     Environment variables required:
-    - POSTGRES_HOST, POSTGRES_PASSWORD (for PostgreSQL)
+    - OMNIBASE_INFRA_DB_URL (preferred) or POSTGRES_HOST, POSTGRES_PASSWORD (for PostgreSQL)
     - CONSUL_HOST (for Consul)
     - KAFKA_BOOTSTRAP_SERVERS (for Kafka)
 

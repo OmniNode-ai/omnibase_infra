@@ -10,7 +10,7 @@
 #   list of database names to create in addition to the default POSTGRES_DB.
 #
 # Example:
-#   POSTGRES_MULTIPLE_DATABASES="omninode_bridge,infisical_db"
+#   POSTGRES_MULTIPLE_DATABASES="omnibase_infra,infisical_db"
 #
 # Note: The default database (POSTGRES_DB) is created automatically by the
 # official PostgreSQL image, so it doesn't need to be in this list.

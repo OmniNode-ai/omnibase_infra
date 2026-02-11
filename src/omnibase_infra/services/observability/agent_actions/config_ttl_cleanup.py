@@ -60,7 +60,7 @@ class ConfigTTLCleanup(BaseSettings):
 
     Example:
         >>> config = ConfigTTLCleanup(
-        ...     postgres_dsn="postgresql://postgres:secret@localhost:5432/omninode_bridge",
+        ...     postgres_dsn="postgresql://postgres:secret@localhost:5432/omnibase_infra",
         ...     retention_days=30,
         ...     batch_size=1000,
         ...     interval_seconds=600,

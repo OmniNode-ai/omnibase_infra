@@ -296,7 +296,7 @@ For CI/CD pipelines, use this exit-code-based validation:
 #!/bin/bash
 # validate_migrations.sh - Exit 0 if all migrations applied, non-zero otherwise
 
-result=$(psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -t -c "
+result=$(psql "$OMNIBASE_INFRA_DB_URL" -t -c "
 SELECT COUNT(*) FROM (
     SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'registration_projections')
     UNION ALL
