@@ -82,7 +82,11 @@ class ModelAuthGateRequest(BaseModel):
     )
 
     @field_validator(
-        "target_path", "target_repo", "emergency_override_reason", mode="before"
+        "tool_name",
+        "target_path",
+        "target_repo",
+        "emergency_override_reason",
+        mode="before",
     )
     @classmethod
     def _strip_control_characters(cls, v: str) -> str:

@@ -1346,6 +1346,11 @@ class TestModelAuthGateRequestSanitization:
         )
         assert req.emergency_override_reason == "Hotfixforbug"
 
+    def test_control_chars_stripped_from_tool_name(self) -> None:
+        """Control characters are stripped from tool_name at model boundary."""
+        req = ModelAuthGateRequest(tool_name="Ed\x1bit")
+        assert req.tool_name == "Edit"
+
     def test_clean_values_unchanged(self) -> None:
         """Clean values pass through unchanged."""
         req = ModelAuthGateRequest(
