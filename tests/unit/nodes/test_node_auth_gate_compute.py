@@ -1063,6 +1063,18 @@ class TestHandlerExecute:
         with pytest.raises(ValueError, match="Unsupported operation"):
             await handler.execute(envelope)
 
+    @pytest.mark.anyio
+    async def test_execute_invalid_payload_wraps_validation_error(
+        self, handler: HandlerAuthGate
+    ) -> None:
+        """execute() wraps ValidationError as ValueError for malformed payloads."""
+        envelope: dict[str, object] = {
+            "operation": "auth_gate.evaluate",
+            "payload": {"tool_name": 123},  # wrong type triggers ValidationError
+        }
+        with pytest.raises(ValueError, match="validation error"):
+            await handler.execute(envelope)
+
 
 # =============================================================================
 # TestGlobToRegexEdgeCases
@@ -1155,6 +1167,26 @@ class TestGlobToRegexEdgeCases:
         """Paths exceeding PATH_MAX (4096) characters are rejected."""
         long_path = "a/" * 3000  # 6000 characters, well over 4096
         assert not handler._path_matches_globs(long_path, ("**",))
+
+    def test_deeply_nested_plan_file_rejected_by_whitelist_depth(
+        self, handler: HandlerAuthGate
+    ) -> None:
+        """Paths with >10 '/' separators are rejected even if they match a whitelist pattern.
+
+        _MAX_WHITELIST_DEPTH (10) prevents abuse via deeply nested paths
+        that exploit the permissive fnmatch * (which matches across /).
+        """
+        # 12 slashes — exceeds _MAX_WHITELIST_DEPTH=10
+        deep_path = "a/b/c/d/e/f/g/h/i/j/k/l/evil.plan.md"
+        assert not handler._is_whitelisted_path(deep_path)
+
+    def test_plan_file_within_whitelist_depth_allowed(
+        self, handler: HandlerAuthGate
+    ) -> None:
+        """Paths within depth limit that match whitelist ARE whitelisted."""
+        # 3 slashes — well within _MAX_WHITELIST_DEPTH=10
+        shallow_path = "workspace/feature/spec.plan.md"
+        assert handler._is_whitelisted_path(shallow_path)
 
 
 # =============================================================================
