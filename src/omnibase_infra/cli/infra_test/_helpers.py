@@ -73,5 +73,11 @@ def get_postgres_dsn() -> str:
             "Example: postgresql://user:pass@host:5432/omnibase_infra"
         )
         raise ValueError(msg)
+    if "/" in database:
+        msg = (
+            f"Invalid database name '{database}' extracted from DSN: "
+            "sub-paths are not valid PostgreSQL database names"
+        )
+        raise ValueError(msg)
 
     return db_url

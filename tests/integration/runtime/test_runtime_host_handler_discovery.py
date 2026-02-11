@@ -30,9 +30,7 @@ Note:
 
 from __future__ import annotations
 
-from collections.abc import Generator
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -230,20 +228,6 @@ class TestRuntimeHostProcessWithContractPaths:
     These tests verify that RuntimeHostProcess correctly uses ContractHandlerDiscovery
     to auto-discover handlers from contract_paths during start().
     """
-
-    @pytest.fixture(autouse=True)
-    def _skip_materialize_dependencies(self) -> Generator[None, None, None]:
-        """Skip dependency materialization which requires OMNIBASE_INFRA_DB_URL.
-
-        These tests exercise handler discovery, not infrastructure
-        dependency materialization (tested in test_dependency_materializer.py).
-        """
-        with patch(
-            "omnibase_infra.runtime.service_runtime_host_process"
-            ".RuntimeHostProcess._materialize_dependencies",
-            new_callable=AsyncMock,
-        ):
-            yield
 
     @pytest.mark.asyncio
     async def test_starts_with_contract_paths(
@@ -450,20 +434,6 @@ class TestRuntimeHostProcessGracefulDegradation:
     errors gracefully, registering valid handlers even when some fail.
     """
 
-    @pytest.fixture(autouse=True)
-    def _skip_materialize_dependencies(self) -> Generator[None, None, None]:
-        """Skip dependency materialization which requires OMNIBASE_INFRA_DB_URL.
-
-        These tests exercise handler discovery, not infrastructure
-        dependency materialization (tested in test_dependency_materializer.py).
-        """
-        with patch(
-            "omnibase_infra.runtime.service_runtime_host_process"
-            ".RuntimeHostProcess._materialize_dependencies",
-            new_callable=AsyncMock,
-        ):
-            yield
-
     @pytest.mark.asyncio
     async def test_graceful_degradation_with_mixed_contracts(
         self,
@@ -610,20 +580,6 @@ class TestRuntimeHostProcessLifecycle:
     These tests verify the complete start/stop lifecycle when using
     contract-based handler discovery.
     """
-
-    @pytest.fixture(autouse=True)
-    def _skip_materialize_dependencies(self) -> Generator[None, None, None]:
-        """Skip dependency materialization which requires OMNIBASE_INFRA_DB_URL.
-
-        These tests exercise handler discovery, not infrastructure
-        dependency materialization (tested in test_dependency_materializer.py).
-        """
-        with patch(
-            "omnibase_infra.runtime.service_runtime_host_process"
-            ".RuntimeHostProcess._materialize_dependencies",
-            new_callable=AsyncMock,
-        ):
-            yield
 
     @pytest.mark.asyncio
     async def test_full_lifecycle_with_discovered_handlers(
@@ -799,20 +755,6 @@ class TestRuntimeHostProcessDiscoveryLogging:
     These tests verify that appropriate logs are generated during
     the handler discovery process.
     """
-
-    @pytest.fixture(autouse=True)
-    def _skip_materialize_dependencies(self) -> Generator[None, None, None]:
-        """Skip dependency materialization which requires OMNIBASE_INFRA_DB_URL.
-
-        These tests exercise handler discovery, not infrastructure
-        dependency materialization (tested in test_dependency_materializer.py).
-        """
-        with patch(
-            "omnibase_infra.runtime.service_runtime_host_process"
-            ".RuntimeHostProcess._materialize_dependencies",
-            new_callable=AsyncMock,
-        ):
-            yield
 
     @pytest.mark.asyncio
     async def test_discovery_logs_registered_handlers(

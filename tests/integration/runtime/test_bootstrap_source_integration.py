@@ -26,7 +26,6 @@ Note:
 from __future__ import annotations
 
 import logging
-from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -146,20 +145,6 @@ class TestBootstrapSourceRuntimeIntegration:
     These tests verify that RuntimeHostProcess correctly uses
     HandlerBootstrapSource during the startup bootstrap process.
     """
-
-    @pytest.fixture(autouse=True)
-    def _skip_materialize_dependencies(self) -> Generator[None, None, None]:
-        """Skip dependency materialization which requires OMNIBASE_INFRA_DB_URL.
-
-        These tests exercise bootstrap handler registration, not infrastructure
-        dependency materialization (tested in test_dependency_materializer.py).
-        """
-        with patch(
-            "omnibase_infra.runtime.service_runtime_host_process"
-            ".RuntimeHostProcess._materialize_dependencies",
-            new_callable=AsyncMock,
-        ):
-            yield
 
     @pytest.mark.asyncio
     async def test_bootstrap_handlers_registered_on_start(self) -> None:
@@ -386,20 +371,6 @@ class TestBootstrapSourceErrorHandling:
     These tests verify that errors during bootstrap handler registration
     are handled gracefully without crashing the runtime.
     """
-
-    @pytest.fixture(autouse=True)
-    def _skip_materialize_dependencies(self) -> Generator[None, None, None]:
-        """Skip dependency materialization which requires OMNIBASE_INFRA_DB_URL.
-
-        These tests exercise bootstrap handler error handling, not infrastructure
-        dependency materialization (tested in test_dependency_materializer.py).
-        """
-        with patch(
-            "omnibase_infra.runtime.service_runtime_host_process"
-            ".RuntimeHostProcess._materialize_dependencies",
-            new_callable=AsyncMock,
-        ):
-            yield
 
     @pytest.mark.asyncio
     async def test_single_handler_import_error_does_not_crash(

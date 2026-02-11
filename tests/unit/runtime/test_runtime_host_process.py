@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -3204,20 +3204,6 @@ class TestRuntimeIdentityMapping:
 
 class TestRuntimeHostProcessContractConfig:
     """Tests for contract config loading integration (OMN-1519)."""
-
-    @pytest.fixture(autouse=True)
-    def _skip_materialize_dependencies(self) -> Generator[None, None, None]:
-        """Skip dependency materialization which requires OMNIBASE_INFRA_DB_URL.
-
-        These tests exercise contract config loading, not infrastructure
-        dependency materialization (tested in test_dependency_materializer.py).
-        """
-        with patch(
-            "omnibase_infra.runtime.service_runtime_host_process"
-            ".RuntimeHostProcess._materialize_dependencies",
-            new_callable=AsyncMock,
-        ):
-            yield
 
     @pytest.mark.asyncio
     async def test_contract_config_is_none_before_start(self) -> None:

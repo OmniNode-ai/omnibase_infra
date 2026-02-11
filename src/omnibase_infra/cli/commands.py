@@ -238,6 +238,12 @@ def _get_db_dsn() -> str:
             f"(correlation_id={correlation_id}). "
             "Example: postgresql://user:pass@host:5432/omnibase_infra"
         )
+    if "/" in database:
+        raise click.ClickException(
+            f"Invalid database name '{database}' extracted from DSN: "
+            f"sub-paths are not valid PostgreSQL database names "
+            f"(correlation_id={correlation_id})"
+        )
 
     return db_url
 

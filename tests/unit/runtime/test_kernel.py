@@ -880,19 +880,6 @@ class TestIntegration:
         monkeypatch.setenv("ONEX_EVENT_BUS_TYPE", "inmemory")
         monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
 
-    @pytest.fixture(autouse=True)
-    def _skip_materialize_dependencies(self) -> Generator[None, None, None]:
-        """Skip dependency materialization which requires OMNIBASE_INFRA_DB_URL.
-
-        These tests exercise the bootstrap/kernel flow, not infrastructure
-        dependency materialization (tested in test_dependency_materializer.py).
-        """
-        with patch(
-            "omnibase_infra.runtime.service_runtime_host_process.RuntimeHostProcess._materialize_dependencies",
-            new_callable=AsyncMock,
-        ):
-            yield
-
     async def test_full_bootstrap_with_real_event_bus(
         self,
         mock_wire_infrastructure: MagicMock,

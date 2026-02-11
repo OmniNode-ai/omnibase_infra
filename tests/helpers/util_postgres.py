@@ -281,10 +281,22 @@ class PostgresConfig:
                     db_url_var,
                     parsed.path,
                 )
+            if "/" in database:
+                logger.warning(
+                    "%s contains sub-path in database name '%s'. "
+                    "Sub-paths are not valid PostgreSQL database names. "
+                    "The resulting PostgresConfig.is_configured will be False "
+                    "and all tests that require a database will be skipped.",
+                    db_url_var,
+                    database,
+                )
+                database = ""
             return cls(
                 host=parsed.hostname or "localhost",
                 port=parsed.port or DEFAULT_POSTGRES_PORT,
                 database=database,
+                # Note: empty-string username (e.g., postgresql://:pass@host/db)
+                # is falsy, correctly falling back to default_user.
                 user=unquote(parsed.username) if parsed.username else default_user,
                 password=unquote(parsed.password) if parsed.password else None,
             )

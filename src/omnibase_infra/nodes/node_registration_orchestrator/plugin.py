@@ -291,6 +291,12 @@ class PluginRegistration:
                     "OMNIBASE_INFRA_DB_URL is missing a database name",
                     context=pool_error_context,
                 )
+            if "/" in dsn_database:
+                raise ContainerWiringError(
+                    f"Invalid database name '{dsn_database}' extracted from DSN: "
+                    "sub-paths are not valid PostgreSQL database names",
+                    context=pool_error_context,
+                )
 
             self._pool = await asyncpg.create_pool(
                 postgres_dsn,

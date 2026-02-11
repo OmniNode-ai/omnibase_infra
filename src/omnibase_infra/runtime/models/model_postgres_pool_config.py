@@ -35,6 +35,7 @@ class ModelPostgresPoolConfig(BaseModel):
         description="PostgreSQL password (never logged or included in repr)",
     )
     database: str = Field(
+        ...,
         description=(
             "PostgreSQL database name (required — no default). "
             "Use from_env() or from_dsn() factories which always provide this."
@@ -144,16 +145,23 @@ class ModelPostgresPoolConfig(BaseModel):
             )
             msg = f"DSN is missing a database name: {safe_dsn}"
             raise ValueError(msg)
+        if "/" in database:
+            msg = (
+                f"Invalid database name '{database}' extracted from DSN: "
+                "sub-paths are not valid PostgreSQL database names"
+            )
+            raise ValueError(msg)
 
-        # DSN query params (sslmode, options, connect_timeout, etc.) are
-        # currently discarded during parsing. Log a warning when this happens
-        # so operators are aware that params like sslmode=require will not
-        # take effect via this config path.
+        # DSN query params (sslmode, options, connect_timeout, etc.) are not
+        # reflected in the returned config fields. Log a warning so operators
+        # are aware of how parameters are (or are not) preserved.
         if parsed.query:
             logger.warning(
-                "DSN query parameters detected but will be discarded: %s. "
-                "Parameters like sslmode are not yet forwarded to asyncpg. "
-                "To enforce SSL, configure it at the asyncpg pool level.",
+                "DSN query parameters detected but will not be reflected in "
+                "config fields: %s. If the original DSN is passed directly to "
+                "asyncpg, parameters will be preserved; if the DSN is "
+                "reconstructed from config fields, parameters will be lost. "
+                "To enforce SSL explicitly, configure it at the asyncpg pool level.",
                 parsed.query,
             )
         #

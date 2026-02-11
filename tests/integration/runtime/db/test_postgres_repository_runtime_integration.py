@@ -129,6 +129,12 @@ def get_dsn() -> str:
         if not database:
             msg = "OMNIBASE_INFRA_DB_URL is missing a database name"
             raise ValueError(msg)
+        if "/" in database:
+            msg = (
+                f"Invalid database name '{database}' extracted from DSN: "
+                "sub-paths are not valid PostgreSQL database names"
+            )
+            raise ValueError(msg)
         return db_url
 
     is_configured, error_msg = _check_postgres_env_vars()

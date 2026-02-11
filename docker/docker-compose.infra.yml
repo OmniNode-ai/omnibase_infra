@@ -48,6 +48,9 @@
 #     - runtime-effects: 8086 [runtime profile]
 #     - agent-actions-consumer: 8087 [runtime profile]
 name: omnibase-infra
+# NOTE: This file uses nested variable expansion (${VAR:-${OTHER:-default}})
+# which requires Docker Compose v2.20+. Older versions will silently produce
+# malformed values. Verify your version: docker compose version
 # ==========================================================================
 # Shared Configuration Templates (YAML Anchors)
 # ==========================================================================
@@ -436,7 +439,7 @@ services:
       # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
       # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
       # RECOMMENDED: Set OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN explicitly in .env instead.
-      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: ${OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for agent-actions DSN}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/omnibase_infra}
+      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: ${OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for agent-actions DSN}@postgres:5432/omnibase_infra}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_SIZE: ${AGENT_ACTIONS_BATCH_SIZE:-100}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_TIMEOUT_MS: ${AGENT_ACTIONS_BATCH_TIMEOUT_MS:-1000}
       OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_PORT: "8087"

@@ -140,6 +140,11 @@ def _get_database_dsn() -> str | None:
                 "OMNIBASE_INFRA_DB_URL is missing a database name. "
                 "Example: postgresql://user:pass@host:5432/omnibase_infra"
             )
+        if "/" in database:
+            raise ValueError(
+                f"Invalid database name '{database}' extracted from DSN: "
+                "sub-paths are not valid PostgreSQL database names"
+            )
         return db_url
 
     host = os.getenv("POSTGRES_HOST", "localhost")

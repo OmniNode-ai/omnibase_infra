@@ -51,6 +51,8 @@ services:
     container_name: omnibase-infra-postgres
     environment:
       POSTGRES_USER: postgres
+      # NOTE: Unlike docker-compose.infra.yml which fails fast when POSTGRES_PASSWORD
+      # is unset (:?), the e2e compose uses a default test password for CI convenience.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test-password}
       POSTGRES_DB: omnibase_infra
       POSTGRES_MULTIPLE_DATABASES: "infisical_db"

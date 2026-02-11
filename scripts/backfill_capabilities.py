@@ -259,6 +259,12 @@ def _get_validated_dsn() -> str:
             "Example: postgresql://postgres:pass@host:5432/omnibase_infra",
             error_code=ErrorCode.CFG_MISSING_DB_NAME,
         )
+    if "/" in database:
+        raise ConfigurationError(
+            f"Invalid database name '{database}' extracted from DSN: "
+            "sub-paths are not valid PostgreSQL database names",
+            error_code=ErrorCode.CFG_MISSING_DB_NAME,
+        )
 
     # Safety check: warn if database name doesn't match expected target
     if database != "omnibase_infra":
