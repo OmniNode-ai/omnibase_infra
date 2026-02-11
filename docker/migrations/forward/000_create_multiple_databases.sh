@@ -118,7 +118,7 @@ create_role() {
                 RAISE NOTICE 'Created role: $role_name';
             ELSE
                 -- Update password on re-run to ensure it stays in sync with env
-                ALTER ROLE "$role_name" WITH PASSWORD '$escaped_password';
+                ALTER ROLE "$role_name" WITH LOGIN PASSWORD '$escaped_password';
                 RAISE NOTICE 'Role $role_name already exists, password updated';
             END IF;
         END
@@ -273,30 +273,32 @@ echo "============================================="
 echo "Phase 4: Revoking cross-database access"
 echo "============================================="
 
-# First, revoke PUBLIC connect on all managed databases (default allows everyone)
+# Collect ALL managed databases for comprehensive PUBLIC revocation.
+# This covers: service DBs, infrastructure DBs, and the default POSTGRES_DB.
+ALL_MANAGED_DBS=()
 for entry in "${SERVICE_DB_MAP[@]}"; do
     IFS=':' read -r db _ _ <<< "$entry"
-    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL || {
-        echo "  WARNING: Failed to revoke PUBLIC connect on $db" >&2
-    }
-        REVOKE CONNECT ON DATABASE "$db" FROM PUBLIC;
-EOSQL
+    ALL_MANAGED_DBS+=("$db")
 done
 for db in "${INFRA_DATABASES[@]}"; do
-    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL || {
-        echo "  WARNING: Failed to revoke PUBLIC connect on $db" >&2
-    }
+    ALL_MANAGED_DBS+=("$db")
+done
+# Include POSTGRES_DB if not already in the list (avoids double-revoke, though REVOKE is idempotent)
+_pg_db_found=0
+for db in "${ALL_MANAGED_DBS[@]}"; do
+    if [ "$db" = "$POSTGRES_DB" ]; then _pg_db_found=1; break; fi
+done
+if [ "$_pg_db_found" -eq 0 ]; then
+    ALL_MANAGED_DBS+=("$POSTGRES_DB")
+fi
+
+# Revoke PUBLIC connect on every managed database (default PostgreSQL allows everyone).
+# Superusers bypass all permission checks, so this is safe for the postgres user.
+for db in "${ALL_MANAGED_DBS[@]}"; do
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL || { echo "  WARNING: Failed to revoke PUBLIC connect on $db" >&2; }
         REVOKE CONNECT ON DATABASE "$db" FROM PUBLIC;
 EOSQL
 done
-
-# Also revoke PUBLIC connect on the default database.
-# Superusers bypass all permission checks, so this is safe for the postgres user.
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL || {
-    echo "  WARNING: Failed to revoke PUBLIC connect on $POSTGRES_DB" >&2
-}
-    REVOKE CONNECT ON DATABASE "$POSTGRES_DB" FROM PUBLIC;
-EOSQL
 
 # Then revoke cross-DB access per role
 for entry in "${SERVICE_DB_MAP[@]}"; do
