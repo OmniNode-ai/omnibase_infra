@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+# Ticket: OMN-2143
+name: "node_checkpoint_validate_compute"
+node_type: "COMPUTE_GENERIC"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+description: >
+  COMPUTE node that performs pure structural validation on checkpoint data. Verifies schema version, required fields, path normalization, phase-payload consistency, and commit SHA format.  No filesystem I/O.
+
+input_model:
+  name: "ModelCheckpointValidateInput"
+  module: "omnibase_infra.nodes.node_checkpoint_validate_compute.models.model_checkpoint_validate_input"
+  description: "Checkpoint data to validate."
+output_model:
+  name: "ModelCheckpointValidateOutput"
+  module: "omnibase_infra.nodes.node_checkpoint_validate_compute.models.model_checkpoint_validate_output"
+  description: "Validation result with errors and warnings."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "validate_checkpoint"
+      handler:
+        name: "HandlerCheckpointValidate"
+        module: "omnibase_infra.nodes.node_checkpoint_validate_compute.handlers.handler_checkpoint_validate"
+capabilities:
+  - "checkpoint.validate"

@@ -109,11 +109,14 @@ class TestInfraValidatorConstants:
           - Callable[[ModelSessionIndex], ModelSessionIndex] transform parameter
         - 122 (2026-02-11): OMN-2146 set_statement_timeout helper (+1 union)
           - timeout_ms: int | float parameter type
+        - 124 (2026-02-11): OMN-2143 checkpoint nodes (+2 unions)
+          - PhasePayload: 5-type discriminated Union in ModelCheckpoint
+          - register_handler(): Write | Read | List handler type param
 
-        Current: 122 (as of OMN-2146). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
+        Current: 124 (as of OMN-2143 + OMN-2146). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 122, (
-            "INFRA_MAX_UNIONS should be 122 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 124, (
+            "INFRA_MAX_UNIONS should be 124 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:
