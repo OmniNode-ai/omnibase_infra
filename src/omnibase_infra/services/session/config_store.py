@@ -39,7 +39,7 @@ class ConfigSessionStorage(BaseSettings):
     )
     postgres_database: str = Field(
         default="",
-        description="PostgreSQL database name (required -- set via env var or OMNIBASE_INFRA_DB_URL)",
+        description="PostgreSQL database name (required -- set via OMNIBASE_INFRA_SESSION_STORAGE_POSTGRES_DATABASE)",
     )
     postgres_user: str = Field(
         default="postgres",
@@ -85,8 +85,7 @@ class ConfigSessionStorage(BaseSettings):
         if not self.postgres_database:
             raise ValueError(
                 "postgres_database must not be empty. "
-                "Set OMNIBASE_INFRA_DB_URL or "
-                "OMNIBASE_INFRA_SESSION_STORAGE_POSTGRES_DATABASE."
+                "Set OMNIBASE_INFRA_SESSION_STORAGE_POSTGRES_DATABASE."
             )
         return self
 

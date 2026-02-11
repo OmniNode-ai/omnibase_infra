@@ -334,8 +334,9 @@ class ModelReplayConfig(BaseModel):
     # Time-range filtering (OMN-1032)
     filter_start_time: datetime | None = None
     filter_end_time: datetime | None = None
-    # PostgreSQL tracking configuration (OMN-1032)
+    # PostgreSQL tracking configuration (OMN-1032, OMN-2146)
     enable_tracking: bool = False
+    db_url: str | None = None
     postgres_host: str | None = None
     postgres_port: int = 5432
     postgres_database: str = ""
@@ -547,6 +548,7 @@ class ModelReplayConfig(BaseModel):
             filter_start_time=filter_start_time,
             filter_end_time=filter_end_time,
             enable_tracking=enable_tracking,
+            db_url=db_url or None,
             postgres_host=postgres_host,
             postgres_port=postgres_port,
             postgres_database=postgres_database,
@@ -558,12 +560,18 @@ class ModelReplayConfig(BaseModel):
     def build_tracking_dsn(self) -> str | None:
         """Build PostgreSQL DSN from config fields.
 
+        Resolution order:
+            1. ``db_url`` (full DSN from OMNIBASE_INFRA_DB_URL) -- preferred
+            2. Individual ``postgres_*`` fields assembled into a DSN
+
         Returns:
             DSN string if all required fields are present and tracking is enabled,
             None otherwise.
         """
         if not self.enable_tracking:
             return None
+        if self.db_url:
+            return self.db_url
         if not all([self.postgres_host, self.postgres_user, self.postgres_password]):
             return None
         return (

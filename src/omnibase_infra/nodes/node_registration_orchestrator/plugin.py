@@ -221,20 +221,21 @@ class PluginRegistration:
     def should_activate(self, config: ModelDomainPluginConfig) -> bool:
         """Check if Registration should activate based on environment.
 
-        Returns True if POSTGRES_HOST is set, indicating PostgreSQL
-        is configured for registration support.
+        Returns True if OMNIBASE_INFRA_DB_URL or POSTGRES_HOST is set,
+        indicating PostgreSQL is configured for registration support.
 
         Args:
             config: Plugin configuration (not used for this check).
 
         Returns:
-            True if POSTGRES_HOST environment variable is set.
+            True if OMNIBASE_INFRA_DB_URL or POSTGRES_HOST environment variable is set.
         """
+        db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
         postgres_host = os.getenv("POSTGRES_HOST")
-        if not postgres_host:
+        if not db_url and not postgres_host:
             logger.debug(
-                "Registration plugin inactive: POSTGRES_HOST not set "
-                "(correlation_id=%s)",
+                "Registration plugin inactive: neither OMNIBASE_INFRA_DB_URL "
+                "nor POSTGRES_HOST is set (correlation_id=%s)",
                 config.correlation_id,
             )
             return False
@@ -270,6 +271,17 @@ class PluginRegistration:
             postgres_host = os.getenv("POSTGRES_HOST")
             postgres_database = os.getenv("POSTGRES_DATABASE", "")
             if not postgres_dsn:
+                if not postgres_host:
+                    context = ModelInfraErrorContext.with_correlation(
+                        correlation_id=correlation_id,
+                        transport_type=EnumInfraTransportType.DATABASE,
+                        operation="create_postgres_pool",
+                    )
+                    raise ContainerWiringError(
+                        "No database configured. "
+                        "Set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST.",
+                        context=context,
+                    )
                 if not postgres_database:
                     context = ModelInfraErrorContext.with_correlation(
                         correlation_id=correlation_id,

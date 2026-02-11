@@ -63,6 +63,17 @@ class ModelPostgresPoolConfig(BaseModel):
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="after")
+    def _warn_empty_database(self) -> ModelPostgresPoolConfig:
+        """Warn when database is empty (likely misconfiguration)."""
+        if not self.database:
+            logger.warning(
+                "ModelPostgresPoolConfig created with empty database. "
+                "This will fail at connection time. "
+                "Use from_env() or from_db_url() for validated construction."
+            )
+        return self
+
     @classmethod
     def from_db_url(
         cls,

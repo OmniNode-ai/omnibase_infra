@@ -364,6 +364,15 @@ def _get_validated_config() -> dict[str, str | int]:
     database = os.getenv("POSTGRES_DATABASE", "")
     password = os.getenv("POSTGRES_PASSWORD", "")
 
+    # Early guard: reject empty database before reaching _validate_identifier
+    # so the error message can mention OMNIBASE_INFRA_DB_URL as an alternative.
+    if not database:
+        raise ConfigurationError(
+            "POSTGRES_DATABASE is empty. "
+            "Set OMNIBASE_INFRA_DB_URL or POSTGRES_DATABASE.",
+            error_code=ErrorCode.CFG_INVALID_DATABASE,
+        )
+
     logger.debug(
         "Validating configuration (host=%s, port=%s, user=%s, database=%s)",
         host,
