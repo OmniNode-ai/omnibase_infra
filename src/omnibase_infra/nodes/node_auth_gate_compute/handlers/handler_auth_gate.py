@@ -285,6 +285,9 @@ class HandlerAuthGate:
                 ),
                 reason_code="file_tool_missing_path",
             )
+        # Security: allowed_paths originates from the contract's work_authorization
+        # config, which is a trusted admin-controlled source. These patterns are
+        # NOT user-supplied input. See _glob_to_regex trust boundary docs.
         if request.target_path and not self._path_matches_globs(
             request.target_path, auth.allowed_paths
         ):

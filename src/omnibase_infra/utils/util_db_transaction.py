@@ -239,6 +239,8 @@ async def set_statement_timeout(conn: asyncpg.Connection, timeout_ms: int | floa
     Uses string interpolation because SET LOCAL does not support $1
     parameterized queries. The int() cast prevents SQL injection.
     """
+    if timeout_ms < 0:
+        raise ValueError(f"statement timeout must be non-negative, got {timeout_ms}")
     safe_ms = int(timeout_ms)
     await conn.execute(f"SET LOCAL statement_timeout = '{safe_ms}'")
 
