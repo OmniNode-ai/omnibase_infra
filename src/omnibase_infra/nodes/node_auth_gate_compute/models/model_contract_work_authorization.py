@@ -56,11 +56,12 @@ class ModelContractWorkAuthorization(BaseModel):
         description="Human-readable reason for the authorization grant.",
     )
 
-    def is_expired(self, now: datetime | None = None) -> bool:
+    def is_expired(self, now: AwareDatetime | None = None) -> bool:
         """Check whether this authorization has expired.
 
         Args:
-            now: Current UTC time. Defaults to ``datetime.now(UTC)``.
+            now: Current UTC time (must be timezone-aware).
+                Defaults to ``datetime.now(UTC)``.
 
         Returns:
             True if the authorization has expired.

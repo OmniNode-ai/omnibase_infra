@@ -927,6 +927,25 @@ class TestHandlerExecute:
         with pytest.raises(ValueError, match="missing required 'payload'"):
             await handler.execute(envelope)
 
+    @pytest.mark.anyio
+    async def test_execute_invalid_correlation_id_falls_back(
+        self, handler: HandlerAuthGate
+    ) -> None:
+        """execute() falls back to uuid4() for invalid correlation_id."""
+        request = ModelAuthGateRequest(
+            tool_name="Edit",
+            target_path="/workspace/my_feature.plan.md",
+        )
+        envelope: dict[str, object] = {
+            "operation": "auth_gate.evaluate",
+            "payload": request,
+            "correlation_id": "not-a-uuid",
+        }
+        result = await handler.execute(envelope)
+
+        assert result.result is not None
+        assert result.correlation_id is not None
+
 
 # =============================================================================
 # TestGlobToRegexEdgeCases
@@ -976,6 +995,10 @@ class TestGlobToRegexEdgeCases:
         pattern = handler._glob_to_regex("src/*.py")
         assert pattern.match("src/foo.py")
         assert not pattern.match("src/sub/foo.py")
+
+    def test_path_traversal_normalized(self, handler: HandlerAuthGate) -> None:
+        """Path with .. segments is normalized before matching."""
+        assert not handler._path_matches_globs("src/../../etc/passwd", ("src/**",))
 
     def test_question_mark_matches_single_non_slash(
         self, handler: HandlerAuthGate

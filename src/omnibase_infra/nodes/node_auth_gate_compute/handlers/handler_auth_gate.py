@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import fnmatch
 import logging
+import posixpath
 import re
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -47,6 +48,9 @@ HANDLER_ID_AUTH_GATE: str = "auth-gate-handler"
 
 # Paths that are always permitted regardless of authorization state.
 # Plans and memory files are safe to read/write without explicit auth.
+# NOTE: Matched via fnmatch where * matches across / (intentionally permissive).
+# For authorization path checks, _path_matches_globs uses _glob_to_regex where
+# * does NOT match / (stricter). Do not confuse the two matching systems.
 WHITELISTED_PATH_PATTERNS: tuple[str, ...] = (
     "*.plan.md",
     "*/.claude/memory/*",
@@ -277,9 +281,12 @@ class HandlerAuthGate:
             ModelHandlerOutput wrapping ModelAuthGateDecision.
         """
         correlation_id_raw = envelope.get("correlation_id")
-        correlation_id = (
-            UUID(str(correlation_id_raw)) if correlation_id_raw else uuid4()
-        )
+        try:
+            correlation_id = (
+                UUID(str(correlation_id_raw)) if correlation_id_raw else uuid4()
+            )
+        except ValueError:
+            correlation_id = uuid4()
         input_envelope_id = uuid4()
 
         payload_raw = envelope.get("payload")
@@ -369,6 +376,10 @@ class HandlerAuthGate:
         never matches ``/``. This is stricter than ``fnmatch`` (used only
         for whitelisted paths) and is the correct behavior for authorization.
 
+        Paths are normalized via ``posixpath.normpath`` to resolve ``..``
+        segments before matching, preventing traversal attacks such as
+        ``src/../../etc/passwd`` matching ``src/**``.
+
         Args:
             path: File path to check.
             globs: Glob patterns to match against.
@@ -376,8 +387,9 @@ class HandlerAuthGate:
         Returns:
             True if the path matches at least one glob pattern.
         """
+        normalized = posixpath.normpath(path)
         for pattern in globs:
-            if HandlerAuthGate._glob_to_regex(pattern).match(path):
+            if HandlerAuthGate._glob_to_regex(pattern).match(normalized):
                 return True
         return False
 
