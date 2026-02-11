@@ -219,6 +219,9 @@ class HandlerAuthGate:
             )
 
         # Step 7: Path not matching allowed_paths glob -> deny
+        # NOTE: Empty target_path skips this check (intentional for non-file
+        # tools like Bash). Callers MUST enforce non-empty target_path for
+        # file-targeting tools (Edit, Write) before invoking the auth gate.
         if request.target_path and not self._path_matches_globs(
             request.target_path, auth.allowed_paths
         ):
@@ -316,6 +319,9 @@ class HandlerAuthGate:
         (which treats ``*`` as non-``/`` matching) because whitelisted
         paths are safe-by-definition and broader matching is desired.
 
+        Paths are normalized via ``posixpath.normpath`` before matching
+        to prevent traversal attacks (e.g., ``/a/.claude/memory/../../../etc/passwd``).
+
         Args:
             path: File path to check.
 
@@ -324,8 +330,9 @@ class HandlerAuthGate:
         """
         if not path:
             return False
+        normalized = posixpath.normpath(path)
         for pattern in WHITELISTED_PATH_PATTERNS:
-            if fnmatch.fnmatch(path, pattern):
+            if fnmatch.fnmatch(normalized, pattern):
                 return True
         return False
 
@@ -338,6 +345,12 @@ class HandlerAuthGate:
         - ``**`` matches zero or more path components (including ``/``)
         - ``*`` matches any characters except ``/``
         - ``?`` matches a single non-``/`` character
+
+        Note:
+            ``**`` is recognized anywhere two consecutive ``*`` appear, without
+            verifying they are at a path boundary. Patterns like ``foo**/bar``
+            would be treated as double-star glob. All patterns in the codebase
+            use proper glob syntax (e.g., ``src/**/*.py``).
 
         Args:
             pattern: Glob pattern, e.g. ``src/**/*.py``.

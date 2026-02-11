@@ -184,6 +184,17 @@ class TestStep1WhitelistedPaths:
 
         assert decision.step != 1
 
+    def test_whitelist_traversal_blocked(self, handler: HandlerAuthGate) -> None:
+        """Path traversal through whitelisted dir is normalized and rejected."""
+        request = ModelAuthGateRequest(
+            tool_name="Edit",
+            target_path="/a/.claude/memory/../../../../etc/passwd",
+        )
+        decision = handler.evaluate(request)
+
+        # Should NOT be whitelisted after normalization resolves to /etc/passwd
+        assert decision.step != 1
+
 
 # =============================================================================
 # TestStep2EmergencyOverride
