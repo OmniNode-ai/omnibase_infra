@@ -35,11 +35,9 @@ Related:
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 from unittest.mock import MagicMock
-from urllib.parse import unquote
 from uuid import uuid4
 
 import pytest
@@ -71,28 +69,42 @@ if TYPE_CHECKING:
 # Environment Configuration
 # =============================================================================
 
-# Check if PostgreSQL is available for integration tests
-# Prefer OMNIBASE_INFRA_DB_URL; fall back to individual POSTGRES_* vars
-_OMNIBASE_INFRA_DB_URL = os.getenv("OMNIBASE_INFRA_DB_URL")
-if _OMNIBASE_INFRA_DB_URL:
-    from urllib.parse import unquote
-    from urllib.parse import urlparse as _urlparse
+# Delegate to shared PostgresConfig for consistent availability checks.
+# See tests/helpers/util_postgres.py for the canonical implementation.
+from tests.helpers.util_postgres import PostgresConfig
 
-    _parsed = _urlparse(_OMNIBASE_INFRA_DB_URL)
-    POSTGRES_HOST: str | None = _parsed.hostname
-    POSTGRES_PASSWORD: str | None = (
-        unquote(_parsed.password) if _parsed.password else None
-    )
-    POSTGRES_DATABASE = unquote((_parsed.path or "").lstrip("/")) or ""
-else:
-    POSTGRES_HOST = os.getenv("POSTGRES_HOST")
-    POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
-    POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "")
-POSTGRES_AVAILABLE = (
-    POSTGRES_HOST is not None
-    and POSTGRES_PASSWORD is not None
-    and bool(POSTGRES_DATABASE)
-)
+_postgres_config = PostgresConfig.from_env()
+POSTGRES_AVAILABLE = _postgres_config.is_configured
+
+
+class _PostgresConfigDict(TypedDict):
+    host: str
+    port: int
+    database: str
+    user: str
+    password: str
+
+
+def _resolve_postgres_config() -> _PostgresConfigDict:
+    """Resolve PostgreSQL connection config from the module-level _postgres_config.
+
+    Reuses the module-level ``_postgres_config`` (created via
+    ``PostgresConfig.from_env()``) to avoid redundant environment parsing.
+
+    Returns:
+        Dict with host, port, database, user, password keys.
+    """
+    return {
+        "host": _postgres_config.host or "localhost",
+        "port": _postgres_config.port,
+        # Default database is "omnibase_infra": PostgresConfig.from_env()
+        # sets this when using individual POSTGRES_* env vars per OMN-2065.
+        "database": _postgres_config.database or "omnibase_infra",
+        "user": _postgres_config.user,
+        # Empty string fallback is safe: the POSTGRES_AVAILABLE skip guard
+        # ensures callers only reach here with valid config.
+        "password": _postgres_config.password or "",
+    }
 
 
 # =============================================================================
@@ -462,16 +474,14 @@ class TestHandlerFactoryPattern:
             )
 
             mock_container = MagicMock(spec=ModelONEXContainer)
-            from tests.helpers.util_postgres import PostgresConfig
-
-            pg_config = PostgresConfig.from_env()
+            pg = _resolve_postgres_config()
             return HandlerRegistrationStoragePostgres(
                 container=mock_container,
-                host=pg_config.host or "localhost",
-                port=pg_config.port,
-                database=pg_config.database,
-                user=pg_config.user,
-                password=pg_config.password or "",
+                host=pg["host"],
+                port=pg["port"],
+                database=pg["database"],
+                user=pg["user"],
+                password=pg["password"],
             )
         else:
             raise ValueError(f"Unknown handler type: {handler_type}")
@@ -486,7 +496,7 @@ class TestHandlerFactoryPattern:
 
     @pytest.mark.skipif(
         not POSTGRES_AVAILABLE,
-        reason="PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST + POSTGRES_PASSWORD + POSTGRES_DATABASE)",
+        reason="PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST+POSTGRES_PASSWORD)",
     )
     def test_factory_creates_postgres_handler(self) -> None:
         """Factory creates HandlerRegistrationStoragePostgres for 'postgresql' type."""
@@ -663,7 +673,7 @@ class TestRuntimeHandlerSwapping:
 
 @pytest.mark.skipif(
     not POSTGRES_AVAILABLE,
-    reason="PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST + POSTGRES_PASSWORD + POSTGRES_DATABASE)",
+    reason="PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST+POSTGRES_PASSWORD)",
 )
 class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
     """Test handler swapping with HandlerRegistrationStoragePostgres.
@@ -678,17 +688,16 @@ class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
         from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
             HandlerRegistrationStoragePostgres,
         )
-        from tests.helpers.util_postgres import PostgresConfig
 
         mock_container = MagicMock(spec=ModelONEXContainer)
-        pg_config = PostgresConfig.from_env()
+        pg = _resolve_postgres_config()
         handler = HandlerRegistrationStoragePostgres(
             container=mock_container,
-            host=pg_config.host or "localhost",
-            port=pg_config.port,
-            database=pg_config.database,
-            user=pg_config.user,
-            password=pg_config.password or "",
+            host=pg["host"],
+            port=pg["port"],
+            database=pg["database"],
+            user=pg["user"],
+            password=pg["password"],
         )
 
         yield handler

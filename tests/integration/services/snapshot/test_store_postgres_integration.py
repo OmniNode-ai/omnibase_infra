@@ -20,17 +20,18 @@ Test Isolation:
     per test.
 
 Environment Variables:
-    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, checked first)
-    POSTGRES_HOST: PostgreSQL hostname (required if DB_URL not set)
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
+        Example: postgresql://postgres:secret@localhost:5432/omnibase_infra
+
+    Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
+    POSTGRES_HOST: PostgreSQL hostname (fallback if OMNIBASE_INFRA_DB_URL not set)
     POSTGRES_PORT: PostgreSQL port (default: 5432)
-    POSTGRES_DATABASE: Database name (no default - tests skip if unset)
     POSTGRES_USER: Database username (default: postgres)
-    POSTGRES_PASSWORD: Database password (required - tests skip if unset)
+    POSTGRES_PASSWORD: Database password (fallback - tests skip if neither is set)
 
 CI/CD Graceful Skip Behavior:
     Tests skip gracefully when PostgreSQL is unavailable:
-    - Skips if POSTGRES_HOST not set
-    - Skips if POSTGRES_PASSWORD not set
+    - Skips if OMNIBASE_INFRA_DB_URL (or POSTGRES_HOST/POSTGRES_PASSWORD fallback) not set
     - Uses module-level pytestmark with pytest.mark.skipif
 
 Related Tickets:
@@ -41,10 +42,8 @@ Related Tickets:
 from __future__ import annotations
 
 import asyncio
-import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
-from urllib.parse import quote_plus
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -52,6 +51,7 @@ import pytest
 
 from omnibase_infra.models.snapshot import ModelSnapshot, ModelSubjectRef
 from omnibase_infra.services.snapshot import StoreSnapshotPostgres
+from tests.helpers.util_postgres import PostgresConfig
 
 # =============================================================================
 # Environment Configuration
@@ -59,28 +59,15 @@ from omnibase_infra.services.snapshot import StoreSnapshotPostgres
 
 
 def _get_postgres_dsn() -> str | None:
-    """Build PostgreSQL DSN from environment variables.
-
-    Checks ``OMNIBASE_INFRA_DB_URL`` first. If set, returns it directly.
-    Otherwise falls back to individual ``POSTGRES_*`` variables.
+    """Build PostgreSQL DSN using shared PostgresConfig utility.
 
     Returns:
-        PostgreSQL connection string, or None if database not configured.
+        PostgreSQL connection string, or None if not configured.
     """
-    db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
-    if db_url:
-        return db_url
-
-    host = os.getenv("POSTGRES_HOST")
-    port = os.getenv("POSTGRES_PORT", "5432")
-    database = os.getenv("POSTGRES_DATABASE", "")
-    user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD")
-
-    if not host or not password or not database:
+    config = PostgresConfig.from_env()
+    if not config.is_configured:
         return None
-
-    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{quote_plus(database)}"
+    return config.build_dsn()
 
 
 # Check PostgreSQL availability at module import
@@ -99,7 +86,7 @@ pytestmark = [
     pytest.mark.postgres,
     pytest.mark.skipif(
         not POSTGRES_AVAILABLE,
-        reason="PostgreSQL not available (POSTGRES_HOST or POSTGRES_PASSWORD not set)",
+        reason="PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST+POSTGRES_PASSWORD)",
     ),
 ]
 

@@ -9,7 +9,10 @@ Centralises environment-resolution functions used by multiple subcommands
 from __future__ import annotations
 
 import os
-from urllib.parse import quote_plus
+
+from omnibase_infra.runtime.models.model_postgres_pool_config import (
+    ModelPostgresPoolConfig,
+)
 
 
 def get_broker() -> str:
@@ -38,44 +41,21 @@ def get_consul_addr() -> str:
 
 
 def get_postgres_dsn() -> str:
-    """Build PostgreSQL DSN from environment variables.
-
-    Resolution order:
-        1. ``OMNIBASE_INFRA_DB_URL`` -- full DSN, returned as-is.
-        2. Individual ``POSTGRES_*`` variables assembled into a DSN.
-
-    Defaults are for local E2E test environments only -- never use in
-    production.  All values (including the fallback password) are overridden
-    via environment variables in real deployments.
-
-    Returns:
-        PostgreSQL connection string.
+    """Get PostgreSQL DSN from OMNIBASE_INFRA_DB_URL.
 
     Raises:
-        ValueError: If no database name is configured or inputs are invalid.
-    """
-    # Prefer explicit DSN when available (OMN-2146)
-    db_url = os.getenv("OMNIBASE_INFRA_DB_URL", "")
-    if db_url:
-        if not db_url.startswith(("postgresql://", "postgres://")):
-            raise ValueError(
-                "OMNIBASE_INFRA_DB_URL must start with postgresql:// or postgres://"
-            )
-        return db_url
+        ValueError: If OMNIBASE_INFRA_DB_URL is not set or invalid.
 
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5433")
-    db = os.getenv("POSTGRES_DATABASE", "")
-    user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD", "test-password")
-    if not db:
-        raise ValueError(
-            "No database configured. Set OMNIBASE_INFRA_DB_URL or POSTGRES_DATABASE."
+    Returns:
+        Validated PostgreSQL connection string.
+    """
+    db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+    if not db_url:
+        msg = (
+            "OMNIBASE_INFRA_DB_URL is required but not set. "
+            "Set it to a PostgreSQL DSN, e.g. "
+            "postgresql://user:pass@host:5432/omnibase_infra"
         )
-    if "@" in host:
-        raise ValueError(
-            f"POSTGRES_HOST contains '@' ({host!r}), which would produce a malformed DSN."
-        )
-    if not port.isdigit():
-        raise ValueError(f"POSTGRES_PORT must be numeric, got {port!r}.")
-    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{quote_plus(db)}"
+        raise ValueError(msg)
+
+    return ModelPostgresPoolConfig.validate_dsn(db_url)

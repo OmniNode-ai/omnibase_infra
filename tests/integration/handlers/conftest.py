@@ -19,8 +19,7 @@ infrastructure (e.g., GitHub Actions without VPN access to internal servers).
 Skip Conditions by Handler:
 
     **PostgreSQL (HandlerDb)**:
-        - Skips if POSTGRES_HOST not set
-        - Skips if POSTGRES_PASSWORD not set
+        - Skips if OMNIBASE_INFRA_DB_URL (or POSTGRES_HOST/POSTGRES_PASSWORD fallback) not set
         - Tests use module-level ``pytestmark`` with ``pytest.mark.skipif``
 
     **Vault (HandlerVault)**:
@@ -47,8 +46,8 @@ Example CI/CD Behavior::
     tests/.../test_consul_handler_integration.py::TestHandlerConsulConnection::test_consul_describe SKIPPED
     tests/.../test_http_handler_integration.py::TestHttpRestHandlerIntegration::test_simple_get_request PASSED
 
-    # With infrastructure access (using REMOTE_INFRA_HOST server):
-    $ export POSTGRES_HOST=$REMOTE_INFRA_HOST POSTGRES_PASSWORD=xxx ...
+    # With infrastructure access (using OMNIBASE_INFRA_DB_URL or fallback vars):
+    $ export OMNIBASE_INFRA_DB_URL=postgresql://postgres:xxx@$REMOTE_INFRA_HOST:5436/omnibase_infra
     $ pytest tests/integration/handlers/ -v
     tests/.../test_db_handler_integration.py::TestHandlerDbConnection::test_db_describe PASSED
 
@@ -61,13 +60,12 @@ Requirements: pytest-httpserver must be installed: pip install pytest-httpserver
 Database Handlers
 =================
 
-Environment Variables (required):
-    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, checked first)
-    POSTGRES_HOST: PostgreSQL hostname (required if DB_URL not set)
-    POSTGRES_PASSWORD: Database password (required if DB_URL not set)
-Environment Variables (optional):
+Environment Variables (preferred):
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
+Environment Variables (fallback - used only if OMNIBASE_INFRA_DB_URL is not set):
+    POSTGRES_HOST: PostgreSQL hostname (fallback if OMNIBASE_INFRA_DB_URL not set)
+    POSTGRES_PASSWORD: Database password (fallback - tests skip if neither is set)
     POSTGRES_PORT: PostgreSQL port (default: 5432)
-    POSTGRES_DATABASE: Database name (no default - tests skip if unset)
     POSTGRES_USER: Database username (default: postgres)
 
 DSN Format: postgresql://{user}:{password}@{host}:{port}/{database}
@@ -106,7 +104,6 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
-from urllib.parse import quote_plus, unquote
 
 import pytest
 
@@ -190,93 +187,30 @@ def _safe_int_env(name: str, default: int) -> int:
 # =============================================================================
 # Database Environment Configuration
 # =============================================================================
+# Delegates to the shared PostgresConfig utility to avoid duplicating DSN
+# parsing logic. See tests/helpers/util_postgres.py for the canonical
+# implementation (OMNIBASE_INFRA_DB_URL primary, POSTGRES_* fallback).
+# =============================================================================
 
-# Read configuration from environment variables (set via docker-compose or .env)
-# Prefer OMNIBASE_INFRA_DB_URL if set; fall back to individual POSTGRES_* vars
-_OMNIBASE_INFRA_DB_URL = os.getenv("OMNIBASE_INFRA_DB_URL")
-if _OMNIBASE_INFRA_DB_URL:
-    from urllib.parse import urlparse as _urlparse
+from tests.helpers.util_postgres import PostgresConfig
 
-    _parsed = _urlparse(_OMNIBASE_INFRA_DB_URL)
-    POSTGRES_HOST = _parsed.hostname
-    POSTGRES_PORT = str(_parsed.port or "5432")
-    POSTGRES_DATABASE = unquote((_parsed.path or "").lstrip("/")) or ""
-    POSTGRES_USER = unquote(_parsed.username or "postgres")
-    POSTGRES_PASSWORD = unquote(_parsed.password) if _parsed.password else None
-else:
-    POSTGRES_HOST = os.getenv("POSTGRES_HOST")
-    POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
-    POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "")
-    POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-    POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+_postgres_config = PostgresConfig.from_env()
 
-# Defensive check: warn if POSTGRES_PASSWORD is missing or empty to avoid silent failures
-# Handles None, empty string, and whitespace-only values
-if not POSTGRES_PASSWORD or not POSTGRES_PASSWORD.strip():
-    import warnings
-
-    warnings.warn(
-        "POSTGRES_PASSWORD environment variable not set or empty - database integration "
-        "tests will be skipped. Set POSTGRES_PASSWORD in your .env file or environment "
-        "to enable database tests.",
-        UserWarning,
-        stacklevel=1,
-    )
-    # Normalize to None for consistent availability check
-    POSTGRES_PASSWORD = None
-
-# Check if PostgreSQL is available based on host, password, and database being set
-POSTGRES_AVAILABLE = (
-    POSTGRES_HOST is not None
-    and POSTGRES_PASSWORD is not None
-    and bool(POSTGRES_DATABASE)
-)
+# Export availability flag for module-level pytestmark skip conditions
+POSTGRES_AVAILABLE = _postgres_config.is_configured
 
 
 def _build_postgres_dsn() -> str:
-    """Build PostgreSQL DSN from environment variables.
-
-    Credentials (user and password) are URL-encoded using quote_plus() to handle
-    special characters like @, :, /, %, etc. that would otherwise break the DSN
-    format.
+    """Build PostgreSQL DSN by delegating to PostgresConfig.build_dsn().
 
     Returns:
         PostgreSQL connection string in standard format.
 
     Raises:
-        ValueError: If POSTGRES_HOST or POSTGRES_PASSWORD is not set.
-
-    Note:
-        This function should only be called after verifying
-        POSTGRES_PASSWORD is set.
-
-    Example:
-        >>> # With special characters in credentials
-        >>> # user="user@domain", password="p@ss:word#123"
-        >>> dsn = _build_postgres_dsn()
-        >>> # Returns: postgresql://user%40domain:p%40ss%3Aword%23123@host:port/db
+        ProtocolConfigurationError: If configuration is incomplete
+            (host, password, or database missing).
     """
-    if not POSTGRES_HOST:
-        raise ValueError(
-            "POSTGRES_HOST is required but not set. "
-            "Set POSTGRES_HOST environment variable to enable database tests."
-        )
-    if not POSTGRES_PASSWORD:
-        raise ValueError(
-            "POSTGRES_PASSWORD is required but not set. "
-            "Set POSTGRES_PASSWORD environment variable to enable database tests."
-        )
-
-    # URL-encode credentials to handle special characters (@, :, /, %, etc.)
-    encoded_user = quote_plus(POSTGRES_USER, safe="")
-    encoded_password = quote_plus(POSTGRES_PASSWORD, safe="")
-
-    encoded_database = quote_plus(POSTGRES_DATABASE, safe="")
-
-    return (
-        f"postgresql://{encoded_user}:{encoded_password}"
-        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{encoded_database}"
-    )
+    return _postgres_config.build_dsn()
 
 
 # =============================================================================
@@ -334,8 +268,8 @@ def db_config() -> dict[str, JsonType]:
     where database infrastructure may not be available.
 
     Skip Conditions (CI/CD Graceful Degradation):
-        - Skips immediately if POSTGRES_PASSWORD environment variable is not set
-        - Combined with module-level pytestmark skipif for POSTGRES_HOST
+        - Skips if PostgreSQL is not available (neither OMNIBASE_INFRA_DB_URL
+          nor POSTGRES_HOST/POSTGRES_PASSWORD is set)
 
     Returns:
         Configuration dict with 'dsn' key for HandlerDb.initialize().
@@ -347,12 +281,15 @@ def db_config() -> dict[str, JsonType]:
 
     Example:
         >>> # In CI without database access:
-        >>> # Test is skipped with message "POSTGRES_PASSWORD not set"
+        >>> # Test is skipped with message "PostgreSQL not available"
         >>> # In development with database:
         >>> config = db_config()  # Returns valid DSN configuration
     """
-    if not POSTGRES_PASSWORD:
-        pytest.skip("POSTGRES_PASSWORD not set")
+    if not POSTGRES_AVAILABLE:
+        pytest.skip(
+            "PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or "
+            "POSTGRES_HOST/POSTGRES_PASSWORD)"
+        )
 
     return {
         "dsn": _build_postgres_dsn(),

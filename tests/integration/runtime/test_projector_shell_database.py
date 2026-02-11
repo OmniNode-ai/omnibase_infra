@@ -14,16 +14,17 @@ These tests verify ProjectorShell against a real PostgreSQL database to validate
 5. Value extraction from nested event payloads end-to-end
 
 Environment Variables:
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
+        Example: postgresql://postgres:secret@localhost:5432/omnibase_infra
+
+    Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
     POSTGRES_HOST: Database host (default: localhost)
     POSTGRES_PORT: Database port (default: 5432)
-    POSTGRES_DATABASE: Database name (default: postgres)
     POSTGRES_USER: Database user (default: postgres)
-    POSTGRES_PASSWORD: Database password (REQUIRED - no default, tests skip if unset)
+    POSTGRES_PASSWORD: Database password (fallback - tests skip if unset)
 
-    For remote OmniNode infrastructure, set OMNIBASE_INFRA_DB_URL or:
-        POSTGRES_HOST=your-infra-server-ip
-        POSTGRES_PORT=5436
-        POSTGRES_DATABASE=your_database_name
+    For remote OmniNode infrastructure, set:
+        OMNIBASE_INFRA_DB_URL=postgresql://postgres:secret@your-infra-server-ip:5436/omnibase_infra
 
 Test Isolation:
     Each test creates a unique table (test_projector_{uuid8}) and drops it
@@ -46,7 +47,6 @@ Usage:
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -115,27 +115,18 @@ class OrderWithNestedPayload(BaseModel):
 def _get_database_dsn() -> str | None:
     """Build database DSN from environment variables.
 
-    Checks ``OMNIBASE_INFRA_DB_URL`` first. If set, returns it directly.
-    Otherwise falls back to individual ``POSTGRES_*`` variables with portable
-    defaults suitable for CI/CD environments.
+    Delegates to the shared ``PostgresConfig`` utility for DSN resolution,
+    validation (scheme, database name, sub-paths), and credential encoding.
 
     Returns:
-        PostgreSQL connection string, or None if database not configured.
+        PostgreSQL connection string, or None if not configured.
     """
-    db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
-    if db_url:
-        return db_url
+    from tests.helpers.util_postgres import PostgresConfig
 
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5432")
-    database = os.getenv("POSTGRES_DATABASE", "postgres")
-    user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD")
-
-    if not password:
+    config = PostgresConfig.from_env()
+    if not config.is_configured:
         return None
-
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    return config.build_dsn()
 
 
 @pytest.fixture
@@ -146,12 +137,14 @@ async def db_pool() -> AsyncGenerator[asyncpg.Pool, None]:
         asyncpg.Pool connected to the test database.
 
     Raises:
-        pytest.skip: If database is not reachable or POSTGRES_PASSWORD not set.
+        pytest.skip: If database is not configured or not reachable.
     """
     dsn = _get_database_dsn()
 
     if not dsn:
-        pytest.skip("POSTGRES_PASSWORD environment variable not set")
+        pytest.skip(
+            "Database not configured (set OMNIBASE_INFRA_DB_URL or POSTGRES_PASSWORD)"
+        )
 
     try:
         pool = await asyncpg.create_pool(

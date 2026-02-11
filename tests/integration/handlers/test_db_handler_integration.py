@@ -17,8 +17,7 @@ CI/CD Graceful Skip Behavior
 These tests skip gracefully in CI/CD environments without database access:
 
 Skip Conditions:
-    - Skips if POSTGRES_HOST not set
-    - Skips if POSTGRES_PASSWORD not set
+    - Skips if OMNIBASE_INFRA_DB_URL (or POSTGRES_HOST/POSTGRES_PASSWORD fallback) not set
     - Module-level ``pytestmark`` with ``pytest.mark.skipif`` used
 
 Example CI/CD Output::
@@ -60,12 +59,14 @@ Environment Variables
 =====================
 
     OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
-    POSTGRES_HOST: PostgreSQL server hostname (required if DSN not set - skip if not set)
+        Example: postgresql://postgres:secret@localhost:5432/omnibase_infra
+
+    Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
+    POSTGRES_HOST: PostgreSQL server hostname (fallback - skip if neither is set)
         Example: localhost or ${REMOTE_INFRA_HOST}
     POSTGRES_PORT: PostgreSQL server port (default: 5432)
-    POSTGRES_DATABASE: Database name (default: omnibase_infra)
     POSTGRES_USER: Database username (default: postgres)
-    POSTGRES_PASSWORD: Database password (required if DSN not set - tests skip if not set)
+    POSTGRES_PASSWORD: Database password (fallback - tests skip if neither is set)
 
     See tests/infrastructure_config.py for REMOTE_INFRA_HOST default.
 
@@ -102,7 +103,7 @@ pytestmark = [
     pytest.mark.postgres,
     pytest.mark.skipif(
         not POSTGRES_AVAILABLE,
-        reason="PostgreSQL not available (POSTGRES_PASSWORD not set)",
+        reason="PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST+POSTGRES_PASSWORD)",
     ),
 ]
 

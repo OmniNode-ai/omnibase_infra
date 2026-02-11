@@ -32,6 +32,10 @@
 #   - Runtime Health: 8085 (when runtime profile enabled)
 name: omnibase-infra
 # ==========================================================================
+# IMPORTANT: Requires Docker Compose v2.20+ (nested variable expansion).
+# Older versions will SILENTLY produce malformed DSNs.
+# Verify: docker compose version
+# ==========================================================================
 # Shared Configuration Templates
 # ==========================================================================
 x-healthcheck-defaults: &healthcheck-defaults
@@ -51,9 +55,11 @@ services:
     container_name: omnibase-infra-postgres
     environment:
       POSTGRES_USER: postgres
+      # NOTE: Unlike docker-compose.infra.yml which fails fast when POSTGRES_PASSWORD
+      # is unset (:?), the e2e compose uses a default test password for CI convenience.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test-password}
       POSTGRES_DB: omnibase_infra
-      POSTGRES_MULTIPLE_DATABASES: "omnibase_infra,infisical_db"
+      POSTGRES_MULTIPLE_DATABASES: "infisical_db"
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     networks:
@@ -269,10 +275,13 @@ services:
       redpanda-topic-manager:
         condition: service_completed_successfully
     environment:
-      # PostgreSQL
+      # PostgreSQL - primary DSN (used by omnibase_infra application code)
+      # Allows host-level override; falls back to constructing DSN from POSTGRES_PASSWORD.
+      # WARNING: If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #), set OMNIBASE_INFRA_DB_URL explicitly.
+      OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://postgres:${POSTGRES_PASSWORD:-test-password}@postgres:5432/omnibase_infra}
+      # Legacy individual vars - retained for agent-actions-consumer and session storage
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DATABASE: omnibase_infra
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test-password}
       # Kafka (internal address)

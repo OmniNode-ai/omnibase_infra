@@ -12,6 +12,8 @@ registration status, confirmation events, and other infrastructure concerns.
 
 Exports:
     EnumAnyTypeViolation: Any type violation categories for strong typing validation
+    EnumAuthDecision: Authorization decision outcomes (ALLOW, DENY, SOFT_DENY)
+    EnumAuthSource: Authorization source classification (PLAN_APPROVAL, TICKET_PIPELINE, etc.)
     EnumBackendType: Infrastructure backend types (CONSUL, POSTGRES)
     EnumChainViolationType: Chain violation types for correlation/causation validation
     EnumCircuitState: Circuit breaker states (CLOSED, OPEN, HALF_OPEN)
@@ -52,6 +54,8 @@ Exports:
 
 from omnibase_core.enums import EnumTopicType
 from omnibase_infra.enums.enum_any_type_violation import EnumAnyTypeViolation
+from omnibase_infra.enums.enum_auth_decision import EnumAuthDecision
+from omnibase_infra.enums.enum_auth_source import EnumAuthSource
 from omnibase_infra.enums.enum_backend_type import EnumBackendType
 from omnibase_infra.enums.enum_capture_outcome import EnumCaptureOutcome
 from omnibase_infra.enums.enum_capture_state import EnumCaptureState
@@ -99,11 +103,16 @@ from omnibase_infra.enums.enum_response_status import EnumResponseStatus
 from omnibase_infra.enums.enum_retry_error_category import EnumRetryErrorCategory
 from omnibase_infra.enums.enum_security_rule_id import EnumSecurityRuleId
 from omnibase_infra.enums.enum_selection_strategy import EnumSelectionStrategy
+from omnibase_infra.enums.enum_session_lifecycle_state import (
+    EnumSessionLifecycleState,
+)
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 from omnibase_infra.enums.enum_validation_severity import EnumValidationSeverity
 
 __all__: list[str] = [
     "EnumAnyTypeViolation",
+    "EnumAuthDecision",
+    "EnumAuthSource",
     "EnumBackendType",
     "EnumCaptureOutcome",
     "EnumCaptureState",
@@ -143,6 +152,7 @@ __all__: list[str] = [
     "EnumRetryErrorCategory",
     "EnumSecurityRuleId",
     "EnumSelectionStrategy",
+    "EnumSessionLifecycleState",
     "EnumTopicStandard",
     "EnumTopicType",
     "EnumValidationSeverity",

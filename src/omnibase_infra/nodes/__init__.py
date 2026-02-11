@@ -13,6 +13,7 @@ Available Submodules:
 - reducers: Reducer nodes for state aggregation
 - node_registration_reducer: Declarative FSM-driven registration reducer
 - node_registration_orchestrator: Registration workflow orchestrator
+- node_auth_gate_compute: Work authorization decision compute node
 - node_ledger_projection_compute: Event ledger projection compute node
 
 Available Classes:
@@ -20,6 +21,8 @@ Available Classes:
 - RegistrationReducer: Pure function reducer implementation
 - NodeRegistryEffect: Effect node for dual-backend registration execution
 - NodeRegistrationOrchestrator: Workflow orchestrator for registration
+- NodeAuthGateCompute: Work authorization decision compute node
+- RegistryInfraAuthGateCompute: Registry for auth gate compute node
 - NodeLedgerProjectionCompute: Event ledger projection compute node
 - RegistryInfraLedgerProjection: Registry for ledger projection node
 """
@@ -29,6 +32,10 @@ from omnibase_infra.nodes.effects import (
     ModelRegistryRequest,
     ModelRegistryResponse,
     NodeRegistryEffect,
+)
+from omnibase_infra.nodes.node_auth_gate_compute import (
+    NodeAuthGateCompute,
+    RegistryInfraAuthGateCompute,
 )
 from omnibase_infra.nodes.node_ledger_projection_compute import (
     NodeLedgerProjectionCompute,
@@ -41,17 +48,39 @@ from omnibase_infra.nodes.node_registration_reducer import (
     NodeRegistrationReducer,
     RegistryInfraNodeRegistrationReducer,
 )
+from omnibase_infra.nodes.node_session_lifecycle_reducer import (
+    ModelSessionLifecycleState,
+    NodeSessionLifecycleReducer,
+    RegistryInfraSessionLifecycle,
+)
+from omnibase_infra.nodes.node_session_state_effect import (
+    ModelRunContext,
+    ModelSessionIndex,
+    ModelSessionStateResult,
+    NodeSessionStateEffect,
+    RegistryInfraSessionState,
+)
 from omnibase_infra.nodes.reducers import RegistrationReducer
 
 __all__: list[str] = [
     "ModelBackendResult",
     "ModelRegistryRequest",
     "ModelRegistryResponse",
+    "ModelRunContext",
+    "ModelSessionIndex",
+    "ModelSessionLifecycleState",
+    "ModelSessionStateResult",
+    "NodeAuthGateCompute",
     "NodeLedgerProjectionCompute",
     "NodeRegistrationOrchestrator",
     "NodeRegistrationReducer",
     "NodeRegistryEffect",
+    "NodeSessionLifecycleReducer",
+    "NodeSessionStateEffect",
     "RegistrationReducer",
+    "RegistryInfraAuthGateCompute",
     "RegistryInfraLedgerProjection",
     "RegistryInfraNodeRegistrationReducer",
+    "RegistryInfraSessionLifecycle",
+    "RegistryInfraSessionState",
 ]

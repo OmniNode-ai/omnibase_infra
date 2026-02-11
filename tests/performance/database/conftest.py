@@ -46,12 +46,14 @@ Fixture Dependency Graph:
                 -> query_analyzer
 
 Environment Requirements:
-    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, checked first)
-    POSTGRES_HOST: PostgreSQL server hostname
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
+        Example: postgresql://postgres:secret@localhost:5436/omnibase_infra
+
+    Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
+    POSTGRES_HOST: PostgreSQL server hostname (fallback if OMNIBASE_INFRA_DB_URL not set)
     POSTGRES_PORT: PostgreSQL server port (default: 5436)
-    POSTGRES_DATABASE: Database name (no default - tests skip if unset)
     POSTGRES_USER: Database user (default: postgres)
-    POSTGRES_PASSWORD: Database password (required)
+    POSTGRES_PASSWORD: Database password (fallback - tests skip if neither is set)
 
 Related:
     - PR #101: Query performance tests with EXPLAIN ANALYZE
@@ -120,10 +122,9 @@ if TYPE_CHECKING:
 # Use shared PostgresConfig for consistent configuration management
 _postgres_config = PostgresConfig.from_env()
 
-# Export individual values for backwards compatibility with existing code
+# Export individual values for use in availability checks and diagnostics
 POSTGRES_HOST = _postgres_config.host
 POSTGRES_PORT = _postgres_config.port
-POSTGRES_DATABASE = _postgres_config.database
 POSTGRES_USER = _postgres_config.user
 POSTGRES_PASSWORD = _postgres_config.password
 

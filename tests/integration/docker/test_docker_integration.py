@@ -477,6 +477,10 @@ class TestDockerRuntime:
                     "ONEX_LOG_LEVEL=DEBUG",
                     "-e",
                     "ONEX_EVENT_BUS_TYPE=inmemory",
+                    # Required by ModelPostgresPoolConfig.from_env() for startup;
+                    # actual DB connectivity is not needed for this test.
+                    "-e",
+                    "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test@localhost:5432/test_db",
                     built_test_image,
                 ],
                 capture_output=True,
@@ -600,6 +604,10 @@ class TestDockerRuntime:
                     "VALKEY_PASSWORD=test",
                     "-e",
                     "ONEX_EVENT_BUS_TYPE=inmemory",
+                    # Required by ModelPostgresPoolConfig.from_env() for startup;
+                    # actual DB connectivity is not needed for this test.
+                    "-e",
+                    "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test@localhost:5432/test_db",
                     built_test_image,
                 ],
                 capture_output=True,
@@ -721,6 +729,10 @@ class TestDockerHealthCheck:
                     "VALKEY_PASSWORD=test",
                     "-e",
                     "ONEX_EVENT_BUS_TYPE=inmemory",
+                    # Required by ModelPostgresPoolConfig.from_env() for startup;
+                    # actual DB connectivity is not needed for this test.
+                    "-e",
+                    "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test@localhost:5432/test_db",
                     built_test_image,
                 ],
                 capture_output=True,
@@ -812,6 +824,10 @@ class TestDockerHealthCheck:
                     "VALKEY_PASSWORD=test",
                     "-e",
                     "ONEX_EVENT_BUS_TYPE=inmemory",
+                    # Required by ModelPostgresPoolConfig.from_env() for startup;
+                    # actual DB connectivity is not needed for this test.
+                    "-e",
+                    "OMNIBASE_INFRA_DB_URL=postgresql://postgres:test@localhost:5432/test_db",
                     built_test_image,
                 ],
                 capture_output=True,

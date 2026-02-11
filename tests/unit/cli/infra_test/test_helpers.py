@@ -65,56 +65,39 @@ class TestGetConsulAddr:
 
 @pytest.mark.unit
 class TestGetPostgresDsn:
-    """Test PostgreSQL DSN construction."""
+    """Test PostgreSQL DSN resolution from OMNIBASE_INFRA_DB_URL."""
 
-    def test_default_value_raises_without_database(self) -> None:
-        """Raises ValueError when no database is configured."""
+    def test_returns_env_var_directly(self) -> None:
+        """Returns OMNIBASE_INFRA_DB_URL value as-is."""
+        url = "postgresql://myuser:mypass@myhost:5433/mydb"
+        env = {"OMNIBASE_INFRA_DB_URL": url}
+        with patch.dict("os.environ", env, clear=True):
+            dsn = get_postgres_dsn()
+            assert dsn == url
+
+    def test_raises_when_env_var_not_set(self) -> None:
+        """Raises ValueError when OMNIBASE_INFRA_DB_URL is not set."""
         with patch.dict("os.environ", {}, clear=True):
-            with pytest.raises(ValueError, match="No database configured"):
+            with pytest.raises(ValueError, match="OMNIBASE_INFRA_DB_URL is required"):
                 get_postgres_dsn()
 
-    def test_default_value_with_database(self) -> None:
-        """Returns default DSN when POSTGRES_DATABASE is set."""
-        with patch.dict(
-            "os.environ", {"POSTGRES_DATABASE": "omnibase_infra"}, clear=True
-        ):
-            dsn = get_postgres_dsn()
-            assert (
-                dsn
-                == "postgresql://postgres:test-password@localhost:5433/omnibase_infra"
-            )
-
-    def test_custom_env(self) -> None:
-        """Respects all POSTGRES_* env vars."""
-        env = {
-            "POSTGRES_HOST": "db.local",
-            "POSTGRES_PORT": "5436",
-            "POSTGRES_DATABASE": "mydb",
-            "POSTGRES_USER": "admin",
-            "POSTGRES_PASSWORD": "secret",
-        }
+    def test_invalid_scheme_raises(self) -> None:
+        """Rejects non-postgresql:// schemes."""
+        env = {"OMNIBASE_INFRA_DB_URL": "mysql://user:pass@host:3306/db"}
         with patch.dict("os.environ", env, clear=True):
-            dsn = get_postgres_dsn()
-            assert dsn == "postgresql://admin:secret@db.local:5436/mydb"
-
-    def test_special_chars_in_password(self) -> None:
-        """URL-encodes special characters in password."""
-        env = {"POSTGRES_PASSWORD": "p@ss:w/rd", "POSTGRES_DATABASE": "testdb"}
-        with patch.dict("os.environ", env, clear=True):
-            dsn = get_postgres_dsn()
-            assert "p%40ss%3Aw%2Frd" in dsn
-            assert "p@ss:w/rd" not in dsn
-
-    def test_host_with_at_raises(self) -> None:
-        """Rejects POSTGRES_HOST containing '@'."""
-        env = {"POSTGRES_HOST": "evil@host", "POSTGRES_DATABASE": "testdb"}
-        with patch.dict("os.environ", env, clear=True):
-            with pytest.raises(ValueError, match="POSTGRES_HOST contains '@'"):
+            with pytest.raises(ValueError, match=r"(?i)invalid.*scheme"):
                 get_postgres_dsn()
 
-    def test_non_numeric_port_raises(self) -> None:
-        """Rejects non-numeric POSTGRES_PORT."""
-        env = {"POSTGRES_PORT": "abc", "POSTGRES_DATABASE": "testdb"}
+    def test_missing_database_name_raises(self) -> None:
+        """Rejects DSN with no database name in path."""
+        env = {"OMNIBASE_INFRA_DB_URL": "postgresql://user:pass@host:5432/"}
         with patch.dict("os.environ", env, clear=True):
-            with pytest.raises(ValueError, match="POSTGRES_PORT must be numeric"):
+            with pytest.raises(ValueError, match="missing a database name"):
+                get_postgres_dsn()
+
+    def test_missing_database_name_no_slash_raises(self) -> None:
+        """Rejects DSN with no path at all."""
+        env = {"OMNIBASE_INFRA_DB_URL": "postgresql://user:pass@host:5432"}
+        with patch.dict("os.environ", env, clear=True):
+            with pytest.raises(ValueError, match="missing a database name"):
                 get_postgres_dsn()

@@ -14,12 +14,9 @@ Usage:
 
 Environment Variables:
     KAFKA_BOOTSTRAP_SERVERS: Kafka broker addresses (REQUIRED - no default)
-    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, takes precedence)
-    POSTGRES_HOST: PostgreSQL host for tracking (required if --enable-tracking)
-    POSTGRES_PORT: PostgreSQL port (default: 5432)
-    POSTGRES_DATABASE: PostgreSQL database name (required when OMNIBASE_INFRA_DB_URL not set)
-    POSTGRES_USER: PostgreSQL username (required if --enable-tracking)
-    POSTGRES_PASSWORD: PostgreSQL password (required if --enable-tracking)
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN for tracking
+        (e.g., postgresql://postgres:pass@host:5432/omnibase_infra)
+        Required if --enable-tracking is used.
 
 See Also:
     docs/operations/DLQ_REPLAY_RUNBOOK.md - Complete replay documentation
@@ -41,7 +38,6 @@ import sys
 from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING
-from urllib.parse import quote_plus
 from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
@@ -335,14 +331,9 @@ class ModelReplayConfig(BaseModel):
     # Time-range filtering (OMN-1032)
     filter_start_time: datetime | None = None
     filter_end_time: datetime | None = None
-    # PostgreSQL tracking configuration (OMN-1032, OMN-2146)
+    # PostgreSQL tracking configuration (OMN-1032)
     enable_tracking: bool = False
-    db_url: str | None = None
-    postgres_host: str | None = None
-    postgres_port: int = 5432
-    postgres_database: str = ""
-    postgres_user: str | None = None
-    postgres_password: str | None = None
+    postgres_dsn: str | None = None
     # Kafka producer settings - extracted from hardcoded values for configurability
     max_request_size: int = Field(
         default=10485760,  # 10MB
@@ -435,6 +426,21 @@ class ModelReplayConfig(BaseModel):
             )
         return v
 
+    @field_validator("postgres_dsn", mode="before")
+    @classmethod
+    def validate_postgres_dsn_scheme(cls, v: object) -> object:
+        """Validate that postgres_dsn starts with a postgresql scheme when provided."""
+        if v is None:
+            return v
+        if not isinstance(v, str):
+            raise ValueError(f"postgres_dsn must be a string, got {type(v).__name__}")
+        stripped = v.strip()
+        if stripped and not stripped.startswith("postgresql"):
+            raise ValueError(
+                f"postgres_dsn must start with 'postgresql' scheme, got '{stripped[:20]}...'"
+            )
+        return stripped
+
     @field_validator("filter_end_time", mode="after")
     @classmethod
     def validate_time_range(
@@ -517,24 +523,9 @@ class ModelReplayConfig(BaseModel):
             # Only set BY_TIME_RANGE if no other filter is specified
             filter_type = EnumFilterType.BY_TIME_RANGE
 
-        # Parse PostgreSQL tracking configuration (OMN-2146)
+        # Parse PostgreSQL tracking configuration
         enable_tracking = getattr(args, "enable_tracking", False)
-        db_url = os.environ.get("OMNIBASE_INFRA_DB_URL", "")
-        postgres_host = os.environ.get("POSTGRES_HOST")
-        postgres_port_str = os.environ.get("POSTGRES_PORT", "5432")
-        postgres_database = os.environ.get("POSTGRES_DATABASE", "")
-        if not postgres_database and not db_url and enable_tracking:
-            raise ValueError(
-                "No database configured for tracking. "
-                "Set OMNIBASE_INFRA_DB_URL or POSTGRES_DATABASE."
-            )
-        postgres_user = os.environ.get("POSTGRES_USER")
-        postgres_password = os.environ.get("POSTGRES_PASSWORD")
-
-        try:
-            postgres_port = int(postgres_port_str)
-        except ValueError:
-            postgres_port = 5432
+        postgres_dsn = os.environ.get("OMNIBASE_INFRA_DB_URL")
 
         return cls(
             bootstrap_servers=bootstrap_servers,
@@ -549,36 +540,23 @@ class ModelReplayConfig(BaseModel):
             filter_start_time=filter_start_time,
             filter_end_time=filter_end_time,
             enable_tracking=enable_tracking,
-            db_url=db_url or None,
-            postgres_host=postgres_host,
-            postgres_port=postgres_port,
-            postgres_database=postgres_database,
-            postgres_user=postgres_user,
-            postgres_password=postgres_password,
+            postgres_dsn=postgres_dsn,
             limit=getattr(args, "limit", None),
         )
 
     def build_tracking_dsn(self) -> str | None:
-        """Build PostgreSQL DSN from config fields.
-
-        Resolution order:
-            1. ``db_url`` (full DSN from OMNIBASE_INFRA_DB_URL) -- preferred
-            2. Individual ``postgres_*`` fields assembled into a DSN
+        """Return PostgreSQL DSN for replay tracking.
 
         Returns:
-            DSN string if all required fields are present and tracking is enabled,
+            DSN string if tracking is enabled and OMNIBASE_INFRA_DB_URL is set,
             None otherwise.
         """
         if not self.enable_tracking:
             return None
-        if self.db_url:
-            return self.db_url
-        if not all([self.postgres_host, self.postgres_user, self.postgres_password]):
+        if not self.postgres_dsn:
+            logger.warning("OMNIBASE_INFRA_DB_URL not set; tracking will be disabled")
             return None
-        return (
-            f"postgresql://{quote_plus(self.postgres_user or '')}:{quote_plus(self.postgres_password or '')}"
-            f"@{self.postgres_host}:{self.postgres_port}/{quote_plus(self.postgres_database)}"
-        )
+        return self.postgres_dsn
 
 
 class ModelReplayResult(BaseModel):
@@ -1413,7 +1391,7 @@ See docs/operations/DLQ_REPLAY_RUNBOOK.md for complete documentation.
     parser.add_argument(
         "--enable-tracking",
         action="store_true",
-        help="Enable PostgreSQL replay tracking (requires POSTGRES_* env vars)",
+        help="Enable PostgreSQL replay tracking (requires OMNIBASE_INFRA_DB_URL env var)",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")

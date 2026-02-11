@@ -15,15 +15,16 @@ from __future__ import annotations
 
 import base64
 import logging
-import os
 from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
-from urllib.parse import quote_plus
 from uuid import UUID, uuid4
 
 import pytest
+
+from tests.helpers.util_postgres import PostgresConfig
+from tests.infrastructure_config import REMOTE_INFRA_HOST
 
 if TYPE_CHECKING:
     import asyncpg
@@ -35,31 +36,18 @@ pytestmark = [pytest.mark.postgres]
 
 
 def _get_postgres_dsn() -> str | None:
-    """Build PostgreSQL DSN from environment variables.
+    """Build PostgreSQL DSN using shared PostgresConfig utility.
 
-    Checks ``OMNIBASE_INFRA_DB_URL`` first. If set, returns it directly.
-    Otherwise falls back to individual ``POSTGRES_*`` variables.
+    Primary source: ``OMNIBASE_INFRA_DB_URL``.
+    Fallback: individual ``POSTGRES_*`` env vars.
 
     Returns:
-        DSN string if database is configured, None otherwise.
+        DSN string if configuration is available, None otherwise.
     """
-    db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
-    if db_url:
-        return db_url
-
-    host = os.getenv("POSTGRES_HOST")
-    password = os.getenv("POSTGRES_PASSWORD")
-
-    if not host or not password:
+    config = PostgresConfig.from_env(fallback_host=REMOTE_INFRA_HOST)
+    if not config.is_configured:
         return None
-
-    port = os.getenv("POSTGRES_PORT", "5436")
-    database = os.getenv("POSTGRES_DATABASE", "")
-    if not database:
-        return None  # Database not configured
-    user = os.getenv("POSTGRES_USER", "postgres")
-
-    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{quote_plus(database)}"
+    return config.build_dsn()
 
 
 @pytest.fixture
@@ -75,7 +63,7 @@ def postgres_dsn() -> str:
     dsn = _get_postgres_dsn()
     if dsn is None:
         pytest.skip(
-            "PostgreSQL not configured (missing POSTGRES_HOST or POSTGRES_PASSWORD)"
+            "PostgreSQL not configured (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST+POSTGRES_PASSWORD)"
         )
     return dsn
 

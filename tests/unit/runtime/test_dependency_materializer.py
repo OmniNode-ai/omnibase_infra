@@ -175,11 +175,11 @@ class TestModelPostgresPoolConfig:
     """Tests for PostgreSQL pool configuration."""
 
     def test_default_values(self) -> None:
-        config = ModelPostgresPoolConfig()
+        config = ModelPostgresPoolConfig(database="testdb")
         assert config.host == "localhost"
         assert config.port == 5432
         assert config.user == "postgres"
-        assert config.database == ""
+        assert config.database == "testdb"
         assert config.min_size == 2
         assert config.max_size == 10
 
@@ -187,11 +187,7 @@ class TestModelPostgresPoolConfig:
         with patch.dict(
             "os.environ",
             {
-                "POSTGRES_HOST": "envhost",
-                "POSTGRES_PORT": "5555",
-                "POSTGRES_USER": "envuser",
-                "POSTGRES_PASSWORD": "envpass",
-                "POSTGRES_DATABASE": "envdb",
+                "OMNIBASE_INFRA_DB_URL": "postgresql://envuser:envpass@envhost:5555/envdb",
             },
         ):
             config = ModelPostgresPoolConfig.from_env()
@@ -202,7 +198,7 @@ class TestModelPostgresPoolConfig:
             assert config.database == "envdb"
 
     def test_frozen(self) -> None:
-        config = ModelPostgresPoolConfig()
+        config = ModelPostgresPoolConfig(database="testdb")
         with pytest.raises(Exception):
             config.host = "other"  # type: ignore[misc]
 
@@ -220,103 +216,30 @@ class TestModelPostgresPoolConfig:
             )
 
     def test_from_env_invalid_port(self) -> None:
-        """Non-numeric POSTGRES_PORT raises ValueError."""
+        """DSN with non-numeric port raises ValueError."""
         with patch.dict(
             "os.environ",
-            {"POSTGRES_PORT": "not_a_number", "POSTGRES_DATABASE": "testdb"},
+            {"OMNIBASE_INFRA_DB_URL": "postgresql://user:pass@host:notaport/db"},
         ):
-            with pytest.raises(
-                ValueError, match="Invalid PostgreSQL pool configuration"
-            ):
+            with pytest.raises(ValueError, match="Port could not be cast"):
                 ModelPostgresPoolConfig.from_env()
 
-    # -------------------------------------------------------------------
-    # from_db_url tests (OMN-2146)
-    # -------------------------------------------------------------------
-
-    def test_from_db_url_parses_full_dsn(self) -> None:
-        """from_db_url parses a complete PostgreSQL DSN into all fields."""
-        config = ModelPostgresPoolConfig.from_db_url(
-            "postgresql://myuser:mypass@dbhost:5433/mydb"
-        )
-        assert config.host == "dbhost"
-        assert config.port == 5433
-        assert config.user == "myuser"
-        assert config.password == "mypass"
-        assert config.database == "mydb"
-        assert config.min_size == 2
-        assert config.max_size == 10
-
-    def test_from_db_url_missing_database_raises(self) -> None:
-        """URL without a database path raises ValueError."""
-        with pytest.raises(ValueError, match="missing the database name"):
-            ModelPostgresPoolConfig.from_db_url("postgresql://user:pass@host:5432/")
-
-    def test_from_db_url_empty_string_raises(self) -> None:
-        """Empty URL string raises ValueError (no database component)."""
-        with pytest.raises(ValueError, match="missing the database name"):
-            ModelPostgresPoolConfig.from_db_url("")
-
-    def test_from_db_url_url_encoded_credentials(self) -> None:
-        """URL-encoded characters in credentials are decoded to raw values.
-
-        urlparse returns percent-encoded values; from_db_url() decodes them
-        via unquote() so the model stores raw credentials consistently
-        (matching the from_env() legacy path). Callers that build DSN
-        strings re-encode with quote_plus() as needed.
-        """
-        config = ModelPostgresPoolConfig.from_db_url(
-            "postgresql://admin:p%40ss%23w0rd@host:5432/mydb"
-        )
-        assert config.user == "admin"
-        assert config.password == "p@ss#w0rd"
-        assert config.database == "mydb"
-
-    def test_from_db_url_defaults_for_missing_parts(self) -> None:
-        """URL with minimal components uses defaults for host, port, user."""
-        config = ModelPostgresPoolConfig.from_db_url("postgresql:///mydb")
-        assert config.host == "localhost"
-        assert config.port == 5432
-        assert config.user == "postgres"
-        assert config.password == ""
-        assert config.database == "mydb"
-
-    # -------------------------------------------------------------------
-    # from_env OMNIBASE_INFRA_DB_URL tests (OMN-2146)
-    # -------------------------------------------------------------------
-
-    def test_from_env_prefers_omnibase_infra_db_url(self) -> None:
-        """OMNIBASE_INFRA_DB_URL takes precedence over POSTGRES_* variables."""
-        with patch.dict(
-            "os.environ",
-            {
-                "OMNIBASE_INFRA_DB_URL": "postgresql://urluser:urlpass@urlhost:5555/urldb",
-                "POSTGRES_HOST": "envhost",
-                "POSTGRES_PORT": "9999",
-                "POSTGRES_USER": "envuser",
-                "POSTGRES_PASSWORD": "envpass",
-                "POSTGRES_DATABASE": "envdb",
-            },
-        ):
-            config = ModelPostgresPoolConfig.from_env()
-            assert config.host == "urlhost"
-            assert config.port == 5555
-            assert config.user == "urluser"
-            assert config.password == "urlpass"
-            assert config.database == "urldb"
-
-    def test_from_env_raises_when_no_database_configured(self) -> None:
-        """Raises ValueError with OMN-2146 message when no database is configured."""
-        with patch.dict(
-            "os.environ",
-            {
-                "POSTGRES_HOST": "somehost",
-                "POSTGRES_PORT": "5432",
-            },
-            clear=True,
-        ):
-            with pytest.raises(ValueError, match="OMN-2146"):
+    def test_from_env_missing_url_raises(self) -> None:
+        """Fail-fast: from_env() raises when OMNIBASE_INFRA_DB_URL is not set."""
+        with patch.dict("os.environ", {}, clear=True):
+            with pytest.raises(ValueError, match="OMNIBASE_INFRA_DB_URL is required"):
                 ModelPostgresPoolConfig.from_env()
+
+    def test_from_dsn_missing_database_raises(self) -> None:
+        """from_dsn() raises when DSN has no database path."""
+        with pytest.raises(ValueError, match="missing a database name"):
+            ModelPostgresPoolConfig.from_dsn("postgresql://user:pass@host:5432/")
+
+    def test_from_dsn_missing_database_sanitizes_password(self) -> None:
+        """Error message for missing database does not leak the password."""
+        with pytest.raises(ValueError, match="missing a database name") as exc_info:
+            ModelPostgresPoolConfig.from_dsn("postgresql://user:secret@host:5432")
+        assert "secret" not in str(exc_info.value)
 
 
 class TestModelKafkaProducerConfig:
@@ -384,15 +307,15 @@ class TestModelMaterializerConfig:
         with patch.dict(
             "os.environ",
             {
-                "POSTGRES_HOST": "testhost",
-                "POSTGRES_PORT": "5555",
-                "POSTGRES_DATABASE": "testdb",
+                "OMNIBASE_INFRA_DB_URL": "postgresql://pguser:pgpass@testhost:5555/testdb",
                 "KAFKA_BOOTSTRAP_SERVERS": "broker:9092",
             },
         ):
             config = ModelMaterializerConfig.from_env()
             assert config.postgres.host == "testhost"
             assert config.postgres.port == 5555
+            assert config.postgres.user == "pguser"
+            assert config.postgres.password == "pgpass"
             assert config.postgres.database == "testdb"
             assert config.kafka.bootstrap_servers == "broker:9092"
 

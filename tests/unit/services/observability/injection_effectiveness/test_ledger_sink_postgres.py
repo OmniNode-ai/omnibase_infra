@@ -312,7 +312,7 @@ class TestAppendSessionEntry:
         )
 
         mock_pool._test_conn.execute.assert_any_call(
-            "SET LOCAL statement_timeout = $1", "10000"
+            "SET LOCAL statement_timeout = '10000'"
         )
 
 
