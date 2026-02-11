@@ -69,6 +69,7 @@ class HandlerToolchainCollect:
 
         Returns empty string on failure.
         """
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 tool,
@@ -82,7 +83,13 @@ class HandlerToolchainCollect:
             output = stdout.decode(errors="replace").strip()
             match = _VERSION_RE.search(output)
             return match.group(1) if match else output
-        except (TimeoutError, FileNotFoundError, OSError) as exc:
+        except TimeoutError:
+            if proc is not None:
+                proc.kill()
+                await proc.wait()
+            logger.debug("%s --version error: timed out after 10s", tool)
+            return ""
+        except (FileNotFoundError, OSError) as exc:
             logger.debug("%s --version error: %s", tool, exc)
             return ""
 
