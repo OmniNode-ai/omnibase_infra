@@ -425,6 +425,8 @@ services:
     command: ["python", "-m", "omnibase_infra.services.observability.agent_actions.consumer"]
     environment:
       OMNIBASE_INFRA_AGENT_ACTIONS_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      # NOTE: If POSTGRES_PASSWORD contains URL-special chars (@, :, %, /),
+      # set OMNIBASE_INFRA_DB_URL with pre-encoded credentials instead.
       OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: ${OMNIBASE_INFRA_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DATABASE:-omnibase_infra}}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_SIZE: ${AGENT_ACTIONS_BATCH_SIZE:-100}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_TIMEOUT_MS: ${AGENT_ACTIONS_BATCH_TIMEOUT_MS:-1000}

@@ -225,8 +225,10 @@ if not POSTGRES_PASSWORD or not POSTGRES_PASSWORD.strip():
     # Normalize to None for consistent availability check
     POSTGRES_PASSWORD = None
 
-# Check if PostgreSQL is available based on host and password being set
-POSTGRES_AVAILABLE = POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None
+# Check if PostgreSQL is available based on host, password, and database being set
+POSTGRES_AVAILABLE = (
+    POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None and bool(POSTGRES_DATABASE)
+)
 
 
 def _build_postgres_dsn() -> str:

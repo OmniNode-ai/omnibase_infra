@@ -74,7 +74,10 @@ if TYPE_CHECKING:
 # Check if PostgreSQL is available for integration tests
 POSTGRES_HOST = os.getenv("POSTGRES_HOST")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
-POSTGRES_AVAILABLE = POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None
+POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "")
+POSTGRES_AVAILABLE = (
+    POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None and bool(POSTGRES_DATABASE)
+)
 
 
 # =============================================================================

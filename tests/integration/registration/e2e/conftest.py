@@ -210,7 +210,7 @@ else:
 if POSTGRES_PASSWORD and not POSTGRES_PASSWORD.strip():
     POSTGRES_PASSWORD = None
 
-POSTGRES_AVAILABLE = bool(POSTGRES_HOST and POSTGRES_PASSWORD)
+POSTGRES_AVAILABLE = bool(POSTGRES_HOST and POSTGRES_PASSWORD and POSTGRES_DATABASE)
 
 # Kafka availability
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
@@ -261,7 +261,7 @@ pytestmark = [
             "Full infrastructure required for E2E tests. "
             f"Kafka: {'available' if KAFKA_AVAILABLE else 'MISSING (set KAFKA_BOOTSTRAP_SERVERS)'}. "
             f"Consul: {'available' if CONSUL_AVAILABLE else 'MISSING (set CONSUL_HOST or unreachable)'}. "
-            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set POSTGRES_HOST and POSTGRES_PASSWORD)'}. "
+            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST + POSTGRES_PASSWORD + POSTGRES_DATABASE)'}. "
             f"ServiceRegistry: {'available' if SERVICE_REGISTRY_AVAILABLE else 'MISSING (omnibase_core circular import issue)'}."
         ),
     ),
