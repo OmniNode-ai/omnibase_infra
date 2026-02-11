@@ -23,6 +23,8 @@ from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from omnibase_infra.nodes.node_session_state_effect.models import (
     ModelSessionIndex,
     ModelSessionStateResult,
@@ -133,7 +135,7 @@ class HandlerSessionIndexWrite:
                     current = ModelSessionIndex.model_validate(json.loads(raw))
                 except FileNotFoundError:
                     current = ModelSessionIndex()
-                except (json.JSONDecodeError, ValueError) as exc:
+                except (json.JSONDecodeError, ValueError, ValidationError) as exc:
                     logger.warning(
                         "Corrupted session.json, falling back to empty index: %s",
                         exc,
@@ -202,6 +204,9 @@ class HandlerSessionIndexWrite:
                 ),
             )
         except Exception as e:
+            # Intentional catch-all: this handler must never raise, as an
+            # unhandled exception would crash the pipeline.  logger.exception
+            # records the full traceback for post-mortem debugging.
             logger.exception(
                 "Unexpected error in atomic read-modify-write session.json: %s", e
             )
@@ -288,6 +293,9 @@ class HandlerSessionIndexWrite:
                 error_code="SESSION_INDEX_WRITE_ERROR",
             )
         except Exception as e:
+            # Intentional catch-all: this handler must never raise, as an
+            # unhandled exception would crash the pipeline.  logger.exception
+            # records the full traceback for post-mortem debugging.
             logger.exception("Unexpected error writing session.json: %s", e)
             return ModelSessionStateResult(
                 success=False,

@@ -137,6 +137,9 @@ class HandlerRunContextWrite:
                 error_code="RUN_CONTEXT_WRITE_ERROR",
             )
         except Exception as e:
+            # Intentional catch-all: this handler must never raise, as an
+            # unhandled exception would crash the pipeline.  logger.exception
+            # records the full traceback for post-mortem debugging.
             logger.exception(
                 "Unexpected error writing run context %s: %s", context.run_id, e
             )

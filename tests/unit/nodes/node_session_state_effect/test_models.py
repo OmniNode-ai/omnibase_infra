@@ -201,6 +201,15 @@ class TestModelRunContext:
         with pytest.raises(ValueError):
             ModelRunContext(run_id="run-abc", unknown_field="oops")  # type: ignore[call-arg]
 
+    def test_metadata_defensive_copy(self) -> None:
+        """Mutating the original dict does not affect the model's metadata."""
+        original = {"key": "value"}
+        ctx = ModelRunContext(run_id="run-abc", metadata=original)
+        # Mutate the original dict after construction
+        original["injected"] = "oops"
+        assert "injected" not in ctx.metadata
+        assert ctx.metadata == {"key": "value"}
+
     @pytest.mark.parametrize(
         "bad_id",
         ["../etc/passwd", "foo/bar", "foo\\bar", "foo\0bar", ".."],

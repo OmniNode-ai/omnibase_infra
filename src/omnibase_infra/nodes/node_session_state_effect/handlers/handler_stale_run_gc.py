@@ -67,9 +67,12 @@ class HandlerStaleRunGC:
         Returns:
             Tuple of (list of deleted run_ids, operation result).
             The caller should use the deleted IDs to update the session index.
-            Note: deleted IDs may include file stems from malformed documents
-            that don't correspond to session index entries; callers should
-            silently ignore missing entries during index cleanup.
+            Note: ``len(deleted_ids)`` may exceed ``result.files_affected``
+            because a single file can contribute two IDs when its stem differs
+            from the embedded ``run_id``.  Deleted IDs may also include file
+            stems from malformed documents that don't correspond to session
+            index entries; callers should silently ignore missing entries
+            during index cleanup.
         """
         return await asyncio.to_thread(self._gc_sync, correlation_id)
 
@@ -140,6 +143,9 @@ class HandlerStaleRunGC:
                     files_deleted += 1
                     deleted_ids.append(ctx.run_id)
                     if stem != ctx.run_id:
+                        # Also record the stem so callers can clean up
+                        # index entries keyed by either value.  Note:
+                        # len(deleted_ids) may exceed files_affected.
                         logger.warning(
                             "GC: file stem %r differs from run_id %r",
                             stem,
