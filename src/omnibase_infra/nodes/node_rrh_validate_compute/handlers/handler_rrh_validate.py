@@ -50,6 +50,7 @@ from omnibase_infra.nodes.architecture_validator.models.model_rule_check_result 
     ModelRuleCheckResult,
 )
 from omnibase_infra.nodes.node_rrh_validate_compute.profiles import get_profile
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 if TYPE_CHECKING:
     from omnibase_infra.models.rrh.model_rrh_environment_data import (
@@ -150,7 +151,7 @@ class HandlerRRHValidate:
                     ModelRuleCheckResult(
                         passed=False,
                         rule_id=rule_id,
-                        message=f"Unknown profile '{profile_name}'.",
+                        message=f"Unknown profile '{profile_name}' [correlation_id={request.correlation_id}].",
                     )
                     for rule_id in ALL_RULE_IDS
                 ),
@@ -415,7 +416,7 @@ class HandlerRRHValidate:
         return ModelRuleCheckResult(
             passed=False,
             rule_id="RRH-1201",
-            message=f"Kafka broker '{broker}' is not in host:port format.",
+            message=f"Kafka broker '{sanitize_error_string(broker)}' is not in host:port format.",
         )
 
     @staticmethod

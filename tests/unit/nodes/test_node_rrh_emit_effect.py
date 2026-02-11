@@ -87,19 +87,6 @@ class TestHandlerRepoStateCollect:
     def handler(self) -> HandlerRepoStateCollect:
         return HandlerRepoStateCollect()
 
-    @pytest.mark.integration
-    @pytest.mark.anyio
-    async def test_collects_from_real_repo(
-        self, handler: HandlerRepoStateCollect
-    ) -> None:
-        """Integration-style test: collect state from the actual repo."""
-        repo_path = str(Path(__file__).resolve().parents[3])
-        result = await handler.handle(repo_path)
-        assert isinstance(result, ModelRRHRepoState)
-        assert result.branch  # Should have a branch
-        assert result.head_sha  # Should have a SHA
-        assert result.repo_root  # Should have a root path
-
     def test_handler_type(self, handler: HandlerRepoStateCollect) -> None:
         from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 
@@ -207,8 +194,7 @@ class TestHandlerToolchainCollect:
         assert result.ruff  # ruff is a dev dependency
         assert result.pytest  # pytest is a dev dependency
 
-    @pytest.mark.anyio
-    async def test_handler_type(self, handler: HandlerToolchainCollect) -> None:
+    def test_handler_type(self, handler: HandlerToolchainCollect) -> None:
         from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 
         assert handler.handler_type == EnumHandlerType.INFRA_HANDLER

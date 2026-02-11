@@ -65,7 +65,7 @@ class HandlerRRHStorageWrite:
             # Build timestamped artifact filename.  Microseconds (%f)
             # prevent collisions from rapid evaluations within the same second.
             ts = request.result.evaluated_at.strftime("%Y%m%dT%H%M%S_%f")
-            cid = str(request.result.correlation_id)[:8]
+            cid = str(request.correlation_id)[:8]
             filename = f"rrh_{cid}_{ts}.json"
             artifact_path = artifacts_dir / filename
 
@@ -102,7 +102,7 @@ class HandlerRRHStorageWrite:
             )
 
         except Exception as exc:
-            logger.warning("RRH storage write failed: %s", exc, exc_info=True)
+            logger.warning("RRH storage write failed: %s", sanitize_error_message(exc))
             return ModelRRHStorageResult(
                 artifact_path="",
                 success=False,
