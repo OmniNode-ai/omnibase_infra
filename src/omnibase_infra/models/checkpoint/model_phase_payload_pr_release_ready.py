@@ -27,6 +27,7 @@ class ModelPhasePayloadPrReleaseReady(BaseModel):
         ...,
         min_length=7,
         max_length=40,
+        pattern=r"^[0-9a-f]+$",
         description="Commit SHA of the last review pass.",
     )
     issue_fingerprints: tuple[str, ...] = Field(

@@ -39,6 +39,15 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BASE_DIR = Path.home() / ".claude" / "checkpoints"
 
 
+def _attempt_number(path: Path) -> int:
+    """Extract numeric attempt from filename like ``phase_1_implement_a3.yaml``."""
+    stem = path.stem
+    after_a = stem.rsplit("_a", maxsplit=1)
+    if len(after_a) == 2 and after_a[1].isdigit():
+        return int(after_a[1])
+    return 0
+
+
 class HandlerCheckpointRead:
     """Reads a checkpoint for a given ticket, run, and phase.
 
@@ -87,7 +96,8 @@ class HandlerCheckpointRead:
             operation="read_checkpoint",
             target_name="checkpoint_yaml",
         )
-        corr_id = context.correlation_id  # with_correlation() guarantees a UUID
+        corr_id = context.correlation_id
+        assert corr_id is not None  # with_correlation() guarantees a UUID
 
         ticket_id = envelope.get("ticket_id")
         run_id = envelope.get("run_id")
@@ -138,14 +148,6 @@ class HandlerCheckpointRead:
             )
 
         # Find all attempt files for this phase, sorted by attempt number
-        def _attempt_number(path: Path) -> int:
-            """Extract numeric attempt from filename like phase_1_implement_a3.yaml."""
-            stem = path.stem  # e.g. "phase_1_implement_a3"
-            after_a = stem.rsplit("_a", maxsplit=1)
-            if len(after_a) == 2 and after_a[1].isdigit():
-                return int(after_a[1])
-            return 0
-
         matching_files = sorted(
             target_dir.glob(f"{phase_prefix}*.yaml"),
             key=_attempt_number,

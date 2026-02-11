@@ -37,6 +37,15 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BASE_DIR = Path.home() / ".claude" / "checkpoints"
 
 
+def _attempt_number(path: Path) -> int:
+    """Extract numeric attempt from filename like ``phase_1_implement_a3.yaml``."""
+    stem = path.stem
+    after_a = stem.rsplit("_a", maxsplit=1)
+    if len(after_a) == 2 and after_a[1].isdigit():
+        return int(after_a[1])
+    return 0
+
+
 class HandlerCheckpointList:
     """Lists all checkpoint files for a ticket and optionally a specific run."""
 
@@ -80,7 +89,8 @@ class HandlerCheckpointList:
             operation="list_checkpoints",
             target_name="checkpoint_yaml",
         )
-        corr_id = context.correlation_id  # with_correlation() guarantees a UUID
+        corr_id = context.correlation_id
+        assert corr_id is not None  # with_correlation() guarantees a UUID
 
         ticket_id = envelope.get("ticket_id")
         if not ticket_id:
@@ -122,14 +132,6 @@ class HandlerCheckpointList:
             scan_dirs = [ticket_dir / str(run_id)]
         else:
             scan_dirs = [d for d in ticket_dir.iterdir() if d.is_dir()]
-
-        def _attempt_number(path: Path) -> int:
-            """Extract numeric attempt from filename like phase_1_implement_a3.yaml."""
-            stem = path.stem
-            after_a = stem.rsplit("_a", maxsplit=1)
-            if len(after_a) == 2 and after_a[1].isdigit():
-                return int(after_a[1])
-            return 0
 
         checkpoints: list[ModelCheckpoint] = []
         for scan_dir in scan_dirs:

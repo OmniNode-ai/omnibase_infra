@@ -37,6 +37,7 @@ class ModelPhasePayloadCreatePr(BaseModel):
         ...,
         min_length=7,
         max_length=40,
+        pattern=r"^[0-9a-f]+$",
         description="HEAD SHA pushed to the remote branch.",
     )
 

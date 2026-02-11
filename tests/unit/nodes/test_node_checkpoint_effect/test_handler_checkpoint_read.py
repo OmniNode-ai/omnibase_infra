@@ -118,7 +118,7 @@ class TestHandlerCheckpointRead:
                     "phase": "local_review",
                     "iteration_count": attempt,
                     "issue_fingerprints": [],
-                    "last_clean_sha": f"sha{attempt:04d}aa",
+                    "last_clean_sha": f"aabbcc{attempt:04d}",
                 },
             )
             write_env: dict[str, object] = {

@@ -9,10 +9,10 @@ Ticket: OMN-2143
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ModelPhasePayloadReadyForMerge(BaseModel):
@@ -28,6 +28,15 @@ class ModelPhasePayloadReadyForMerge(BaseModel):
         ...,
         description="UTC timestamp when the merge-ready label was applied.",
     )
+
+    @field_validator("label_applied_at", mode="after")
+    @classmethod
+    def _ensure_utc(cls, v: datetime) -> datetime:
+        """Reject naive datetimes; normalize to UTC."""
+        if v.tzinfo is None:
+            msg = "label_applied_at must be timezone-aware (use datetime.now(UTC))"
+            raise ValueError(msg)
+        return v.astimezone(UTC)
 
 
 __all__: list[str] = ["ModelPhasePayloadReadyForMerge"]

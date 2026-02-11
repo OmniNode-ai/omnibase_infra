@@ -33,6 +33,7 @@ class ModelPhasePayloadImplement(BaseModel):
         ...,
         min_length=7,
         max_length=40,
+        pattern=r"^[0-9a-f]+$",
         description="HEAD commit SHA after implementation.",
     )
     files_changed: tuple[str, ...] = Field(
