@@ -11,18 +11,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from pathlib import Path
 from uuid import UUID
 
 from omnibase_infra.nodes.node_session_state_effect.models import (
+    RUN_ID_PATTERN,
     ModelRunContext,
     ModelSessionStateResult,
 )
 
 logger = logging.getLogger(__name__)
-
-_SAFE_RUN_ID = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
 class HandlerRunContextRead:
@@ -50,7 +48,7 @@ class HandlerRunContextRead:
         Returns:
             Tuple of (parsed context or None if not found, operation result).
         """
-        if not _SAFE_RUN_ID.match(run_id) or ".." in run_id:
+        if not RUN_ID_PATTERN.match(run_id) or ".." in run_id:
             return (
                 None,
                 ModelSessionStateResult(

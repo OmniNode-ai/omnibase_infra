@@ -126,6 +126,25 @@ class TestModelSessionIndex:
         # The oldest entry was trimmed
         assert f"run-{max_runs - 1}" not in idx2.recent_run_ids
 
+    def test_with_run_added_clears_trimmed_active(self) -> None:
+        """active_run_id is cleared when it gets trimmed by MAX_RECENT_RUNS."""
+        max_runs = ModelSessionIndex.MAX_RECENT_RUNS
+        # The oldest run is the active one
+        oldest = f"run-{max_runs - 1}"
+        ids = tuple(f"run-{i}" for i in range(max_runs))
+        idx = ModelSessionIndex(recent_run_ids=ids, active_run_id=oldest)
+        # Adding a new run trims the oldest (which is the active one)
+        idx2 = idx.with_run_added("run-new")
+        assert oldest not in idx2.recent_run_ids
+        assert idx2.active_run_id is None  # Cleared because it was trimmed
+
+    def test_with_run_added_preserves_active_when_not_trimmed(self) -> None:
+        """active_run_id is preserved when not affected by trim."""
+        ids = tuple(f"run-{i}" for i in range(5))
+        idx = ModelSessionIndex(recent_run_ids=ids, active_run_id="run-0")
+        idx2 = idx.with_run_added("run-new")
+        assert idx2.active_run_id == "run-0"  # Still present, not trimmed
+
 
 # ============================================================
 # ModelRunContext tests

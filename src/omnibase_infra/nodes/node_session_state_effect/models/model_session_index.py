@@ -15,13 +15,14 @@ Concurrency model:
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-_RUN_ID_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
+from omnibase_infra.nodes.node_session_state_effect.models.model_run_context import (
+    validate_run_id,
+)
 
 
 class ModelSessionIndex(BaseModel):
@@ -58,16 +59,7 @@ class ModelSessionIndex(BaseModel):
         """
         if v is None:
             return v
-        if not _RUN_ID_PATTERN.match(v):
-            msg = (
-                "run_id must contain only alphanumeric characters, "
-                "dots, hyphens, and underscores"
-            )
-            raise ValueError(msg)
-        if ".." in v:
-            msg = "run_id must not contain '..'"
-            raise ValueError(msg)
-        return v
+        return validate_run_id(v)
 
     @field_validator("updated_at")
     @classmethod
@@ -86,15 +78,7 @@ class ModelSessionIndex(BaseModel):
         a denylist, mirroring the validation in ``ModelRunContext``.
         """
         for rid in v:
-            if not _RUN_ID_PATTERN.match(rid):
-                msg = (
-                    "run_id must contain only alphanumeric characters, "
-                    "dots, hyphens, and underscores"
-                )
-                raise ValueError(msg)
-            if ".." in rid:
-                msg = "run_id must not contain '..'"
-                raise ValueError(msg)
+            validate_run_id(rid)
         return v
 
     # ------------------------------------------------------------------
@@ -123,19 +107,15 @@ class ModelSessionIndex(BaseModel):
         Raises:
             ValueError: If *run_id* contains unsafe filesystem characters.
         """
-        if not _RUN_ID_PATTERN.match(run_id):
-            msg = (
-                "run_id must contain only alphanumeric characters, "
-                "dots, hyphens, and underscores"
-            )
-            raise ValueError(msg)
-        if ".." in run_id:
-            msg = "run_id must not contain '..'"
-            raise ValueError(msg)
+        validate_run_id(run_id)
         ids = (run_id, *[rid for rid in self.recent_run_ids if rid != run_id])
         ids = ids[: self.MAX_RECENT_RUNS]
+        # Clear active_run_id if it was trimmed from the list
+        active = run_id if set_active else self.active_run_id
+        if active is not None and active not in ids:
+            active = None
         return ModelSessionIndex(
-            active_run_id=run_id if set_active else self.active_run_id,
+            active_run_id=active,
             recent_run_ids=ids,
             updated_at=datetime.now(UTC),
         )

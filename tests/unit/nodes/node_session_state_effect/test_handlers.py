@@ -147,6 +147,62 @@ class TestHandlerSessionIndexWrite:
         data = json.loads((state_dir / "session.json").read_text())
         assert "recent_run_ids" in data
 
+    @pytest.mark.asyncio
+    async def test_read_modify_write_atomic(self, state_dir: Path) -> None:
+        """Atomic read-modify-write adds a run to an existing index."""
+        handler = HandlerSessionIndexWrite(state_dir)
+        # Seed an initial index
+        initial = ModelSessionIndex(recent_run_ids=("run-1",))
+        await handler.handle(initial, uuid4())
+
+        # Use read_modify_write to atomically add a run
+        new_idx, result = await handler.handle_read_modify_write(
+            lambda idx: idx.with_run_added("run-2"),
+            uuid4(),
+        )
+        assert result.success
+        assert new_idx is not None
+        assert "run-2" in new_idx.recent_run_ids
+        assert "run-1" in new_idx.recent_run_ids
+
+        # Verify persisted
+        data = json.loads((state_dir / "session.json").read_text())
+        assert "run-2" in data["recent_run_ids"]
+        assert "run-1" in data["recent_run_ids"]
+
+    @pytest.mark.asyncio
+    async def test_read_modify_write_empty_file(self, state_dir: Path) -> None:
+        """Atomic read-modify-write works when session.json doesn't exist."""
+        handler = HandlerSessionIndexWrite(state_dir)
+        new_idx, result = await handler.handle_read_modify_write(
+            lambda idx: idx.with_run_added("run-first"),
+            uuid4(),
+        )
+        assert result.success
+        assert new_idx is not None
+        assert new_idx.recent_run_ids == ("run-first",)
+
+    @pytest.mark.asyncio
+    async def test_concurrent_read_modify_write_no_lost_updates(
+        self, state_dir: Path
+    ) -> None:
+        """Concurrent read-modify-write calls don't lose each other's runs."""
+        handler = HandlerSessionIndexWrite(state_dir)
+
+        async def add_run(run_id: str) -> None:
+            _, result = await handler.handle_read_modify_write(
+                lambda idx: idx.with_run_added(run_id),
+                uuid4(),
+            )
+            assert result.success
+
+        # Run 10 concurrent add-run operations
+        await asyncio.gather(*(add_run(f"run-{i}") for i in range(10)))
+
+        data = json.loads((state_dir / "session.json").read_text())
+        # All 10 runs should be present (no lost updates)
+        assert len(data["recent_run_ids"]) == 10
+
 
 # ============================================================
 # HandlerRunContextRead tests

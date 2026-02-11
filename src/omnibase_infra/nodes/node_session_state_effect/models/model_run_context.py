@@ -17,7 +17,32 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from omnibase_core.types.type_json import StrictJsonPrimitive
 from omnibase_infra.enums import EnumSessionLifecycleState
 
-_RUN_ID_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
+RUN_ID_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
+"""Compiled regex for validating run IDs (alphanumeric, dot, hyphen, underscore)."""
+
+
+def validate_run_id(value: str) -> str:
+    """Validate a run_id against the filesystem-safe allowlist.
+
+    Args:
+        value: The run_id to validate.
+
+    Returns:
+        The validated run_id (unchanged).
+
+    Raises:
+        ValueError: If the run_id contains unsafe characters or '..'.
+    """
+    if not RUN_ID_PATTERN.match(value):
+        msg = (
+            "run_id must contain only alphanumeric characters, "
+            "dots, hyphens, and underscores"
+        )
+        raise ValueError(msg)
+    if ".." in value:
+        msg = "run_id must not contain '..'"
+        raise ValueError(msg)
+    return value
 
 
 class ModelRunContext(BaseModel):
@@ -68,17 +93,7 @@ class ModelRunContext(BaseModel):
         Uses an allowlist (alphanumeric, dot, hyphen, underscore) rather than
         a denylist, to guard against unexpected special characters.
         """
-        if not _RUN_ID_PATTERN.match(v):
-            msg = (
-                "run_id must contain only alphanumeric characters, "
-                "dots, hyphens, and underscores"
-            )
-            raise ValueError(msg)
-        # Double-dot still disallowed (path traversal)
-        if ".." in v:
-            msg = "run_id must not contain '..'"
-            raise ValueError(msg)
-        return v
+        return validate_run_id(v)
 
     @field_validator("created_at", "updated_at")
     @classmethod

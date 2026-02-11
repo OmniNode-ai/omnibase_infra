@@ -61,7 +61,9 @@ class HandlerSessionIndexRead:
         """Synchronous read logic, executed off the event loop."""
         session_path = self._state_dir / "session.json"
 
-        if not session_path.exists():
+        try:
+            raw = session_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
             logger.debug(
                 "session.json not found at %s, returning default", session_path
             )
@@ -74,9 +76,21 @@ class HandlerSessionIndexRead:
                     files_affected=0,
                 ),
             )
+        except OSError as e:
+            logger.warning("Failed to read session.json: %s", e)
+            return (
+                None,
+                ModelSessionStateResult(
+                    success=False,
+                    operation="session_index_read",
+                    correlation_id=correlation_id,
+                    error=f"I/O error reading session.json: {e}",
+                    error_code="SESSION_INDEX_IO_ERROR",
+                    files_affected=0,
+                ),
+            )
 
         try:
-            raw = session_path.read_text(encoding="utf-8")
             data = json.loads(raw)
             index = ModelSessionIndex.model_validate(data)
             return (
@@ -99,19 +113,6 @@ class HandlerSessionIndexRead:
                     error=f"Failed to parse session.json: {e}",
                     error_code="SESSION_INDEX_PARSE_ERROR",
                     files_affected=1,
-                ),
-            )
-        except OSError as e:
-            logger.warning("Failed to read session.json: %s", e)
-            return (
-                None,
-                ModelSessionStateResult(
-                    success=False,
-                    operation="session_index_read",
-                    correlation_id=correlation_id,
-                    error=f"I/O error reading session.json: {e}",
-                    error_code="SESSION_INDEX_IO_ERROR",
-                    files_affected=0,
                 ),
             )
 

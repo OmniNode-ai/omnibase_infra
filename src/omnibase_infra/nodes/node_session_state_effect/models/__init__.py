@@ -3,7 +3,9 @@
 """Models for the session state effect node."""
 
 from omnibase_infra.nodes.node_session_state_effect.models.model_run_context import (
+    RUN_ID_PATTERN,
     ModelRunContext,
+    validate_run_id,
 )
 from omnibase_infra.nodes.node_session_state_effect.models.model_session_index import (
     ModelSessionIndex,
@@ -13,7 +15,9 @@ from omnibase_infra.nodes.node_session_state_effect.models.model_session_state_r
 )
 
 __all__: list[str] = [
+    "RUN_ID_PATTERN",
     "ModelRunContext",
     "ModelSessionIndex",
     "ModelSessionStateResult",
+    "validate_run_id",
 ]
