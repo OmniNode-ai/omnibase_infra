@@ -37,6 +37,8 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import UTC, datetime
 from functools import cached_property
 from pathlib import Path
@@ -73,6 +75,11 @@ _VALID_ENVIRONMENTS = frozenset({"dev", "staging", "production", "ci", "test"})
 _NESTED_QUANTIFIER_RE = re.compile(r"\([^)]*[+*][^)]*\)\s*[+*?{]")
 _MAX_BRANCH_PATTERN_LEN = 200
 _MAX_DISPLAY_PATTERN_LEN = 80
+# Hard timeout for regex matching as a safety net against ReDoS patterns
+# that bypass the heuristic check.  Uses concurrent.futures to enforce.
+_REGEX_TIMEOUT_SECONDS = 0.1
+# Maximum length for Kafka broker address before truncation in messages.
+_MAX_BROKER_LEN = 253
 
 
 def _truncate_pattern(pattern: str, max_len: int = _MAX_DISPLAY_PATTERN_LEN) -> str:
@@ -119,6 +126,8 @@ class HandlerRRHValidate:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.COMPUTE
 
+    # Note: Synchronous by design -- COMPUTE handlers perform no I/O.
+    # Callers must NOT await this method.
     def handle(self, request: ModelRRHValidateRequest) -> ModelRRHResult:
         """Evaluate all RRH rules against the environment data.
 
@@ -151,7 +160,7 @@ class HandlerRRHValidate:
                     ModelRuleCheckResult(
                         passed=False,
                         rule_id=rule_id,
-                        message=f"Unknown profile '{profile_name}' [correlation_id={request.correlation_id}].",
+                        message=f"Unknown profile '{profile_name}'.",
                     )
                     for rule_id in ALL_RULE_IDS
                 ),
@@ -268,6 +277,7 @@ class HandlerRRHValidate:
     # Rule evaluation dispatcher
     # ------------------------------------------------------------------
 
+    # cached_property is thread-safe in Python 3.12+ (PEP 688).
     @cached_property
     def _rule_dispatcher(self) -> dict[str, Callable[..., ModelRuleCheckResult]]:
         """Build rule dispatcher once and cache on the instance."""
@@ -333,7 +343,8 @@ class HandlerRRHValidate:
                 reason="No expected_branch_pattern in governance.",
             )
         pattern = gov.expected_branch_pattern
-        # Guard against ReDoS: reject overly long or structurally unsafe patterns.
+        # Fast-path ReDoS rejection: overly long or structurally unsafe
+        # patterns.  The ThreadPoolExecutor timeout below is the hard safety net.
         if len(pattern) > _MAX_BRANCH_PATTERN_LEN or _NESTED_QUANTIFIER_RE.search(
             pattern
         ):
@@ -344,8 +355,22 @@ class HandlerRRHValidate:
             )
         branch = env.repo_state.branch
         try:
-            if re.fullmatch(pattern, branch):
+            # Run fullmatch with a hard timeout as a safety net against
+            # ReDoS patterns that bypass the heuristic check above.
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(re.fullmatch, pattern, branch)
+                match = future.result(timeout=_REGEX_TIMEOUT_SECONDS)
+            if match:
                 return ModelRuleCheckResult(passed=True, rule_id="RRH-1002")
+        except FuturesTimeoutError:
+            return ModelRuleCheckResult(
+                passed=False,
+                rule_id="RRH-1002",
+                message=(
+                    f"Branch pattern match timed out (possible ReDoS): "
+                    f"{_truncate_pattern(pattern)!r}"
+                ),
+            )
         except re.error:
             return ModelRuleCheckResult(
                 passed=False,
@@ -401,6 +426,13 @@ class HandlerRRHValidate:
                 rule_id="RRH-1201",
                 message="Kafka broker not configured but interfaces_touched includes 'topics'.",
             )
+        # Truncate broker value before including in any error messages to
+        # prevent unbounded environment variable content in stored artifacts.
+        broker_display = (
+            broker[:_MAX_BROKER_LEN] + "..."
+            if len(broker) > _MAX_BROKER_LEN
+            else broker
+        )
         # Validate host:port format(s). Supports comma-separated broker lists
         # and underscores in hostnames. Basic format check only (not full
         # URI validation).
@@ -416,7 +448,7 @@ class HandlerRRHValidate:
         return ModelRuleCheckResult(
             passed=False,
             rule_id="RRH-1201",
-            message=f"Kafka broker '{sanitize_error_string(broker)}' is not in host:port format.",
+            message=f"Kafka broker '{sanitize_error_string(broker_display)}' is not in host:port format.",
         )
 
     @staticmethod

@@ -19,7 +19,11 @@ class ModelRRHRuntimeTarget(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     environment: str = Field(default="dev", description="Target environment label.")
-    kafka_broker: str = Field(default="", description="Kafka bootstrap server.")
+    kafka_broker: str = Field(
+        default="",
+        max_length=1024,
+        description="Kafka bootstrap server (max 1024 chars).",
+    )
     kubernetes_context: str = Field(default="", description="Active kubectl context.")
 
 
