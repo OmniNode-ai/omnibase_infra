@@ -41,6 +41,9 @@ OMNIBASE_INFRA_DB_URL=postgresql://role_omnibase_infra:s3cret@db.example.com:543
 2. **Error** - If the variable is not set, a `ValueError` is raised
    with a clear message. There is no silent fallback.
 
+Pool sizing is optionally controlled by `POSTGRES_POOL_MIN_SIZE` (default 2)
+and `POSTGRES_POOL_MAX_SIZE` (default 10).
+
 > **Note**: The test helper `PostgresConfig.from_env()` (in
 > `tests/helpers/util_postgres.py`) additionally falls back to individual
 > `POSTGRES_*` variables (`POSTGRES_HOST`, `POSTGRES_PORT`, etc.) for
@@ -93,6 +96,9 @@ POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omnibase_infra}
 
 ### For Tests
 
-Integration tests check `OMNIBASE_INFRA_DB_URL` first, then fall back to
-individual `POSTGRES_*` variables. Tests skip gracefully when no database
+The shared test helper `PostgresConfig.from_env()` checks
+`OMNIBASE_INFRA_DB_URL` first, then falls back to individual `POSTGRES_*`
+variables. Some test conftest files (e.g., injection_effectiveness) build
+DSNs directly from individual `POSTGRES_*` variables with a default
+database of `omnibase_infra`. All tests skip gracefully when no database
 is configured.
