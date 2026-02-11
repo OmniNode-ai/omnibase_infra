@@ -81,6 +81,16 @@ class HandlerRunContextWrite:
             runs_dir.mkdir(parents=True, exist_ok=True)
 
             run_path = runs_dir / f"{context.run_id}.json"
+
+            # Defense-in-depth: verify resolved path stays within runs directory
+            if run_path.resolve().parent != runs_dir.resolve():
+                return ModelSessionStateResult(
+                    success=False,
+                    operation="run_context_write",
+                    correlation_id=correlation_id,
+                    error=f"Invalid run_id: resolved path escapes state directory: {context.run_id!r}",
+                    error_code="RUN_CONTEXT_INVALID_ID",
+                )
             data = context.model_dump(mode="json")
 
             # Write to temp file, fsync, then atomic rename
@@ -126,6 +136,17 @@ class HandlerRunContextWrite:
                 correlation_id=correlation_id,
                 error=f"I/O error writing run context {context.run_id}: {e}",
                 error_code="RUN_CONTEXT_WRITE_ERROR",
+            )
+        except Exception as e:
+            logger.warning(
+                "Unexpected error writing run context %s: %s", context.run_id, e
+            )
+            return ModelSessionStateResult(
+                success=False,
+                operation="run_context_write",
+                correlation_id=correlation_id,
+                error=f"Unexpected error writing run context {context.run_id}: {e}",
+                error_code="RUN_CONTEXT_WRITE_UNEXPECTED",
             )
 
 

@@ -152,6 +152,15 @@ class HandlerSessionIndexWrite:
                 error=f"I/O error writing session.json: {e}",
                 error_code="SESSION_INDEX_WRITE_ERROR",
             )
+        except Exception as e:
+            logger.warning("Unexpected error writing session.json: %s", e)
+            return ModelSessionStateResult(
+                success=False,
+                operation="session_index_write",
+                correlation_id=correlation_id,
+                error=f"Unexpected error writing session.json: {e}",
+                error_code="SESSION_INDEX_WRITE_UNEXPECTED",
+            )
 
 
 __all__: list[str] = ["HandlerSessionIndexWrite"]

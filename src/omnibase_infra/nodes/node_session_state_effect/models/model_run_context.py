@@ -28,6 +28,12 @@ class ModelRunContext(BaseModel):
         created_at: When the run was created (UTC).
         updated_at: Last modification timestamp (UTC).
         metadata: Arbitrary key-value data attached to the run.
+
+    Warning:
+        **Metadata mutability**: ``frozen=True`` prevents reassigning the
+        ``metadata`` field but does **not** prevent in-place mutation of dict
+        contents (e.g., ``ctx.metadata['key'] = 'val'`` will silently succeed).
+        Always use :meth:`with_metadata` to add entries immutably.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
