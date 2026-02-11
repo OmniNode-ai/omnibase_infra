@@ -452,10 +452,12 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # Note: OMN-1742 RequestResponseWiring uses UUID | None (optional, not counted)
 # Note: OMN-1869 ContractRegistration added IntentPayloadType union (118th)
 # Note: OMN-1990 ServiceTopicManager return type dict[str, list[str] | str] (119th)
-# - 121 (2026-02-11): OMN-2143 checkpoint nodes (+2 unions)
+# Note: OMN-2117 ModelRunContext.metadata uses StrictJsonPrimitive from omnibase_core (120th)
+# Note: OMN-2117 Callable[[ModelSessionIndex], ModelSessionIndex] transform parameter (121st)
+# - 123 (2026-02-11): OMN-2143 checkpoint nodes (+2 unions)
 #                     PhasePayload: 5-type discriminated Union in ModelCheckpoint
 #                     register_handler(): Write | Read | List handler type param
-INFRA_MAX_UNIONS = 121
+INFRA_MAX_UNIONS = 123
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

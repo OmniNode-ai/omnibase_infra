@@ -104,6 +104,9 @@ from omnibase_infra.enums.enum_response_status import EnumResponseStatus
 from omnibase_infra.enums.enum_retry_error_category import EnumRetryErrorCategory
 from omnibase_infra.enums.enum_security_rule_id import EnumSecurityRuleId
 from omnibase_infra.enums.enum_selection_strategy import EnumSelectionStrategy
+from omnibase_infra.enums.enum_session_lifecycle_state import (
+    EnumSessionLifecycleState,
+)
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 from omnibase_infra.enums.enum_validation_severity import EnumValidationSeverity
 
@@ -151,6 +154,7 @@ __all__: list[str] = [
     "EnumRetryErrorCategory",
     "EnumSecurityRuleId",
     "EnumSelectionStrategy",
+    "EnumSessionLifecycleState",
     "EnumTopicStandard",
     "EnumTopicType",
     "EnumValidationSeverity",

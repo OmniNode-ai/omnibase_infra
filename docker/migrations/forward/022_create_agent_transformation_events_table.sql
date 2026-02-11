@@ -32,7 +32,12 @@ CREATE TABLE IF NOT EXISTS agent_transformation_events (
     -- Optional context
     trigger TEXT,
     context TEXT,
-    metadata JSONB
+    metadata JSONB,
+
+    -- Project context (absorbed from omniclaude - OMN-2057)
+    project_path TEXT,
+    project_name VARCHAR(255),
+    claude_session_id VARCHAR(255)
 );
 
 -- ============================================================================
@@ -56,3 +61,6 @@ COMMENT ON COLUMN agent_transformation_events.created_at IS 'Timestamp when even
 COMMENT ON COLUMN agent_transformation_events.trigger IS 'Trigger that caused the transformation';
 COMMENT ON COLUMN agent_transformation_events.context IS 'Context information about the transformation';
 COMMENT ON COLUMN agent_transformation_events.metadata IS 'Additional metadata about the transformation (JSONB)';
+COMMENT ON COLUMN agent_transformation_events.project_path IS 'Absolute path to the project being worked on (absorbed from omniclaude OMN-2057)';
+COMMENT ON COLUMN agent_transformation_events.project_name IS 'Human-readable project name (absorbed from omniclaude OMN-2057)';
+COMMENT ON COLUMN agent_transformation_events.claude_session_id IS 'Claude Code session identifier (absorbed from omniclaude OMN-2057)';

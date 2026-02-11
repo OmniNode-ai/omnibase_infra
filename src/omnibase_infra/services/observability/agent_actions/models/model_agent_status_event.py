@@ -12,7 +12,9 @@ Note:
     replaced with an import from omnibase_core.
 
 Design Decisions:
-    - extra="allow": Phase 1 flexibility - required fields typed, extras preserved
+    - frozen=True: Immutability for thread safety
+    - extra="forbid": Strict validation ensures schema compliance
+    - from_attributes=True: ORM/pytest-xdist compatibility
     - created_at: Required for TTL cleanup job (Phase 2)
     - progress: Bounded 0.0-1.0 for percentage representation
 
@@ -49,8 +51,8 @@ class ModelAgentStatusEvent(BaseModel):
     """Agent status event model for Kafka deserialization.
 
     Represents a single status report from an agent, including its current
-    state, progress, and phase. Uses extra="allow" for Phase 1 flexibility
-    while ensuring required fields are typed.
+    state, progress, and phase. Uses frozen=True for thread safety and
+    extra="forbid" for strict schema compliance.
 
     Attributes:
         id: Unique event identifier (idempotency key).
@@ -82,7 +84,8 @@ class ModelAgentStatusEvent(BaseModel):
     """
 
     model_config = ConfigDict(
-        extra="allow",
+        frozen=True,
+        extra="forbid",
         from_attributes=True,
     )
 

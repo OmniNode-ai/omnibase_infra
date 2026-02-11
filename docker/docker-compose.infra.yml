@@ -143,7 +143,16 @@ services:
       # SECURITY: Password is required and must be explicitly set (no default)
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: omnibase_infra
-      POSTGRES_MULTIPLE_DATABASES: "infisical_db"
+      # Per-service role passwords (DB-SPLIT-05 / OMN-2056)
+      # Roles are created only when the corresponding password env var is set.
+      # Empty defaults are intentional — the init script treats empty as "skip role".
+      # Generate each with: openssl rand -hex 32
+      ROLE_OMNIBASE_PASSWORD: ${ROLE_OMNIBASE_PASSWORD:-}
+      ROLE_OMNICLAUDE_PASSWORD: ${ROLE_OMNICLAUDE_PASSWORD:-}
+      ROLE_OMNIDASH_PASSWORD: ${ROLE_OMNIDASH_PASSWORD:-}
+      ROLE_OMNIINTELLIGENCE_PASSWORD: ${ROLE_OMNIINTELLIGENCE_PASSWORD:-}
+      ROLE_OMNIMEMORY_PASSWORD: ${ROLE_OMNIMEMORY_PASSWORD:-}
+      ROLE_OMNINODE_PASSWORD: ${ROLE_OMNINODE_PASSWORD:-}
     ports:
       - "${POSTGRES_EXTERNAL_PORT:-5436}:5432"
     volumes:

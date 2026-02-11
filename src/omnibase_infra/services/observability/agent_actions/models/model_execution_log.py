@@ -7,7 +7,9 @@ from Kafka. Execution logs track the full lifecycle of an agent execution,
 from start to completion (or failure).
 
 Design Decisions:
-    - extra="allow": Phase 1 flexibility - required fields typed, extras preserved
+    - frozen=True: Immutability for thread safety
+    - extra="forbid": Strict validation ensures schema compliance
+    - from_attributes=True: ORM/pytest-xdist compatibility
     - raw_payload: Optional field to preserve complete payload for schema tightening
     - created_at AND updated_at: Both required for lifecycle tracking and TTL
     - TTL keys off updated_at (not created_at) to avoid deleting in-flight executions
@@ -76,7 +78,8 @@ class ModelExecutionLog(BaseModel):
     """
 
     model_config = ConfigDict(
-        extra="allow",
+        frozen=True,
+        extra="forbid",
         from_attributes=True,
     )
 
@@ -140,6 +143,24 @@ class ModelExecutionLog(BaseModel):
     raw_payload: dict[str, JsonType] | None = Field(
         default=None,
         description="Complete raw payload for Phase 2 schema tightening.",
+    )
+
+    # ---- Project Context (absorbed from omniclaude - OMN-2057) ----
+    project_path: str | None = Field(
+        default=None,
+        description="Absolute path to the project being worked on.",
+    )
+    project_name: str | None = Field(
+        default=None,
+        description="Human-readable project name.",
+    )
+    claude_session_id: str | None = Field(
+        default=None,
+        description="Claude Code session identifier.",
+    )
+    terminal_id: str | None = Field(
+        default=None,
+        description="Terminal/TTY identifier for the session.",
     )
 
     def __str__(self) -> str:
