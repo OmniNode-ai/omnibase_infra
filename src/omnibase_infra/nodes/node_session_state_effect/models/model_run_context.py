@@ -164,6 +164,10 @@ class ModelRunContext(BaseModel):
     def is_stale(self, ttl_seconds: float = 14400.0) -> bool:
         """Check if this run context is stale (default 4hr TTL).
 
+        Compares ``updated_at`` against the current UTC wall-clock, so the
+        result is sensitive to system clock skew between the process that
+        wrote the document and the process running GC.
+
         Args:
             ttl_seconds: Time-to-live in seconds (default: 14400 = 4 hours).
 

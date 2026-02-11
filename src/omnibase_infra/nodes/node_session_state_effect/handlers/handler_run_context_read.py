@@ -73,8 +73,8 @@ class HandlerRunContextRead:
         runs_dir = (self._state_dir / "runs").resolve()
         run_path = runs_dir / f"{run_id}.json"
 
-        # Defense-in-depth: verify resolved path stays within runs directory
-        # (resolve() works on non-existent paths, avoiding TOCTOU with exists())
+        # Defense-in-depth: structural comparison ensures the resolved path
+        # stays within the runs directory, even if run_id contains ".." etc.
         if run_path.resolve().parent != runs_dir:
             return (
                 None,
