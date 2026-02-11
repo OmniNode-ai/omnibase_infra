@@ -66,6 +66,11 @@ logger = logging.getLogger(__name__)
 
 _VALID_ENVIRONMENTS = frozenset({"dev", "staging", "production", "ci", "test"})
 
+# Heuristic to detect regex patterns vulnerable to catastrophic backtracking
+# (ReDoS).  Catches quantified groups containing quantifiers, e.g. (a+)+, (a*)*.
+_NESTED_QUANTIFIER_RE = re.compile(r"\([^)]*[+*][^)]*\)\s*[+*?{]")
+_MAX_BRANCH_PATTERN_LEN = 200
+
 # All 13 rule IDs in catalog order.
 ALL_RULE_IDS: tuple[str, ...] = (
     "RRH-1001",
@@ -286,9 +291,19 @@ class HandlerRRHValidate:
                 rule_id="RRH-1002",
                 reason="No expected_branch_pattern in governance.",
             )
+        pattern = gov.expected_branch_pattern
+        # Guard against ReDoS: reject overly long or structurally unsafe patterns.
+        if len(pattern) > _MAX_BRANCH_PATTERN_LEN or _NESTED_QUANTIFIER_RE.search(
+            pattern
+        ):
+            return ModelRuleCheckResult(
+                passed=False,
+                rule_id="RRH-1002",
+                message=f"Unsafe branch pattern (possible ReDoS): {pattern!r}",
+            )
         branch = env.repo_state.branch
         try:
-            if re.fullmatch(gov.expected_branch_pattern, branch):
+            if re.fullmatch(pattern, branch):
                 return ModelRuleCheckResult(passed=True, rule_id="RRH-1002")
         except re.error:
             return ModelRuleCheckResult(

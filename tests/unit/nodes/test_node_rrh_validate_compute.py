@@ -32,8 +32,10 @@ from omnibase_infra.models.rrh.model_rrh_result import ModelRRHResult
 from omnibase_infra.nodes.node_rrh_validate_compute.handlers.handler_rrh_validate import (
     HandlerRRHValidate,
 )
-from omnibase_infra.nodes.node_rrh_validate_compute.models.model_rrh_validate_request import (
+from omnibase_infra.nodes.node_rrh_validate_compute.models.model_rrh_contract_governance import (
     ModelRRHContractGovernance,
+)
+from omnibase_infra.nodes.node_rrh_validate_compute.models.model_rrh_validate_request import (
     ModelRRHValidateRequest,
 )
 from omnibase_infra.nodes.node_rrh_validate_compute.node import NodeRRHValidateCompute

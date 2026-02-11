@@ -13,7 +13,7 @@ import asyncio
 import logging
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.models.rrh.model_rrh_environment_data import ModelRRHRepoState
+from omnibase_infra.models.rrh.model_rrh_repo_state import ModelRRHRepoState
 
 logger = logging.getLogger(__name__)
 

@@ -19,6 +19,7 @@ from omnibase_infra.models.rrh.model_rrh_environment_data import (
 from omnibase_infra.models.rrh.model_rrh_profile import ModelRRHProfile
 from omnibase_infra.models.rrh.model_rrh_repo_state import ModelRRHRepoState
 from omnibase_infra.models.rrh.model_rrh_result import ModelRRHResult
+from omnibase_infra.models.rrh.model_rrh_rule_severity import ModelRRHRuleSeverity
 from omnibase_infra.models.rrh.model_rrh_runtime_target import ModelRRHRuntimeTarget
 from omnibase_infra.models.rrh.model_rrh_toolchain_versions import (
     ModelRRHToolchainVersions,
@@ -29,6 +30,7 @@ __all__: list[str] = [
     "ModelRRHProfile",
     "ModelRRHRepoState",
     "ModelRRHResult",
+    "ModelRRHRuleSeverity",
     "ModelRRHRuntimeTarget",
     "ModelRRHToolchainVersions",
 ]

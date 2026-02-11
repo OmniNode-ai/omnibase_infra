@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.models.rrh.model_rrh_environment_data import ModelRRHRuntimeTarget
+from omnibase_infra.models.rrh.model_rrh_runtime_target import ModelRRHRuntimeTarget
 
 
 class HandlerRuntimeTargetCollect:

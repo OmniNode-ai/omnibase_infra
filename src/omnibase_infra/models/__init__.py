@@ -77,6 +77,7 @@ from omnibase_infra.models.rrh import (
     ModelRRHProfile,
     ModelRRHRepoState,
     ModelRRHResult,
+    ModelRRHRuleSeverity,
     ModelRRHRuntimeTarget,
     ModelRRHToolchainVersions,
 )
@@ -117,6 +118,7 @@ __all__: list[str] = [
     "ModelRRHProfile",
     "ModelRRHRepoState",
     "ModelRRHResult",
+    "ModelRRHRuleSeverity",
     "ModelRRHRuntimeTarget",
     "ModelRRHToolchainVersions",
     # Validation models

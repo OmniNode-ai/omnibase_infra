@@ -13,7 +13,7 @@ import logging
 import re
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.models.rrh.model_rrh_environment_data import (
+from omnibase_infra.models.rrh.model_rrh_toolchain_versions import (
     ModelRRHToolchainVersions,
 )
 
