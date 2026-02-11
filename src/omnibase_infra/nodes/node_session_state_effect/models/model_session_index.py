@@ -48,6 +48,27 @@ class ModelSessionIndex(BaseModel):
         description="Last modification timestamp (UTC).",
     )
 
+    @field_validator("active_run_id")
+    @classmethod
+    def _validate_active_run_id_safe(cls, v: str | None) -> str | None:
+        """Reject active_run_id with unsafe filesystem characters.
+
+        Applies the same allowlist as ``_validate_run_ids_safe`` to prevent
+        path-traversal when constructing from deserialized JSON data.
+        """
+        if v is None:
+            return v
+        if not _RUN_ID_PATTERN.match(v):
+            msg = (
+                "run_id must contain only alphanumeric characters, "
+                "dots, hyphens, and underscores"
+            )
+            raise ValueError(msg)
+        if ".." in v:
+            msg = "run_id must not contain '..'"
+            raise ValueError(msg)
+        return v
+
     @field_validator("updated_at")
     @classmethod
     def _validate_tz_aware(cls, v: datetime) -> datetime:

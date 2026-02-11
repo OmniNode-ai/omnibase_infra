@@ -93,6 +93,28 @@ class TestModelSessionIndex:
         with pytest.raises(ValueError, match="timezone-aware"):
             ModelSessionIndex(updated_at=datetime(2026, 1, 1))
 
+    @pytest.mark.parametrize(
+        "bad_id",
+        ["../etc/passwd", "foo/bar", "foo\\bar", "foo\0bar", ".."],
+    )
+    def test_active_run_id_path_traversal_rejected(self, bad_id: str) -> None:
+        """active_run_id with unsafe characters is rejected by allowlist."""
+        with pytest.raises(ValueError, match="run_id"):
+            ModelSessionIndex(active_run_id=bad_id, recent_run_ids=())
+
+    def test_active_run_id_valid_accepted(self) -> None:
+        """active_run_id with safe characters is accepted."""
+        idx = ModelSessionIndex(
+            active_run_id="run-abc.123_test",
+            recent_run_ids=("run-abc.123_test",),
+        )
+        assert idx.active_run_id == "run-abc.123_test"
+
+    def test_active_run_id_none_accepted(self) -> None:
+        """active_run_id=None bypasses validation."""
+        idx = ModelSessionIndex(active_run_id=None)
+        assert idx.active_run_id is None
+
     def test_with_run_added_caps_at_max(self) -> None:
         """recent_run_ids is trimmed to MAX_RECENT_RUNS."""
         max_runs = ModelSessionIndex.MAX_RECENT_RUNS
