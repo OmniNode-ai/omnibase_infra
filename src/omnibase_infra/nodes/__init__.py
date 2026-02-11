@@ -48,19 +48,39 @@ from omnibase_infra.nodes.node_registration_reducer import (
     NodeRegistrationReducer,
     RegistryInfraNodeRegistrationReducer,
 )
+from omnibase_infra.nodes.node_session_lifecycle_reducer import (
+    ModelSessionLifecycleState,
+    NodeSessionLifecycleReducer,
+    RegistryInfraSessionLifecycle,
+)
+from omnibase_infra.nodes.node_session_state_effect import (
+    ModelRunContext,
+    ModelSessionIndex,
+    ModelSessionStateResult,
+    NodeSessionStateEffect,
+    RegistryInfraSessionState,
+)
 from omnibase_infra.nodes.reducers import RegistrationReducer
 
 __all__: list[str] = [
     "ModelBackendResult",
     "ModelRegistryRequest",
     "ModelRegistryResponse",
+    "ModelRunContext",
+    "ModelSessionIndex",
+    "ModelSessionLifecycleState",
+    "ModelSessionStateResult",
     "NodeAuthGateCompute",
     "NodeLedgerProjectionCompute",
     "NodeRegistrationOrchestrator",
     "NodeRegistrationReducer",
     "NodeRegistryEffect",
+    "NodeSessionLifecycleReducer",
+    "NodeSessionStateEffect",
     "RegistrationReducer",
     "RegistryInfraAuthGateCompute",
     "RegistryInfraLedgerProjection",
     "RegistryInfraNodeRegistrationReducer",
+    "RegistryInfraSessionLifecycle",
+    "RegistryInfraSessionState",
 ]

@@ -1,0 +1,181 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+# ONEX Node Contract — Session Lifecycle Reducer
+#
+# Pure FSM for session lifecycle management.
+# Tracks: idle -> run_created -> run_active -> run_ended -> idle
+#
+# Concurrency rules:
+#   - Each pipeline creates its own runs/{run_id}.json
+#   - session.json updates are append-only for recent_run_ids
+#   - active_run_id is advisory (for interactive sessions)
+#   - Multiple active runs allowed; destructive ops denied
+#     until /onex:set-active-run {run_id} disambiguates
+#
+# Related Tickets:
+#   - OMN-2117: Canonical State Nodes
+#   - OMN-2005: Workflow Automation (parent)
+# =============================================================================
+# Contract identifiers
+name: "node_session_lifecycle_reducer"
+contract_name: "node_session_lifecycle_reducer"
+node_name: "node_session_lifecycle_reducer"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Node type
+node_type: "REDUCER_GENERIC"
+# Description
+description: >
+  Pure reducer for session lifecycle management. Tracks the FSM idle -> run_created -> run_active -> run_ended for each pipeline run. Emits intents for session index and run context writes. Supports concurrent pipeline isolation via per-run FSM instances.
+
+# I/O Models
+input_model:
+  name: "ModelReducerInput"
+  module: "omnibase_core.models.reducer.model_reducer_input"
+  description: "Reducer input containing session event and trigger."
+output_model:
+  name: "ModelReducerOutput"
+  module: "omnibase_core.models.reducer.model_reducer_output"
+  description: "Reducer output containing new state and session intents."
+# FSM State Machine Definition
+# ============================
+#
+# State Diagram:
+#   +------+   create_run   +-------------+   activate_run   +------------+
+#   | idle | -------------> | run_created | ---------------> | run_active |
+#   +------+                +-------------+                  +------------+
+#      ^                                                          |
+#      |                    +----------+                          |
+#      +--------------------| run_ended | <-----------------------+
+#              reset        +----------+        end_run
+#
+state_machine:
+  state_machine_name: "session_lifecycle_fsm"
+  initial_state: "idle"
+  states:
+    - state_name: "idle"
+      description: "No active run — waiting for pipeline start"
+      entry_actions: []
+      exit_actions: []
+      required_data: []
+    - state_name: "run_created"
+      description: "Run document created, not yet active"
+      entry_actions:
+        - "emit_run_context_write_intent"
+        - "emit_session_index_update_intent"
+      exit_actions: []
+      required_data:
+        - "run_id"
+    - state_name: "run_active"
+      description: "Run is actively executing"
+      entry_actions:
+        - "emit_run_context_update_intent"
+      exit_actions: []
+      required_data:
+        - "run_id"
+    - state_name: "run_ended"
+      description: "Run has completed or been terminated"
+      entry_actions:
+        - "emit_run_context_update_intent"
+        - "emit_session_index_cleanup_intent"
+      exit_actions: []
+      required_data:
+        - "run_id"
+  transitions:
+    # idle -> run_created: On pipeline start
+    - from_state: "idle"
+      to_state: "run_created"
+      trigger: "create_run"
+      description: "Create a new pipeline run"
+      conditions:
+        - expression: "run_id is_present"
+          required: true
+      actions:
+        - action_name: "build_run_context_write_intent"
+          action_type: "intent_emission"
+        - action_name: "build_session_index_add_run_intent"
+          action_type: "intent_emission"
+    # run_created -> run_active: On run activation
+    - from_state: "run_created"
+      to_state: "run_active"
+      trigger: "activate_run"
+      description: "Activate the run (start executing)"
+      actions:
+        - action_name: "build_run_context_activate_intent"
+          action_type: "intent_emission"
+    # run_active -> run_ended: On run completion
+    - from_state: "run_active"
+      to_state: "run_ended"
+      trigger: "end_run"
+      description: "End the current run"
+      actions:
+        - action_name: "build_run_context_end_intent"
+          action_type: "intent_emission"
+    # run_ended -> idle: Reset for next run
+    - from_state: "run_ended"
+      to_state: "idle"
+      trigger: "reset"
+      description: "Reset to idle for next pipeline run"
+      actions:
+        - action_name: "clear_run_state"
+          action_type: "state_update"
+  persistence_enabled: true
+  terminal_states: []
+  # run_ended is NOT a true terminal — it resets to idle
+# Intent Emission Configuration
+# ============================
+intent_emission:
+  enabled: true
+  intents:
+    - intent_type: "session.index.write"
+      target_pattern: "filesystem://state/session.json"
+      payload_model: "ModelSessionIndex"
+      payload_module: "omnibase_infra.nodes.node_session_state_effect.models"
+      description: "Write updated session index with new run"
+    - intent_type: "session.run.write"
+      target_pattern: "filesystem://state/runs/{run_id}.json"
+      payload_model: "ModelRunContext"
+      payload_module: "omnibase_infra.nodes.node_session_state_effect.models"
+      description: "Write run context document"
+# State Model Configuration
+state_model:
+  name: "ModelSessionLifecycleState"
+  module: "omnibase_infra.nodes.node_session_lifecycle_reducer.models"
+  description: "Immutable state model for session lifecycle FSM"
+# Idempotency Configuration
+idempotency:
+  enabled: true
+  strategy: "event_id_tracking"
+  description: "Skip duplicate events based on last_processed_event_id"
+# Dependencies
+dependencies:
+  - name: "container"
+    type: "ModelONEXContainer"
+    module: "omnibase_core.models.container.model_onex_container"
+    description: "ONEX dependency injection container"
+# Health check
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-10"
+  tags:
+    - reducer
+    - session
+    - lifecycle
+    - fsm
+    - pure-function
+    - concurrent-pipeline
+  related_tickets:
+    - "OMN-2117"
+    - "OMN-2005"
