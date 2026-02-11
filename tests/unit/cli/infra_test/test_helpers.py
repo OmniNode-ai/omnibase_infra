@@ -75,7 +75,9 @@ class TestGetPostgresDsn:
 
     def test_default_value_with_database(self) -> None:
         """Returns default DSN when POSTGRES_DATABASE is set."""
-        with patch.dict("os.environ", {"POSTGRES_DATABASE": "omnibase_infra"}, clear=True):
+        with patch.dict(
+            "os.environ", {"POSTGRES_DATABASE": "omnibase_infra"}, clear=True
+        ):
             dsn = get_postgres_dsn()
             assert (
                 dsn
