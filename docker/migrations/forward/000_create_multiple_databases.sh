@@ -228,8 +228,9 @@ for entry in "${SERVICE_DB_MAP[@]}"; do
     IFS=':' read -r db role_name password_var <<< "$entry"
     role_password="${!password_var:-}"
 
-    if [ -z "$role_password" ]; then
-        continue  # Skip roles that weren't created
+    # Skip roles that weren't created (empty or invalid password)
+    if [ -z "$role_password" ] || ! validate_password "$role_password" "$role_name" 2>/dev/null; then
+        continue
     fi
 
     grant_role_to_database "$role_name" "$db"
@@ -268,7 +269,8 @@ for entry in "${SERVICE_DB_MAP[@]}"; do
     IFS=':' read -r db role_name password_var <<< "$entry"
     role_password="${!password_var:-}"
 
-    if [ -z "$role_password" ]; then
+    # Skip roles that weren't created (empty or invalid password)
+    if [ -z "$role_password" ] || ! validate_password "$role_password" "$role_name" 2>/dev/null; then
         continue
     fi
 
