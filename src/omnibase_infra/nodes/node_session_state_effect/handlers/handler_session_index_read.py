@@ -8,6 +8,7 @@ If the file does not exist, returns a default empty index.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -48,6 +49,13 @@ class HandlerSessionIndexRead:
         Returns:
             Tuple of (parsed index, operation result).
         """
+        return await asyncio.to_thread(self._read_sync, correlation_id)
+
+    def _read_sync(
+        self,
+        correlation_id: UUID,
+    ) -> tuple[ModelSessionIndex, ModelSessionStateResult]:
+        """Synchronous read logic, executed off the event loop."""
         session_path = self._state_dir / "session.json"
 
         if not session_path.exists():

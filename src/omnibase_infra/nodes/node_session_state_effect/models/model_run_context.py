@@ -9,7 +9,7 @@ is required for run context files.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -50,6 +50,15 @@ class ModelRunContext(BaseModel):
         default_factory=dict,
         description="Arbitrary key-value data attached to the run.",
     )
+
+    @field_validator("run_id")
+    @classmethod
+    def _validate_run_id_safe(cls, v: str) -> str:
+        """Reject run_id values that could cause path traversal."""
+        if ".." in v or "/" in v or "\\" in v or "\0" in v:
+            msg = "run_id must not contain path separators or traversal sequences"
+            raise ValueError(msg)
+        return v
 
     @field_validator("created_at", "updated_at")
     @classmethod

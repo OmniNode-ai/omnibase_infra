@@ -13,10 +13,11 @@ since multiple pipelines may register new runs simultaneously.
 
 from __future__ import annotations
 
-import fcntl
+import asyncio
 import json
 import logging
 import os
+import sys
 import tempfile
 from pathlib import Path
 from uuid import UUID
@@ -25,6 +26,11 @@ from omnibase_infra.nodes.node_session_state_effect.models import (
     ModelSessionIndex,
     ModelSessionStateResult,
 )
+
+if sys.platform != "win32":
+    import fcntl
+else:  # pragma: no cover — flock not available on Windows
+    fcntl = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +41,10 @@ class HandlerSessionIndexWrite:
     This handler uses the write-tmp-fsync-rename pattern to ensure
     that ``session.json`` is never left in a partial state, even on
     power loss or concurrent access.
+
+    Note:
+        File locking (``flock``) requires a POSIX platform (Linux, macOS).
+        On Windows, the handler raises ``RuntimeError`` at construction time.
     """
 
     def __init__(self, state_dir: Path) -> None:
@@ -42,7 +52,13 @@ class HandlerSessionIndexWrite:
 
         Args:
             state_dir: Root directory for session state (e.g. ``~/.claude/state``).
+
+        Raises:
+            RuntimeError: If ``fcntl`` is not available (Windows).
         """
+        if fcntl is None:
+            msg = "HandlerSessionIndexWrite requires fcntl (POSIX-only)"
+            raise RuntimeError(msg)
         self._state_dir = state_dir
 
     async def handle(
@@ -59,6 +75,14 @@ class HandlerSessionIndexWrite:
         Returns:
             Operation result indicating success or failure.
         """
+        return await asyncio.to_thread(self._write_sync, index, correlation_id)
+
+    def _write_sync(
+        self,
+        index: ModelSessionIndex,
+        correlation_id: UUID,
+    ) -> ModelSessionStateResult:
+        """Synchronous write logic with flock, executed off the event loop."""
         session_path = self._state_dir / "session.json"
 
         try:

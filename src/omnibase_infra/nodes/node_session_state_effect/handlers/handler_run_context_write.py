@@ -9,6 +9,7 @@ write-tmp-fsync-rename pattern as session index writes for crash safety.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -53,6 +54,14 @@ class HandlerRunContextWrite:
         Returns:
             Operation result indicating success or failure.
         """
+        return await asyncio.to_thread(self._write_sync, context, correlation_id)
+
+    def _write_sync(
+        self,
+        context: ModelRunContext,
+        correlation_id: UUID,
+    ) -> ModelSessionStateResult:
+        """Synchronous write logic, executed off the event loop."""
         runs_dir = self._state_dir / "runs"
 
         try:

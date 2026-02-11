@@ -8,6 +8,7 @@ that created it. No locking is required for reads.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -19,6 +20,8 @@ from omnibase_infra.nodes.node_session_state_effect.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+_PATH_TRAVERSAL_CHARS = ("..", "/", "\\", "\0")
 
 
 class HandlerRunContextRead:
@@ -46,6 +49,26 @@ class HandlerRunContextRead:
         Returns:
             Tuple of (parsed context or None if not found, operation result).
         """
+        if any(ch in run_id for ch in _PATH_TRAVERSAL_CHARS):
+            return (
+                None,
+                ModelSessionStateResult(
+                    success=False,
+                    operation="run_context_read",
+                    correlation_id=correlation_id,
+                    error=f"Invalid run_id: contains path traversal characters: {run_id!r}",
+                    error_code="RUN_CONTEXT_INVALID_ID",
+                ),
+            )
+
+        return await asyncio.to_thread(self._read_sync, run_id, correlation_id)
+
+    def _read_sync(
+        self,
+        run_id: str,
+        correlation_id: UUID,
+    ) -> tuple[ModelRunContext | None, ModelSessionStateResult]:
+        """Synchronous read logic, executed off the event loop."""
         run_path = self._state_dir / "runs" / f"{run_id}.json"
 
         if not run_path.exists():

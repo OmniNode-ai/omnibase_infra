@@ -2327,7 +2327,7 @@ architecture_exemptions:
       - CLAUDE.md (Protocol File Naming - domain-grouping convention)
       - docs/patterns/timeout_scanner_emitter.md
     ticket: OMN-932
-    # These handle complex union type violations
+# These handle complex union type violations
 union_exemptions:
   # ==========================================================================
   # ModelNodeCapabilities Config Field Exemption

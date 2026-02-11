@@ -3,15 +3,16 @@
 """Handler for garbage-collecting stale run context documents.
 
 Removes run documents from ``~/.claude/state/runs/`` that are older
-than the configured TTL (default: 4 hours). Also cleans up stale
-entries from the session index.
+than the configured TTL (default: 4 hours). Returns the list of deleted
+run IDs so that the caller (orchestrator) can update the session index.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -29,7 +30,8 @@ class HandlerStaleRunGC:
     """Garbage-collect stale run context documents.
 
     Scans ``runs/`` directory and deletes any run document whose
-    ``updated_at`` is older than the configured TTL.
+    ``updated_at`` is older than the configured TTL. The caller is
+    responsible for removing deleted run IDs from the session index.
     """
 
     def __init__(
@@ -55,7 +57,15 @@ class HandlerStaleRunGC:
 
         Returns:
             Tuple of (list of deleted run_ids, operation result).
+            The caller should use the deleted IDs to update the session index.
         """
+        return await asyncio.to_thread(self._gc_sync, correlation_id)
+
+    def _gc_sync(
+        self,
+        correlation_id: UUID,
+    ) -> tuple[list[str], ModelSessionStateResult]:
+        """Synchronous GC logic, executed off the event loop."""
         runs_dir = self._state_dir / "runs"
         deleted_ids: list[str] = []
 
