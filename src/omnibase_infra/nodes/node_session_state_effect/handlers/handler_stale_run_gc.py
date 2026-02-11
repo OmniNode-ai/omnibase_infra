@@ -132,10 +132,12 @@ class HandlerStaleRunGC:
 
                 if ctx.is_stale(self._ttl_seconds):
                     stem = run_file.stem
-                    run_file.unlink(missing_ok=True)
+                    try:
+                        run_file.unlink()
+                    except FileNotFoundError:
+                        # Concurrently deleted by another process — skip.
+                        continue
                     files_deleted += 1
-                    # Record IDs after successful unlink so deleted_ids
-                    # only contains IDs whose files were actually removed.
                     deleted_ids.append(ctx.run_id)
                     if stem != ctx.run_id:
                         logger.warning(
@@ -159,9 +161,11 @@ class HandlerStaleRunGC:
                     "GC: removing malformed run file %s: %s", run_file.name, e
                 )
                 stem = run_file.stem
-                run_file.unlink(missing_ok=True)
+                try:
+                    run_file.unlink()
+                except FileNotFoundError:
+                    continue  # concurrently deleted
                 files_deleted += 1
-                # Record stem after successful unlink only
                 deleted_ids.append(stem)
             except OSError as e:
                 logger.warning("GC: failed to process %s: %s", run_file.name, e)
