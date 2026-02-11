@@ -144,9 +144,10 @@ class HandlerStaleRunGC:
                 logger.warning(
                     "GC: removing malformed run file %s: %s", run_file.name, e
                 )
-                run_file.unlink(missing_ok=True)
+                # Track stem before unlink (defensive, consistent with stale path)
                 stem = run_file.stem
                 deleted_ids.append(stem)
+                run_file.unlink(missing_ok=True)
             except OSError as e:
                 logger.warning("GC: failed to process %s: %s", run_file.name, e)
 

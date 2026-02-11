@@ -125,11 +125,12 @@ class HandlerSessionIndexWrite:
             try:
                 fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
-                # Read current state under the lock
-                if session_path.exists():
+                # Read current state under the lock (use try/except to
+                # avoid TOCTOU if an external process deletes the file)
+                try:
                     raw = session_path.read_text(encoding="utf-8")
                     current = ModelSessionIndex.model_validate(json.loads(raw))
-                else:
+                except FileNotFoundError:
                     current = ModelSessionIndex()
 
                 # Apply caller's transform
