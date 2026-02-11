@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Planned check model — canonical definition shared by orchestrator and executor.
+"""Shared validation pipeline model — planned check.
 
 A single check to be executed as part of the validation plan.
 

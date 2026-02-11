@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Validation plan model — canonical definition shared by orchestrator and executor.
+"""Shared validation pipeline model — validation plan.
 
 Produced by the orchestrator's build_plan step and consumed by the executor
 effect node.
@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.node_validation_orchestrator.models.model_planned_check import (
+from omnibase_infra.models.validation.model_planned_check import (
     ModelPlannedCheck,
 )
 

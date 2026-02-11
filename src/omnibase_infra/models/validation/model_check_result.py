@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Individual check result model for the validation executor."""
+"""Shared validation pipeline model — individual check result."""
 
 from __future__ import annotations
 

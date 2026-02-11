@@ -20,18 +20,14 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
 )
-from omnibase_infra.nodes.node_validation_executor.handlers.handler_run_checks import (
-    HandlerRunChecks,
-)
-from omnibase_infra.nodes.node_validation_executor.models.model_check_result import (
+from omnibase_infra.models.validation import (
     ModelCheckResult,
-)
-from omnibase_infra.nodes.node_validation_executor.models.model_executor_result import (
     ModelExecutorResult,
-)
-from omnibase_infra.nodes.node_validation_orchestrator.models import (
     ModelPlannedCheck,
     ModelValidationPlan,
+)
+from omnibase_infra.nodes.node_validation_executor.handlers.handler_run_checks import (
+    HandlerRunChecks,
 )
 
 # ============================================================================

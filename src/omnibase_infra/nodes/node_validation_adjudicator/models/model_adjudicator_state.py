@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumAdjudicatorState, EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
-from omnibase_infra.nodes.node_validation_executor.models.model_check_result import (
+from omnibase_infra.models.validation.model_check_result import (
     ModelCheckResult,
 )
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string

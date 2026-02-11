@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Aggregated executor result model for the validation executor."""
+"""Shared validation pipeline model — aggregated executor result."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.node_validation_executor.models.model_check_result import (
+from omnibase_infra.models.validation.model_check_result import (
     ModelCheckResult,
 )
 
