@@ -138,9 +138,11 @@ class ModelPostgresPoolConfig(BaseModel):
 
         database = (parsed.path or "").lstrip("/")
         if not database:
-            safe_dsn = (
-                f"{parsed.scheme}://{parsed.hostname or '?'}:{parsed.port or '?'}/???"
-            )
+            try:
+                port_str = str(parsed.port) if parsed.port else "?"
+            except ValueError:
+                port_str = "?"
+            safe_dsn = f"{parsed.scheme}://{parsed.hostname or '?'}:{port_str}/???"
             msg = f"DSN is missing a database name: {safe_dsn}"
             raise ValueError(msg)
         if "/" in database:
