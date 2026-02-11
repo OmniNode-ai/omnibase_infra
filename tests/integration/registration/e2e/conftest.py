@@ -7,12 +7,12 @@ orchestrator against real infrastructure (Kafka, Consul, PostgreSQL).
 
 Infrastructure Requirements:
     Tests require ALL infrastructure services to be available:
-    - PostgreSQL: POSTGRES_HOST:5436 (database: omninode_bridge)
+    - PostgreSQL: via OMNIBASE_INFRA_DB_URL or POSTGRES_HOST:5436
     - Consul: CONSUL_HOST:28500
     - Kafka/Redpanda: KAFKA_BOOTSTRAP_SERVERS
 
     Environment variables required:
-    - POSTGRES_HOST, POSTGRES_PASSWORD (for PostgreSQL)
+    - OMNIBASE_INFRA_DB_URL or POSTGRES_HOST + POSTGRES_PASSWORD (for PostgreSQL)
     - CONSUL_HOST (for Consul)
     - KAFKA_BOOTSTRAP_SERVERS (for Kafka)
 
@@ -188,12 +188,23 @@ def wrap_event_in_envelope(
 # Infrastructure Availability Checks
 # =============================================================================
 
-# PostgreSQL availability
-POSTGRES_HOST = os.getenv("POSTGRES_HOST")
-POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", str(DEFAULT_POSTGRES_PORT)))
-POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+# PostgreSQL availability - prefer OMNIBASE_INFRA_DB_URL if set
+_OMNIBASE_INFRA_DB_URL = os.getenv("OMNIBASE_INFRA_DB_URL")
+if _OMNIBASE_INFRA_DB_URL:
+    from urllib.parse import urlparse as _urlparse
+
+    _parsed = _urlparse(_OMNIBASE_INFRA_DB_URL)
+    POSTGRES_HOST: str | None = _parsed.hostname
+    POSTGRES_PORT = _parsed.port or DEFAULT_POSTGRES_PORT
+    POSTGRES_DATABASE = (_parsed.path or "").lstrip("/") or ""
+    POSTGRES_USER = _parsed.username or "postgres"
+    POSTGRES_PASSWORD: str | None = _parsed.password
+else:
+    POSTGRES_HOST = os.getenv("POSTGRES_HOST")
+    POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", str(DEFAULT_POSTGRES_PORT)))
+    POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "")
+    POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
+    POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 
 # Normalize empty password to None for consistent checking
 if POSTGRES_PASSWORD and not POSTGRES_PASSWORD.strip():

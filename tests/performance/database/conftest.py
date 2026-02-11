@@ -46,9 +46,10 @@ Fixture Dependency Graph:
                 -> query_analyzer
 
 Environment Requirements:
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, checked first)
     POSTGRES_HOST: PostgreSQL server hostname
     POSTGRES_PORT: PostgreSQL server port (default: 5436)
-    POSTGRES_DATABASE: Database name (default: omninode_bridge)
+    POSTGRES_DATABASE: Database name (no default - tests skip if unset)
     POSTGRES_USER: Database user (default: postgres)
     POSTGRES_PASSWORD: Database password (required)
 

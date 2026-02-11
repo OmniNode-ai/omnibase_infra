@@ -30,7 +30,7 @@ export KAFKA_BOOTSTRAP_SERVERS="<infrastructure-host>:29092"
 # PostgreSQL tracking configuration (required if --enable-tracking is used)
 export POSTGRES_HOST="<infrastructure-host>"
 export POSTGRES_PORT="5436"
-export POSTGRES_DATABASE="omninode_bridge"
+export POSTGRES_DATABASE="omnibase_infra"
 export POSTGRES_USER="postgres"
 export POSTGRES_PASSWORD="your_password"
 ```
@@ -238,7 +238,7 @@ Set the required environment variables:
 ```bash
 export POSTGRES_HOST="<infrastructure-host>"
 export POSTGRES_PORT="5436"
-export POSTGRES_DATABASE="omninode_bridge"
+export POSTGRES_DATABASE="omnibase_infra"
 export POSTGRES_USER="postgres"
 export POSTGRES_PASSWORD="your_password"
 ```

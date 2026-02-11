@@ -14,9 +14,10 @@ Usage:
 
 Environment Variables:
     KAFKA_BOOTSTRAP_SERVERS: Kafka broker addresses (REQUIRED - no default)
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, takes precedence)
     POSTGRES_HOST: PostgreSQL host for tracking (required if --enable-tracking)
     POSTGRES_PORT: PostgreSQL port (default: 5432)
-    POSTGRES_DATABASE: PostgreSQL database name (default: omninode_bridge)
+    POSTGRES_DATABASE: PostgreSQL database name (required when OMNIBASE_INFRA_DB_URL not set)
     POSTGRES_USER: PostgreSQL username (required if --enable-tracking)
     POSTGRES_PASSWORD: PostgreSQL password (required if --enable-tracking)
 
@@ -337,7 +338,7 @@ class ModelReplayConfig(BaseModel):
     enable_tracking: bool = False
     postgres_host: str | None = None
     postgres_port: int = 5432
-    postgres_database: str = "omninode_bridge"
+    postgres_database: str = ""
     postgres_user: str | None = None
     postgres_password: str | None = None
     # Kafka producer settings - extracted from hardcoded values for configurability
@@ -514,11 +515,17 @@ class ModelReplayConfig(BaseModel):
             # Only set BY_TIME_RANGE if no other filter is specified
             filter_type = EnumFilterType.BY_TIME_RANGE
 
-        # Parse PostgreSQL tracking configuration
+        # Parse PostgreSQL tracking configuration (OMN-2146)
         enable_tracking = getattr(args, "enable_tracking", False)
+        db_url = os.environ.get("OMNIBASE_INFRA_DB_URL", "")
         postgres_host = os.environ.get("POSTGRES_HOST")
         postgres_port_str = os.environ.get("POSTGRES_PORT", "5432")
-        postgres_database = os.environ.get("POSTGRES_DATABASE", "omninode_bridge")
+        postgres_database = os.environ.get("POSTGRES_DATABASE", "")
+        if not postgres_database and not db_url and enable_tracking:
+            raise ValueError(
+                "No database configured for tracking. "
+                "Set OMNIBASE_INFRA_DB_URL or POSTGRES_DATABASE."
+            )
         postgres_user = os.environ.get("POSTGRES_USER")
         postgres_password = os.environ.get("POSTGRES_PASSWORD")
 

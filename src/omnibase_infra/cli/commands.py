@@ -204,12 +204,29 @@ def registry() -> None:
 
 
 def _get_db_dsn() -> str:
-    """Build PostgreSQL DSN from environment variables."""
+    """Build PostgreSQL DSN from environment variables.
+
+    Resolution order:
+        1. ``OMNIBASE_INFRA_DB_URL`` -- full DSN, returned as-is.
+        2. Individual ``POSTGRES_*`` variables assembled into a DSN.
+
+    Raises:
+        click.ClickException: If no database name is configured.
+    """
+    # Prefer explicit DSN when available (OMN-2146)
+    db_url = os.environ.get("OMNIBASE_INFRA_DB_URL", "")
+    if db_url:
+        return db_url
+
     host = os.environ.get("POSTGRES_HOST", "192.168.86.200")
     port = os.environ.get("POSTGRES_PORT", "5436")
     user = os.environ.get("POSTGRES_USER", "postgres")
     password = os.environ.get("POSTGRES_PASSWORD", "")
-    database = os.environ.get("POSTGRES_DATABASE", "omninode_bridge")
+    database = os.environ.get("POSTGRES_DATABASE", "")
+    if not database:
+        raise click.ClickException(
+            "No database configured. Set OMNIBASE_INFRA_DB_URL or POSTGRES_DATABASE."
+        )
     if not password:
         click.echo(
             "Warning: POSTGRES_PASSWORD not set. Set it via environment or .env file.",

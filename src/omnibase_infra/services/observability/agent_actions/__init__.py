@@ -32,7 +32,7 @@ Example:
     >>>
     >>> config = ConfigAgentActionsConsumer(
     ...     kafka_bootstrap_servers="localhost:9092",
-    ...     postgres_dsn="postgresql://postgres:secret@localhost:5432/omninode_bridge",
+    ...     postgres_dsn="postgresql://postgres:secret@localhost:5432/omnibase_infra",
     ... )
     >>> consumer = AgentActionsConsumer(config)
     >>>

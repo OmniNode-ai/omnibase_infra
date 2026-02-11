@@ -71,7 +71,7 @@ POSTGRES_PASSWORD=your_secure_password
 
 # Optional (defaults shown)
 POSTGRES_PORT=5432
-POSTGRES_DATABASE=omninode_bridge
+POSTGRES_DATABASE=omnibase_infra
 POSTGRES_USER=postgres
 ```
 

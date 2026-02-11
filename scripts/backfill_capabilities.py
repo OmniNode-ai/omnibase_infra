@@ -62,9 +62,10 @@ Usage:
     BACKFILL_DEBUG=1 python scripts/backfill_capabilities.py
 
 Environment Variables:
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, takes precedence)
     POSTGRES_HOST: Database host (default: localhost)
     POSTGRES_PORT: Database port (default: 5432)
-    POSTGRES_DATABASE: Database name (default: omninode_bridge)
+    POSTGRES_DATABASE: Database name (required when OMNIBASE_INFRA_DB_URL not set)
     POSTGRES_USER: Database user (default: postgres)
     POSTGRES_PASSWORD: Database password (required)
     BACKFILL_DEBUG: Enable debug logging to stderr (optional)
@@ -340,16 +341,27 @@ def _get_connection_timeout() -> float:
 def _get_validated_config() -> dict[str, str | int]:
     """Get and validate database connection configuration from environment.
 
+    Resolution order (OMN-2146):
+        1. ``OMNIBASE_INFRA_DB_URL`` -- returned under the ``"dsn"`` key.
+        2. Individual ``POSTGRES_*`` variables validated individually.
+
     Returns:
-        Dictionary with validated connection parameters
+        Dictionary with validated connection parameters.  When ``"dsn"`` is
+        present, the caller should use it directly instead of individual keys.
 
     Raises:
         ConfigurationError: If any configuration is invalid
     """
+    # Prefer explicit DSN when available (OMN-2146)
+    db_url = os.getenv("OMNIBASE_INFRA_DB_URL", "")
+    if db_url:
+        logger.debug("Using OMNIBASE_INFRA_DB_URL for connection")
+        return {"dsn": db_url}
+
     host = os.getenv("POSTGRES_HOST", "localhost")
     port_str = os.getenv("POSTGRES_PORT", "5432")
     user = os.getenv("POSTGRES_USER", "postgres")
-    database = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
+    database = os.getenv("POSTGRES_DATABASE", "")
     password = os.getenv("POSTGRES_PASSWORD", "")
 
     logger.debug(
@@ -383,6 +395,11 @@ async def get_connection() -> asyncpg.Connection:
     """
     config = _get_validated_config()
     timeout = _get_connection_timeout()
+
+    # When OMNIBASE_INFRA_DB_URL is set, connect via DSN directly (OMN-2146)
+    if "dsn" in config:
+        logger.debug("Connecting via OMNIBASE_INFRA_DB_URL (timeout=%.1fs)", timeout)
+        return await asyncpg.connect(dsn=str(config["dsn"]), timeout=timeout)
 
     logger.debug(
         "Attempting database connection to %s:%s/%s (timeout=%.1fs)",

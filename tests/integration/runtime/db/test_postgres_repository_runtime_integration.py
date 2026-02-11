@@ -81,9 +81,14 @@ def event_loop() -> Iterator[asyncio.AbstractEventLoop]:
 def _check_postgres_env_vars() -> tuple[bool, str]:
     """Check if required PostgreSQL environment variables are set.
 
+    Checks ``OMNIBASE_INFRA_DB_URL`` first. If set, all vars are considered
+    available. Otherwise checks individual ``POSTGRES_*`` variables.
+
     Returns:
         Tuple of (all_set, missing_vars_message)
     """
+    if os.getenv("OMNIBASE_INFRA_DB_URL"):
+        return True, ""
     required_vars = [
         "POSTGRES_HOST",
         "POSTGRES_PORT",
@@ -100,10 +105,12 @@ def _check_postgres_env_vars() -> tuple[bool, str]:
 def get_dsn() -> str:
     """Build PostgreSQL DSN from environment variables.
 
-    All environment variables are REQUIRED - no defaults are provided
-    to prevent accidental credential exposure in source code.
+    Checks ``OMNIBASE_INFRA_DB_URL`` first. If set, returns it directly.
+    Otherwise all individual environment variables are REQUIRED - no defaults
+    are provided to prevent accidental credential exposure in source code.
 
     Required env vars:
+        OMNIBASE_INFRA_DB_URL: Full DSN (preferred)
         POSTGRES_HOST: Database host
         POSTGRES_PORT: Database port
         POSTGRES_DATABASE: Database name
@@ -111,8 +118,12 @@ def get_dsn() -> str:
         POSTGRES_PASSWORD: Database password
 
     Raises:
-        ValueError: If any required environment variable is not set.
+        ValueError: If no database configuration is available.
     """
+    db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+    if db_url:
+        return db_url
+
     is_configured, error_msg = _check_postgres_env_vars()
     if not is_configured:
         raise ValueError(error_msg)
@@ -492,7 +503,7 @@ class TestLearnedPatternsTable:
         contract = ModelDbRepositoryContract(
             name="learned_patterns_repo",
             engine="postgres",
-            database_ref="omninode_bridge",
+            database_ref="infra_db",
             tables=["learned_patterns"],
             models={"LearnedPattern": "dict"},
             ops={

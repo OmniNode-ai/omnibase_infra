@@ -20,10 +20,10 @@ Environment Variables:
     POSTGRES_USER: Database user (default: postgres)
     POSTGRES_PASSWORD: Database password (REQUIRED - no default, tests skip if unset)
 
-    For remote OmniNode infrastructure, set:
+    For remote OmniNode infrastructure, set OMNIBASE_INFRA_DB_URL or:
         POSTGRES_HOST=your-infra-server-ip
         POSTGRES_PORT=5436
-        POSTGRES_DATABASE=omninode_bridge
+        POSTGRES_DATABASE=your_database_name
 
 Test Isolation:
     Each test creates a unique table (test_projector_{uuid8}) and drops it
@@ -115,13 +115,17 @@ class OrderWithNestedPayload(BaseModel):
 def _get_database_dsn() -> str | None:
     """Build database DSN from environment variables.
 
-    All database configuration comes from environment variables with portable
-    defaults suitable for CI/CD environments. Set POSTGRES_HOST, POSTGRES_PORT,
-    etc. to override for specific infrastructure.
+    Checks ``OMNIBASE_INFRA_DB_URL`` first. If set, returns it directly.
+    Otherwise falls back to individual ``POSTGRES_*`` variables with portable
+    defaults suitable for CI/CD environments.
 
     Returns:
-        PostgreSQL connection string, or None if POSTGRES_PASSWORD is not set.
+        PostgreSQL connection string, or None if database not configured.
     """
+    db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+    if db_url:
+        return db_url
+
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
     database = os.getenv("POSTGRES_DATABASE", "postgres")

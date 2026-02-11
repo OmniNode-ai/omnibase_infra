@@ -59,12 +59,13 @@ Example pattern used in these tests::
 Environment Variables
 =====================
 
-    POSTGRES_HOST: PostgreSQL server hostname (required - skip if not set)
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
+    POSTGRES_HOST: PostgreSQL server hostname (required if DSN not set - skip if not set)
         Example: localhost or ${REMOTE_INFRA_HOST}
     POSTGRES_PORT: PostgreSQL server port (default: 5432)
-    POSTGRES_DATABASE: Database name (default: omninode_bridge)
+    POSTGRES_DATABASE: Database name (default: omnibase_infra)
     POSTGRES_USER: Database username (default: postgres)
-    POSTGRES_PASSWORD: Database password (required - tests skip if not set)
+    POSTGRES_PASSWORD: Database password (required if DSN not set - tests skip if not set)
 
     See tests/infrastructure_config.py for REMOTE_INFRA_HOST default.
 

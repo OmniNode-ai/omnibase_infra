@@ -88,7 +88,7 @@ x-runtime-env: &runtime-env
   # PostgreSQL - use internal service name
   POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
   POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-  POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omninode_bridge}
+  POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omnibase_infra}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
   # Consul - use internal service name
@@ -128,8 +128,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       # SECURITY: Password is required and must be explicitly set (no default)
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      POSTGRES_DB: ${POSTGRES_DATABASE:-omninode_bridge}
-      POSTGRES_MULTIPLE_DATABASES: "omninode_bridge,infisical_db"
+      POSTGRES_DB: ${POSTGRES_DATABASE:-omnibase_infra}
+      POSTGRES_MULTIPLE_DATABASES: "omnibase_infra,infisical_db"
     ports:
       - "${POSTGRES_EXTERNAL_PORT:-5436}:5432"
     volumes:
@@ -139,7 +139,7 @@ services:
       - omnibase-infra-network
     healthcheck:
       !!merge <<: *healthcheck-defaults
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DATABASE:-omninode_bridge}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DATABASE:-omnibase_infra}"]
     logging: *logging-defaults
     restart: unless-stopped
     labels:
@@ -423,7 +423,7 @@ services:
     command: ["python", "-m", "omnibase_infra.services.observability.agent_actions.consumer"]
     environment:
       OMNIBASE_INFRA_AGENT_ACTIONS_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
-      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DATABASE:-omninode_bridge}
+      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DATABASE:-omnibase_infra}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_SIZE: ${AGENT_ACTIONS_BATCH_SIZE:-100}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_TIMEOUT_MS: ${AGENT_ACTIONS_BATCH_TIMEOUT_MS:-1000}
       OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_PORT: "8087"

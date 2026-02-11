@@ -443,13 +443,29 @@ class TestHandlerFactoryPattern:
             )
 
             mock_container = MagicMock(spec=ModelONEXContainer)
+            db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+            if db_url:
+                from urllib.parse import urlparse
+
+                parsed = urlparse(db_url)
+                _host = parsed.hostname or "localhost"
+                _port = parsed.port or 5432
+                _database = (parsed.path or "").lstrip("/") or ""
+                _user = parsed.username or "postgres"
+                _password = parsed.password or ""
+            else:
+                _host = os.getenv("POSTGRES_HOST", "localhost")
+                _port = int(os.getenv("POSTGRES_PORT", "5432"))
+                _database = os.getenv("POSTGRES_DATABASE", "")
+                _user = os.getenv("POSTGRES_USER", "postgres")
+                _password = os.getenv("POSTGRES_PASSWORD", "")
             return HandlerRegistrationStoragePostgres(
                 container=mock_container,
-                host=os.getenv("POSTGRES_HOST", "localhost"),
-                port=int(os.getenv("POSTGRES_PORT", "5432")),
-                database=os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
-                user=os.getenv("POSTGRES_USER", "postgres"),
-                password=os.getenv("POSTGRES_PASSWORD", ""),
+                host=_host,
+                port=_port,
+                database=_database,
+                user=_user,
+                password=_password,
             )
         else:
             raise ValueError(f"Unknown handler type: {handler_type}")
@@ -658,13 +674,29 @@ class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
         )
 
         mock_container = MagicMock(spec=ModelONEXContainer)
+        db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+        if db_url:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(db_url)
+            _host = parsed.hostname or "localhost"
+            _port = parsed.port or 5432
+            _database = (parsed.path or "").lstrip("/") or ""
+            _user = parsed.username or "postgres"
+            _password = parsed.password or ""
+        else:
+            _host = os.getenv("POSTGRES_HOST", "localhost")
+            _port = int(os.getenv("POSTGRES_PORT", "5432"))
+            _database = os.getenv("POSTGRES_DATABASE", "")
+            _user = os.getenv("POSTGRES_USER", "postgres")
+            _password = os.getenv("POSTGRES_PASSWORD", "")
         handler = HandlerRegistrationStoragePostgres(
             container=mock_container,
-            host=os.getenv("POSTGRES_HOST", "localhost"),
-            port=int(os.getenv("POSTGRES_PORT", "5432")),
-            database=os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
-            user=os.getenv("POSTGRES_USER", "postgres"),
-            password=os.getenv("POSTGRES_PASSWORD", ""),
+            host=_host,
+            port=_port,
+            database=_database,
+            user=_user,
+            password=_password,
         )
 
         yield handler

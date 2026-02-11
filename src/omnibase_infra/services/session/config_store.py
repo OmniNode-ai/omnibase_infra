@@ -38,8 +38,8 @@ class ConfigSessionStorage(BaseSettings):
         description="PostgreSQL port",
     )
     postgres_database: str = Field(
-        default="omninode_bridge",
-        description="PostgreSQL database name",
+        default="",
+        description="PostgreSQL database name (required -- set via env var or OMNIBASE_INFRA_DB_URL)",
     )
     postgres_user: str = Field(
         default="postgres",
@@ -71,6 +71,24 @@ class ConfigSessionStorage(BaseSettings):
         le=300,
         description="Query timeout in seconds",
     )
+
+    @model_validator(mode="after")
+    def validate_database_configured(self) -> ConfigSessionStorage:
+        """Validate that a database name has been provided.
+
+        Returns:
+            Self if validation passes.
+
+        Raises:
+            ValueError: If postgres_database is empty.
+        """
+        if not self.postgres_database:
+            raise ValueError(
+                "postgres_database must not be empty. "
+                "Set OMNIBASE_INFRA_DB_URL or "
+                "OMNIBASE_INFRA_SESSION_STORAGE_POSTGRES_DATABASE."
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_pool_sizes(self) -> ConfigSessionStorage:

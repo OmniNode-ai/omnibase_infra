@@ -3,19 +3,36 @@
 """PostgreSQL connection pool configuration.
 
 Part of OMN-1976: Contract dependency materialization.
+Part of OMN-2146: Per-service DB URL contract.
+
+DB URL Contract
+---------------
+The preferred configuration method is a single ``OMNIBASE_INFRA_DB_URL``
+environment variable containing a full PostgreSQL DSN::
+
+    OMNIBASE_INFRA_DB_URL=postgresql://role_omnibase_infra:<pw>@<host>:5432/omnibase_infra
+
+``from_env()`` reads ``OMNIBASE_INFRA_DB_URL`` first.  If unset it falls
+back to individual ``POSTGRES_*`` variables **but raises** if no database
+name can be resolved (no silent fallback to a shared database).
 """
 
 from __future__ import annotations
 
+import logging
 import os
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 class ModelPostgresPoolConfig(BaseModel):
     """PostgreSQL connection pool configuration.
 
-    Sources configuration from POSTGRES_* environment variables.
+    Sources configuration from ``OMNIBASE_INFRA_DB_URL`` (preferred) or
+    individual ``POSTGRES_*`` environment variables.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -28,7 +45,7 @@ class ModelPostgresPoolConfig(BaseModel):
         repr=False,
         description="PostgreSQL password (never logged or included in repr)",
     )
-    database: str = Field(default="omninode_bridge", description="PostgreSQL database")
+    database: str = Field(default="", description="PostgreSQL database")
     min_size: int = Field(default=2, ge=1, le=100, description="Minimum pool size")
     max_size: int = Field(default=10, ge=1, le=100, description="Maximum pool size")
 
@@ -47,19 +64,87 @@ class ModelPostgresPoolConfig(BaseModel):
         return self
 
     @classmethod
-    def from_env(cls) -> ModelPostgresPoolConfig:
-        """Create config from POSTGRES_* environment variables.
+    def from_db_url(
+        cls,
+        url: str,
+        *,
+        min_size: int = 2,
+        max_size: int = 10,
+    ) -> ModelPostgresPoolConfig:
+        """Create config by parsing a PostgreSQL DSN.
+
+        Args:
+            url: Full PostgreSQL DSN
+                (e.g. ``postgresql://user:pass@host:5432/dbname``).
+            min_size: Minimum connection pool size.
+            max_size: Maximum connection pool size.
 
         Raises:
-            ValueError: If environment configuration is invalid.
+            ValueError: If the URL cannot be parsed or is missing required
+                components (database name).
         """
+        try:
+            parsed = urlparse(url)
+        except Exception as exc:
+            msg = f"Invalid OMNIBASE_INFRA_DB_URL: {exc}"
+            raise ValueError(msg) from exc
+
+        database = parsed.path.lstrip("/") if parsed.path else ""
+        if not database:
+            msg = (
+                "OMNIBASE_INFRA_DB_URL is missing the database name "
+                "(expected postgresql://…/<database>)"
+            )
+            raise ValueError(msg)
+
+        return cls(
+            host=parsed.hostname or "localhost",
+            port=parsed.port or 5432,
+            user=parsed.username or "postgres",
+            password=parsed.password or "",
+            database=database,
+            min_size=min_size,
+            max_size=max_size,
+        )
+
+    @classmethod
+    def from_env(cls) -> ModelPostgresPoolConfig:
+        """Create config from environment variables.
+
+        Resolution order:
+        1. ``OMNIBASE_INFRA_DB_URL`` - full DSN (preferred).
+        2. Individual ``POSTGRES_*`` variables (legacy fallback).
+
+        Raises:
+            ValueError: If no database name can be resolved or the
+                environment configuration is otherwise invalid.
+        """
+        db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+        if db_url:
+            return cls.from_db_url(
+                db_url,
+                min_size=int(os.getenv("POSTGRES_POOL_MIN_SIZE", "2")),
+                max_size=int(os.getenv("POSTGRES_POOL_MAX_SIZE", "10")),
+            )
+
+        # Legacy fallback – individual POSTGRES_* vars
+        database = os.getenv("POSTGRES_DATABASE", "")
+        if not database:
+            msg = (
+                "PostgreSQL database not configured. "
+                "Set OMNIBASE_INFRA_DB_URL (preferred) or POSTGRES_DATABASE. "
+                "The implicit 'omninode_bridge' default has been removed "
+                "(see OMN-2146)."
+            )
+            raise ValueError(msg)
+
         try:
             return cls(
                 host=os.getenv("POSTGRES_HOST", "localhost"),
                 port=int(os.getenv("POSTGRES_PORT", "5432")),
                 user=os.getenv("POSTGRES_USER", "postgres"),
                 password=os.getenv("POSTGRES_PASSWORD", ""),
-                database=os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
+                database=database,
                 min_size=int(os.getenv("POSTGRES_POOL_MIN_SIZE", "2")),
                 max_size=int(os.getenv("POSTGRES_POOL_MAX_SIZE", "10")),
             )

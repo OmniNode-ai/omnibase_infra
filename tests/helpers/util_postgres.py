@@ -219,11 +219,15 @@ class PostgresConfig:
         database_var: str = "POSTGRES_DATABASE",
         user_var: str = "POSTGRES_USER",
         password_var: str = "POSTGRES_PASSWORD",  # noqa: S107 (env var name, not a password)
-        default_database: str = "omninode_bridge",
+        default_database: str = "",
         default_user: str = "postgres",
         fallback_host: str | None = None,
     ) -> PostgresConfig:
         """Create PostgresConfig from environment variables.
+
+        Checks ``OMNIBASE_INFRA_DB_URL`` first. If set, the URL is parsed to
+        extract host, port, user, password, and database. Otherwise falls back
+        to individual ``POSTGRES_*`` environment variables.
 
         Args:
             host_var: Environment variable name for host.
@@ -239,6 +243,20 @@ class PostgresConfig:
         Returns:
             PostgresConfig instance with values from environment.
         """
+        # Prefer OMNIBASE_INFRA_DB_URL if set
+        db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+        if db_url:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(db_url)
+            return cls(
+                host=parsed.hostname or None,
+                port=parsed.port or DEFAULT_POSTGRES_PORT,
+                database=(parsed.path or "").lstrip("/") or default_database,
+                user=parsed.username or default_user,
+                password=parsed.password or None,
+            )
+
         host: str | None = os.getenv(host_var)
         # Normalize empty or whitespace-only host to None
         # This prevents malformed DSN like "postgresql://user:pass@:5432/db"

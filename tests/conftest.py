@@ -932,22 +932,27 @@ async def cleanup_postgres_test_projections() -> AsyncGenerator[None, None]:
 
     yield  # Let the test run
 
-    # Check if PostgreSQL is configured
-    postgres_host = os.getenv("POSTGRES_HOST")
-    postgres_password = os.getenv("POSTGRES_PASSWORD")
+    # Check if PostgreSQL is configured - prefer OMNIBASE_INFRA_DB_URL
+    db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+    if db_url:
+        dsn = db_url
+    else:
+        postgres_host = os.getenv("POSTGRES_HOST")
+        postgres_password = os.getenv("POSTGRES_PASSWORD")
 
-    if not postgres_host or not postgres_password:
-        return  # PostgreSQL not configured, skip cleanup
+        if not postgres_host or not postgres_password:
+            return  # PostgreSQL not configured, skip cleanup
 
-    # Build connection string
-    postgres_port = os.getenv("POSTGRES_PORT", "5436")
-    postgres_database = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
-    postgres_user = os.getenv("POSTGRES_USER", "postgres")
+        postgres_port = os.getenv("POSTGRES_PORT", "5436")
+        postgres_database = os.getenv("POSTGRES_DATABASE", "")
+        if not postgres_database:
+            return  # Database not configured, skip cleanup
+        postgres_user = os.getenv("POSTGRES_USER", "postgres")
 
-    dsn = (
-        f"postgresql://{postgres_user}:{postgres_password}"
-        f"@{postgres_host}:{postgres_port}/{postgres_database}"
-    )
+        dsn = (
+            f"postgresql://{postgres_user}:{postgres_password}"
+            f"@{postgres_host}:{postgres_port}/{postgres_database}"
+        )
 
     try:
         import asyncpg

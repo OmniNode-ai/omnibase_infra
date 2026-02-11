@@ -179,7 +179,7 @@ class TestModelPostgresPoolConfig:
         assert config.host == "localhost"
         assert config.port == 5432
         assert config.user == "postgres"
-        assert config.database == "omninode_bridge"
+        assert config.database == ""
         assert config.min_size == 2
         assert config.max_size == 10
 

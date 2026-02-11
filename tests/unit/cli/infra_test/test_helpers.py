@@ -67,13 +67,19 @@ class TestGetConsulAddr:
 class TestGetPostgresDsn:
     """Test PostgreSQL DSN construction."""
 
-    def test_default_value(self) -> None:
-        """Returns default DSN when env vars are unset."""
+    def test_default_value_raises_without_database(self) -> None:
+        """Raises ValueError when no database is configured."""
         with patch.dict("os.environ", {}, clear=True):
+            with pytest.raises(ValueError, match="No database configured"):
+                get_postgres_dsn()
+
+    def test_default_value_with_database(self) -> None:
+        """Returns default DSN when POSTGRES_DATABASE is set."""
+        with patch.dict("os.environ", {"POSTGRES_DATABASE": "omnibase_infra"}, clear=True):
             dsn = get_postgres_dsn()
             assert (
                 dsn
-                == "postgresql://postgres:test-password@localhost:5433/omninode_bridge"
+                == "postgresql://postgres:test-password@localhost:5433/omnibase_infra"
             )
 
     def test_custom_env(self) -> None:
@@ -91,7 +97,7 @@ class TestGetPostgresDsn:
 
     def test_special_chars_in_password(self) -> None:
         """URL-encodes special characters in password."""
-        env = {"POSTGRES_PASSWORD": "p@ss:w/rd"}
+        env = {"POSTGRES_PASSWORD": "p@ss:w/rd", "POSTGRES_DATABASE": "testdb"}
         with patch.dict("os.environ", env, clear=True):
             dsn = get_postgres_dsn()
             assert "p%40ss%3Aw%2Frd" in dsn
@@ -99,12 +105,14 @@ class TestGetPostgresDsn:
 
     def test_host_with_at_raises(self) -> None:
         """Rejects POSTGRES_HOST containing '@'."""
-        with patch.dict("os.environ", {"POSTGRES_HOST": "evil@host"}, clear=True):
+        env = {"POSTGRES_HOST": "evil@host", "POSTGRES_DATABASE": "testdb"}
+        with patch.dict("os.environ", env, clear=True):
             with pytest.raises(ValueError, match="POSTGRES_HOST contains '@'"):
                 get_postgres_dsn()
 
     def test_non_numeric_port_raises(self) -> None:
         """Rejects non-numeric POSTGRES_PORT."""
-        with patch.dict("os.environ", {"POSTGRES_PORT": "abc"}, clear=True):
+        env = {"POSTGRES_PORT": "abc", "POSTGRES_DATABASE": "testdb"}
+        with patch.dict("os.environ", env, clear=True):
             with pytest.raises(ValueError, match="POSTGRES_PORT must be numeric"):
                 get_postgres_dsn()

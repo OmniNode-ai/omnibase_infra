@@ -27,7 +27,8 @@ Configuration:
     - POSTGRES_PORT: Optional (default: 5432)
     - POSTGRES_USER: Optional (default: postgres)
     - POSTGRES_PASSWORD: Required when POSTGRES_HOST is set
-    - POSTGRES_DATABASE: Optional (default: omninode_bridge)
+    - OMNIBASE_INFRA_DB_URL: Full DSN (preferred, takes precedence)
+    - POSTGRES_DATABASE: Required when OMNIBASE_INFRA_DB_URL is not set
     - CONSUL_HOST: Optional, enables Consul dual-registration
     - CONSUL_PORT: Optional (default: 8500)
 
@@ -264,15 +265,29 @@ class PluginRegistration:
         correlation_id = config.correlation_id
 
         try:
-            # 1. Create PostgreSQL pool
+            # 1. Create PostgreSQL pool (OMN-2146: prefer OMNIBASE_INFRA_DB_URL)
+            postgres_dsn = os.getenv("OMNIBASE_INFRA_DB_URL", "")
             postgres_host = os.getenv("POSTGRES_HOST")
-            postgres_dsn = (
-                f"postgresql://{os.getenv('POSTGRES_USER', 'postgres')}:"
-                f"{os.getenv('POSTGRES_PASSWORD', '')}@"
-                f"{postgres_host}:"
-                f"{os.getenv('POSTGRES_PORT', '5432')}/"
-                f"{os.getenv('POSTGRES_DATABASE', 'omninode_bridge')}"
-            )
+            postgres_database = os.getenv("POSTGRES_DATABASE", "")
+            if not postgres_dsn:
+                if not postgres_database:
+                    context = ModelInfraErrorContext.with_correlation(
+                        correlation_id=correlation_id,
+                        transport_type=EnumInfraTransportType.DATABASE,
+                        operation="create_postgres_pool",
+                    )
+                    raise ContainerWiringError(
+                        "No database configured. "
+                        "Set OMNIBASE_INFRA_DB_URL or POSTGRES_DATABASE.",
+                        context=context,
+                    )
+                postgres_dsn = (
+                    f"postgresql://{os.getenv('POSTGRES_USER', 'postgres')}:"
+                    f"{os.getenv('POSTGRES_PASSWORD', '')}@"
+                    f"{postgres_host}:"
+                    f"{os.getenv('POSTGRES_PORT', '5432')}/"
+                    f"{postgres_database}"
+                )
 
             self._pool = await asyncpg.create_pool(
                 postgres_dsn,
@@ -298,7 +313,7 @@ class PluginRegistration:
                 extra={
                     "host": postgres_host,
                     "port": os.getenv("POSTGRES_PORT", "5432"),
-                    "database": os.getenv("POSTGRES_DATABASE", "omninode_bridge"),
+                    "database": postgres_database or "(from OMNIBASE_INFRA_DB_URL)",
                 },
             )
 

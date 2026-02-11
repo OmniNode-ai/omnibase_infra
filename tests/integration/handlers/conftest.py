@@ -62,11 +62,12 @@ Database Handlers
 =================
 
 Environment Variables (required):
-    POSTGRES_HOST: PostgreSQL hostname (required)
-    POSTGRES_PASSWORD: Database password (required)
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, checked first)
+    POSTGRES_HOST: PostgreSQL hostname (required if DB_URL not set)
+    POSTGRES_PASSWORD: Database password (required if DB_URL not set)
 Environment Variables (optional):
     POSTGRES_PORT: PostgreSQL port (default: 5432)
-    POSTGRES_DATABASE: Database name (default: omninode_bridge)
+    POSTGRES_DATABASE: Database name (no default - tests skip if unset)
     POSTGRES_USER: Database username (default: postgres)
 
 DSN Format: postgresql://{user}:{password}@{host}:{port}/{database}
@@ -191,11 +192,23 @@ def _safe_int_env(name: str, default: int) -> int:
 # =============================================================================
 
 # Read configuration from environment variables (set via docker-compose or .env)
-POSTGRES_HOST = os.getenv("POSTGRES_HOST")
-POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
-POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+# Prefer OMNIBASE_INFRA_DB_URL if set; fall back to individual POSTGRES_* vars
+_OMNIBASE_INFRA_DB_URL = os.getenv("OMNIBASE_INFRA_DB_URL")
+if _OMNIBASE_INFRA_DB_URL:
+    from urllib.parse import urlparse as _urlparse
+
+    _parsed = _urlparse(_OMNIBASE_INFRA_DB_URL)
+    POSTGRES_HOST = _parsed.hostname
+    POSTGRES_PORT = str(_parsed.port or "5432")
+    POSTGRES_DATABASE = (_parsed.path or "").lstrip("/") or ""
+    POSTGRES_USER = _parsed.username or "postgres"
+    POSTGRES_PASSWORD = _parsed.password
+else:
+    POSTGRES_HOST = os.getenv("POSTGRES_HOST")
+    POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
+    POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "")
+    POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
+    POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 
 # Defensive check: warn if POSTGRES_PASSWORD is missing or empty to avoid silent failures
 # Handles None, empty string, and whitespace-only values

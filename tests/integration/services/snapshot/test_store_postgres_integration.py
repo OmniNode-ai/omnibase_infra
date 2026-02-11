@@ -20,9 +20,10 @@ Test Isolation:
     per test.
 
 Environment Variables:
-    POSTGRES_HOST: PostgreSQL hostname (required)
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, checked first)
+    POSTGRES_HOST: PostgreSQL hostname (required if DB_URL not set)
     POSTGRES_PORT: PostgreSQL port (default: 5432)
-    POSTGRES_DATABASE: Database name (default: omninode_bridge)
+    POSTGRES_DATABASE: Database name (no default - tests skip if unset)
     POSTGRES_USER: Database username (default: postgres)
     POSTGRES_PASSWORD: Database password (required - tests skip if unset)
 
@@ -59,16 +60,23 @@ from omnibase_infra.services.snapshot import StoreSnapshotPostgres
 def _get_postgres_dsn() -> str | None:
     """Build PostgreSQL DSN from environment variables.
 
+    Checks ``OMNIBASE_INFRA_DB_URL`` first. If set, returns it directly.
+    Otherwise falls back to individual ``POSTGRES_*`` variables.
+
     Returns:
-        PostgreSQL connection string, or None if required vars not set.
+        PostgreSQL connection string, or None if database not configured.
     """
+    db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+    if db_url:
+        return db_url
+
     host = os.getenv("POSTGRES_HOST")
     port = os.getenv("POSTGRES_PORT", "5432")
-    database = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
+    database = os.getenv("POSTGRES_DATABASE", "")
     user = os.getenv("POSTGRES_USER", "postgres")
     password = os.getenv("POSTGRES_PASSWORD")
 
-    if not host or not password:
+    if not host or not password or not database:
         return None
 
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"

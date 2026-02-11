@@ -174,7 +174,7 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
         dsn: str | None = None,
         host: str = "localhost",
         port: int = 5432,
-        database: str = "omninode_bridge",
+        database: str = "",
         user: str = "postgres",
         password: str | None = None,
         pool_size: int = DEFAULT_POOL_SIZE,
@@ -191,9 +191,10 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
             postgres_adapter: Optional existing PostgreSQL adapter (ProtocolPostgresAdapter).
                 If not provided, a new asyncpg connection pool will be created.
             dsn: Optional PostgreSQL connection DSN (overrides host/port/etc).
+                Prefer setting ``OMNIBASE_INFRA_DB_URL`` at the environment level.
             host: PostgreSQL server hostname (default: "localhost").
             port: PostgreSQL server port (default: 5432).
-            database: Database name (default: "omninode_bridge").
+            database: Database name (no default -- must be provided when *dsn* is not set).
             user: Database user (default: "postgres").
             password: Optional database password.
             pool_size: Connection pool size (default: 10).
@@ -235,6 +236,14 @@ class HandlerRegistrationStoragePostgres(MixinAsyncCircuitBreaker):
             service_name=cb_config.service_name,
             transport_type=cb_config.transport_type,
         )
+
+        # Fail fast: a database must be configured when no explicit DSN is
+        # provided (OMN-2146).
+        if not dsn and not database:
+            raise ValueError(
+                "No database configured. Supply a 'dsn' or set 'database' "
+                "(env: OMNIBASE_INFRA_DB_URL or POSTGRES_DATABASE)."
+            )
 
         # Store configuration
         self._dsn = dsn

@@ -34,11 +34,12 @@ Test Categories
 Environment Variables
 =====================
 
-    POSTGRES_HOST: PostgreSQL server hostname (required)
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
+    POSTGRES_HOST: PostgreSQL server hostname (required if DSN not set)
     POSTGRES_PORT: PostgreSQL server port (default: 5436)
-    POSTGRES_DATABASE: Database name (default: omninode_bridge)
+    POSTGRES_DATABASE: Database name (default: omnibase_infra)
     POSTGRES_USER: Database username (default: postgres)
-    POSTGRES_PASSWORD: Database password (required)
+    POSTGRES_PASSWORD: Database password (required if DSN not set)
 
 Related Ticket: OMN-1032 - Complete DLQ Replay PostgreSQL Tracking Integration
 """
