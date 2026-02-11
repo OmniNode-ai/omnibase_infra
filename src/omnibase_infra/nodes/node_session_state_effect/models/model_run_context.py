@@ -137,7 +137,7 @@ class ModelRunContext(BaseModel):
             True if the run is older than the TTL.
         """
         age = (datetime.now(UTC) - self.updated_at).total_seconds()
-        return age > ttl_seconds
+        return age >= ttl_seconds
 
 
 __all__: list[str] = ["ModelRunContext"]
