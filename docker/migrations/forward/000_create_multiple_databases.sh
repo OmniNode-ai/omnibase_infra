@@ -133,7 +133,8 @@ grant_role_to_database() {
     validate_identifier "$database" "Database name" || return 1
     echo "  Granting $role_name full access to $database"
     # CONNECT privilege
-    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+    # Note: explicit || return 1 because set -e is disabled when caller uses ||
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL || return 1
         GRANT CONNECT ON DATABASE "$database" TO "$role_name";
 EOSQL
     # Schema and table privileges (must run against the target database)
@@ -141,7 +142,7 @@ EOSQL
     # CURRENT user (postgres superuser). If migrations run as the service role,
     # you must run ALTER DEFAULT PRIVILEGES as that role too (or run migrations
     # as the superuser and grant to the service role).
-    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$database" <<-EOSQL
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$database" <<-EOSQL || return 1
         GRANT USAGE, CREATE ON SCHEMA public TO "$role_name";
         ALTER DEFAULT PRIVILEGES IN SCHEMA public
             GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "$role_name";
@@ -229,7 +230,11 @@ for entry in "${SERVICE_DB_MAP[@]}"; do
         continue
     }
 
-    create_role "$role_name" "$role_password"
+    create_role "$role_name" "$role_password" || {
+        echo "  FAIL: $role_name — create_role failed" >&2
+        ROLES_SKIPPED=$((ROLES_SKIPPED + 1))
+        continue
+    }
     ROLES_CREATED=$((ROLES_CREATED + 1))
 done
 
@@ -253,7 +258,9 @@ for entry in "${SERVICE_DB_MAP[@]}"; do
         continue
     fi
 
-    grant_role_to_database "$role_name" "$db"
+    grant_role_to_database "$role_name" "$db" || {
+        echo "  WARNING: grant failed for $role_name on $db" >&2
+    }
 done
 
 echo ""
