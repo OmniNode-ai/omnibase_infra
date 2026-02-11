@@ -34,7 +34,12 @@ CREATE TABLE IF NOT EXISTS agent_routing_decisions (
     alternatives JSONB,
     routing_reason TEXT,
     domain VARCHAR(255),
-    metadata JSONB
+    metadata JSONB,
+
+    -- Project context (absorbed from omniclaude - OMN-2057)
+    project_path TEXT,
+    project_name VARCHAR(255),
+    claude_session_id VARCHAR(255)
 );
 
 -- ============================================================================
@@ -60,3 +65,6 @@ COMMENT ON COLUMN agent_routing_decisions.alternatives IS 'JSON array of alterna
 COMMENT ON COLUMN agent_routing_decisions.routing_reason IS 'Explanation for the routing decision';
 COMMENT ON COLUMN agent_routing_decisions.domain IS 'Domain classification for the request';
 COMMENT ON COLUMN agent_routing_decisions.metadata IS 'Additional metadata about the decision (JSON object)';
+COMMENT ON COLUMN agent_routing_decisions.project_path IS 'Absolute path to the project being worked on (absorbed from omniclaude OMN-2057)';
+COMMENT ON COLUMN agent_routing_decisions.project_name IS 'Human-readable project name (absorbed from omniclaude OMN-2057)';
+COMMENT ON COLUMN agent_routing_decisions.claude_session_id IS 'Claude Code session identifier (absorbed from omniclaude OMN-2057)';

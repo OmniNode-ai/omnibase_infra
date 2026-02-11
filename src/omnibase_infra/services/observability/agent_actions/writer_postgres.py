@@ -222,9 +222,10 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
         sql = """
             INSERT INTO agent_actions (
                 id, correlation_id, agent_name, action_type, action_name,
-                created_at, status, duration_ms, result, error_message, metadata
+                created_at, status, duration_ms, result, error_message, metadata,
+                project_path, project_name, working_directory
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             ON CONFLICT (id) DO NOTHING
         """
 
@@ -245,6 +246,9 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
                             e.result,
                             e.error_message,
                             self._serialize_json(e.metadata),
+                            e.project_path,
+                            e.project_name,
+                            e.working_directory,
                         )
                         for e in events
                     ],
@@ -344,9 +348,10 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
         sql = """
             INSERT INTO agent_routing_decisions (
                 id, correlation_id, selected_agent, confidence_score, created_at,
-                request_type, alternatives, routing_reason, domain, metadata
+                request_type, alternatives, routing_reason, domain, metadata,
+                project_path, project_name, claude_session_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             ON CONFLICT (id) DO NOTHING
         """
 
@@ -366,6 +371,9 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
                             e.routing_reason,
                             e.domain,
                             self._serialize_json(e.metadata),
+                            e.project_path,
+                            e.project_name,
+                            e.claude_session_id,
                         )
                         for e in events
                     ],
@@ -465,9 +473,10 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
         sql = """
             INSERT INTO agent_transformation_events (
                 id, correlation_id, source_agent, target_agent, created_at,
-                trigger, context, metadata
+                trigger, context, metadata,
+                project_path, project_name, claude_session_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             ON CONFLICT (id) DO NOTHING
         """
 
@@ -485,6 +494,9 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
                             e.trigger,
                             e.context,
                             self._serialize_json(e.metadata),
+                            e.project_path,
+                            e.project_name,
+                            e.claude_session_id,
                         )
                         for e in events
                     ],
@@ -704,9 +716,10 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
         sql = """
             INSERT INTO agent_detection_failures (
                 correlation_id, failure_reason, created_at,
-                request_summary, attempted_patterns, fallback_used, error_code, metadata
+                request_summary, attempted_patterns, fallback_used, error_code, metadata,
+                project_path, project_name, claude_session_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             ON CONFLICT (correlation_id) DO NOTHING
         """
 
@@ -724,6 +737,9 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
                             e.fallback_used,
                             e.error_code,
                             self._serialize_json(e.metadata),
+                            e.project_path,
+                            e.project_name,
+                            e.claude_session_id,
                         )
                         for e in events
                     ],
@@ -827,9 +843,10 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
                 execution_id, correlation_id, agent_name, status,
                 created_at, updated_at, started_at, completed_at,
                 duration_ms, exit_code, error_message, input_summary,
-                output_summary, metadata
+                output_summary, metadata,
+                project_path, project_name, claude_session_id, terminal_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             ON CONFLICT (execution_id) DO UPDATE SET
                 status = EXCLUDED.status,
                 completed_at = EXCLUDED.completed_at,
@@ -838,6 +855,10 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
                 error_message = EXCLUDED.error_message,
                 output_summary = EXCLUDED.output_summary,
                 metadata = EXCLUDED.metadata,
+                project_path = COALESCE(EXCLUDED.project_path, agent_execution_logs.project_path),
+                project_name = COALESCE(EXCLUDED.project_name, agent_execution_logs.project_name),
+                claude_session_id = COALESCE(EXCLUDED.claude_session_id, agent_execution_logs.claude_session_id),
+                terminal_id = COALESCE(EXCLUDED.terminal_id, agent_execution_logs.terminal_id),
                 updated_at = NOW()
         """
 
@@ -861,6 +882,10 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
                             e.input_summary,
                             e.output_summary,
                             self._serialize_json(e.metadata),
+                            e.project_path,
+                            e.project_name,
+                            e.claude_session_id,
+                            e.terminal_id,
                         )
                         for e in events
                     ],

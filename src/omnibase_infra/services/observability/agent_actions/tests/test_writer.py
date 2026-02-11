@@ -591,8 +591,11 @@ class TestJSONSerialization:
 
         call_args = mock_conn.executemany.call_args
         batch_data = list(call_args[0][1])
-        # metadata is the last field in the INSERT tuple
-        metadata_value = batch_data[0][-1]
+        # metadata is at index 10 in the INSERT tuple
+        # (id, correlation_id, agent_name, action_type, action_name,
+        #  created_at, status, duration_ms, result, error_message, metadata,
+        #  project_path, project_name, working_directory)
+        metadata_value = batch_data[0][10]
         assert isinstance(metadata_value, str)
         assert '"tool"' in metadata_value
         assert '"Read"' in metadata_value

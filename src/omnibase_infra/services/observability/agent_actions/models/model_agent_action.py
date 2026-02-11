@@ -126,6 +126,20 @@ class ModelAgentAction(BaseModel):
         description="Complete raw payload for Phase 2 schema tightening.",
     )
 
+    # ---- Project Context (absorbed from omniclaude - OMN-2057) ----
+    project_path: str | None = Field(
+        default=None,
+        description="Absolute path to the project being worked on.",
+    )
+    project_name: str | None = Field(
+        default=None,
+        description="Human-readable project name.",
+    )
+    working_directory: str | None = Field(
+        default=None,
+        description="Working directory where the action was executed.",
+    )
+
     def __str__(self) -> str:
         """Return concise string representation for logging.
 
