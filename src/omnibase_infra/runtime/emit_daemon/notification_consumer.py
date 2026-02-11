@@ -324,7 +324,7 @@ class NotificationConsumer:
 
         # Extract thread_ts for threading support (if present in payload)
         thread_ts_raw = payload.get("thread_ts")
-        thread_ts = str(thread_ts_raw) if isinstance(thread_ts_raw, str) else None
+        thread_ts = thread_ts_raw if isinstance(thread_ts_raw, str) else None
 
         # Build details list safely
         details: list[str] = []
@@ -385,7 +385,7 @@ class NotificationConsumer:
 
         # Extract thread_ts for threading support (if present in payload)
         thread_ts_raw = payload.get("thread_ts")
-        thread_ts = str(thread_ts_raw) if isinstance(thread_ts_raw, str) else None
+        thread_ts = thread_ts_raw if isinstance(thread_ts_raw, str) else None
 
         # Build details dict
         details_dict: dict[str, str] = {

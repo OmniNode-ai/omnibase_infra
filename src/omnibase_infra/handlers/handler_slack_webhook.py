@@ -89,18 +89,6 @@ _SEVERITY_TITLES: dict[EnumAlertSeverity, str] = {
     EnumAlertSeverity.INFO: "Info",
 }
 
-# Webhook response bodies that indicate an error despite HTTP 200 status
-_WEBHOOK_ERROR_BODIES: frozenset[str] = frozenset(
-    {
-        "no_service",
-        "invalid_payload",
-        "channel_not_found",
-        "channel_is_archived",
-        "action_prohibited",
-        "posting_to_general_channel_denied",
-    }
-)
-
 
 class HandlerSlackWebhook:
     """Handler for Slack alert delivery via webhook or Web API.
@@ -195,6 +183,11 @@ class HandlerSlackWebhook:
         self._max_retries = max_retries
         self._retry_backoff = retry_backoff
         self._timeout = timeout
+
+    def __repr__(self) -> str:
+        """Mask credentials to prevent accidental exposure in logs/tracebacks."""
+        mode = "web_api" if self._bot_token else "webhook"
+        return f"<{type(self).__name__} mode={mode}>"
 
     @property
     def uses_web_api(self) -> bool:
@@ -356,20 +349,19 @@ class HandlerSlackWebhook:
                     duration_ms = (time.perf_counter() - start_time) * 1000
 
                     if response.status == 200:
-                        # Slack webhooks return 200 with error text bodies
-                        # for some error conditions (e.g. "no_service",
-                        # "invalid_payload", "channel_is_archived").
-                        # Only "ok" indicates true success.
-                        body_text = await response.text()
-                        if body_text.strip() in _WEBHOOK_ERROR_BODIES:
-                            duration_ms = (time.perf_counter() - start_time) * 1000
-                            last_error = f"Webhook error: {body_text.strip()[:100]}"
+                        # Slack webhooks return 200 with a text body.
+                        # Only "ok" indicates true success; known error
+                        # bodies and unrecognized responses are treated
+                        # as failures to avoid masking new error strings.
+                        body_text = (await response.text()).strip()
+                        if body_text != "ok":
+                            last_error = f"Webhook error: {body_text[:100]}"
                             last_error_code = "SLACK_WEBHOOK_ERROR"
                             logger.warning(
-                                "Slack webhook returned error body on 200",
+                                "Slack webhook returned non-ok body on 200",
                                 extra={
                                     "correlation_id": str(correlation_id),
-                                    "body": body_text.strip()[:100],
+                                    "body": body_text[:100],
                                     "attempt": attempt + 1,
                                 },
                             )
@@ -633,7 +625,7 @@ class HandlerSlackWebhook:
                             },
                         )
 
-                    else:
+                    elif response.status == 200:
                         # HTTP 200 - parse JSON response
                         try:
                             body = await response.json()

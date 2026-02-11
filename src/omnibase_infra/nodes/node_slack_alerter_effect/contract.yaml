@@ -5,8 +5,8 @@
 # Node: NodeSlackAlerterEffect
 #
 # This contract defines the interface for the Slack Alerter Effect node,
-# which sends infrastructure alerts to Slack via webhooks. The node uses
-# declarative operation routing to dispatch operations to the handler.
+# which sends infrastructure alerts to Slack via the Web API or webhooks.
+# The node uses declarative operation routing to dispatch operations to the handler.
 #
 # Related Tickets:
 #   - OMN-1905: Add declarative Slack webhook handler to omnibase_infra
