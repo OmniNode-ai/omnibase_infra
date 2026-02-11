@@ -7,6 +7,8 @@ Moved from omniclaude as part of OMN-1526 architectural cleanup.
 
 from __future__ import annotations
 
+from urllib.parse import quote_plus
+
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -111,13 +113,13 @@ class ConfigSessionStorage(BaseSettings):
         """Build PostgreSQL DSN from components.
 
         Returns:
-            PostgreSQL connection string.
+            PostgreSQL connection string with URL-encoded credentials.
         """
         password = self.postgres_password.get_secret_value()
         return (
-            f"postgresql://{self.postgres_user}:{password}"
+            f"postgresql://{quote_plus(self.postgres_user)}:{quote_plus(password)}"
             f"@{self.postgres_host}:{self.postgres_port}"
-            f"/{self.postgres_database}"
+            f"/{quote_plus(self.postgres_database)}"
         )
 
     @property
@@ -125,13 +127,14 @@ class ConfigSessionStorage(BaseSettings):
         """Build async PostgreSQL DSN for asyncpg.
 
         Returns:
-            PostgreSQL connection string with postgresql+asyncpg scheme.
+            PostgreSQL connection string with postgresql+asyncpg scheme
+            and URL-encoded credentials.
         """
         password = self.postgres_password.get_secret_value()
         return (
-            f"postgresql+asyncpg://{self.postgres_user}:{password}"
+            f"postgresql+asyncpg://{quote_plus(self.postgres_user)}:{quote_plus(password)}"
             f"@{self.postgres_host}:{self.postgres_port}"
-            f"/{self.postgres_database}"
+            f"/{quote_plus(self.postgres_database)}"
         )
 
     @property

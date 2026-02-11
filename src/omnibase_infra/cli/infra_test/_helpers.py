@@ -57,6 +57,10 @@ def get_postgres_dsn() -> str:
     # Prefer explicit DSN when available (OMN-2146)
     db_url = os.getenv("OMNIBASE_INFRA_DB_URL", "")
     if db_url:
+        if not db_url.startswith(("postgresql://", "postgres://")):
+            raise ValueError(
+                "OMNIBASE_INFRA_DB_URL must start with postgresql:// or postgres://"
+            )
         return db_url
 
     host = os.getenv("POSTGRES_HOST", "localhost")

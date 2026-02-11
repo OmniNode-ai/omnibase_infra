@@ -238,7 +238,7 @@ def _get_db_dsn() -> str:
             "Warning: POSTGRES_PASSWORD not set. Set it via environment or .env file.",
             err=True,
         )
-    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}"
+    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{quote_plus(database)}"
 
 
 def _sanitize_dsn(dsn: str) -> str:

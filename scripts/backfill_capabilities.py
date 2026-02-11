@@ -1084,14 +1084,14 @@ def main() -> int:
         print("WARNING: Large batch sizes (>100000) may cause memory issues")
 
     password = os.getenv("POSTGRES_PASSWORD")
-    if password is None:
+    if not os.getenv("OMNIBASE_INFRA_DB_URL") and password is None:
         print(
             f"ERROR [{ErrorCode.CFG_MISSING_PASSWORD}]: "
             "POSTGRES_PASSWORD environment variable is required"
         )
         print("  Action: Set POSTGRES_PASSWORD before running this script.")
         return 1
-    if password == "":
+    if not os.getenv("OMNIBASE_INFRA_DB_URL") and password == "":
         print(
             f"ERROR [{ErrorCode.CFG_MISSING_PASSWORD}]: "
             "POSTGRES_PASSWORD environment variable is set but empty"

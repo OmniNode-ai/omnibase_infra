@@ -41,6 +41,7 @@ import sys
 from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING
+from urllib.parse import quote_plus
 from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
@@ -575,8 +576,8 @@ class ModelReplayConfig(BaseModel):
         if not all([self.postgres_host, self.postgres_user, self.postgres_password]):
             return None
         return (
-            f"postgresql://{self.postgres_user}:{self.postgres_password}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_database}"
+            f"postgresql://{quote_plus(self.postgres_user or '')}:{quote_plus(self.postgres_password or '')}"
+            f"@{self.postgres_host}:{self.postgres_port}/{quote_plus(self.postgres_database)}"
         )
 
 

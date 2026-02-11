@@ -69,6 +69,7 @@ import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import quote_plus
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -293,12 +294,19 @@ class PluginRegistration:
                         "Set OMNIBASE_INFRA_DB_URL or POSTGRES_DATABASE.",
                         context=context,
                     )
+                postgres_user = os.getenv("POSTGRES_USER", "postgres")
+                postgres_password = os.getenv("POSTGRES_PASSWORD", "")
+                postgres_port = os.getenv("POSTGRES_PORT", "5432")
+                if not postgres_password:
+                    logger.warning(
+                        "POSTGRES_PASSWORD not set — DSN will have empty credentials",
+                    )
                 postgres_dsn = (
-                    f"postgresql://{os.getenv('POSTGRES_USER', 'postgres')}:"
-                    f"{os.getenv('POSTGRES_PASSWORD', '')}@"
+                    f"postgresql://{quote_plus(postgres_user)}:"
+                    f"{quote_plus(postgres_password)}@"
                     f"{postgres_host}:"
-                    f"{os.getenv('POSTGRES_PORT', '5432')}/"
-                    f"{postgres_database}"
+                    f"{postgres_port}/"
+                    f"{quote_plus(postgres_database)}"
                 )
 
             self._pool = await asyncpg.create_pool(
@@ -324,7 +332,7 @@ class PluginRegistration:
                 correlation_id,
                 extra={
                     "host": postgres_host,
-                    "port": os.getenv("POSTGRES_PORT", "5432"),
+                    "port": postgres_port,
                     "database": postgres_database or "(from OMNIBASE_INFRA_DB_URL)",
                 },
             )
