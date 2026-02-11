@@ -79,9 +79,7 @@ class HandlerCheckpointValidate:
         """
         correlation_id_raw = envelope.get("correlation_id")
         corr_id = (
-            correlation_id_raw
-            if isinstance(correlation_id_raw, UUID)
-            else UUID("00000000-0000-0000-0000-000000000000")
+            correlation_id_raw if isinstance(correlation_id_raw, UUID) else uuid4()
         )
         input_envelope_id = uuid4()
 

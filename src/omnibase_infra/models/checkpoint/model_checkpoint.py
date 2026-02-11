@@ -16,6 +16,7 @@ Ticket: OMN-2143
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Annotated, Union
 from uuid import UUID
@@ -61,6 +62,8 @@ PhasePayload = Annotated[
 
 CHECKPOINT_SCHEMA_VERSION = "1.0.0"
 """Current schema version for checkpoint files."""
+
+_HEX_SHA_RE = re.compile(r"^[0-9a-f]+$")
 
 
 class ModelCheckpoint(BaseModel):
@@ -110,10 +113,38 @@ class ModelCheckpoint(BaseModel):
         default_factory=dict,
         description="Mapping of relative repo path to commit SHA.",
     )
+
+    @field_validator("repo_commit_map", mode="after")
+    @classmethod
+    def _validate_commit_shas(cls, v: dict[str, str]) -> dict[str, str]:
+        """Ensure every value in repo_commit_map is a valid lowercase hex SHA."""
+        for repo_path, sha in v.items():
+            if not _HEX_SHA_RE.match(sha):
+                msg = (
+                    f"repo_commit_map[{repo_path!r}] value {sha!r} is not a "
+                    f"valid hex commit SHA (expected pattern ^[0-9a-f]+$)"
+                )
+                raise ValueError(msg)
+        return v
+
     artifact_paths: tuple[str, ...] = Field(
         default_factory=tuple,
         description="Relative filesystem paths serving as resume evidence.",
     )
+
+    @field_validator("artifact_paths", mode="after")
+    @classmethod
+    def _validate_artifact_paths(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        """Reject absolute paths and path-traversal segments in artifact_paths."""
+        for p in v:
+            if p.startswith("/"):
+                msg = f"Absolute artifact path forbidden: {p!r}"
+                raise ValueError(msg)
+            if ".." in p.split("/"):
+                msg = f"Path traversal segment '..' forbidden in artifact path: {p!r}"
+                raise ValueError(msg)
+        return v
+
     attempt_number: int = Field(
         default=1,
         ge=1,

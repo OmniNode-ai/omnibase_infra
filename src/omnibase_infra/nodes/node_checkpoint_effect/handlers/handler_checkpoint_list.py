@@ -25,6 +25,9 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.models.checkpoint.model_checkpoint import ModelCheckpoint
+from omnibase_infra.nodes.node_checkpoint_effect.handlers.util_checkpoint_sorting import (
+    attempt_number,
+)
 from omnibase_infra.nodes.node_checkpoint_effect.models.model_checkpoint_effect_output import (
     ModelCheckpointEffectOutput,
 )
@@ -35,15 +38,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_DIR = Path.home() / ".claude" / "checkpoints"
-
-
-def _attempt_number(path: Path) -> int:
-    """Extract numeric attempt from filename like ``phase_1_implement_a3.yaml``."""
-    stem = path.stem
-    after_a = stem.rsplit("_a", maxsplit=1)
-    if len(after_a) == 2 and after_a[1].isdigit():
-        return int(after_a[1])
-    return 0
 
 
 class HandlerCheckpointList:
@@ -90,7 +84,8 @@ class HandlerCheckpointList:
             target_name="checkpoint_yaml",
         )
         corr_id = context.correlation_id
-        assert corr_id is not None  # with_correlation() guarantees a UUID
+        if corr_id is None:
+            raise RuntimeError("correlation_id must not be None")
 
         ticket_id = envelope.get("ticket_id")
         if not ticket_id:
@@ -141,7 +136,7 @@ class HandlerCheckpointList:
             if not scan_dir.resolve().is_relative_to(base_dir.resolve()):
                 logger.warning("Skipping escaped path: %s", scan_dir.name)
                 continue
-            for yaml_file in sorted(scan_dir.glob("phase_*.yaml"), key=_attempt_number):
+            for yaml_file in sorted(scan_dir.glob("phase_*.yaml"), key=attempt_number):
                 try:
                     raw_data = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
                     if not isinstance(raw_data, dict):

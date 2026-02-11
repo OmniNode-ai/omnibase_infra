@@ -106,7 +106,8 @@ class HandlerCheckpointWrite:
             target_name="checkpoint_yaml",
         )
         corr_id = context.correlation_id
-        assert corr_id is not None  # with_correlation() guarantees a UUID
+        if corr_id is None:
+            raise RuntimeError("correlation_id must not be None")
 
         raw_checkpoint = envelope.get("checkpoint")
         if raw_checkpoint is None:
@@ -183,7 +184,8 @@ class HandlerCheckpointWrite:
             os.close(tmp_fd)
             tmp_fd = -1
 
-            # Atomic link: fails with FileExistsError if target already exists
+            # Atomic link: fails with FileExistsError if target already exists.
+            # Hard link requires same filesystem; mkstemp(dir=target_dir) ensures this.
             os.link(tmp_path_str, str(target_path))
             Path(tmp_path_str).unlink()
             tmp_path_str = ""

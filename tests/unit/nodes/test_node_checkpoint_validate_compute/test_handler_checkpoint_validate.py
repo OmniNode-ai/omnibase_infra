@@ -55,6 +55,26 @@ def _valid_checkpoint(**overrides: object) -> ModelCheckpoint:
     return ModelCheckpoint(**defaults)  # type: ignore[arg-type]
 
 
+def _invalid_checkpoint(**overrides: object) -> ModelCheckpoint:
+    """Create a checkpoint bypassing model validators for handler-level testing."""
+    defaults: dict[str, object] = {
+        "run_id": uuid4(),
+        "ticket_id": "OMN-2143",
+        "phase": EnumCheckpointPhase.IMPLEMENT,
+        "timestamp_utc": datetime.now(UTC),
+        "repo_commit_map": {"omnibase_infra": "abc1234"},
+        "artifact_paths": ("src/foo.py",),
+        "attempt_number": 1,
+        "schema_version": "1.0.0",
+        "phase_payload": ModelPhasePayloadImplement(
+            branch_name="feature-branch",
+            commit_sha="abc1234",
+        ),
+    }
+    defaults.update(overrides)
+    return ModelCheckpoint.model_construct(**defaults)  # type: ignore[arg-type]
+
+
 class TestHandlerCheckpointValidate:
     """Tests for HandlerCheckpointValidate."""
 
@@ -82,7 +102,7 @@ class TestHandlerCheckpointValidate:
         """Absolute paths in artifact_paths produce an error."""
         await handler.initialize({})
 
-        cp = _valid_checkpoint(artifact_paths=("/absolute/path.py",))
+        cp = _invalid_checkpoint(artifact_paths=("/absolute/path.py",))
 
         env: dict[str, object] = {
             "checkpoint": cp,
@@ -98,10 +118,25 @@ class TestHandlerCheckpointValidate:
         self,
         handler: HandlerCheckpointValidate,
     ) -> None:
-        """Non-hex commit SHA produces an error."""
+        """Non-hex commit SHA produces an error.
+
+        Uses ``model_construct`` to bypass Pydantic field validation so the
+        handler's own SHA check is exercised.  The model-level
+        ``_validate_commit_shas`` validator would reject this value at
+        construction time.
+        """
         await handler.initialize({})
 
-        cp = _valid_checkpoint(repo_commit_map={"repo": "not-a-sha!!"})
+        # Build a valid checkpoint, then reconstruct with bad repo_commit_map.
+        # We must preserve the original field objects (not serialized dicts)
+        # so that model_construct produces a valid-looking instance.
+        base = _valid_checkpoint()
+        fields = {
+            field_name: getattr(base, field_name)
+            for field_name in ModelCheckpoint.model_fields
+        }
+        fields["repo_commit_map"] = {"repo": "not-a-sha!!"}
+        cp = ModelCheckpoint.model_construct(**fields)
 
         env: dict[str, object] = {
             "checkpoint": cp,
@@ -214,7 +249,7 @@ class TestHandlerCheckpointValidate:
         assert bool(valid_result.result) is True
 
         invalid_env: dict[str, object] = {
-            "checkpoint": _valid_checkpoint(artifact_paths=("/abs/path",)),
+            "checkpoint": _invalid_checkpoint(artifact_paths=("/abs/path",)),
             "correlation_id": uuid4(),
         }
         invalid_result = await handler.execute(invalid_env)

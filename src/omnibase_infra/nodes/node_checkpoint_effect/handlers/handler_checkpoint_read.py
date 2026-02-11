@@ -27,8 +27,8 @@ from omnibase_infra.enums import (
 from omnibase_infra.enums.enum_checkpoint_phase import EnumCheckpointPhase
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.models.checkpoint.model_checkpoint import ModelCheckpoint
-from omnibase_infra.nodes.node_checkpoint_effect.handlers.handler_checkpoint_list import (
-    _attempt_number,
+from omnibase_infra.nodes.node_checkpoint_effect.handlers.util_checkpoint_sorting import (
+    attempt_number,
 )
 from omnibase_infra.nodes.node_checkpoint_effect.models.model_checkpoint_effect_output import (
     ModelCheckpointEffectOutput,
@@ -91,7 +91,8 @@ class HandlerCheckpointRead:
             target_name="checkpoint_yaml",
         )
         corr_id = context.correlation_id
-        assert corr_id is not None  # with_correlation() guarantees a UUID
+        if corr_id is None:
+            raise RuntimeError("correlation_id must not be None")
 
         ticket_id = envelope.get("ticket_id")
         run_id = envelope.get("run_id")
@@ -144,8 +145,8 @@ class HandlerCheckpointRead:
 
         # Find all attempt files for this phase, sorted by attempt number
         matching_files = sorted(
-            target_dir.glob(f"{phase_prefix}*.yaml"),
-            key=_attempt_number,
+            target_dir.glob(f"{phase_prefix}[0-9]*.yaml"),
+            key=attempt_number,
         )
 
         if not matching_files:

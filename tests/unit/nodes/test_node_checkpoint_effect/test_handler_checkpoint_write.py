@@ -129,13 +129,15 @@ class TestHandlerCheckpointWrite:
         """Write rejects checkpoints with absolute artifact paths."""
         await handler.initialize({})
 
-        cp = ModelCheckpoint(
+        cp = ModelCheckpoint.model_construct(
             run_id=uuid4(),
             ticket_id="OMN-2143",
             phase=EnumCheckpointPhase.IMPLEMENT,
             timestamp_utc=datetime.now(UTC),
             artifact_paths=("/absolute/path/bad.py",),
             attempt_number=1,
+            schema_version="1.0.0",
+            repo_commit_map={},
             phase_payload=ModelPhasePayloadImplement(
                 branch_name="branch",
                 commit_sha="abc1234",
