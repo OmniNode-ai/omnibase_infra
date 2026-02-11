@@ -271,6 +271,7 @@ class PluginRegistration:
             postgres_dsn = os.getenv("OMNIBASE_INFRA_DB_URL", "")
             postgres_host = os.getenv("POSTGRES_HOST")
             postgres_database = os.getenv("POSTGRES_DATABASE", "")
+            postgres_port = os.getenv("POSTGRES_PORT", "5432")
             if not postgres_dsn:
                 if not postgres_host:
                     context = ModelInfraErrorContext.with_correlation(
@@ -296,7 +297,6 @@ class PluginRegistration:
                     )
                 postgres_user = os.getenv("POSTGRES_USER", "postgres")
                 postgres_password = os.getenv("POSTGRES_PASSWORD", "")
-                postgres_port = os.getenv("POSTGRES_PORT", "5432")
                 if not postgres_password:
                     logger.warning(
                         "POSTGRES_PASSWORD not set — DSN will have empty credentials",
