@@ -15,11 +15,14 @@ from omnibase_infra.nodes.node_session_state_effect.models import (
     ModelSessionStateResult,
 )
 
+pytestmark = pytest.mark.unit
+
 # ============================================================
 # ModelSessionIndex tests
 # ============================================================
 
 
+@pytest.mark.unit
 class TestModelSessionIndex:
     """Tests for ModelSessionIndex."""
 
@@ -151,6 +154,7 @@ class TestModelSessionIndex:
 # ============================================================
 
 
+@pytest.mark.unit
 class TestModelRunContext:
     """Tests for ModelRunContext."""
 
@@ -233,6 +237,7 @@ class TestModelRunContext:
 # ============================================================
 
 
+@pytest.mark.unit
 class TestModelSessionStateResult:
     """Tests for ModelSessionStateResult."""
 

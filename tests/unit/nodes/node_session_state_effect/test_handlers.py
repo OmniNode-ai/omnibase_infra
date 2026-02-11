@@ -32,6 +32,8 @@ from omnibase_infra.nodes.node_session_state_effect.models import (
     ModelSessionIndex,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def state_dir(tmp_path: Path) -> Path:
@@ -46,6 +48,7 @@ def state_dir(tmp_path: Path) -> Path:
 # ============================================================
 
 
+@pytest.mark.unit
 class TestHandlerSessionIndexRead:
     """Tests for HandlerSessionIndexRead."""
 
@@ -91,6 +94,7 @@ class TestHandlerSessionIndexRead:
 # ============================================================
 
 
+@pytest.mark.unit
 class TestHandlerSessionIndexWrite:
     """Tests for HandlerSessionIndexWrite."""
 
@@ -146,6 +150,13 @@ class TestHandlerSessionIndexWrite:
         # File should be valid JSON (one of the writes won)
         data = json.loads((state_dir / "session.json").read_text())
         assert "recent_run_ids" in data
+
+        # Data integrity: the persisted data must round-trip through the model
+        # without corruption (valid structure, consistent types, no partial writes)
+        restored = ModelSessionIndex(**data)
+        assert isinstance(restored.recent_run_ids, tuple)
+        assert len(restored.recent_run_ids) == 1  # Last write wins, single run_id
+        assert restored.recent_run_ids[0].startswith("run-")
 
     @pytest.mark.asyncio
     async def test_read_modify_write_atomic(self, state_dir: Path) -> None:
@@ -212,6 +223,7 @@ class TestHandlerSessionIndexWrite:
 # ============================================================
 
 
+@pytest.mark.unit
 class TestHandlerRunContextRead:
     """Tests for HandlerRunContextRead."""
 
@@ -246,6 +258,7 @@ class TestHandlerRunContextRead:
         assert ctx.metadata == {"ticket": "OMN-2117"}
 
 
+@pytest.mark.unit
 class TestHandlerRunContextReadPathTraversal:
     """Tests for path traversal rejection in HandlerRunContextRead."""
 
@@ -268,6 +281,7 @@ class TestHandlerRunContextReadPathTraversal:
 # ============================================================
 
 
+@pytest.mark.unit
 class TestHandlerRunContextWrite:
     """Tests for HandlerRunContextWrite."""
 
@@ -306,6 +320,7 @@ class TestHandlerRunContextWrite:
 # ============================================================
 
 
+@pytest.mark.unit
 class TestHandlerStaleRunGC:
     """Tests for HandlerStaleRunGC."""
 
@@ -382,6 +397,7 @@ class TestHandlerStaleRunGC:
 # ============================================================
 
 
+@pytest.mark.unit
 class TestConcurrentPipelineIsolation:
     """Tests for concurrent pipeline isolation (OMN-2117 DoD)."""
 

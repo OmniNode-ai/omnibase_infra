@@ -29,6 +29,11 @@ description: >
   Effect node for session state filesystem I/O. Owns all reads/writes to ~/.claude/state/ including session.json (with flock) and runs/{run_id}.json. Uses atomic write-tmp-fsync-rename pattern for crash safety. Supports concurrent pipeline isolation via per-run documents and stale run GC.
 
 # Strongly typed I/O models
+# TODO(OMN-2117): input_model is ModelSessionIndex, but individual handlers accept
+# different input types (run_id: str, ModelRunContext, Callable transform, etc.).
+# Consider introducing a ModelSessionStateInput union/envelope that covers all
+# operations, or document that the input_model here is the "primary" input type
+# and individual handler signatures are the source of truth for per-operation I/O.
 input_model:
   name: "ModelSessionIndex"
   module: "omnibase_infra.nodes.node_session_state_effect.models"

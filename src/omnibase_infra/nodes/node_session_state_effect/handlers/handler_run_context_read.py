@@ -16,17 +16,31 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_session_state_effect.models import (
     RUN_ID_PATTERN,
     ModelRunContext,
     ModelSessionStateResult,
 )
+from omnibase_infra.utils import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
 
 class HandlerRunContextRead:
-    """Read a run context document from the filesystem."""
+    """Read a run context document from the filesystem.
+
+    Reads ``runs/{run_id}.json`` from the configured state directory and
+    returns a validated ``ModelRunContext``. If the file does not exist,
+    returns ``(None, result)`` with ``result.success=True`` and
+    ``files_affected=0`` (missing file is not an error).
+
+    Security:
+        Run IDs are validated against a filesystem-safe allowlist before
+        constructing any file paths, and resolved paths are checked to
+        ensure they stay within the ``runs/`` directory (defense-in-depth
+        against path traversal).
+    """
 
     def __init__(self, state_dir: Path) -> None:
         """Initialize with state directory path.
@@ -35,6 +49,26 @@ class HandlerRunContextRead:
             state_dir: Root directory for session state (e.g. ``~/.claude/state``).
         """
         self._state_dir = state_dir
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role: infrastructure handler for filesystem I/O.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER - This handler is an infrastructure
+            handler that reads run context files from the filesystem.
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification: side-effecting filesystem read.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT - This handler performs side-effecting
+            I/O operations (filesystem reads).
+        """
+        return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
         self,
@@ -69,7 +103,20 @@ class HandlerRunContextRead:
         run_id: str,
         correlation_id: UUID,
     ) -> tuple[ModelRunContext | None, ModelSessionStateResult]:
-        """Synchronous read logic, executed off the event loop."""
+        """Synchronous read logic, executed off the event loop.
+
+        Resolves the file path for ``runs/{run_id}.json``, validates
+        the resolved path stays within the runs directory, then reads
+        and parses the document. Returns ``None`` with a success result
+        if the file does not exist (missing is not an error).
+
+        Args:
+            run_id: The unique run identifier (pre-validated by caller).
+            correlation_id: Correlation ID for distributed tracing.
+
+        Returns:
+            Tuple of (parsed context or None, operation result).
+        """
         runs_dir = (self._state_dir / "runs").resolve()
         run_path = runs_dir / f"{run_id}.json"
 
@@ -120,7 +167,9 @@ class HandlerRunContextRead:
                     success=False,
                     operation="run_context_read",
                     correlation_id=correlation_id,
-                    error=f"Failed to parse run context {run_id}: {e}",
+                    error=sanitize_error_string(
+                        f"Failed to parse run context {run_id}: {e}"
+                    ),
                     error_code="RUN_CONTEXT_PARSE_ERROR",
                     files_affected=1,
                 ),
@@ -133,7 +182,9 @@ class HandlerRunContextRead:
                     success=False,
                     operation="run_context_read",
                     correlation_id=correlation_id,
-                    error=f"I/O error reading run context {run_id}: {e}",
+                    error=sanitize_error_string(
+                        f"I/O error reading run context {run_id}: {e}"
+                    ),
                     error_code="RUN_CONTEXT_IO_ERROR",
                     files_affected=1,
                 ),

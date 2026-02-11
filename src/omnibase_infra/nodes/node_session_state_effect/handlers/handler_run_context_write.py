@@ -17,11 +17,13 @@ import tempfile
 from pathlib import Path
 from uuid import UUID
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_session_state_effect.models import (
     RUN_ID_PATTERN,
     ModelRunContext,
     ModelSessionStateResult,
 )
+from omnibase_infra.utils import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +31,16 @@ logger = logging.getLogger(__name__)
 class HandlerRunContextWrite:
     """Atomically write a run context document to the filesystem.
 
-    No file locking is used — each run document has a single writer
-    (the pipeline that created it).
+    Uses the write-tmp-fsync-rename pattern to ensure that
+    ``runs/{run_id}.json`` is never left in a partial state, even on
+    power loss. No file locking is used because each run document has
+    a single writer (the pipeline that created it).
+
+    Security:
+        Run IDs are validated against a filesystem-safe allowlist and
+        checked for path-traversal characters (``/``, ``\\``, ``..``)
+        before constructing any file paths. Resolved paths are also
+        verified to stay within the ``runs/`` directory.
     """
 
     def __init__(self, state_dir: Path) -> None:
@@ -41,6 +51,26 @@ class HandlerRunContextWrite:
         """
         self._state_dir = state_dir
         self._runs_dir = (state_dir / "runs").resolve()
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role: infrastructure handler for filesystem I/O.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER - This handler is an infrastructure
+            handler that writes run context files to the filesystem.
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification: side-effecting filesystem write.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT - This handler performs side-effecting
+            I/O operations (filesystem writes).
+        """
+        return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
         self,
@@ -63,9 +93,28 @@ class HandlerRunContextWrite:
         context: ModelRunContext,
         correlation_id: UUID,
     ) -> ModelSessionStateResult:
-        """Synchronous write logic, executed off the event loop."""
-        # Defense-in-depth: reject unsafe IDs even if model_construct() skipped validators
-        if not RUN_ID_PATTERN.match(context.run_id) or ".." in context.run_id:
+        """Synchronous write logic, executed off the event loop.
+
+        Validates the run_id for path safety, writes the context to a
+        temp file in the same directory, fsyncs, and atomically renames
+        over the target path.
+
+        Args:
+            context: The run context to persist.
+            correlation_id: Correlation ID for distributed tracing.
+
+        Returns:
+            Operation result indicating success or failure.
+        """
+        # Defense-in-depth: reject unsafe IDs even if model_construct() skipped validators.
+        # Explicit checks for path traversal characters (/, \, ..) in addition to
+        # the regex allowlist, since run_id is used to construct filesystem paths.
+        if (
+            not RUN_ID_PATTERN.match(context.run_id)
+            or ".." in context.run_id
+            or "/" in context.run_id
+            or "\\" in context.run_id
+        ):
             return ModelSessionStateResult(
                 success=False,
                 operation="run_context_write",
@@ -133,7 +182,9 @@ class HandlerRunContextWrite:
                 success=False,
                 operation="run_context_write",
                 correlation_id=correlation_id,
-                error=f"I/O error writing run context {context.run_id}: {e}",
+                error=sanitize_error_string(
+                    f"I/O error writing run context {context.run_id}: {e}"
+                ),
                 error_code="RUN_CONTEXT_WRITE_ERROR",
                 files_affected=1,
             )
@@ -148,7 +199,9 @@ class HandlerRunContextWrite:
                 success=False,
                 operation="run_context_write",
                 correlation_id=correlation_id,
-                error=f"Unexpected error writing run context {context.run_id}: {e}",
+                error=sanitize_error_string(
+                    f"Unexpected error writing run context {context.run_id}: {e}"
+                ),
                 error_code="RUN_CONTEXT_WRITE_UNEXPECTED",
             )
 

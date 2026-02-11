@@ -16,10 +16,12 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_session_state_effect.models import (
     ModelSessionIndex,
     ModelSessionStateResult,
 )
+from omnibase_infra.utils import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,26 @@ class HandlerSessionIndexRead:
         """
         self._state_dir = state_dir
 
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role: infrastructure handler for filesystem I/O.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER - This handler is an infrastructure
+            handler that reads the session index from the filesystem.
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification: side-effecting filesystem read.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT - This handler performs side-effecting
+            I/O operations (filesystem reads).
+        """
+        return EnumHandlerTypeCategory.EFFECT
+
     async def handle(
         self,
         correlation_id: UUID,
@@ -69,7 +91,18 @@ class HandlerSessionIndexRead:
         self,
         correlation_id: UUID,
     ) -> tuple[ModelSessionIndex | None, ModelSessionStateResult]:
-        """Synchronous read logic, executed off the event loop."""
+        """Synchronous read logic, executed off the event loop.
+
+        Reads and parses ``session.json``. Returns a default empty
+        ``ModelSessionIndex`` if the file does not exist, or ``None``
+        with an error result if parsing or I/O fails.
+
+        Args:
+            correlation_id: Correlation ID for distributed tracing.
+
+        Returns:
+            Tuple of (parsed index or None on error, operation result).
+        """
         session_path = self._state_dir / "session.json"
 
         try:
@@ -95,7 +128,7 @@ class HandlerSessionIndexRead:
                     success=False,
                     operation="session_index_read",
                     correlation_id=correlation_id,
-                    error=f"I/O error reading session.json: {e}",
+                    error=sanitize_error_string(f"I/O error reading session.json: {e}"),
                     error_code="SESSION_INDEX_IO_ERROR",
                     files_affected=0,
                 ),
@@ -121,7 +154,7 @@ class HandlerSessionIndexRead:
                     success=False,
                     operation="session_index_read",
                     correlation_id=correlation_id,
-                    error=f"Failed to parse session.json: {e}",
+                    error=sanitize_error_string(f"Failed to parse session.json: {e}"),
                     error_code="SESSION_INDEX_PARSE_ERROR",
                     files_affected=1,
                 ),

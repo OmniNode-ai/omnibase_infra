@@ -18,6 +18,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_session_state_effect.models import (
     ModelRunContext,
     ModelSessionStateResult,
@@ -55,6 +56,26 @@ class HandlerStaleRunGC:
         self._ttl_seconds = ttl_seconds
         self._max_deletions = max_deletions
 
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role: infrastructure handler for filesystem I/O.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER - This handler is an infrastructure
+            handler that garbage-collects stale run context files.
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification: side-effecting filesystem deletion.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT - This handler performs side-effecting
+            I/O operations (filesystem reads and deletes).
+        """
+        return EnumHandlerTypeCategory.EFFECT
+
     async def handle(
         self,
         correlation_id: UUID,
@@ -80,7 +101,19 @@ class HandlerStaleRunGC:
         self,
         correlation_id: UUID,
     ) -> tuple[list[str], ModelSessionStateResult]:
-        """Synchronous GC logic, executed off the event loop."""
+        """Synchronous GC logic, executed off the event loop.
+
+        Scans ``runs/*.json`` sorted by mtime (oldest first), parses
+        each document, and deletes any whose ``updated_at`` exceeds
+        the configured TTL. Malformed files are also deleted. Stops
+        after ``max_deletions`` files to bound execution time.
+
+        Args:
+            correlation_id: Correlation ID for distributed tracing.
+
+        Returns:
+            Tuple of (list of deleted run IDs, operation result).
+        """
         runs_dir = self._state_dir / "runs"
         deleted_ids: list[str] = []
         files_deleted: int = 0
@@ -156,6 +189,14 @@ class HandlerStaleRunGC:
                         "GC'd stale run %s (age=%.0fs, ttl=%.0fs)",
                         ctx.run_id,
                         (now - ctx.updated_at).total_seconds(),
+                        self._ttl_seconds,
+                    )
+                else:
+                    age_seconds = (now - ctx.updated_at).total_seconds()
+                    logger.debug(
+                        "GC: run %s not stale (age=%.0fs, ttl=%.0fs)",
+                        ctx.run_id,
+                        age_seconds,
                         self._ttl_seconds,
                     )
             except (json.JSONDecodeError, ValueError, ValidationError) as e:

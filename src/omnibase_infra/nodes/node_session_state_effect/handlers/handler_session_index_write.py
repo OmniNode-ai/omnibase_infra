@@ -25,10 +25,17 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.nodes.node_session_state_effect.models import (
     ModelSessionIndex,
     ModelSessionStateResult,
 )
+from omnibase_infra.utils import sanitize_error_string
 
 if sys.platform != "win32":
     import fcntl
@@ -47,7 +54,8 @@ class HandlerSessionIndexWrite:
 
     Note:
         File locking (``flock``) requires a POSIX platform (Linux, macOS).
-        On Windows, the handler raises ``RuntimeError`` at construction time.
+        On Windows, the handler raises ``ProtocolConfigurationError`` at
+        construction time.
 
         The lock file (``session.json.lock``) persists after use. This is
         intentional — ``flock`` advisory locks do not require file deletion,
@@ -61,12 +69,38 @@ class HandlerSessionIndexWrite:
             state_dir: Root directory for session state (e.g. ``~/.claude/state``).
 
         Raises:
-            RuntimeError: If ``fcntl`` is not available (Windows).
+            ProtocolConfigurationError: If ``fcntl`` is not available (Windows).
         """
         if fcntl is None:
-            msg = "HandlerSessionIndexWrite requires fcntl (POSIX-only)"
-            raise RuntimeError(msg)
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.FILESYSTEM,
+                operation="session_index_write_init",
+            )
+            raise ProtocolConfigurationError(
+                "HandlerSessionIndexWrite requires fcntl (POSIX-only)",
+                context=context,
+            )
         self._state_dir = state_dir
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role: infrastructure handler for filesystem I/O.
+
+        Returns:
+            EnumHandlerType.INFRA_HANDLER - This handler is an infrastructure
+            handler that writes the session index to the filesystem.
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification: side-effecting filesystem write.
+
+        Returns:
+            EnumHandlerTypeCategory.EFFECT - This handler performs side-effecting
+            I/O operations (filesystem writes with flock).
+        """
+        return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
         self,
@@ -116,7 +150,19 @@ class HandlerSessionIndexWrite:
         transform: Callable[[ModelSessionIndex], ModelSessionIndex],
         correlation_id: UUID,
     ) -> tuple[ModelSessionIndex | None, ModelSessionStateResult]:
-        """Synchronous read-modify-write under flock."""
+        """Synchronous read-modify-write under flock.
+
+        Acquires an exclusive flock, reads the current session index
+        (falling back to an empty index on missing or corrupt files),
+        applies the caller's transform, and atomically writes the result.
+
+        Args:
+            transform: Pure function that maps current index to new index.
+            correlation_id: Correlation ID for distributed tracing.
+
+        Returns:
+            Tuple of (new index or None on failure, operation result).
+        """
         session_path = self._state_dir / "session.json"
 
         try:
@@ -199,7 +245,9 @@ class HandlerSessionIndexWrite:
                     success=False,
                     operation="session_index_read_modify_write",
                     correlation_id=correlation_id,
-                    error=f"I/O error in atomic read-modify-write: {e}",
+                    error=sanitize_error_string(
+                        f"I/O error in atomic read-modify-write: {e}"
+                    ),
                     error_code="SESSION_INDEX_RMW_ERROR",
                 ),
             )
@@ -216,7 +264,9 @@ class HandlerSessionIndexWrite:
                     success=False,
                     operation="session_index_read_modify_write",
                     correlation_id=correlation_id,
-                    error=f"Unexpected error in atomic read-modify-write: {e}",
+                    error=sanitize_error_string(
+                        f"Unexpected error in atomic read-modify-write: {e}"
+                    ),
                     error_code="SESSION_INDEX_RMW_UNEXPECTED",
                 ),
             )
@@ -289,7 +339,7 @@ class HandlerSessionIndexWrite:
                 success=False,
                 operation="session_index_write",
                 correlation_id=correlation_id,
-                error=f"I/O error writing session.json: {e}",
+                error=sanitize_error_string(f"I/O error writing session.json: {e}"),
                 error_code="SESSION_INDEX_WRITE_ERROR",
             )
         except Exception as e:
@@ -301,7 +351,9 @@ class HandlerSessionIndexWrite:
                 success=False,
                 operation="session_index_write",
                 correlation_id=correlation_id,
-                error=f"Unexpected error writing session.json: {e}",
+                error=sanitize_error_string(
+                    f"Unexpected error writing session.json: {e}"
+                ),
                 error_code="SESSION_INDEX_WRITE_UNEXPECTED",
             )
 

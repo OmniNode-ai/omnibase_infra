@@ -19,6 +19,14 @@ Concurrency Model:
     - Multiple active runs allowed; destructive ops denied
       until /onex:set-active-run {run_id} disambiguates
 
+Defensive Copy (Immutability) Pattern:
+    All ``with_*`` transition methods return **new** frozen instances rather
+    than mutating the current object.  This is a defensive-copy approach:
+    callers always receive an independent snapshot, so no reference held
+    elsewhere can observe a state change.  Because every field is either a
+    primitive or ``None``, a shallow copy (via Pydantic model construction)
+    is sufficient — there are no mutable containers to worry about.
+
 Tracking:
     - OMN-2117: Canonical State Nodes
 """
@@ -29,25 +37,67 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums import EnumSessionLifecycleState
+from omnibase_infra.enums import EnumInfraTransportType, EnumSessionLifecycleState
+from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.nodes.node_session_state_effect.models.model_run_context import (
     validate_run_id,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
+
+
+def _make_transition_error(
+    current_state: str,
+    target_state: str,
+    required_state: str,
+) -> RuntimeHostError:
+    """Build a ``RuntimeHostError`` for an illegal FSM transition.
+
+    The raw message is passed through ``sanitize_error_string`` before
+    being stored on the error, and a ``ModelInfraErrorContext`` is
+    attached for structured tracing.
+
+    Args:
+        current_state: Value of the current FSM state (e.g. ``"idle"``).
+        target_state: The state the caller attempted to reach.
+        required_state: The state that would have allowed the transition.
+
+    Returns:
+        A fully-constructed ``RuntimeHostError`` ready to raise.
+    """
+    raw_msg = (
+        f"Cannot transition to {target_state} from state {current_state!r} "
+        f"(requires {required_state})"
+    )
+    context = ModelInfraErrorContext.with_correlation(
+        transport_type=EnumInfraTransportType.RUNTIME,
+        operation="state_transition",
+    )
+    return RuntimeHostError(sanitize_error_string(raw_msg), context=context)
 
 
 class ModelSessionLifecycleState(BaseModel):
     """State model for the session lifecycle reducer FSM.
 
     Immutable state passed to and returned from reduce().
-    Follows the pure reducer pattern — no internal state mutation.
+    Follows the pure reducer pattern -- no internal state mutation.
 
     State transitions are performed via ``with_*`` methods that return
-    new immutable instances.
+    new immutable instances.  Each ``with_*`` call produces a **defensive
+    copy** (a brand-new frozen model) so that no caller holding a
+    reference to a previous state can observe the mutation.  Because all
+    fields are primitives or ``None``, a shallow copy via normal Pydantic
+    construction is sufficient -- there are no mutable containers (such as
+    ``dict`` or ``list``) that would require deep-copying.
 
     Attributes:
         status: Current FSM state.
         run_id: Active run identifier (set when a run is created).
         last_processed_event_id: Last processed event ID for idempotency.
+
+    Raises:
+        RuntimeHostError: On any illegal state transition, with a
+            ``ModelInfraErrorContext`` attached for structured tracing
+            and a sanitized error message.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -82,11 +132,11 @@ class ModelSessionLifecycleState(BaseModel):
             New state with status=RUN_CREATED.
 
         Raises:
-            ValueError: If current state is not IDLE or run_id is invalid.
+            RuntimeHostError: If current state is not IDLE.
+            ValueError: If run_id is invalid (via ``validate_run_id``).
         """
         if not self.can_create_run():
-            msg = f"Cannot create run from state {self.status.value!r} (requires IDLE)"
-            raise ValueError(msg)
+            raise _make_transition_error(self.status.value, "run_created", "IDLE")
         validate_run_id(run_id)
         return ModelSessionLifecycleState(
             status=EnumSessionLifecycleState.RUN_CREATED,
@@ -104,11 +154,20 @@ class ModelSessionLifecycleState(BaseModel):
             New state with status=RUN_ACTIVE.
 
         Raises:
-            ValueError: If current state is not RUN_CREATED.
+            RuntimeHostError: If current state is not RUN_CREATED or
+                ``run_id`` is missing.
         """
         if not self.can_activate_run():
-            msg = f"Cannot activate run from state {self.status.value!r} (requires RUN_CREATED)"
-            raise ValueError(msg)
+            raise _make_transition_error(self.status.value, "run_active", "RUN_CREATED")
+        if not self.run_id:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="state_transition",
+            )
+            raise RuntimeHostError(
+                sanitize_error_string("Cannot activate run: run_id is missing"),
+                context=context,
+            )
         return ModelSessionLifecycleState(
             status=EnumSessionLifecycleState.RUN_ACTIVE,
             run_id=self.run_id,
@@ -125,13 +184,20 @@ class ModelSessionLifecycleState(BaseModel):
             New state with status=RUN_ENDED.
 
         Raises:
-            ValueError: If current state is not RUN_ACTIVE.
+            RuntimeHostError: If current state is not RUN_ACTIVE or
+                ``run_id`` is missing.
         """
         if not self.can_end_run():
-            msg = (
-                f"Cannot end run from state {self.status.value!r} (requires RUN_ACTIVE)"
+            raise _make_transition_error(self.status.value, "run_ended", "RUN_ACTIVE")
+        if not self.run_id:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="state_transition",
             )
-            raise ValueError(msg)
+            raise RuntimeHostError(
+                sanitize_error_string("Cannot end run: run_id is missing"),
+                context=context,
+            )
         return ModelSessionLifecycleState(
             status=EnumSessionLifecycleState.RUN_ENDED,
             run_id=self.run_id,
@@ -148,11 +214,10 @@ class ModelSessionLifecycleState(BaseModel):
             New state with status=IDLE and run_id cleared.
 
         Raises:
-            ValueError: If current state is not RUN_ENDED.
+            RuntimeHostError: If current state is not RUN_ENDED.
         """
         if not self.can_reset():
-            msg = f"Cannot reset from state {self.status.value!r} (requires RUN_ENDED)"
-            raise ValueError(msg)
+            raise _make_transition_error(self.status.value, "idle", "RUN_ENDED")
         return ModelSessionLifecycleState(
             status=EnumSessionLifecycleState.IDLE,
             run_id=None,

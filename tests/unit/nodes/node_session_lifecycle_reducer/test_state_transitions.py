@@ -11,12 +11,16 @@ from uuid import uuid4
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from omnibase_infra.enums import EnumSessionLifecycleState
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.nodes.node_session_lifecycle_reducer.models import (
     ModelSessionLifecycleState,
 )
 
 
+@pytest.mark.unit
 class TestModelSessionLifecycleState:
     """Tests for ModelSessionLifecycleState FSM transitions."""
 
@@ -241,7 +245,7 @@ class TestModelSessionLifecycleState:
         transition_method: str,
         expected_match: str,
     ) -> None:
-        """Every invalid (source_state, transition) pair raises ValueError."""
+        """Every invalid (source_state, transition) pair raises RuntimeHostError."""
         # States that need a run_id to construct validly
         needs_run_id = {
             EnumSessionLifecycleState.RUN_CREATED,
@@ -254,8 +258,32 @@ class TestModelSessionLifecycleState:
         state = ModelSessionLifecycleState(**kwargs)  # type: ignore[arg-type]
 
         method = getattr(state, transition_method)
-        with pytest.raises(ValueError, match=expected_match):
+        with pytest.raises(RuntimeHostError, match=expected_match):
             if transition_method == "with_run_created":
                 method("run-2", uuid4())
             else:
                 method(uuid4())
+
+    # ------------------------------------------------------------------
+    # run_id guard enforcement
+    # ------------------------------------------------------------------
+
+    def test_activate_without_run_id_raises(self) -> None:
+        """Activating a run without run_id raises RuntimeHostError."""
+        # Construct a state in RUN_CREATED but with run_id=None
+        # (bypassing normal flow to test the guard)
+        state = ModelSessionLifecycleState(
+            status=EnumSessionLifecycleState.RUN_CREATED,
+            run_id=None,
+        )
+        with pytest.raises(RuntimeHostError, match="run_id is missing"):
+            state.with_run_activated(uuid4())
+
+    def test_end_run_without_run_id_raises(self) -> None:
+        """Ending a run without run_id raises RuntimeHostError."""
+        state = ModelSessionLifecycleState(
+            status=EnumSessionLifecycleState.RUN_ACTIVE,
+            run_id=None,
+        )
+        with pytest.raises(RuntimeHostError, match="run_id is missing"):
+            state.with_run_ended(uuid4())

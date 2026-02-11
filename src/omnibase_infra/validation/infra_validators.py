@@ -453,6 +453,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # Note: OMN-1869 ContractRegistration added IntentPayloadType union (118th)
 # Note: OMN-1990 ServiceTopicManager return type dict[str, list[str] | str] (119th)
 # Note: OMN-2117 ModelRunContext.metadata uses StrictJsonPrimitive from omnibase_core (120th)
+# Note: OMN-2117 ModelRunContext.with_metadata() value param uses StrictJsonPrimitive (121st)
 INFRA_MAX_UNIONS = 121
 
 # Maximum allowed architecture violations in infrastructure code.

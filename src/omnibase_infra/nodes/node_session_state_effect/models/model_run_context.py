@@ -61,6 +61,13 @@ class ModelRunContext(BaseModel):
             lossless round-trip through ``json.dump``/``json.loads``.
     """
 
+    # frozen=True prevents field reassignment but does NOT make container types
+    # (like dict) deeply immutable.  The ``metadata`` field uses a mutable dict
+    # because MappingProxyType is not JSON-serializable and Pydantic cannot
+    # validate it natively.  Instead, ``_freeze_metadata`` creates a defensive
+    # shallow copy on construction and callers MUST use ``with_metadata()``
+    # rather than mutating the dict in-place.  This is an intentional trade-off
+    # documented in the ``metadata`` field docstring.
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     run_id: str = Field(
