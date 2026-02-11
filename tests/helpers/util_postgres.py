@@ -35,7 +35,7 @@ import os
 import re
 import socket
 from dataclasses import dataclass
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, unquote
 from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -253,8 +253,8 @@ class PostgresConfig:
                 host=parsed.hostname or None,
                 port=parsed.port or DEFAULT_POSTGRES_PORT,
                 database=(parsed.path or "").lstrip("/") or default_database,
-                user=parsed.username or default_user,
-                password=parsed.password or None,
+                user=unquote(parsed.username or default_user),
+                password=unquote(parsed.password) if parsed.password else None,
             )
 
         host: str | None = os.getenv(host_var)

@@ -331,8 +331,8 @@ class PluginRegistration:
                 "PostgreSQL pool created (correlation_id=%s)",
                 correlation_id,
                 extra={
-                    "host": postgres_host,
-                    "port": postgres_port,
+                    "host": postgres_host or "(from OMNIBASE_INFRA_DB_URL)",
+                    "port": postgres_port or "(from OMNIBASE_INFRA_DB_URL)",
                     "database": postgres_database or "(from OMNIBASE_INFRA_DB_URL)",
                 },
             )

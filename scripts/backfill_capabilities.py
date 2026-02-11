@@ -355,6 +355,12 @@ def _get_validated_config() -> dict[str, str | int]:
     # Prefer explicit DSN when available (OMN-2146)
     db_url = os.getenv("OMNIBASE_INFRA_DB_URL", "")
     if db_url:
+        if not db_url.startswith(("postgresql://", "postgres://")):
+            raise ConfigurationError(
+                "OMNIBASE_INFRA_DB_URL must start with postgresql:// or postgres://. "
+                f"Got scheme: {db_url.split('://', 1)[0] if '://' in db_url else '(none)'}",
+                error_code=ErrorCode.CFG_INVALID_DATABASE,
+            )
         logger.debug("Using OMNIBASE_INFRA_DB_URL for connection")
         return {"dsn": db_url}
 

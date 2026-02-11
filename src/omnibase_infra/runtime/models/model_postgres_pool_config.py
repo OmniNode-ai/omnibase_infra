@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -111,8 +111,8 @@ class ModelPostgresPoolConfig(BaseModel):
         return cls(
             host=parsed.hostname or "localhost",
             port=parsed.port or 5432,
-            user=parsed.username or "postgres",
-            password=parsed.password or "",
+            user=unquote(parsed.username or "postgres"),
+            password=unquote(parsed.password or ""),
             database=database,
             min_size=min_size,
             max_size=max_size,

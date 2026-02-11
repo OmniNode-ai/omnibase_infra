@@ -39,6 +39,7 @@ import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
+from urllib.parse import unquote
 from uuid import uuid4
 
 import pytest
@@ -443,29 +444,16 @@ class TestHandlerFactoryPattern:
             )
 
             mock_container = MagicMock(spec=ModelONEXContainer)
-            db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
-            if db_url:
-                from urllib.parse import urlparse
+            from tests.helpers.util_postgres import PostgresConfig
 
-                parsed = urlparse(db_url)
-                _host = parsed.hostname or "localhost"
-                _port = parsed.port or 5432
-                _database = (parsed.path or "").lstrip("/") or ""
-                _user = parsed.username or "postgres"
-                _password = parsed.password or ""
-            else:
-                _host = os.getenv("POSTGRES_HOST", "localhost")
-                _port = int(os.getenv("POSTGRES_PORT", "5432"))
-                _database = os.getenv("POSTGRES_DATABASE", "")
-                _user = os.getenv("POSTGRES_USER", "postgres")
-                _password = os.getenv("POSTGRES_PASSWORD", "")
+            pg_config = PostgresConfig.from_env()
             return HandlerRegistrationStoragePostgres(
                 container=mock_container,
-                host=_host,
-                port=_port,
-                database=_database,
-                user=_user,
-                password=_password,
+                host=pg_config.host or "localhost",
+                port=pg_config.port,
+                database=pg_config.database,
+                user=pg_config.user,
+                password=pg_config.password or "",
             )
         else:
             raise ValueError(f"Unknown handler type: {handler_type}")
@@ -672,31 +660,17 @@ class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
         from omnibase_infra.handlers.registration_storage.handler_registration_storage_postgres import (
             HandlerRegistrationStoragePostgres,
         )
+        from tests.helpers.util_postgres import PostgresConfig
 
         mock_container = MagicMock(spec=ModelONEXContainer)
-        db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
-        if db_url:
-            from urllib.parse import urlparse
-
-            parsed = urlparse(db_url)
-            _host = parsed.hostname or "localhost"
-            _port = parsed.port or 5432
-            _database = (parsed.path or "").lstrip("/") or ""
-            _user = parsed.username or "postgres"
-            _password = parsed.password or ""
-        else:
-            _host = os.getenv("POSTGRES_HOST", "localhost")
-            _port = int(os.getenv("POSTGRES_PORT", "5432"))
-            _database = os.getenv("POSTGRES_DATABASE", "")
-            _user = os.getenv("POSTGRES_USER", "postgres")
-            _password = os.getenv("POSTGRES_PASSWORD", "")
+        pg_config = PostgresConfig.from_env()
         handler = HandlerRegistrationStoragePostgres(
             container=mock_container,
-            host=_host,
-            port=_port,
-            database=_database,
-            user=_user,
-            password=_password,
+            host=pg_config.host or "localhost",
+            port=pg_config.port,
+            database=pg_config.database,
+            user=pg_config.user,
+            password=pg_config.password or "",
         )
 
         yield handler

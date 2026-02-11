@@ -55,7 +55,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 from unittest.mock import MagicMock
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, unquote
 from uuid import UUID, uuid4
 
 import pytest
@@ -197,8 +197,8 @@ if _OMNIBASE_INFRA_DB_URL:
     POSTGRES_HOST: str | None = _parsed.hostname
     POSTGRES_PORT = _parsed.port or DEFAULT_POSTGRES_PORT
     POSTGRES_DATABASE = (_parsed.path or "").lstrip("/") or ""
-    POSTGRES_USER = _parsed.username or "postgres"
-    POSTGRES_PASSWORD: str | None = _parsed.password
+    POSTGRES_USER = unquote(_parsed.username or "postgres")
+    POSTGRES_PASSWORD: str | None = unquote(_parsed.password) if _parsed.password else None
 else:
     POSTGRES_HOST = os.getenv("POSTGRES_HOST")
     POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", str(DEFAULT_POSTGRES_PORT)))

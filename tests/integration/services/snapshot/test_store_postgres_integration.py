@@ -44,6 +44,7 @@ import asyncio
 import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
+from urllib.parse import quote_plus
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -79,7 +80,7 @@ def _get_postgres_dsn() -> str | None:
     if not host or not password or not database:
         return None
 
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}"
 
 
 # Check PostgreSQL availability at module import

@@ -258,17 +258,18 @@ class TestModelPostgresPoolConfig:
             ModelPostgresPoolConfig.from_db_url("")
 
     def test_from_db_url_url_encoded_credentials(self) -> None:
-        """URL-encoded characters in credentials are preserved as-is.
+        """URL-encoded characters in credentials are decoded to raw values.
 
-        urlparse does not decode percent-encoding in userinfo; the raw
-        value is stored so that downstream drivers (asyncpg/libpq) can
-        handle decoding themselves.
+        urlparse returns percent-encoded values; from_db_url() decodes them
+        via unquote() so the model stores raw credentials consistently
+        (matching the from_env() legacy path). Callers that build DSN
+        strings re-encode with quote_plus() as needed.
         """
         config = ModelPostgresPoolConfig.from_db_url(
             "postgresql://admin:p%40ss%23w0rd@host:5432/mydb"
         )
         assert config.user == "admin"
-        assert config.password == "p%40ss%23w0rd"
+        assert config.password == "p@ss#w0rd"
         assert config.database == "mydb"
 
     def test_from_db_url_defaults_for_missing_parts(self) -> None:

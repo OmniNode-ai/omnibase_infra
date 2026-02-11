@@ -20,6 +20,7 @@ from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
+from urllib.parse import quote_plus
 from uuid import UUID, uuid4
 
 import pytest
@@ -58,7 +59,7 @@ def _get_postgres_dsn() -> str | None:
         return None  # Database not configured
     user = os.getenv("POSTGRES_USER", "postgres")
 
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}"
 
 
 @pytest.fixture

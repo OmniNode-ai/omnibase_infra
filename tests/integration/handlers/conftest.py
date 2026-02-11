@@ -106,7 +106,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, unquote
 
 import pytest
 
@@ -201,8 +201,8 @@ if _OMNIBASE_INFRA_DB_URL:
     POSTGRES_HOST = _parsed.hostname
     POSTGRES_PORT = str(_parsed.port or "5432")
     POSTGRES_DATABASE = (_parsed.path or "").lstrip("/") or ""
-    POSTGRES_USER = _parsed.username or "postgres"
-    POSTGRES_PASSWORD = _parsed.password
+    POSTGRES_USER = unquote(_parsed.username or "postgres")
+    POSTGRES_PASSWORD = unquote(_parsed.password) if _parsed.password else None
 else:
     POSTGRES_HOST = os.getenv("POSTGRES_HOST")
     POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
