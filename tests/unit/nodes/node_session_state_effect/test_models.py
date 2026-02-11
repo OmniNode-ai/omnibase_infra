@@ -165,8 +165,8 @@ class TestModelRunContext:
         ["../etc/passwd", "foo/bar", "foo\\bar", "foo\0bar", ".."],
     )
     def test_path_traversal_run_id_rejected(self, bad_id: str) -> None:
-        """run_id containing path traversal characters is rejected."""
-        with pytest.raises(ValueError, match="path separators"):
+        """run_id containing unsafe characters is rejected by allowlist."""
+        with pytest.raises(ValueError, match="run_id"):
             ModelRunContext(run_id=bad_id)
 
 

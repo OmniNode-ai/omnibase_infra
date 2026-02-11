@@ -9,11 +9,14 @@ is required for run context files.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumSessionLifecycleState
+
+_RUN_ID_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
 class ModelRunContext(BaseModel):
@@ -59,9 +62,20 @@ class ModelRunContext(BaseModel):
     @field_validator("run_id")
     @classmethod
     def _validate_run_id_safe(cls, v: str) -> str:
-        """Reject run_id values that could cause path traversal."""
-        if ".." in v or "/" in v or "\\" in v or "\0" in v:
-            msg = "run_id must not contain path separators or traversal sequences"
+        """Reject run_id values with unsafe filesystem characters.
+
+        Uses an allowlist (alphanumeric, dot, hyphen, underscore) rather than
+        a denylist, to guard against unexpected special characters.
+        """
+        if not _RUN_ID_PATTERN.match(v):
+            msg = (
+                "run_id must contain only alphanumeric characters, "
+                "dots, hyphens, and underscores"
+            )
+            raise ValueError(msg)
+        # Double-dot still disallowed (path traversal)
+        if ".." in v:
+            msg = "run_id must not contain '..'"
             raise ValueError(msg)
         return v
 

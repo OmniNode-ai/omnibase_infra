@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from uuid import UUID
@@ -24,7 +25,7 @@ from omnibase_infra.nodes.node_session_state_effect.models import (
 
 logger = logging.getLogger(__name__)
 
-_PATH_TRAVERSAL_CHARS = ("..", "/", "\\", "\0")
+_SAFE_RUN_ID = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
 class HandlerRunContextWrite:
@@ -64,8 +65,8 @@ class HandlerRunContextWrite:
         correlation_id: UUID,
     ) -> ModelSessionStateResult:
         """Synchronous write logic, executed off the event loop."""
-        # Defense-in-depth: reject traversal even if model_construct() skipped validators
-        if any(ch in context.run_id for ch in _PATH_TRAVERSAL_CHARS):
+        # Defense-in-depth: reject unsafe IDs even if model_construct() skipped validators
+        if not _SAFE_RUN_ID.match(context.run_id) or ".." in context.run_id:
             return ModelSessionStateResult(
                 success=False,
                 operation="run_context_write",
@@ -80,7 +81,7 @@ class HandlerRunContextWrite:
             runs_dir.mkdir(parents=True, exist_ok=True)
 
             run_path = runs_dir / f"{context.run_id}.json"
-            data = json.loads(context.model_dump_json())
+            data = context.model_dump(mode="json")
 
             # Write to temp file, fsync, then atomic rename
             fd, tmp_path = tempfile.mkstemp(

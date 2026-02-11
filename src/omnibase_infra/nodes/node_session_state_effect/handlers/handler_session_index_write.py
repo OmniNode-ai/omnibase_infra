@@ -93,7 +93,7 @@ class HandlerSessionIndexWrite:
             # Ensure the state directory exists
             self._state_dir.mkdir(parents=True, exist_ok=True)
 
-            data = json.loads(index.model_dump_json())
+            data = index.model_dump(mode="json")
 
             # Acquire an exclusive flock on a lock file
             lock_path = self._state_dir / "session.json.lock"

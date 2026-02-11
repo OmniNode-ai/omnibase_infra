@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from uuid import UUID
 
@@ -21,7 +22,7 @@ from omnibase_infra.nodes.node_session_state_effect.models import (
 
 logger = logging.getLogger(__name__)
 
-_PATH_TRAVERSAL_CHARS = ("..", "/", "\\", "\0")
+_SAFE_RUN_ID = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
 class HandlerRunContextRead:
@@ -49,7 +50,7 @@ class HandlerRunContextRead:
         Returns:
             Tuple of (parsed context or None if not found, operation result).
         """
-        if any(ch in run_id for ch in _PATH_TRAVERSAL_CHARS):
+        if not _SAFE_RUN_ID.match(run_id) or ".." in run_id:
             return (
                 None,
                 ModelSessionStateResult(
@@ -69,7 +70,21 @@ class HandlerRunContextRead:
         correlation_id: UUID,
     ) -> tuple[ModelRunContext | None, ModelSessionStateResult]:
         """Synchronous read logic, executed off the event loop."""
-        run_path = self._state_dir / "runs" / f"{run_id}.json"
+        runs_dir = self._state_dir / "runs"
+        run_path = runs_dir / f"{run_id}.json"
+
+        # Defense-in-depth: verify resolved path stays within runs directory
+        if run_path.exists() and run_path.resolve().parent != runs_dir.resolve():
+            return (
+                None,
+                ModelSessionStateResult(
+                    success=False,
+                    operation="run_context_read",
+                    correlation_id=correlation_id,
+                    error=f"Invalid run_id: resolved path escapes state directory: {run_id!r}",
+                    error_code="RUN_CONTEXT_INVALID_ID",
+                ),
+            )
 
         if not run_path.exists():
             logger.debug("Run context not found: %s", run_path)

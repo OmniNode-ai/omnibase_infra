@@ -24,6 +24,7 @@ from omnibase_infra.nodes.node_session_state_effect.models import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_TTL_SECONDS: float = 14400.0  # 4 hours
+DEFAULT_MAX_DELETIONS: int = 500
 
 
 class HandlerStaleRunGC:
@@ -35,16 +36,22 @@ class HandlerStaleRunGC:
     """
 
     def __init__(
-        self, state_dir: Path, ttl_seconds: float = DEFAULT_TTL_SECONDS
+        self,
+        state_dir: Path,
+        ttl_seconds: float = DEFAULT_TTL_SECONDS,
+        max_deletions: int = DEFAULT_MAX_DELETIONS,
     ) -> None:
         """Initialize with state directory and TTL.
 
         Args:
             state_dir: Root directory for session state.
             ttl_seconds: Time-to-live in seconds (default: 14400 = 4 hours).
+            max_deletions: Maximum files to delete per GC pass (default: 500).
+                Callers should re-invoke if the result count equals this limit.
         """
         self._state_dir = state_dir
         self._ttl_seconds = ttl_seconds
+        self._max_deletions = max_deletions
 
     async def handle(
         self,
@@ -85,6 +92,12 @@ class HandlerStaleRunGC:
         resolved_runs_dir = runs_dir.resolve()
 
         for run_file in runs_dir.glob("*.json"):
+            if len(deleted_ids) >= self._max_deletions:
+                logger.info(
+                    "GC: reached max_deletions=%d, stopping", self._max_deletions
+                )
+                break
+
             # Skip symlinks and files that resolve outside the runs directory
             if not run_file.is_file() or run_file.resolve().parent != resolved_runs_dir:
                 logger.warning(
@@ -107,7 +120,10 @@ class HandlerStaleRunGC:
                         self._ttl_seconds,
                     )
             except (json.JSONDecodeError, ValueError) as e:
-                # Malformed files are also GC candidates — delete them
+                # Malformed files are also GC candidates — delete them.
+                # Note: the stem may not correspond to a valid session index
+                # entry; callers should treat deleted_ids as best-effort and
+                # silently ignore missing entries when updating the index.
                 logger.warning(
                     "GC: removing malformed run file %s: %s", run_file.name, e
                 )
