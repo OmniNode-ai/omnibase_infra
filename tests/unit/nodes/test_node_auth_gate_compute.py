@@ -1129,10 +1129,10 @@ class TestGlobToRegexEdgeCases:
     def test_too_many_double_star_segments_raises(
         self, handler: HandlerAuthGate
     ) -> None:
-        """Patterns with more than 3 ** segments raise ValueError (ReDoS guard)."""
-        # 4 ** segments exceeds _MAX_DOUBLE_STAR_SEGMENTS=3
+        """Patterns with more than 2 ** segments raise ValueError (ReDoS guard)."""
+        # 3 ** segments exceeds _MAX_DOUBLE_STAR_SEGMENTS=2
         with pytest.raises(ValueError, match="exceeding maximum"):
-            handler._glob_to_regex("a/**/b/**/c/**/d/**")
+            handler._glob_to_regex("a/**/b/**/c/**")
 
     def test_null_byte_rejected_in_path_matches_globs(
         self, handler: HandlerAuthGate

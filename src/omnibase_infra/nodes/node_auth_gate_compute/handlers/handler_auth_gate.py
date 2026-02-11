@@ -30,6 +30,8 @@ import re
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from pydantic import ValidationError
+
 from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_auth_decision import EnumAuthDecision
@@ -360,7 +362,14 @@ class HandlerAuthGate:
         if isinstance(payload_raw, ModelAuthGateRequest):
             request = payload_raw
         else:
-            request = ModelAuthGateRequest.model_validate(payload_raw)
+            try:
+                request = ModelAuthGateRequest.model_validate(payload_raw)
+            except ValidationError as exc:
+                msg = (
+                    f"[{HANDLER_ID_AUTH_GATE}] Invalid payload for auth gate "
+                    f"evaluation: {exc.error_count()} validation error(s)."
+                )
+                raise ValueError(msg) from exc
 
         decision = self.evaluate(request)
 
@@ -421,11 +430,11 @@ class HandlerAuthGate:
 
     # Maximum number of ** segments allowed in a single glob pattern.
     # Each ** produces a regex fragment like ``(?:.*/)?`` or ``.*`` which
-    # involves backtracking. With many such segments, a crafted path can
-    # trigger catastrophic backtracking (ReDoS). 3 is sufficient for any
-    # legitimate glob (e.g., ``src/**/tests/**/*.py``); patterns requiring
-    # more are never needed in practice.
-    _MAX_DOUBLE_STAR_SEGMENTS: int = 3
+    # involves backtracking. Adjacent ** groups without intervening literal
+    # anchors cause O(n^k) backtracking where k = number of groups. At
+    # PATH_MAX=4096, k=3 can take seconds on non-matching input. 2 is
+    # sufficient for any legitimate glob (e.g., ``src/**/tests/**/*.py``).
+    _MAX_DOUBLE_STAR_SEGMENTS: int = 2
 
     # Maximum path length accepted by ``_path_matches_globs``. Paths longer
     # than this are rejected to bound regex evaluation time against patterns
@@ -450,7 +459,7 @@ class HandlerAuthGate:
             use proper glob syntax (e.g., ``src/**/*.py``).
 
         Security:
-            Patterns with more than ``_MAX_DOUBLE_STAR_SEGMENTS`` (3) ``**``
+            Patterns with more than ``_MAX_DOUBLE_STAR_SEGMENTS`` (2) ``**``
             segments are rejected with a ``ValueError`` to prevent ReDoS from
             catastrophic backtracking in the generated regex.
 
