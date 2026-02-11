@@ -54,11 +54,6 @@ class EnumCheckpointPhase(str, Enum):
         """
         return _PHASE_ORDINALS[self]
 
-    @property
-    def filename(self) -> str:
-        """Return the canonical checkpoint filename for this phase."""
-        return f"phase_{self.phase_number}_{self.value}.yaml"
-
 
 # Explicit mapping — add new phases at the end with the next available ordinal.
 _PHASE_ORDINALS: dict[EnumCheckpointPhase, int] = {

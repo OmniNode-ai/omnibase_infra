@@ -155,22 +155,26 @@ class TestHandlerCheckpointValidate:
         """Phase payload phase != header phase produces an error."""
         await handler.initialize({})
 
-        # Create a checkpoint where header says LOCAL_REVIEW but payload is IMPLEMENT
-        cp = _valid_checkpoint(
-            phase=EnumCheckpointPhase.LOCAL_REVIEW,
-            phase_payload=ModelPhasePayloadLocalReview(
-                iteration_count=1,
-                last_clean_sha="abc1234",
-            ),
+        # Header says IMPLEMENT, but payload says "local_review"
+        mismatched_payload = ModelPhasePayloadLocalReview.model_construct(
+            phase="local_review",
+            iteration_count=1,
+            last_clean_sha="abc1234",
+        )
+        cp = _invalid_checkpoint(
+            phase=EnumCheckpointPhase.IMPLEMENT,
+            phase_payload=mismatched_payload,
         )
 
-        # This should be valid — payload matches header
         env: dict[str, object] = {
             "checkpoint": cp,
             "correlation_id": uuid4(),
         }
         result = await handler.execute(env)
-        assert result.result.is_valid is True
+        output = result.result
+
+        assert output.is_valid is False
+        assert any("Phase mismatch" in e for e in output.errors)
 
     async def test_schema_version_mismatch_is_warning(
         self,
