@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -148,6 +148,15 @@ class TestModelRunContext:
         """Extra fields are rejected by extra='forbid'."""
         with pytest.raises(ValueError):
             ModelRunContext(run_id="run-abc", unknown_field="oops")  # type: ignore[call-arg]
+
+    @pytest.mark.parametrize(
+        "bad_id",
+        ["../etc/passwd", "foo/bar", "foo\\bar", "foo\0bar", ".."],
+    )
+    def test_path_traversal_run_id_rejected(self, bad_id: str) -> None:
+        """run_id containing path traversal characters is rejected."""
+        with pytest.raises(ValueError, match="path separators"):
+            ModelRunContext(run_id=bad_id)
 
 
 # ============================================================

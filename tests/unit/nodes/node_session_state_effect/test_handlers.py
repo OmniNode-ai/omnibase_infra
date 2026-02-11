@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -190,6 +190,23 @@ class TestHandlerRunContextRead:
 # ============================================================
 # HandlerRunContextWrite tests
 # ============================================================
+
+
+class TestHandlerRunContextReadPathTraversal:
+    """Tests for path traversal rejection in HandlerRunContextRead."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "bad_id",
+        ["../etc/passwd", "foo/bar", "foo\\bar", "foo\0bar", ".."],
+    )
+    async def test_path_traversal_rejected(self, state_dir: Path, bad_id: str) -> None:
+        """run_id with path traversal characters returns error result."""
+        handler = HandlerRunContextRead(state_dir)
+        ctx, result = await handler.handle(bad_id, uuid4())
+        assert not result.success
+        assert result.error_code == "RUN_CONTEXT_INVALID_ID"
+        assert ctx is None
 
 
 class TestHandlerRunContextWrite:
