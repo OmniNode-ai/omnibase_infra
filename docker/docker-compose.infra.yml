@@ -131,6 +131,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DATABASE:-omninode_bridge}
       # Per-service role passwords (DB-SPLIT-05 / OMN-2056)
       # Roles are created only when the corresponding password env var is set.
+      # Empty defaults are intentional — the init script treats empty as "skip role".
       # Generate each with: openssl rand -hex 32
       ROLE_OMNIBASE_PASSWORD: ${ROLE_OMNIBASE_PASSWORD:-}
       ROLE_OMNIINTELLIGENCE_PASSWORD: ${ROLE_OMNIINTELLIGENCE_PASSWORD:-}

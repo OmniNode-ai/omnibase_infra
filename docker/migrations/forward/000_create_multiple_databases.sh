@@ -21,6 +21,10 @@
 
 set -e
 set -u
+# Note: set -u with ${!password_var:-} (indirect expansion + default) means
+# typos in SERVICE_DB_MAP password_var fields will silently default to empty
+# rather than erroring. This is intentional — empty means "skip this role".
+# Verify env var names match docker-compose.infra.yml when editing SERVICE_DB_MAP.
 
 : "${POSTGRES_USER:?POSTGRES_USER must be set}"
 : "${POSTGRES_DB:?POSTGRES_DB must be set}"
@@ -80,8 +84,12 @@ validate_password() {
 
 create_database() {
     local database="$1"
-    validate_identifier "$database" "Database name"
+    validate_identifier "$database" "Database name" || return 1
     echo "  Creating database: $database"
+    # Safety: $database is used in two SQL contexts below:
+    #   - Double-quoted identifier ("$database") for CREATE DATABASE
+    #   - Single-quoted string literal ('$database') for the pg_database lookup
+    # Both are safe because validate_identifier restricts to [a-zA-Z_][a-zA-Z0-9_-]*
     psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
         SELECT 'CREATE DATABASE "$database"'
         WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$database')\gexec
@@ -92,8 +100,11 @@ EOSQL
 create_role() {
     local role_name="$1"
     local role_password="$2"
-    validate_identifier "$role_name" "Role name"
+    validate_identifier "$role_name" "Role name" || return 1
+    validate_password "$role_password" "$role_name" || return 1
     # Escape single quotes for safe SQL interpolation (' → '')
+    # Note: validate_password enforces hex-only ([0-9a-fA-F]+) so single quotes
+    # cannot appear in practice, but the escaping is retained for defense-in-depth.
     local escaped_password="${role_password//\'/\'\'}"
     echo "  Creating role: $role_name"
     psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
