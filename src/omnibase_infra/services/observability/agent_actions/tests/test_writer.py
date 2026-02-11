@@ -109,7 +109,7 @@ def sample_routing_decision() -> ModelRoutingDecision:
         selected_agent="api-architect",
         confidence_score=0.95,
         created_at=datetime.now(UTC),
-        alternatives=["testing", "debug"],
+        alternatives=("testing", "debug"),
     )
 
 
@@ -145,7 +145,7 @@ def sample_detection_failure() -> ModelDetectionFailure:
         correlation_id=uuid4(),
         failure_reason="No matching pattern",
         created_at=datetime.now(UTC),
-        attempted_patterns=["code-review", "testing"],
+        attempted_patterns=("code-review", "testing"),
     )
 
 

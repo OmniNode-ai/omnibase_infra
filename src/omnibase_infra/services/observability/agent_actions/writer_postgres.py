@@ -165,18 +165,18 @@ class WriterAgentActionsPostgres(MixinAsyncCircuitBreaker):
         return json.dumps(dict(value))
 
     @staticmethod
-    def _serialize_list(value: list[str] | None) -> str | None:
-        """Serialize a list to JSON string for JSONB/array columns.
+    def _serialize_list(value: tuple[str, ...] | None) -> str | None:
+        """Serialize a tuple to JSON string for JSONB/array columns.
 
         Args:
-            value: List to serialize, or None.
+            value: Tuple to serialize, or None.
 
         Returns:
             JSON string if value is not None, otherwise None.
         """
         if value is None:
             return None
-        return json.dumps(value)
+        return json.dumps(list(value))
 
     async def write_agent_actions(
         self,

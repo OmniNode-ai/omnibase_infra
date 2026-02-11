@@ -7,7 +7,9 @@ from Kafka. Execution logs track the full lifecycle of an agent execution,
 from start to completion (or failure).
 
 Design Decisions:
-    - extra="allow": Phase 1 flexibility - required fields typed, extras preserved
+    - frozen=True: Immutability for thread safety
+    - extra="forbid": Strict validation ensures schema compliance
+    - from_attributes=True: ORM/pytest-xdist compatibility
     - raw_payload: Optional field to preserve complete payload for schema tightening
     - created_at AND updated_at: Both required for lifecycle tracking and TTL
     - TTL keys off updated_at (not created_at) to avoid deleting in-flight executions
@@ -76,7 +78,8 @@ class ModelExecutionLog(BaseModel):
     """
 
     model_config = ConfigDict(
-        extra="allow",
+        frozen=True,
+        extra="forbid",
         from_attributes=True,
     )
 

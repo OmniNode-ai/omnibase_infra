@@ -7,7 +7,9 @@ from Kafka. Routing decisions capture the selection logic when an agent
 is chosen to handle a request, including confidence scores and alternatives.
 
 Design Decisions:
-    - extra="allow": Phase 1 flexibility - required fields typed, extras preserved
+    - frozen=True: Immutability for thread safety
+    - extra="forbid": Strict validation ensures schema compliance
+    - from_attributes=True: ORM/pytest-xdist compatibility
     - raw_payload: Optional field to preserve complete payload for schema tightening
     - created_at: Required for TTL cleanup job (Phase 2)
 
@@ -50,7 +52,7 @@ class ModelRoutingDecision(BaseModel):
         confidence_score: Confidence score (0.0-1.0) for the selection.
         created_at: Timestamp when the decision was made (TTL key).
         request_type: Optional type of request being routed.
-        alternatives: Optional list of alternative agents considered.
+        alternatives: Optional tuple of alternative agents considered.
         routing_reason: Optional explanation for the routing decision.
         domain: Optional domain classification for the request.
         metadata: Optional additional metadata about the decision.
@@ -68,7 +70,8 @@ class ModelRoutingDecision(BaseModel):
     """
 
     model_config = ConfigDict(
-        extra="allow",
+        frozen=True,
+        extra="forbid",
         from_attributes=True,
     )
 
@@ -101,9 +104,9 @@ class ModelRoutingDecision(BaseModel):
         default=None,
         description="Type of request being routed.",
     )
-    alternatives: list[str] | None = Field(
+    alternatives: tuple[str, ...] | None = Field(
         default=None,
-        description="List of alternative agents considered.",
+        description="Alternative agents considered during routing.",
     )
     routing_reason: str | None = Field(
         default=None,

@@ -3,8 +3,7 @@
 """Unit tests for agent_actions observability models.
 
 This module tests model validation behavior:
-    - Envelope strict validation (extra="forbid")
-    - Payload models allow extras (extra="allow")
+    - All models use strict validation (extra="forbid", frozen=True)
     - Type validation (UUID, datetime, dict[str, object])
     - Required vs optional field enforcement
 
@@ -121,33 +120,46 @@ class TestModelObservabilityEnvelopeStrict:
 
 
 # =============================================================================
-# Payload Models Allow Extras Tests
+# Payload Models Strict Validation Tests
 # =============================================================================
 
 
-class TestModelAgentActionExtrasAllowed:
-    """Test that ModelAgentAction allows extra fields (extra='allow')."""
+class TestModelAgentActionStrict:
+    """Test that ModelAgentAction has strict validation (extra='forbid', frozen=True)."""
 
-    def test_agent_action_accepts_extra_fields(self) -> None:
-        """Agent action should accept and preserve extra fields."""
-        action = ModelAgentAction(  # type: ignore[call-arg]
+    def test_agent_action_rejects_extra_fields(self) -> None:
+        """Agent action should reject unknown fields with ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelAgentAction(  # type: ignore[call-arg]
+                id=uuid4(),
+                correlation_id=uuid4(),
+                agent_name="test-agent",
+                action_type="tool_call",
+                action_name="Read",
+                created_at=datetime.now(UTC),
+                custom_field="should_fail",
+            )
+
+        errors = exc_info.value.errors()
+        error_types = {e["type"] for e in errors}
+        assert "extra_forbidden" in error_types
+
+    def test_agent_action_is_frozen(self) -> None:
+        """Agent action should be immutable after creation."""
+        action = ModelAgentAction(
             id=uuid4(),
             correlation_id=uuid4(),
             agent_name="test-agent",
             action_type="tool_call",
             action_name="Read",
             created_at=datetime.now(UTC),
-            custom_field="extra_value",  # Extra field - should be allowed
-            another_extra=123,  # Another extra field
         )
 
-        # Extra fields should be accessible via model_extra
-        assert action.model_extra is not None
-        assert action.model_extra.get("custom_field") == "extra_value"
-        assert action.model_extra.get("another_extra") == 123
+        with pytest.raises(ValidationError):
+            action.agent_name = "new-agent"  # type: ignore[misc]
 
     def test_agent_action_required_fields_enforced(self) -> None:
-        """Agent action should still enforce required fields."""
+        """Agent action should enforce required fields."""
         with pytest.raises(ValidationError) as exc_info:
             ModelAgentAction()  # type: ignore[call-arg]
 
@@ -179,22 +191,37 @@ class TestModelAgentActionExtrasAllowed:
         assert action.raw_payload is None
 
 
-class TestModelRoutingDecisionExtrasAllowed:
-    """Test that ModelRoutingDecision allows extra fields."""
+class TestModelRoutingDecisionStrict:
+    """Test that ModelRoutingDecision has strict validation."""
 
-    def test_routing_decision_accepts_extra_fields(self) -> None:
-        """Routing decision should accept and preserve extra fields."""
-        decision = ModelRoutingDecision(  # type: ignore[call-arg]
+    def test_routing_decision_rejects_extra_fields(self) -> None:
+        """Routing decision should reject unknown fields with ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelRoutingDecision(  # type: ignore[call-arg]
+                id=uuid4(),
+                correlation_id=uuid4(),
+                selected_agent="api-architect",
+                confidence_score=0.95,
+                created_at=datetime.now(UTC),
+                custom_routing_field="should_fail",
+            )
+
+        errors = exc_info.value.errors()
+        error_types = {e["type"] for e in errors}
+        assert "extra_forbidden" in error_types
+
+    def test_routing_decision_is_frozen(self) -> None:
+        """Routing decision should be immutable after creation."""
+        decision = ModelRoutingDecision(
             id=uuid4(),
             correlation_id=uuid4(),
             selected_agent="api-architect",
             confidence_score=0.95,
             created_at=datetime.now(UTC),
-            custom_routing_field="allowed",
         )
 
-        assert decision.model_extra is not None
-        assert decision.model_extra.get("custom_routing_field") == "allowed"
+        with pytest.raises(ValidationError):
+            decision.selected_agent = "new-agent"  # type: ignore[misc]
 
     def test_routing_decision_required_fields_enforced(self) -> None:
         """Routing decision should enforce required fields."""
@@ -210,74 +237,132 @@ class TestModelRoutingDecisionExtrasAllowed:
         assert "created_at" in error_locs
 
 
-class TestModelTransformationEventExtrasAllowed:
-    """Test that ModelTransformationEvent allows extra fields."""
+class TestModelTransformationEventStrict:
+    """Test that ModelTransformationEvent has strict validation."""
 
-    def test_transformation_event_accepts_extra_fields(self) -> None:
-        """Transformation event should accept and preserve extra fields."""
-        event = ModelTransformationEvent(  # type: ignore[call-arg]
+    def test_transformation_event_rejects_extra_fields(self) -> None:
+        """Transformation event should reject unknown fields."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelTransformationEvent(  # type: ignore[call-arg]
+                id=uuid4(),
+                correlation_id=uuid4(),
+                source_agent="polymorphic-agent",
+                target_agent="api-architect",
+                created_at=datetime.now(UTC),
+                extra_transform_data={"key": "value"},
+            )
+
+        errors = exc_info.value.errors()
+        error_types = {e["type"] for e in errors}
+        assert "extra_forbidden" in error_types
+
+    def test_transformation_event_is_frozen(self) -> None:
+        """Transformation event should be immutable after creation."""
+        event = ModelTransformationEvent(
             id=uuid4(),
             correlation_id=uuid4(),
             source_agent="polymorphic-agent",
             target_agent="api-architect",
             created_at=datetime.now(UTC),
-            extra_transform_data={"key": "value"},
         )
 
-        assert event.model_extra is not None
-        assert event.model_extra.get("extra_transform_data") == {"key": "value"}
+        with pytest.raises(ValidationError):
+            event.source_agent = "new-agent"  # type: ignore[misc]
 
 
-class TestModelPerformanceMetricExtrasAllowed:
-    """Test that ModelPerformanceMetric allows extra fields."""
+class TestModelPerformanceMetricStrict:
+    """Test that ModelPerformanceMetric has strict validation."""
 
-    def test_performance_metric_accepts_extra_fields(self) -> None:
-        """Performance metric should accept and preserve extra fields."""
-        metric = ModelPerformanceMetric(  # type: ignore[call-arg]
+    def test_performance_metric_rejects_extra_fields(self) -> None:
+        """Performance metric should reject unknown fields."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelPerformanceMetric(  # type: ignore[call-arg]
+                id=uuid4(),
+                metric_name="routing_latency_ms",
+                metric_value=45.2,
+                created_at=datetime.now(UTC),
+                extra_metric_tag="should_fail",
+            )
+
+        errors = exc_info.value.errors()
+        error_types = {e["type"] for e in errors}
+        assert "extra_forbidden" in error_types
+
+    def test_performance_metric_is_frozen(self) -> None:
+        """Performance metric should be immutable after creation."""
+        metric = ModelPerformanceMetric(
             id=uuid4(),
             metric_name="routing_latency_ms",
             metric_value=45.2,
             created_at=datetime.now(UTC),
-            extra_metric_tag="custom_tag",
         )
 
-        assert metric.model_extra is not None
-        assert metric.model_extra.get("extra_metric_tag") == "custom_tag"
+        with pytest.raises(ValidationError):
+            metric.metric_name = "new_metric"  # type: ignore[misc]
 
 
-class TestModelDetectionFailureExtrasAllowed:
-    """Test that ModelDetectionFailure allows extra fields."""
+class TestModelDetectionFailureStrict:
+    """Test that ModelDetectionFailure has strict validation."""
 
-    def test_detection_failure_accepts_extra_fields(self) -> None:
-        """Detection failure should accept and preserve extra fields."""
-        failure = ModelDetectionFailure(  # type: ignore[call-arg]
+    def test_detection_failure_rejects_extra_fields(self) -> None:
+        """Detection failure should reject unknown fields."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelDetectionFailure(  # type: ignore[call-arg]
+                correlation_id=uuid4(),
+                failure_reason="No matching pattern",
+                created_at=datetime.now(UTC),
+                debug_info="should_fail",
+            )
+
+        errors = exc_info.value.errors()
+        error_types = {e["type"] for e in errors}
+        assert "extra_forbidden" in error_types
+
+    def test_detection_failure_is_frozen(self) -> None:
+        """Detection failure should be immutable after creation."""
+        failure = ModelDetectionFailure(
             correlation_id=uuid4(),
             failure_reason="No matching pattern",
             created_at=datetime.now(UTC),
-            debug_info="extra debugging data",
         )
 
-        assert failure.model_extra is not None
-        assert failure.model_extra.get("debug_info") == "extra debugging data"
+        with pytest.raises(ValidationError):
+            failure.failure_reason = "new reason"  # type: ignore[misc]
 
 
-class TestModelExecutionLogExtrasAllowed:
-    """Test that ModelExecutionLog allows extra fields."""
+class TestModelExecutionLogStrict:
+    """Test that ModelExecutionLog has strict validation."""
 
-    def test_execution_log_accepts_extra_fields(self) -> None:
-        """Execution log should accept and preserve extra fields."""
-        log = ModelExecutionLog(  # type: ignore[call-arg]
+    def test_execution_log_rejects_extra_fields(self) -> None:
+        """Execution log should reject unknown fields."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelExecutionLog(  # type: ignore[call-arg]
+                execution_id=uuid4(),
+                correlation_id=uuid4(),
+                agent_name="testing",
+                status="completed",
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+                custom_log_field=42,
+            )
+
+        errors = exc_info.value.errors()
+        error_types = {e["type"] for e in errors}
+        assert "extra_forbidden" in error_types
+
+    def test_execution_log_is_frozen(self) -> None:
+        """Execution log should be immutable after creation."""
+        log = ModelExecutionLog(
             execution_id=uuid4(),
             correlation_id=uuid4(),
             agent_name="testing",
             status="completed",
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
-            custom_log_field=42,
         )
 
-        assert log.model_extra is not None
-        assert log.model_extra.get("custom_log_field") == 42
+        with pytest.raises(ValidationError):
+            log.status = "failed"  # type: ignore[misc]
 
 
 # =============================================================================
@@ -492,17 +577,17 @@ class TestModelRoutingDecisionSpecific:
         )
         assert decision.confidence_score == 0.875
 
-    def test_routing_decision_alternatives_list(self) -> None:
-        """Alternatives should accept list of strings."""
+    def test_routing_decision_alternatives_tuple(self) -> None:
+        """Alternatives should accept and store as tuple of strings."""
         decision = ModelRoutingDecision(
             id=uuid4(),
             correlation_id=uuid4(),
             selected_agent="api-architect",
             confidence_score=0.95,
             created_at=datetime.now(UTC),
-            alternatives=["testing", "debug", "code-reviewer"],
+            alternatives=("testing", "debug", "code-reviewer"),
         )
-        assert decision.alternatives == ["testing", "debug", "code-reviewer"]
+        assert decision.alternatives == ("testing", "debug", "code-reviewer")
 
     def test_routing_decision_rejects_confidence_score_above_one(self) -> None:
         """Confidence score above 1.0 should be rejected."""
@@ -613,18 +698,18 @@ class TestModelDetectionFailureSpecific:
         assert failure.correlation_id == cid
 
     def test_detection_failure_attempted_patterns(self) -> None:
-        """Detection failure should accept list of attempted patterns."""
+        """Detection failure should accept and store as tuple of attempted patterns."""
         failure = ModelDetectionFailure(
             correlation_id=uuid4(),
             failure_reason="Low confidence scores",
             created_at=datetime.now(UTC),
-            attempted_patterns=["code-review", "testing", "infrastructure"],
+            attempted_patterns=("code-review", "testing", "infrastructure"),
         )
-        assert failure.attempted_patterns == [
+        assert failure.attempted_patterns == (
             "code-review",
             "testing",
             "infrastructure",
-        ]
+        )
 
 
 # =============================================================================
@@ -632,23 +717,39 @@ class TestModelDetectionFailureSpecific:
 # =============================================================================
 
 
-class TestModelAgentStatusEventExtrasAllowed:
-    """Test that ModelAgentStatusEvent allows extra fields."""
+class TestModelAgentStatusEventStrict:
+    """Test that ModelAgentStatusEvent has strict validation (extra='forbid', frozen=True)."""
 
-    def test_agent_status_event_accepts_extra_fields(self) -> None:
-        """Agent status event should accept and preserve extra fields."""
-        event = ModelAgentStatusEvent(  # type: ignore[call-arg]
+    def test_agent_status_event_rejects_extra_fields(self) -> None:
+        """Agent status event should reject unknown fields with ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelAgentStatusEvent(  # type: ignore[call-arg]
+                correlation_id=uuid4(),
+                agent_name="test-agent",
+                session_id="session-123",
+                state="working",
+                message="Processing request",
+                created_at=datetime.now(UTC),
+                custom_field="should_fail",
+            )
+
+        errors = exc_info.value.errors()
+        error_types = {e["type"] for e in errors}
+        assert "extra_forbidden" in error_types
+
+    def test_agent_status_event_is_frozen(self) -> None:
+        """Agent status event should be immutable after creation."""
+        event = ModelAgentStatusEvent(
             correlation_id=uuid4(),
             agent_name="test-agent",
             session_id="session-123",
             state="working",
             message="Processing request",
             created_at=datetime.now(UTC),
-            custom_field="extra_value",
         )
 
-        assert event.model_extra is not None
-        assert event.model_extra.get("custom_field") == "extra_value"
+        with pytest.raises(ValidationError):
+            event.state = "idle"  # type: ignore[misc]
 
     def test_agent_status_event_required_fields_enforced(self) -> None:
         """Agent status event should enforce required fields."""
@@ -822,14 +923,14 @@ class TestModelAgentStatusEventSpecific:
 
 __all__ = [
     "TestModelObservabilityEnvelopeStrict",
-    "TestModelAgentActionExtrasAllowed",
-    "TestModelAgentStatusEventExtrasAllowed",
+    "TestModelAgentActionStrict",
+    "TestModelAgentStatusEventStrict",
     "TestModelAgentStatusEventSpecific",
-    "TestModelRoutingDecisionExtrasAllowed",
-    "TestModelTransformationEventExtrasAllowed",
-    "TestModelPerformanceMetricExtrasAllowed",
-    "TestModelDetectionFailureExtrasAllowed",
-    "TestModelExecutionLogExtrasAllowed",
+    "TestModelRoutingDecisionStrict",
+    "TestModelTransformationEventStrict",
+    "TestModelPerformanceMetricStrict",
+    "TestModelDetectionFailureStrict",
+    "TestModelExecutionLogStrict",
     "TestUUIDValidation",
     "TestDatetimeValidation",
     "TestRawPayloadValidation",

@@ -7,7 +7,9 @@ from Kafka. Performance metrics capture timing and throughput data
 for the agent routing system.
 
 Design Decisions:
-    - extra="allow": Phase 1 flexibility - required fields typed, extras preserved
+    - frozen=True: Immutability for thread safety
+    - extra="forbid": Strict validation ensures schema compliance
+    - from_attributes=True: ORM/pytest-xdist compatibility
     - raw_payload: Optional field to preserve complete payload for schema tightening
     - created_at: Required for TTL cleanup job (Phase 2)
 
@@ -66,7 +68,8 @@ class ModelPerformanceMetric(BaseModel):
     """
 
     model_config = ConfigDict(
-        extra="allow",
+        frozen=True,
+        extra="forbid",
         from_attributes=True,
     )
 

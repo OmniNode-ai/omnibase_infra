@@ -7,7 +7,9 @@ from Kafka. Detection failures occur when the routing system cannot
 determine an appropriate agent for a request.
 
 Design Decisions:
-    - extra="allow": Phase 1 flexibility - required fields typed, extras preserved
+    - frozen=True: Immutability for thread safety
+    - extra="forbid": Strict validation ensures schema compliance
+    - from_attributes=True: ORM/pytest-xdist compatibility
     - raw_payload: Optional field to preserve complete payload for schema tightening
     - created_at: Required for TTL cleanup job (Phase 2)
 
@@ -45,7 +47,7 @@ class ModelDetectionFailure(BaseModel):
         failure_reason: Reason the detection failed.
         created_at: Timestamp when the failure was recorded (TTL key).
         request_summary: Optional summary of the request that failed routing.
-        attempted_patterns: Optional list of patterns attempted during detection.
+        attempted_patterns: Optional tuple of patterns attempted during detection.
         fallback_used: Optional name of fallback agent if one was used.
         error_code: Optional error code for categorization.
         metadata: Optional additional metadata about the failure.
@@ -56,13 +58,14 @@ class ModelDetectionFailure(BaseModel):
         ...     correlation_id=uuid4(),
         ...     failure_reason="Confidence below threshold (0.3 < 0.5)",
         ...     created_at=datetime.now(UTC),
-        ...     attempted_patterns=["code-review", "testing", "infrastructure"],
+        ...     attempted_patterns=("code-review", "testing", "infrastructure"),
         ...     fallback_used="polymorphic-agent",
         ... )
     """
 
     model_config = ConfigDict(
-        extra="allow",
+        frozen=True,
+        extra="forbid",
         from_attributes=True,
     )
 
@@ -85,9 +88,9 @@ class ModelDetectionFailure(BaseModel):
         default=None,
         description="Summary of the request that failed routing.",
     )
-    attempted_patterns: list[str] | None = Field(
+    attempted_patterns: tuple[str, ...] | None = Field(
         default=None,
-        description="List of patterns attempted during detection.",
+        description="Patterns attempted during detection.",
     )
     fallback_used: str | None = Field(
         default=None,

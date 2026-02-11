@@ -7,7 +7,9 @@ Agent actions represent individual tool calls, decisions, errors, and
 successes recorded during agent execution.
 
 Design Decisions:
-    - extra="allow": Phase 1 flexibility - required fields typed, extras preserved
+    - frozen=True: Immutability for thread safety
+    - extra="forbid": Strict validation ensures schema compliance
+    - from_attributes=True: ORM/pytest-xdist compatibility
     - raw_payload: Optional field to preserve complete payload for schema tightening
     - created_at: Required for TTL cleanup job (Phase 2)
 
@@ -41,8 +43,8 @@ class ModelAgentAction(BaseModel):
     """Agent action event model.
 
     Represents a single action performed by an agent, such as a tool call,
-    decision, error, or success. Uses extra="allow" for Phase 1 flexibility
-    while ensuring required fields are typed.
+    decision, error, or success. Uses frozen=True for thread safety and
+    extra="forbid" for strict schema compliance.
 
     Attributes:
         id: Unique identifier for this action (idempotency key).
@@ -72,7 +74,8 @@ class ModelAgentAction(BaseModel):
     """
 
     model_config = ConfigDict(
-        extra="allow",
+        frozen=True,
+        extra="forbid",
         from_attributes=True,
     )
 

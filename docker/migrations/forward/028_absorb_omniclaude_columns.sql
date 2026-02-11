@@ -96,7 +96,7 @@ SELECT
     NULL::TEXT AS working_directory,
     metadata
 FROM agent_execution_logs
-WHERE created_at > NOW() - INTERVAL '24 hours'
+WHERE updated_at > NOW() - INTERVAL '24 hours'
 
 UNION ALL
 
