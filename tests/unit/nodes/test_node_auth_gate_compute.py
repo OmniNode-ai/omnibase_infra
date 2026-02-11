@@ -1367,3 +1367,20 @@ class TestModelAuthGateRequestSanitization:
                 emergency_override_active=True,
                 emergency_override_reason="x" * 1001,
             )
+
+    def test_tool_name_max_length_enforced(self) -> None:
+        """tool_name exceeding max_length (200) is rejected at model boundary."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            ModelAuthGateRequest(tool_name="A" * 201)
+
+    def test_target_repo_max_length_enforced(self) -> None:
+        """target_repo exceeding max_length (500) is rejected at model boundary."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            ModelAuthGateRequest(
+                tool_name="Edit",
+                target_repo="r" * 501,
+            )

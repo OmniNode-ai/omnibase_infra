@@ -48,6 +48,7 @@ class ModelAuthGateRequest(BaseModel):
     tool_name: str = Field(
         ...,
         min_length=1,
+        max_length=200,
         description="Canonical tool name (case-sensitive, e.g., 'Edit', 'Write', 'Bash').",
     )  # ONEX_EXCLUDE: pattern - simple tool identifier
     target_path: str = Field(
@@ -55,7 +56,11 @@ class ModelAuthGateRequest(BaseModel):
         max_length=8192,
         description="File path the tool targets.",
     )
-    target_repo: str = Field(default="", description="Repository the tool targets.")
+    target_repo: str = Field(
+        default="",
+        max_length=500,
+        description="Repository the tool targets.",
+    )
     run_id: UUID | None = Field(
         default=None, description="Current run ID, or None if not determinable."
     )
