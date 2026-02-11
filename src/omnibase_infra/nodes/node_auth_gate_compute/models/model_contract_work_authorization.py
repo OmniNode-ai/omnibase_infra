@@ -36,7 +36,12 @@ class ModelContractWorkAuthorization(BaseModel):
 
     run_id: UUID = Field(..., description="Run ID this authorization is bound to.")
     allowed_tools: tuple[str, ...] = Field(
-        ..., description="Tool names permitted under this authorization."
+        ...,
+        description=(
+            "Tool names permitted under this authorization. "
+            "Case-sensitive canonical names (e.g., 'Edit', 'Write'). "
+            "An empty tuple effectively denies all tools at step 6."
+        ),
     )
     allowed_paths: tuple[str, ...] = Field(
         ..., description="Glob patterns for permitted file paths."

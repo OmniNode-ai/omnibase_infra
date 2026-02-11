@@ -23,6 +23,7 @@ Ticket: OMN-2125
 from __future__ import annotations
 
 import fnmatch
+import functools
 import logging
 import posixpath
 import re
@@ -143,11 +144,14 @@ class HandlerAuthGate:
             Authorization decision with step, reason, and optional banner.
         """
         # Step 1: Whitelisted paths -> allow
+        normalized_path = (
+            posixpath.normpath(request.target_path) if request.target_path else ""
+        )
         if self._is_whitelisted_path(request.target_path):
             return ModelAuthGateDecision(
                 decision=EnumAuthDecision.ALLOW,
                 step=1,
-                reason=f"Path '{request.target_path}' matches whitelisted pattern.",
+                reason=f"Path '{normalized_path}' matches whitelisted pattern.",
                 reason_code="whitelisted_path",
             )
 
@@ -207,6 +211,8 @@ class HandlerAuthGate:
             )
 
         # Step 6: Tool not in allowed_tools -> deny
+        # Matching is case-sensitive — callers must use canonical tool names
+        # (e.g., "Edit", "Write", "Bash").
         if request.tool_name not in auth.allowed_tools:
             return ModelAuthGateDecision(
                 decision=EnumAuthDecision.DENY,
@@ -337,6 +343,7 @@ class HandlerAuthGate:
         return False
 
     @staticmethod
+    @functools.lru_cache(maxsize=128)
     def _glob_to_regex(pattern: str) -> re.Pattern[str]:
         """Convert a glob pattern (supporting ``**``) to a compiled regex.
 
