@@ -562,7 +562,7 @@ class TestJSONSerialization:
 
     def test_serialize_list_with_strings(self) -> None:
         """_serialize_list should convert list to JSON string."""
-        result = WriterAgentActionsPostgres._serialize_list(["a", "b", "c"])
+        result = WriterAgentActionsPostgres._serialize_list(("a", "b", "c"))
         assert result == '["a", "b", "c"]'
 
     def test_serialize_list_with_none(self) -> None:
