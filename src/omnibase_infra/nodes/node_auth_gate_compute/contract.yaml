@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeAuthGateCompute
+#
+# Pure COMPUTE node for work authorization decisions. Receives auth state
+# and tool request, returns allow/deny/soft_deny via a 10-step cascade.
+# No I/O, no side effects.
+#
+# Related Tickets:
+#   - OMN-2125: Auth Gate Nodes — Work Authorization Compute Node
+#   - OMN-2006: Auth Gate Nodes (parent)
+# Contract identifiers
+name: "node_auth_gate_compute"
+contract_name: "node_auth_gate_compute"
+node_name: "node_auth_gate_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "0.1.0"
+# Node type - COMPUTE for pure authorization logic
+node_type: "COMPUTE_GENERIC"
+# Description
+description: >
+  Pure COMPUTE node for work authorization decisions. Evaluates a 10-step cascade: whitelisted paths, emergency overrides, run_id validation, authorization scope checks (tools, paths, repos), and expiry. Returns allow/deny/soft_deny with reason codes. No I/O, no side effects.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelAuthGateRequest"
+  module: "omnibase_infra.nodes.node_auth_gate_compute.models.model_auth_gate_request"
+  description: >
+    Authorization gate request containing tool invocation context (tool name, target path, target repo) and authorization state (run_id, work authorization contract, emergency override flags).
+
+output_model:
+  name: "ModelAuthGateDecision"
+  module: "omnibase_infra.nodes.node_auth_gate_compute.models.model_auth_gate_decision"
+  description: >
+    Authorization decision with verdict (allow/deny/soft_deny), the cascade step that produced it, a human-readable reason, machine-readable reason_code, and optional warning banner.
+
+# Handler routing - delegates compute logic to handler
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "auth_gate"
+      handler:
+        name: "HandlerAuthGate"
+        module: "omnibase_infra.nodes.node_auth_gate_compute.handlers.handler_auth_gate"
+      supported_operations:
+        - "auth_gate.evaluate"
+# Capabilities provided by this node
+capabilities:
+  - name: "auth_gate.evaluate"
+    description: "Evaluate work authorization for a tool invocation"
+    version: "0.1.0"
+  - name: "auth_gate.emergency_override"
+    description: "Handle emergency override with hardened validation"
+    version: "0.1.0"
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-10"
+  ticket: "OMN-2125"
+  tags:
+    - compute
+    - authorization
+    - auth-gate
+    - security
+    - pure-function
