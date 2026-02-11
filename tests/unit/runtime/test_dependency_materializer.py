@@ -221,7 +221,10 @@ class TestModelPostgresPoolConfig:
 
     def test_from_env_invalid_port(self) -> None:
         """Non-numeric POSTGRES_PORT raises ValueError."""
-        with patch.dict("os.environ", {"POSTGRES_PORT": "not_a_number"}):
+        with patch.dict(
+            "os.environ",
+            {"POSTGRES_PORT": "not_a_number", "POSTGRES_DATABASE": "testdb"},
+        ):
             with pytest.raises(
                 ValueError, match="Invalid PostgreSQL pool configuration"
             ):
@@ -295,12 +298,14 @@ class TestModelMaterializerConfig:
             {
                 "POSTGRES_HOST": "testhost",
                 "POSTGRES_PORT": "5555",
+                "POSTGRES_DATABASE": "testdb",
                 "KAFKA_BOOTSTRAP_SERVERS": "broker:9092",
             },
         ):
             config = ModelMaterializerConfig.from_env()
             assert config.postgres.host == "testhost"
             assert config.postgres.port == 5555
+            assert config.postgres.database == "testdb"
             assert config.kafka.bootstrap_servers == "broker:9092"
 
 
