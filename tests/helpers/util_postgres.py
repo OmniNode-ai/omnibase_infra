@@ -274,6 +274,10 @@ class PostgresConfig:
         """
         # --- Primary: full DSN from db_url_var ---
         db_url: str | None = os.getenv(db_url_var)
+        # Normalize whitespace-only DSN to None so it falls through to
+        # the individual-env-var path (or yields is_configured=False).
+        if db_url is not None:
+            db_url = db_url.strip() or None
         if db_url:
             parsed = urlparse(db_url)
 

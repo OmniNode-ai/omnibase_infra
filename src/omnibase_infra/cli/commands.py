@@ -205,6 +205,8 @@ def registry() -> None:
 def _get_db_dsn() -> str:
     """Get PostgreSQL DSN from OMNIBASE_INFRA_DB_URL.
 
+    Generates a correlation_id for traceability in error messages.
+
     Raises:
         click.ClickException: If OMNIBASE_INFRA_DB_URL is not set or invalid.
     """
@@ -212,10 +214,12 @@ def _get_db_dsn() -> str:
         ModelPostgresPoolConfig,
     )
 
+    correlation_id = uuid4()
     db_url = os.environ.get("OMNIBASE_INFRA_DB_URL")
     if not db_url:
         raise click.ClickException(
-            "OMNIBASE_INFRA_DB_URL is required but not set. "
+            f"OMNIBASE_INFRA_DB_URL is required but not set "
+            f"(correlation_id={correlation_id}). "
             "Set it to a PostgreSQL DSN, e.g. "
             "postgresql://user:pass@host:5432/omnibase_infra"
         )
@@ -223,7 +227,7 @@ def _get_db_dsn() -> str:
     try:
         return ModelPostgresPoolConfig.validate_dsn(db_url)
     except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise click.ClickException(f"{exc} (correlation_id={correlation_id})") from exc
 
 
 def _sanitize_dsn(dsn: str) -> str:
