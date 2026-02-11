@@ -193,10 +193,14 @@ class HandlerAuthGate:
                     ),
                     reason_code="emergency_no_reason",
                 )
-            # Truncate and strip control characters from user-supplied reason
-            # to prevent log injection or display issues in downstream consumers.
+            # Truncate and strip control/format characters from user-supplied
+            # reason to prevent log injection or display manipulation in
+            # downstream consumers. Covers ASCII C0/DEL, Unicode directional
+            # overrides (U+202A-202E), zero-width chars, and BOM.
             safe_reason = re.sub(
-                r"[\x00-\x1f\x7f]", "", request.emergency_override_reason[:500]
+                r"[\x00-\x1f\x7f\u200b-\u200f\u2028-\u202f\u2060-\u2069\ufeff]",
+                "",
+                request.emergency_override_reason[:500],
             )
             return ModelAuthGateDecision(
                 decision=EnumAuthDecision.SOFT_DENY,
@@ -280,16 +284,14 @@ class HandlerAuthGate:
             )
 
         # Step 8: Repo not in repo_scopes -> deny
-        if (
-            request.target_repo
-            and auth.repo_scopes
-            and (request.target_repo not in auth.repo_scopes)
-        ):
+        # Use .strip() so whitespace-only target_repo is treated as empty.
+        target_repo = request.target_repo.strip()
+        if target_repo and auth.repo_scopes and (target_repo not in auth.repo_scopes):
             return ModelAuthGateDecision(
                 decision=EnumAuthDecision.DENY,
                 step=8,
                 reason=(
-                    f"Repository '{request.target_repo}' not in repo_scopes: "
+                    f"Repository '{target_repo}' not in repo_scopes: "
                     f"{list(auth.repo_scopes)}."
                 ),
                 reason_code="repo_not_in_scope",
