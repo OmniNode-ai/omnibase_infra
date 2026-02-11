@@ -166,6 +166,14 @@ class HandlerStaleRunGC:
                 data = json.loads(raw)
                 ctx = ModelRunContext.model_validate(data)
 
+                age_s = (now - ctx.updated_at).total_seconds()
+                if age_s < -5.0:
+                    logger.warning(
+                        "GC: run %s has updated_at %.0fs in the future (clock skew?)",
+                        ctx.run_id,
+                        -age_s,
+                    )
+
                 if ctx.is_stale(self._ttl_seconds):
                     stem = run_file.stem
                     try:

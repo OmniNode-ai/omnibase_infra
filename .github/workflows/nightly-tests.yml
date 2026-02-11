@@ -32,6 +32,8 @@ env:
   # Force inmemory event bus for CI tests (no Kafka infrastructure available)
   # This overrides the default "kafka" in contracts/runtime/runtime_config.yaml
   ONEX_EVENT_BUS_TYPE: "inmemory"
+  # Explicit database name for integration tests (see test.yml for details).
+  POSTGRES_DATABASE: "omnibase_infra"
 
 jobs:
   slow-tests:

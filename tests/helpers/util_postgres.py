@@ -316,7 +316,7 @@ class PostgresConfig:
                     user=default_user,
                     password=None,
                 )
-            database = (parsed.path or "").lstrip("/")
+            database = unquote((parsed.path or "").lstrip("/"))
             if not database:
                 logger.warning(
                     "%s is set but contains no database name "

@@ -207,10 +207,7 @@ async def transaction_context(
                 # Set statement timeout if provided
                 # Uses LOCAL to scope timeout to this transaction only
                 if timeout is not None:
-                    timeout_ms = int(timeout * 1000)
-                    # Note: SET LOCAL does not support parameterized queries ($1)
-                    # in PostgreSQL. int() cast guarantees numeric-only output.
-                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
+                    await set_statement_timeout(conn, timeout * 1000)
 
                 yield conn
 
@@ -236,6 +233,21 @@ async def transaction_context(
             raise
 
 
+async def set_statement_timeout(
+    conn: asyncpg.Connection, timeout_ms: int | float
+) -> None:
+    """Set PostgreSQL statement_timeout for the current transaction.
+
+    Uses string interpolation because SET LOCAL does not support $1
+    parameterized queries. The int() cast prevents SQL injection.
+    """
+    if timeout_ms < 0:
+        raise ValueError(f"statement timeout must be non-negative, got {timeout_ms}")
+    safe_ms = int(timeout_ms)
+    await conn.execute(f"SET LOCAL statement_timeout = '{safe_ms}'")
+
+
 __all__: list[str] = [
+    "set_statement_timeout",
     "transaction_context",
 ]

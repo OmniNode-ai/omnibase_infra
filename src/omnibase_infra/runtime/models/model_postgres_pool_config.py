@@ -136,7 +136,7 @@ class ModelPostgresPoolConfig(BaseModel):
             )
             raise ValueError(msg)
 
-        database = (parsed.path or "").lstrip("/")
+        database = unquote((parsed.path or "").lstrip("/"))
         if not database:
             try:
                 port_str = str(parsed.port) if parsed.port else "?"
@@ -183,7 +183,7 @@ class ModelPostgresPoolConfig(BaseModel):
         dsn = cls.validate_dsn(dsn)
 
         parsed = urlparse(dsn)
-        database = (parsed.path or "").lstrip("/")
+        database = unquote((parsed.path or "").lstrip("/"))
 
         # DSN query params (sslmode, options, connect_timeout, etc.) are not
         # reflected in the returned config fields. Log a warning so operators

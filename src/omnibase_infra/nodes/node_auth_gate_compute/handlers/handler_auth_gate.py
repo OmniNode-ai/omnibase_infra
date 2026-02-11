@@ -69,6 +69,8 @@ EXPECTED_OPERATION: str = "auth_gate.evaluate"
 # Tools NOT in this set with an empty target_path skip the path check
 # entirely (step 7). Forgetting to add a file-targeting tool here would
 # allow it to bypass path authorization silently.
+# TODO: Derive this set from tool metadata/registry instead of hardcoding
+# to eliminate the risk of forgetting to update it when new tools are added.
 FILE_TARGETING_TOOLS: frozenset[str] = frozenset(
     {
         "Edit",
@@ -283,6 +285,9 @@ class HandlerAuthGate:
                 ),
                 reason_code="file_tool_missing_path",
             )
+        # Security: allowed_paths originates from the contract's work_authorization
+        # config, which is a trusted admin-controlled source. These patterns are
+        # NOT user-supplied input. See _glob_to_regex trust boundary docs.
         if request.target_path and not self._path_matches_globs(
             request.target_path, auth.allowed_paths
         ):
@@ -299,6 +304,9 @@ class HandlerAuthGate:
         # Step 8: Repo not in repo_scopes -> deny
         # Use .strip() so whitespace-only target_repo is treated as empty.
         # `in` is O(n) on the tuple — acceptable for typical scope sizes (<50 repos).
+        # Bypass rationale: empty target_repo means the tool does not target a
+        # specific repo (no repo check needed); empty repo_scopes means the
+        # authorization does not restrict to specific repos (all repos allowed).
         target_repo = request.target_repo.strip()
         if target_repo and auth.repo_scopes and (target_repo not in auth.repo_scopes):
             return ModelAuthGateDecision(
@@ -417,6 +425,12 @@ class HandlerAuthGate:
         This is intentionally more permissive than ``_path_matches_globs``
         (which treats ``*`` as non-``/`` matching) because whitelisted
         paths are safe-by-definition and broader matching is desired.
+
+        Security Note:
+            The fnmatch/regex asymmetry is intentional and safe. Whitelist
+            (allow-list) uses permissive fnmatch so fewer safe paths are
+            falsely denied. Authorization path checks (step 7) use stricter
+            regex so fewer unauthorized paths are falsely allowed.
 
         Paths are normalized via ``posixpath.normpath`` before matching
         to prevent traversal attacks (e.g., ``/a/.claude/memory/../../../etc/passwd``).

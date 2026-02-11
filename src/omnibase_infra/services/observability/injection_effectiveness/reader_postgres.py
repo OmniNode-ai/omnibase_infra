@@ -57,6 +57,7 @@ from omnibase_infra.services.observability.injection_effectiveness.models.model_
     ModelPatternHitRateRow,
 )
 from omnibase_infra.utils.util_db_error_context import db_operation_error_context
+from omnibase_infra.utils.util_db_transaction import set_statement_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -157,10 +158,7 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         ):
             async with self._pool.acquire() as conn:
                 async with conn.transaction(readonly=True):
-                    # Note: SET LOCAL does not support parameterized queries ($1)
-                    # in PostgreSQL. int() cast guarantees numeric-only output.
-                    timeout_ms = int(self._query_timeout * 1000)
-                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
+                    await set_statement_timeout(conn, self._query_timeout * 1000)
 
                     row = await conn.fetchrow(sql, session_id)
 
@@ -279,10 +277,7 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         ):
             async with self._pool.acquire() as conn:
                 async with conn.transaction(readonly=True):
-                    # Note: SET LOCAL does not support parameterized queries ($1)
-                    # in PostgreSQL. int() cast guarantees numeric-only output.
-                    timeout_ms = int(self._query_timeout * 1000)
-                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
+                    await set_statement_timeout(conn, self._query_timeout * 1000)
 
                     raw_count = await conn.fetchval(count_sql, *params)
                     total_count: int = int(raw_count) if raw_count is not None else 0
@@ -358,10 +353,7 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         ):
             async with self._pool.acquire() as conn:
                 async with conn.transaction(readonly=True):
-                    # Note: SET LOCAL does not support parameterized queries ($1)
-                    # in PostgreSQL. int() cast guarantees numeric-only output.
-                    timeout_ms = int(self._query_timeout * 1000)
-                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
+                    await set_statement_timeout(conn, self._query_timeout * 1000)
 
                     rows = await conn.fetch(sql, session_id, limit, offset)
 
@@ -450,10 +442,7 @@ class ReaderInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         ):
             async with self._pool.acquire() as conn:
                 async with conn.transaction(readonly=True):
-                    # Note: SET LOCAL does not support parameterized queries ($1)
-                    # in PostgreSQL. int() cast guarantees numeric-only output.
-                    timeout_ms = int(self._query_timeout * 1000)
-                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
+                    await set_statement_timeout(conn, self._query_timeout * 1000)
 
                     rows = await conn.fetch(sql, *query_params)
 
