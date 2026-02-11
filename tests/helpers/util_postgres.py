@@ -287,9 +287,9 @@ class PostgresConfig:
         """Check if the configuration is complete for database connections.
 
         Returns:
-            True if host and password are set, False otherwise.
+            True if host, password, and database are set, False otherwise.
         """
-        return self.host is not None and self.password is not None
+        return self.host is not None and self.password is not None and bool(self.database)
 
     def build_dsn(self) -> str:
         """Build PostgreSQL DSN from configuration.
@@ -325,6 +325,8 @@ class PostgresConfig:
                 missing.append("host")
             if self.password is None:
                 missing.append("password")
+            if not self.database:
+                missing.append("database")
 
             # Create error context with correlation ID for tracing
             correlation_id = uuid4()
@@ -347,10 +349,11 @@ class PostgresConfig:
         assert self.password is not None  # Verified by is_configured check above
         encoded_user: str = quote_plus(self.user, safe="")
         encoded_password: str = quote_plus(self.password, safe="")
+        encoded_database: str = quote_plus(self.database, safe="")
 
         return (
             f"postgresql://{encoded_user}:{encoded_password}"
-            f"@{self.host}:{self.port}/{self.database}"
+            f"@{self.host}:{self.port}/{encoded_database}"
         )
 
 
@@ -438,7 +441,9 @@ def build_postgres_dsn(
     encoded_user: str = quote_plus(user, safe="")
     encoded_password: str = quote_plus(normalized_password, safe="")
 
-    return f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/{database}"
+    encoded_database: str = quote_plus(database, safe="")
+
+    return f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/{encoded_database}"
 
 
 def check_postgres_reachable(

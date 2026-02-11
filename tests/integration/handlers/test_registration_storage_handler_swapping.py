@@ -72,9 +72,20 @@ if TYPE_CHECKING:
 # =============================================================================
 
 # Check if PostgreSQL is available for integration tests
-POSTGRES_HOST = os.getenv("POSTGRES_HOST")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
-POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "")
+# Prefer OMNIBASE_INFRA_DB_URL; fall back to individual POSTGRES_* vars
+_OMNIBASE_INFRA_DB_URL = os.getenv("OMNIBASE_INFRA_DB_URL")
+if _OMNIBASE_INFRA_DB_URL:
+    from urllib.parse import unquote
+    from urllib.parse import urlparse as _urlparse
+
+    _parsed = _urlparse(_OMNIBASE_INFRA_DB_URL)
+    POSTGRES_HOST: str | None = _parsed.hostname
+    POSTGRES_PASSWORD: str | None = unquote(_parsed.password) if _parsed.password else None
+    POSTGRES_DATABASE = unquote((_parsed.path or "").lstrip("/")) or ""
+else:
+    POSTGRES_HOST = os.getenv("POSTGRES_HOST")
+    POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+    POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "")
 POSTGRES_AVAILABLE = (
     POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None and bool(POSTGRES_DATABASE)
 )
@@ -471,7 +482,7 @@ class TestHandlerFactoryPattern:
 
     @pytest.mark.skipif(
         not POSTGRES_AVAILABLE,
-        reason="PostgreSQL not available (POSTGRES_HOST/POSTGRES_PASSWORD not set)",
+        reason="PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST + POSTGRES_PASSWORD + POSTGRES_DATABASE)",
     )
     def test_factory_creates_postgres_handler(self) -> None:
         """Factory creates HandlerRegistrationStoragePostgres for 'postgresql' type."""
@@ -648,7 +659,7 @@ class TestRuntimeHandlerSwapping:
 
 @pytest.mark.skipif(
     not POSTGRES_AVAILABLE,
-    reason="PostgreSQL not available (POSTGRES_HOST/POSTGRES_PASSWORD not set)",
+    reason="PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST + POSTGRES_PASSWORD + POSTGRES_DATABASE)",
 )
 class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
     """Test handler swapping with HandlerRegistrationStoragePostgres.
