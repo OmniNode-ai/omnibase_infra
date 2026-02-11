@@ -1126,6 +1126,25 @@ class TestGlobToRegexEdgeCases:
         assert not pattern.match("src/ab.py")
         assert not pattern.match("src//.py")
 
+    def test_too_many_double_star_segments_raises(
+        self, handler: HandlerAuthGate
+    ) -> None:
+        """Patterns with more than 3 ** segments raise ValueError (ReDoS guard)."""
+        # 4 ** segments exceeds _MAX_DOUBLE_STAR_SEGMENTS=3
+        with pytest.raises(ValueError, match="exceeding maximum"):
+            handler._glob_to_regex("a/**/b/**/c/**/d/**")
+
+    def test_null_byte_rejected_in_path_matches_globs(
+        self, handler: HandlerAuthGate
+    ) -> None:
+        """Paths containing null bytes are rejected by _path_matches_globs."""
+        assert not handler._path_matches_globs("src/main.py\x00evil", ("src/**",))
+
+    def test_path_exceeding_path_max_rejected(self, handler: HandlerAuthGate) -> None:
+        """Paths exceeding PATH_MAX (4096) characters are rejected."""
+        long_path = "a/" * 3000  # 6000 characters, well over 4096
+        assert not handler._path_matches_globs(long_path, ("**",))
+
 
 # =============================================================================
 # TestNodeDeclarativePattern

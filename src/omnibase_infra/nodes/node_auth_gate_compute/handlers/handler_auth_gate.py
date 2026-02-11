@@ -369,7 +369,7 @@ class HandlerAuthGate:
         to prevent traversal attacks (e.g., ``/a/.claude/memory/../../../etc/passwd``).
 
         After fnmatch succeeds, a depth check rejects paths with more than
-        ``_MAX_WHITELIST_DEPTH`` (5) ``/`` separators to limit abuse from
+        ``_MAX_WHITELIST_DEPTH`` (10) ``/`` separators to limit abuse from
         deeply nested paths matching the permissive ``*.plan.md`` pattern.
 
         Args:
@@ -399,10 +399,15 @@ class HandlerAuthGate:
     # Maximum number of ** segments allowed in a single glob pattern.
     # Each ** produces a regex fragment like ``(?:.*/)?`` or ``.*`` which
     # involves backtracking. With many such segments, a crafted path can
-    # trigger catastrophic backtracking (ReDoS). 10 is generous for any
-    # legitimate glob; patterns like ``a/**/b/**/c/**/d/**/e/**/f/**/g/**``
-    # are never needed in practice.
-    _MAX_DOUBLE_STAR_SEGMENTS: int = 10
+    # trigger catastrophic backtracking (ReDoS). 3 is sufficient for any
+    # legitimate glob (e.g., ``src/**/tests/**/*.py``); patterns requiring
+    # more are never needed in practice.
+    _MAX_DOUBLE_STAR_SEGMENTS: int = 3
+
+    # Maximum path length accepted by ``_path_matches_globs``. Paths longer
+    # than this are rejected to bound regex evaluation time against patterns
+    # containing multiple ``**`` segments. Mirrors Linux ``PATH_MAX``.
+    _PATH_MAX: int = 4096
 
     @staticmethod
     @functools.lru_cache(maxsize=128)
@@ -422,7 +427,7 @@ class HandlerAuthGate:
             use proper glob syntax (e.g., ``src/**/*.py``).
 
         Security:
-            Patterns with more than ``_MAX_DOUBLE_STAR_SEGMENTS`` (10) ``**``
+            Patterns with more than ``_MAX_DOUBLE_STAR_SEGMENTS`` (3) ``**``
             segments are rejected with a ``ValueError`` to prevent ReDoS from
             catastrophic backtracking in the generated regex.
 
@@ -499,10 +504,9 @@ class HandlerAuthGate:
         # bypass glob checks (same rationale as _is_whitelisted_path).
         if "\x00" in path:
             return False
-        # Cap path length at Linux PATH_MAX to bound regex evaluation time
+        # Cap path length at PATH_MAX to bound regex evaluation time
         # against patterns containing multiple ** segments.
-        _PATH_MAX = 4096
-        if len(path) > _PATH_MAX:
+        if len(path) > HandlerAuthGate._PATH_MAX:
             return False
         normalized = posixpath.normpath(path)
         for pattern in globs:
