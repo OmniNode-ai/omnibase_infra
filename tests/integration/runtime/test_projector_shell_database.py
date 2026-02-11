@@ -47,10 +47,8 @@ Usage:
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
-from urllib.parse import quote_plus, urlparse
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -117,51 +115,18 @@ class OrderWithNestedPayload(BaseModel):
 def _get_database_dsn() -> str | None:
     """Build database DSN from environment variables.
 
-    Primary source: ``OMNIBASE_INFRA_DB_URL``.
-    Fallback: individual ``POSTGRES_*`` env vars with portable defaults
-    suitable for CI/CD environments.
+    Delegates to the shared ``PostgresConfig`` utility for DSN resolution,
+    validation (scheme, database name, sub-paths), and credential encoding.
 
     Returns:
         PostgreSQL connection string, or None if not configured.
     """
-    db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
-    if db_url:
-        # Basic validation: ensure the user-provided DSN is well-formed
-        parsed = urlparse(db_url)
-        if parsed.scheme not in ("postgresql", "postgres"):
-            raise ValueError(
-                f"OMNIBASE_INFRA_DB_URL has invalid scheme '{parsed.scheme}'. "
-                "Expected 'postgresql://' or 'postgres://'."
-            )
-        # Validate database name is present in the DSN path
-        database = (parsed.path or "").lstrip("/")
-        if not database:
-            raise ValueError(
-                "OMNIBASE_INFRA_DB_URL is missing a database name. "
-                "Example: postgresql://user:pass@host:5432/omnibase_infra"
-            )
-        if "/" in database:
-            raise ValueError(
-                f"Invalid database name '{database}' extracted from DSN: "
-                "sub-paths are not valid PostgreSQL database names"
-            )
-        return db_url
+    from tests.helpers.util_postgres import PostgresConfig
 
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5432")
-    user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD")
-
-    if not password:
+    config = PostgresConfig.from_env()
+    if not config.is_configured:
         return None
-
-    # URL-encode credentials to handle special characters (@, :, /, %, etc.)
-    encoded_user = quote_plus(user, safe="")
-    encoded_password = quote_plus(password, safe="")
-
-    return (
-        f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/omnibase_infra"
-    )
+    return config.build_dsn()
 
 
 @pytest.fixture

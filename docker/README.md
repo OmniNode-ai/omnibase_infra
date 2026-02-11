@@ -493,7 +493,7 @@ These variables must be set explicitly. The runtime will fail to start if they a
 | Variable                  | Description                                         | Security Level | Profile    |
 |---------------------------|-----------------------------------------------------|----------------|------------|
 | `POSTGRES_PASSWORD`       | PostgreSQL database password                        | Secret         | (default)  |
-| `OMNIBASE_INFRA_DB_URL`  | Full PostgreSQL DSN for omnibase_infra. Required for CLI/scripts; optional for Docker (has fallback from `POSTGRES_PASSWORD`). | Secret | (default) |
+| `OMNIBASE_INFRA_DB_URL`  | Full PostgreSQL DSN for omnibase_infra. Required for CLI/scripts; recommended for Docker. The Docker fallback from `POSTGRES_PASSWORD` cannot URL-encode, so passwords with special characters (`@`, `:`, `/`, `%`, `#`) will produce malformed DSNs. | Secret | (default) |
 | `INFISICAL_ENCRYPTION_KEY`| Hex-encoded AES key (32 or 64 hex chars)            | Secret         | secrets    |
 | `INFISICAL_AUTH_SECRET`   | JWT signing secret for authentication               | Secret         | secrets    |
 

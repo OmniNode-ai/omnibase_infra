@@ -195,6 +195,9 @@ class ModelPostgresPoolConfig(BaseModel):
         # NOTE: Credentials are stored *decoded* (unquote). If a DSN is later
         # reconstructed from these fields, the values must be re-encoded with
         # urllib.parse.quote_plus() to produce a valid connection string.
+        # NOTE: parsed.hostname returns None for Unix-socket DSNs
+        # (e.g., "postgresql:///dbname"). The fallback to "localhost" means
+        # Unix-socket DSNs are silently rewritten to TCP connections.
         return cls(
             host=parsed.hostname or "localhost",
             port=parsed.port or 5432,

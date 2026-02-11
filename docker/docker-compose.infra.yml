@@ -48,9 +48,11 @@
 #     - runtime-effects: 8086 [runtime profile]
 #     - agent-actions-consumer: 8087 [runtime profile]
 name: omnibase-infra
-# NOTE: This file uses nested variable expansion (${VAR:-${OTHER:-default}})
-# which requires Docker Compose v2.20+. Older versions will silently produce
-# malformed values. Verify your version: docker compose version
+# ==========================================================================
+# IMPORTANT: Requires Docker Compose v2.20+ (nested variable expansion).
+# Older versions will SILENTLY produce malformed DSNs.
+# Verify: docker compose version
+# ==========================================================================
 # ==========================================================================
 # Shared Configuration Templates (YAML Anchors)
 # ==========================================================================

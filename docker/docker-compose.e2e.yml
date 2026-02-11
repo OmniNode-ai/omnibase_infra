@@ -32,6 +32,10 @@
 #   - Runtime Health: 8085 (when runtime profile enabled)
 name: omnibase-infra
 # ==========================================================================
+# IMPORTANT: Requires Docker Compose v2.20+ (nested variable expansion).
+# Older versions will SILENTLY produce malformed DSNs.
+# Verify: docker compose version
+# ==========================================================================
 # Shared Configuration Templates
 # ==========================================================================
 x-healthcheck-defaults: &healthcheck-defaults
