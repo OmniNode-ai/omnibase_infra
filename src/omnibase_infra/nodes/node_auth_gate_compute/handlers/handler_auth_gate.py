@@ -87,6 +87,10 @@ WHITELISTED_PATH_PATTERNS: tuple[str, ...] = (
     "*.plan.md",
     "*/.claude/memory/*",
     "*/.claude/projects/*/memory/*",
+    # fnmatch treats ** as two consecutive * wildcards (both match across /),
+    # NOT as gitignore-style recursive directory matching.  The result is the
+    # same here — it matches MEMORY.md at any depth under .claude/ — but the
+    # semantics differ from pathlib.PurePath.match or git's globbing.
     "*/.claude/**/MEMORY.md",
 )
 
@@ -461,6 +465,13 @@ class HandlerAuthGate:
             Patterns with more than ``_MAX_DOUBLE_STAR_SEGMENTS`` (2) ``**``
             segments are rejected with a ``ValueError`` to prevent ReDoS from
             catastrophic backtracking in the generated regex.
+
+        Trust boundary:
+            This method is cached with ``lru_cache(maxsize=128)``.  Patterns
+            **must** originate from trusted contract configuration (i.e.
+            ``ModelContractWorkAuthorization.allowed_paths``), never from
+            end-user input.  Untrusted patterns could fill the cache with
+            adversarial entries, evicting legitimate compiled regexes.
 
         Args:
             pattern: Glob pattern, e.g. ``src/**/*.py``.
