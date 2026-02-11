@@ -248,12 +248,14 @@ def _get_validated_dsn() -> str:
     try:
         dsn = ModelPostgresPoolConfig.validate_dsn(dsn)
     except ValueError as exc:
-        # Distinguish scheme errors from database name errors for accurate codes
+        # Map to script-specific error codes. validate_dsn raises ValueError
+        # with "scheme" in the message only for scheme validation failures;
+        # all other failures relate to database name (missing or sub-path).
         error_msg = str(exc)
         error_code = (
-            ErrorCode.CFG_MISSING_DB_NAME
-            if "database" in error_msg.lower()
-            else ErrorCode.CFG_INVALID_DSN_SCHEME
+            ErrorCode.CFG_INVALID_DSN_SCHEME
+            if "scheme" in error_msg.lower()
+            else ErrorCode.CFG_MISSING_DB_NAME
         )
         raise ConfigurationError(
             error_msg,
