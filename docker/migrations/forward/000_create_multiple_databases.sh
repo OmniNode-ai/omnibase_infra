@@ -22,6 +22,9 @@
 set -e
 set -u
 
+: "${POSTGRES_USER:?POSTGRES_USER must be set}"
+: "${POSTGRES_DB:?POSTGRES_DB must be set}"
+
 # =============================================================================
 # Configuration: database → role mapping
 # =============================================================================
@@ -43,21 +46,41 @@ INFRA_DATABASES=("infisical_db")
 # Helper functions
 # =============================================================================
 
-validate_db_name() {
+validate_identifier() {
     local name="$1"
+    local context="${2:-Identifier}"
     if [ ${#name} -gt 63 ]; then
-        echo "ERROR: Database name '$name' exceeds 63-character limit" >&2
+        echo "ERROR: $context '$name' exceeds 63-character limit" >&2
         return 1
     fi
     if ! echo "$name" | grep -qE '^[a-zA-Z_][a-zA-Z0-9_-]*$'; then
-        echo "ERROR: Invalid database name '$name' - must match ^[a-zA-Z_][a-zA-Z0-9_-]*$" >&2
+        echo "ERROR: Invalid $context '$name' - must match ^[a-zA-Z_][a-zA-Z0-9_-]*$" >&2
+        return 1
+    fi
+}
+
+validate_password() {
+    local password="$1"
+    local context="$2"
+    if [ -z "$password" ]; then
+        echo "ERROR: Empty password for $context" >&2
+        return 1
+    fi
+    if echo "$password" | grep -qE '^__REPLACE_WITH_.*__$'; then
+        echo "ERROR: Password for $context is still a placeholder." >&2
+        echo "       Replace with: openssl rand -hex 32" >&2
+        return 1
+    fi
+    if ! echo "$password" | grep -qE '^[0-9a-fA-F]+$'; then
+        echo "ERROR: Password for $context contains non-hex characters." >&2
+        echo "       Generate with: openssl rand -hex 32" >&2
         return 1
     fi
 }
 
 create_database() {
     local database="$1"
-    validate_db_name "$database"
+    validate_identifier "$database" "Database name"
     echo "  Creating database: $database"
     psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
         SELECT 'CREATE DATABASE "$database"'
@@ -69,6 +92,7 @@ EOSQL
 create_role() {
     local role_name="$1"
     local role_password="$2"
+    validate_identifier "$role_name" "Role name"
     # Escape single quotes for safe SQL interpolation (' → '')
     local escaped_password="${role_password//\'/\'\'}"
     echo "  Creating role: $role_name"
@@ -97,6 +121,10 @@ grant_role_to_database() {
         GRANT CONNECT ON DATABASE "$database" TO "$role_name";
 EOSQL
     # Schema and table privileges (must run against the target database)
+    # NOTE: ALTER DEFAULT PRIVILEGES only applies to objects created by the
+    # CURRENT user (postgres superuser). If migrations run as the service role,
+    # you must run ALTER DEFAULT PRIVILEGES as that role too (or run migrations
+    # as the superuser and grant to the service role).
     psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$database" <<-EOSQL
         GRANT USAGE, CREATE ON SCHEMA public TO "$role_name";
         ALTER DEFAULT PRIVILEGES IN SCHEMA public
@@ -127,6 +155,12 @@ EOSQL
             REVOKE CONNECT ON DATABASE "$db" FROM "$role_name";
 EOSQL
     done
+    # Also revoke from the default database (if different from own_database)
+    if [ "$POSTGRES_DB" != "$own_database" ]; then
+        psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+            REVOKE CONNECT ON DATABASE "$POSTGRES_DB" FROM "$role_name";
+EOSQL
+    fi
 }
 
 # =============================================================================
@@ -146,18 +180,6 @@ done
 for db in "${INFRA_DATABASES[@]}"; do
     create_database "$db"
 done
-
-# Legacy database (POSTGRES_MULTIPLE_DATABASES support for backwards compat)
-if [ -n "${POSTGRES_MULTIPLE_DATABASES:-}" ]; then
-    echo "  Additional databases from POSTGRES_MULTIPLE_DATABASES: $POSTGRES_MULTIPLE_DATABASES"
-    IFS=',' read -ra EXTRA_DBS <<< "$POSTGRES_MULTIPLE_DATABASES"
-    for db in "${EXTRA_DBS[@]}"; do
-        db=$(echo "$db" | xargs)
-        if [ -n "$db" ] && [ "$db" != "$POSTGRES_DB" ]; then
-            create_database "$db"
-        fi
-    done
-fi
 
 echo ""
 
@@ -180,6 +202,12 @@ for entry in "${SERVICE_DB_MAP[@]}"; do
         ROLES_SKIPPED=$((ROLES_SKIPPED + 1))
         continue
     fi
+
+    validate_password "$role_password" "$role_name" || {
+        echo "  SKIP: $role_name — invalid password"
+        ROLES_SKIPPED=$((ROLES_SKIPPED + 1))
+        continue
+    }
 
     create_role "$role_name" "$role_password"
     ROLES_CREATED=$((ROLES_CREATED + 1))
@@ -228,6 +256,12 @@ for db in "${INFRA_DATABASES[@]}"; do
         REVOKE CONNECT ON DATABASE "$db" FROM PUBLIC;
 EOSQL
 done
+
+# Also revoke PUBLIC connect on the default database.
+# Superusers bypass all permission checks, so this is safe for the postgres user.
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+    REVOKE CONNECT ON DATABASE "$POSTGRES_DB" FROM PUBLIC;
+EOSQL
 
 # Then revoke cross-DB access per role
 for entry in "${SERVICE_DB_MAP[@]}"; do
