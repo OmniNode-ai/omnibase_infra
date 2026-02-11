@@ -276,19 +276,25 @@ echo "============================================="
 # First, revoke PUBLIC connect on all managed databases (default allows everyone)
 for entry in "${SERVICE_DB_MAP[@]}"; do
     IFS=':' read -r db _ _ <<< "$entry"
-    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL || {
+        echo "  WARNING: Failed to revoke PUBLIC connect on $db" >&2
+    }
         REVOKE CONNECT ON DATABASE "$db" FROM PUBLIC;
 EOSQL
 done
 for db in "${INFRA_DATABASES[@]}"; do
-    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL || {
+        echo "  WARNING: Failed to revoke PUBLIC connect on $db" >&2
+    }
         REVOKE CONNECT ON DATABASE "$db" FROM PUBLIC;
 EOSQL
 done
 
 # Also revoke PUBLIC connect on the default database.
 # Superusers bypass all permission checks, so this is safe for the postgres user.
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL || {
+    echo "  WARNING: Failed to revoke PUBLIC connect on $POSTGRES_DB" >&2
+}
     REVOKE CONNECT ON DATABASE "$POSTGRES_DB" FROM PUBLIC;
 EOSQL
 
