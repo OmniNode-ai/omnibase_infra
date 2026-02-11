@@ -104,6 +104,8 @@ class NotificationConsumer:
         self,
         event_bus: ProtocolEventBusLike,
         webhook_url: str | None = None,
+        bot_token: str | None = None,
+        default_channel: str | None = None,
     ) -> None:
         """Initialize the notification consumer.
 
@@ -111,14 +113,24 @@ class NotificationConsumer:
             event_bus: Kafka event bus for subscribing to notification topics.
             webhook_url: Optional Slack webhook URL. If not provided, reads
                 from SLACK_WEBHOOK_URL environment variable.
+            bot_token: Optional Slack Bot Token for Web API mode. If set,
+                the handler uses chat.postMessage which supports threading.
+            default_channel: Optional default channel ID for Web API posts.
         """
         self._event_bus = event_bus
-        self._handler = HandlerSlackWebhook(webhook_url=webhook_url)
+        self._handler = HandlerSlackWebhook(
+            webhook_url=webhook_url,
+            bot_token=bot_token,
+            default_channel=default_channel,
+        )
         self._running = False
         self._consumer_tasks: list[asyncio.Task[None]] = []
         self._shutdown_event = asyncio.Event()
 
-        logger.debug("NotificationConsumer initialized")
+        logger.debug(
+            "NotificationConsumer initialized",
+            extra={"mode": "web_api" if self._handler.uses_web_api else "webhook"},
+        )
 
     async def start(self) -> None:
         """Start consuming notification events.
@@ -310,6 +322,10 @@ class NotificationConsumer:
         repo = str(payload.get("repo", "unknown"))
         correlation_id = self._extract_correlation_id(payload)
 
+        # Extract thread_ts for threading support (if present in payload)
+        thread_ts_raw = payload.get("thread_ts")
+        thread_ts = thread_ts_raw if isinstance(thread_ts_raw, str) else None
+
         # Build details list safely
         details: list[str] = []
         if isinstance(details_raw, list):
@@ -330,6 +346,7 @@ class NotificationConsumer:
                 "Repo": repo,
             },
             correlation_id=correlation_id,
+            thread_ts=thread_ts,
         )
 
         result = await self._handler.handle(alert)
@@ -340,6 +357,7 @@ class NotificationConsumer:
                 extra={
                     "correlation_id": str(correlation_id),
                     "duration_ms": result.duration_ms,
+                    "thread_ts": result.thread_ts,
                 },
             )
         else:
@@ -365,6 +383,10 @@ class NotificationConsumer:
         pr_url = payload.get("pr_url")
         correlation_id = self._extract_correlation_id(payload)
 
+        # Extract thread_ts for threading support (if present in payload)
+        thread_ts_raw = payload.get("thread_ts")
+        thread_ts = thread_ts_raw if isinstance(thread_ts_raw, str) else None
+
         # Build details dict
         details_dict: dict[str, str] = {
             "Ticket": ticket_identifier,
@@ -379,6 +401,7 @@ class NotificationConsumer:
             title=f":white_check_mark: {ticket_identifier} completed",
             details=details_dict,
             correlation_id=correlation_id,
+            thread_ts=thread_ts,
         )
 
         result = await self._handler.handle(alert)
@@ -389,6 +412,7 @@ class NotificationConsumer:
                 extra={
                     "correlation_id": str(correlation_id),
                     "duration_ms": result.duration_ms,
+                    "thread_ts": result.thread_ts,
                 },
             )
         else:
