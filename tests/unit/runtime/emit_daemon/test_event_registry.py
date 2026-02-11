@@ -25,6 +25,7 @@ import pytest
 
 from omnibase_core.errors import OnexError
 from omnibase_infra.runtime.emit_daemon.event_registry import (
+    PHASE_METRICS_REGISTRATION,
     EventRegistry,
     ModelEventRegistration,
 )
@@ -810,3 +811,37 @@ class TestEventRegistryGetRegistration:
         assert retrieved.partition_key_field == "custom_key"
         assert retrieved.required_fields == ["a", "b"]
         assert retrieved.schema_version == "3.0.0"
+
+
+@pytest.mark.unit
+class TestPhaseMetricsRegistration:
+    """Tests for the pre-built PHASE_METRICS_REGISTRATION constant."""
+
+    def test_phase_metrics_event_type(self) -> None:
+        """Should have correct event type."""
+        assert PHASE_METRICS_REGISTRATION.event_type == "phase.metrics"
+
+    def test_phase_metrics_topic_template(self) -> None:
+        """Should map to correct Kafka topic."""
+        assert (
+            PHASE_METRICS_REGISTRATION.topic_template
+            == "onex.evt.omniclaude.phase-metrics.v1"
+        )
+
+    def test_phase_metrics_partition_key(self) -> None:
+        """Should partition by run_id."""
+        assert PHASE_METRICS_REGISTRATION.partition_key_field == "run_id"
+
+    def test_phase_metrics_resolves_in_registry(self) -> None:
+        """Should resolve correctly when registered in EventRegistry."""
+        registry = EventRegistry()
+        registry.register(PHASE_METRICS_REGISTRATION)
+        topic = registry.resolve_topic("phase.metrics")
+        assert topic == "onex.evt.omniclaude.phase-metrics.v1"
+
+    def test_phase_metrics_partition_key_extraction(self) -> None:
+        """Should extract run_id as partition key from payload."""
+        registry = EventRegistry()
+        registry.register(PHASE_METRICS_REGISTRATION)
+        key = registry.get_partition_key("phase.metrics", {"run_id": "run-abc-123"})
+        assert key == "run-abc-123"

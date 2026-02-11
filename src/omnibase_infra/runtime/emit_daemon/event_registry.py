@@ -67,6 +67,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_core.errors import OnexError
+from omnibase_infra.runtime.emit_daemon.topics import TOPIC_PHASE_METRICS
 
 
 class ModelEventRegistration(BaseModel):
@@ -474,7 +475,16 @@ class EventRegistry:
         return list(self._registrations.keys())
 
 
+PHASE_METRICS_REGISTRATION = ModelEventRegistration(
+    event_type="phase.metrics",
+    topic_template=TOPIC_PHASE_METRICS,
+    partition_key_field="run_id",
+    required_fields=["run_id"],
+    schema_version="1.0.0",
+)
+
 __all__: list[str] = [
     "EventRegistry",
     "ModelEventRegistration",
+    "PHASE_METRICS_REGISTRATION",
 ]
