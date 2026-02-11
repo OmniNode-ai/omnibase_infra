@@ -118,12 +118,13 @@ class ModelPostgresPoolConfig(BaseModel):
             dsn: PostgreSQL connection string to validate.
 
         Returns:
-            The validated DSN string (unchanged).
+            The validated (stripped) DSN string.
 
         Raises:
             ValueError: If the DSN has an invalid scheme, is missing a database
                 name, or contains sub-paths in the database name.
         """
+        dsn = dsn.strip()
         # Security: error messages are sanitised to prevent credential leaks.
         parsed = urlparse(dsn)
 
@@ -191,6 +192,9 @@ class ModelPostgresPoolConfig(BaseModel):
         # intentional — from_env() is the production entry point and requires a
         # fully-formed DSN with credentials.  from_dsn() is a lower-level
         # parser that tolerates password-less DSNs for dev/test flexibility.
+        # NOTE: Credentials are stored *decoded* (unquote). If a DSN is later
+        # reconstructed from these fields, the values must be re-encoded with
+        # urllib.parse.quote_plus() to produce a valid connection string.
         return cls(
             host=parsed.hostname or "localhost",
             port=parsed.port or 5432,

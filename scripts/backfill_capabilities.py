@@ -113,6 +113,9 @@ from uuid import UUID
 import asyncpg
 
 from omnibase_infra.enums import EnumContractType
+from omnibase_infra.runtime.models.model_postgres_pool_config import (
+    ModelPostgresPoolConfig,
+)
 
 # Configure logging - controlled by BACKFILL_DEBUG environment variable
 # When enabled, logs to stderr with detailed information (never secrets)
@@ -240,33 +243,18 @@ def _get_validated_dsn() -> str:
             error_code=ErrorCode.CFG_MISSING_DB_URL,
         )
 
-    if not dsn.startswith(("postgresql://", "postgres://")):
+    # Delegate scheme, database name, and sub-path validation to shared utility
+    # (avoids duplicating logic that lives in ModelPostgresPoolConfig.validate_dsn)
+    try:
+        dsn = ModelPostgresPoolConfig.validate_dsn(dsn)
+    except ValueError as exc:
         raise ConfigurationError(
-            "OMNIBASE_INFRA_DB_URL must start with 'postgresql://' or 'postgres://'. "
-            f"Got scheme: {urlparse(dsn).scheme or '(none)'}",
+            str(exc),
             error_code=ErrorCode.CFG_INVALID_DSN_SCHEME,
-        )
-
-    # Validate the DSN contains a database name (path component)
-    parsed = urlparse(dsn)
-    database = (parsed.path or "").lstrip("/")
-    if not database:
-        safe_dsn = (
-            f"{parsed.scheme}://{parsed.hostname or '?'}:{parsed.port or '?'}/???"
-        )
-        raise ConfigurationError(
-            f"OMNIBASE_INFRA_DB_URL is missing a database name: {safe_dsn}. "
-            "Example: postgresql://postgres:pass@host:5432/omnibase_infra",
-            error_code=ErrorCode.CFG_MISSING_DB_NAME,
-        )
-    if "/" in database:
-        raise ConfigurationError(
-            f"Invalid database name '{database}' extracted from DSN: "
-            "sub-paths are not valid PostgreSQL database names",
-            error_code=ErrorCode.CFG_MISSING_DB_NAME,
-        )
+        ) from exc
 
     # Safety check: warn if database name doesn't match expected target
+    database = (urlparse(dsn).path or "").lstrip("/")
     if database != "omnibase_infra":
         logger.warning(
             "Database name '%s' in OMNIBASE_INFRA_DB_URL is not 'omnibase_infra'. "
