@@ -1271,3 +1271,46 @@ class TestHandlerProperties:
         await handler.initialize({})
         await handler.shutdown()
         assert handler._initialized is False
+
+
+# =============================================================================
+# TestModelAuthGateRequestSanitization
+# =============================================================================
+
+
+class TestModelAuthGateRequestSanitization:
+    """Test model-level control character sanitization on target_path/target_repo."""
+
+    def test_control_chars_stripped_from_target_path(self) -> None:
+        """Control characters are stripped from target_path at model boundary."""
+        req = ModelAuthGateRequest(
+            tool_name="Edit",
+            target_path="src/\x00main\x1f.py",
+        )
+        assert req.target_path == "src/main.py"
+
+    def test_control_chars_stripped_from_target_repo(self) -> None:
+        """Control characters are stripped from target_repo at model boundary."""
+        req = ModelAuthGateRequest(
+            tool_name="Edit",
+            target_repo="my\x07repo\x1b",
+        )
+        assert req.target_repo == "myrepo"
+
+    def test_unicode_zero_width_stripped(self) -> None:
+        """Unicode zero-width and formatting chars are stripped."""
+        req = ModelAuthGateRequest(
+            tool_name="Edit",
+            target_path="src/\u200bmain\ufeff.py",
+        )
+        assert req.target_path == "src/main.py"
+
+    def test_clean_values_unchanged(self) -> None:
+        """Clean values pass through unchanged."""
+        req = ModelAuthGateRequest(
+            tool_name="Edit",
+            target_path="src/utils/helper.py",
+            target_repo="omnibase_infra",
+        )
+        assert req.target_path == "src/utils/helper.py"
+        assert req.target_repo == "omnibase_infra"

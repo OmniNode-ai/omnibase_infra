@@ -11,13 +11,21 @@ Ticket: OMN-2125
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.nodes.node_auth_gate_compute.models.model_contract_work_authorization import (
     ModelContractWorkAuthorization,
+)
+
+# Same control-character pattern used in HandlerAuthGate for
+# emergency_override_reason sanitization.  Applied at the model
+# boundary so downstream reason strings never embed raw control chars.
+_CONTROL_CHAR_RE: re.Pattern[str] = re.compile(
+    r"[\x00-\x1f\x7f\u200b-\u200f\u2028-\u202f\u2060-\u2069\ufeff]"
 )
 
 
@@ -62,6 +70,14 @@ class ModelAuthGateRequest(BaseModel):
         default_factory=lambda: datetime.now(UTC),
         description="Current UTC timestamp for expiry checks.",
     )
+
+    @field_validator("target_path", "target_repo", mode="before")
+    @classmethod
+    def _strip_control_characters(cls, v: str) -> str:
+        """Strip control characters from path/repo fields for defense-in-depth."""
+        if not isinstance(v, str):
+            return v
+        return _CONTROL_CHAR_RE.sub("", v)
 
 
 __all__: list[str] = ["ModelAuthGateRequest"]
