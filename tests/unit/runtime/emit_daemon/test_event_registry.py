@@ -25,10 +25,10 @@ import pytest
 
 from omnibase_core.errors import OnexError
 from omnibase_infra.runtime.emit_daemon.event_registry import (
-    PHASE_METRICS_REGISTRATION,
     EventRegistry,
     ModelEventRegistration,
 )
+from omnibase_infra.runtime.emit_daemon.topics import PHASE_METRICS_REGISTRATION
 
 # Fixed values for deterministic tests
 FIXED_UUID = UUID("12345678-1234-5678-1234-567812345678")

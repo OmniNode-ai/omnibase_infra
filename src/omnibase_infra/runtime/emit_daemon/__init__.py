@@ -47,7 +47,6 @@ Example Usage:
 """
 
 from omnibase_infra.runtime.emit_daemon.event_registry import (
-    PHASE_METRICS_REGISTRATION,
     EventRegistry,
     ModelEventRegistration,
 )
@@ -59,6 +58,7 @@ from omnibase_infra.runtime.emit_daemon.notification_consumer import (
     NotificationConsumer,
 )
 from omnibase_infra.runtime.emit_daemon.topics import (
+    PHASE_METRICS_REGISTRATION,
     TOPIC_NOTIFICATION_BLOCKED,
     TOPIC_NOTIFICATION_COMPLETED,
     TOPIC_PHASE_METRICS,
