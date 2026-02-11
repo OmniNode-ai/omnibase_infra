@@ -40,21 +40,24 @@ class HandlerSessionIndexRead:
     async def handle(
         self,
         correlation_id: UUID,
-    ) -> tuple[ModelSessionIndex, ModelSessionStateResult]:
+    ) -> tuple[ModelSessionIndex | None, ModelSessionStateResult]:
         """Read session.json and return the parsed index.
 
         Args:
             correlation_id: Correlation ID for distributed tracing.
 
         Returns:
-            Tuple of (parsed index, operation result).
+            Tuple of (parsed index or None on error, operation result).
+            Returns ``None`` for the index when parsing or I/O fails so
+            that callers are forced to check ``result.success`` before
+            using the index (prevents silent overwrite with empty data).
         """
         return await asyncio.to_thread(self._read_sync, correlation_id)
 
     def _read_sync(
         self,
         correlation_id: UUID,
-    ) -> tuple[ModelSessionIndex, ModelSessionStateResult]:
+    ) -> tuple[ModelSessionIndex | None, ModelSessionStateResult]:
         """Synchronous read logic, executed off the event loop."""
         session_path = self._state_dir / "session.json"
 
@@ -88,7 +91,7 @@ class HandlerSessionIndexRead:
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning("Failed to parse session.json: %s", e)
             return (
-                ModelSessionIndex(),
+                None,
                 ModelSessionStateResult(
                     success=False,
                     operation="session_index_read",
@@ -101,7 +104,7 @@ class HandlerSessionIndexRead:
         except OSError as e:
             logger.warning("Failed to read session.json: %s", e)
             return (
-                ModelSessionIndex(),
+                None,
                 ModelSessionStateResult(
                     success=False,
                     operation="session_index_read",

@@ -153,7 +153,7 @@ class HandlerSessionIndexWrite:
                 error_code="SESSION_INDEX_WRITE_ERROR",
             )
         except Exception as e:
-            logger.warning("Unexpected error writing session.json: %s", e)
+            logger.exception("Unexpected error writing session.json: %s", e)
             return ModelSessionStateResult(
                 success=False,
                 operation="session_index_write",

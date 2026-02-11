@@ -15,10 +15,13 @@ Concurrency model:
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+_RUN_ID_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
 class ModelSessionIndex(BaseModel):
@@ -53,6 +56,26 @@ class ModelSessionIndex(BaseModel):
             raise ValueError(msg)
         return v
 
+    @field_validator("recent_run_ids")
+    @classmethod
+    def _validate_run_ids_safe(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        """Reject run IDs with unsafe filesystem characters.
+
+        Uses an allowlist (alphanumeric, dot, hyphen, underscore) rather than
+        a denylist, mirroring the validation in ``ModelRunContext``.
+        """
+        for rid in v:
+            if not _RUN_ID_PATTERN.match(rid):
+                msg = (
+                    "run_id must contain only alphanumeric characters, "
+                    "dots, hyphens, and underscores"
+                )
+                raise ValueError(msg)
+            if ".." in rid:
+                msg = "run_id must not contain '..'"
+                raise ValueError(msg)
+        return v
+
     # ------------------------------------------------------------------
     # Transition helpers (pure — return new instances)
     # ------------------------------------------------------------------
@@ -75,7 +98,19 @@ class ModelSessionIndex(BaseModel):
 
         Returns:
             New ModelSessionIndex with the run added.
+
+        Raises:
+            ValueError: If *run_id* contains unsafe filesystem characters.
         """
+        if not _RUN_ID_PATTERN.match(run_id):
+            msg = (
+                "run_id must contain only alphanumeric characters, "
+                "dots, hyphens, and underscores"
+            )
+            raise ValueError(msg)
+        if ".." in run_id:
+            msg = "run_id must not contain '..'"
+            raise ValueError(msg)
         ids = (run_id, *[rid for rid in self.recent_run_ids if rid != run_id])
         ids = ids[: self.MAX_RECENT_RUNS]
         return ModelSessionIndex(

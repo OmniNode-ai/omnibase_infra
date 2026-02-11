@@ -138,7 +138,7 @@ class HandlerRunContextWrite:
                 error_code="RUN_CONTEXT_WRITE_ERROR",
             )
         except Exception as e:
-            logger.warning(
+            logger.exception(
                 "Unexpected error writing run context %s: %s", context.run_id, e
             )
             return ModelSessionStateResult(

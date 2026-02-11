@@ -65,6 +65,9 @@ class HandlerStaleRunGC:
         Returns:
             Tuple of (list of deleted run_ids, operation result).
             The caller should use the deleted IDs to update the session index.
+            Note: deleted IDs may include file stems from malformed documents
+            that don't correspond to session index entries; callers should
+            silently ignore missing entries during index cleanup.
         """
         return await asyncio.to_thread(self._gc_sync, correlation_id)
 
@@ -99,7 +102,11 @@ class HandlerStaleRunGC:
                 break
 
             # Skip symlinks and files that resolve outside the runs directory
-            if not run_file.is_file() or run_file.resolve().parent != resolved_runs_dir:
+            if (
+                run_file.is_symlink()
+                or not run_file.is_file()
+                or run_file.resolve().parent != resolved_runs_dir
+            ):
                 logger.warning(
                     "GC: skipping non-regular or external file %s", run_file.name
                 )

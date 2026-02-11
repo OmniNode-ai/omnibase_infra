@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_core.types.type_json import StrictJsonPrimitive
 from omnibase_infra.enums import EnumSessionLifecycleState
 
 _RUN_ID_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
@@ -28,12 +29,8 @@ class ModelRunContext(BaseModel):
         created_at: When the run was created (UTC).
         updated_at: Last modification timestamp (UTC).
         metadata: Arbitrary key-value data attached to the run.
-
-    Warning:
-        **Metadata mutability**: ``frozen=True`` prevents reassigning the
-        ``metadata`` field but does **not** prevent in-place mutation of dict
-        contents (e.g., ``ctx.metadata['key'] = 'val'`` will silently succeed).
-        Always use :meth:`with_metadata` to add entries immutably.
+            Values are restricted to JSON-serializable primitives to ensure
+            lossless round-trip through ``json.dump``/``json.loads``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -55,13 +52,11 @@ class ModelRunContext(BaseModel):
         default_factory=lambda: datetime.now(UTC),
         description="Last modification timestamp (UTC).",
     )
-    metadata: dict[str, object] = Field(
+    metadata: dict[str, StrictJsonPrimitive] = Field(
         default_factory=dict,
         description=(
             "Arbitrary key-value data attached to the run. "
-            "Warning: ``frozen=True`` prevents reassigning this field but does "
-            "not prevent in-place mutation of dict contents. Always use "
-            "``with_metadata()`` to add entries immutably."
+            "Values are restricted to JSON-serializable primitives."
         ),
     )
 
@@ -114,7 +109,7 @@ class ModelRunContext(BaseModel):
             metadata={**self.metadata},
         )
 
-    def with_metadata(self, key: str, value: object) -> ModelRunContext:
+    def with_metadata(self, key: str, value: StrictJsonPrimitive) -> ModelRunContext:
         """Return a new run context with an additional metadata entry.
 
         Args:

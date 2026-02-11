@@ -83,7 +83,7 @@ class TestHandlerSessionIndexRead:
         idx, result = await handler.handle(uuid4())
         assert not result.success
         assert "PARSE_ERROR" in result.error_code
-        assert idx.recent_run_ids == ()
+        assert idx is None
 
 
 # ============================================================
@@ -187,11 +187,6 @@ class TestHandlerRunContextRead:
         assert ctx.metadata == {"ticket": "OMN-2117"}
 
 
-# ============================================================
-# HandlerRunContextWrite tests
-# ============================================================
-
-
 class TestHandlerRunContextReadPathTraversal:
     """Tests for path traversal rejection in HandlerRunContextRead."""
 
@@ -207,6 +202,11 @@ class TestHandlerRunContextReadPathTraversal:
         assert not result.success
         assert result.error_code == "RUN_CONTEXT_INVALID_ID"
         assert ctx is None
+
+
+# ============================================================
+# HandlerRunContextWrite tests
+# ============================================================
 
 
 class TestHandlerRunContextWrite:
