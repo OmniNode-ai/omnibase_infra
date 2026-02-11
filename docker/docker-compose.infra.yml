@@ -53,7 +53,6 @@ name: omnibase-infra
 # Older versions will SILENTLY produce malformed DSNs.
 # Verify: docker compose version
 # ==========================================================================
-# ==========================================================================
 # Shared Configuration Templates (YAML Anchors)
 # ==========================================================================
 
@@ -280,7 +279,7 @@ services:
       valkey:
         condition: service_healthy
     environment:
-      DB_CONNECTION_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/infisical_db
+      DB_CONNECTION_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for Infisical DB}@postgres:5432/infisical_db
       # Redis URL for Infisical's cache backend (Valkey is Redis-compatible)
       # NOTE: Default includes the dev password matching VALKEY_PASSWORD default.
       # If you change VALKEY_PASSWORD, update INFISICAL_REDIS_URL to match.

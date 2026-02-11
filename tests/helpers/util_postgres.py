@@ -186,6 +186,29 @@ def should_skip_migration(sql: str) -> bool:
 # =============================================================================
 
 
+def _extract_password(parsed: object, db_url_var: str) -> str | None:
+    """Extract password from a parsed URL, warning on empty-password DSNs.
+
+    Peer/trust-auth DSNs (e.g., ``postgresql://user:@host/db``) have an
+    explicitly empty password which is falsy. This helper logs a warning
+    so the operator knows why ``is_configured`` returns ``False``.
+    """
+    # urlparse ParseResult — password is str | None
+    password = getattr(parsed, "password", None)
+    if password:
+        return unquote(password)
+    # Distinguish "no password at all" from "explicitly empty password"
+    netloc: str = getattr(parsed, "netloc", "")
+    if ":@" in netloc:
+        logger.warning(
+            "%s contains an explicitly empty password (peer/trust auth DSN). "
+            "is_configured will return False; tests will be skipped. "
+            "Set POSTGRES_PASSWORD or include a non-empty password in the DSN.",
+            db_url_var,
+        )
+    return None
+
+
 @dataclass
 class PostgresConfig:
     """Configuration for PostgreSQL connections.
@@ -323,7 +346,7 @@ class PostgresConfig:
                 # postgresql://user:@host/db) are falsy, so password becomes None and
                 # is_configured returns False — those DSNs require POSTGRES_PASSWORD
                 # fallback or an explicit non-empty password in the DSN.
-                password=unquote(parsed.password) if parsed.password else None,
+                password=_extract_password(parsed, db_url_var),
             )
 
         # --- Fallback: individual env vars ---

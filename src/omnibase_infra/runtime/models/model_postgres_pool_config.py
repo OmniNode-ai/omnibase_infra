@@ -125,7 +125,8 @@ class ModelPostgresPoolConfig(BaseModel):
                 name, or contains sub-paths in the database name.
         """
         dsn = dsn.strip()
-        # Security: error messages are sanitised to prevent credential leaks.
+        # Security: error messages omit credentials. Hostname/port are included
+        # for diagnostics but are not considered secret in this context.
         parsed = urlparse(dsn)
 
         if parsed.scheme not in ("postgresql", "postgres"):
