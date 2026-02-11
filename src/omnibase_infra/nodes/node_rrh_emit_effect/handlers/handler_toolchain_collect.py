@@ -16,6 +16,7 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.rrh.model_rrh_toolchain_versions import (
     ModelRRHToolchainVersions,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,9 @@ class HandlerToolchainCollect:
             logger.debug("%s --version error: timed out after 10s", tool)
             return ""
         except (FileNotFoundError, OSError) as exc:
-            logger.debug("%s --version error: %s", tool, exc)
+            logger.debug(
+                "%s --version error: %s", tool, sanitize_error_string(str(exc))
+            )
             return ""
 
 

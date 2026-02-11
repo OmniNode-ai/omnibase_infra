@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -126,8 +127,10 @@ class HandlerRRHStorageWrite:
         """
         try:
             symlink_dir.mkdir(parents=True, exist_ok=True)
-            # Sanitize name to prevent path traversal.
-            safe_name = name.replace("/", "_").replace("..", "_")
+            # Sanitize name to prevent path traversal.  Strip all directory
+            # components first, then apply a strict allowlist to eliminate any
+            # remaining dangerous characters (e.g., NUL bytes, backslashes).
+            safe_name = re.sub(r"[^a-zA-Z0-9_.\-]", "_", Path(name).name or "_")
             link_path = symlink_dir / safe_name
             # Compute relative target for portable symlinks.
             rel_target = Path("..") / "artifacts" / target.name

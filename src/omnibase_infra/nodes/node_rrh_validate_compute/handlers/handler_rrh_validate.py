@@ -111,6 +111,12 @@ class HandlerRRHValidate:
     def handle(self, request: ModelRRHValidateRequest) -> ModelRRHResult:
         """Evaluate all RRH rules against the environment data.
 
+        Note:
+            Intentionally synchronous.  This is a pure COMPUTE handler with
+            no I/O — all inputs are pre-collected values.  The handler is
+            called directly (not via the envelope-based ``ProtocolHandler``
+            dispatch), so ``async`` is unnecessary and would add overhead.
+
         Args:
             request: Validation request with environment data, profile,
                 and governance.
