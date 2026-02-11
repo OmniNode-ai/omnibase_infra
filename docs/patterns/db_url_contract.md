@@ -46,22 +46,24 @@ OMNIBASE_INFRA_DB_URL=postgresql://role_omnibase_infra:s3cret@db.example.com:543
 > `POSTGRES_*` variables (`POSTGRES_HOST`, `POSTGRES_PORT`, etc.) for
 > convenience in local development. The production `from_env()` does not.
 
-## Fail-Fast Behaviour
+## Fail-Fast Behavior
 
 The implicit `omninode_bridge` default has been removed. Code that previously
 connected to the shared `omninode_bridge` database by default now raises an
 error unless explicitly configured.
 
+The conceptual change is:
+
 ```python
 # Before (OMN-2146)
 database = os.getenv("POSTGRES_DATABASE", "omninode_bridge")  # silent coupling
 
-# After (OMN-2146)
+# After (OMN-2146) — production code requires OMNIBASE_INFRA_DB_URL with no
+# fallback.  The test helper (PostgresConfig.from_env) additionally falls
+# back to individual POSTGRES_* variables for local convenience.
 db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
 if not db_url:
-    database = os.getenv("POSTGRES_DATABASE", "")
-    if not database:
-        raise ValueError("Set OMNIBASE_INFRA_DB_URL or POSTGRES_DATABASE")
+    raise ValueError("Set OMNIBASE_INFRA_DB_URL")
 ```
 
 ## Migration from `omninode_bridge`
