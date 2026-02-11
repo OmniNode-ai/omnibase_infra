@@ -132,6 +132,8 @@ class HandlerRRHStorageWrite:
             # components first, then apply a strict allowlist to eliminate any
             # remaining dangerous characters (e.g., NUL bytes, backslashes).
             safe_name = re.sub(r"[^a-zA-Z0-9_.\-]", "_", Path(name).name or "_")
+            if safe_name in (".", ".."):
+                safe_name = "_"
             link_path = symlink_dir / safe_name
             # Compute relative target for portable symlinks.
             rel_target = Path("..") / "artifacts" / target.name

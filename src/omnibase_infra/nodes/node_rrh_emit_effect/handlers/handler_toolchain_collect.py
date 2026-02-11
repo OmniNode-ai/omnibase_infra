@@ -83,7 +83,7 @@ class HandlerToolchainCollect:
                 return ""
             output = stdout.decode(errors="replace").strip()
             match = _VERSION_RE.search(output)
-            return match.group(1) if match else output
+            return match.group(1) if match else ""
         except TimeoutError:
             if proc is not None:
                 proc.kill()
