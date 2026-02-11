@@ -93,6 +93,17 @@ class TestModelSessionIndex:
         with pytest.raises(ValueError, match="timezone-aware"):
             ModelSessionIndex(updated_at=datetime(2026, 1, 1))
 
+    def test_with_run_added_caps_at_max(self) -> None:
+        """recent_run_ids is trimmed to MAX_RECENT_RUNS."""
+        max_runs = ModelSessionIndex.MAX_RECENT_RUNS
+        ids = tuple(f"run-{i}" for i in range(max_runs))
+        idx = ModelSessionIndex(recent_run_ids=ids)
+        idx2 = idx.with_run_added("run-new")
+        assert len(idx2.recent_run_ids) == max_runs
+        assert idx2.recent_run_ids[0] == "run-new"
+        # The oldest entry was trimmed
+        assert f"run-{max_runs - 1}" not in idx2.recent_run_ids
+
 
 # ============================================================
 # ModelRunContext tests

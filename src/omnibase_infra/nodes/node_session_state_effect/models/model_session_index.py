@@ -16,6 +16,7 @@ Concurrency model:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -56,10 +57,17 @@ class ModelSessionIndex(BaseModel):
     # Transition helpers (pure — return new instances)
     # ------------------------------------------------------------------
 
+    #: Maximum number of run IDs retained in the session index.
+    #: Older entries are trimmed on each ``with_run_added()`` call.
+    MAX_RECENT_RUNS: ClassVar[int] = 1000
+
     def with_run_added(
         self, run_id: str, *, set_active: bool = False
     ) -> ModelSessionIndex:
         """Return a new index with *run_id* prepended to ``recent_run_ids``.
+
+        The list is capped at :attr:`MAX_RECENT_RUNS` entries to prevent
+        unbounded growth of ``session.json`` over long-running sessions.
 
         Args:
             run_id: The new run identifier to register.
@@ -69,6 +77,7 @@ class ModelSessionIndex(BaseModel):
             New ModelSessionIndex with the run added.
         """
         ids = (run_id, *[rid for rid in self.recent_run_ids if rid != run_id])
+        ids = ids[: self.MAX_RECENT_RUNS]
         return ModelSessionIndex(
             active_run_id=run_id if set_active else self.active_run_id,
             recent_run_ids=ids,

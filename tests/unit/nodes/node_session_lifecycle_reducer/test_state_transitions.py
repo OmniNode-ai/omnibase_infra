@@ -171,3 +171,42 @@ class TestModelSessionLifecycleState:
         """Extra fields are rejected."""
         with pytest.raises(ValueError):
             ModelSessionLifecycleState(unknown="oops")  # type: ignore[call-arg]
+
+    # ------------------------------------------------------------------
+    # Invalid transition enforcement
+    # ------------------------------------------------------------------
+
+    def test_with_run_created_from_non_idle_raises(self) -> None:
+        """with_run_created from non-IDLE state raises ValueError."""
+        state = ModelSessionLifecycleState(
+            status=EnumSessionLifecycleState.RUN_ACTIVE,
+            run_id="run-1",
+        )
+        with pytest.raises(ValueError, match="requires IDLE"):
+            state.with_run_created("run-2", uuid4())
+
+    def test_with_run_activated_from_non_created_raises(self) -> None:
+        """with_run_activated from non-RUN_CREATED state raises ValueError."""
+        state = ModelSessionLifecycleState(
+            status=EnumSessionLifecycleState.IDLE,
+        )
+        with pytest.raises(ValueError, match="requires RUN_CREATED"):
+            state.with_run_activated(uuid4())
+
+    def test_with_run_ended_from_non_active_raises(self) -> None:
+        """with_run_ended from non-RUN_ACTIVE state raises ValueError."""
+        state = ModelSessionLifecycleState(
+            status=EnumSessionLifecycleState.RUN_CREATED,
+            run_id="run-1",
+        )
+        with pytest.raises(ValueError, match="requires RUN_ACTIVE"):
+            state.with_run_ended(uuid4())
+
+    def test_with_reset_from_non_ended_raises(self) -> None:
+        """with_reset from non-RUN_ENDED state raises ValueError."""
+        state = ModelSessionLifecycleState(
+            status=EnumSessionLifecycleState.RUN_ACTIVE,
+            run_id="run-1",
+        )
+        with pytest.raises(ValueError, match="requires RUN_ENDED"):
+            state.with_reset(uuid4())

@@ -82,7 +82,13 @@ class ModelSessionLifecycleState(BaseModel):
 
         Returns:
             New state with status=RUN_CREATED.
+
+        Raises:
+            ValueError: If current state is not IDLE.
         """
+        if not self.can_create_run():
+            msg = f"Cannot create run from state {self.status.value!r} (requires IDLE)"
+            raise ValueError(msg)
         return ModelSessionLifecycleState(
             status=EnumSessionLifecycleState.RUN_CREATED,
             run_id=run_id,
@@ -98,7 +104,13 @@ class ModelSessionLifecycleState(BaseModel):
 
         Returns:
             New state with status=RUN_ACTIVE.
+
+        Raises:
+            ValueError: If current state is not RUN_CREATED.
         """
+        if not self.can_activate_run():
+            msg = f"Cannot activate run from state {self.status.value!r} (requires RUN_CREATED)"
+            raise ValueError(msg)
         return ModelSessionLifecycleState(
             status=EnumSessionLifecycleState.RUN_ACTIVE,
             run_id=self.run_id,
@@ -114,7 +126,15 @@ class ModelSessionLifecycleState(BaseModel):
 
         Returns:
             New state with status=RUN_ENDED.
+
+        Raises:
+            ValueError: If current state is not RUN_ACTIVE.
         """
+        if not self.can_end_run():
+            msg = (
+                f"Cannot end run from state {self.status.value!r} (requires RUN_ACTIVE)"
+            )
+            raise ValueError(msg)
         return ModelSessionLifecycleState(
             status=EnumSessionLifecycleState.RUN_ENDED,
             run_id=self.run_id,
@@ -130,7 +150,13 @@ class ModelSessionLifecycleState(BaseModel):
 
         Returns:
             New state with status=IDLE and run_id cleared.
+
+        Raises:
+            ValueError: If current state is not RUN_ENDED.
         """
+        if not self.can_reset():
+            msg = f"Cannot reset from state {self.status.value!r} (requires RUN_ENDED)"
+            raise ValueError(msg)
         return ModelSessionLifecycleState(
             status=EnumSessionLifecycleState.IDLE,
             run_id=None,

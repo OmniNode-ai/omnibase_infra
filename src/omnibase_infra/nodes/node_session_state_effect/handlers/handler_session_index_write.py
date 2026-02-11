@@ -93,7 +93,7 @@ class HandlerSessionIndexWrite:
 
             # Acquire an exclusive flock on a lock file
             lock_path = self._state_dir / "session.json.lock"
-            lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+            lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
             try:
                 fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
@@ -119,8 +119,12 @@ class HandlerSessionIndexWrite:
                         pass
                     raise
             finally:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                os.close(lock_fd)
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+                finally:
+                    os.close(lock_fd)
 
             logger.debug("Wrote session.json with %d runs", len(index.recent_run_ids))
             return ModelSessionStateResult(
