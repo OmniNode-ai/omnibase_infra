@@ -387,6 +387,38 @@ class TestStep6ToolNotAllowed:
         assert decision.step == 6
         assert decision.reason_code == "tool_not_allowed"
 
+    def test_tool_name_case_sensitive(
+        self,
+        handler: HandlerAuthGate,
+        run_id: UUID,
+        now: datetime,
+    ) -> None:
+        """Lowercase 'edit' is denied when only titlecase 'Edit' is allowed.
+
+        Tool matching is case-sensitive: callers must use canonical tool
+        names exactly as declared in allowed_tools.
+        """
+        auth = ModelContractWorkAuthorization(
+            run_id=run_id,
+            allowed_tools=("Edit",),
+            allowed_paths=("src/**/*.py",),
+            repo_scopes=(),
+            source=EnumAuthSource.EXPLICIT,
+            expires_at=now + timedelta(hours=4),
+        )
+        request = ModelAuthGateRequest(
+            tool_name="edit",  # lowercase — should NOT match "Edit"
+            target_path="src/main.py",
+            run_id=run_id,
+            authorization=auth,
+            now=now,
+        )
+        decision = handler.evaluate(request)
+
+        assert decision.decision == EnumAuthDecision.DENY
+        assert decision.step == 6
+        assert decision.reason_code == "tool_not_allowed"
+
     def test_allowed_tool_passes(
         self,
         handler: HandlerAuthGate,
@@ -483,25 +515,68 @@ class TestStep7PathNotAllowed:
         assert decision.step == 7
         assert decision.reason_code == "path_not_allowed"
 
-    def test_empty_path_skips_check(
+    def test_empty_path_skips_check_for_non_file_tools(
+        self,
+        handler: HandlerAuthGate,
+        run_id: UUID,
+        now: datetime,
+    ) -> None:
+        """Empty target_path skips path check for non-file tools (e.g., Bash)."""
+        auth = ModelContractWorkAuthorization(
+            run_id=run_id,
+            allowed_tools=("Bash",),
+            allowed_paths=("src/**/*.py",),
+            repo_scopes=(),
+            source=EnumAuthSource.EXPLICIT,
+            expires_at=now + timedelta(hours=4),
+        )
+        request = ModelAuthGateRequest(
+            tool_name="Bash",
+            target_path="",
+            run_id=run_id,
+            authorization=auth,
+            now=now,
+        )
+        decision = handler.evaluate(request)
+
+        # Non-file tool with empty path should not be denied at step 7
+        assert decision.step != 7 or decision.decision != EnumAuthDecision.DENY
+
+    def test_empty_path_denied_for_file_targeting_tools(
         self,
         handler: HandlerAuthGate,
         run_id: UUID,
         valid_auth: ModelContractWorkAuthorization,
         now: datetime,
     ) -> None:
-        """Empty target_path skips path check (e.g., Bash command)."""
-        request = ModelAuthGateRequest(
-            tool_name="Edit",
-            target_path="",
-            run_id=run_id,
-            authorization=valid_auth,
-            now=now,
-        )
-        decision = handler.evaluate(request)
+        """File-targeting tools with empty target_path are denied at step 7."""
+        for tool_name in ("Edit", "Write", "Read", "NotebookEdit", "MultiEdit"):
+            auth = ModelContractWorkAuthorization(
+                run_id=run_id,
+                allowed_tools=(tool_name,),
+                allowed_paths=("src/**/*.py",),
+                repo_scopes=(),
+                source=EnumAuthSource.EXPLICIT,
+                expires_at=now + timedelta(hours=4),
+            )
+            request = ModelAuthGateRequest(
+                tool_name=tool_name,
+                target_path="",
+                run_id=run_id,
+                authorization=auth,
+                now=now,
+            )
+            decision = handler.evaluate(request)
 
-        # Should not be denied at step 7
-        assert decision.step != 7 or decision.decision != EnumAuthDecision.DENY
+            assert decision.decision == EnumAuthDecision.DENY, (
+                f"Expected DENY for {tool_name} with empty path"
+            )
+            assert decision.step == 7, (
+                f"Expected step 7 for {tool_name} with empty path"
+            )
+            assert decision.reason_code == "file_tool_missing_path", (
+                f"Expected file_tool_missing_path for {tool_name}"
+            )
 
 
 # =============================================================================
@@ -956,6 +1031,37 @@ class TestHandlerExecute:
 
         assert result.result is not None
         assert result.correlation_id is not None
+
+    @pytest.mark.anyio
+    async def test_execute_wrong_operation_raises(
+        self, handler: HandlerAuthGate
+    ) -> None:
+        """execute() raises ValueError for unsupported operation."""
+        request = ModelAuthGateRequest(
+            tool_name="Edit",
+            target_path="src/main.py",
+        )
+        envelope: dict[str, object] = {
+            "operation": "auth_gate.unknown",
+            "payload": request,
+        }
+        with pytest.raises(ValueError, match="Unsupported operation"):
+            await handler.execute(envelope)
+
+    @pytest.mark.anyio
+    async def test_execute_missing_operation_raises(
+        self, handler: HandlerAuthGate
+    ) -> None:
+        """execute() raises ValueError when envelope has no operation."""
+        request = ModelAuthGateRequest(
+            tool_name="Edit",
+            target_path="src/main.py",
+        )
+        envelope: dict[str, object] = {
+            "payload": request,
+        }
+        with pytest.raises(ValueError, match="Unsupported operation"):
+            await handler.execute(envelope)
 
 
 # =============================================================================

@@ -47,6 +47,23 @@ logger = logging.getLogger(__name__)
 
 HANDLER_ID_AUTH_GATE: str = "auth-gate-handler"
 
+# The only operation this handler supports, as declared in contract.yaml
+# under handler_routing.handlers[0].supported_operations.
+EXPECTED_OPERATION: str = "auth_gate.evaluate"
+
+# Tools that target files and therefore require a non-empty target_path.
+# If a file-targeting tool is invoked with an empty target_path, the auth
+# gate denies the request rather than silently skipping the path check.
+FILE_TARGETING_TOOLS: frozenset[str] = frozenset(
+    {
+        "Edit",
+        "Write",
+        "Read",
+        "NotebookEdit",
+        "MultiEdit",
+    }
+)
+
 # Paths that are always permitted regardless of authorization state.
 # Plans and memory files are safe to read/write without explicit auth.
 # NOTE: Matched via fnmatch where * matches across / (intentionally permissive).
@@ -144,14 +161,11 @@ class HandlerAuthGate:
             Authorization decision with step, reason, and optional banner.
         """
         # Step 1: Whitelisted paths -> allow
-        normalized_path = (
-            posixpath.normpath(request.target_path) if request.target_path else ""
-        )
         if self._is_whitelisted_path(request.target_path):
             return ModelAuthGateDecision(
                 decision=EnumAuthDecision.ALLOW,
                 step=1,
-                reason=f"Path '{normalized_path}' matches whitelisted pattern.",
+                reason=f"Path '{request.target_path}' matches whitelisted pattern.",
                 reason_code="whitelisted_path",
             )
 
@@ -225,9 +239,19 @@ class HandlerAuthGate:
             )
 
         # Step 7: Path not matching allowed_paths glob -> deny
-        # NOTE: Empty target_path skips this check (intentional for non-file
-        # tools like Bash). Callers MUST enforce non-empty target_path for
-        # file-targeting tools (Edit, Write) before invoking the auth gate.
+        # File-targeting tools (Edit, Write, Read, NotebookEdit, MultiEdit)
+        # MUST provide a non-empty target_path. Denying here prevents silent
+        # bypass of path authorization for tools that always operate on files.
+        if not request.target_path and request.tool_name in FILE_TARGETING_TOOLS:
+            return ModelAuthGateDecision(
+                decision=EnumAuthDecision.DENY,
+                step=7,
+                reason=(
+                    f"File-targeting tool '{request.tool_name}' requires "
+                    f"a non-empty target_path."
+                ),
+                reason_code="file_tool_missing_path",
+            )
         if request.target_path and not self._path_matches_globs(
             request.target_path, auth.allowed_paths
         ):
@@ -289,6 +313,14 @@ class HandlerAuthGate:
         Returns:
             ModelHandlerOutput wrapping ModelAuthGateDecision.
         """
+        operation = envelope.get("operation")
+        if operation != EXPECTED_OPERATION:
+            msg = (
+                f"Unsupported operation: {operation!r}. "
+                f"This handler only supports '{EXPECTED_OPERATION}'."
+            )
+            raise ValueError(msg)
+
         correlation_id_raw = envelope.get("correlation_id")
         try:
             correlation_id = (
@@ -316,6 +348,14 @@ class HandlerAuthGate:
             result=decision,
         )
 
+    # Maximum directory depth for whitelisted paths. Paths with more than
+    # this many ``/`` separators after normalization are never whitelisted,
+    # preventing abuse via deeply nested paths that exploit the permissive
+    # fnmatch ``*`` (which matches across ``/``).  Set to 10 to accommodate
+    # legitimate patterns like ``*/.claude/projects/*/memory/*`` under deep
+    # workspace roots (up to ~3 prefix components).
+    _MAX_WHITELIST_DEPTH: int = 10
+
     @staticmethod
     def _is_whitelisted_path(path: str) -> bool:
         """Check if a path matches any whitelisted pattern.
@@ -328,6 +368,10 @@ class HandlerAuthGate:
         Paths are normalized via ``posixpath.normpath`` before matching
         to prevent traversal attacks (e.g., ``/a/.claude/memory/../../../etc/passwd``).
 
+        After fnmatch succeeds, a depth check rejects paths with more than
+        ``_MAX_WHITELIST_DEPTH`` (5) ``/`` separators to limit abuse from
+        deeply nested paths matching the permissive ``*.plan.md`` pattern.
+
         Args:
             path: File path to check.
 
@@ -336,11 +380,29 @@ class HandlerAuthGate:
         """
         if not path:
             return False
+        # Reject null bytes: a path like "src/main.py\x00.plan.md" would pass
+        # fnmatch (matching *.plan.md) but the OS truncates at the null byte,
+        # effectively allowing access to "src/main.py" under a whitelisted
+        # pattern.
+        if "\x00" in path:
+            return False
         normalized = posixpath.normpath(path)
         for pattern in WHITELISTED_PATH_PATTERNS:
             if fnmatch.fnmatch(normalized, pattern):
+                # Reject deeply nested paths to limit abuse surface of
+                # permissive fnmatch patterns like *.plan.md.
+                if normalized.count("/") > HandlerAuthGate._MAX_WHITELIST_DEPTH:
+                    return False
                 return True
         return False
+
+    # Maximum number of ** segments allowed in a single glob pattern.
+    # Each ** produces a regex fragment like ``(?:.*/)?`` or ``.*`` which
+    # involves backtracking. With many such segments, a crafted path can
+    # trigger catastrophic backtracking (ReDoS). 10 is generous for any
+    # legitimate glob; patterns like ``a/**/b/**/c/**/d/**/e/**/f/**/g/**``
+    # are never needed in practice.
+    _MAX_DOUBLE_STAR_SEGMENTS: int = 10
 
     @staticmethod
     @functools.lru_cache(maxsize=128)
@@ -359,12 +421,23 @@ class HandlerAuthGate:
             would be treated as double-star glob. All patterns in the codebase
             use proper glob syntax (e.g., ``src/**/*.py``).
 
+        Security:
+            Patterns with more than ``_MAX_DOUBLE_STAR_SEGMENTS`` (10) ``**``
+            segments are rejected with a ``ValueError`` to prevent ReDoS from
+            catastrophic backtracking in the generated regex.
+
         Args:
             pattern: Glob pattern, e.g. ``src/**/*.py``.
 
         Returns:
             Compiled regex pattern.
+
+        Raises:
+            ValueError: If the pattern contains more than
+                ``_MAX_DOUBLE_STAR_SEGMENTS`` ``**`` segments.
         """
+        # Count ** segments upfront to reject ReDoS-prone patterns.
+        double_star_count = 0
         regex = ""
         i = 0
         n = len(pattern)
@@ -372,6 +445,15 @@ class HandlerAuthGate:
             c = pattern[i]
             if c == "*":
                 if i + 1 < n and pattern[i + 1] == "*":
+                    double_star_count += 1
+                    if double_star_count > HandlerAuthGate._MAX_DOUBLE_STAR_SEGMENTS:
+                        msg = (
+                            f"Glob pattern contains {double_star_count} '**' segments, "
+                            f"exceeding maximum of "
+                            f"{HandlerAuthGate._MAX_DOUBLE_STAR_SEGMENTS}. "
+                            f"Pattern: {pattern!r}"
+                        )
+                        raise ValueError(msg)
                     # ** matches zero or more path components
                     if i + 2 < n and pattern[i + 2] == "/":
                         regex += "(?:.*/)?"
@@ -400,6 +482,12 @@ class HandlerAuthGate:
         segments before matching, preventing traversal attacks such as
         ``src/../../etc/passwd`` matching ``src/**``.
 
+        Security:
+            - Null bytes are rejected to prevent C-string truncation exploits.
+            - Path length is capped at ``PATH_MAX`` (4096) to mitigate ReDoS
+              from crafted long inputs matched against patterns with multiple
+              ``**`` segments.
+
         Args:
             path: File path to check.
             globs: Glob patterns to match against.
@@ -407,6 +495,15 @@ class HandlerAuthGate:
         Returns:
             True if the path matches at least one glob pattern.
         """
+        # Reject null bytes: OS-level C-string truncation could let a path
+        # bypass glob checks (same rationale as _is_whitelisted_path).
+        if "\x00" in path:
+            return False
+        # Cap path length at Linux PATH_MAX to bound regex evaluation time
+        # against patterns containing multiple ** segments.
+        _PATH_MAX = 4096
+        if len(path) > _PATH_MAX:
+            return False
         normalized = posixpath.normpath(path)
         for pattern in globs:
             if HandlerAuthGate._glob_to_regex(pattern).match(normalized):

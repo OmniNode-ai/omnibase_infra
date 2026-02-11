@@ -38,7 +38,9 @@ class ModelAuthGateRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     tool_name: str = Field(
-        ..., min_length=1, description="Tool being invoked."
+        ...,
+        min_length=1,
+        description="Canonical tool name (case-sensitive, e.g., 'Edit', 'Write', 'Bash').",
     )  # ONEX_EXCLUDE: pattern - simple tool identifier
     target_path: str = Field(default="", description="File path the tool targets.")
     target_repo: str = Field(default="", description="Repository the tool targets.")
