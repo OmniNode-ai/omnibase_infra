@@ -33,8 +33,16 @@ from uuid import UUID, uuid4
 from pydantic import ValidationError
 
 from omnibase_core.models.dispatch import ModelHandlerOutput
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.enums.enum_auth_decision import EnumAuthDecision
+from omnibase_infra.errors.error_infra import RuntimeHostError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.nodes.node_auth_gate_compute.models.model_auth_gate_decision import (
     ModelAuthGateDecision,
 )
@@ -335,18 +343,6 @@ class HandlerAuthGate:
         Returns:
             ModelHandlerOutput wrapping ModelAuthGateDecision.
         """
-        # NOTE: ValueError is intentional for programming errors below.
-        # EnvelopeValidationError is explicitly "NOT a handler-specific error"
-        # (see error_infra.py). These are caller bugs (wrong operation routed,
-        # missing payload), not infrastructure failures.
-        operation = envelope.get("operation")
-        if operation != EXPECTED_OPERATION:
-            msg = (
-                f"[{HANDLER_ID_AUTH_GATE}] Unsupported operation: {operation!r}. "
-                f"This handler only supports '{EXPECTED_OPERATION}'."
-            )
-            raise ValueError(msg)
-
         correlation_id_raw = envelope.get("correlation_id")
         try:
             correlation_id = (
@@ -356,24 +352,45 @@ class HandlerAuthGate:
             correlation_id = uuid4()
         input_envelope_id = uuid4()
 
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="auth_gate.evaluate",
+        )
+
+        operation = envelope.get("operation")
+        if operation != EXPECTED_OPERATION:
+            raise RuntimeHostError(
+                f"[{HANDLER_ID_AUTH_GATE}] Unsupported operation: {operation!r}. "
+                f"This handler only supports '{EXPECTED_OPERATION}'.",
+                context=context,
+            )
+
         payload_raw = envelope.get("payload")
         if payload_raw is None:
-            msg = (
+            raise RuntimeHostError(
                 f"[{HANDLER_ID_AUTH_GATE}] Envelope missing required 'payload' "
-                f"key for auth gate evaluation."
+                f"key for auth gate evaluation.",
+                context=context,
             )
-            raise ValueError(msg)
+
         if isinstance(payload_raw, ModelAuthGateRequest):
             request = payload_raw
-        else:
+        elif isinstance(payload_raw, dict):
             try:
                 request = ModelAuthGateRequest.model_validate(payload_raw)
             except ValidationError as exc:
-                msg = (
+                raise RuntimeHostError(
                     f"[{HANDLER_ID_AUTH_GATE}] Invalid payload for auth gate "
-                    f"evaluation: {exc.error_count()} validation error(s)."
-                )
-                raise ValueError(msg) from exc
+                    f"evaluation: {exc.error_count()} validation error(s).",
+                    context=context,
+                ) from exc
+        else:
+            raise RuntimeHostError(
+                f"[{HANDLER_ID_AUTH_GATE}] Expected dict or ModelAuthGateRequest payload, "
+                f"got {type(payload_raw).__name__}.",
+                context=context,
+            )
 
         decision = self.evaluate(request)
 

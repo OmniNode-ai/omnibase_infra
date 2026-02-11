@@ -33,6 +33,7 @@ import yaml
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_auth_decision import EnumAuthDecision
 from omnibase_infra.enums.enum_auth_source import EnumAuthSource
+from omnibase_infra.errors.error_infra import RuntimeHostError
 from omnibase_infra.nodes.node_auth_gate_compute import (
     HandlerAuthGate,
     NodeAuthGateCompute,
@@ -1006,11 +1007,11 @@ class TestHandlerExecute:
     async def test_execute_missing_payload_raises(
         self, handler: HandlerAuthGate
     ) -> None:
-        """execute() raises ValueError when envelope has no payload."""
+        """execute() raises RuntimeHostError when envelope has no payload."""
         envelope: dict[str, object] = {
             "operation": "auth_gate.evaluate",
         }
-        with pytest.raises(ValueError, match="missing required 'payload'"):
+        with pytest.raises(RuntimeHostError, match="missing required 'payload'"):
             await handler.execute(envelope)
 
     @pytest.mark.anyio
@@ -1036,7 +1037,7 @@ class TestHandlerExecute:
     async def test_execute_wrong_operation_raises(
         self, handler: HandlerAuthGate
     ) -> None:
-        """execute() raises ValueError for unsupported operation."""
+        """execute() raises RuntimeHostError for unsupported operation."""
         request = ModelAuthGateRequest(
             tool_name="Edit",
             target_path="src/main.py",
@@ -1045,14 +1046,14 @@ class TestHandlerExecute:
             "operation": "auth_gate.unknown",
             "payload": request,
         }
-        with pytest.raises(ValueError, match="Unsupported operation"):
+        with pytest.raises(RuntimeHostError, match="Unsupported operation"):
             await handler.execute(envelope)
 
     @pytest.mark.anyio
     async def test_execute_missing_operation_raises(
         self, handler: HandlerAuthGate
     ) -> None:
-        """execute() raises ValueError when envelope has no operation."""
+        """execute() raises RuntimeHostError when envelope has no operation."""
         request = ModelAuthGateRequest(
             tool_name="Edit",
             target_path="src/main.py",
@@ -1060,19 +1061,19 @@ class TestHandlerExecute:
         envelope: dict[str, object] = {
             "payload": request,
         }
-        with pytest.raises(ValueError, match="Unsupported operation"):
+        with pytest.raises(RuntimeHostError, match="Unsupported operation"):
             await handler.execute(envelope)
 
     @pytest.mark.anyio
     async def test_execute_invalid_payload_wraps_validation_error(
         self, handler: HandlerAuthGate
     ) -> None:
-        """execute() wraps ValidationError as ValueError for malformed payloads."""
+        """execute() wraps ValidationError as RuntimeHostError for malformed payloads."""
         envelope: dict[str, object] = {
             "operation": "auth_gate.evaluate",
             "payload": {"tool_name": 123},  # wrong type triggers ValidationError
         }
-        with pytest.raises(ValueError, match="validation error"):
+        with pytest.raises(RuntimeHostError, match="validation error"):
             await handler.execute(envelope)
 
 
