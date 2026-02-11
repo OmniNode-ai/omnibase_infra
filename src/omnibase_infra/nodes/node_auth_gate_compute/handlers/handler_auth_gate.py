@@ -195,7 +195,9 @@ class HandlerAuthGate:
                 )
             # Truncate and strip control characters from user-supplied reason
             # to prevent log injection or display issues in downstream consumers.
-            safe_reason = request.emergency_override_reason[:500]
+            safe_reason = re.sub(
+                r"[\x00-\x1f\x7f]", "", request.emergency_override_reason[:500]
+            )
             return ModelAuthGateDecision(
                 decision=EnumAuthDecision.SOFT_DENY,
                 step=2,

@@ -1140,6 +1140,17 @@ class TestGlobToRegexEdgeCases:
         """Paths containing null bytes are rejected by _path_matches_globs."""
         assert not handler._path_matches_globs("src/main.py\x00evil", ("src/**",))
 
+    def test_null_byte_rejected_in_is_whitelisted_path(
+        self, handler: HandlerAuthGate
+    ) -> None:
+        """Paths containing null bytes are rejected by _is_whitelisted_path.
+
+        A path like "src/main.py\\x00.plan.md" would pass fnmatch (matching
+        *.plan.md) but the OS truncates at the null byte, effectively
+        granting access to "src/main.py" under a whitelisted pattern.
+        """
+        assert not handler._is_whitelisted_path("src/main.py\x00.plan.md")
+
     def test_path_exceeding_path_max_rejected(self, handler: HandlerAuthGate) -> None:
         """Paths exceeding PATH_MAX (4096) characters are rejected."""
         long_path = "a/" * 3000  # 6000 characters, well over 4096
