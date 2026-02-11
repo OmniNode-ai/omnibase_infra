@@ -2240,6 +2240,27 @@ pattern_exemptions:
     documentation:
       - OMN-1908 (Cross-repo validation ledger persistence)
     ticket: OMN-1908
+  # ==========================================================================
+  # Session State Node Exemptions (OMN-2117)
+  # ==========================================================================
+  # run_id is a human-readable pipeline run identifier string (e.g., 'pipeline-1'),
+  # NOT a UUID. Used for filesystem paths (runs/{run_id}.json) and human readability.
+  - file_pattern: 'model_run_context\.py'
+    violation_pattern: "Field 'run_id' should use UUID"
+    reason: >
+      run_id is a human-readable pipeline run identifier (e.g., 'pipeline-1'), not a UUID. It is used directly in filesystem paths (runs/{run_id}.json) and for human-readable pipeline identification. The _id suffix triggers a false positive UUID suggestion.
+
+    documentation:
+      - OMN-2117 ticket description (run_id as string identifier)
+    ticket: OMN-2117
+  - file_pattern: 'model_session_lifecycle_state\.py'
+    violation_pattern: "Field 'run_id' should use UUID"
+    reason: >
+      run_id mirrors the string type from ModelRunContext for consistency. Pipeline run identifiers are human-readable strings, not UUIDs.
+
+    documentation:
+      - OMN-2117 ticket description (run_id as string identifier)
+    ticket: OMN-2117
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
@@ -2306,7 +2327,7 @@ architecture_exemptions:
       - CLAUDE.md (Protocol File Naming - domain-grouping convention)
       - docs/patterns/timeout_scanner_emitter.md
     ticket: OMN-932
-# These handle complex union type violations
+    # These handle complex union type violations
 union_exemptions:
   # ==========================================================================
   # ModelNodeCapabilities Config Field Exemption

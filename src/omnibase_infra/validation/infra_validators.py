@@ -452,7 +452,8 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # Note: OMN-1742 RequestResponseWiring uses UUID | None (optional, not counted)
 # Note: OMN-1869 ContractRegistration added IntentPayloadType union (118th)
 # Note: OMN-1990 ServiceTopicManager return type dict[str, list[str] | str] (119th)
-INFRA_MAX_UNIONS = 119
+# Note: OMN-2117 ModelRunContext.metadata: dict[str, Any] uses union-like typing (120th)
+INFRA_MAX_UNIONS = 120
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

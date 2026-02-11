@@ -1,0 +1,145 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeSessionStateEffect
+#
+# Session state filesystem I/O effect node.
+# Owns ALL reads/writes to ~/.claude/state/.
+#
+# Related Tickets:
+#   - OMN-2117: Canonical State Nodes
+#   - OMN-2005: Workflow Automation (parent)
+# Contract identifiers
+name: "node_session_state_effect"
+contract_name: "node_session_state_effect"
+node_name: "node_session_state_effect"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Description
+description: >
+  Effect node for session state filesystem I/O. Owns all reads/writes to ~/.claude/state/ including session.json (with flock) and runs/{run_id}.json. Uses atomic write-tmp-fsync-rename pattern for crash safety. Supports concurrent pipeline isolation via per-run documents and stale run GC.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelSessionIndex"
+  module: "omnibase_infra.nodes.node_session_state_effect.models"
+  description: "Session index representing current session state pointers."
+output_model:
+  name: "ModelSessionStateResult"
+  module: "omnibase_infra.nodes.node_session_state_effect.models"
+  description: "Result of a session state filesystem operation."
+# Capability declaration
+capabilities:
+  - name: "session.state.index_read"
+    description: "Read session.json index file"
+  - name: "session.state.index_write"
+    description: "Atomic write session.json with flock"
+  - name: "session.state.run_read"
+    description: "Read runs/{run_id}.json context file"
+  - name: "session.state.run_write"
+    description: "Atomic write runs/{run_id}.json context file"
+  - name: "session.state.gc"
+    description: "Garbage-collect stale run documents (4hr TTL)"
+# IO operations
+io_operations:
+  - operation: "session.index.read"
+    description: "Read session.json and return ModelSessionIndex"
+    idempotent: true
+  - operation: "session.index.write"
+    description: "Atomic write session.json with flock protection"
+    idempotent: true
+  - operation: "session.run.read"
+    description: "Read runs/{run_id}.json and return ModelRunContext"
+    input_fields:
+      - run_id: "str"
+    idempotent: true
+  - operation: "session.run.write"
+    description: "Atomic write runs/{run_id}.json (single writer, no lock)"
+    input_fields:
+      - run_id: "str"
+    idempotent: true
+  - operation: "session.gc"
+    description: "Remove run documents older than TTL (default 4hr)"
+    idempotent: true
+# Handler routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "session.index.read"
+      handler_class: "HandlerSessionIndexRead"
+      handler_module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_session_index_read"
+      description: "Read session.json index"
+    - operation: "session.index.write"
+      handler_class: "HandlerSessionIndexWrite"
+      handler_module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_session_index_write"
+      description: "Atomic write session.json with flock"
+    - operation: "session.run.read"
+      handler_class: "HandlerRunContextRead"
+      handler_module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_run_context_read"
+      description: "Read run context document"
+    - operation: "session.run.write"
+      handler_class: "HandlerRunContextWrite"
+      handler_module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_run_context_write"
+      description: "Atomic write run context document"
+    - operation: "session.gc"
+      handler_class: "HandlerStaleRunGC"
+      handler_module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_stale_run_gc"
+      description: "Garbage-collect stale run documents"
+# Dependencies
+dependencies:
+  - name: "state_dir"
+    type: "path"
+    description: "Root directory for session state (~/.claude/state)"
+# Error handling
+error_handling:
+  retry_policy:
+    max_retries: 2
+    initial_delay_ms: 50
+    max_delay_ms: 500
+    exponential_base: 2
+    retry_on:
+      - "OSError"
+  error_types:
+    - name: "SessionIndexParseError"
+      description: "session.json is malformed"
+      recoverable: false
+    - name: "SessionIndexIOError"
+      description: "I/O error reading/writing session.json"
+      recoverable: true
+    - name: "RunContextParseError"
+      description: "run context document is malformed"
+      recoverable: false
+    - name: "RunContextIOError"
+      description: "I/O error reading/writing run context"
+      recoverable: true
+# Health check
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  checks:
+    - name: "state_dir_writable"
+      type: "filesystem"
+      critical: true
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-10"
+  tags:
+    - effect
+    - session
+    - state
+    - filesystem
+    - atomic-write
+    - flock
+    - concurrent-pipeline
