@@ -105,7 +105,7 @@ class ModelRunContext(BaseModel):
             status=status,
             created_at=self.created_at,
             updated_at=datetime.now(UTC),
-            metadata=self.metadata,
+            metadata={**self.metadata},
         )
 
     def with_metadata(self, key: str, value: object) -> ModelRunContext:

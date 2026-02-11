@@ -90,10 +90,15 @@ class HandlerRunContextWrite:
                 suffix=".tmp",
             )
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2, default=str)
-                    f.flush()
-                    os.fsync(f.fileno())
+                file_obj = os.fdopen(fd, "w", encoding="utf-8")
+            except BaseException:
+                os.close(fd)
+                raise
+            try:
+                with file_obj:
+                    json.dump(data, file_obj, indent=2, default=str)
+                    file_obj.flush()
+                    os.fsync(file_obj.fileno())
 
                 Path(tmp_path).rename(run_path)
             except BaseException:

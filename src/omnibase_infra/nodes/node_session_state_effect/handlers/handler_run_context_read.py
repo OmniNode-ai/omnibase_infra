@@ -74,7 +74,8 @@ class HandlerRunContextRead:
         run_path = runs_dir / f"{run_id}.json"
 
         # Defense-in-depth: verify resolved path stays within runs directory
-        if run_path.exists() and run_path.resolve().parent != runs_dir.resolve():
+        # (resolve() works on non-existent paths, avoiding TOCTOU with exists())
+        if run_path.resolve().parent != runs_dir.resolve():
             return (
                 None,
                 ModelSessionStateResult(
