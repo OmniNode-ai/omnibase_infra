@@ -69,6 +69,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
+from urllib.parse import quote_plus
 
 import pytest
 from dotenv import load_dotenv
@@ -950,8 +951,8 @@ async def cleanup_postgres_test_projections() -> AsyncGenerator[None, None]:
         postgres_user = os.getenv("POSTGRES_USER", "postgres")
 
         dsn = (
-            f"postgresql://{postgres_user}:{postgres_password}"
-            f"@{postgres_host}:{postgres_port}/{postgres_database}"
+            f"postgresql://{quote_plus(postgres_user)}:{quote_plus(postgres_password)}"
+            f"@{postgres_host}:{postgres_port}/{quote_plus(postgres_database)}"
         )
 
     try:

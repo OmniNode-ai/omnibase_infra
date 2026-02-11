@@ -230,6 +230,93 @@ class TestModelPostgresPoolConfig:
             ):
                 ModelPostgresPoolConfig.from_env()
 
+    # -------------------------------------------------------------------
+    # from_db_url tests (OMN-2146)
+    # -------------------------------------------------------------------
+
+    def test_from_db_url_parses_full_dsn(self) -> None:
+        """from_db_url parses a complete PostgreSQL DSN into all fields."""
+        config = ModelPostgresPoolConfig.from_db_url(
+            "postgresql://myuser:mypass@dbhost:5433/mydb"
+        )
+        assert config.host == "dbhost"
+        assert config.port == 5433
+        assert config.user == "myuser"
+        assert config.password == "mypass"
+        assert config.database == "mydb"
+        assert config.min_size == 2
+        assert config.max_size == 10
+
+    def test_from_db_url_missing_database_raises(self) -> None:
+        """URL without a database path raises ValueError."""
+        with pytest.raises(ValueError, match="missing the database name"):
+            ModelPostgresPoolConfig.from_db_url("postgresql://user:pass@host:5432/")
+
+    def test_from_db_url_empty_string_raises(self) -> None:
+        """Empty URL string raises ValueError (no database component)."""
+        with pytest.raises(ValueError, match="missing the database name"):
+            ModelPostgresPoolConfig.from_db_url("")
+
+    def test_from_db_url_url_encoded_credentials(self) -> None:
+        """URL-encoded characters in credentials are preserved as-is.
+
+        urlparse does not decode percent-encoding in userinfo; the raw
+        value is stored so that downstream drivers (asyncpg/libpq) can
+        handle decoding themselves.
+        """
+        config = ModelPostgresPoolConfig.from_db_url(
+            "postgresql://admin:p%40ss%23w0rd@host:5432/mydb"
+        )
+        assert config.user == "admin"
+        assert config.password == "p%40ss%23w0rd"
+        assert config.database == "mydb"
+
+    def test_from_db_url_defaults_for_missing_parts(self) -> None:
+        """URL with minimal components uses defaults for host, port, user."""
+        config = ModelPostgresPoolConfig.from_db_url("postgresql:///mydb")
+        assert config.host == "localhost"
+        assert config.port == 5432
+        assert config.user == "postgres"
+        assert config.password == ""
+        assert config.database == "mydb"
+
+    # -------------------------------------------------------------------
+    # from_env OMNIBASE_INFRA_DB_URL tests (OMN-2146)
+    # -------------------------------------------------------------------
+
+    def test_from_env_prefers_omnibase_infra_db_url(self) -> None:
+        """OMNIBASE_INFRA_DB_URL takes precedence over POSTGRES_* variables."""
+        with patch.dict(
+            "os.environ",
+            {
+                "OMNIBASE_INFRA_DB_URL": "postgresql://urluser:urlpass@urlhost:5555/urldb",
+                "POSTGRES_HOST": "envhost",
+                "POSTGRES_PORT": "9999",
+                "POSTGRES_USER": "envuser",
+                "POSTGRES_PASSWORD": "envpass",
+                "POSTGRES_DATABASE": "envdb",
+            },
+        ):
+            config = ModelPostgresPoolConfig.from_env()
+            assert config.host == "urlhost"
+            assert config.port == 5555
+            assert config.user == "urluser"
+            assert config.password == "urlpass"
+            assert config.database == "urldb"
+
+    def test_from_env_raises_when_no_database_configured(self) -> None:
+        """Raises ValueError with OMN-2146 message when no database is configured."""
+        with patch.dict(
+            "os.environ",
+            {
+                "POSTGRES_HOST": "somehost",
+                "POSTGRES_PORT": "5432",
+            },
+            clear=True,
+        ):
+            with pytest.raises(ValueError, match="OMN-2146"):
+                ModelPostgresPoolConfig.from_env()
+
 
 class TestModelKafkaProducerConfig:
     """Tests for Kafka producer configuration."""
