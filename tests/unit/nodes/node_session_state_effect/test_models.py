@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 
@@ -243,8 +244,6 @@ class TestModelSessionStateResult:
 
     def test_success_result(self) -> None:
         """A successful result evaluates as True."""
-        from uuid import uuid4
-
         result = ModelSessionStateResult(
             success=True,
             operation="test",
@@ -254,8 +253,6 @@ class TestModelSessionStateResult:
 
     def test_failure_result(self) -> None:
         """A failed result evaluates as False."""
-        from uuid import uuid4
-
         result = ModelSessionStateResult(
             success=False,
             operation="test",

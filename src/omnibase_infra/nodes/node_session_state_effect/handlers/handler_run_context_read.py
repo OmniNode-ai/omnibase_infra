@@ -91,7 +91,7 @@ class HandlerRunContextRead:
                     success=False,
                     operation="run_context_read",
                     correlation_id=correlation_id,
-                    error=f"Invalid run_id: contains path traversal characters: {run_id!r}",
+                    error="Invalid run_id: contains disallowed characters",
                     error_code="RUN_CONTEXT_INVALID_ID",
                 ),
             )
@@ -129,7 +129,7 @@ class HandlerRunContextRead:
                     success=False,
                     operation="run_context_read",
                     correlation_id=correlation_id,
-                    error=f"Invalid run_id: resolved path escapes state directory: {run_id!r}",
+                    error="Invalid run_id: resolved path escapes state directory",
                     error_code="RUN_CONTEXT_INVALID_ID",
                 ),
             )
@@ -157,6 +157,22 @@ class HandlerRunContextRead:
                     operation="run_context_read",
                     correlation_id=correlation_id,
                     files_affected=1,
+                ),
+            )
+        except FileNotFoundError:
+            # TOCTOU: file was deleted between exists() check and read_text().
+            # Treat the same as "not found" -- this is not an error.
+            logger.debug(
+                "Run context disappeared between exists() and read_text(): %s",
+                run_path,
+            )
+            return (
+                None,
+                ModelSessionStateResult(
+                    success=True,
+                    operation="run_context_read",
+                    correlation_id=correlation_id,
+                    files_affected=0,
                 ),
             )
         except (json.JSONDecodeError, ValueError, ValidationError) as e:

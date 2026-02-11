@@ -107,19 +107,21 @@ class HandlerRunContextWrite:
             Operation result indicating success or failure.
         """
         # Defense-in-depth: reject unsafe IDs even if model_construct() skipped validators.
-        # Explicit checks for path traversal characters (/, \, ..) in addition to
-        # the regex allowlist, since run_id is used to construct filesystem paths.
+        # Explicit checks for path traversal characters (/, \, ..), and null bytes
+        # in addition to the regex allowlist, since run_id is used to construct
+        # filesystem paths.
         if (
             not RUN_ID_PATTERN.match(context.run_id)
             or ".." in context.run_id
             or "/" in context.run_id
             or "\\" in context.run_id
+            or "\x00" in context.run_id
         ):
             return ModelSessionStateResult(
                 success=False,
                 operation="run_context_write",
                 correlation_id=correlation_id,
-                error=f"Invalid run_id: contains path traversal characters: {context.run_id!r}",
+                error="Invalid run_id: contains disallowed characters",
                 error_code="RUN_CONTEXT_INVALID_ID",
             )
 
@@ -136,7 +138,7 @@ class HandlerRunContextWrite:
                     success=False,
                     operation="run_context_write",
                     correlation_id=correlation_id,
-                    error=f"Invalid run_id: resolved path escapes state directory: {context.run_id!r}",
+                    error="Invalid run_id: resolved path escapes state directory",
                     error_code="RUN_CONTEXT_INVALID_ID",
                 )
             data = context.model_dump(mode="json")

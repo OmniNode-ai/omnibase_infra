@@ -157,9 +157,8 @@ class ModelSessionLifecycleState(BaseModel):
             RuntimeHostError: If current state is not RUN_CREATED or
                 ``run_id`` is missing.
         """
-        if not self.can_activate_run():
-            raise _make_transition_error(self.status.value, "run_active", "RUN_CREATED")
-        if not self.run_id:
+        # Check run_id first so the error message is specific.
+        if self.status == EnumSessionLifecycleState.RUN_CREATED and not self.run_id:
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="state_transition",
@@ -168,6 +167,8 @@ class ModelSessionLifecycleState(BaseModel):
                 sanitize_error_string("Cannot activate run: run_id is missing"),
                 context=context,
             )
+        if not self.can_activate_run():
+            raise _make_transition_error(self.status.value, "run_active", "RUN_CREATED")
         return ModelSessionLifecycleState(
             status=EnumSessionLifecycleState.RUN_ACTIVE,
             run_id=self.run_id,
@@ -187,9 +188,8 @@ class ModelSessionLifecycleState(BaseModel):
             RuntimeHostError: If current state is not RUN_ACTIVE or
                 ``run_id`` is missing.
         """
-        if not self.can_end_run():
-            raise _make_transition_error(self.status.value, "run_ended", "RUN_ACTIVE")
-        if not self.run_id:
+        # Check run_id first so the error message is specific.
+        if self.status == EnumSessionLifecycleState.RUN_ACTIVE and not self.run_id:
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="state_transition",
@@ -198,6 +198,8 @@ class ModelSessionLifecycleState(BaseModel):
                 sanitize_error_string("Cannot end run: run_id is missing"),
                 context=context,
             )
+        if not self.can_end_run():
+            raise _make_transition_error(self.status.value, "run_ended", "RUN_ACTIVE")
         return ModelSessionLifecycleState(
             status=EnumSessionLifecycleState.RUN_ENDED,
             run_id=self.run_id,
@@ -253,17 +255,27 @@ class ModelSessionLifecycleState(BaseModel):
         """Check if the current run can be activated.
 
         Returns:
-            True if the current state is RUN_CREATED.
+            True if the current state is RUN_CREATED and ``run_id`` is set.
+            A state with status RUN_CREATED but no run_id is malformed and
+            cannot be activated.
         """
-        return self.status == EnumSessionLifecycleState.RUN_CREATED
+        return (
+            self.status == EnumSessionLifecycleState.RUN_CREATED
+            and self.run_id is not None
+        )
 
     def can_end_run(self) -> bool:
         """Check if the current run can be ended.
 
         Returns:
-            True if the current state is RUN_ACTIVE.
+            True if the current state is RUN_ACTIVE and ``run_id`` is set.
+            A state with status RUN_ACTIVE but no run_id is malformed and
+            cannot transition to ended.
         """
-        return self.status == EnumSessionLifecycleState.RUN_ACTIVE
+        return (
+            self.status == EnumSessionLifecycleState.RUN_ACTIVE
+            and self.run_id is not None
+        )
 
     def can_reset(self) -> bool:
         """Check if the current state allows reset to idle.
