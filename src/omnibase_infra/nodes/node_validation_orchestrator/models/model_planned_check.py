@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Planned check model for the validation orchestrator.
+"""Planned check model — canonical definition shared by orchestrator and executor.
 
 A single check to be executed as part of the validation plan.
+
+Ticket: OMN-2147
 """
 
 from __future__ import annotations
@@ -13,21 +15,34 @@ from omnibase_infra.enums import EnumCheckSeverity
 
 
 class ModelPlannedCheck(BaseModel):
-    """A single check to be executed as part of the validation plan.
+    """A single check scheduled for execution as part of a validation plan.
 
     Attributes:
-        check_code: Check identifier (e.g., CHECK-PY-001).
-        label: Human-readable check label.
-        severity: Check severity level.
-        enabled: Whether this check is enabled.
+        check_code: Unique check identifier (e.g., CHECK-PY-001).
+        label: Human-readable check label (e.g., "mypy typecheck").
+        command: Shell command to execute (e.g., "poetry run mypy src/").
+        severity: Whether this check is required, recommended, or informational.
+        enabled: Whether the check should be executed.
+        timeout_ms: Maximum execution time in milliseconds (0 = no limit).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    check_code: str = Field(..., description="Check identifier (e.g., CHECK-PY-001).")
+    check_code: str = Field(
+        ..., description="Unique check identifier (e.g., CHECK-PY-001)."
+    )
     label: str = Field(..., description="Human-readable check name.")
-    severity: EnumCheckSeverity = Field(..., description="Check severity level.")
-    enabled: bool = Field(default=True, description="Whether this check is enabled.")
+    command: str = Field(default="", description="Shell command to execute.")
+    severity: EnumCheckSeverity = Field(
+        default=EnumCheckSeverity.REQUIRED,
+        description="Severity classification for this check.",
+    )
+    enabled: bool = Field(
+        default=True, description="Whether the check should be executed."
+    )
+    timeout_ms: float = Field(
+        default=0.0, ge=0.0, description="Max execution time in ms (0 = no limit)."
+    )
 
 
 __all__: list[str] = ["ModelPlannedCheck"]

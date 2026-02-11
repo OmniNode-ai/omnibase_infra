@@ -11,10 +11,12 @@ any type violations, security validation, validation severity, selection strateg
 registration status, confirmation events, and other infrastructure concerns.
 
 Exports:
+    EnumAdjudicatorState: Validation adjudicator FSM states (COLLECTING, ADJUDICATING, VERDICT_EMITTED)
     EnumAnyTypeViolation: Any type violation categories for strong typing validation
     EnumAuthDecision: Authorization decision outcomes (ALLOW, DENY, SOFT_DENY)
     EnumAuthSource: Authorization source classification (PLAN_APPROVAL, TICKET_PIPELINE, etc.)
     EnumBackendType: Infrastructure backend types (CONSUL, POSTGRES)
+    EnumCheckSeverity: Validation check severity (REQUIRED, RECOMMENDED, INFORMATIONAL)
     EnumChainViolationType: Chain violation types for correlation/causation validation
     EnumCircuitState: Circuit breaker states (CLOSED, OPEN, HALF_OPEN)
     EnumConfirmationEventType: Registration confirmation event types
@@ -50,6 +52,8 @@ Exports:
     EnumTopicStandard: Topic standards (ONEX_KAFKA, ENVIRONMENT_AWARE)
     EnumTopicType: Topic types (EVENTS, COMMANDS, INTENTS, SNAPSHOTS)
     EnumValidationSeverity: Validation error severity levels (ERROR, CRITICAL, WARNING)
+    EnumValidationVerdict: Validation pipeline verdict (PASS, FAIL, QUARANTINE)
+    EnumLifecycleTier: Pattern lifecycle promotion tiers (OBSERVED through DEFAULT, SUPPRESSED)
 """
 
 from omnibase_core.enums import EnumTopicType

@@ -316,6 +316,8 @@ class TestModelPlannedCheck:
         assert check.label == "Typecheck"
         assert check.severity == EnumCheckSeverity.REQUIRED
         assert check.enabled is True
+        assert check.command == ""
+        assert check.timeout_ms == 0.0
 
     def test_frozen_immutability(self) -> None:
         """Frozen model rejects attribute mutation."""

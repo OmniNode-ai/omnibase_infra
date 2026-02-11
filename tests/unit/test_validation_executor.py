@@ -10,7 +10,7 @@ Tests:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -23,17 +23,15 @@ from omnibase_infra.enums import (
 from omnibase_infra.nodes.node_validation_executor.handlers.handler_run_checks import (
     HandlerRunChecks,
 )
+from omnibase_infra.nodes.node_validation_executor.models import (
+    ModelPlannedCheck,
+    ModelValidationPlan,
+)
 from omnibase_infra.nodes.node_validation_executor.models.model_check_result import (
     ModelCheckResult,
 )
 from omnibase_infra.nodes.node_validation_executor.models.model_executor_result import (
     ModelExecutorResult,
-)
-from omnibase_infra.nodes.node_validation_executor.models.model_planned_check import (
-    ModelPlannedCheck,
-)
-from omnibase_infra.nodes.node_validation_executor.models.model_validation_plan import (
-    ModelValidationPlan,
 )
 
 # ============================================================================

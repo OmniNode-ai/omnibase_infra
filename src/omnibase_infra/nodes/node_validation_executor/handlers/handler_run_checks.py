@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -23,7 +23,7 @@ from omnibase_infra.nodes.node_validation_executor.models.model_check_result imp
 from omnibase_infra.nodes.node_validation_executor.models.model_executor_result import (
     ModelExecutorResult,
 )
-from omnibase_infra.nodes.node_validation_executor.models.model_validation_plan import (
+from omnibase_infra.nodes.node_validation_orchestrator.models.model_validation_plan import (
     ModelValidationPlan,
 )
 
