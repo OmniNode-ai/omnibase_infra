@@ -71,7 +71,9 @@ class HandlerAuthGate:
 
     CRITICAL INVARIANTS:
     - Pure computation: no I/O, no side effects, no event bus access
-    - Deterministic: same input always produces same output
+    - Deterministic: ``evaluate()`` always produces same output for same input.
+      ``execute()`` generates envelope metadata (correlation_id, envelope_id)
+      which may differ across calls.
     - Cascade order is fixed and must not be reordered
 
     Attributes:
@@ -281,6 +283,9 @@ class HandlerAuthGate:
         input_envelope_id = uuid4()
 
         payload_raw = envelope.get("payload")
+        if payload_raw is None:
+            msg = "Envelope missing required 'payload' key for auth gate evaluation."
+            raise ValueError(msg)
         if isinstance(payload_raw, ModelAuthGateRequest):
             request = payload_raw
         else:
@@ -298,6 +303,11 @@ class HandlerAuthGate:
     @staticmethod
     def _is_whitelisted_path(path: str) -> bool:
         """Check if a path matches any whitelisted pattern.
+
+        Uses ``fnmatch`` where ``*`` matches across directory separators.
+        This is intentionally more permissive than ``_path_matches_globs``
+        (which treats ``*`` as non-``/`` matching) because whitelisted
+        paths are safe-by-definition and broader matching is desired.
 
         Args:
             path: File path to check.
@@ -346,10 +356,8 @@ class HandlerAuthGate:
                 regex += "[^/]*"
             elif c == "?":
                 regex += "[^/]"
-            elif c in r".+^${}|()[]\\":
-                regex += "\\" + c
             else:
-                regex += c
+                regex += re.escape(c)
             i += 1
         return re.compile(f"^{regex}$")
 

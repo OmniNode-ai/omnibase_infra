@@ -875,6 +875,76 @@ class TestHandlerExecute:
         assert result.result.decision == EnumAuthDecision.ALLOW
         assert result.result.step == 1
 
+    @pytest.mark.anyio
+    async def test_execute_missing_payload_raises(
+        self, handler: HandlerAuthGate
+    ) -> None:
+        """execute() raises ValueError when envelope has no payload."""
+        envelope: dict[str, object] = {
+            "operation": "auth_gate.evaluate",
+        }
+        with pytest.raises(ValueError, match="missing required 'payload'"):
+            await handler.execute(envelope)
+
+
+# =============================================================================
+# TestGlobToRegexEdgeCases
+# =============================================================================
+
+
+class TestGlobToRegexEdgeCases:
+    """Edge case tests for _glob_to_regex in security-sensitive path matching."""
+
+    def test_leading_double_star(self, handler: HandlerAuthGate) -> None:
+        """Leading **/ matches any path prefix."""
+        pattern = handler._glob_to_regex("**/foo.py")
+        assert pattern.match("foo.py")
+        assert pattern.match("a/foo.py")
+        assert pattern.match("a/b/c/foo.py")
+        assert not pattern.match("foo.pyc")
+
+    def test_trailing_double_star(self, handler: HandlerAuthGate) -> None:
+        """Trailing ** matches any path suffix."""
+        pattern = handler._glob_to_regex("src/**")
+        assert pattern.match("src/")
+        assert pattern.match("src/foo.py")
+        assert pattern.match("src/a/b/c.py")
+
+    def test_multiple_double_star_segments(self, handler: HandlerAuthGate) -> None:
+        """Multiple **/ segments in a single pattern."""
+        pattern = handler._glob_to_regex("src/**/tests/**/*.py")
+        assert pattern.match("src/tests/test_main.py")
+        assert pattern.match("src/a/b/tests/c/d/test_main.py")
+        assert not pattern.match("src/tests/test_main.txt")
+
+    def test_regex_metacharacters_in_path(self, handler: HandlerAuthGate) -> None:
+        """Paths with regex metacharacters are escaped correctly."""
+        pattern = handler._glob_to_regex("src/file.name+extra(1).py")
+        assert pattern.match("src/file.name+extra(1).py")
+        # Should NOT match without the literal dot/parens
+        assert not pattern.match("src/fileXname+extra(1)Xpy")
+
+    def test_brackets_in_pattern(self, handler: HandlerAuthGate) -> None:
+        """Square brackets in path are escaped, not treated as regex class."""
+        pattern = handler._glob_to_regex("src/[backup]/file.py")
+        assert pattern.match("src/[backup]/file.py")
+        assert not pattern.match("src/b/file.py")
+
+    def test_single_star_does_not_cross_slash(self, handler: HandlerAuthGate) -> None:
+        """Single * does not match across directory separators."""
+        pattern = handler._glob_to_regex("src/*.py")
+        assert pattern.match("src/foo.py")
+        assert not pattern.match("src/sub/foo.py")
+
+    def test_question_mark_matches_single_non_slash(
+        self, handler: HandlerAuthGate
+    ) -> None:
+        """? matches exactly one non-/ character."""
+        pattern = handler._glob_to_regex("src/?.py")
+        assert pattern.match("src/a.py")
+        assert not pattern.match("src/ab.py")
+        assert not pattern.match("src//.py")
+
 
 # =============================================================================
 # TestNodeDeclarativePattern
@@ -996,6 +1066,7 @@ __all__: list[str] = [
     "TestContractValidation",
     "TestContractWorkAuthorizationExpiry",
     "TestEnumAuthDecision",
+    "TestGlobToRegexEdgeCases",
     "TestHandlerExecute",
     "TestHandlerProperties",
     "TestModelAuthGateDecisionBool",
