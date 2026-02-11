@@ -98,6 +98,9 @@ x-runtime-env: &runtime-env
   # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
   # shell-special characters ($, `, \, !), the expansion WILL produce a malformed DSN.
   # RECOMMENDED: Always set OMNIBASE_INFRA_DB_URL explicitly in .env.
+  # NOTE: The fallback below hardcodes `postgres:5432` (the Compose service name, not POSTGRES_HOST).
+  # POSTGRES_HOST/POSTGRES_PORT are NOT used in the fallback — set OMNIBASE_INFRA_DB_URL directly.
+  # Requires Docker Compose v2.20+ for nested ${...} expansion (see header comment).
   OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for DB URL fallback}@postgres:5432/omnibase_infra}
   # Retained for agent-actions-consumer (DSN fallback) and session storage (pydantic-settings prefix).
   POSTGRES_USER: ${POSTGRES_USER:-postgres}

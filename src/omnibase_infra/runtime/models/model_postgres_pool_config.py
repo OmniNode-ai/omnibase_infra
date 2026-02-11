@@ -164,6 +164,13 @@ class ModelPostgresPoolConfig(BaseModel):
     ) -> ModelPostgresPoolConfig:
         """Create config by parsing a PostgreSQL DSN string.
 
+        Note:
+            ``parsed.hostname`` normalises to lowercase per RFC 2396. The
+            stored ``host`` value may therefore differ in casing from the
+            original DSN.  Credentials are stored *decoded* (``unquote``);
+            if a DSN is later reconstructed from these fields, values must
+            be re-encoded with ``urllib.parse.quote_plus()``.
+
         Args:
             dsn: PostgreSQL connection string
                 (``postgresql://user:pass@host:port/database``).

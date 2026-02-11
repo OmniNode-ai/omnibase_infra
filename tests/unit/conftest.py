@@ -87,8 +87,16 @@ def _skip_materialize_dependencies() -> Generator[None, None, None]:
 
     This fixture is ``autouse=True`` but scoped to ``tests/unit/`` only.
     Integration tests that need this mock should define a local fixture.
-    Tests that need real materialization can override by defining their own
-    ``_skip_materialize_dependencies`` fixture that yields without patching.
+
+    Override:
+        Tests that need real materialization behaviour (e.g.,
+        ``test_dependency_materializer.py``) can override by defining a
+        same-named fixture in their own module or conftest that yields
+        without patching::
+
+            @pytest.fixture(autouse=True)
+            def _skip_materialize_dependencies():
+                yield  # no-op — let real materialisation run
     """
     with patch(
         "omnibase_infra.runtime.service_runtime_host_process"

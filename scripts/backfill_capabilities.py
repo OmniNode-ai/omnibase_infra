@@ -243,22 +243,25 @@ def _get_validated_dsn() -> str:
             error_code=ErrorCode.CFG_MISSING_DB_URL,
         )
 
-    # Delegate scheme, database name, and sub-path validation to shared utility
-    # (avoids duplicating logic that lives in ModelPostgresPoolConfig.validate_dsn)
+    # Pre-check scheme before delegating to validate_dsn so we can map to the
+    # correct script-specific error code without fragile string-matching on
+    # the exception message.
+    from urllib.parse import urlparse as _urlparse
+
+    _parsed = _urlparse(dsn)
+    _is_valid_scheme = _parsed.scheme in ("postgresql", "postgres")
+
+    # Delegate full validation (scheme, database name, sub-paths) to shared utility
     try:
         dsn = ModelPostgresPoolConfig.validate_dsn(dsn)
     except ValueError as exc:
-        # Map to script-specific error codes. validate_dsn raises ValueError
-        # with "scheme" in the message only for scheme validation failures;
-        # all other failures relate to database name (missing or sub-path).
-        error_msg = str(exc)
         error_code = (
             ErrorCode.CFG_INVALID_DSN_SCHEME
-            if "scheme" in error_msg.lower()
+            if not _is_valid_scheme
             else ErrorCode.CFG_MISSING_DB_NAME
         )
         raise ConfigurationError(
-            error_msg,
+            str(exc),
             error_code=error_code,
         ) from exc
 

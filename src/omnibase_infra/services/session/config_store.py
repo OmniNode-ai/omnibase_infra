@@ -13,6 +13,7 @@ Moved from omniclaude as part of OMN-1526 architectural cleanup.
 
 from __future__ import annotations
 
+import ipaddress
 from urllib.parse import quote_plus
 
 from pydantic import Field, SecretStr, model_validator
@@ -101,13 +102,21 @@ class ConfigSessionStorage(BaseSettings):
     def _format_host(host: str) -> str:
         """Format host for DSN, wrapping IPv6 addresses in brackets.
 
+        Uses ``ipaddress.IPv6Address`` for definitive detection rather than
+        a ``":" in host`` heuristic, which would false-positive on strings
+        like ``host:port`` accidentally passed as a bare hostname.
+
         Args:
             host: Hostname or IP address.
 
         Returns:
             Host string suitable for embedding in a DSN.
         """
-        return f"[{host}]" if ":" in host else host
+        try:
+            ipaddress.IPv6Address(host)
+        except ValueError:
+            return host
+        return f"[{host}]"
 
     @property
     def dsn(self) -> str:
