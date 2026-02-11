@@ -170,7 +170,7 @@ class ModelPostgresPoolConfig(BaseModel):
         Raises:
             ValueError: If the DSN is malformed or missing required parts.
         """
-        cls.validate_dsn(dsn)
+        dsn = cls.validate_dsn(dsn)
 
         parsed = urlparse(dsn)
         database = (parsed.path or "").lstrip("/")
