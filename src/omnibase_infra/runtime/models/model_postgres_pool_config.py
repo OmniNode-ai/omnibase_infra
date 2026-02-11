@@ -136,7 +136,7 @@ class ModelPostgresPoolConfig(BaseModel):
             )
             raise ValueError(msg)
 
-        database = (parsed.path or "").lstrip("/")
+        database = unquote((parsed.path or "").lstrip("/"))
         if not database:
             try:
                 port_str = str(parsed.port) if parsed.port else "?"

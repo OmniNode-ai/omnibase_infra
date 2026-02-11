@@ -34,14 +34,17 @@ OMNIBASE_INFRA_DB_URL=postgresql://role_omnibase_infra:s3cret@db.example.com:543
 
 ## Resolution Order
 
-`ModelPostgresPoolConfig.from_env()` resolves configuration in this order:
+`ModelPostgresPoolConfig.from_env()` requires a single `*_DB_URL` variable:
 
-1. **`OMNIBASE_INFRA_DB_URL`** - Full DSN (preferred). Host, port, user,
+1. **`OMNIBASE_INFRA_DB_URL`** - Full DSN (required). Host, port, user,
    password, and database are parsed from the URL.
-2. **Individual `POSTGRES_*` variables** - Legacy fallback. `POSTGRES_HOST`,
-   `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DATABASE`.
-3. **Error** - If no database name can be resolved, a `ValueError` is raised
+2. **Error** - If the variable is not set, a `ValueError` is raised
    with a clear message. There is no silent fallback.
+
+> **Note**: The test helper `PostgresConfig.from_env()` (in
+> `tests/helpers/util_postgres.py`) additionally falls back to individual
+> `POSTGRES_*` variables (`POSTGRES_HOST`, `POSTGRES_PORT`, etc.) for
+> convenience in local development. The production `from_env()` does not.
 
 ## Fail-Fast Behaviour
 
