@@ -34,8 +34,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Marker for all tests in this directory
-pytestmark = [pytest.mark.postgres]
+# NOTE: pytestmark in conftest.py does NOT propagate to test files in the same
+# directory. Each test module must declare its own pytestmark. See:
+# tests/integration/conftest.py for the canonical documentation of this behavior.
 
 
 def _get_postgres_dsn() -> str | None:
@@ -115,6 +116,12 @@ async def cleanup_injection_test_data(
     """Track and cleanup injection effectiveness test data after each test.
 
     Yields a dict with lists to track session_ids and ledger_entry_ids for cleanup.
+
+    Cleanup order matters for FK constraints:
+    1. pattern_hit_rates (no FK dependency)
+    2. latency_breakdowns (FK → injection_effectiveness.session_id)
+    3. injection_effectiveness (parent table)
+    4. event_ledger (independent table)
     """
     tracker: dict[str, list[UUID]] = {
         "session_ids": [],
@@ -124,7 +131,7 @@ async def cleanup_injection_test_data(
 
     yield tracker
 
-    # Cleanup all tracked test data
+    # Cleanup all tracked test data (order: children before parents for FK safety)
     async with postgres_pool.acquire() as conn:
         # Delete pattern_hit_rates for test patterns
         if tracker["pattern_ids"]:
@@ -135,9 +142,19 @@ async def cleanup_injection_test_data(
             )
             logger.debug("Cleaned up %d pattern_hit_rates rows", len(valid_pattern_ids))
 
-        # Delete injection_effectiveness rows for test sessions
+        # Delete latency_breakdowns (FK → injection_effectiveness) before parent
         if tracker["session_ids"]:
             valid_session_ids = [str(sid) for sid in tracker["session_ids"]]
+            await conn.execute(
+                "DELETE FROM latency_breakdowns WHERE session_id = ANY($1::uuid[])",
+                valid_session_ids,
+            )
+            logger.debug(
+                "Cleaned up latency_breakdowns for %d sessions", len(valid_session_ids)
+            )
+
+        # Delete injection_effectiveness rows for test sessions
+        if tracker["session_ids"]:
             await conn.execute(
                 "DELETE FROM injection_effectiveness WHERE session_id = ANY($1::uuid[])",
                 valid_session_ids,
