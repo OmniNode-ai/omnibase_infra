@@ -229,7 +229,7 @@ class PluginRegistration:
         Returns:
             True if OMNIBASE_INFRA_DB_URL environment variable is set.
         """
-        db_url = os.getenv("OMNIBASE_INFRA_DB_URL")
+        db_url = (os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip()
         if not db_url:
             logger.debug(
                 "Registration plugin inactive: OMNIBASE_INFRA_DB_URL not set "
@@ -265,7 +265,7 @@ class PluginRegistration:
 
         try:
             # 1. Create PostgreSQL pool from OMNIBASE_INFRA_DB_URL
-            postgres_dsn = os.getenv("OMNIBASE_INFRA_DB_URL")
+            postgres_dsn = (os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip()
 
             # Shared error context for all DSN validation failures
             pool_error_context = ModelInfraErrorContext.with_correlation(

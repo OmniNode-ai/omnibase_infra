@@ -215,7 +215,7 @@ def _get_db_dsn() -> str:
     )
 
     correlation_id = uuid4()
-    db_url = os.environ.get("OMNIBASE_INFRA_DB_URL")
+    db_url = (os.environ.get("OMNIBASE_INFRA_DB_URL") or "").strip()
     if not db_url:
         raise click.ClickException(
             f"OMNIBASE_INFRA_DB_URL is required but not set "

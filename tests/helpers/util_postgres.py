@@ -38,7 +38,7 @@ import os
 import re
 import socket
 from dataclasses import dataclass
-from urllib.parse import quote_plus, unquote, urlparse
+from urllib.parse import ParseResult, quote_plus, unquote, urlparse
 from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -186,7 +186,7 @@ def should_skip_migration(sql: str) -> bool:
 # =============================================================================
 
 
-def _extract_password(parsed: object, db_url_var: str) -> str | None:
+def _extract_password(parsed: ParseResult, db_url_var: str) -> str | None:
     """Extract password from a parsed URL, warning on empty-password DSNs.
 
     Peer/trust-auth DSNs (e.g., ``postgresql://user:@host/db``) have an
@@ -194,11 +194,10 @@ def _extract_password(parsed: object, db_url_var: str) -> str | None:
     so the operator knows why ``is_configured`` returns ``False``.
     """
     # urlparse ParseResult — password is str | None
-    password = getattr(parsed, "password", None)
-    if password:
-        return unquote(password)
+    if parsed.password:
+        return unquote(parsed.password)
     # Distinguish "no password at all" from "explicitly empty password"
-    netloc: str = getattr(parsed, "netloc", "")
+    netloc: str = parsed.netloc
     if ":@" in netloc:
         logger.warning(
             "%s contains an explicitly empty password (peer/trust auth DSN). "
