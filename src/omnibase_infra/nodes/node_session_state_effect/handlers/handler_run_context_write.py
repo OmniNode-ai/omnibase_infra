@@ -24,6 +24,8 @@ from omnibase_infra.nodes.node_session_state_effect.models import (
 
 logger = logging.getLogger(__name__)
 
+_PATH_TRAVERSAL_CHARS = ("..", "/", "\\", "\0")
+
 
 class HandlerRunContextWrite:
     """Atomically write a run context document to the filesystem.
@@ -62,6 +64,16 @@ class HandlerRunContextWrite:
         correlation_id: UUID,
     ) -> ModelSessionStateResult:
         """Synchronous write logic, executed off the event loop."""
+        # Defense-in-depth: reject traversal even if model_construct() skipped validators
+        if any(ch in context.run_id for ch in _PATH_TRAVERSAL_CHARS):
+            return ModelSessionStateResult(
+                success=False,
+                operation="run_context_write",
+                correlation_id=correlation_id,
+                error=f"Invalid run_id: contains path traversal characters: {context.run_id!r}",
+                error_code="RUN_CONTEXT_INVALID_ID",
+            )
+
         runs_dir = self._state_dir / "runs"
 
         try:

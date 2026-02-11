@@ -48,7 +48,12 @@ class ModelRunContext(BaseModel):
     )
     metadata: dict[str, object] = Field(
         default_factory=dict,
-        description="Arbitrary key-value data attached to the run.",
+        description=(
+            "Arbitrary key-value data attached to the run. "
+            "Warning: ``frozen=True`` prevents reassigning this field but does "
+            "not prevent in-place mutation of dict contents. Always use "
+            "``with_metadata()`` to add entries immutably."
+        ),
     )
 
     @field_validator("run_id")

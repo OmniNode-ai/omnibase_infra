@@ -82,7 +82,16 @@ class HandlerStaleRunGC:
 
         now = datetime.now(UTC)
 
+        resolved_runs_dir = runs_dir.resolve()
+
         for run_file in runs_dir.glob("*.json"):
+            # Skip symlinks and files that resolve outside the runs directory
+            if not run_file.is_file() or run_file.resolve().parent != resolved_runs_dir:
+                logger.warning(
+                    "GC: skipping non-regular or external file %s", run_file.name
+                )
+                continue
+
             try:
                 raw = run_file.read_text(encoding="utf-8")
                 data = json.loads(raw)

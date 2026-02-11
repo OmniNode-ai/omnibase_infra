@@ -45,6 +45,10 @@ class HandlerSessionIndexWrite:
     Note:
         File locking (``flock``) requires a POSIX platform (Linux, macOS).
         On Windows, the handler raises ``RuntimeError`` at construction time.
+
+        The lock file (``session.json.lock``) persists after use. This is
+        intentional — ``flock`` advisory locks do not require file deletion,
+        and recreating the file on every write would race with other writers.
     """
 
     def __init__(self, state_dir: Path) -> None:
