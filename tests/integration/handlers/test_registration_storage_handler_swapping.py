@@ -101,6 +101,8 @@ def _resolve_postgres_config() -> _PostgresConfigDict:
         # sets this when using individual POSTGRES_* env vars per OMN-2065.
         "database": _postgres_config.database or "omnibase_infra",
         "user": _postgres_config.user,
+        # Empty string fallback is safe: the POSTGRES_AVAILABLE skip guard
+        # ensures callers only reach here with valid config.
         "password": _postgres_config.password or "",
     }
 

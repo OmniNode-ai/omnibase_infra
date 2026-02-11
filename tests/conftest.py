@@ -65,10 +65,10 @@ import asyncio
 import inspect
 import logging
 import os
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from dotenv import load_dotenv

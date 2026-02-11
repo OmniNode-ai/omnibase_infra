@@ -97,12 +97,24 @@ class ConfigSessionStorage(BaseSettings):
             )
         return self
 
+    @staticmethod
+    def _format_host(host: str) -> str:
+        """Format host for DSN, wrapping IPv6 addresses in brackets.
+
+        Args:
+            host: Hostname or IP address.
+
+        Returns:
+            Host string suitable for embedding in a DSN.
+        """
+        return f"[{host}]" if ":" in host else host
+
     @property
     def dsn(self) -> str:
         """Build PostgreSQL DSN from components.
 
-        Credentials are URL-encoded using quote_plus() to handle special
-        characters like @, :, /, %, etc. that would otherwise break the DSN.
+        Credentials, database name, and host are URL-encoded or formatted
+        to handle special characters that would otherwise break the DSN.
 
         Returns:
             PostgreSQL connection string.
@@ -111,18 +123,20 @@ class ConfigSessionStorage(BaseSettings):
         encoded_password = quote_plus(
             self.postgres_password.get_secret_value(), safe=""
         )
+        encoded_database = quote_plus(self.postgres_database, safe="")
+        host = self._format_host(self.postgres_host)
         return (
             f"postgresql://{encoded_user}:{encoded_password}"
-            f"@{self.postgres_host}:{self.postgres_port}"
-            f"/{self.postgres_database}"
+            f"@{host}:{self.postgres_port}"
+            f"/{encoded_database}"
         )
 
     @property
     def dsn_async(self) -> str:
         """Build async PostgreSQL DSN for asyncpg.
 
-        Credentials are URL-encoded using quote_plus() to handle special
-        characters like @, :, /, %, etc. that would otherwise break the DSN.
+        Credentials, database name, and host are URL-encoded or formatted
+        to handle special characters that would otherwise break the DSN.
 
         Returns:
             PostgreSQL connection string with postgresql+asyncpg scheme.
@@ -131,10 +145,12 @@ class ConfigSessionStorage(BaseSettings):
         encoded_password = quote_plus(
             self.postgres_password.get_secret_value(), safe=""
         )
+        encoded_database = quote_plus(self.postgres_database, safe="")
+        host = self._format_host(self.postgres_host)
         return (
             f"postgresql+asyncpg://{encoded_user}:{encoded_password}"
-            f"@{self.postgres_host}:{self.postgres_port}"
-            f"/{self.postgres_database}"
+            f"@{host}:{self.postgres_port}"
+            f"/{encoded_database}"
         )
 
     @property
@@ -145,10 +161,12 @@ class ConfigSessionStorage(BaseSettings):
             PostgreSQL connection string with password replaced by ***.
         """
         encoded_user = quote_plus(self.postgres_user, safe="")
+        encoded_database = quote_plus(self.postgres_database, safe="")
+        host = self._format_host(self.postgres_host)
         return (
             f"postgresql://{encoded_user}:***"
-            f"@{self.postgres_host}:{self.postgres_port}"
-            f"/{self.postgres_database}"
+            f"@{host}:{self.postgres_port}"
+            f"/{encoded_database}"
         )
 
     def __repr__(self) -> str:

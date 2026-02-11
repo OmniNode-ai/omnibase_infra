@@ -426,6 +426,21 @@ class ModelReplayConfig(BaseModel):
             )
         return v
 
+    @field_validator("postgres_dsn", mode="before")
+    @classmethod
+    def validate_postgres_dsn_scheme(cls, v: object) -> object:
+        """Validate that postgres_dsn starts with a postgresql scheme when provided."""
+        if v is None:
+            return v
+        if not isinstance(v, str):
+            raise ValueError(f"postgres_dsn must be a string, got {type(v).__name__}")
+        stripped = v.strip()
+        if stripped and not stripped.startswith("postgresql"):
+            raise ValueError(
+                f"postgres_dsn must start with 'postgresql' scheme, got '{stripped[:20]}...'"
+            )
+        return stripped
+
     @field_validator("filter_end_time", mode="after")
     @classmethod
     def validate_time_range(
