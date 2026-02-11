@@ -241,7 +241,7 @@ class HandlerRRHValidate:
         - ``interfaces_touched: ["topics"]`` -> enable RRH-1201
         - ``deployment_targets: ["k8s"]`` -> enable RRH-1301
 
-        CRITICAL: Contract can only ENABLE rules or RAISE severity.
+        CRITICAL: Contract can only ENABLE rules.
         It can NEVER disable a rule that the profile enables, nor
         lower severity from FAIL to WARN.
         """
@@ -354,29 +354,35 @@ class HandlerRRHValidate:
                 message=f"Unsafe branch pattern (possible ReDoS): {_truncate_pattern(pattern)!r}",
             )
         branch = env.repo_state.branch
+        # Avoid context manager: its __exit__ calls shutdown(wait=True),
+        # which blocks until the thread finishes — defeating the timeout
+        # for ReDoS patterns.
+        executor = ThreadPoolExecutor(max_workers=1)
         try:
-            # Run fullmatch with a hard timeout as a safety net against
-            # ReDoS patterns that bypass the heuristic check above.
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(re.fullmatch, pattern, branch)
+            future = executor.submit(re.fullmatch, pattern, branch)
+            try:
                 match = future.result(timeout=_REGEX_TIMEOUT_SECONDS)
+            except FuturesTimeoutError:
+                future.cancel()
+                executor.shutdown(wait=False, cancel_futures=True)
+                return ModelRuleCheckResult(
+                    passed=False,
+                    rule_id="RRH-1002",
+                    message=(
+                        f"Branch pattern match timed out (possible ReDoS): "
+                        f"{_truncate_pattern(pattern)!r}"
+                    ),
+                )
             if match:
                 return ModelRuleCheckResult(passed=True, rule_id="RRH-1002")
-        except FuturesTimeoutError:
-            return ModelRuleCheckResult(
-                passed=False,
-                rule_id="RRH-1002",
-                message=(
-                    f"Branch pattern match timed out (possible ReDoS): "
-                    f"{_truncate_pattern(pattern)!r}"
-                ),
-            )
         except re.error:
             return ModelRuleCheckResult(
                 passed=False,
                 rule_id="RRH-1002",
                 message=f"Invalid branch pattern: {_truncate_pattern(gov.expected_branch_pattern)}",
             )
+        finally:
+            executor.shutdown(wait=False)
         return ModelRuleCheckResult(
             passed=False,
             rule_id="RRH-1002",
