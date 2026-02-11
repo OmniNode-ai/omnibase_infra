@@ -10,7 +10,7 @@ Computes the tier transition by delegating to
 from __future__ import annotations
 
 import logging
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from omnibase_infra.enums import (
     EnumHandlerType,
@@ -22,6 +22,7 @@ from omnibase_infra.nodes.node_pattern_lifecycle_effect.models import (
     ModelLifecycleResult,
     ModelLifecycleState,
 )
+from omnibase_infra.utils import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ class HandlerLifecycleUpdate:
         self,
         pattern_id: UUID,
         verdict: EnumValidationVerdict,
-        correlation_id: UUID,
+        correlation_id: UUID | None = None,
         current_state: ModelLifecycleState | None = None,
     ) -> ModelLifecycleResult:
         """Apply a validation verdict to pattern lifecycle state.
@@ -89,13 +90,15 @@ class HandlerLifecycleUpdate:
         Args:
             pattern_id: Identifier of the pattern being evaluated.
             verdict: The validation verdict to apply.
-            correlation_id: Correlation ID for distributed tracing.
+            correlation_id: Correlation ID for distributed tracing.  Auto-
+                generated when ``None``.
             current_state: Current lifecycle state, or None for first-time
                 patterns.
 
         Returns:
             A ``ModelLifecycleResult`` describing the tier transition.
         """
+        correlation_id = correlation_id or uuid4()
         try:
             state = current_state or ModelLifecycleState(pattern_id=pattern_id)
             previous_tier = state.current_tier
@@ -131,11 +134,12 @@ class HandlerLifecycleUpdate:
                 correlation_id=correlation_id,
             )
         except Exception as exc:
+            sanitized_error = sanitize_error_message(exc)
             logger.warning(
                 "Failed to apply verdict %s to pattern %s: %s (cid=%s)",
                 verdict.value,
                 pattern_id,
-                exc,
+                sanitized_error,
                 correlation_id,
             )
             return ModelLifecycleResult(
@@ -153,7 +157,7 @@ class HandlerLifecycleUpdate:
                 tier_changed=False,
                 verdict_applied=verdict,
                 correlation_id=correlation_id,
-                error=str(exc),
+                error=sanitized_error,
                 error_code="LIFECYCLE_UPDATE_ERROR",
             )
 

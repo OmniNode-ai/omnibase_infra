@@ -26,7 +26,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.enums import EnumCheckSeverity, EnumValidationVerdict
+from omnibase_infra.enums import (
+    EnumCheckSeverity,
+    EnumInfraTransportType,
+    EnumValidationVerdict,
+)
+from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 
 if TYPE_CHECKING:
     from omnibase_infra.nodes.node_validation_adjudicator.models.model_adjudicator_state import (
@@ -107,14 +112,24 @@ class ModelVerdict(BaseModel):
             A fully-populated ``ModelVerdict`` instance.
 
         Raises:
-            ValueError: If ``state.candidate_id`` or ``state.plan_id`` is None.
+            RuntimeHostError: If ``state.candidate_id`` or ``state.plan_id`` is None.
         """
         if state.candidate_id is None:
-            msg = "Cannot produce verdict: candidate_id is None"
-            raise ValueError(msg)
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="adjudicate_verdict",
+            )
+            raise RuntimeHostError(
+                "Cannot produce verdict: candidate_id is None", context=context
+            )
         if state.plan_id is None:
-            msg = "Cannot produce verdict: plan_id is None"
-            raise ValueError(msg)
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="adjudicate_verdict",
+            )
+            raise RuntimeHostError(
+                "Cannot produce verdict: plan_id is None", context=context
+            )
 
         results = state.check_results
 

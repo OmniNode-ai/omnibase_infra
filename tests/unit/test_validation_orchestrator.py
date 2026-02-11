@@ -29,6 +29,8 @@ from omnibase_infra.nodes.node_validation_orchestrator.models import (
     ModelValidationPlan,
 )
 
+pytestmark = pytest.mark.unit
+
 # ============================================================================
 # Fixtures (local to this module)
 # ============================================================================

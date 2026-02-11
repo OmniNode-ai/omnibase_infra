@@ -30,6 +30,8 @@ from omnibase_infra.nodes.node_validation_executor.handlers.handler_run_checks i
     HandlerRunChecks,
 )
 
+pytestmark = pytest.mark.unit
+
 # ============================================================================
 # Helpers
 # ============================================================================

@@ -41,6 +41,7 @@ def _make_transition_error(
     current_state: str,
     target_state: str,
     required_state: str,
+    correlation_id: UUID | None = None,
 ) -> RuntimeHostError:
     """Build a ``RuntimeHostError`` for an illegal FSM transition.
 
@@ -52,6 +53,8 @@ def _make_transition_error(
         current_state: Value of the current FSM state (e.g. ``"collecting"``).
         target_state: The state the caller attempted to reach.
         required_state: The state that would have allowed the transition.
+        correlation_id: Optional correlation ID to propagate from the
+            incoming request.  When ``None`` a new ID is auto-generated.
 
     Returns:
         A fully-constructed ``RuntimeHostError`` ready to raise.
@@ -61,6 +64,7 @@ def _make_transition_error(
         f"(requires {required_state})"
     )
     context = ModelInfraErrorContext.with_correlation(
+        correlation_id=correlation_id,
         transport_type=EnumInfraTransportType.RUNTIME,
         operation="state_transition",
     )
@@ -122,13 +126,17 @@ class ModelAdjudicatorState(BaseModel):
     # ------------------------------------------------------------------
 
     def with_check_result(
-        self, result: ModelCheckResult, event_id: UUID
+        self,
+        result: ModelCheckResult,
+        event_id: UUID,
+        correlation_id: UUID | None = None,
     ) -> ModelAdjudicatorState:
         """Append a check result while staying in COLLECTING state.
 
         Args:
             result: Individual check result from the executor.
             event_id: UUID of the event triggering this update.
+            correlation_id: Optional correlation ID to propagate into errors.
 
         Returns:
             New state with the check result appended.
@@ -138,7 +146,10 @@ class ModelAdjudicatorState(BaseModel):
         """
         if self.status != EnumAdjudicatorState.COLLECTING:
             raise _make_transition_error(
-                self.status.value, "collecting (append)", "COLLECTING"
+                self.status.value,
+                "collecting (append)",
+                "COLLECTING",
+                correlation_id=correlation_id,
             )
         return ModelAdjudicatorState(
             status=EnumAdjudicatorState.COLLECTING,
@@ -148,11 +159,14 @@ class ModelAdjudicatorState(BaseModel):
             last_processed_event_id=event_id,
         )
 
-    def with_adjudication_started(self, event_id: UUID) -> ModelAdjudicatorState:
+    def with_adjudication_started(
+        self, event_id: UUID, correlation_id: UUID | None = None
+    ) -> ModelAdjudicatorState:
         """Transition: collecting -> adjudicating.
 
         Args:
             event_id: UUID of the event triggering this transition.
+            correlation_id: Optional correlation ID to propagate into errors.
 
         Returns:
             New state with status=ADJUDICATING.
@@ -162,7 +176,10 @@ class ModelAdjudicatorState(BaseModel):
         """
         if not self.can_adjudicate():
             raise _make_transition_error(
-                self.status.value, "adjudicating", "COLLECTING"
+                self.status.value,
+                "adjudicating",
+                "COLLECTING",
+                correlation_id=correlation_id,
             )
         return ModelAdjudicatorState(
             status=EnumAdjudicatorState.ADJUDICATING,
@@ -172,11 +189,14 @@ class ModelAdjudicatorState(BaseModel):
             last_processed_event_id=event_id,
         )
 
-    def with_verdict_emitted(self, event_id: UUID) -> ModelAdjudicatorState:
+    def with_verdict_emitted(
+        self, event_id: UUID, correlation_id: UUID | None = None
+    ) -> ModelAdjudicatorState:
         """Transition: adjudicating -> verdict_emitted.
 
         Args:
             event_id: UUID of the event triggering this transition.
+            correlation_id: Optional correlation ID to propagate into errors.
 
         Returns:
             New state with status=VERDICT_EMITTED.
@@ -186,7 +206,10 @@ class ModelAdjudicatorState(BaseModel):
         """
         if not self.can_emit_verdict():
             raise _make_transition_error(
-                self.status.value, "verdict_emitted", "ADJUDICATING"
+                self.status.value,
+                "verdict_emitted",
+                "ADJUDICATING",
+                correlation_id=correlation_id,
             )
         return ModelAdjudicatorState(
             status=EnumAdjudicatorState.VERDICT_EMITTED,
@@ -196,11 +219,14 @@ class ModelAdjudicatorState(BaseModel):
             last_processed_event_id=event_id,
         )
 
-    def with_reset(self, event_id: UUID) -> ModelAdjudicatorState:
+    def with_reset(
+        self, event_id: UUID, correlation_id: UUID | None = None
+    ) -> ModelAdjudicatorState:
         """Transition: verdict_emitted -> collecting (reset for next run).
 
         Args:
             event_id: UUID of the event triggering this transition.
+            correlation_id: Optional correlation ID to propagate into errors.
 
         Returns:
             New state with status=COLLECTING and all data cleared.
@@ -210,7 +236,10 @@ class ModelAdjudicatorState(BaseModel):
         """
         if not self.can_reset():
             raise _make_transition_error(
-                self.status.value, "collecting", "VERDICT_EMITTED"
+                self.status.value,
+                "collecting",
+                "VERDICT_EMITTED",
+                correlation_id=correlation_id,
             )
         return ModelAdjudicatorState(
             status=EnumAdjudicatorState.COLLECTING,

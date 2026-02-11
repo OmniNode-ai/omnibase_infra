@@ -61,7 +61,7 @@ _CHECK_CATALOG: tuple[tuple[str, str, EnumCheckSeverity], ...] = (
     ("CHECK-TEST-002", "Targeted integration tests", EnumCheckSeverity.RECOMMENDED),
     ("CHECK-VAL-001", "Deterministic replay sanity", EnumCheckSeverity.RECOMMENDED),
     ("CHECK-VAL-002", "Artifact completeness", EnumCheckSeverity.REQUIRED),
-    ("CHECK-RISK-001", "Sensitive paths stricter bar", EnumCheckSeverity.REQUIRED),
+    ("CHECK-RISK-001", "Sensitive paths -> stricter bar", EnumCheckSeverity.REQUIRED),
     ("CHECK-RISK-002", "Diff size threshold", EnumCheckSeverity.RECOMMENDED),
     ("CHECK-RISK-003", "Unsafe operations detector", EnumCheckSeverity.REQUIRED),
     ("CHECK-OUT-001", "CI equivalent pass rate", EnumCheckSeverity.REQUIRED),

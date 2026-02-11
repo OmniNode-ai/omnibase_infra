@@ -73,10 +73,8 @@ class EnumLifecycleTier(str, Enum):
         """Return the next demotion tier.
 
         Returns:
-            The next lower tier, or OBSERVED if already at the bottom.
-
-        Raises:
-            ValueError: If the tier cannot be demoted (SUPPRESSED).
+            The next lower tier, OBSERVED if already at the bottom, or
+            SUPPRESSED if already suppressed (demotion floor).
         """
         demotion_map: dict[EnumLifecycleTier, EnumLifecycleTier] = {
             EnumLifecycleTier.DEFAULT: EnumLifecycleTier.PROMOTED,
@@ -84,6 +82,7 @@ class EnumLifecycleTier(str, Enum):
             EnumLifecycleTier.SHADOW_APPLY: EnumLifecycleTier.SUGGESTED,
             EnumLifecycleTier.SUGGESTED: EnumLifecycleTier.OBSERVED,
             EnumLifecycleTier.OBSERVED: EnumLifecycleTier.OBSERVED,
+            EnumLifecycleTier.SUPPRESSED: EnumLifecycleTier.SUPPRESSED,
         }
         if self not in demotion_map:
             msg = f"Cannot demote from tier {self.value}"

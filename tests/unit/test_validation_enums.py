@@ -20,6 +20,8 @@ from omnibase_infra.enums import (
     EnumValidationVerdict,
 )
 
+pytestmark = pytest.mark.unit
+
 # ============================================================================
 # EnumCheckSeverity
 # ============================================================================
@@ -199,10 +201,9 @@ class TestEnumLifecycleTier:
         """OBSERVED demotes to OBSERVED (floor)."""
         assert EnumLifecycleTier.OBSERVED.demoted() == EnumLifecycleTier.OBSERVED
 
-    def test_demoted_suppressed_raises(self) -> None:
-        """SUPPRESSED cannot be demoted -- raises ValueError."""
-        with pytest.raises(ValueError, match="Cannot demote from tier suppressed"):
-            EnumLifecycleTier.SUPPRESSED.demoted()
+    def test_demoted_suppressed_stays(self) -> None:
+        """SUPPRESSED demotes to SUPPRESSED (demotion floor)."""
+        assert EnumLifecycleTier.SUPPRESSED.demoted() == EnumLifecycleTier.SUPPRESSED
 
     def test_str_serialization(self) -> None:
         """__str__ returns the raw value for serialization."""

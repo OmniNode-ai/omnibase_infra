@@ -34,6 +34,8 @@ from omnibase_infra.nodes.node_pattern_lifecycle_effect.models.model_lifecycle_s
     ModelLifecycleState,
 )
 
+pytestmark = pytest.mark.unit
+
 # ============================================================================
 # Helpers
 # ============================================================================

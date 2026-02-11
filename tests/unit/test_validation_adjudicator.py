@@ -33,6 +33,8 @@ from omnibase_infra.nodes.node_validation_adjudicator.models.model_verdict impor
     ModelVerdict,
 )
 
+pytestmark = pytest.mark.unit
+
 # ============================================================================
 # Helpers
 # ============================================================================
@@ -485,17 +487,17 @@ class TestModelVerdictFromState:
         assert isinstance(verdict.adjudicated_at, datetime)
 
     def test_raises_when_candidate_id_none(self) -> None:
-        """Raises ValueError if state has no candidate_id."""
+        """Raises RuntimeHostError if state has no candidate_id."""
         state = ModelAdjudicatorState(candidate_id=None, plan_id=uuid4())
 
-        with pytest.raises(ValueError, match="candidate_id"):
+        with pytest.raises(RuntimeHostError, match="candidate_id"):
             ModelVerdict.from_state(state)
 
     def test_raises_when_plan_id_none(self) -> None:
-        """Raises ValueError if state has no plan_id."""
+        """Raises RuntimeHostError if state has no plan_id."""
         state = ModelAdjudicatorState(candidate_id=uuid4(), plan_id=None)
 
-        with pytest.raises(ValueError, match="plan_id"):
+        with pytest.raises(RuntimeHostError, match="plan_id"):
             ModelVerdict.from_state(state)
 
 
