@@ -207,3 +207,32 @@ class TestHandlerCheckpointWrite:
         # Second write with same checkpoint (same attempt_number) fails
         with pytest.raises(Exception, match="Checkpoint already exists"):
             await handler.execute(envelope)
+
+    async def test_write_rejects_path_traversal(
+        self,
+        handler: HandlerCheckpointWrite,
+        tmp_path: Path,
+    ) -> None:
+        """Write rejects ticket_id containing path traversal sequences."""
+        await handler.initialize({})
+
+        cp = ModelCheckpoint(
+            run_id=uuid4(),
+            ticket_id="../../etc",
+            phase=EnumCheckpointPhase.IMPLEMENT,
+            timestamp_utc=datetime.now(UTC),
+            attempt_number=1,
+            phase_payload=ModelPhasePayloadImplement(
+                branch_name="branch",
+                commit_sha="abc1234",
+            ),
+        )
+
+        envelope: dict[str, object] = {
+            "checkpoint": cp,
+            "correlation_id": uuid4(),
+            "base_dir": str(tmp_path),
+        }
+
+        with pytest.raises(Exception, match="Path traversal detected"):
+            await handler.execute(envelope)

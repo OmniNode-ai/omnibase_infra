@@ -133,8 +133,13 @@ class HandlerCheckpointWrite:
         base_dir_raw = envelope.get("base_dir")
         base_dir = Path(str(base_dir_raw)) if base_dir_raw else _DEFAULT_BASE_DIR
 
-        # Build path
+        # Build path and guard against path traversal via ticket_id
         target_dir = _checkpoint_dir(base_dir, checkpoint.ticket_id, checkpoint.run_id)
+        if not target_dir.resolve().is_relative_to(base_dir.resolve()):
+            raise RuntimeHostError(
+                "Path traversal detected: ticket_id escapes checkpoint root",
+                context=context,
+            )
         filename = _checkpoint_filename(
             checkpoint.phase.phase_number,
             checkpoint.phase.value,

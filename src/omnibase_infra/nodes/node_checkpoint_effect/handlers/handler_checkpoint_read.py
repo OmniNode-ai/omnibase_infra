@@ -116,8 +116,13 @@ class HandlerCheckpointRead:
         base_dir_raw = envelope.get("base_dir")
         base_dir = Path(str(base_dir_raw)) if base_dir_raw else _DEFAULT_BASE_DIR
 
-        # Scan for matching files
+        # Scan for matching files (with path traversal guard)
         target_dir = base_dir / str(ticket_id) / str(run_id_val)
+        if not target_dir.resolve().is_relative_to(base_dir.resolve()):
+            raise RuntimeHostError(
+                "Path traversal detected: ticket_id escapes checkpoint root",
+                context=context,
+            )
         phase_prefix = f"phase_{phase.phase_number}_{phase.value}_a"
 
         if not target_dir.is_dir():
@@ -132,10 +137,18 @@ class HandlerCheckpointRead:
                 ),
             )
 
-        # Find all attempt files for this phase
+        # Find all attempt files for this phase, sorted by attempt number
+        def _attempt_number(path: Path) -> int:
+            """Extract numeric attempt from filename like phase_1_implement_a3.yaml."""
+            stem = path.stem  # e.g. "phase_1_implement_a3"
+            after_a = stem.rsplit("_a", maxsplit=1)
+            if len(after_a) == 2 and after_a[1].isdigit():
+                return int(after_a[1])
+            return 0
+
         matching_files = sorted(
             target_dir.glob(f"{phase_prefix}*.yaml"),
-            key=lambda p: p.name,
+            key=_attempt_number,
         )
 
         if not matching_files:

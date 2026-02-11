@@ -94,6 +94,11 @@ class HandlerCheckpointList:
         base_dir = Path(str(base_dir_raw)) if base_dir_raw else _DEFAULT_BASE_DIR
 
         ticket_dir = base_dir / str(ticket_id)
+        if not ticket_dir.resolve().is_relative_to(base_dir.resolve()):
+            raise RuntimeHostError(
+                "Path traversal detected: ticket_id escapes checkpoint root",
+                context=context,
+            )
         if not ticket_dir.is_dir():
             return ModelHandlerOutput.for_compute(
                 input_envelope_id=uuid4(),

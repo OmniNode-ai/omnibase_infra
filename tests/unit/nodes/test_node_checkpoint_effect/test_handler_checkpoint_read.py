@@ -253,3 +253,64 @@ class TestHandlerCheckpointRead:
         result = await reader.execute(read_env)
         assert result.result.success is False
         assert "No checkpoint found" in result.result.error
+
+    async def test_read_rejects_path_traversal(
+        self,
+        reader: HandlerCheckpointRead,
+        tmp_path: Path,
+    ) -> None:
+        """Read rejects ticket_id containing path traversal sequences."""
+        await reader.initialize({})
+
+        read_env: dict[str, object] = {
+            "ticket_id": "../../etc",
+            "run_id": uuid4(),
+            "phase": EnumCheckpointPhase.IMPLEMENT,
+            "correlation_id": uuid4(),
+            "base_dir": str(tmp_path),
+        }
+        with pytest.raises(Exception, match="Path traversal detected"):
+            await reader.execute(read_env)
+
+    async def test_read_sorts_by_attempt_number_not_name(
+        self,
+        reader: HandlerCheckpointRead,
+        tmp_path: Path,
+    ) -> None:
+        """Read returns highest attempt even when attempt >= 10."""
+        await reader.initialize({})
+
+        run_id = uuid4()
+        run_dir = tmp_path / "OMN-2143" / str(run_id)
+        run_dir.mkdir(parents=True)
+
+        # Create files with attempts 1, 2, 10 (a10 sorts before a2 lexically)
+        for attempt in (1, 2, 10):
+            cp = ModelCheckpoint(
+                run_id=run_id,
+                ticket_id="OMN-2143",
+                phase=EnumCheckpointPhase.IMPLEMENT,
+                timestamp_utc=datetime.now(UTC),
+                attempt_number=attempt,
+                phase_payload=ModelPhasePayloadImplement(
+                    branch_name="branch",
+                    commit_sha="abc1234",
+                ),
+            )
+            filename = f"phase_1_implement_a{attempt}.yaml"
+            data = cp.model_dump(mode="json")
+            (run_dir / filename).write_text(
+                yaml.dump(data, default_flow_style=False), encoding="utf-8"
+            )
+
+        read_env: dict[str, object] = {
+            "ticket_id": "OMN-2143",
+            "run_id": run_id,
+            "phase": EnumCheckpointPhase.IMPLEMENT,
+            "correlation_id": uuid4(),
+            "base_dir": str(tmp_path),
+        }
+        result = await reader.execute(read_env)
+        assert result.result.success is True
+        # Must return attempt 10, not attempt 2 (which would be the lexicographic last)
+        assert result.result.checkpoint.attempt_number == 10
