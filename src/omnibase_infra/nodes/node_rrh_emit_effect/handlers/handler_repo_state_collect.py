@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from pathlib import Path
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.rrh.model_rrh_repo_state import ModelRRHRepoState
@@ -47,7 +48,14 @@ class HandlerRepoStateCollect:
         Returns:
             Populated ``ModelRRHRepoState`` with git information.
             On error, fields default to empty/unknown values.
+
+        Raises:
+            ValueError: If *repo_path* is empty or not an absolute path.
         """
+        if not repo_path or not Path(repo_path).is_absolute():
+            raise ValueError(
+                f"repo_path must be a non-empty absolute path, got: {repo_path!r}"
+            )
         branch = await self._git(repo_path, "rev-parse", "--abbrev-ref", "HEAD")
         head_sha = await self._git(repo_path, "rev-parse", "HEAD")
         dirty_output = await self._git(repo_path, "status", "--porcelain")

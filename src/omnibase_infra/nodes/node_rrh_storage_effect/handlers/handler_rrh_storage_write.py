@@ -59,6 +59,14 @@ class HandlerRRHStorageWrite:
         """
         try:
             base = Path(request.output_dir)
+            if not base.is_absolute():
+                raise ValueError(
+                    f"output_dir must be absolute, got: {request.output_dir!r}"
+                )
+            if ".." in base.parts:
+                raise ValueError(
+                    f"output_dir must not contain '..' components, got: {request.output_dir!r}"
+                )
             artifacts_dir = base / "artifacts"
             artifacts_dir.mkdir(parents=True, exist_ok=True)
 

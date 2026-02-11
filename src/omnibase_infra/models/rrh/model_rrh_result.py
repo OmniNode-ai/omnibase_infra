@@ -14,6 +14,7 @@ Verdict Semantics:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
@@ -22,6 +23,9 @@ from omnibase_infra.diagnostics.enum_verdict import EnumVerdict
 from omnibase_infra.nodes.architecture_validator.models.model_rule_check_result import (
     ModelRuleCheckResult,
 )
+
+if TYPE_CHECKING:
+    from omnibase_infra.models.rrh.model_rrh_rule_severity import ModelRRHRuleSeverity
 
 
 class ModelRRHResult(BaseModel):
@@ -76,6 +80,56 @@ class ModelRRHResult(BaseModel):
     def applicable_checks(self) -> tuple[ModelRuleCheckResult, ...]:
         """Return only checks that were actually evaluated (not skipped)."""
         return tuple(c for c in self.checks if c.is_applicable())
+
+    def warning_checks(
+        self,
+        effective_rules: dict[str, ModelRRHRuleSeverity],
+    ) -> tuple[ModelRuleCheckResult, ...]:
+        """Return violations whose configured severity is WARN.
+
+        Note:
+            ``ModelRuleCheckResult`` does not carry per-check severity;
+            severity is a profile-level concept stored in
+            ``ModelRRHRuleSeverity``.  Callers must supply the effective
+            rules mapping produced by ``HandlerRRHValidate._apply_tightening``.
+
+        Args:
+            effective_rules: Rule-ID to severity mapping from the profile.
+
+        Returns:
+            Tuple of failed checks where the rule severity is ``WARN``.
+        """
+        return tuple(
+            c
+            for c in self.checks
+            if c.is_violation()
+            and c.rule_id in effective_rules
+            and effective_rules[c.rule_id].severity == EnumVerdict.WARN
+        )
+
+    def error_checks(
+        self,
+        effective_rules: dict[str, ModelRRHRuleSeverity],
+    ) -> tuple[ModelRuleCheckResult, ...]:
+        """Return violations whose configured severity is FAIL.
+
+        Note:
+            See ``warning_checks`` for rationale on the *effective_rules*
+            parameter.
+
+        Args:
+            effective_rules: Rule-ID to severity mapping from the profile.
+
+        Returns:
+            Tuple of failed checks where the rule severity is ``FAIL``.
+        """
+        return tuple(
+            c
+            for c in self.checks
+            if c.is_violation()
+            and c.rule_id in effective_rules
+            and effective_rules[c.rule_id].severity == EnumVerdict.FAIL
+        )
 
 
 __all__: list[str] = ["ModelRRHResult"]

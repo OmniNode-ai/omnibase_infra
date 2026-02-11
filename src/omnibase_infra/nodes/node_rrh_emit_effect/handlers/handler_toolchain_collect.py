@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from typing import ClassVar
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.rrh.model_rrh_toolchain_versions import (
@@ -33,6 +34,15 @@ class HandlerToolchainCollect:
         handler_type: ``INFRA_HANDLER``
         handler_category: ``EFFECT``
     """
+
+    _KNOWN_TOOLS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "pre-commit",
+            "ruff",
+            "pytest",
+            "mypy",
+        }
+    )
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -61,15 +71,20 @@ class HandlerToolchainCollect:
             mypy=mypy,
         )
 
-    @staticmethod
-    async def _version(tool: str) -> str:
+    @classmethod
+    async def _version(cls, tool: str) -> str:
         """Run ``<tool> --version`` via create_subprocess_exec and extract version.
 
-        Uses create_subprocess_exec (not shell) for safety — the tool
-        name is from a fixed set, not from user input.
+        Uses create_subprocess_exec (not shell) for safety -- the tool
+        name is validated against ``_KNOWN_TOOLS`` before execution.
 
         Returns empty string on failure.
+
+        Raises:
+            ValueError: If *tool* is not in ``_KNOWN_TOOLS``.
         """
+        if tool not in cls._KNOWN_TOOLS:
+            raise ValueError(f"Unknown tool: {tool!r}")
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
