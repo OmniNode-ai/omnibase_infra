@@ -84,7 +84,17 @@ class HandlerRunContextRead:
         Returns:
             Tuple of (parsed context or None if not found, operation result).
         """
-        if not RUN_ID_PATTERN.match(run_id) or ".." in run_id:
+        # Defense-in-depth: reject unsafe IDs even if model_construct() skipped
+        # validators. Explicit checks for path traversal characters (/, \, ..),
+        # and null bytes in addition to the regex allowlist, since run_id is
+        # used to construct filesystem paths. Mirrors handler_run_context_write.
+        if (
+            not RUN_ID_PATTERN.match(run_id)
+            or ".." in run_id
+            or "/" in run_id
+            or "\\" in run_id
+            or "\x00" in run_id
+        ):
             return (
                 None,
                 ModelSessionStateResult(

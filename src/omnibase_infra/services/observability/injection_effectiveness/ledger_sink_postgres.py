@@ -43,6 +43,7 @@ import asyncpg
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.utils.util_db_error_context import db_operation_error_context
+from omnibase_infra.utils.util_db_transaction import set_statement_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -218,10 +219,7 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         ):
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    # Note: SET LOCAL does not support parameterized queries ($1)
-                    # in PostgreSQL. int() cast guarantees numeric-only output.
-                    timeout_ms = int(self._query_timeout * 1000)
-                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
+                    await set_statement_timeout(conn, self._query_timeout * 1000)
 
                     raw_result = await conn.fetchval(
                         sql,
@@ -368,10 +366,7 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         ):
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    # Note: SET LOCAL does not support parameterized queries ($1)
-                    # in PostgreSQL. int() cast guarantees numeric-only output.
-                    timeout_ms = int(self._query_timeout * 1000)
-                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
+                    await set_statement_timeout(conn, self._query_timeout * 1000)
 
                     await conn.executemany(
                         sql,

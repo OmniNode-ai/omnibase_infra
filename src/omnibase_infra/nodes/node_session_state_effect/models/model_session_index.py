@@ -101,6 +101,9 @@ class ModelSessionIndex(BaseModel):
 
         The list is capped at :attr:`MAX_RECENT_RUNS` entries to prevent
         unbounded growth of ``session.json`` over long-running sessions.
+        When trimming occurs, ``active_run_id`` is cleared if the active
+        run was evicted from the truncated list. This prevents a dangling
+        active pointer to a run that is no longer tracked.
 
         Args:
             run_id: The new run identifier to register.
