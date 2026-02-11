@@ -15,6 +15,8 @@ Ticket: OMN-2143
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -156,20 +158,45 @@ class HandlerCheckpointWrite:
                 )
 
         # Write (append-only: refuse to overwrite existing checkpoints)
+        #
+        # Atomic write: content goes to a temp file first, then os.link()
+        # atomically creates the target or raises FileExistsError (TOCTOU-safe).
+        # This ensures checkpoints are always complete — a crash mid-write
+        # leaves only the temp file, which is cleaned up on the next attempt.
         target_dir.mkdir(parents=True, exist_ok=True)
-        if target_path.exists():
-            raise RuntimeHostError(
-                f"Checkpoint already exists: {filename} — "
-                f"increment attempt_number to create a new checkpoint",
-                context=context,
-            )
         yaml_content = yaml.dump(
             _serialize_checkpoint(checkpoint),
             default_flow_style=False,
             sort_keys=False,
             allow_unicode=True,
         )
-        target_path.write_text(yaml_content, encoding="utf-8")
+
+        tmp_fd = -1
+        tmp_path_str = ""
+        try:
+            tmp_fd, tmp_path_str = tempfile.mkstemp(
+                dir=str(target_dir), suffix=".tmp", prefix=".ckpt_"
+            )
+            os.write(tmp_fd, yaml_content.encode("utf-8"))
+            os.fsync(tmp_fd)
+            os.close(tmp_fd)
+            tmp_fd = -1
+
+            # Atomic link: fails with FileExistsError if target already exists
+            os.link(tmp_path_str, str(target_path))
+            Path(tmp_path_str).unlink()
+            tmp_path_str = ""
+        except FileExistsError:
+            raise RuntimeHostError(
+                f"Checkpoint already exists: {filename} — "
+                f"increment attempt_number to create a new checkpoint",
+                context=context,
+            )
+        finally:
+            if tmp_fd >= 0:
+                os.close(tmp_fd)
+            if tmp_path_str and Path(tmp_path_str).exists():
+                Path(tmp_path_str).unlink()
 
         logger.info(
             "Checkpoint written: %s (phase=%s, attempt=%d)",

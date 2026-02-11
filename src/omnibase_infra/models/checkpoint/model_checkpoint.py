@@ -16,11 +16,19 @@ Ticket: OMN-2143
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    Tag,
+    field_validator,
+    model_validator,
+)
 
 from omnibase_infra.enums.enum_checkpoint_phase import EnumCheckpointPhase
 from omnibase_infra.models.checkpoint.model_phase_payload_create_pr import (
@@ -88,6 +96,16 @@ class ModelCheckpoint(BaseModel):
         ...,
         description="UTC timestamp when the phase completed.",
     )
+
+    @field_validator("timestamp_utc", mode="after")
+    @classmethod
+    def _ensure_utc(cls, v: datetime) -> datetime:
+        """Reject naive datetimes; normalize to UTC."""
+        if v.tzinfo is None:
+            msg = "timestamp_utc must be timezone-aware (use datetime.now(UTC))"
+            raise ValueError(msg)
+        return v.astimezone(UTC)
+
     repo_commit_map: dict[str, str] = Field(
         default_factory=dict,
         description="Mapping of relative repo path to commit SHA.",

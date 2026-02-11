@@ -179,13 +179,9 @@ class HandlerCheckpointValidate:
             )
 
         # 6. Timestamp not in the future (with 60s tolerance)
+        # Note: ModelCheckpoint._ensure_utc guarantees tzinfo is never None.
         now = datetime.now(UTC)
-        if checkpoint.timestamp_utc.tzinfo is not None:
-            ts = checkpoint.timestamp_utc
-        else:
-            ts = checkpoint.timestamp_utc.replace(tzinfo=UTC)
-
-        if ts > now + timedelta(seconds=60):
+        if checkpoint.timestamp_utc > now + timedelta(seconds=60):
             warnings.append("timestamp_utc is in the future")
 
         is_valid = len(errors) == 0

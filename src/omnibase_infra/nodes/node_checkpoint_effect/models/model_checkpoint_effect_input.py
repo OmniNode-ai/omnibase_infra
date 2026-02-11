@@ -7,6 +7,7 @@ Ticket: OMN-2143
 
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,10 +25,11 @@ class ModelCheckpointEffectInput(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    operation: str = Field(
-        ...,
-        min_length=1,
-        description="Operation to perform: write_checkpoint, read_checkpoint, list_checkpoints.",
+    operation: Literal["write_checkpoint", "read_checkpoint", "list_checkpoints"] = (
+        Field(
+            ...,
+            description="Operation to perform: write_checkpoint, read_checkpoint, list_checkpoints.",
+        )
     )
     correlation_id: UUID = Field(
         ...,

@@ -123,11 +123,19 @@ class HandlerCheckpointList:
         else:
             scan_dirs = [d for d in ticket_dir.iterdir() if d.is_dir()]
 
+        def _attempt_number(path: Path) -> int:
+            """Extract numeric attempt from filename like phase_1_implement_a3.yaml."""
+            stem = path.stem
+            after_a = stem.rsplit("_a", maxsplit=1)
+            if len(after_a) == 2 and after_a[1].isdigit():
+                return int(after_a[1])
+            return 0
+
         checkpoints: list[ModelCheckpoint] = []
         for scan_dir in scan_dirs:
             if not scan_dir.is_dir():
                 continue
-            for yaml_file in sorted(scan_dir.glob("phase_*.yaml")):
+            for yaml_file in sorted(scan_dir.glob("phase_*.yaml"), key=_attempt_number):
                 try:
                     raw_data = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
                     if not isinstance(raw_data, dict):
