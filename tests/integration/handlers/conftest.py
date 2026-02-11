@@ -227,7 +227,9 @@ if not POSTGRES_PASSWORD or not POSTGRES_PASSWORD.strip():
 
 # Check if PostgreSQL is available based on host, password, and database being set
 POSTGRES_AVAILABLE = (
-    POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None and bool(POSTGRES_DATABASE)
+    POSTGRES_HOST is not None
+    and POSTGRES_PASSWORD is not None
+    and bool(POSTGRES_DATABASE)
 )
 
 

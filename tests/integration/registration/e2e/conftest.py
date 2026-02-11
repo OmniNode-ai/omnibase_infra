@@ -198,7 +198,9 @@ if _OMNIBASE_INFRA_DB_URL:
     POSTGRES_PORT = _parsed.port or DEFAULT_POSTGRES_PORT
     POSTGRES_DATABASE = unquote((_parsed.path or "").lstrip("/")) or ""
     POSTGRES_USER = unquote(_parsed.username or "postgres")
-    POSTGRES_PASSWORD: str | None = unquote(_parsed.password) if _parsed.password else None
+    POSTGRES_PASSWORD: str | None = (
+        unquote(_parsed.password) if _parsed.password else None
+    )
 else:
     POSTGRES_HOST = os.getenv("POSTGRES_HOST")
     POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", str(DEFAULT_POSTGRES_PORT)))

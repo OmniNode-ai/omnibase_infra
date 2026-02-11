@@ -289,7 +289,9 @@ class PostgresConfig:
         Returns:
             True if host, password, and database are set, False otherwise.
         """
-        return self.host is not None and self.password is not None and bool(self.database)
+        return (
+            self.host is not None and self.password is not None and bool(self.database)
+        )
 
     def build_dsn(self) -> str:
         """Build PostgreSQL DSN from configuration.

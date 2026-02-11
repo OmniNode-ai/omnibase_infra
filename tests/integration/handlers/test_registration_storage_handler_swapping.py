@@ -80,14 +80,18 @@ if _OMNIBASE_INFRA_DB_URL:
 
     _parsed = _urlparse(_OMNIBASE_INFRA_DB_URL)
     POSTGRES_HOST: str | None = _parsed.hostname
-    POSTGRES_PASSWORD: str | None = unquote(_parsed.password) if _parsed.password else None
+    POSTGRES_PASSWORD: str | None = (
+        unquote(_parsed.password) if _parsed.password else None
+    )
     POSTGRES_DATABASE = unquote((_parsed.path or "").lstrip("/")) or ""
 else:
     POSTGRES_HOST = os.getenv("POSTGRES_HOST")
     POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
     POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "")
 POSTGRES_AVAILABLE = (
-    POSTGRES_HOST is not None and POSTGRES_PASSWORD is not None and bool(POSTGRES_DATABASE)
+    POSTGRES_HOST is not None
+    and POSTGRES_PASSWORD is not None
+    and bool(POSTGRES_DATABASE)
 )
 
 
