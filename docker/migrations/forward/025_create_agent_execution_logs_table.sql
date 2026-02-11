@@ -46,7 +46,13 @@ CREATE TABLE IF NOT EXISTS agent_execution_logs (
     output_summary TEXT,
 
     -- Execution metadata
-    metadata JSONB
+    metadata JSONB,
+
+    -- Project context (absorbed from omniclaude - OMN-2057)
+    project_path TEXT,
+    project_name VARCHAR(255),
+    claude_session_id VARCHAR(255),
+    terminal_id VARCHAR(255)
 );
 
 -- ============================================================================
@@ -95,3 +101,7 @@ COMMENT ON COLUMN agent_execution_logs.error_message IS 'Error message if execut
 COMMENT ON COLUMN agent_execution_logs.input_summary IS 'Summary of input provided to agent';
 COMMENT ON COLUMN agent_execution_logs.output_summary IS 'Summary of agent output/results';
 COMMENT ON COLUMN agent_execution_logs.metadata IS 'JSON metadata about execution';
+COMMENT ON COLUMN agent_execution_logs.project_path IS 'Absolute path to the project being worked on (absorbed from omniclaude OMN-2057)';
+COMMENT ON COLUMN agent_execution_logs.project_name IS 'Human-readable project name (absorbed from omniclaude OMN-2057)';
+COMMENT ON COLUMN agent_execution_logs.claude_session_id IS 'Claude Code session identifier (absorbed from omniclaude OMN-2057)';
+COMMENT ON COLUMN agent_execution_logs.terminal_id IS 'Terminal/TTY identifier for the session (absorbed from omniclaude OMN-2057)';

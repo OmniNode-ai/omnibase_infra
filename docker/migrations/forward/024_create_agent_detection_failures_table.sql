@@ -31,7 +31,12 @@ CREATE TABLE IF NOT EXISTS agent_detection_failures (
     attempted_patterns JSONB,
     fallback_used VARCHAR(255),
     error_code VARCHAR(100),
-    metadata JSONB
+    metadata JSONB,
+
+    -- Project context (absorbed from omniclaude - OMN-2057)
+    project_path TEXT,
+    project_name VARCHAR(255),
+    claude_session_id VARCHAR(255)
 );
 
 -- ============================================================================
@@ -55,3 +60,6 @@ COMMENT ON COLUMN agent_detection_failures.attempted_patterns IS 'JSON array of 
 COMMENT ON COLUMN agent_detection_failures.fallback_used IS 'Name of fallback agent if one was used';
 COMMENT ON COLUMN agent_detection_failures.error_code IS 'Error code for categorization';
 COMMENT ON COLUMN agent_detection_failures.metadata IS 'Additional JSON metadata about the failure';
+COMMENT ON COLUMN agent_detection_failures.project_path IS 'Absolute path to the project being worked on (absorbed from omniclaude OMN-2057)';
+COMMENT ON COLUMN agent_detection_failures.project_name IS 'Human-readable project name (absorbed from omniclaude OMN-2057)';
+COMMENT ON COLUMN agent_detection_failures.claude_session_id IS 'Claude Code session identifier (absorbed from omniclaude OMN-2057)';

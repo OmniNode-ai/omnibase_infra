@@ -55,8 +55,8 @@ Main migrations represent a logical unit of schema change. They are numbered seq
 - `003_capability_fields.sql` - Capability discovery columns and standard indexes
 - `004_capability_fields_concurrent.sql` - Production concurrent indexes (companion to 003)
 - `005_create_contracts_topics.sql` - Contract and topic tracking tables
-- `016_create_session_snapshots.sql` - Session snapshot tables
 - `020-027` - Agent observability and analytics tables
+- `028_absorb_omniclaude_columns.sql` - Absorb project context columns + agent_activity_realtime view (OMN-2057)
 
 **When to increment the main number:**
 - New tables or major schema changes
@@ -122,7 +122,6 @@ forward/
   003_capability_fields.sql              # Main: capability columns + standard indexes
   004_capability_fields_concurrent.sql   # Main: concurrent indexes (production)
   005_create_contracts_topics.sql        # Main: contract/topic tables
-  016_create_session_snapshots.sql       # Main: session snapshots
   020_create_agent_actions_table.sql                  # Main: agent actions
   021_create_agent_routing_decisions_table.sql        # Main: routing decisions
   022_create_agent_transformation_events_table.sql    # Main: transformation events
@@ -131,9 +130,10 @@ forward/
   025_create_agent_execution_logs_table.sql           # Main: execution logs
   026_injection_effectiveness_tables.sql              # Main: injection effectiveness
   027_create_agent_status_events_table.sql            # Main: agent status events
+  028_absorb_omniclaude_columns.sql                   # Main: absorb omniclaude columns (OMN-2057)
 ```
 
-**Next available:** `028_*.sql`
+**Next available:** `029_*.sql`
 
 ## Migration Header Requirements
 
