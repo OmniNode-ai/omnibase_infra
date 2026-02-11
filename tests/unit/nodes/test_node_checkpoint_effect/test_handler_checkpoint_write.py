@@ -184,3 +184,26 @@ class TestHandlerCheckpointWrite:
 
         result = await handler.execute(envelope)
         assert result.result.success is True
+
+    async def test_write_rejects_duplicate_attempt(
+        self,
+        handler: HandlerCheckpointWrite,
+        sample_checkpoint: ModelCheckpoint,
+        tmp_path: Path,
+    ) -> None:
+        """Write refuses to overwrite an existing checkpoint (append-only)."""
+        await handler.initialize({})
+
+        envelope: dict[str, object] = {
+            "checkpoint": sample_checkpoint,
+            "correlation_id": uuid4(),
+            "base_dir": str(tmp_path),
+        }
+
+        # First write succeeds
+        result = await handler.execute(envelope)
+        assert result.result.success is True
+
+        # Second write with same checkpoint (same attempt_number) fails
+        with pytest.raises(Exception, match="Checkpoint already exists"):
+            await handler.execute(envelope)

@@ -39,7 +39,11 @@ _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
 
 class HandlerCheckpointValidate:
-    """Pure validation of checkpoint data — no I/O, fully deterministic."""
+    """Pure validation of checkpoint data — no I/O, fully deterministic.
+
+    Classification: ``COMPUTE_HANDLER`` + ``COMPUTE`` — this is a pure compute
+    handler.  Effect handlers use ``NODE_HANDLER`` + ``EFFECT`` instead.
+    """
 
     def __init__(self, container: ModelONEXContainer) -> None:
         self._container = container

@@ -103,8 +103,7 @@ class HandlerCheckpointWrite:
             operation="write_checkpoint",
             target_name="checkpoint_yaml",
         )
-        # with_correlation() auto-generates a UUID when None is passed
-        corr_id = context.correlation_id or uuid4()
+        corr_id = context.correlation_id  # with_correlation() guarantees a UUID
 
         raw_checkpoint = envelope.get("checkpoint")
         if raw_checkpoint is None:
@@ -151,8 +150,14 @@ class HandlerCheckpointWrite:
                     context=context,
                 )
 
-        # Write
+        # Write (append-only: refuse to overwrite existing checkpoints)
         target_dir.mkdir(parents=True, exist_ok=True)
+        if target_path.exists():
+            raise RuntimeHostError(
+                f"Checkpoint already exists: {filename} — "
+                f"increment attempt_number to create a new checkpoint",
+                context=context,
+            )
         yaml_content = yaml.dump(
             _serialize_checkpoint(checkpoint),
             default_flow_style=False,

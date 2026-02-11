@@ -159,6 +159,58 @@ class TestHandlerCheckpointRead:
         assert result.result.success is False
         assert "not found" in result.result.error
 
+    async def test_read_handles_invalid_yaml(
+        self,
+        reader: HandlerCheckpointRead,
+        tmp_path: Path,
+    ) -> None:
+        """Read raises RuntimeHostError when checkpoint file contains invalid YAML."""
+        await reader.initialize({})
+
+        run_id = uuid4()
+        run_dir = tmp_path / "OMN-2143" / str(run_id)
+        run_dir.mkdir(parents=True)
+
+        # Write a corrupt YAML file
+        corrupt_file = run_dir / "phase_1_implement_a1.yaml"
+        corrupt_file.write_text(": : : [invalid yaml", encoding="utf-8")
+
+        read_env: dict[str, object] = {
+            "ticket_id": "OMN-2143",
+            "run_id": run_id,
+            "phase": EnumCheckpointPhase.IMPLEMENT,
+            "correlation_id": uuid4(),
+            "base_dir": str(tmp_path),
+        }
+        with pytest.raises(Exception, match=r"Corrupt checkpoint file.*invalid YAML"):
+            await reader.execute(read_env)
+
+    async def test_read_handles_empty_yaml(
+        self,
+        reader: HandlerCheckpointRead,
+        tmp_path: Path,
+    ) -> None:
+        """Read raises RuntimeHostError when checkpoint file is empty (None)."""
+        await reader.initialize({})
+
+        run_id = uuid4()
+        run_dir = tmp_path / "OMN-2143" / str(run_id)
+        run_dir.mkdir(parents=True)
+
+        # Write an empty YAML file (safe_load returns None)
+        empty_file = run_dir / "phase_1_implement_a1.yaml"
+        empty_file.write_text("", encoding="utf-8")
+
+        read_env: dict[str, object] = {
+            "ticket_id": "OMN-2143",
+            "run_id": run_id,
+            "phase": EnumCheckpointPhase.IMPLEMENT,
+            "correlation_id": uuid4(),
+            "base_dir": str(tmp_path),
+        }
+        with pytest.raises(Exception, match="expected mapping"):
+            await reader.execute(read_env)
+
     async def test_read_missing_phase_returns_error(
         self,
         writer: HandlerCheckpointWrite,

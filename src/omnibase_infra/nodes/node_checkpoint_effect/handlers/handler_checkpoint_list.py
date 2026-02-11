@@ -80,8 +80,7 @@ class HandlerCheckpointList:
             operation="list_checkpoints",
             target_name="checkpoint_yaml",
         )
-        # with_correlation() auto-generates a UUID when None is passed
-        corr_id = context.correlation_id or uuid4()
+        corr_id = context.correlation_id  # with_correlation() guarantees a UUID
 
         ticket_id = envelope.get("ticket_id")
         if not ticket_id:
@@ -126,6 +125,11 @@ class HandlerCheckpointList:
             for yaml_file in sorted(scan_dir.glob("phase_*.yaml")):
                 try:
                     raw_data = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
+                    if not isinstance(raw_data, dict):
+                        logger.warning(
+                            "Skipping non-mapping checkpoint %s", yaml_file.name
+                        )
+                        continue
                     checkpoint = ModelCheckpoint.model_validate(raw_data)
                     checkpoints.append(checkpoint)
                 except (ValidationError, yaml.YAMLError) as exc:

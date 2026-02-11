@@ -174,6 +174,54 @@ class TestHandlerCheckpointList:
         assert result.result.success is True
         assert len(result.result.checkpoints) == 2
 
+    async def test_list_skips_empty_yaml_files(
+        self,
+        writer: HandlerCheckpointWrite,
+        lister: HandlerCheckpointList,
+        tmp_path: Path,
+    ) -> None:
+        """List skips empty or non-dict YAML files without crashing."""
+        await writer.initialize({})
+        await lister.initialize({})
+
+        run_id = uuid4()
+
+        # Write one valid checkpoint
+        cp = ModelCheckpoint(
+            run_id=run_id,
+            ticket_id="OMN-2143",
+            phase=EnumCheckpointPhase.IMPLEMENT,
+            timestamp_utc=datetime.now(UTC),
+            attempt_number=1,
+            phase_payload=ModelPhasePayloadImplement(
+                branch_name="branch",
+                commit_sha="abc1234",
+            ),
+        )
+        await writer.execute(
+            {
+                "checkpoint": cp,
+                "correlation_id": uuid4(),
+                "base_dir": str(tmp_path),
+            }
+        )
+
+        # Place an empty YAML file alongside the valid one
+        run_dir = tmp_path / "OMN-2143" / str(run_id)
+        empty_file = run_dir / "phase_1_implement_a0.yaml"
+        empty_file.write_text("", encoding="utf-8")
+
+        env: dict[str, object] = {
+            "ticket_id": "OMN-2143",
+            "run_id": run_id,
+            "correlation_id": uuid4(),
+            "base_dir": str(tmp_path),
+        }
+        result = await lister.execute(env)
+        assert result.result.success is True
+        # Only the valid checkpoint should be returned; the empty one is skipped
+        assert len(result.result.checkpoints) == 1
+
     async def test_list_without_run_id_scans_all_runs(
         self,
         writer: HandlerCheckpointWrite,

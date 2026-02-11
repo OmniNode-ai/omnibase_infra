@@ -87,8 +87,7 @@ class HandlerCheckpointRead:
             operation="read_checkpoint",
             target_name="checkpoint_yaml",
         )
-        # with_correlation() auto-generates a UUID when None is passed
-        corr_id = context.correlation_id or uuid4()
+        corr_id = context.correlation_id  # with_correlation() guarantees a UUID
 
         ticket_id = envelope.get("ticket_id")
         run_id = envelope.get("run_id")
@@ -153,10 +152,20 @@ class HandlerCheckpointRead:
 
         # Read the latest attempt (last file alphabetically = highest attempt)
         latest_file = matching_files[-1]
-        raw_data = yaml.safe_load(latest_file.read_text(encoding="utf-8"))
-
         try:
+            raw_data = yaml.safe_load(latest_file.read_text(encoding="utf-8"))
+            if not isinstance(raw_data, dict):
+                raise RuntimeHostError(
+                    f"Corrupt checkpoint file {latest_file.name}: expected mapping, "
+                    f"got {type(raw_data).__name__}",
+                    context=context,
+                )
             checkpoint = ModelCheckpoint.model_validate(raw_data)
+        except yaml.YAMLError as exc:
+            raise RuntimeHostError(
+                f"Corrupt checkpoint file {latest_file.name}: invalid YAML",
+                context=context,
+            ) from exc
         except ValidationError as exc:
             raise RuntimeHostError(
                 f"Corrupt checkpoint file {latest_file.name}: {exc.error_count()} errors",
