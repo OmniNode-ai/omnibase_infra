@@ -34,9 +34,11 @@ OMNIBASE_INFRA_DB_URL=postgresql://role_omnibase_infra:s3cret@db.example.com:543
 
 ## Resolution Order
 
-`ModelPostgresPoolConfig.from_env()` requires a single `*_DB_URL` variable:
+`ModelPostgresPoolConfig.from_env(db_url_var=...)` reads a single `*_DB_URL`
+environment variable. The `db_url_var` parameter defaults to
+`"OMNIBASE_INFRA_DB_URL"` but each service passes its own variable name:
 
-1. **`OMNIBASE_INFRA_DB_URL`** - Full DSN (required). Host, port, user,
+1. **Read `db_url_var`** - Full DSN (required). Host, port, user,
    password, and database are parsed from the URL.
 2. **Error** - If the variable is not set, a `ValueError` is raised
    with a clear message. There is no silent fallback.
@@ -86,12 +88,13 @@ POSTGRES_DATABASE=omnibase_infra
 
 ### For Docker Compose
 
-Docker Compose defaults have been updated from `omninode_bridge` to
-`omnibase_infra`:
+Docker Compose files use the standard PostgreSQL image variable `POSTGRES_DB`
+(not `POSTGRES_DATABASE`). Defaults have been updated from `omninode_bridge`
+to `omnibase_infra`:
 
 ```yaml
-# docker-compose.infra.yml
-POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omnibase_infra}
+# docker-compose.infra.yml / docker-compose.e2e.yml
+POSTGRES_DB: omnibase_infra
 ```
 
 ### For Tests
