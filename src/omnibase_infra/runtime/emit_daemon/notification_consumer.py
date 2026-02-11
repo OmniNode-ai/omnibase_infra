@@ -56,15 +56,15 @@ from omnibase_infra.handlers.models.model_slack_alert import (
     EnumAlertSeverity,
     ModelSlackAlert,
 )
+from omnibase_infra.runtime.emit_daemon.topics import (
+    TOPIC_NOTIFICATION_BLOCKED,
+    TOPIC_NOTIFICATION_COMPLETED,
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.protocols import ProtocolEventBusLike
 
 logger = logging.getLogger(__name__)
-
-# Topic constants for notification events
-TOPIC_NOTIFICATION_BLOCKED = "onex.evt.omniclaude.notification-blocked.v1"
-TOPIC_NOTIFICATION_COMPLETED = "onex.evt.omniclaude.notification-completed.v1"
 
 
 class NotificationConsumer:
@@ -444,6 +444,4 @@ class NotificationConsumer:
 
 __all__ = [
     "NotificationConsumer",
-    "TOPIC_NOTIFICATION_BLOCKED",
-    "TOPIC_NOTIFICATION_COMPLETED",
 ]

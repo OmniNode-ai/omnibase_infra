@@ -2272,6 +2272,30 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Node Architecture - COMPUTE nodes)
     ticket: OMN-2125
+  # ==========================================================================
+  # ModelPhasePayloadImplement branch_name Exemption (OMN-2143)
+  # ==========================================================================
+  # branch_name is a git branch string, not an entity reference.
+  - file_pattern: 'model_phase_payload_implement\.py'
+    violation_pattern: "Field 'branch_name' might reference an entity"
+    reason: >
+      branch_name is a git branch string (e.g., "jonah/omn-2143-checkpoint-nodes") identifying the working branch for a pipeline phase. It is not a domain entity requiring ID + display_name.
+
+    documentation:
+      - CLAUDE.md (Node Architecture - EFFECT nodes)
+    ticket: OMN-2143
+  # ==========================================================================
+  # ModelCheckpoint ticket_id Exemption (OMN-2143)
+  # ==========================================================================
+  # ticket_id is a Linear ticket identifier string (e.g., "OMN-2143"), not a UUID.
+  - file_pattern: 'model_checkpoint\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id is a human-readable Linear ticket identifier (e.g., "OMN-2143") used for grouping checkpoint files by ticket. Linear ticket IDs are string-formatted identifiers, not UUIDs.
+
+    documentation:
+      - CLAUDE.md (Node Architecture - EFFECT nodes)
+    ticket: OMN-2143
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

@@ -49,7 +49,7 @@ def _get_postgres_dsn() -> str | None:
         return None
 
     port = os.getenv("POSTGRES_PORT", "5436")
-    database = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
+    database = os.getenv("POSTGRES_DATABASE", "omnibase_infra")
     user = os.getenv("POSTGRES_USER", "postgres")
 
     return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}"

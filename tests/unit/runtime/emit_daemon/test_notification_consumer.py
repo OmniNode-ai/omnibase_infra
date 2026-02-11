@@ -20,9 +20,11 @@ import pytest
 
 from omnibase_infra.handlers.models.model_slack_alert import EnumAlertSeverity
 from omnibase_infra.runtime.emit_daemon.notification_consumer import (
+    NotificationConsumer,
+)
+from omnibase_infra.runtime.emit_daemon.topics import (
     TOPIC_NOTIFICATION_BLOCKED,
     TOPIC_NOTIFICATION_COMPLETED,
-    NotificationConsumer,
 )
 
 FIXED_UUID = UUID("12345678-1234-5678-1234-567812345678")

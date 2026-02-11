@@ -56,6 +56,7 @@ from omnibase_infra.services.observability.injection_effectiveness.models.model_
     ModelLatencyBreakdownEvent,
 )
 from omnibase_infra.utils.util_db_error_context import db_operation_error_context
+from omnibase_infra.utils.util_db_transaction import set_statement_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -270,11 +271,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 # If pattern_hit_rates write fails after injection_effectiveness succeeds,
                 # both are rolled back to prevent partial data.
                 async with conn.transaction():
-                    # SET LOCAL scopes timeout to this transaction (pool-safe)
-                    # Note: SET LOCAL does not support parameterized queries ($1)
-                    # in PostgreSQL. int() cast guarantees numeric-only output.
-                    timeout_ms = int(self._query_timeout * 1000)
-                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
+                    await set_statement_timeout(conn, self._query_timeout * 1000)
 
                     # Write to injection_effectiveness
                     await conn.executemany(
@@ -409,11 +406,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         ):
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    # SET LOCAL scopes timeout to this transaction (pool-safe)
-                    # Note: SET LOCAL does not support parameterized queries ($1)
-                    # in PostgreSQL. int() cast guarantees numeric-only output.
-                    timeout_ms = int(self._query_timeout * 1000)
-                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
+                    await set_statement_timeout(conn, self._query_timeout * 1000)
 
                     await conn.executemany(
                         sql,
@@ -533,11 +526,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 # If latency_breakdowns insert fails after injection_effectiveness upsert,
                 # both are rolled back to prevent partial data.
                 async with conn.transaction():
-                    # SET LOCAL scopes timeout to this transaction (pool-safe)
-                    # Note: SET LOCAL does not support parameterized queries ($1)
-                    # in PostgreSQL. int() cast guarantees numeric-only output.
-                    timeout_ms = int(self._query_timeout * 1000)
-                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
+                    await set_statement_timeout(conn, self._query_timeout * 1000)
 
                     # 1. First: Upsert to injection_effectiveness (creates parent row if needed)
                     await conn.executemany(

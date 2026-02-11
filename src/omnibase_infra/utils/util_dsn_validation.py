@@ -357,7 +357,7 @@ def parse_and_validate_dsn(
     # Validate database name
     # Path is "/dbname" or "///dbname" for Unix socket
     # Strip leading slashes to get database name
-    database = parsed.path.lstrip("/") if parsed.path else ""
+    database = unquote(parsed.path.lstrip("/")) if parsed.path else ""
 
     # Database name is required (unless using Unix socket with query param)
     # For Unix sockets: postgresql:///dbname?host=/var/run/postgresql

@@ -44,6 +44,7 @@ from omnibase_infra.utils.util_datetime import (
 # Import directly: from omnibase_infra.utils.util_db_error_context import db_operation_error_context
 # See: omnibase_infra.errors -> util_error_sanitization -> utils.__init__ -> util_db_error_context -> errors
 from omnibase_infra.utils.util_db_transaction import (
+    set_statement_timeout,
     transaction_context,
 )
 from omnibase_infra.utils.util_dsn_validation import (
@@ -108,6 +109,7 @@ __all__: list[str] = [
     "sanitize_error_string",
     "sanitize_secret_path",
     "set_correlation_id",
+    "set_statement_timeout",
     "transaction_context",
     "validate_contract_type_value",
     "validate_endpoint_urls_dict",

@@ -359,7 +359,7 @@ def connect_to_database(host: str, connection_pool: object) -> None:
         context = ModelInfraErrorContext.with_correlation(
             transport_type=EnumInfraTransportType.DATABASE,
             operation="execute_query",
-            target_name="omninode_bridge",
+            target_name="omnibase_infra",
         )
         raise InfraConnectionError("Connection refused", context=context) from e
 ```

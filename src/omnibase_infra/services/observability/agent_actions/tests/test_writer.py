@@ -109,7 +109,7 @@ def sample_routing_decision() -> ModelRoutingDecision:
         selected_agent="api-architect",
         confidence_score=0.95,
         created_at=datetime.now(UTC),
-        alternatives=["testing", "debug"],
+        alternatives=("testing", "debug"),
     )
 
 
@@ -145,7 +145,7 @@ def sample_detection_failure() -> ModelDetectionFailure:
         correlation_id=uuid4(),
         failure_reason="No matching pattern",
         created_at=datetime.now(UTC),
-        attempted_patterns=["code-review", "testing"],
+        attempted_patterns=("code-review", "testing"),
     )
 
 
@@ -562,7 +562,7 @@ class TestJSONSerialization:
 
     def test_serialize_list_with_strings(self) -> None:
         """_serialize_list should convert list to JSON string."""
-        result = WriterAgentActionsPostgres._serialize_list(["a", "b", "c"])
+        result = WriterAgentActionsPostgres._serialize_list(("a", "b", "c"))
         assert result == '["a", "b", "c"]'
 
     def test_serialize_list_with_none(self) -> None:
@@ -591,8 +591,11 @@ class TestJSONSerialization:
 
         call_args = mock_conn.executemany.call_args
         batch_data = list(call_args[0][1])
-        # metadata is the last field in the INSERT tuple
-        metadata_value = batch_data[0][-1]
+        # metadata is at index 10 in the INSERT tuple
+        # (id, correlation_id, agent_name, action_type, action_name,
+        #  created_at, status, duration_ms, result, error_message, metadata,
+        #  project_path, project_name, working_directory)
+        metadata_value = batch_data[0][10]
         assert isinstance(metadata_value, str)
         assert '"tool"' in metadata_value
         assert '"Read"' in metadata_value
