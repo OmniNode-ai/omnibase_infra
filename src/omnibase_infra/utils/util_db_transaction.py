@@ -233,7 +233,9 @@ async def transaction_context(
             raise
 
 
-async def set_statement_timeout(conn: asyncpg.Connection, timeout_ms: int | float) -> None:
+async def set_statement_timeout(
+    conn: asyncpg.Connection, timeout_ms: int | float
+) -> None:
     """Set PostgreSQL statement_timeout for the current transaction.
 
     Uses string interpolation because SET LOCAL does not support $1

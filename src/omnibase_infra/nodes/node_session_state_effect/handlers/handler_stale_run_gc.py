@@ -170,7 +170,8 @@ class HandlerStaleRunGC:
                 if age_s < -5.0:
                     logger.warning(
                         "GC: run %s has updated_at %.0fs in the future (clock skew?)",
-                        ctx.run_id, -age_s,
+                        ctx.run_id,
+                        -age_s,
                     )
 
                 if ctx.is_stale(self._ttl_seconds):
