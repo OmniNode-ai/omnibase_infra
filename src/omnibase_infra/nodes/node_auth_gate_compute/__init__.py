@@ -17,7 +17,7 @@ Core Purpose:
 
 Decision Cascade:
      1. Whitelisted paths -> allow (plans, memory)
-     2. Emergency override active -> allow/deny (requires reason)
+     2. Emergency override active -> soft_deny (with banner) / deny if no reason
      3. No run_id determinable -> deny
      4. Run context not found -> deny
      5. Auth not granted (run_id mismatch) -> deny

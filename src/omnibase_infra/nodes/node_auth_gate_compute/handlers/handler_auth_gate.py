@@ -7,7 +7,7 @@ allow/deny/soft_deny. No I/O, no side effects.
 
 Decision Cascade (evaluated top-to-bottom, first match wins):
      1. Whitelisted paths -> allow (plans, memory)
-     2. Emergency override active -> allow (with reason_code) / deny if no reason
+     2. Emergency override active -> soft_deny (with banner) / deny if no reason
      3. No run_id determinable -> deny
      4. Run context not found (no authorization) -> deny
      5. Auth not granted (authorization exists but run_id mismatch) -> deny
