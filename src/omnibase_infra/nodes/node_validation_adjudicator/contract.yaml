@@ -1,0 +1,154 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+# ONEX Node Contract — Validation Adjudicator Reducer
+#
+# Pure FSM for validation verdict production.
+# Tracks: collecting -> adjudicating -> verdict_emitted -> collecting
+#
+# Scoring policy:
+#   - Any REQUIRED check failure -> FAIL (hard block)
+#   - Score < threshold but no hard blocks -> QUARANTINE (soft block)
+#   - All REQUIRED pass and score >= threshold -> PASS
+#
+# Related Tickets:
+#   - OMN-2147: Validation Skeleton — Orchestrator + Executor
+# =============================================================================
+# Contract identifiers
+name: "node_validation_adjudicator"
+contract_name: "node_validation_adjudicator"
+node_name: "node_validation_adjudicator"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Node type
+node_type: "REDUCER_GENERIC"
+# Description
+description: >
+  Pure reducer for validation verdict production. Aggregates check results from the validation executor, applies scoring policy (required/recommended/informational severity), and produces a PASS/FAIL/QUARANTINE verdict. Supports the collecting -> adjudicating -> verdict_emitted FSM lifecycle with reset capability.
+
+# I/O Models
+input_model:
+  name: "ModelReducerInput"
+  module: "omnibase_core.models.reducer.model_reducer_input"
+  description: "Reducer input containing validation event and trigger."
+output_model:
+  name: "ModelReducerOutput"
+  module: "omnibase_core.models.reducer.model_reducer_output"
+  description: "Reducer output containing new state and verdict intents."
+# FSM State Machine Definition
+# ============================
+#
+# State Diagram:
+#   +------------+  begin_adjudication  +--------------+  emit_verdict  +----------------+
+#   | collecting | ------------------> | adjudicating | -------------> | verdict_emitted |
+#   +------------+                     +--------------+                +----------------+
+#        ^                                                                    |
+#        |                                                                    |
+#        +--------------------------------------------------------------------+
+#                                      reset
+#
+state_machine:
+  state_machine_name: "validation_adjudicator_fsm"
+  initial_state: "collecting"
+  states:
+    - state_name: "collecting"
+      description: "Accumulating check results from executor"
+      entry_actions: []
+      exit_actions: []
+      required_data: []
+    - state_name: "adjudicating"
+      description: "Applying scoring policy to collected results"
+      entry_actions:
+        - "compute_verdict_score"
+      exit_actions: []
+      required_data:
+        - "candidate_id"
+        - "plan_id"
+    - state_name: "verdict_emitted"
+      description: "Final verdict has been produced and emitted"
+      entry_actions:
+        - "emit_verdict_intent"
+      exit_actions: []
+      required_data:
+        - "candidate_id"
+        - "plan_id"
+  transitions:
+    # collecting -> adjudicating: On adjudication start
+    - from_state: "collecting"
+      to_state: "adjudicating"
+      trigger: "begin_adjudication"
+      description: "Begin adjudicating collected check results"
+      conditions:
+        - expression: "check_results is_present"
+          required: true
+      actions:
+        - action_name: "compute_weighted_score"
+          action_type: "state_update"
+    # adjudicating -> verdict_emitted: On verdict emission
+    - from_state: "adjudicating"
+      to_state: "verdict_emitted"
+      trigger: "emit_verdict"
+      description: "Produce and emit the final verdict"
+      actions:
+        - action_name: "build_verdict_intent"
+          action_type: "intent_emission"
+    # verdict_emitted -> collecting: Reset for next validation run
+    - from_state: "verdict_emitted"
+      to_state: "collecting"
+      trigger: "reset"
+      description: "Reset to collecting for next validation run"
+      actions:
+        - action_name: "clear_adjudicator_state"
+          action_type: "state_update"
+  persistence_enabled: true
+  terminal_states: []
+  # verdict_emitted is NOT a true terminal — it resets to collecting
+# Intent Emission Configuration
+# ============================
+intent_emission:
+  enabled: true
+  intents:
+    - intent_type: "validation.verdict.emit"
+      target_pattern: "orchestrator://validation/{candidate_id}/verdict"
+      payload_model: "ModelVerdict"
+      payload_module: "omnibase_infra.nodes.node_validation_adjudicator.models"
+      description: "Emit the computed validation verdict"
+# State Model Configuration
+state_model:
+  name: "ModelAdjudicatorState"
+  module: "omnibase_infra.nodes.node_validation_adjudicator.models"
+  description: "Immutable state model for validation adjudicator FSM"
+# Idempotency Configuration
+idempotency:
+  enabled: true
+  strategy: "event_id_tracking"
+  description: "Skip duplicate events based on last_processed_event_id"
+# Dependencies
+dependencies:
+  - name: "container"
+    type: "ModelONEXContainer"
+    module: "omnibase_core.models.container.model_onex_container"
+    description: "ONEX dependency injection container"
+# Health check
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-11"
+  tags:
+    - reducer
+    - validation
+    - adjudicator
+    - fsm
+    - verdict
+  related_tickets:
+    - "OMN-2147"
