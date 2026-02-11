@@ -87,7 +87,9 @@ class ModelLifecycleState(BaseModel):
             - **FAIL**: Reset pass counter, increment fail counter.
               Demote if ``consecutive_fail_count >= 2``.
               Suppress if ``consecutive_fail_count >= 3``.
-            - **QUARANTINE**: Record the verdict without changing the tier.
+            - **QUARANTINE**: Record the verdict without changing the tier
+              or the consecutive pass/fail counters.  A quarantine does
+              **not** break an existing pass or fail streak.
 
         Args:
             verdict: The validation verdict to apply.

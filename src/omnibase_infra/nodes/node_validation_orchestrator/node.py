@@ -50,37 +50,12 @@ Ticket: OMN-2147
 
 from __future__ import annotations
 
-import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from omnibase_core.nodes.node_orchestrator import NodeOrchestrator
-from omnibase_infra.models.routing import ModelRoutingSubcontract
-from omnibase_infra.runtime.contract_loaders import load_handler_routing_subcontract
 
 if TYPE_CHECKING:
     from omnibase_core.models.container import ModelONEXContainer
-
-logger = logging.getLogger(__name__)
-
-
-def _create_handler_routing_subcontract() -> ModelRoutingSubcontract:
-    """Load handler routing configuration from this node's contract.yaml.
-
-    Thin wrapper around the shared utility load_handler_routing_subcontract()
-    that provides the contract path for this node. This maintains the existing
-    function signature for internal callers while delegating to the shared
-    implementation.
-
-    Returns:
-        ModelRoutingSubcontract with entries mapping event models to handlers.
-
-    Raises:
-        ProtocolConfigurationError: If contract.yaml does not exist, contains invalid
-            YAML syntax, is empty, or handler_routing section is missing.
-    """
-    contract_path = Path(__file__).parent / "contract.yaml"
-    return load_handler_routing_subcontract(contract_path)
 
 
 class NodeValidationOrchestrator(NodeOrchestrator):

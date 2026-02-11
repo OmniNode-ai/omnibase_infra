@@ -30,7 +30,7 @@ description: >
 # Strongly typed I/O models
 input_model:
   name: "ModelValidationPlan"
-  module: "omnibase_infra.nodes.node_validation_executor.models"
+  module: "omnibase_infra.nodes.node_validation_orchestrator.models"
   description: "Validation plan containing the checks to execute."
 output_model:
   name: "ModelExecutorResult"
@@ -55,7 +55,7 @@ handler_routing:
       description: "Execute all checks in a validation plan"
       input_model:
         name: "ModelValidationPlan"
-        module: "omnibase_infra.nodes.node_validation_executor.models"
+        module: "omnibase_infra.nodes.node_validation_orchestrator.models"
 # Error handling
 error_handling:
   retry_policy:

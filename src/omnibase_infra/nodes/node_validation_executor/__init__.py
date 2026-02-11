@@ -11,8 +11,6 @@ Available Exports:
     - NodeValidationExecutor: The declarative effect node
     - ModelCheckResult: Individual check result
     - ModelExecutorResult: Aggregated executor result
-    - ModelPlannedCheck: A single planned check definition
-    - ModelValidationPlan: Plan of checks to execute
     - HandlerRunChecks: Handler that executes planned checks
     - RegistryInfraValidationExecutor: DI registry
 
@@ -24,8 +22,6 @@ from omnibase_infra.nodes.node_validation_executor.handlers import HandlerRunChe
 from omnibase_infra.nodes.node_validation_executor.models import (
     ModelCheckResult,
     ModelExecutorResult,
-    ModelPlannedCheck,
-    ModelValidationPlan,
 )
 from omnibase_infra.nodes.node_validation_executor.node import NodeValidationExecutor
 from omnibase_infra.nodes.node_validation_executor.registry import (
@@ -40,8 +36,6 @@ __all__: list[str] = [
     # Models
     "ModelCheckResult",
     "ModelExecutorResult",
-    "ModelPlannedCheck",
-    "ModelValidationPlan",
     # Registry
     "RegistryInfraValidationExecutor",
 ]
