@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums.enum_auth_source import EnumAuthSource
 
@@ -48,7 +48,7 @@ class ModelContractWorkAuthorization(BaseModel):
     source: EnumAuthSource = Field(
         ..., description="How the authorization was granted."
     )
-    expires_at: datetime = Field(
+    expires_at: AwareDatetime = Field(
         ..., description="UTC timestamp when this authorization expires."
     )
     reason: str = Field(

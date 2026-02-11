@@ -444,6 +444,34 @@ class TestStep7PathNotAllowed:
 
         assert decision.step >= 8 or decision.decision == EnumAuthDecision.ALLOW
 
+    def test_single_star_does_not_match_nested_path(
+        self,
+        handler: HandlerAuthGate,
+        run_id: UUID,
+        now: datetime,
+    ) -> None:
+        """Single * in allowed_paths must not match across /."""
+        auth = ModelContractWorkAuthorization(
+            run_id=run_id,
+            allowed_tools=("Edit",),
+            allowed_paths=("src/*.py",),
+            repo_scopes=(),
+            source=EnumAuthSource.EXPLICIT,
+            expires_at=now + timedelta(hours=4),
+        )
+        request = ModelAuthGateRequest(
+            tool_name="Edit",
+            target_path="src/deep/nested/secret.py",
+            run_id=run_id,
+            authorization=auth,
+            now=now,
+        )
+        decision = handler.evaluate(request)
+
+        assert decision.decision == EnumAuthDecision.DENY
+        assert decision.step == 7
+        assert decision.reason_code == "path_not_allowed"
+
     def test_empty_path_skips_check(
         self,
         handler: HandlerAuthGate,
@@ -610,7 +638,7 @@ class TestStep9AuthExpired:
         auth = ModelContractWorkAuthorization(
             run_id=run_id,
             allowed_tools=("Edit", "Write"),
-            allowed_paths=("*",),
+            allowed_paths=("**",),
             repo_scopes=(),
             source=EnumAuthSource.EXPLICIT,
             expires_at=now,  # Exactly now
@@ -637,7 +665,7 @@ class TestStep9AuthExpired:
         auth = ModelContractWorkAuthorization(
             run_id=run_id,
             allowed_tools=("Edit", "Write"),
-            allowed_paths=("*",),
+            allowed_paths=("**",),
             repo_scopes=(),
             source=EnumAuthSource.EXPLICIT,
             expires_at=now + timedelta(hours=4),
@@ -672,7 +700,7 @@ class TestStep10AllChecksPassed:
         auth = ModelContractWorkAuthorization(
             run_id=run_id,
             allowed_tools=("Edit", "Write"),
-            allowed_paths=("*",),
+            allowed_paths=("**",),
             repo_scopes=(),
             source=EnumAuthSource.EXPLICIT,
             expires_at=now + timedelta(hours=4),
@@ -776,7 +804,7 @@ class TestContractWorkAuthorizationExpiry:
         auth = ModelContractWorkAuthorization(
             run_id=uuid4(),
             allowed_tools=("Edit",),
-            allowed_paths=("*",),
+            allowed_paths=("**",),
             source=EnumAuthSource.EXPLICIT,
             expires_at=datetime(2026, 12, 31, tzinfo=UTC),
         )
@@ -788,7 +816,7 @@ class TestContractWorkAuthorizationExpiry:
         auth = ModelContractWorkAuthorization(
             run_id=uuid4(),
             allowed_tools=("Edit",),
-            allowed_paths=("*",),
+            allowed_paths=("**",),
             source=EnumAuthSource.EXPLICIT,
             expires_at=datetime(2026, 1, 1, tzinfo=UTC),
         )
@@ -802,12 +830,25 @@ class TestContractWorkAuthorizationExpiry:
         auth = ModelContractWorkAuthorization(
             run_id=uuid4(),
             allowed_tools=("Edit",),
-            allowed_paths=("*",),
+            allowed_paths=("**",),
             source=EnumAuthSource.EXPLICIT,
             expires_at=datetime(2026, 12, 31, tzinfo=UTC),
         )
         with pytest.raises((TypeError, ValidationError)):
             auth.reason = "changed"  # type: ignore[misc]
+
+    def test_naive_datetime_rejected(self) -> None:
+        """Timezone-naive expires_at is rejected by AwareDatetime."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="timezone"):
+            ModelContractWorkAuthorization(
+                run_id=uuid4(),
+                allowed_tools=("Edit",),
+                allowed_paths=("**",),
+                source=EnumAuthSource.EXPLICIT,
+                expires_at=datetime(2026, 12, 31),  # No tzinfo
+            )
 
 
 # =============================================================================

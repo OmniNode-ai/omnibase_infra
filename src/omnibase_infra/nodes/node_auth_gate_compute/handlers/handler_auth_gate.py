@@ -365,7 +365,9 @@ class HandlerAuthGate:
     def _path_matches_globs(path: str, globs: tuple[str, ...]) -> bool:
         """Check if a path matches any of the provided glob patterns.
 
-        Supports ``**`` for recursive directory matching (unlike ``fnmatch``).
+        All patterns are routed through ``_glob_to_regex`` to ensure ``*``
+        never matches ``/``. This is stricter than ``fnmatch`` (used only
+        for whitelisted paths) and is the correct behavior for authorization.
 
         Args:
             path: File path to check.
@@ -375,10 +377,7 @@ class HandlerAuthGate:
             True if the path matches at least one glob pattern.
         """
         for pattern in globs:
-            if "**" in pattern:
-                if HandlerAuthGate._glob_to_regex(pattern).match(path):
-                    return True
-            elif fnmatch.fnmatch(path, pattern):
+            if HandlerAuthGate._glob_to_regex(pattern).match(path):
                 return True
         return False
 

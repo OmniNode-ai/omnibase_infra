@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from omnibase_infra.nodes.node_auth_gate_compute.models.model_contract_work_authorization import (
     ModelContractWorkAuthorization,
@@ -56,7 +56,7 @@ class ModelAuthGateRequest(BaseModel):
         default="",
         description="Value of ONEX_UNSAFE_REASON env var.",
     )
-    now: datetime = Field(
+    now: AwareDatetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="Current UTC timestamp for expiry checks.",
     )
