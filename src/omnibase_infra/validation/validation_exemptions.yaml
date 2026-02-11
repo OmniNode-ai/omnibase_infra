@@ -2261,6 +2261,17 @@ pattern_exemptions:
     documentation:
       - OMN-2117 ticket description (run_id as string identifier)
     ticket: OMN-2117
+  # ==========================================================================
+  # ModelAuthGateRequest tool_name Exemption (OMN-2125)
+  # ==========================================================================
+  - file_pattern: 'model_auth_gate_request\.py'
+    violation_pattern: "Field 'tool_name' might reference an entity"
+    reason: >
+      tool_name is a simple string identifier for the tool being invoked (e.g., "Edit", "Write", "Bash"). It identifies a Claude Code tool by display name, not a domain entity. There is no separate ID for tools.
+
+    documentation:
+      - CLAUDE.md (Node Architecture - COMPUTE nodes)
+    ticket: OMN-2125
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

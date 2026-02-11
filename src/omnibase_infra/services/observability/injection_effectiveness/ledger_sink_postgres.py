@@ -218,10 +218,10 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         ):
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
+                    # Note: SET LOCAL does not support parameterized queries ($1)
+                    # in PostgreSQL. int() cast guarantees numeric-only output.
                     timeout_ms = int(self._query_timeout * 1000)
-                    await conn.execute(
-                        "SET LOCAL statement_timeout = $1", str(timeout_ms)
-                    )
+                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
 
                     raw_result = await conn.fetchval(
                         sql,
@@ -368,10 +368,10 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         ):
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
+                    # Note: SET LOCAL does not support parameterized queries ($1)
+                    # in PostgreSQL. int() cast guarantees numeric-only output.
                     timeout_ms = int(self._query_timeout * 1000)
-                    await conn.execute(
-                        "SET LOCAL statement_timeout = $1", str(timeout_ms)
-                    )
+                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
 
                     await conn.executemany(
                         sql,

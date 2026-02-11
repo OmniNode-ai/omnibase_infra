@@ -324,9 +324,9 @@ class TestTransactionContextTimeout:
         async with transaction_context(pool, timeout=5.0):  # type: ignore[arg-type]
             pass
 
-        # SET LOCAL should be called with parameterized timeout in milliseconds
+        # SET LOCAL should be called with timeout in milliseconds
         connection.execute.assert_called_once_with(
-            "SET LOCAL statement_timeout = $1", 5000
+            "SET LOCAL statement_timeout = '5000'"
         )
 
     @pytest.mark.asyncio
@@ -340,7 +340,7 @@ class TestTransactionContextTimeout:
 
         # 1.5 seconds = 1500 milliseconds
         connection.execute.assert_called_once_with(
-            "SET LOCAL statement_timeout = $1", 1500
+            "SET LOCAL statement_timeout = '1500'"
         )
 
     @pytest.mark.asyncio
@@ -353,9 +353,7 @@ class TestTransactionContextTimeout:
             pass
 
         # 0.0015 seconds = 1.5 milliseconds, truncated to 1
-        connection.execute.assert_called_once_with(
-            "SET LOCAL statement_timeout = $1", 1
-        )
+        connection.execute.assert_called_once_with("SET LOCAL statement_timeout = '1'")
 
     @pytest.mark.asyncio
     async def test_timeout_zero(self) -> None:
@@ -366,9 +364,7 @@ class TestTransactionContextTimeout:
         async with transaction_context(pool, timeout=0.0):  # type: ignore[arg-type]
             pass
 
-        connection.execute.assert_called_once_with(
-            "SET LOCAL statement_timeout = $1", 0
-        )
+        connection.execute.assert_called_once_with("SET LOCAL statement_timeout = '0'")
 
 
 @pytest.mark.unit
@@ -563,7 +559,7 @@ class TestTransactionContextCombinations:
         assert connection._last_transaction_params["deferrable"] is True
 
         # Verify timeout was set
-        connection.execute.assert_called_with("SET LOCAL statement_timeout = $1", 30000)
+        connection.execute.assert_called_with("SET LOCAL statement_timeout = '30000'")
 
         # Verify fetchval was called
         connection.fetchval.assert_called_once_with("SELECT 1")

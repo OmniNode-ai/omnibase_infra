@@ -68,6 +68,10 @@ class ModelSlackAlertResult(BaseModel):
         ge=0,
         description="Number of retry attempts made",
     )
+    thread_ts: str | None = Field(
+        default=None,
+        description="Slack ts of the posted message (only available with Web API mode).",
+    )
 
 
 __all__ = ["ModelSlackAlertResult"]

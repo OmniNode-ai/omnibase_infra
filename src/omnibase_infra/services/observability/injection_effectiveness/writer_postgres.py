@@ -271,10 +271,10 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 # both are rolled back to prevent partial data.
                 async with conn.transaction():
                     # SET LOCAL scopes timeout to this transaction (pool-safe)
+                    # Note: SET LOCAL does not support parameterized queries ($1)
+                    # in PostgreSQL. int() cast guarantees numeric-only output.
                     timeout_ms = int(self._query_timeout * 1000)
-                    await conn.execute(
-                        "SET LOCAL statement_timeout = $1", str(timeout_ms)
-                    )
+                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
 
                     # Write to injection_effectiveness
                     await conn.executemany(
@@ -410,10 +410,10 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
                     # SET LOCAL scopes timeout to this transaction (pool-safe)
+                    # Note: SET LOCAL does not support parameterized queries ($1)
+                    # in PostgreSQL. int() cast guarantees numeric-only output.
                     timeout_ms = int(self._query_timeout * 1000)
-                    await conn.execute(
-                        "SET LOCAL statement_timeout = $1", str(timeout_ms)
-                    )
+                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
 
                     await conn.executemany(
                         sql,
@@ -534,10 +534,10 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
                 # both are rolled back to prevent partial data.
                 async with conn.transaction():
                     # SET LOCAL scopes timeout to this transaction (pool-safe)
+                    # Note: SET LOCAL does not support parameterized queries ($1)
+                    # in PostgreSQL. int() cast guarantees numeric-only output.
                     timeout_ms = int(self._query_timeout * 1000)
-                    await conn.execute(
-                        "SET LOCAL statement_timeout = $1", str(timeout_ms)
-                    )
+                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
 
                     # 1. First: Upsert to injection_effectiveness (creates parent row if needed)
                     await conn.executemany(
