@@ -13,7 +13,7 @@ Tests:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -499,6 +499,36 @@ class TestModelVerdictFromState:
 
         with pytest.raises(RuntimeHostError, match="plan_id"):
             ModelVerdict.from_state(state)
+
+    def test_propagates_correlation_id_on_candidate_id_none(self) -> None:
+        """Caller correlation_id is propagated into the error context when candidate_id is None."""
+        caller_id = uuid4()
+        state = ModelAdjudicatorState(candidate_id=None, plan_id=uuid4())
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            ModelVerdict.from_state(state, correlation_id=caller_id)
+
+        assert exc_info.value.correlation_id == caller_id
+
+    def test_propagates_correlation_id_on_plan_id_none(self) -> None:
+        """Caller correlation_id is propagated into the error context when plan_id is None."""
+        caller_id = uuid4()
+        state = ModelAdjudicatorState(candidate_id=uuid4(), plan_id=None)
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            ModelVerdict.from_state(state, correlation_id=caller_id)
+
+        assert exc_info.value.correlation_id == caller_id
+
+    def test_auto_generates_correlation_id_when_not_provided(self) -> None:
+        """When no correlation_id is passed, error context auto-generates one."""
+        state = ModelAdjudicatorState(candidate_id=None, plan_id=uuid4())
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            ModelVerdict.from_state(state)
+
+        assert exc_info.value.correlation_id is not None
+        assert isinstance(exc_info.value.correlation_id, UUID)
 
 
 # ============================================================================

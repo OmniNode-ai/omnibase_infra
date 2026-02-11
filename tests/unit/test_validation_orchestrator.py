@@ -10,7 +10,7 @@ Tests:
 
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -199,6 +199,29 @@ class TestHandlerBuildPlanHandle:
         plan_a = await handler.handle(candidate, correlation_id=uuid4())
         plan_b = await handler.handle(candidate, correlation_id=uuid4())
         assert plan_a.plan_id != plan_b.plan_id
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_generates_correlation_id_when_none(
+        self,
+        handler: HandlerBuildPlan,
+        candidate: ModelPatternCandidate,
+    ) -> None:
+        """handle() succeeds with correlation_id=None (auto-generates UUID)."""
+        plan = await handler.handle(candidate, correlation_id=None)
+        assert isinstance(plan, ModelValidationPlan)
+        assert isinstance(plan.plan_id, UUID)
+        assert len(plan.checks) == 12
+
+    @pytest.mark.asyncio
+    async def test_handle_omitted_correlation_id_defaults_to_none(
+        self,
+        handler: HandlerBuildPlan,
+        candidate: ModelPatternCandidate,
+    ) -> None:
+        """handle() succeeds when correlation_id is omitted entirely."""
+        plan = await handler.handle(candidate)
+        assert isinstance(plan, ModelValidationPlan)
+        assert len(plan.checks) == 12
 
 
 # ============================================================================

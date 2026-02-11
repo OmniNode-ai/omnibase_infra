@@ -92,6 +92,7 @@ class ModelVerdict(BaseModel):
         cls,
         state: ModelAdjudicatorState,
         score_threshold: float = 0.8,
+        correlation_id: UUID | None = None,
     ) -> ModelVerdict:
         """Compute a verdict from the adjudicator's accumulated state.
 
@@ -107,6 +108,8 @@ class ModelVerdict(BaseModel):
         Args:
             state: Current adjudicator state with accumulated check results.
             score_threshold: Minimum score for a PASS verdict (default 0.8).
+            correlation_id: Optional caller correlation ID to propagate into
+                error contexts.  When ``None``, a new ID is auto-generated.
 
         Returns:
             A fully-populated ``ModelVerdict`` instance.
@@ -116,6 +119,7 @@ class ModelVerdict(BaseModel):
         """
         if state.candidate_id is None:
             context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="adjudicate_verdict",
             )
@@ -124,6 +128,7 @@ class ModelVerdict(BaseModel):
             )
         if state.plan_id is None:
             context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="adjudicate_verdict",
             )
@@ -138,7 +143,7 @@ class ModelVerdict(BaseModel):
         skipped = sum(1 for r in results if r.skipped)
         total = len(results)
 
-        # Score: ratio of passed to non-skipped checks (0.0 if all skipped)
+        # Score: ratio of passed to non-skipped checks (1.0 if all skipped)
         non_skipped = passed + failed
         score = passed / non_skipped if non_skipped > 0 else 1.0
 

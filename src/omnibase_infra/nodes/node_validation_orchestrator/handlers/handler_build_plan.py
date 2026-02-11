@@ -90,7 +90,7 @@ class HandlerBuildPlan:
         ...     pattern_id="pattern-001",
         ...     source_path="/src/my_module",
         ... )
-        >>> plan = await handler.handle(candidate, correlation_id=uuid4())
+        >>> plan = await handler.handle(candidate)
         >>> len(plan.checks)
         12
     """
@@ -121,7 +121,7 @@ class HandlerBuildPlan:
     async def handle(
         self,
         candidate: ModelPatternCandidate,
-        correlation_id: UUID,
+        correlation_id: UUID | None = None,
     ) -> ModelValidationPlan:
         """Build a validation plan from a pattern candidate.
 
@@ -130,11 +130,13 @@ class HandlerBuildPlan:
 
         Args:
             candidate: The pattern candidate to build a plan for.
-            correlation_id: Correlation ID for tracing.
+            correlation_id: Correlation ID for tracing. Auto-generated
+                via ``uuid4()`` when ``None``.
 
         Returns:
             ModelValidationPlan with ordered checks from the MVP catalog.
         """
+        correlation_id = correlation_id or uuid4()
         plan_id = uuid4()
 
         checks = tuple(
