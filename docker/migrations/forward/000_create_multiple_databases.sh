@@ -129,6 +129,8 @@ EOSQL
 grant_role_to_database() {
     local role_name="$1"
     local database="$2"
+    validate_identifier "$role_name" "Role name" || return 1
+    validate_identifier "$database" "Database name" || return 1
     echo "  Granting $role_name full access to $database"
     # CONNECT privilege
     psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
@@ -154,6 +156,8 @@ EOSQL
 revoke_cross_db_access() {
     local role_name="$1"
     local own_database="$2"
+    validate_identifier "$role_name" "Role name" || return 1
+    validate_identifier "$own_database" "Database name" || return 1
     echo "  Revoking cross-DB access for $role_name (allowed: $own_database only)"
     for entry in "${SERVICE_DB_MAP[@]}"; do
         IFS=':' read -r db _ _ <<< "$entry"
@@ -187,12 +191,12 @@ echo "============================================="
 # Service databases
 for entry in "${SERVICE_DB_MAP[@]}"; do
     IFS=':' read -r db _ _ <<< "$entry"
-    create_database "$db"
+    create_database "$db" || { echo "FATAL: Failed to create database '$db'" >&2; exit 1; }
 done
 
 # Infrastructure databases
 for db in "${INFRA_DATABASES[@]}"; do
-    create_database "$db"
+    create_database "$db" || { echo "FATAL: Failed to create database '$db'" >&2; exit 1; }
 done
 
 echo ""
