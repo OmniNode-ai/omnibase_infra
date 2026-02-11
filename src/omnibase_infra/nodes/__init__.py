@@ -13,6 +13,7 @@ Available Submodules:
 - reducers: Reducer nodes for state aggregation
 - node_registration_reducer: Declarative FSM-driven registration reducer
 - node_registration_orchestrator: Registration workflow orchestrator
+- node_auth_gate_compute: Work authorization decision compute node
 - node_ledger_projection_compute: Event ledger projection compute node
 
 Available Classes:
@@ -20,6 +21,8 @@ Available Classes:
 - RegistrationReducer: Pure function reducer implementation
 - NodeRegistryEffect: Effect node for dual-backend registration execution
 - NodeRegistrationOrchestrator: Workflow orchestrator for registration
+- NodeAuthGateCompute: Work authorization decision compute node
+- RegistryInfraAuthGateCompute: Registry for auth gate compute node
 - NodeLedgerProjectionCompute: Event ledger projection compute node
 - RegistryInfraLedgerProjection: Registry for ledger projection node
 """
@@ -29,6 +32,10 @@ from omnibase_infra.nodes.effects import (
     ModelRegistryRequest,
     ModelRegistryResponse,
     NodeRegistryEffect,
+)
+from omnibase_infra.nodes.node_auth_gate_compute import (
+    NodeAuthGateCompute,
+    RegistryInfraAuthGateCompute,
 )
 from omnibase_infra.nodes.node_ledger_projection_compute import (
     NodeLedgerProjectionCompute,
@@ -47,11 +54,13 @@ __all__: list[str] = [
     "ModelBackendResult",
     "ModelRegistryRequest",
     "ModelRegistryResponse",
+    "NodeAuthGateCompute",
     "NodeLedgerProjectionCompute",
     "NodeRegistrationOrchestrator",
     "NodeRegistrationReducer",
     "NodeRegistryEffect",
     "RegistrationReducer",
+    "RegistryInfraAuthGateCompute",
     "RegistryInfraLedgerProjection",
     "RegistryInfraNodeRegistrationReducer",
 ]
