@@ -19,10 +19,9 @@ env:
   # Force inmemory event bus for CI tests (no Kafka infrastructure available)
   # This overrides the default "kafka" in contracts/runtime/runtime_config.yaml
   ONEX_EVENT_BUS_TYPE: "inmemory"
-  # Explicit database name required since OMN-2146 removed the implicit
-  # 'omninode_bridge' default.  Unit/integration tests that create a
-  # RuntimeHostProcess trigger DependencyMaterializer → from_env() which
-  # now fails fast when no database is configured.
+  # Explicit database name for integration tests that pass POSTGRES_DATABASE
+  # into Docker containers and for injection_effectiveness conftest.  Production
+  # code uses OMNIBASE_INFRA_DB_URL instead (see docs/patterns/db_url_contract.md).
   POSTGRES_DATABASE: "omnibase_infra"
 
 jobs:
