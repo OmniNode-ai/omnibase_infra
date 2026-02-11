@@ -81,10 +81,12 @@ class ModelAuthGateRequest(BaseModel):
         description="Current UTC timestamp for expiry checks.",
     )
 
-    @field_validator("target_path", "target_repo", mode="before")
+    @field_validator(
+        "target_path", "target_repo", "emergency_override_reason", mode="before"
+    )
     @classmethod
     def _strip_control_characters(cls, v: str) -> str:
-        """Strip control characters from path/repo fields for defense-in-depth."""
+        """Strip control characters from string fields for defense-in-depth."""
         if not isinstance(v, str):
             return v
         return _CONTROL_CHAR_RE.sub("", v)

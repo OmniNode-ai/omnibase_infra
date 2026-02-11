@@ -1337,6 +1337,15 @@ class TestModelAuthGateRequestSanitization:
         )
         assert req.target_path == "src/main.py"
 
+    def test_control_chars_stripped_from_emergency_override_reason(self) -> None:
+        """Control characters are stripped from emergency_override_reason at model boundary."""
+        req = ModelAuthGateRequest(
+            tool_name="Edit",
+            emergency_override_active=True,
+            emergency_override_reason="Hotfix\x00for\x1fbug",
+        )
+        assert req.emergency_override_reason == "Hotfixforbug"
+
     def test_clean_values_unchanged(self) -> None:
         """Clean values pass through unchanged."""
         req = ModelAuthGateRequest(
