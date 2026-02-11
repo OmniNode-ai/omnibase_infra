@@ -38,6 +38,7 @@ import logging
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -70,6 +71,15 @@ _VALID_ENVIRONMENTS = frozenset({"dev", "staging", "production", "ci", "test"})
 # (ReDoS).  Catches quantified groups containing quantifiers, e.g. (a+)+, (a*)*.
 _NESTED_QUANTIFIER_RE = re.compile(r"\([^)]*[+*][^)]*\)\s*[+*?{]")
 _MAX_BRANCH_PATTERN_LEN = 200
+_MAX_DISPLAY_PATTERN_LEN = 80
+
+
+def _truncate_pattern(pattern: str, max_len: int = _MAX_DISPLAY_PATTERN_LEN) -> str:
+    """Truncate a regex pattern for safe display in error messages."""
+    if len(pattern) <= max_len:
+        return pattern
+    return pattern[:max_len] + "..."
+
 
 # All 13 rule IDs in catalog order.
 ALL_RULE_IDS: tuple[str, ...] = (
@@ -130,7 +140,27 @@ class HandlerRRHValidate:
         profile_name = (
             "seam-ticket" if governance.is_seam_ticket else request.profile_name
         )
-        profile = self._load_profile(profile_name)
+        try:
+            profile = self._load_profile(profile_name)
+        except KeyError:
+            # Unknown profile name -- return immediate FAIL with all rules
+            # marked as failed so the caller gets actionable feedback.
+            return ModelRRHResult(
+                checks=tuple(
+                    ModelRuleCheckResult(
+                        passed=False,
+                        rule_id=rule_id,
+                        message=f"Unknown profile '{profile_name}'.",
+                    )
+                    for rule_id in ALL_RULE_IDS
+                ),
+                verdict=EnumVerdict.FAIL,
+                profile_name=profile_name,
+                ticket_id=governance.ticket_id,
+                repo_name=request.repo_name,
+                correlation_id=request.correlation_id,
+                evaluated_at=datetime.now(UTC),
+            )
 
         # Apply contract tightening — can only enable rules, never disable.
         effective_rules = self._apply_tightening(profile, governance)
@@ -237,14 +267,10 @@ class HandlerRRHValidate:
     # Rule evaluation dispatcher
     # ------------------------------------------------------------------
 
-    def _evaluate_rule(
-        self,
-        rule_id: str,
-        env: ModelRRHEnvironmentData,
-        gov: ModelRRHContractGovernance,
-    ) -> ModelRuleCheckResult:
-        """Dispatch to the appropriate rule checker."""
-        dispatcher: dict[str, Callable[..., ModelRuleCheckResult]] = {
+    @cached_property
+    def _rule_dispatcher(self) -> dict[str, Callable[..., ModelRuleCheckResult]]:
+        """Build rule dispatcher once and cache on the instance."""
+        return {
             "RRH-1001": self._check_1001_clean_tree,
             "RRH-1002": self._check_1002_expected_branch,
             "RRH-1101": self._check_1101_env_target_valid,
@@ -259,7 +285,15 @@ class HandlerRRHValidate:
             "RRH-1601": self._check_1601_no_disallowed_fields,
             "RRH-1701": self._check_1701_repo_boundary,
         }
-        checker = dispatcher.get(rule_id)
+
+    def _evaluate_rule(
+        self,
+        rule_id: str,
+        env: ModelRRHEnvironmentData,
+        gov: ModelRRHContractGovernance,
+    ) -> ModelRuleCheckResult:
+        """Dispatch to the appropriate rule checker."""
+        checker = self._rule_dispatcher.get(rule_id)
         if checker is None:
             return ModelRuleCheckResult(
                 passed=False,
@@ -305,7 +339,7 @@ class HandlerRRHValidate:
             return ModelRuleCheckResult(
                 passed=False,
                 rule_id="RRH-1002",
-                message=f"Unsafe branch pattern (possible ReDoS): {pattern!r}",
+                message=f"Unsafe branch pattern (possible ReDoS): {_truncate_pattern(pattern)!r}",
             )
         branch = env.repo_state.branch
         try:
@@ -315,12 +349,12 @@ class HandlerRRHValidate:
             return ModelRuleCheckResult(
                 passed=False,
                 rule_id="RRH-1002",
-                message=f"Invalid branch pattern: {gov.expected_branch_pattern}",
+                message=f"Invalid branch pattern: {_truncate_pattern(gov.expected_branch_pattern)}",
             )
         return ModelRuleCheckResult(
             passed=False,
             rule_id="RRH-1002",
-            message=f"Branch '{branch}' does not match pattern '{gov.expected_branch_pattern}'.",
+            message=f"Branch '{branch}' does not match pattern '{_truncate_pattern(gov.expected_branch_pattern)}'.",
         )
 
     @staticmethod

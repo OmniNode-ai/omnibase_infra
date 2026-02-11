@@ -62,8 +62,9 @@ class HandlerRRHStorageWrite:
             artifacts_dir = base / "artifacts"
             artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-            # Build timestamped artifact filename.
-            ts = request.result.evaluated_at.strftime("%Y%m%dT%H%M%S")
+            # Build timestamped artifact filename.  Microseconds (%f)
+            # prevent collisions from rapid evaluations within the same second.
+            ts = request.result.evaluated_at.strftime("%Y%m%dT%H%M%S_%f")
             cid = str(request.result.correlation_id)[:8]
             filename = f"rrh_{cid}_{ts}.json"
             artifact_path = artifacts_dir / filename
