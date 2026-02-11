@@ -135,6 +135,7 @@ class HandlerRunContextRead:
                     correlation_id=correlation_id,
                     error=f"I/O error reading run context {run_id}: {e}",
                     error_code="RUN_CONTEXT_IO_ERROR",
+                    files_affected=1,
                 ),
             )
 

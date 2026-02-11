@@ -135,6 +135,7 @@ class HandlerRunContextWrite:
                 correlation_id=correlation_id,
                 error=f"I/O error writing run context {context.run_id}: {e}",
                 error_code="RUN_CONTEXT_WRITE_ERROR",
+                files_affected=1,
             )
         except Exception as e:
             # Intentional catch-all: this handler must never raise, as an

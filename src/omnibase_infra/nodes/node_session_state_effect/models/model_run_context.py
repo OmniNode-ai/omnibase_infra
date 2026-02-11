@@ -117,8 +117,7 @@ class ModelRunContext(BaseModel):
         (``str``, ``int``, ``float``, ``bool``, ``None``), so only the dict
         container itself needs to be duplicated.
         """
-        if self.metadata:
-            object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "metadata", dict(self.metadata))
         return self
 
     # ------------------------------------------------------------------

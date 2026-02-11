@@ -210,6 +210,14 @@ class TestModelRunContext:
         assert "injected" not in ctx.metadata
         assert ctx.metadata == {"key": "value"}
 
+    def test_metadata_defensive_copy_empty_dict(self) -> None:
+        """An empty dict is also defensively copied so later mutations don't leak."""
+        d: dict[str, str] = {}
+        ctx = ModelRunContext(run_id="run-abc", metadata=d)
+        # Mutate the original empty dict after construction
+        d["injected"] = "oops"
+        assert ctx.metadata == {}
+
     @pytest.mark.parametrize(
         "bad_id",
         ["../etc/passwd", "foo/bar", "foo\\bar", "foo\0bar", ".."],
