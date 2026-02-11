@@ -107,6 +107,9 @@ create_role() {
     # cannot appear in practice, but the escaping is retained for defense-in-depth.
     local escaped_password="${role_password//\'/\'\'}"
     echo "  Creating role: $role_name"
+    # Safety: $role_name is used in dual SQL contexts below (double-quoted identifier
+    # and single-quoted string literal), safe because validate_identifier restricts
+    # to [a-zA-Z_][a-zA-Z0-9_-]*. Same rationale as create_database().
     psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
         DO \$\$
         BEGIN
@@ -214,6 +217,8 @@ for entry in "${SERVICE_DB_MAP[@]}"; do
         continue
     fi
 
+    # Pre-check: validate here for user-facing SKIP message.
+    # create_role() also validates internally as its own safety guard.
     validate_password "$role_password" "$role_name" || {
         echo "  SKIP: $role_name — invalid password"
         ROLES_SKIPPED=$((ROLES_SKIPPED + 1))
