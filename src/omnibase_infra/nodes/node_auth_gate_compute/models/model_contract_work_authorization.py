@@ -11,7 +11,7 @@ Ticket: OMN-2125
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -60,7 +60,7 @@ class ModelContractWorkAuthorization(BaseModel):
         """Check whether this authorization has expired.
 
         Args:
-            now: Current UTC time. Defaults to ``datetime.now(timezone.utc)``.
+            now: Current UTC time. Defaults to ``datetime.now(UTC)``.
 
         Returns:
             True if the authorization has expired.

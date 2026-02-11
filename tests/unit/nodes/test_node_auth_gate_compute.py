@@ -22,10 +22,10 @@ Related:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import yaml
@@ -92,13 +92,13 @@ def now() -> datetime:
 
 
 @pytest.fixture
-def run_id() -> MagicMock:
+def run_id() -> UUID:
     """A fixed run_id for tests."""
     return uuid4()
 
 
 @pytest.fixture
-def valid_auth(run_id: MagicMock, now: datetime) -> ModelContractWorkAuthorization:
+def valid_auth(run_id: UUID, now: datetime) -> ModelContractWorkAuthorization:
     """Create a valid, non-expired authorization with common defaults."""
     return ModelContractWorkAuthorization(
         run_id=run_id,
@@ -358,7 +358,7 @@ class TestStep6ToolNotAllowed:
     def test_tool_not_allowed_denied(
         self,
         handler: HandlerAuthGate,
-        run_id: MagicMock,
+        run_id: UUID,
         valid_auth: ModelContractWorkAuthorization,
         now: datetime,
     ) -> None:
@@ -379,7 +379,7 @@ class TestStep6ToolNotAllowed:
     def test_allowed_tool_passes(
         self,
         handler: HandlerAuthGate,
-        run_id: MagicMock,
+        run_id: UUID,
         valid_auth: ModelContractWorkAuthorization,
         now: datetime,
     ) -> None:
@@ -407,7 +407,7 @@ class TestStep7PathNotAllowed:
     def test_path_outside_scope_denied(
         self,
         handler: HandlerAuthGate,
-        run_id: MagicMock,
+        run_id: UUID,
         valid_auth: ModelContractWorkAuthorization,
         now: datetime,
     ) -> None:
@@ -428,7 +428,7 @@ class TestStep7PathNotAllowed:
     def test_path_in_scope_passes(
         self,
         handler: HandlerAuthGate,
-        run_id: MagicMock,
+        run_id: UUID,
         valid_auth: ModelContractWorkAuthorization,
         now: datetime,
     ) -> None:
@@ -447,7 +447,7 @@ class TestStep7PathNotAllowed:
     def test_empty_path_skips_check(
         self,
         handler: HandlerAuthGate,
-        run_id: MagicMock,
+        run_id: UUID,
         valid_auth: ModelContractWorkAuthorization,
         now: datetime,
     ) -> None:
@@ -476,7 +476,7 @@ class TestStep8RepoNotInScope:
     def test_repo_not_in_scope_denied(
         self,
         handler: HandlerAuthGate,
-        run_id: MagicMock,
+        run_id: UUID,
         valid_auth: ModelContractWorkAuthorization,
         now: datetime,
     ) -> None:
@@ -498,7 +498,7 @@ class TestStep8RepoNotInScope:
     def test_repo_in_scope_passes(
         self,
         handler: HandlerAuthGate,
-        run_id: MagicMock,
+        run_id: UUID,
         valid_auth: ModelContractWorkAuthorization,
         now: datetime,
     ) -> None:
@@ -518,7 +518,7 @@ class TestStep8RepoNotInScope:
     def test_empty_target_repo_skips_check(
         self,
         handler: HandlerAuthGate,
-        run_id: MagicMock,
+        run_id: UUID,
         valid_auth: ModelContractWorkAuthorization,
         now: datetime,
     ) -> None:
@@ -538,7 +538,7 @@ class TestStep8RepoNotInScope:
     def test_empty_repo_scopes_skips_check(
         self,
         handler: HandlerAuthGate,
-        run_id: MagicMock,
+        run_id: UUID,
         now: datetime,
     ) -> None:
         """Empty repo_scopes on auth means no repo restriction."""
@@ -575,7 +575,7 @@ class TestStep9AuthExpired:
     def test_expired_auth_denied(
         self,
         handler: HandlerAuthGate,
-        run_id: MagicMock,
+        run_id: UUID,
         now: datetime,
     ) -> None:
         """10min expires -> denied (ticket test case)."""
@@ -603,7 +603,7 @@ class TestStep9AuthExpired:
     def test_auth_expiring_exactly_now_denied(
         self,
         handler: HandlerAuthGate,
-        run_id: MagicMock,
+        run_id: UUID,
         now: datetime,
     ) -> None:
         """Auth expiring at exactly now -> denied (>= comparison)."""
@@ -630,7 +630,7 @@ class TestStep9AuthExpired:
     def test_not_expired_passes(
         self,
         handler: HandlerAuthGate,
-        run_id: MagicMock,
+        run_id: UUID,
         now: datetime,
     ) -> None:
         """Auth not yet expired passes step 9."""
@@ -665,7 +665,7 @@ class TestStep10AllChecksPassed:
     def test_fully_authorized_allowed(
         self,
         handler: HandlerAuthGate,
-        run_id: MagicMock,
+        run_id: UUID,
         now: datetime,
     ) -> None:
         """Fully authorized request -> allowed at step 10."""
@@ -694,7 +694,7 @@ class TestStep10AllChecksPassed:
     def test_ticket_pipeline_auth_with_matching_files(
         self,
         handler: HandlerAuthGate,
-        run_id: MagicMock,
+        run_id: UUID,
         now: datetime,
     ) -> None:
         """Ticket pipeline auth with matching files -> allowed."""
@@ -930,7 +930,8 @@ class TestContractValidation:
         if not CONTRACT_PATH.exists():
             pytest.skip(f"Contract file not found: {CONTRACT_PATH}")
         with open(CONTRACT_PATH) as f:
-            return yaml.safe_load(f)
+            data: dict = yaml.safe_load(f)
+        return data
 
     def test_node_type_is_compute_generic(self, contract_data: dict) -> None:
         """Node type must be COMPUTE_GENERIC."""

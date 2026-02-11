@@ -281,9 +281,7 @@ class HandlerAuthGate:
         input_envelope_id = uuid4()
 
         payload_raw = envelope.get("payload")
-        if isinstance(payload_raw, dict):
-            request = ModelAuthGateRequest.model_validate(payload_raw)
-        elif isinstance(payload_raw, ModelAuthGateRequest):
+        if isinstance(payload_raw, ModelAuthGateRequest):
             request = payload_raw
         else:
             request = ModelAuthGateRequest.model_validate(payload_raw)
@@ -348,7 +346,7 @@ class HandlerAuthGate:
                 regex += "[^/]*"
             elif c == "?":
                 regex += "[^/]"
-            elif c in r".+^${}|()\\":
+            elif c in r".+^${}|()[]\\":
                 regex += "\\" + c
             else:
                 regex += c
