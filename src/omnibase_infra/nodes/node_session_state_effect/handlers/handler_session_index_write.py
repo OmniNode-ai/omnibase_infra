@@ -126,11 +126,18 @@ class HandlerSessionIndexWrite:
                 fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
                 # Read current state under the lock (use try/except to
-                # avoid TOCTOU if an external process deletes the file)
+                # avoid TOCTOU if an external process deletes the file,
+                # and to recover from corrupted JSON or schema drift)
                 try:
                     raw = session_path.read_text(encoding="utf-8")
                     current = ModelSessionIndex.model_validate(json.loads(raw))
                 except FileNotFoundError:
+                    current = ModelSessionIndex()
+                except (json.JSONDecodeError, ValueError) as exc:
+                    logger.warning(
+                        "Corrupted session.json, falling back to empty index: %s",
+                        exc,
+                    )
                     current = ModelSessionIndex()
 
                 # Apply caller's transform

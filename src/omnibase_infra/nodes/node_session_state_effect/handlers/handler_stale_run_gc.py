@@ -16,6 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from omnibase_infra.nodes.node_session_state_effect.models import (
     ModelRunContext,
     ModelSessionStateResult,
@@ -94,7 +96,17 @@ class HandlerStaleRunGC:
 
         resolved_runs_dir = runs_dir.resolve()
 
-        for run_file in runs_dir.glob("*.json"):
+        # Sort by mtime (oldest first) so max_deletions cap removes the
+        # oldest files deterministically, regardless of filesystem order.
+        def _safe_mtime(p: Path) -> float:
+            try:
+                return p.stat().st_mtime
+            except OSError:
+                return 0.0  # disappeared between glob and sort; sort to front
+
+        run_files = sorted(runs_dir.glob("*.json"), key=_safe_mtime)
+
+        for run_file in run_files:
             if len(deleted_ids) >= self._max_deletions:
                 logger.info(
                     "GC: reached max_deletions=%d, stopping", self._max_deletions
@@ -136,7 +148,7 @@ class HandlerStaleRunGC:
                         (now - ctx.updated_at).total_seconds(),
                         self._ttl_seconds,
                     )
-            except (json.JSONDecodeError, ValueError) as e:
+            except (json.JSONDecodeError, ValueError, ValidationError) as e:
                 # Malformed files are also GC candidates — delete them.
                 # Note: the stem may not correspond to a valid session index
                 # entry; callers should treat deleted_ids as best-effort and

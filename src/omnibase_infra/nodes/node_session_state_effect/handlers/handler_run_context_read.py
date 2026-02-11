@@ -14,6 +14,8 @@ import logging
 from pathlib import Path
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from omnibase_infra.nodes.node_session_state_effect.models import (
     RUN_ID_PATTERN,
     ModelRunContext,
@@ -68,12 +70,12 @@ class HandlerRunContextRead:
         correlation_id: UUID,
     ) -> tuple[ModelRunContext | None, ModelSessionStateResult]:
         """Synchronous read logic, executed off the event loop."""
-        runs_dir = self._state_dir / "runs"
+        runs_dir = (self._state_dir / "runs").resolve()
         run_path = runs_dir / f"{run_id}.json"
 
         # Defense-in-depth: verify resolved path stays within runs directory
         # (resolve() works on non-existent paths, avoiding TOCTOU with exists())
-        if run_path.resolve().parent != runs_dir.resolve():
+        if run_path.resolve().parent != runs_dir:
             return (
                 None,
                 ModelSessionStateResult(
@@ -110,7 +112,7 @@ class HandlerRunContextRead:
                     files_affected=1,
                 ),
             )
-        except (json.JSONDecodeError, ValueError) as e:
+        except (json.JSONDecodeError, ValueError, ValidationError) as e:
             logger.warning("Failed to parse run context %s: %s", run_id, e)
             return (
                 None,

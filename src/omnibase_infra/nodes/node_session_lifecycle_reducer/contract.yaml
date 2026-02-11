@@ -81,7 +81,6 @@ state_machine:
         - "run_id"
     - state_name: "run_ended"
       description: "Run has completed or been terminated"
-      is_terminal: false # Can reset to idle
       entry_actions:
         - "emit_run_context_update_intent"
         - "emit_session_index_cleanup_intent"

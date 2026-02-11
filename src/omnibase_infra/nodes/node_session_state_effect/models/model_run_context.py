@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_core.types.type_json import StrictJsonPrimitive
 from omnibase_infra.enums import EnumSessionLifecycleState
@@ -53,7 +53,10 @@ class ModelRunContext(BaseModel):
         status: Current lifecycle state of the run.
         created_at: When the run was created (UTC).
         updated_at: Last modification timestamp (UTC).
-        metadata: Arbitrary key-value data attached to the run.
+        metadata: Arbitrary key-value metadata. **Warning**: Although this model
+            is frozen (field reassignment is prevented), the dict container itself
+            is mutable. Callers MUST NOT mutate the dict in-place; use
+            ``with_metadata(key, value)`` to produce a new instance instead.
             Values are restricted to JSON-serializable primitives to ensure
             lossless round-trip through ``json.dump``/``json.loads``.
     """
@@ -102,6 +105,13 @@ class ModelRunContext(BaseModel):
             msg = "Timestamps must be timezone-aware"
             raise ValueError(msg)
         return v
+
+    @model_validator(mode="after")
+    def _freeze_metadata(self) -> ModelRunContext:
+        """Create a defensive copy of metadata to prevent mutation via original reference."""
+        if self.metadata:
+            object.__setattr__(self, "metadata", dict(self.metadata))
+        return self
 
     # ------------------------------------------------------------------
     # Transition helpers (pure — return new instances)
@@ -156,4 +166,4 @@ class ModelRunContext(BaseModel):
         return age >= ttl_seconds
 
 
-__all__: list[str] = ["ModelRunContext"]
+__all__: list[str] = ["ModelRunContext", "RUN_ID_PATTERN", "validate_run_id"]

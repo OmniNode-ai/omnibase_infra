@@ -30,7 +30,7 @@ class ModelSessionIndex(BaseModel):
 
     Attributes:
         active_run_id: Currently selected interactive run (advisory).
-        recent_run_ids: Ordered list of known run IDs (most recent first).
+        recent_run_ids: Ordered tuple of known run IDs (most recent first).
         updated_at: Last modification timestamp (timezone-aware UTC).
     """
 

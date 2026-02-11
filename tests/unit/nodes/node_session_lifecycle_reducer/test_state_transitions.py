@@ -173,40 +173,89 @@ class TestModelSessionLifecycleState:
             ModelSessionLifecycleState(unknown="oops")  # type: ignore[call-arg]
 
     # ------------------------------------------------------------------
-    # Invalid transition enforcement
+    # Invalid transition enforcement (all 12 invalid pairs)
     # ------------------------------------------------------------------
 
-    def test_with_run_created_from_non_idle_raises(self) -> None:
-        """with_run_created from non-IDLE state raises ValueError."""
-        state = ModelSessionLifecycleState(
-            status=EnumSessionLifecycleState.RUN_ACTIVE,
-            run_id="run-1",
-        )
-        with pytest.raises(ValueError, match="requires IDLE"):
-            state.with_run_created("run-2", uuid4())
+    @pytest.mark.parametrize(
+        ("source_status", "transition_method", "expected_match"),
+        [
+            # with_run_created: only valid from IDLE
+            (
+                EnumSessionLifecycleState.RUN_CREATED,
+                "with_run_created",
+                "requires IDLE",
+            ),
+            (EnumSessionLifecycleState.RUN_ACTIVE, "with_run_created", "requires IDLE"),
+            (EnumSessionLifecycleState.RUN_ENDED, "with_run_created", "requires IDLE"),
+            # with_run_activated: only valid from RUN_CREATED
+            (
+                EnumSessionLifecycleState.IDLE,
+                "with_run_activated",
+                "requires RUN_CREATED",
+            ),
+            (
+                EnumSessionLifecycleState.RUN_ACTIVE,
+                "with_run_activated",
+                "requires RUN_CREATED",
+            ),
+            (
+                EnumSessionLifecycleState.RUN_ENDED,
+                "with_run_activated",
+                "requires RUN_CREATED",
+            ),
+            # with_run_ended: only valid from RUN_ACTIVE
+            (EnumSessionLifecycleState.IDLE, "with_run_ended", "requires RUN_ACTIVE"),
+            (
+                EnumSessionLifecycleState.RUN_CREATED,
+                "with_run_ended",
+                "requires RUN_ACTIVE",
+            ),
+            (
+                EnumSessionLifecycleState.RUN_ENDED,
+                "with_run_ended",
+                "requires RUN_ACTIVE",
+            ),
+            # with_reset: only valid from RUN_ENDED
+            (EnumSessionLifecycleState.IDLE, "with_reset", "requires RUN_ENDED"),
+            (EnumSessionLifecycleState.RUN_CREATED, "with_reset", "requires RUN_ENDED"),
+            (EnumSessionLifecycleState.RUN_ACTIVE, "with_reset", "requires RUN_ENDED"),
+        ],
+        ids=[
+            "run_created-from-RUN_CREATED",
+            "run_created-from-RUN_ACTIVE",
+            "run_created-from-RUN_ENDED",
+            "run_activated-from-IDLE",
+            "run_activated-from-RUN_ACTIVE",
+            "run_activated-from-RUN_ENDED",
+            "run_ended-from-IDLE",
+            "run_ended-from-RUN_CREATED",
+            "run_ended-from-RUN_ENDED",
+            "reset-from-IDLE",
+            "reset-from-RUN_CREATED",
+            "reset-from-RUN_ACTIVE",
+        ],
+    )
+    def test_invalid_transition_raises(
+        self,
+        source_status: EnumSessionLifecycleState,
+        transition_method: str,
+        expected_match: str,
+    ) -> None:
+        """Every invalid (source_state, transition) pair raises ValueError."""
+        # States that need a run_id to construct validly
+        needs_run_id = {
+            EnumSessionLifecycleState.RUN_CREATED,
+            EnumSessionLifecycleState.RUN_ACTIVE,
+            EnumSessionLifecycleState.RUN_ENDED,
+        }
+        kwargs: dict[str, str | EnumSessionLifecycleState] = {"status": source_status}
+        if source_status in needs_run_id:
+            kwargs["run_id"] = "run-1"
+        state = ModelSessionLifecycleState(**kwargs)  # type: ignore[arg-type]
 
-    def test_with_run_activated_from_non_created_raises(self) -> None:
-        """with_run_activated from non-RUN_CREATED state raises ValueError."""
-        state = ModelSessionLifecycleState(
-            status=EnumSessionLifecycleState.IDLE,
-        )
-        with pytest.raises(ValueError, match="requires RUN_CREATED"):
-            state.with_run_activated(uuid4())
-
-    def test_with_run_ended_from_non_active_raises(self) -> None:
-        """with_run_ended from non-RUN_ACTIVE state raises ValueError."""
-        state = ModelSessionLifecycleState(
-            status=EnumSessionLifecycleState.RUN_CREATED,
-            run_id="run-1",
-        )
-        with pytest.raises(ValueError, match="requires RUN_ACTIVE"):
-            state.with_run_ended(uuid4())
-
-    def test_with_reset_from_non_ended_raises(self) -> None:
-        """with_reset from non-RUN_ENDED state raises ValueError."""
-        state = ModelSessionLifecycleState(
-            status=EnumSessionLifecycleState.RUN_ACTIVE,
-            run_id="run-1",
-        )
-        with pytest.raises(ValueError, match="requires RUN_ENDED"):
-            state.with_reset(uuid4())
+        method = getattr(state, transition_method)
+        with pytest.raises(ValueError, match=expected_match):
+            if transition_method == "with_run_created":
+                method("run-2", uuid4())
+            else:
+                method(uuid4())

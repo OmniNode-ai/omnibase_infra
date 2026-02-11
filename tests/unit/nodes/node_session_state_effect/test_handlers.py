@@ -182,6 +182,9 @@ class TestHandlerSessionIndexWrite:
         assert new_idx is not None
         assert new_idx.recent_run_ids == ("run-first",)
 
+    # This test is deterministic because _read_modify_write_sync uses flock
+    # to serialize concurrent writers. All 10 asyncio.to_thread calls are
+    # serialized by the OS file lock, so no updates are lost.
     @pytest.mark.asyncio
     async def test_concurrent_read_modify_write_no_lost_updates(
         self, state_dir: Path

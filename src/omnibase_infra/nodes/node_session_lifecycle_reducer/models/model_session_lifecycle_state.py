@@ -30,6 +30,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumSessionLifecycleState
+from omnibase_infra.nodes.node_session_state_effect.models.model_run_context import (
+    validate_run_id,
+)
 
 
 class ModelSessionLifecycleState(BaseModel):
@@ -45,7 +48,6 @@ class ModelSessionLifecycleState(BaseModel):
         status: Current FSM state.
         run_id: Active run identifier (set when a run is created).
         last_processed_event_id: Last processed event ID for idempotency.
-        failure_reason: Reason for unexpected state (informational).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -61,10 +63,6 @@ class ModelSessionLifecycleState(BaseModel):
     last_processed_event_id: UUID | None = Field(
         default=None,
         description="Last processed event ID for idempotency.",
-    )
-    failure_reason: str | None = Field(
-        default=None,
-        description="Reason for unexpected state (informational).",
     )
 
     # ------------------------------------------------------------------
@@ -84,16 +82,16 @@ class ModelSessionLifecycleState(BaseModel):
             New state with status=RUN_CREATED.
 
         Raises:
-            ValueError: If current state is not IDLE.
+            ValueError: If current state is not IDLE or run_id is invalid.
         """
         if not self.can_create_run():
             msg = f"Cannot create run from state {self.status.value!r} (requires IDLE)"
             raise ValueError(msg)
+        validate_run_id(run_id)
         return ModelSessionLifecycleState(
             status=EnumSessionLifecycleState.RUN_CREATED,
             run_id=run_id,
             last_processed_event_id=event_id,
-            failure_reason=None,
         )
 
     def with_run_activated(self, event_id: UUID) -> ModelSessionLifecycleState:
@@ -115,7 +113,6 @@ class ModelSessionLifecycleState(BaseModel):
             status=EnumSessionLifecycleState.RUN_ACTIVE,
             run_id=self.run_id,
             last_processed_event_id=event_id,
-            failure_reason=None,
         )
 
     def with_run_ended(self, event_id: UUID) -> ModelSessionLifecycleState:
@@ -139,7 +136,6 @@ class ModelSessionLifecycleState(BaseModel):
             status=EnumSessionLifecycleState.RUN_ENDED,
             run_id=self.run_id,
             last_processed_event_id=event_id,
-            failure_reason=None,
         )
 
     def with_reset(self, event_id: UUID) -> ModelSessionLifecycleState:
@@ -161,7 +157,6 @@ class ModelSessionLifecycleState(BaseModel):
             status=EnumSessionLifecycleState.IDLE,
             run_id=None,
             last_processed_event_id=event_id,
-            failure_reason=None,
         )
 
     def is_duplicate_event(self, event_id: UUID) -> bool:
@@ -172,6 +167,12 @@ class ModelSessionLifecycleState(BaseModel):
 
         Returns:
             True if this event_id matches the last processed event.
+
+        Note:
+            Only detects immediate replays (consecutive duplicate event IDs).
+            Out-of-order redelivery (e.g., event A, event B, event A replayed)
+            is NOT detected. For Kafka consumers, use consumer-side deduplication
+            with a bounded ID window if stronger guarantees are needed.
         """
         return self.last_processed_event_id == event_id
 
