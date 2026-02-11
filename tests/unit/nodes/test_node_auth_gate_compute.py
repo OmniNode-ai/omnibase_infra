@@ -1346,3 +1346,24 @@ class TestModelAuthGateRequestSanitization:
         )
         assert req.target_path == "src/utils/helper.py"
         assert req.target_repo == "omnibase_infra"
+
+    def test_target_path_max_length_enforced(self) -> None:
+        """target_path exceeding max_length (8192) is rejected at model boundary."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            ModelAuthGateRequest(
+                tool_name="Edit",
+                target_path="a" * 8193,
+            )
+
+    def test_emergency_override_reason_max_length_enforced(self) -> None:
+        """emergency_override_reason exceeding max_length (1000) is rejected."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            ModelAuthGateRequest(
+                tool_name="Edit",
+                emergency_override_active=True,
+                emergency_override_reason="x" * 1001,
+            )

@@ -50,7 +50,11 @@ class ModelAuthGateRequest(BaseModel):
         min_length=1,
         description="Canonical tool name (case-sensitive, e.g., 'Edit', 'Write', 'Bash').",
     )  # ONEX_EXCLUDE: pattern - simple tool identifier
-    target_path: str = Field(default="", description="File path the tool targets.")
+    target_path: str = Field(
+        default="",
+        max_length=8192,
+        description="File path the tool targets.",
+    )
     target_repo: str = Field(default="", description="Repository the tool targets.")
     run_id: UUID | None = Field(
         default=None, description="Current run ID, or None if not determinable."
@@ -64,6 +68,7 @@ class ModelAuthGateRequest(BaseModel):
     )
     emergency_override_reason: str = Field(
         default="",
+        max_length=1000,
         description="Value of ONEX_UNSAFE_REASON env var.",
     )
     now: AwareDatetime = Field(

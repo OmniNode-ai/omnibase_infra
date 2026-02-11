@@ -290,6 +290,7 @@ class HandlerAuthGate:
 
         # Step 8: Repo not in repo_scopes -> deny
         # Use .strip() so whitespace-only target_repo is treated as empty.
+        # `in` is O(n) on the tuple — acceptable for typical scope sizes (<50 repos).
         target_repo = request.target_repo.strip()
         if target_repo and auth.repo_scopes and (target_repo not in auth.repo_scopes):
             return ModelAuthGateDecision(
