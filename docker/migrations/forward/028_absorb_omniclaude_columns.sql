@@ -14,6 +14,21 @@
 -- Rollback: See rollback/rollback_028_absorb_omniclaude_columns.sql
 
 -- ============================================================================
+-- CLEANUP: Drop orphaned claude_session_* tables from deleted migration 016
+-- ============================================================================
+-- Migration 016_create_session_snapshots.sql was removed from this branch
+-- (moved to omniclaude in DB-SPLIT-07), but environments that already ran it
+-- will still have these tables. Drop them here to keep the schema clean.
+-- Child tables with FK references must be dropped before the parent.
+
+DROP TRIGGER IF EXISTS update_session_snapshots_updated_at ON claude_session_snapshots;
+DROP FUNCTION IF EXISTS update_claude_session_snapshots_updated_at();
+DROP TABLE IF EXISTS claude_session_prompts;
+DROP TABLE IF EXISTS claude_session_tools;
+DROP TABLE IF EXISTS claude_session_event_idempotency;
+DROP TABLE IF EXISTS claude_session_snapshots;
+
+-- ============================================================================
 -- AGENT_ACTIONS: Add project_path, project_name, working_directory
 -- ============================================================================
 
@@ -96,6 +111,7 @@ SELECT
     NULL::TEXT AS working_directory,
     metadata
 FROM agent_execution_logs
+-- Use updated_at (not created_at) because execution_logs are lifecycle-tracked
 WHERE updated_at > NOW() - INTERVAL '24 hours'
 
 UNION ALL
@@ -142,7 +158,7 @@ SELECT
     'detection_failure' AS event_type,
     correlation_id AS event_id,
     correlation_id,
-    fallback_used AS agent_name,
+    COALESCE(fallback_used, 'unknown') AS agent_name,
     NULL::VARCHAR(50) AS action_type,
     NULL::VARCHAR(255) AS action_name,
     created_at,
@@ -159,4 +175,4 @@ WHERE created_at > NOW() - INTERVAL '24 hours';
 -- COMMENTS
 -- ============================================================================
 
-COMMENT ON VIEW agent_activity_realtime IS 'Unified real-time agent activity view across all observability tables (OMN-2057). Shows last 24 hours of activity.';
+COMMENT ON VIEW agent_activity_realtime IS 'Unified real-time agent activity view across core action tables (excludes status events and performance metrics) (OMN-2057). Shows last 24 hours of activity.';

@@ -921,6 +921,189 @@ class TestModelAgentStatusEventSpecific:
         assert "analysis" in result
 
 
+# =============================================================================
+# Project Context Field Tests (OMN-2057)
+# =============================================================================
+
+
+class TestModelAgentActionProjectContext:
+    """Test project context fields on ModelAgentAction (OMN-2057)."""
+
+    def test_agent_action_project_context_defaults_to_none(self) -> None:
+        """Project context fields should default to None when not provided."""
+        action = ModelAgentAction(
+            id=uuid4(),
+            correlation_id=uuid4(),
+            agent_name="test-agent",
+            action_type="tool_call",
+            action_name="Read",
+            created_at=datetime.now(UTC),
+        )
+
+        assert action.project_path is None
+        assert action.project_name is None
+        assert action.working_directory is None
+
+    def test_agent_action_project_context_accepts_values(self) -> None:
+        """Project context fields should accept valid string values."""
+        action = ModelAgentAction(
+            id=uuid4(),
+            correlation_id=uuid4(),
+            agent_name="test-agent",
+            action_type="tool_call",
+            action_name="Read",
+            created_at=datetime.now(UTC),
+            project_path="/home/user/projects/omnibase_infra",
+            project_name="omnibase_infra",
+            working_directory="/home/user/projects/omnibase_infra/src",
+        )
+
+        assert action.project_path == "/home/user/projects/omnibase_infra"
+        assert action.project_name == "omnibase_infra"
+        assert action.working_directory == "/home/user/projects/omnibase_infra/src"
+
+
+class TestModelRoutingDecisionProjectContext:
+    """Test project context fields on ModelRoutingDecision (OMN-2057)."""
+
+    def test_routing_decision_project_context_defaults_to_none(self) -> None:
+        """Project context fields should default to None when not provided."""
+        decision = ModelRoutingDecision(
+            id=uuid4(),
+            correlation_id=uuid4(),
+            selected_agent="api-architect",
+            confidence_score=0.95,
+            created_at=datetime.now(UTC),
+        )
+
+        assert decision.project_path is None
+        assert decision.project_name is None
+        assert decision.claude_session_id is None
+
+    def test_routing_decision_project_context_accepts_values(self) -> None:
+        """Project context fields should accept valid string values."""
+        decision = ModelRoutingDecision(
+            id=uuid4(),
+            correlation_id=uuid4(),
+            selected_agent="api-architect",
+            confidence_score=0.95,
+            created_at=datetime.now(UTC),
+            project_path="/home/user/projects/omnibase_infra",
+            project_name="omnibase_infra",
+            claude_session_id="session-abc-123",
+        )
+
+        assert decision.project_path == "/home/user/projects/omnibase_infra"
+        assert decision.project_name == "omnibase_infra"
+        assert decision.claude_session_id == "session-abc-123"
+
+
+class TestModelTransformationEventProjectContext:
+    """Test project context fields on ModelTransformationEvent (OMN-2057)."""
+
+    def test_transformation_event_project_context_defaults_to_none(self) -> None:
+        """Project context fields should default to None when not provided."""
+        event = ModelTransformationEvent(
+            id=uuid4(),
+            correlation_id=uuid4(),
+            source_agent="polymorphic-agent",
+            target_agent="api-architect",
+            created_at=datetime.now(UTC),
+        )
+
+        assert event.project_path is None
+        assert event.project_name is None
+        assert event.claude_session_id is None
+
+    def test_transformation_event_project_context_accepts_values(self) -> None:
+        """Project context fields should accept valid string values."""
+        event = ModelTransformationEvent(
+            id=uuid4(),
+            correlation_id=uuid4(),
+            source_agent="polymorphic-agent",
+            target_agent="api-architect",
+            created_at=datetime.now(UTC),
+            project_path="/home/user/projects/omnibase_infra",
+            project_name="omnibase_infra",
+            claude_session_id="session-def-456",
+        )
+
+        assert event.project_path == "/home/user/projects/omnibase_infra"
+        assert event.project_name == "omnibase_infra"
+        assert event.claude_session_id == "session-def-456"
+
+
+class TestModelDetectionFailureProjectContext:
+    """Test project context fields on ModelDetectionFailure (OMN-2057)."""
+
+    def test_detection_failure_project_context_defaults_to_none(self) -> None:
+        """Project context fields should default to None when not provided."""
+        failure = ModelDetectionFailure(
+            correlation_id=uuid4(),
+            failure_reason="No matching pattern",
+            created_at=datetime.now(UTC),
+        )
+
+        assert failure.project_path is None
+        assert failure.project_name is None
+        assert failure.claude_session_id is None
+
+    def test_detection_failure_project_context_accepts_values(self) -> None:
+        """Project context fields should accept valid string values."""
+        failure = ModelDetectionFailure(
+            correlation_id=uuid4(),
+            failure_reason="No matching pattern",
+            created_at=datetime.now(UTC),
+            project_path="/home/user/projects/omnibase_infra",
+            project_name="omnibase_infra",
+            claude_session_id="session-ghi-789",
+        )
+
+        assert failure.project_path == "/home/user/projects/omnibase_infra"
+        assert failure.project_name == "omnibase_infra"
+        assert failure.claude_session_id == "session-ghi-789"
+
+
+class TestModelExecutionLogProjectContext:
+    """Test project context fields on ModelExecutionLog (OMN-2057)."""
+
+    def test_execution_log_project_context_defaults_to_none(self) -> None:
+        """Project context fields should default to None when not provided."""
+        log = ModelExecutionLog(
+            execution_id=uuid4(),
+            correlation_id=uuid4(),
+            agent_name="testing",
+            status="completed",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        assert log.project_path is None
+        assert log.project_name is None
+        assert log.claude_session_id is None
+        assert log.terminal_id is None
+
+    def test_execution_log_project_context_accepts_values(self) -> None:
+        """Project context fields should accept valid string values."""
+        log = ModelExecutionLog(
+            execution_id=uuid4(),
+            correlation_id=uuid4(),
+            agent_name="testing",
+            status="completed",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            project_path="/home/user/projects/omnibase_infra",
+            project_name="omnibase_infra",
+            claude_session_id="session-jkl-012",
+            terminal_id="/dev/ttys003",
+        )
+
+        assert log.project_path == "/home/user/projects/omnibase_infra"
+        assert log.project_name == "omnibase_infra"
+        assert log.claude_session_id == "session-jkl-012"
+        assert log.terminal_id == "/dev/ttys003"
+
+
 __all__ = [
     "TestModelObservabilityEnvelopeStrict",
     "TestModelAgentActionStrict",
@@ -939,4 +1122,9 @@ __all__ = [
     "TestModelRoutingDecisionSpecific",
     "TestModelExecutionLogSpecific",
     "TestModelDetectionFailureSpecific",
+    "TestModelAgentActionProjectContext",
+    "TestModelRoutingDecisionProjectContext",
+    "TestModelTransformationEventProjectContext",
+    "TestModelDetectionFailureProjectContext",
+    "TestModelExecutionLogProjectContext",
 ]
