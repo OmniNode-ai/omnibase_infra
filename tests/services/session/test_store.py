@@ -694,7 +694,7 @@ class TestConfigSessionStorage:
         fields = ConfigSessionStorage.model_fields
         assert fields["postgres_host"].default == "localhost"
         assert fields["postgres_port"].default == 5436
-        assert fields["postgres_database"].default == "omninode_bridge"
+        assert fields["postgres_database"].default == "omnibase_infra"
         assert fields["postgres_user"].default == "postgres"
         assert fields["pool_min_size"].default == 2
         assert fields["pool_max_size"].default == 10

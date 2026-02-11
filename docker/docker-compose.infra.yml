@@ -49,6 +49,10 @@
 #     - agent-actions-consumer: 8087 [runtime profile]
 name: omnibase-infra
 # ==========================================================================
+# IMPORTANT: Requires Docker Compose v2.20+ (nested variable expansion).
+# Older versions will SILENTLY produce malformed DSNs.
+# Verify: docker compose version
+# ==========================================================================
 # Shared Configuration Templates (YAML Anchors)
 # ==========================================================================
 
@@ -85,12 +89,22 @@ x-runtime-base: &runtime-base
 x-runtime-env: &runtime-env
   # Kafka/Redpanda - use internal service name
   KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
-  # PostgreSQL - use internal service name
-  POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
-  POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-  POSTGRES_DATABASE: ${POSTGRES_DATABASE:-omninode_bridge}
+  # PostgreSQL - DSN-based configuration (OMN-2065)
+  # NOTE: If OMNIBASE_INFRA_DB_URL is unset, falls back to constructing DSN from POSTGRES_PASSWORD.
+  # POSTGRES_PASSWORD must be set (enforced by :? on the postgres service) for the fallback to work.
+  # WARNING: The fallback DSN uses nested variable expansion (requires recent Compose v2).
+  # Docker Compose cannot URL-encode variables, so the fallback path REQUIRES passwords
+  # containing only hex-safe characters (e.g., generated via `openssl rand -hex 32`).
+  # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
+  # shell-special characters ($, `, \, !), the expansion WILL produce a malformed DSN.
+  # RECOMMENDED: Always set OMNIBASE_INFRA_DB_URL explicitly in .env.
+  # NOTE: The fallback below hardcodes `postgres:5432` (the Compose service name, not POSTGRES_HOST).
+  # POSTGRES_HOST/POSTGRES_PORT are NOT used in the fallback — set OMNIBASE_INFRA_DB_URL directly.
+  # Requires Docker Compose v2.20+ for nested ${...} expansion (see header comment).
+  OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for DB URL fallback}@postgres:5432/omnibase_infra}
+  # Retained for agent-actions-consumer (DSN fallback) and session storage (pydantic-settings prefix).
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
-  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   # Consul - use internal service name
   CONSUL_HOST: ${CONSUL_HOST:-consul}
   CONSUL_PORT: ${CONSUL_PORT:-8500}
@@ -128,17 +142,17 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       # SECURITY: Password is required and must be explicitly set (no default)
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      POSTGRES_DB: ${POSTGRES_DATABASE:-omninode_bridge}
+      POSTGRES_DB: omnibase_infra
       # Per-service role passwords (DB-SPLIT-05 / OMN-2056)
       # Roles are created only when the corresponding password env var is set.
       # Empty defaults are intentional — the init script treats empty as "skip role".
       # Generate each with: openssl rand -hex 32
       ROLE_OMNIBASE_PASSWORD: ${ROLE_OMNIBASE_PASSWORD:-}
-      ROLE_OMNIINTELLIGENCE_PASSWORD: ${ROLE_OMNIINTELLIGENCE_PASSWORD:-}
       ROLE_OMNICLAUDE_PASSWORD: ${ROLE_OMNICLAUDE_PASSWORD:-}
+      ROLE_OMNIDASH_PASSWORD: ${ROLE_OMNIDASH_PASSWORD:-}
+      ROLE_OMNIINTELLIGENCE_PASSWORD: ${ROLE_OMNIINTELLIGENCE_PASSWORD:-}
       ROLE_OMNIMEMORY_PASSWORD: ${ROLE_OMNIMEMORY_PASSWORD:-}
       ROLE_OMNINODE_PASSWORD: ${ROLE_OMNINODE_PASSWORD:-}
-      ROLE_OMNIDASH_PASSWORD: ${ROLE_OMNIDASH_PASSWORD:-}
     ports:
       - "${POSTGRES_EXTERNAL_PORT:-5436}:5432"
     volumes:
@@ -148,7 +162,7 @@ services:
       - omnibase-infra-network
     healthcheck:
       !!merge <<: *healthcheck-defaults
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DATABASE:-omninode_bridge}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d omnibase_infra"]
     logging: *logging-defaults
     restart: unless-stopped
     labels:
@@ -277,7 +291,7 @@ services:
       valkey:
         condition: service_healthy
     environment:
-      DB_CONNECTION_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/infisical_db
+      DB_CONNECTION_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for Infisical DB}@postgres:5432/infisical_db
       # Redis URL for Infisical's cache backend (Valkey is Redis-compatible)
       # NOTE: Default includes the dev password matching VALKEY_PASSWORD default.
       # If you change VALKEY_PASSWORD, update INFISICAL_REDIS_URL to match.
@@ -432,7 +446,14 @@ services:
     command: ["python", "-m", "omnibase_infra.services.observability.agent_actions.consumer"]
     environment:
       OMNIBASE_INFRA_AGENT_ACTIONS_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
-      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DATABASE:-omninode_bridge}
+      # NOTE: Uses dedicated OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN rather than
+      # OMNIBASE_INFRA_DB_URL because this consumer uses pydantic-settings with the
+      # OMNIBASE_INFRA_AGENT_ACTIONS_ prefix and may use a different DB role.
+      # WARNING: The fallback DSN uses nested variable expansion (requires recent Compose v2).
+      # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
+      # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
+      # RECOMMENDED: Set OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN explicitly in .env instead.
+      OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN: ${OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for agent-actions DSN}@postgres:5432/omnibase_infra}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_SIZE: ${AGENT_ACTIONS_BATCH_SIZE:-100}
       OMNIBASE_INFRA_AGENT_ACTIONS_BATCH_TIMEOUT_MS: ${AGENT_ACTIONS_BATCH_TIMEOUT_MS:-1000}
       OMNIBASE_INFRA_AGENT_ACTIONS_HEALTH_CHECK_PORT: "8087"

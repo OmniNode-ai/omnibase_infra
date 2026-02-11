@@ -28,11 +28,8 @@ export KAFKA_BOOTSTRAP_SERVERS="<infrastructure-host>:29092"
 **Optional (for PostgreSQL tracking)**:
 ```bash
 # PostgreSQL tracking configuration (required if --enable-tracking is used)
-export POSTGRES_HOST="<infrastructure-host>"
-export POSTGRES_PORT="5436"
-export POSTGRES_DATABASE="omninode_bridge"
-export POSTGRES_USER="postgres"
-export POSTGRES_PASSWORD="your_password"
+# Use the role configured in your OMNIBASE_INFRA_DB_URL (see .env.example).
+export OMNIBASE_INFRA_DB_URL="postgresql://role_omnibase_infra:your_password@<infrastructure-host>:5436/omnibase_infra"
 ```
 
 ### Network Access
@@ -233,14 +230,11 @@ Enable PostgreSQL-based tracking to persist replay attempt history for auditing 
 
 ### Configuration
 
-Set the required environment variables:
+Set the required environment variable:
 
 ```bash
-export POSTGRES_HOST="<infrastructure-host>"
-export POSTGRES_PORT="5436"
-export POSTGRES_DATABASE="omninode_bridge"
-export POSTGRES_USER="postgres"
-export POSTGRES_PASSWORD="your_password"
+# Use the per-service role matching your OMNIBASE_INFRA_DB_URL configuration.
+export OMNIBASE_INFRA_DB_URL="postgresql://role_omnibase_infra:your_password@<infrastructure-host>:5436/omnibase_infra"
 ```
 
 ### Usage
@@ -434,7 +428,7 @@ WARNING: Failed to initialize tracking service: ...
 ```
 
 **Resolution**:
-1. Verify all `POSTGRES_*` environment variables are set
+1. Verify `OMNIBASE_INFRA_DB_URL` environment variable is set
 2. Check PostgreSQL connectivity
 3. Ensure database schema includes `dlq_replay_history` table
 

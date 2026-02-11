@@ -40,7 +40,7 @@ Example:
     ... )
     >>>
     >>> config = ConfigTTLCleanup(
-    ...     postgres_dsn="postgresql://postgres:secret@localhost:5432/omninode_bridge",
+    ...     postgres_dsn="postgresql://postgres:secret@localhost:5432/omnibase_infra",
     ...     retention_days=30,
     ... )
     >>> pool = await asyncpg.create_pool(dsn=config.postgres_dsn)

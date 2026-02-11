@@ -3,7 +3,7 @@
 """Integration tests for PostgresRepositoryRuntime against real PostgreSQL.
 
 These tests require a running PostgreSQL instance configured via environment variables:
-    POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DATABASE, POSTGRES_USER, POSTGRES_PASSWORD
+    OMNIBASE_INFRA_DB_URL (preferred) or POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_PASSWORD
 
 Run with: pytest -m postgres tests/integration/runtime/db/
 
@@ -32,7 +32,6 @@ The S608 suppression for this file is configured in pyproject.toml under
 from __future__ import annotations
 
 import asyncio
-import os
 import uuid
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
@@ -78,51 +77,43 @@ def event_loop() -> Iterator[asyncio.AbstractEventLoop]:
     loop.close()
 
 
-def _check_postgres_env_vars() -> tuple[bool, str]:
-    """Check if required PostgreSQL environment variables are set.
+def _check_postgres_configured() -> tuple[bool, str]:
+    """Check if PostgreSQL is configured via the shared utility.
+
+    Delegates to ``PostgresConfig.from_env()`` for DSN resolution and validation.
 
     Returns:
-        Tuple of (all_set, missing_vars_message)
+        Tuple of (configured, skip_message).
     """
-    required_vars = [
-        "POSTGRES_HOST",
-        "POSTGRES_PORT",
-        "POSTGRES_DATABASE",
-        "POSTGRES_USER",
-        "POSTGRES_PASSWORD",
-    ]
-    missing = [var for var in required_vars if not os.getenv(var)]
-    if missing:
-        return False, f"Missing required environment variables: {', '.join(missing)}"
+    from tests.helpers.util_postgres import PostgresConfig
+
+    config = PostgresConfig.from_env()
+    if not config.is_configured:
+        return False, (
+            "Missing OMNIBASE_INFRA_DB_URL or required POSTGRES_* fallback variables"
+        )
     return True, ""
 
 
 def get_dsn() -> str:
     """Build PostgreSQL DSN from environment variables.
 
-    All environment variables are REQUIRED - no defaults are provided
-    to prevent accidental credential exposure in source code.
-
-    Required env vars:
-        POSTGRES_HOST: Database host
-        POSTGRES_PORT: Database port
-        POSTGRES_DATABASE: Database name
-        POSTGRES_USER: Database user
-        POSTGRES_PASSWORD: Database password
+    Delegates to the shared ``PostgresConfig`` utility for DSN resolution,
+    validation (scheme, database name, sub-paths), and credential encoding.
 
     Raises:
-        ValueError: If any required environment variable is not set.
+        ValueError: If PostgreSQL is not configured.
     """
-    is_configured, error_msg = _check_postgres_env_vars()
-    if not is_configured:
-        raise ValueError(error_msg)
+    from tests.helpers.util_postgres import PostgresConfig
 
-    host = os.environ["POSTGRES_HOST"]
-    port = os.environ["POSTGRES_PORT"]
-    database = os.environ["POSTGRES_DATABASE"]
-    user = os.environ["POSTGRES_USER"]
-    password = os.environ["POSTGRES_PASSWORD"]
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    config = PostgresConfig.from_env()
+    if not config.is_configured:
+        msg = (
+            "PostgreSQL not configured. "
+            "Set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST + POSTGRES_PASSWORD."
+        )
+        raise ValueError(msg)
+    return config.build_dsn()
 
 
 # Module-constant table name with random UUID suffix for test isolation.
@@ -141,7 +132,7 @@ async def db_pool():
 
     Skips all tests if PostgreSQL environment variables are not configured.
     """
-    is_configured, error_msg = _check_postgres_env_vars()
+    is_configured, error_msg = _check_postgres_configured()
     if not is_configured:
         pytest.skip(f"PostgreSQL integration tests skipped: {error_msg}")
 
@@ -492,7 +483,7 @@ class TestLearnedPatternsTable:
         contract = ModelDbRepositoryContract(
             name="learned_patterns_repo",
             engine="postgres",
-            database_ref="omninode_bridge",
+            database_ref="omnibase_infra",
             tables=["learned_patterns"],
             models={"LearnedPattern": "dict"},
             ops={

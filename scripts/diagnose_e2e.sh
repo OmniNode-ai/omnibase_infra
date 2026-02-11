@@ -556,10 +556,10 @@ ${REPORT_CALLBACK_LOGS}
 
 ### Recent Projections
 \`\`\`
-$(docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d omninode_bridge -c "SELECT entity_id, node_type, registration_phase, created_at FROM registration_projections ORDER BY created_at DESC LIMIT 10;" 2>&1 || echo "ERROR: Failed to query registration_projections table.
+$(docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d omnibase_infra -c "SELECT entity_id, node_type, registration_phase, created_at FROM registration_projections ORDER BY created_at DESC LIMIT 10;" 2>&1 || echo "ERROR: Failed to query registration_projections table.
 Possible causes:
   - PostgreSQL container 'postgres' is not running (check: docker compose ps postgres)
-  - Database 'omninode_bridge' does not exist
+  - Database 'omnibase_infra' does not exist
   - Table 'registration_projections' does not exist (run migrations)
   - Network connectivity issue between containers
 Run 'docker compose -f $COMPOSE_FILE logs postgres' for container logs.")
