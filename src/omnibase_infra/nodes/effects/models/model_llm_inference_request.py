@@ -190,12 +190,25 @@ class ModelLlmInferenceRequest(BaseModel):
         description="Arbitrary key-value pairs for observability.",
     )
 
+    @field_validator("stop")
+    @classmethod
+    def _validate_stop_sequences(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        """Reject empty or whitespace-only stop sequences."""
+        for i, seq in enumerate(v):
+            if not seq.strip():
+                raise ValueError(f"stop sequence at index {i} must be non-empty.")
+        return v
+
     @field_validator("base_url")
     @classmethod
     def _validate_base_url(cls, v: str) -> str:
-        """Ensure base_url uses an HTTP(S) scheme."""
+        """Ensure base_url uses an HTTP(S) scheme with a host."""
         if not v.startswith(("http://", "https://")):
             raise ValueError("base_url must start with http:// or https://")
+        # Ensure there's content after the scheme
+        scheme_end = v.index("://") + 3
+        if len(v) <= scheme_end or not v[scheme_end:].strip("/"):
+            raise ValueError("base_url must include a host after the scheme")
         return v
 
     @model_validator(mode="after")
