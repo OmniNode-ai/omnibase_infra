@@ -1,0 +1,193 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract - Validation Orchestrator Node
+#
+# Orchestrates the validation pipeline: receives pattern candidates, builds
+# validation plans, coordinates executor and adjudicator, publishes results.
+#
+# Related Tickets:
+#   - OMN-2147: Validation Pipeline Orchestrator
+#
+# Contract identifiers
+name: "node_validation_orchestrator"
+contract_name: "node_validation_orchestrator"
+node_name: "node_validation_orchestrator"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Node type
+node_type: "ORCHESTRATOR_GENERIC"
+# Description
+description: >
+  Orchestrator for the validation pipeline. Consumes pattern candidates, builds validation plans with the MVP check catalog, coordinates executor and adjudicator nodes, and publishes validation results. Drives the build_plan -> execute_checks -> adjudicate -> update_lifecycle workflow.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelPatternCandidate"
+  module: "omnibase_infra.nodes.node_validation_orchestrator.models"
+  description: "A pattern candidate submitted for validation."
+output_model:
+  name: "ModelValidationPlan"
+  module: "omnibase_infra.nodes.node_validation_orchestrator.models"
+  description: "Validation plan containing ordered checks for the candidate."
+# Event Bus Subcontract
+# =====================
+# Canonical runtime-enforced declaration of event subscriptions and publications.
+# Topics use realm-agnostic 5-segment ONEX format:
+#   onex.<kind>.<producer>.<event-name>.v<version>
+event_bus:
+  version:
+    major: 0
+    minor: 1
+    patch: 0
+  subscribe_topics:
+    - "onex.evt.platform.validation-candidate-submitted.v1"
+    - "onex.evt.platform.validation-checks-completed.v1"
+    - "onex.evt.platform.validation-adjudication-completed.v1"
+  publish_topics:
+    - "onex.evt.platform.validation-plan-created.v1"
+    - "onex.evt.platform.validation-execution-requested.v1"
+    - "onex.evt.platform.validation-adjudication-requested.v1"
+    - "onex.evt.platform.validation-result-published.v1"
+    - "onex.evt.platform.validation-lifecycle-updated.v1"
+# Handler Routing Configuration
+# ==============================
+# Declarative mapping of consumed events to handler implementations.
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    # ModelPatternCandidate -> HandlerBuildPlan
+    # Builds a validation plan with the MVP check catalog for the submitted candidate.
+    - event_model:
+        name: "ModelPatternCandidate"
+        module: "omnibase_infra.nodes.node_validation_orchestrator.models.model_pattern_candidate"
+      handler:
+        name: "HandlerBuildPlan"
+        module: "omnibase_infra.nodes.node_validation_orchestrator.handlers.handler_build_plan"
+      output_events:
+        - "ModelValidationPlan"
+      description: "Build validation plan from pattern candidate using MVP check catalog."
+# Consumed events
+consumed_events:
+  - topic: "onex.evt.platform.validation-candidate-submitted.v1"
+    event_type: "ValidationCandidateSubmitted"
+    description: "Pattern candidate submitted for validation"
+  - topic: "onex.evt.platform.validation-checks-completed.v1"
+    event_type: "ValidationChecksCompleted"
+    description: "All checks in the plan have been executed"
+  - topic: "onex.evt.platform.validation-adjudication-completed.v1"
+    event_type: "ValidationAdjudicationCompleted"
+    description: "Adjudicator has produced a verdict"
+# Published events
+published_events:
+  - topic: "onex.evt.platform.validation-plan-created.v1"
+    event_type: "ValidationPlanCreated"
+  - topic: "onex.evt.platform.validation-execution-requested.v1"
+    event_type: "ValidationExecutionRequested"
+  - topic: "onex.evt.platform.validation-adjudication-requested.v1"
+    event_type: "ValidationAdjudicationRequested"
+  - topic: "onex.evt.platform.validation-result-published.v1"
+    event_type: "ValidationResultPublished"
+  - topic: "onex.evt.platform.validation-lifecycle-updated.v1"
+    event_type: "ValidationLifecycleUpdated"
+# Workflow Coordination Configuration
+# ====================================
+# ALL coordination settings are consolidated within coordination_rules.
+workflow_coordination:
+  workflow_definition:
+    workflow_metadata:
+      workflow_name: "validation_pipeline_workflow"
+      workflow_version:
+        major: 0
+        minor: 1
+        patch: 0
+      execution_mode: sequential
+      description: "Validation pipeline: build plan, execute checks, adjudicate, update lifecycle"
+    execution_graph:
+      nodes:
+        - node_id: "build_plan"
+          node_type: COMPUTE_GENERIC
+          description: "Build validation plan from pattern candidate using MVP check catalog"
+        - node_id: "execute_checks"
+          node_type: EFFECT_GENERIC
+          description: "Dispatch checks to executor and collect results"
+          depends_on: ["build_plan"]
+          step_config:
+            effect_node: "node_validation_executor"
+            parallel_checks: true
+        - node_id: "adjudicate"
+          node_type: COMPUTE_GENERIC
+          description: "Adjudicate check results into PASS/FAIL/QUARANTINE verdict"
+          depends_on: ["execute_checks"]
+          step_config:
+            adjudicator_node: "node_validation_adjudicator"
+        - node_id: "update_lifecycle"
+          node_type: EFFECT_GENERIC
+          description: "Update candidate lifecycle and publish final validation result"
+          depends_on: ["adjudicate"]
+          step_config:
+            event_type: "ValidationResultPublished"
+    # Coordination Rules (Single Source of Truth)
+    coordination_rules:
+      execution_mode: sequential
+      parallel_execution_allowed: false
+      failure_recovery_strategy: retry
+      max_retries: 2
+      timeout_ms: 60000
+      checkpoint_enabled: false
+      state_persistence_enabled: false
+      rollback_enabled: false
+# Dependencies
+dependencies:
+  - name: "validation_executor"
+    type: "node"
+    description: "Effect node for executing validation checks."
+  - name: "validation_adjudicator"
+    type: "node"
+    description: "Compute node for adjudicating check results."
+# Error Handling Configuration
+error_handling:
+  retry_policy:
+    max_retries: 2
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "EffectExecutionError"
+      - "ConnectionError"
+      - "TimeoutError"
+  error_types:
+    - name: "PlanBuildError"
+      description: "Error building validation plan from candidate"
+      recoverable: false
+      retry_strategy: "none"
+    - name: "CheckExecutionError"
+      description: "Error executing one or more validation checks"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "AdjudicationError"
+      description: "Error during check result adjudication"
+      recoverable: false
+      retry_strategy: "none"
+# Health check
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-11"
+  tags:
+    - orchestrator
+    - validation
+    - workflow
+  related_tickets:
+    - "OMN-2147"
