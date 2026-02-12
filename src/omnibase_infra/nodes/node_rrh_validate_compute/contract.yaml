@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: MIT
+# ONEX Contract: node_rrh_validate_compute
+# Ticket: OMN-2136
+name: "node_rrh_validate_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+node_type: "COMPUTE_GENERIC"
+description: >
+  Pure COMPUTE node for Release Readiness Handshake validation. Evaluates 13 rules (RRH-1001 through RRH-1701) against collected environment data using profile-driven severity and contract tightening. No I/O — deterministic input-to-output transformation.
+
+input_model:
+  name: "ModelRRHValidateRequest"
+  module: "omnibase_infra.nodes.node_rrh_validate_compute.models.model_rrh_validate_request"
+  description: >
+    Validation request containing environment data, profile name, and contract governance fields for rule activation/tightening.
+
+output_model:
+  name: "ModelRRHResult"
+  module: "omnibase_infra.models.rrh.model_rrh_result"
+  description: >
+    Aggregate validation result composing ModelRuleCheckResult checks and an EnumVerdict.
+
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "rrh_validate"
+      handler:
+        name: "HandlerRRHValidate"
+        module: "omnibase_infra.nodes.node_rrh_validate_compute.handlers.handler_rrh_validate"
+      supported_operations:
+        - "rrh.validate"
+# --- Rule Catalog ---
+# RRH-1001: Repo clean working tree
+# RRH-1002: Repo on expected branch
+# RRH-1101: Environment target valid
+# RRH-1102: Environment kafka_broker configured
+# RRH-1201: Kafka broker reachable (conditional: interfaces_touched includes 'topics')
+# RRH-1301: Kubernetes context valid (conditional: deployment_targets includes 'k8s')
+# RRH-1401: Toolchain pre-commit present
+# RRH-1402: Toolchain ruff present
+# RRH-1403: Toolchain pytest present (conditional: evidence_requirements includes 'tests')
+# RRH-1404: Toolchain mypy present
+# RRH-1501: Cross-check branch matches ticket ID
+# RRH-1601: Cross-check no disallowed contract fields
+# RRH-1701: Repo-boundary no cross-repo imports
+
+# --- Profiles ---
+# default.yaml:          baseline rules (excludes conditional rules)
+# ticket-pipeline.yaml:  standard pipeline rules
+# ci-repair.yaml:        relaxed for CI repair (dirty allowed)
+# seam-ticket.yaml:      all rules active (cross-repo seam tickets)
+capabilities:
+  - name: "rrh.validate"
+    description: "Validate environment data against RRH rules and profiles"
+    version: "1.0.0"
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-11"
+  ticket: "OMN-2136"
+  tags:
+    - compute
+    - rrh
+    - validation
+    - pure-function

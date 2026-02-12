@@ -96,7 +96,32 @@ class HandlerCheckpointList:
 
         # Resolve base directory
         base_dir_raw = envelope.get("base_dir")
+        if base_dir_raw is not None and not isinstance(base_dir_raw, (str, Path)):
+            return ModelHandlerOutput.for_compute(
+                input_envelope_id=uuid4(),
+                correlation_id=corr_id,
+                handler_id="handler-checkpoint-list",
+                result=ModelCheckpointEffectOutput(
+                    success=False,
+                    correlation_id=corr_id,
+                    error=(
+                        f"Invalid base_dir type: expected str or Path, "
+                        f"got {type(base_dir_raw).__name__}"
+                    ),
+                ),
+            )
         base_dir = Path(str(base_dir_raw)) if base_dir_raw else _DEFAULT_BASE_DIR
+
+        if not base_dir.is_absolute():
+            raise RuntimeHostError(
+                f"base_dir must be an absolute path, got: {base_dir}",
+                context=context,
+            )
+        if ".." in base_dir.parts:
+            raise RuntimeHostError(
+                f"base_dir must not contain '..' components, got: {base_dir}",
+                context=context,
+            )
 
         ticket_dir = base_dir / str(ticket_id)
         if not ticket_dir.resolve().is_relative_to(base_dir.resolve()):
@@ -119,14 +144,36 @@ class HandlerCheckpointList:
         # Optionally scope to a specific run
         run_id_raw = envelope.get("run_id")
         if run_id_raw is not None:
-            run_id = (
-                UUID(str(run_id_raw))
-                if not isinstance(run_id_raw, UUID)
-                else run_id_raw
-            )
+            if isinstance(run_id_raw, UUID):
+                run_id = run_id_raw
+            else:
+                try:
+                    run_id = UUID(str(run_id_raw))
+                except ValueError:
+                    return ModelHandlerOutput.for_compute(
+                        input_envelope_id=uuid4(),
+                        correlation_id=corr_id,
+                        handler_id="handler-checkpoint-list",
+                        result=ModelCheckpointEffectOutput(
+                            success=False,
+                            correlation_id=corr_id,
+                            error=f"Invalid run_id: not a valid UUID: {run_id_raw!r}",
+                        ),
+                    )
             scan_dirs = [ticket_dir / str(run_id)]
         else:
-            scan_dirs = [d for d in ticket_dir.iterdir() if d.is_dir()]
+            # Cap the number of directories scanned to prevent unbounded I/O.
+            _MAX_SCAN_DIRS = 1000
+            all_dirs = [d for d in ticket_dir.iterdir() if d.is_dir()]
+            if len(all_dirs) > _MAX_SCAN_DIRS:
+                logger.warning(
+                    "Ticket %s has %d run directories; capping scan at %d",
+                    ticket_id,
+                    len(all_dirs),
+                    _MAX_SCAN_DIRS,
+                )
+                all_dirs = all_dirs[:_MAX_SCAN_DIRS]
+            scan_dirs = all_dirs
 
         checkpoints: list[ModelCheckpoint] = []
         for scan_dir in scan_dirs:

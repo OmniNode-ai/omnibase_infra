@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: MIT
+# ONEX Contract: node_rrh_storage_effect
+# Ticket: OMN-2136
+name: "node_rrh_storage_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+node_type: "EFFECT_GENERIC"
+description: >
+  Effect node that persists RRH validation results as timestamped JSON artifacts and maintains convenience symlinks for quick lookup by ticket and repository.
+
+input_model:
+  name: "ModelRRHStorageRequest"
+  module: "omnibase_infra.nodes.node_rrh_storage_effect.models.model_rrh_storage_request"
+  description: >
+    Storage request containing the RRH result and output directory.
+
+output_model:
+  name: "ModelRRHStorageResult"
+  module: "omnibase_infra.nodes.node_rrh_storage_effect.models.model_rrh_storage_result"
+  description: >
+    Storage outcome with artifact path and symlinks created.
+
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - handler_type: "rrh_storage"
+      handler:
+        name: "HandlerRRHStorageWrite"
+        module: "omnibase_infra.nodes.node_rrh_storage_effect.handlers.handler_rrh_storage_write"
+      supported_operations:
+        - "rrh.storage.write"
+      description: "Write RRH result JSON and update symlinks."
+capabilities:
+  - name: "rrh.storage"
+    description: "Persist RRH validation results as artifacts with symlinks"
+    version: "1.0.0"
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-11"
+  ticket: "OMN-2136"
+  tags:
+    - effect
+    - rrh
+    - storage
+    - artifacts

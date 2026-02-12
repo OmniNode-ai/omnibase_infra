@@ -2273,6 +2273,57 @@ pattern_exemptions:
       - CLAUDE.md (Node Architecture - COMPUTE nodes)
     ticket: OMN-2125
   # ==========================================================================
+  # RRH Node Exemptions (OMN-2136)
+  # ==========================================================================
+  # RRH (Release Readiness Handshake) uses domain-specific string identifiers
+  # (e.g. "OMN-2136", "RRH-1001", "default") that are NOT UUIDs.
+  # The 'handle' method name follows the standard handler protocol pattern.
+  # The 13 rule checkers plus helpers exceed the method count threshold but
+  # are cohesive (single responsibility: validate one dimension each).
+  - file_pattern: 'model_rrh_contract_governance\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID"
+    reason: >
+      ticket_id is a human-readable Linear identifier (e.g. "OMN-2136"), not a UUID. Using str is the correct type for this domain identifier.
+
+    ticket: OMN-2136
+  - file_pattern: 'model_rrh_result\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID"
+    reason: >
+      ticket_id is a human-readable Linear identifier (e.g. "OMN-2136"), not a UUID.
+
+    ticket: OMN-2136
+  - file_pattern: 'model_rrh_result\.py'
+    violation_pattern: "might reference an entity"
+    reason: >
+      profile_name and repo_name are simple string labels, not entity references requiring an ID + display_name pattern. They identify RRH profiles and repos by name for human-readable result artifacts.
+
+    ticket: OMN-2136
+  - file_pattern: 'model_rrh_validate_request\.py'
+    violation_pattern: "might reference an entity"
+    reason: >
+      profile_name and repo_name are simple string labels for human-readable identification in RRH validation requests, not entity references.
+
+    ticket: OMN-2136
+  - file_pattern: 'model_rrh_rule_severity\.py'
+    violation_pattern: "Field 'rule_id' should use UUID"
+    reason: >
+      rule_id is a human-readable RRH rule identifier (e.g. "RRH-1001"), not a UUID. This matches the ModelRuleCheckResult pattern in architecture_validator.
+
+    ticket: OMN-2136
+  - file_pattern: 'handler_rrh_validate\.py'
+    class_pattern: "Class 'HandlerRRHValidate'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      13 rule checkers (one per RRH rule) plus profile loading, tightening, dispatching, and verdict derivation. All methods serve the single purpose of validating environment data against rules. Breaking into smaller classes would scatter the rule catalog without meaningful benefit.
+
+    ticket: OMN-2136
+  - file_pattern: 'handler_rrh_validate\.py'
+    violation_pattern: "Function name 'handle' is too generic"
+    reason: >
+      'handle' is the standard ONEX handler method name per the ProtocolHandler and ProtocolMessageHandler conventions. All handlers use this name.
+
+    ticket: OMN-2136
+  # ==========================================================================
   # ModelPhasePayloadImplement branch_name Exemption (OMN-2143)
   # ==========================================================================
   # branch_name is a git branch string, not an entity reference.
