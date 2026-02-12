@@ -16,11 +16,16 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from pathlib import Path
+from uuid import uuid4
 
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.nodes.node_rrh_storage_effect.models.model_rrh_storage_request import (
     ModelRRHStorageRequest,
 )
@@ -59,13 +64,20 @@ class HandlerRRHStorageWrite:
         """
         try:
             base = Path(request.output_dir)
+            error_context = ModelInfraErrorContext.with_correlation(
+                correlation_id=request.correlation_id,
+                transport_type=EnumInfraTransportType.FILESYSTEM,
+                operation="validate_output_dir",
+            )
             if not base.is_absolute():
-                raise ValueError(
-                    f"output_dir must be absolute, got: {request.output_dir!r}"
+                raise ProtocolConfigurationError(
+                    "output_dir must be absolute",
+                    context=error_context,
                 )
             if ".." in base.parts:
-                raise ValueError(
-                    f"output_dir must not contain '..' components, got: {request.output_dir!r}"
+                raise ProtocolConfigurationError(
+                    "output_dir must not contain '..' components",
+                    context=error_context,
                 )
             artifacts_dir = base / "artifacts"
             artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -145,20 +157,24 @@ class HandlerRRHStorageWrite:
             link_path = symlink_dir / safe_name
             # Compute relative target for portable symlinks.
             rel_target = Path("..") / "artifacts" / target.name
-            # Atomic symlink replacement: create temp link, then rename over target.
-            tmp_link = symlink_dir / f".tmp_{safe_name}_{os.getpid()}"
+            # Atomic symlink replacement: create temp link, then Path.replace()
+            # over the final path.  Path.replace() delegates to os.replace()
+            # which is atomic on POSIX.
+            tmp_link = symlink_dir / f".tmp_{safe_name}_{uuid4().hex[:8]}"
             try:
                 tmp_link.symlink_to(rel_target)
-                tmp_link.rename(link_path)
+                tmp_link.replace(link_path)
             except OSError:
-                # Fallback: non-atomic if rename fails (e.g., cross-device).
+                # Fallback: non-atomic if replace fails (e.g., cross-device).
                 tmp_link.unlink(missing_ok=True)
                 if link_path.is_symlink() or link_path.exists():
                     link_path.unlink()
                 link_path.symlink_to(rel_target)
             return str(link_path)
         except OSError as exc:
-            logger.debug("Failed to update symlink %s: %s", name, exc)
+            logger.debug(
+                "Failed to update symlink %s: %s", name, sanitize_error_message(exc)
+            )
             return ""
 
 

@@ -114,6 +114,11 @@ class HandlerRepoStateCollect:
                 await proc.wait()
             logger.debug("git %s error: timed out after 10s", " ".join(args))
             return ""
+        except asyncio.CancelledError:
+            if proc is not None:
+                proc.kill()
+                await proc.wait()
+            raise
         except (FileNotFoundError, OSError) as exc:
             logger.debug(
                 "git %s error: %s",

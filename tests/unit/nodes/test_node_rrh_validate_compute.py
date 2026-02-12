@@ -573,6 +573,105 @@ class TestContractTightening:
         # Should be evaluated, not skipped.
         assert not check.skipped
 
+    def test_tightening_promotes_warn_to_fail(
+        self, handler: HandlerRRHValidate
+    ) -> None:
+        """Tightening promotes an enabled rule from WARN to FAIL severity.
+
+        Uses a custom profile where RRH-1403 is enabled with WARN severity.
+        Contract governance with evidence_requirements=["tests"] must promote
+        it to FAIL.
+        """
+        from omnibase_infra.models.rrh.model_rrh_profile import ModelRRHProfile
+        from omnibase_infra.models.rrh.model_rrh_rule_severity import (
+            ModelRRHRuleSeverity,
+        )
+
+        profile = ModelRRHProfile(
+            name="warn-profile",
+            description="Test profile with WARN severity on RRH-1403.",
+            rules=(
+                ModelRRHRuleSeverity(
+                    rule_id="RRH-1403", enabled=True, severity=EnumVerdict.WARN
+                ),
+            ),
+        )
+        gov = ModelRRHContractGovernance(evidence_requirements=("tests",))
+        result = handler._apply_tightening(profile, gov)
+        rule = result["RRH-1403"]
+        assert rule.enabled
+        assert rule.severity == EnumVerdict.FAIL
+
+    def test_tightening_keeps_fail_unchanged(self, handler: HandlerRRHValidate) -> None:
+        """Tightening does not alter a rule already at FAIL severity."""
+        from omnibase_infra.models.rrh.model_rrh_profile import ModelRRHProfile
+        from omnibase_infra.models.rrh.model_rrh_rule_severity import (
+            ModelRRHRuleSeverity,
+        )
+
+        profile = ModelRRHProfile(
+            name="fail-profile",
+            description="Test profile with FAIL severity on RRH-1403.",
+            rules=(
+                ModelRRHRuleSeverity(
+                    rule_id="RRH-1403", enabled=True, severity=EnumVerdict.FAIL
+                ),
+            ),
+        )
+        gov = ModelRRHContractGovernance(evidence_requirements=("tests",))
+        result = handler._apply_tightening(profile, gov)
+        rule = result["RRH-1403"]
+        assert rule.enabled
+        assert rule.severity == EnumVerdict.FAIL
+
+    def test_tightening_enables_disabled_rule(
+        self, handler: HandlerRRHValidate
+    ) -> None:
+        """Tightening enables a disabled rule with FAIL severity."""
+        from omnibase_infra.models.rrh.model_rrh_profile import ModelRRHProfile
+        from omnibase_infra.models.rrh.model_rrh_rule_severity import (
+            ModelRRHRuleSeverity,
+        )
+
+        profile = ModelRRHProfile(
+            name="disabled-profile",
+            description="Test profile with disabled RRH-1201.",
+            rules=(
+                ModelRRHRuleSeverity(
+                    rule_id="RRH-1201", enabled=False, severity=EnumVerdict.WARN
+                ),
+            ),
+        )
+        gov = ModelRRHContractGovernance(interfaces_touched=("topics",))
+        result = handler._apply_tightening(profile, gov)
+        rule = result["RRH-1201"]
+        assert rule.enabled
+        assert rule.severity == EnumVerdict.FAIL
+
+    def test_tightening_promotes_k8s_warn_to_fail(
+        self, handler: HandlerRRHValidate
+    ) -> None:
+        """Tightening promotes RRH-1301 from WARN to FAIL via deployment_targets."""
+        from omnibase_infra.models.rrh.model_rrh_profile import ModelRRHProfile
+        from omnibase_infra.models.rrh.model_rrh_rule_severity import (
+            ModelRRHRuleSeverity,
+        )
+
+        profile = ModelRRHProfile(
+            name="k8s-warn-profile",
+            description="Test profile with WARN severity on RRH-1301.",
+            rules=(
+                ModelRRHRuleSeverity(
+                    rule_id="RRH-1301", enabled=True, severity=EnumVerdict.WARN
+                ),
+            ),
+        )
+        gov = ModelRRHContractGovernance(deployment_targets=("k8s",))
+        result = handler._apply_tightening(profile, gov)
+        rule = result["RRH-1301"]
+        assert rule.enabled
+        assert rule.severity == EnumVerdict.FAIL
+
 
 # ---------------------------------------------------------------
 # Verdict derivation

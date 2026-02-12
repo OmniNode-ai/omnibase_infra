@@ -158,6 +158,26 @@ class TestHandlerRepoStateCollect:
         assert result.remote_url == ""
         assert not result.is_dirty
 
+    @pytest.mark.anyio
+    async def test_git_cancelled_error_kills_process(
+        self, handler: HandlerRepoStateCollect
+    ) -> None:
+        """CancelledError during communicate() must kill the subprocess and re-raise."""
+        mock_proc = MagicMock(spec=asyncio.subprocess.Process)
+        mock_proc.communicate = AsyncMock(side_effect=asyncio.CancelledError)
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock()
+
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new=AsyncMock(return_value=mock_proc),
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await handler._git("/fake/repo", "status")
+
+        mock_proc.kill.assert_called_once()
+        mock_proc.wait.assert_awaited_once()
+
 
 # ---------------------------------------------------------------
 # HandlerRuntimeTargetCollect

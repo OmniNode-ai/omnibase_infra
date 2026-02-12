@@ -14,12 +14,14 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 import yaml
 
 from omnibase_infra.diagnostics.enum_verdict import EnumVerdict
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.rrh.model_rrh_result import ModelRRHResult
 from omnibase_infra.nodes.architecture_validator.models.model_rule_check_result import (
     ModelRuleCheckResult,
@@ -267,3 +269,134 @@ class TestErrorHandling:
         result = await handler.handle(request)
         assert result.success is False
         assert result.error
+
+
+# ---------------------------------------------------------------
+# Path validation guard tests (ProtocolConfigurationError)
+# ---------------------------------------------------------------
+
+
+class TestPathValidationGuards:
+    """Verify path validation raises ProtocolConfigurationError (not ValueError).
+
+    The handler catches all exceptions in its ``except Exception`` block to
+    return a graceful result.  We patch ``sanitize_error_message`` to re-raise
+    the original exception so we can assert on its type directly.
+    """
+
+    @pytest.mark.anyio
+    async def test_relative_path_raises_protocol_configuration_error(
+        self,
+        handler: HandlerRRHStorageWrite,
+        sample_result: ModelRRHResult,
+    ) -> None:
+        request = ModelRRHStorageRequest(
+            result=sample_result, output_dir="relative/path"
+        )
+
+        def _reraise(exc: BaseException) -> str:
+            raise exc
+
+        with (
+            patch(
+                "omnibase_infra.nodes.node_rrh_storage_effect.handlers"
+                ".handler_rrh_storage_write.sanitize_error_message",
+                side_effect=_reraise,
+            ),
+            pytest.raises(
+                ProtocolConfigurationError, match="output_dir must be absolute"
+            ),
+        ):
+            await handler.handle(request)
+
+    @pytest.mark.anyio
+    async def test_path_traversal_raises_protocol_configuration_error(
+        self,
+        handler: HandlerRRHStorageWrite,
+        sample_result: ModelRRHResult,
+    ) -> None:
+        request = ModelRRHStorageRequest(
+            result=sample_result, output_dir="/safe/rrh/../escape"
+        )
+
+        def _reraise(exc: BaseException) -> str:
+            raise exc
+
+        with (
+            patch(
+                "omnibase_infra.nodes.node_rrh_storage_effect.handlers"
+                ".handler_rrh_storage_write.sanitize_error_message",
+                side_effect=_reraise,
+            ),
+            pytest.raises(
+                ProtocolConfigurationError, match="must not contain '\\.\\.'"
+            ),
+        ):
+            await handler.handle(request)
+
+    @pytest.mark.anyio
+    async def test_relative_path_error_includes_correlation_id(
+        self,
+        handler: HandlerRRHStorageWrite,
+        sample_result: ModelRRHResult,
+    ) -> None:
+        cid = uuid4()
+        request = ModelRRHStorageRequest(
+            result=sample_result, output_dir="relative/path", correlation_id=cid
+        )
+
+        captured: list[BaseException] = []
+
+        def _capture(exc: BaseException) -> str:
+            captured.append(exc)
+            raise exc
+
+        with (
+            patch(
+                "omnibase_infra.nodes.node_rrh_storage_effect.handlers"
+                ".handler_rrh_storage_write.sanitize_error_message",
+                side_effect=_capture,
+            ),
+            pytest.raises(ProtocolConfigurationError),
+        ):
+            await handler.handle(request)
+
+        assert len(captured) == 1
+        err = captured[0]
+        assert isinstance(err, ProtocolConfigurationError)
+        # The correlation_id should be propagated from the request.
+        assert err.model.correlation_id == cid
+
+    @pytest.mark.anyio
+    async def test_path_traversal_error_includes_correlation_id(
+        self,
+        handler: HandlerRRHStorageWrite,
+        sample_result: ModelRRHResult,
+    ) -> None:
+        cid = uuid4()
+        request = ModelRRHStorageRequest(
+            result=sample_result,
+            output_dir="/safe/rrh/../escape",
+            correlation_id=cid,
+        )
+
+        captured: list[BaseException] = []
+
+        def _capture(exc: BaseException) -> str:
+            captured.append(exc)
+            raise exc
+
+        with (
+            patch(
+                "omnibase_infra.nodes.node_rrh_storage_effect.handlers"
+                ".handler_rrh_storage_write.sanitize_error_message",
+                side_effect=_capture,
+            ),
+            pytest.raises(ProtocolConfigurationError),
+        ):
+            await handler.handle(request)
+
+        assert len(captured) == 1
+        err = captured[0]
+        assert isinstance(err, ProtocolConfigurationError)
+        assert err.model.correlation_id == cid

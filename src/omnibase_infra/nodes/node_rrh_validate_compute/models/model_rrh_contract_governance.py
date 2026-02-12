@@ -25,7 +25,7 @@ class ModelRRHContractGovernance(BaseModel):
             Switches to seam-ticket profile (all rules active).
         disallowed_fields: Contract fields that should not be present.
             Triggers RRH-1601 when non-empty.
-        expected_branch_pattern: Regex or glob for expected branch name.
+        expected_branch_pattern: Regex pattern for expected branch name.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -53,7 +53,7 @@ class ModelRRHContractGovernance(BaseModel):
     )
     expected_branch_pattern: str = Field(
         default="",
-        description="Expected branch name pattern.",
+        description="Expected branch name regex pattern (matched via re.fullmatch).",
     )
 
 

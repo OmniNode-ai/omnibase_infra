@@ -155,6 +155,11 @@ class HandlerRRHValidate:
         except KeyError:
             # Unknown profile name -- return immediate FAIL with all rules
             # marked as failed so the caller gets actionable feedback.
+            logger.warning(
+                "Unknown RRH profile %r, correlation_id=%s",
+                profile_name,
+                request.correlation_id,
+            )
             return ModelRRHResult(
                 checks=tuple(
                     ModelRuleCheckResult(
@@ -241,7 +246,13 @@ class HandlerRRHValidate:
         - ``interfaces_touched: ["topics"]`` -> enable RRH-1201
         - ``deployment_targets: ["k8s"]`` -> enable RRH-1301
 
-        CRITICAL: Contract can only ENABLE rules.
+        Severity promotion:
+        - If a rule is not present or disabled, enable it with FAIL severity.
+        - If a rule is already enabled but at a lower severity (e.g. WARN),
+          promote it to FAIL.
+        - If a rule is already enabled at FAIL severity, no change.
+
+        CRITICAL: Contract can only ENABLE rules and RAISE severity.
         It can NEVER disable a rule that the profile enables, nor
         lower severity from FAIL to WARN.
         """
@@ -250,7 +261,11 @@ class HandlerRRHValidate:
         # Tighten: evidence_requirements includes "tests" -> RRH-1403
         if "tests" in governance.evidence_requirements:
             existing = rules.get("RRH-1403")
-            if existing is None or not existing.enabled:
+            if (
+                existing is None
+                or not existing.enabled
+                or existing.severity != EnumVerdict.FAIL
+            ):
                 rules["RRH-1403"] = ModelRRHRuleSeverity(
                     rule_id="RRH-1403", enabled=True, severity=EnumVerdict.FAIL
                 )
@@ -258,7 +273,11 @@ class HandlerRRHValidate:
         # Tighten: interfaces_touched includes "topics" -> RRH-1201
         if "topics" in governance.interfaces_touched:
             existing = rules.get("RRH-1201")
-            if existing is None or not existing.enabled:
+            if (
+                existing is None
+                or not existing.enabled
+                or existing.severity != EnumVerdict.FAIL
+            ):
                 rules["RRH-1201"] = ModelRRHRuleSeverity(
                     rule_id="RRH-1201", enabled=True, severity=EnumVerdict.FAIL
                 )
@@ -266,7 +285,11 @@ class HandlerRRHValidate:
         # Tighten: deployment_targets includes "k8s" -> RRH-1301
         if "k8s" in governance.deployment_targets:
             existing = rules.get("RRH-1301")
-            if existing is None or not existing.enabled:
+            if (
+                existing is None
+                or not existing.enabled
+                or existing.severity != EnumVerdict.FAIL
+            ):
                 rules["RRH-1301"] = ModelRRHRuleSeverity(
                     rule_id="RRH-1301", enabled=True, severity=EnumVerdict.FAIL
                 )
