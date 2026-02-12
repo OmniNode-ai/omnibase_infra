@@ -16,6 +16,7 @@ Exports:
     InfraTimeoutError: Infrastructure timeout errors
     InfraAuthenticationError: Infrastructure authentication errors
     InfraUnavailableError: Infrastructure resource unavailable errors
+    InfraRateLimitedError: Infrastructure rate limit errors
     EnvelopeValidationError: Envelope validation errors (pre-dispatch)
     UnknownHandlerTypeError: Unknown handler type prefix errors
     PolicyRegistryError: Policy registry operation errors
@@ -119,6 +120,7 @@ from omnibase_infra.errors.error_infra import (
     EnvelopeValidationError,
     InfraAuthenticationError,
     InfraConnectionError,
+    InfraRateLimitedError,
     InfraTimeoutError,
     InfraUnavailableError,
     ProtocolConfigurationError,
@@ -164,6 +166,7 @@ __all__: list[str] = [
     "InfraConnectionError",
     # Service-specific connection errors
     "InfraConsulError",
+    "InfraRateLimitedError",
     "InfraTimeoutError",
     "InfraUnavailableError",
     "InfraVaultError",
