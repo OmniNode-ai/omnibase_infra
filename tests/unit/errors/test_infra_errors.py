@@ -29,6 +29,7 @@ from omnibase_infra.errors import ModelInfraErrorContext, ModelTimeoutErrorConte
 from omnibase_infra.errors.error_infra import (
     InfraAuthenticationError,
     InfraConnectionError,
+    InfraRateLimitedError,
     InfraTimeoutError,
     InfraUnavailableError,
     ProtocolConfigurationError,
@@ -751,6 +752,106 @@ class TestInfraUnavailableError:
             assert e.model.context["port"] == 8500
 
 
+class TestInfraRateLimitedError:
+    """Tests for InfraRateLimitedError."""
+
+    def test_basic_instantiation(self) -> None:
+        """Test basic error instantiation."""
+        error = InfraRateLimitedError("Rate limit exceeded")
+        assert "Rate limit exceeded" in str(error)
+        assert isinstance(error, RuntimeHostError)
+
+    def test_with_context_model(self) -> None:
+        """Test error with context model."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="chat_completion",
+            target_name="openai-api",
+        )
+        error = InfraRateLimitedError(
+            "Rate limit exceeded",
+            context=context,
+        )
+        assert error.model.context["transport_type"] == EnumInfraTransportType.HTTP
+        assert error.model.context["operation"] == "chat_completion"
+        assert error.model.context["target_name"] == "openai-api"
+
+    def test_with_retry_after_seconds(self) -> None:
+        """Test error with retry_after_seconds parameter."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="api_request",
+        )
+        error = InfraRateLimitedError(
+            "Rate limit exceeded",
+            context=context,
+            retry_after_seconds=30.0,
+        )
+        # Verify retry_after_seconds stored as instance attribute
+        assert error.retry_after_seconds == 30.0
+        # Verify retry_after_seconds flows into extra_context
+        assert error.model.context["retry_after_seconds"] == 30.0
+
+    def test_without_retry_after_seconds(self) -> None:
+        """Test error without retry_after_seconds (None case)."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="api_request",
+        )
+        error = InfraRateLimitedError(
+            "Rate limit exceeded",
+            context=context,
+        )
+        # Verify retry_after_seconds is None when not provided
+        assert error.retry_after_seconds is None
+        # Verify retry_after_seconds not in extra_context when None
+        assert "retry_after_seconds" not in error.model.context
+
+    def test_error_code_mapping(self) -> None:
+        """Test that error uses RATE_LIMIT_ERROR code."""
+        error = InfraRateLimitedError("Rate limit error")
+        assert error.model.error_code == EnumCoreErrorCode.RATE_LIMIT_ERROR
+
+    def test_with_retry_after_and_extra_context(self) -> None:
+        """Test error with both retry_after_seconds and additional context."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="chat_completion",
+            target_name="openai-api",
+        )
+        error = InfraRateLimitedError(
+            "Rate limit exceeded",
+            context=context,
+            retry_after_seconds=60.0,
+            endpoint="/v1/chat/completions",
+            request_id="req_abc123",
+        )
+        # Verify retry_after_seconds stored
+        assert error.retry_after_seconds == 60.0
+        # Verify all extra context fields present
+        assert error.model.context["retry_after_seconds"] == 60.0
+        assert error.model.context["endpoint"] == "/v1/chat/completions"
+        assert error.model.context["request_id"] == "req_abc123"
+
+    def test_error_chaining(self) -> None:
+        """Test error chaining from rate limit exception."""
+        context = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.HTTP,
+            target_name="api-gateway",
+        )
+        rate_limit_exception = ConnectionError("429 Too Many Requests")
+        try:
+            raise InfraRateLimitedError(
+                "API rate limit exceeded",
+                context=context,
+                retry_after_seconds=120.0,
+            ) from rate_limit_exception
+        except InfraRateLimitedError as e:
+            assert e.__cause__ == rate_limit_exception
+            assert e.model.context["target_name"] == "api-gateway"
+            assert e.retry_after_seconds == 120.0
+
+
 class TestAllErrorsInheritance:
     """Test that all infrastructure errors properly inherit from RuntimeHostError."""
 
@@ -768,6 +869,7 @@ class TestAllErrorsInheritance:
             InfraTimeoutError("test", context=timeout_context),
             InfraAuthenticationError("test"),
             InfraUnavailableError("test"),
+            InfraRateLimitedError("test"),
         ]
 
         for error in errors:
@@ -796,6 +898,7 @@ class TestStructuredFieldsComprehensive:
             InfraTimeoutError("test", context=timeout_context),
             InfraAuthenticationError("test", context=context),
             InfraUnavailableError("test", context=context),
+            InfraRateLimitedError("test", context=context),
         ]
 
         for error in errors:
@@ -810,6 +913,7 @@ class TestStructuredFieldsComprehensive:
             EnumInfraTransportType.KAFKA,
             EnumInfraTransportType.CONSUL,
             EnumInfraTransportType.VALKEY,
+            EnumInfraTransportType.HTTP,
         ]
         errors = [
             ProtocolConfigurationError(
@@ -849,6 +953,12 @@ class TestStructuredFieldsComprehensive:
                     transport_type=EnumInfraTransportType.VALKEY
                 ),
             ),
+            InfraRateLimitedError(
+                "test",
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.HTTP
+                ),
+            ),
         ]
 
         for error, expected_type in zip(errors, transport_types, strict=True):
@@ -863,6 +973,7 @@ class TestStructuredFieldsComprehensive:
             "execute",
             "authenticate",
             "check_health",
+            "api_request",
         ]
         errors = [
             ProtocolConfigurationError(
@@ -887,6 +998,9 @@ class TestStructuredFieldsComprehensive:
             InfraUnavailableError(
                 "test", context=ModelInfraErrorContext(operation="check_health")
             ),
+            InfraRateLimitedError(
+                "test", context=ModelInfraErrorContext(operation="api_request")
+            ),
         ]
 
         for error, operation in zip(errors, operations, strict=True):
@@ -894,7 +1008,15 @@ class TestStructuredFieldsComprehensive:
 
     def test_all_errors_support_target_name(self) -> None:
         """Test that all errors support target_name via context model."""
-        targets = ["api", "vault", "postgresql", "kafka", "consul", "valkey"]
+        targets = [
+            "api",
+            "vault",
+            "postgresql",
+            "kafka",
+            "consul",
+            "valkey",
+            "openai-api",
+        ]
         errors = [
             ProtocolConfigurationError(
                 "test", context=ModelInfraErrorContext(target_name="api")
@@ -918,6 +1040,9 @@ class TestStructuredFieldsComprehensive:
             ),
             InfraUnavailableError(
                 "test", context=ModelInfraErrorContext(target_name="valkey")
+            ),
+            InfraRateLimitedError(
+                "test", context=ModelInfraErrorContext(target_name="openai-api")
             ),
         ]
 
@@ -1026,6 +1151,19 @@ class TestErrorChaining:
             assert wrapped.__cause__ is original
             assert isinstance(wrapped.__cause__, ConnectionRefusedError)
             assert "Service not responding" in str(wrapped.__cause__)
+
+    def test_infra_rate_limited_error_chaining_preserves_cause(self) -> None:
+        """Test InfraRateLimitedError properly chains and preserves original exception."""
+        original = ConnectionError("429 Too Many Requests")
+        try:
+            try:
+                raise original
+            except ConnectionError as e:
+                raise InfraRateLimitedError("Rate limit exceeded") from e
+        except InfraRateLimitedError as wrapped:
+            assert wrapped.__cause__ is original
+            assert isinstance(wrapped.__cause__, ConnectionError)
+            assert "429 Too Many Requests" in str(wrapped.__cause__)
 
     def test_chained_error_with_context_preserved(self) -> None:
         """Test that context is preserved when chaining errors."""
@@ -1628,6 +1766,7 @@ class TestErrorContextSecretSanitization:
             # InfraTimeoutError tested separately (requires ModelTimeoutErrorContext)
             (InfraAuthenticationError, "Auth error"),
             (InfraUnavailableError, "Unavailable error"),
+            (InfraRateLimitedError, "Rate limit error"),
         ],
     )
     def test_all_error_types_context_serialization_is_safe(
