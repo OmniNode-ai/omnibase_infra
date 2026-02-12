@@ -11,7 +11,7 @@
 
 CREATE TABLE IF NOT EXISTS public.db_metadata (
     id BOOLEAN PRIMARY KEY DEFAULT TRUE,
-    owner_service TEXT NOT NULL,
+    owner_service VARCHAR(128) NOT NULL,
     schema_version TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -23,7 +23,10 @@ COMMENT ON TABLE public.db_metadata IS
     'Used by validate_db_ownership() at startup to prevent cross-service '
     'data corruption after the DB-per-repo split (OMN-2085).';
 
--- Seed the ownership row for omnibase_infra
+-- Seed the ownership row for omnibase_infra.
+-- The WHERE clause ensures we only update schema_version for same-owner re-runs
+-- (idempotency). If a different owner already holds the row, the UPDATE is a no-op
+-- and the DO $$ block below will catch it with an explicit error.
 INSERT INTO public.db_metadata (id, owner_service, schema_version)
 VALUES (TRUE, 'omnibase_infra', '029')
 ON CONFLICT (id) DO UPDATE SET

@@ -63,8 +63,8 @@ class DbOwnershipMismatchError(RuntimeHostError):
             )
 
         ctx = dict(extra_context)
-        ctx["expected_owner"] = expected_owner
-        ctx["actual_owner"] = actual_owner
+        ctx.setdefault("expected_owner", expected_owner)
+        ctx.setdefault("actual_owner", actual_owner)
 
         super().__init__(
             message=message,
@@ -106,7 +106,7 @@ class DbOwnershipMissingError(RuntimeHostError):
             )
 
         ctx = dict(extra_context)
-        ctx["expected_owner"] = expected_owner
+        ctx.setdefault("expected_owner", expected_owner)
 
         super().__init__(
             message=message,

@@ -57,6 +57,8 @@ async def validate_db_ownership(
     """
     if not expected_owner or not expected_owner.strip():
         raise ValueError("expected_owner must be a non-empty, non-whitespace string")
+    if len(expected_owner) > 128:
+        raise ValueError("expected_owner must be <= 128 characters")
 
     if correlation_id is None:
         correlation_id = uuid4()
@@ -92,7 +94,7 @@ async def validate_db_ownership(
         )
 
     actual_owner = row["owner_service"]
-    if actual_owner != expected_owner:
+    if not isinstance(actual_owner, str) or actual_owner != expected_owner:
         # Truncate actual_owner for log/error safety -- a crafted value in the
         # DB should not be able to flood logs or exploit error rendering.
         safe_actual = (

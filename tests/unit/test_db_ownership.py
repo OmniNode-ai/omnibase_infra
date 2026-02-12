@@ -156,6 +156,33 @@ class TestValidateDbOwnership:
         msg = str(exc_info.value)
         assert "hint" in msg.lower() or "OMNIBASE_INFRA_DB_URL" in msg
 
+    @pytest.mark.asyncio
+    async def test_long_owner_service_is_truncated(self) -> None:
+        """Very long owner_service from DB is truncated in error message."""
+        long_owner = "x" * 200
+        pool = _make_mock_pool(row={"owner_service": long_owner})
+        with pytest.raises(DbOwnershipMismatchError) as exc_info:
+            await validate_db_ownership(
+                pool=pool,
+                expected_owner="omnibase_infra",
+                correlation_id=uuid4(),
+            )
+        # actual_owner should be truncated to 64 chars
+        assert len(exc_info.value.actual_owner) == 64
+
+    @pytest.mark.asyncio
+    async def test_special_chars_in_owner_service(self) -> None:
+        """Special characters in owner_service don't cause crashes."""
+        special_owner = "evil'; DROP TABLE --\n\x00\t"
+        pool = _make_mock_pool(row={"owner_service": special_owner})
+        with pytest.raises(DbOwnershipMismatchError) as exc_info:
+            await validate_db_ownership(
+                pool=pool,
+                expected_owner="omnibase_infra",
+                correlation_id=uuid4(),
+            )
+        assert exc_info.value.expected_owner == "omnibase_infra"
+
 
 class TestDbOwnershipErrorTypes:
     """Tests for error type hierarchy and attributes."""
