@@ -19,6 +19,7 @@ Related:
 from __future__ import annotations
 
 import importlib
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -29,25 +30,15 @@ import yaml
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
-from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchContext
-from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
+from tests.helpers.dispatchers import ContextCapturingDispatcher
+from tests.helpers.path_utils import find_project_root
 
-
-def _find_project_root() -> Path:
-    """Walk up from this file to find the project root (contains pyproject.toml).
-
-    Note: Canonical implementation lives in ``tests.helpers.path_utils.find_project_root``.
-    This local wrapper passes the correct start directory.
-    """
-    from tests.helpers.path_utils import find_project_root
-
-    return find_project_root(start=Path(__file__).resolve().parent)
-
+logger = logging.getLogger(__name__)
 
 # Path to the registration orchestrator contract
 try:
-    PROJECT_ROOT = _find_project_root()
+    PROJECT_ROOT = find_project_root(start=Path(__file__).resolve().parent)
     CONTRACT_PATH = (
         PROJECT_ROOT
         / "src"
@@ -57,6 +48,11 @@ try:
         / "contract.yaml"
     )
 except RuntimeError:
+    logger.warning(
+        "Could not find project root from %s; contract routing tests will be skipped",
+        Path(__file__).resolve().parent,
+        exc_info=True,
+    )
     PROJECT_ROOT = None  # type: ignore[assignment]
     CONTRACT_PATH = None  # type: ignore[assignment]
 
@@ -70,64 +66,6 @@ pytestmark = [
         ),
     ),
 ]
-
-
-# =============================================================================
-# Context-Capturing Dispatcher (local helper)
-# =============================================================================
-
-
-class ContextCapturingDispatcher:
-    """Test dispatcher that captures context and envelope for assertions."""
-
-    def __init__(
-        self,
-        dispatcher_id: str,
-        node_kind: EnumNodeKind,
-        category: EnumMessageCategory = EnumMessageCategory.EVENT,
-        message_types: set[str] | None = None,
-    ) -> None:
-        self._dispatcher_id = dispatcher_id
-        self._node_kind = node_kind
-        self._category = category
-        self._message_types = message_types or set()
-
-        self.captured_envelope: object | None = None
-        self.invocation_count: int = 0
-
-    @property
-    def dispatcher_id(self) -> str:
-        return self._dispatcher_id
-
-    @property
-    def category(self) -> EnumMessageCategory:
-        return self._category
-
-    @property
-    def message_types(self) -> set[str]:
-        return self._message_types
-
-    @property
-    def node_kind(self) -> EnumNodeKind:
-        return self._node_kind
-
-    async def handle(
-        self,
-        envelope: object,
-        context: ModelDispatchContext | None = None,
-    ) -> ModelDispatchResult:
-        """Handle the message and capture the envelope for assertions."""
-        self.captured_envelope = envelope
-        self.invocation_count += 1
-
-        return ModelDispatchResult(
-            dispatch_id=uuid4(),
-            status=EnumDispatchStatus.SUCCESS,
-            topic="test.events.v1",
-            dispatcher_id=self._dispatcher_id,
-            message_type=type(envelope).__name__ if envelope else None,
-            started_at=datetime.now(UTC),
-        )
 
 
 # =============================================================================

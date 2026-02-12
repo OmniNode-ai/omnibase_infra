@@ -24,12 +24,13 @@ import pytest
 from omnibase_infra.runtime.models import ModelEventBusConfig, ModelRuntimeConfig
 from omnibase_infra.runtime.registry import RegistryProtocolBinding
 
-# Re-export handler seeding utilities from root conftest
-# These are available here for convenience but defined in tests/conftest.py
-# to make them available to both unit and integration tests.
-from tests.conftest import mock_runtime_handler, seed_mock_handlers
+# Import handler seeding utilities from canonical location.
+# mock_runtime_handler is a pytest fixture defined in root conftest.py and
+# is automatically available to all tests via pytest's conftest discovery.
+# seed_mock_handlers is a regular function from runtime_helpers.
+from tests.helpers.runtime_helpers import seed_mock_handlers
 
-__all__ = ["mock_runtime_handler", "seed_mock_handlers"]
+__all__ = ["seed_mock_handlers"]
 
 if TYPE_CHECKING:
     from collections.abc import Generator

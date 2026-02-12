@@ -69,7 +69,7 @@ from omnibase_infra.nodes.architecture_validator import (
 
 # Import RuntimeHostProcess (should always be available)
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
-from tests.conftest import make_runtime_config, seed_mock_handlers
+from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
 # =============================================================================
 # Quick Reference: Handler Semantics (see module docstring for full details)

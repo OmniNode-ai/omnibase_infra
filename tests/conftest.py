@@ -1103,19 +1103,6 @@ async def full_infrastructure_cleanup(
 # =============================================================================
 
 
-# =============================================================================
-# RuntimeHostProcess Handler Seeding Helpers
-# =============================================================================
-# Canonical implementations live in ``tests.helpers.runtime_helpers``.
-# Re-exported here for backwards compatibility so that existing imports of
-# ``from tests.conftest import make_runtime_config, seed_mock_handlers``
-# continue to work.  New code should import directly from
-# ``tests.helpers.runtime_helpers``.
-# =============================================================================
-
-from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
-
-
 @pytest.fixture
 def mock_runtime_handler() -> MagicMock:
     """Create a pre-configured mock handler suitable for runtime handler seeding.

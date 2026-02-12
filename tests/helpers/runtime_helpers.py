@@ -24,6 +24,8 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+from omnibase_infra.protocols.protocol_container_aware import ProtocolContainerAware
+
 
 def make_runtime_config(**overrides: object) -> dict[str, object]:
     """Create a runtime config dict with default required fields and optional overrides.
@@ -106,9 +108,12 @@ def seed_mock_handlers(
         process._handlers = handlers  # type: ignore[attr-defined]
         return
 
-    # Create default mock handler with required async methods
-    # These methods are needed for safe cleanup with await process.stop()
-    mock_handler = MagicMock()
+    # Create default mock handler with required async methods.
+    # spec=ProtocolContainerAware constrains the mock to the handler protocol,
+    # preventing tests from accidentally relying on auto-created attributes.
+    # Async methods are explicitly overridden because spec alone produces
+    # synchronous MagicMock stubs for protocol methods.
+    mock_handler = MagicMock(spec=ProtocolContainerAware)
     mock_handler.execute = AsyncMock(return_value={"success": True, "result": "mock"})
     mock_handler.initialize = AsyncMock()
     mock_handler.shutdown = AsyncMock()

@@ -157,15 +157,21 @@ class TestRegistrationHandlerProperties:
 class TestConsulRegistrationVisible:
     """Tests that Consul registration is visible after introspection processing."""
 
-    # Fallback Consul connection details for CI/test infrastructure.
-    # These values match the remote infrastructure topology documented in
-    # ~/.claude/CLAUDE.md (Consul external port 28500 on 192.168.86.200).
-    # They are only used when CONSUL_HOST / CONSUL_PORT environment variables
-    # are not set.  The handlers conftest uses a different default port (8500)
-    # because it reads from .env; here we use the external port for direct
-    # client access outside the Docker network.
-    _CONSUL_HOST = os.environ.get("CONSUL_HOST", "192.168.86.200")
-    _CONSUL_PORT = int(os.environ.get("CONSUL_PORT", "28500"))
+    @staticmethod
+    def _consul_connection() -> tuple[str, int]:
+        """Read Consul host/port from the environment at call time.
+
+        Fallback values match the remote infrastructure topology documented
+        in ``~/.claude/CLAUDE.md`` (Consul external port 28500 on
+        192.168.86.200).  They are only used when ``CONSUL_HOST`` /
+        ``CONSUL_PORT`` environment variables are not set.
+
+        Returns:
+            Tuple of (host, port) for the Consul agent.
+        """
+        host = os.environ.get("CONSUL_HOST", "192.168.86.200")
+        port = int(os.environ.get("CONSUL_PORT", "28500"))
+        return host, port
 
     @pytest.mark.consul
     @pytest.mark.asyncio
@@ -186,7 +192,8 @@ class TestConsulRegistrationVisible:
 
         import consul.aio
 
-        client = consul.aio.Consul(host=self._CONSUL_HOST, port=self._CONSUL_PORT)
+        consul_host, consul_port = self._consul_connection()
+        client = consul.aio.Consul(host=consul_host, port=consul_port)
 
         service_id = f"test-omn2081-{uuid4().hex[:8]}"
         service_name = "test-omn2081-introspection"

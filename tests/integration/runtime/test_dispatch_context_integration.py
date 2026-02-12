@@ -37,6 +37,7 @@ from omnibase_infra.runtime.registry_dispatcher import (
     RegistryDispatcher,
 )
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
+from tests.helpers.dispatchers import ContextCapturingDispatcher
 
 # =============================================================================
 # Test Payload Models
@@ -85,75 +86,8 @@ def create_mock_envelope(
 
 
 # =============================================================================
-# Context-Capturing Test Dispatchers
+# Specialized Test Dispatchers
 # =============================================================================
-
-
-class ContextCapturingDispatcher:
-    """
-    Test dispatcher that captures the context it receives for assertions.
-
-    This dispatcher implements ProtocolMessageDispatcher and stores the
-    dispatch context it receives, allowing tests to verify context injection rules.
-    """
-
-    def __init__(
-        self,
-        dispatcher_id: str,
-        node_kind: EnumNodeKind,
-        category: EnumMessageCategory = EnumMessageCategory.EVENT,
-        message_types: set[str] | None = None,
-    ) -> None:
-        self._dispatcher_id = dispatcher_id
-        self._node_kind = node_kind
-        self._category = category
-        self._message_types = message_types or set()
-
-        # Captured data for assertions
-        self.captured_context: ModelDispatchContext | None = None
-        self.captured_envelope: object | None = None
-        self.invocation_count: int = 0
-
-    @property
-    def dispatcher_id(self) -> str:
-        return self._dispatcher_id
-
-    @property
-    def category(self) -> EnumMessageCategory:
-        return self._category
-
-    @property
-    def message_types(self) -> set[str]:
-        return self._message_types
-
-    @property
-    def node_kind(self) -> EnumNodeKind:
-        return self._node_kind
-
-    async def handle(
-        self,
-        envelope: object,
-        context: ModelDispatchContext | None = None,
-    ) -> ModelDispatchResult:
-        """Handle the message and capture the context for assertions."""
-        self.captured_envelope = envelope
-        self.captured_context = context
-        self.invocation_count += 1
-
-        return ModelDispatchResult(
-            dispatch_id=uuid4(),
-            status=EnumDispatchStatus.SUCCESS,
-            topic="test.events.v1",
-            dispatcher_id=self._dispatcher_id,
-            message_type=type(envelope).__name__ if envelope else None,
-            started_at=datetime(2025, 1, 1, tzinfo=UTC),
-        )
-
-    def reset(self) -> None:
-        """Reset captured state for reuse between tests."""
-        self.captured_context = None
-        self.captured_envelope = None
-        self.invocation_count = 0
 
 
 class DeterministicResultDispatcher(ContextCapturingDispatcher):

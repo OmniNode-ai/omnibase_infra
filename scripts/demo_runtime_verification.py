@@ -99,7 +99,12 @@ def _seed_mock_handlers(process: object) -> None:
     """
     from unittest.mock import AsyncMock, MagicMock
 
-    mock_handler = MagicMock()
+    from omnibase_infra.protocols.protocol_container_aware import ProtocolContainerAware
+
+    # spec=ProtocolContainerAware constrains the mock to the handler protocol,
+    # preventing accidental reliance on auto-created attributes.  Async methods
+    # are explicitly overridden because spec alone produces synchronous stubs.
+    mock_handler = MagicMock(spec=ProtocolContainerAware)
     mock_handler.execute = AsyncMock(return_value={"success": True})
     mock_handler.initialize = AsyncMock()
     mock_handler.shutdown = AsyncMock()

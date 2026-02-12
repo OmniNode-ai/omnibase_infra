@@ -75,8 +75,15 @@ Available Utilities:
     Runtime Helpers:
         - make_runtime_config: Create RuntimeHostProcess config with defaults
         - seed_mock_handlers: Seed mock handlers to bypass fail-fast validation
+
+    Dispatchers:
+        - ContextCapturingDispatcher: Test dispatcher capturing context for assertions
+
+    aiohttp Utilities:
+        - get_aiohttp_bound_port: Extract auto-assigned port from ServiceHealth server
 """
 
+from tests.helpers.aiohttp_utils import get_aiohttp_bound_port
 from tests.helpers.ast_analysis import (
     find_datetime_now_calls,
     find_io_method_calls,
@@ -91,6 +98,7 @@ from tests.helpers.chaos_utils import (
     create_envelope_from_chained_message,
 )
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
+from tests.helpers.dispatchers import ContextCapturingDispatcher
 from tests.helpers.log_helpers import filter_handler_warnings, get_warning_messages
 from tests.helpers.mock_helpers import MockStatResult, create_mock_stat_result
 from tests.helpers.path_utils import find_project_root
@@ -204,4 +212,8 @@ __all__ = [
     # Runtime helpers
     "make_runtime_config",
     "seed_mock_handlers",
+    # Dispatchers
+    "ContextCapturingDispatcher",
+    # aiohttp utilities
+    "get_aiohttp_bound_port",
 ]
