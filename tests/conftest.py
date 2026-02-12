@@ -1127,7 +1127,12 @@ def mock_runtime_handler() -> MagicMock:
         ...     await process.start()
         ...     mock_runtime_handler.health_check.assert_called()
     """
-    mock_handler = MagicMock()
+    from omnibase_infra.protocols.protocol_container_aware import ProtocolContainerAware
+
+    # spec=ProtocolContainerAware constrains the mock to the handler protocol,
+    # preventing tests from accidentally relying on auto-created attributes.
+    # This matches the pattern used in tests.helpers.runtime_helpers.seed_mock_handlers.
+    mock_handler = MagicMock(spec=ProtocolContainerAware)
     mock_handler.execute = AsyncMock(return_value={"success": True, "result": "mock"})
     mock_handler.initialize = AsyncMock()
     mock_handler.shutdown = AsyncMock()

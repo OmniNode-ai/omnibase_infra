@@ -8,10 +8,12 @@ consolidating shared mocks to avoid code duplication.
 Fixtures:
     mock_wire_infrastructure: Mocks wire_infrastructure_services and
         ModelONEXContainer to avoid wiring errors in tests.
-    mock_runtime_handler: Re-exported from tests.conftest for handler seeding.
+    mock_runtime_handler: Auto-discovered from root tests/conftest.py via
+        pytest's conftest hierarchy (not re-exported here).
 
 Functions:
-    seed_mock_handlers: Re-exported from tests.conftest for fail-fast bypass.
+    seed_mock_handlers: Imported from tests.helpers.runtime_helpers for
+        fail-fast bypass in RuntimeHostProcess tests.
 """
 
 from __future__ import annotations
