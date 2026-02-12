@@ -114,7 +114,7 @@ Orchestrator (owns retry logic)
 |------------|-------------|-----------|
 | Connection refused | `InfraConnectionError` | Service may be starting up |
 | Connection timeout | `InfraTimeoutError` | Network congestion may clear |
-| Rate limited (429) | `InfraConnectionError` | Will succeed after backoff |
+| Rate limited (429) | `InfraRateLimitedError` | Will succeed after backoff |
 | Service temporarily unavailable (503) | `InfraUnavailableError` | Service may recover |
 | Network partition (transient) | `InfraConnectionError` | Network may heal |
 | Broker not available (Kafka) | `InfraConnectionError` | Kafka leader election |

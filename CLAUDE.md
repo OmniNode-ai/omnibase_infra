@@ -334,6 +334,7 @@ ModelOnexError (omnibase_core)
     │   └── InfraVaultError
     ├── InfraTimeoutError
     ├── InfraAuthenticationError
+    ├── InfraRateLimitedError
     ├── InfraUnavailableError
     ├── EnvelopeValidationError
     ├── UnknownHandlerTypeError
@@ -360,6 +361,7 @@ ModelOnexError (omnibase_core)
 | Connection failed | `InfraConnectionError` |
 | Timeout | `InfraTimeoutError` |
 | Auth failed | `InfraAuthenticationError` |
+| Rate limited | `InfraRateLimitedError` |
 | Unavailable | `InfraUnavailableError` |
 | Repository operation | `RepositoryError` (or subclass) |
 | Container wiring | `ContainerWiringError` (or subclass) |

@@ -17,7 +17,8 @@ Use the appropriate error class based on the failure scenario:
 | Connection failed | `InfraConnectionError` | Network connectivity issues, service unreachable, DNS resolution failures |
 | Timeout | `InfraTimeoutError` | Operation exceeds deadline, slow response times, hung connections |
 | Auth failed | `InfraAuthenticationError` | Invalid credentials, expired tokens, permission denied |
-| Unavailable | `InfraUnavailableError` | Service down, maintenance mode, rate limiting |
+| Rate limited | `InfraRateLimitedError` | HTTP 429 responses, API quota exceeded, throttling enforced |
+| Unavailable | `InfraUnavailableError` | Service down, maintenance mode |
 
 ## Error Context Usage
 
