@@ -2915,14 +2915,14 @@ files = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.16.0"
+version = "0.17.0"
 description = "ONEX Core Framework - Base classes and essential implementations"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_core-0.16.0-py3-none-any.whl", hash = "sha256:7a474183220fd00c154562d7e707d885999f6cf67dc3755a6e926f293b40d42e"},
-    {file = "omnibase_core-0.16.0.tar.gz", hash = "sha256:78cd5c1fe0985194c599ab35d14764142c89f3700c7786a4f4a2163ba87ea399"},
+    {file = "omnibase_core-0.17.0-py3-none-any.whl", hash = "sha256:dcd7991b601e555cd547d20d1ca122b233d3fbecff5fe9146ae5a4c153bc4407"},
+    {file = "omnibase_core-0.17.0.tar.gz", hash = "sha256:af5c64ad80acbab66cfbcb520643cc46b90bee7be787e377516f8452ba263601"},
 ]
 
 [package.dependencies]
@@ -2945,18 +2945,18 @@ sql-parser = ["sqlglot (>=26.0.0,<27.0.0)"]
 
 [[package]]
 name = "omnibase-spi"
-version = "0.7.0"
+version = "0.8.0"
 description = "ONEX Service Provider Interface - Protocol definitions"
 optional = false
 python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "omnibase_spi-0.7.0-py3-none-any.whl", hash = "sha256:b062ba21af8b8b83c3e3120c235fb048ed4fc4643171f4bee2e8254b7a31896f"},
-    {file = "omnibase_spi-0.7.0.tar.gz", hash = "sha256:f973a4d5025a604928bcb052915cba6db50607fb505424b0f3111315b69235a3"},
+    {file = "omnibase_spi-0.8.0-py3-none-any.whl", hash = "sha256:19c03cefc4c8142ed952f79e2fc35218e97a6bb1b994cd2852926f6889c9edb6"},
+    {file = "omnibase_spi-0.8.0.tar.gz", hash = "sha256:7e42e0b13fcf8dbdefa68d9b7c48f88d52f860eba3e55752b80faeceeb0fe00f"},
 ]
 
 [package.dependencies]
-omnibase-core = ">=0.16.0"
+omnibase-core = ">=0.17.0"
 pydantic = ">=2.11.7"
 typing-extensions = ">=4.5.0"
 
@@ -5332,4 +5332,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "7806d9ff43576e64ae8ba7e4ae205a3221bfa58823256e271adc08398b13ab51"
+content-hash = "1311002c6123d592e4b802ecfe67679ba1c834d01a9ebf78111451346e56e90b"
