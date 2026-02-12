@@ -166,14 +166,29 @@ class HandlerStaleRunGC:
                 ctx = ModelRunContext.model_validate(data)
 
                 age_s = (now - ctx.updated_at).total_seconds()
-                if age_s < -5.0:
+                # Treat documents with timestamps >1 hour in the future as stale.
+                # This prevents accumulation from clock skew or manipulation.
+                _FUTURE_THRESHOLD_S = 3600.0
+                if age_s < -_FUTURE_THRESHOLD_S:
+                    logger.warning(
+                        "GC: run %s has updated_at %.0fs in the future — "
+                        "treating as stale (clock skew threshold: %.0fs)",
+                        ctx.run_id,
+                        -age_s,
+                        _FUTURE_THRESHOLD_S,
+                    )
+                    force_stale = True
+                elif age_s < -5.0:
                     logger.warning(
                         "GC: run %s has updated_at %.0fs in the future (clock skew?)",
                         ctx.run_id,
                         -age_s,
                     )
+                    force_stale = False
+                else:
+                    force_stale = False
 
-                if ctx.is_stale(self._ttl_seconds):
+                if force_stale or ctx.is_stale(self._ttl_seconds):
                     stem = run_file.stem
                     try:
                         run_file.unlink()

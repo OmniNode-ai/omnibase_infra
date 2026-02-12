@@ -381,11 +381,13 @@ class HandlerRRHValidate:
         # which blocks until the thread finishes — defeating the timeout
         # for ReDoS patterns.
         executor = ThreadPoolExecutor(max_workers=1)
+        _timed_out = False
         try:
             future = executor.submit(re.fullmatch, pattern, branch)
             try:
                 match = future.result(timeout=_REGEX_TIMEOUT_SECONDS)
             except FuturesTimeoutError:
+                _timed_out = True
                 future.cancel()
                 executor.shutdown(wait=False, cancel_futures=True)
                 return ModelRuleCheckResult(
@@ -405,7 +407,7 @@ class HandlerRRHValidate:
                 message=f"Invalid branch pattern: {_truncate_pattern(gov.expected_branch_pattern)}",
             )
         finally:
-            executor.shutdown(wait=True)
+            executor.shutdown(wait=not _timed_out)
         return ModelRuleCheckResult(
             passed=False,
             rule_id="RRH-1002",

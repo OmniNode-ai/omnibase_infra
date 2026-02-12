@@ -135,6 +135,20 @@ class HandlerCheckpointWrite:
 
         # Resolve base directory
         base_dir_raw = envelope.get("base_dir")
+        if base_dir_raw is not None and not isinstance(base_dir_raw, (str, Path)):
+            return ModelHandlerOutput.for_compute(
+                input_envelope_id=uuid4(),
+                correlation_id=corr_id,
+                handler_id="handler-checkpoint-write",
+                result=ModelCheckpointEffectOutput(
+                    success=False,
+                    correlation_id=corr_id,
+                    error=(
+                        f"Invalid base_dir type: expected str or Path, "
+                        f"got {type(base_dir_raw).__name__}"
+                    ),
+                ),
+            )
         base_dir = Path(str(base_dir_raw)) if base_dir_raw else _DEFAULT_BASE_DIR
 
         if not base_dir.is_absolute():
