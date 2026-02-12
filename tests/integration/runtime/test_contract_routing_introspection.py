@@ -21,8 +21,7 @@ from __future__ import annotations
 import importlib
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import MagicMock
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 import yaml
@@ -125,24 +124,6 @@ class ContextCapturingDispatcher:
             message_type=type(envelope).__name__ if envelope else None,
             started_at=datetime.now(UTC),
         )
-
-
-# =============================================================================
-# Mock envelope helper
-# =============================================================================
-
-
-def _make_mock_envelope(
-    correlation_id: UUID | None = None,
-    trace_id: UUID | None = None,
-    payload: object | None = None,
-) -> MagicMock:
-    """Create a mock ModelEventEnvelope."""
-    envelope = MagicMock()
-    envelope.correlation_id = correlation_id or uuid4()
-    envelope.trace_id = trace_id
-    envelope.payload = payload
-    return envelope
 
 
 # =============================================================================
