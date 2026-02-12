@@ -14,7 +14,8 @@ Error Hierarchy:
         ├── InfraConnectionError
         ├── InfraTimeoutError
         ├── InfraAuthenticationError
-        └── InfraUnavailableError
+        ├── InfraUnavailableError
+        └── InfraRateLimitedError
 
 All errors:
     - Extend ModelOnexError from omnibase_core
@@ -515,6 +516,56 @@ class InfraUnavailableError(RuntimeHostError):
         )
 
 
+class InfraRateLimitedError(RuntimeHostError):
+    """Rate limit exceeded by external service.
+
+    Distinct from connection/unavailable errors because:
+    - Requires different backoff strategy (respect Retry-After)
+    - Should not count toward circuit breaker failure threshold
+    - Observability: rate limit events need separate metrics
+
+    Example:
+        >>> context = ModelInfraErrorContext(
+        ...     transport_type=EnumInfraTransportType.HTTP,
+        ...     operation="chat_completion",
+        ...     target_name="openai-api",
+        ... )
+        >>> raise InfraRateLimitedError(
+        ...     "Rate limit exceeded",
+        ...     context=context,
+        ...     retry_after_seconds=30.0,
+        ... )
+    """
+
+    def __init__(
+        self,
+        message: str,
+        context: ModelInfraErrorContext | None = None,
+        retry_after_seconds: float | None = None,
+        **extra_context: object,
+    ) -> None:
+        """Initialize InfraRateLimitedError.
+
+        Args:
+            message: Human-readable error message
+            context: Bundled infrastructure context
+            retry_after_seconds: Seconds to wait before retrying (from Retry-After header)
+            **extra_context: Additional context information
+        """
+        if retry_after_seconds is not None:
+            extra_context = {
+                "retry_after_seconds": retry_after_seconds,
+                **extra_context,
+            }
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.RATE_LIMIT_ERROR,
+            context=context,
+            **extra_context,
+        )
+        self.retry_after_seconds = retry_after_seconds
+
+
 class EnvelopeValidationError(RuntimeHostError):
     """Raised when envelope validation fails before dispatch.
 
@@ -660,6 +711,7 @@ __all__: list[str] = [
     "EnvelopeValidationError",
     "InfraAuthenticationError",
     "InfraConnectionError",
+    "InfraRateLimitedError",
     "InfraTimeoutError",
     "InfraUnavailableError",
     "ProtocolConfigurationError",
