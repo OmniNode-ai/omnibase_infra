@@ -108,6 +108,10 @@ from omnibase_infra.errors.error_container_wiring import (
     ServiceRegistryUnavailableError,
     ServiceResolutionError,
 )
+from omnibase_infra.errors.error_db_ownership import (
+    DbOwnershipMismatchError,
+    DbOwnershipMissingError,
+)
 from omnibase_infra.errors.error_event_bus_registry import EventBusRegistryError
 from omnibase_infra.errors.error_infra import (
     EnvelopeValidationError,
@@ -149,6 +153,9 @@ __all__: list[str] = [
     "ContainerValidationError",
     # Container wiring errors
     "ContainerWiringError",
+    # DB ownership errors
+    "DbOwnershipMismatchError",
+    "DbOwnershipMissingError",
     "EnvelopeValidationError",
     "EventBusRegistryError",
     "InfraAuthenticationError",

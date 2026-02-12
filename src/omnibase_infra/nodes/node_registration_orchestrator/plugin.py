@@ -313,6 +313,19 @@ class PluginRegistration:
                 extra={"dsn_var": "OMNIBASE_INFRA_DB_URL"},
             )
 
+            # 1.5 Validate DB ownership (OMN-2085)
+            # Hard gate: prevents operating on a database owned by another
+            # service after the DB-per-repo split.
+            from omnibase_infra.runtime.util_db_ownership import (
+                validate_db_ownership,
+            )
+
+            await validate_db_ownership(
+                pool=self._pool,
+                expected_owner="omnibase_infra",
+                correlation_id=correlation_id,
+            )
+
             # 2. Load projectors from contracts via ProjectorPluginLoader
             await self._load_projector(config)
             if self._projector is not None:

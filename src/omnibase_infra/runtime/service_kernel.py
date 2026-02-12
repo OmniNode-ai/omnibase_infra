@@ -72,6 +72,10 @@ from omnibase_infra.errors import (
     RuntimeHostError,
     ServiceResolutionError,
 )
+from omnibase_infra.errors.error_db_ownership import (
+    DbOwnershipMismatchError,
+    DbOwnershipMissingError,
+)
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
@@ -971,6 +975,11 @@ async def bootstrap() -> int:
                     plugin_id,
                     correlation_id,
                 )
+            except (DbOwnershipMismatchError, DbOwnershipMissingError):
+                # DB ownership errors are hard gates -- propagate to kill
+                # the kernel. The service must not operate on a database
+                # owned by another service (OMN-2085).
+                raise
             except Exception:
                 logger.warning(
                     "Plugin '%s' failed during lifecycle activation "
