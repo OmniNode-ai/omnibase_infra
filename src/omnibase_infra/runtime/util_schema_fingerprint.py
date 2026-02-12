@@ -469,7 +469,15 @@ async def validate_schema_fingerprint(
     # actual hashes for tables that exist (so matching tables don't appear as
     # "changed"). Missing tables keep an empty sentinel so they surface as
     # removed in the diff.
-    actual_per_table = dict(result.per_table_hashes)
+    # Filter out tables with the empty-table sentinel hash so that missing
+    # tables (present in manifest but absent from catalog) surface as
+    # "removed" in the diff instead of silently matching.
+    empty_table_hash = _sha256_json({"columns": [], "constraints": []})
+    actual_per_table = {
+        table: table_hash
+        for table, table_hash in result.per_table_hashes
+        if table_hash != empty_table_hash
+    }
     expected_per_table = {
         table: actual_per_table.get(table, "") for table in manifest.tables
     }
