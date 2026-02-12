@@ -16,6 +16,7 @@ import pytest
 import yaml
 
 from omnibase_infra.enums.enum_checkpoint_phase import EnumCheckpointPhase
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.checkpoint.model_checkpoint import ModelCheckpoint
 from omnibase_infra.models.checkpoint.model_phase_payload_implement import (
     ModelPhasePayloadImplement,
@@ -314,3 +315,41 @@ class TestHandlerCheckpointRead:
         assert result.result.success is True
         # Must return attempt 10, not attempt 2 (which would be the lexicographic last)
         assert result.result.checkpoint.attempt_number == 10
+
+    async def test_rejects_relative_base_dir(
+        self,
+        reader: HandlerCheckpointRead,
+    ) -> None:
+        """Read rejects a relative base_dir."""
+        await reader.initialize({})
+
+        read_env: dict[str, object] = {
+            "ticket_id": "OMN-2143",
+            "run_id": uuid4(),
+            "phase": EnumCheckpointPhase.IMPLEMENT,
+            "correlation_id": uuid4(),
+            "base_dir": "relative/path",
+        }
+
+        with pytest.raises(RuntimeHostError, match="base_dir must be an absolute path"):
+            await reader.execute(read_env)
+
+    async def test_rejects_base_dir_with_traversal(
+        self,
+        reader: HandlerCheckpointRead,
+    ) -> None:
+        """Read rejects a base_dir containing '..' components."""
+        await reader.initialize({})
+
+        read_env: dict[str, object] = {
+            "ticket_id": "OMN-2143",
+            "run_id": uuid4(),
+            "phase": EnumCheckpointPhase.IMPLEMENT,
+            "correlation_id": uuid4(),
+            "base_dir": "/var/../etc",
+        }
+
+        with pytest.raises(
+            RuntimeHostError, match=r"must not contain '\.\.' components"
+        ):
+            await reader.execute(read_env)

@@ -15,6 +15,7 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.enums.enum_checkpoint_phase import EnumCheckpointPhase
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.checkpoint.model_checkpoint import ModelCheckpoint
 from omnibase_infra.models.checkpoint.model_phase_payload_create_pr import (
     ModelPhasePayloadCreatePr,
@@ -260,3 +261,37 @@ class TestHandlerCheckpointList:
         result = await lister.execute(env)
         assert result.result.success is True
         assert len(result.result.checkpoints) == 2
+
+    async def test_rejects_relative_base_dir(
+        self,
+        lister: HandlerCheckpointList,
+    ) -> None:
+        """List rejects a relative base_dir."""
+        await lister.initialize({})
+
+        env: dict[str, object] = {
+            "ticket_id": "OMN-2143",
+            "correlation_id": uuid4(),
+            "base_dir": "relative/path",
+        }
+
+        with pytest.raises(RuntimeHostError, match="base_dir must be an absolute path"):
+            await lister.execute(env)
+
+    async def test_rejects_base_dir_with_traversal(
+        self,
+        lister: HandlerCheckpointList,
+    ) -> None:
+        """List rejects a base_dir containing '..' components."""
+        await lister.initialize({})
+
+        env: dict[str, object] = {
+            "ticket_id": "OMN-2143",
+            "correlation_id": uuid4(),
+            "base_dir": "/var/../etc",
+        }
+
+        with pytest.raises(
+            RuntimeHostError, match=r"must not contain '\.\.' components"
+        ):
+            await lister.execute(env)

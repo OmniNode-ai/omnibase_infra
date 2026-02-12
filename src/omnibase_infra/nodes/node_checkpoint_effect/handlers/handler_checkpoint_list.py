@@ -99,10 +99,14 @@ class HandlerCheckpointList:
         base_dir = Path(str(base_dir_raw)) if base_dir_raw else _DEFAULT_BASE_DIR
 
         if not base_dir.is_absolute():
-            raise ValueError(f"base_dir must be an absolute path, got: {base_dir}")
+            raise RuntimeHostError(
+                f"base_dir must be an absolute path, got: {base_dir}",
+                context=context,
+            )
         if ".." in base_dir.parts:
-            raise ValueError(
-                f"base_dir must not contain '..' components, got: {base_dir}"
+            raise RuntimeHostError(
+                f"base_dir must not contain '..' components, got: {base_dir}",
+                context=context,
             )
 
         ticket_dir = base_dir / str(ticket_id)

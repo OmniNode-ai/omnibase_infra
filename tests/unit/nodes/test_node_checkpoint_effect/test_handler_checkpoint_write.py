@@ -16,6 +16,7 @@ import pytest
 import yaml
 
 from omnibase_infra.enums.enum_checkpoint_phase import EnumCheckpointPhase
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.checkpoint.model_checkpoint import ModelCheckpoint
 from omnibase_infra.models.checkpoint.model_phase_payload_implement import (
     ModelPhasePayloadImplement,
@@ -237,4 +238,40 @@ class TestHandlerCheckpointWrite:
         }
 
         with pytest.raises(Exception, match="Path traversal detected"):
+            await handler.execute(envelope)
+
+    async def test_rejects_relative_base_dir(
+        self,
+        handler: HandlerCheckpointWrite,
+        sample_checkpoint: ModelCheckpoint,
+    ) -> None:
+        """Write rejects a relative base_dir."""
+        await handler.initialize({})
+
+        envelope: dict[str, object] = {
+            "checkpoint": sample_checkpoint,
+            "correlation_id": uuid4(),
+            "base_dir": "relative/path",
+        }
+
+        with pytest.raises(RuntimeHostError, match="base_dir must be an absolute path"):
+            await handler.execute(envelope)
+
+    async def test_rejects_base_dir_with_traversal(
+        self,
+        handler: HandlerCheckpointWrite,
+        sample_checkpoint: ModelCheckpoint,
+    ) -> None:
+        """Write rejects a base_dir containing '..' components."""
+        await handler.initialize({})
+
+        envelope: dict[str, object] = {
+            "checkpoint": sample_checkpoint,
+            "correlation_id": uuid4(),
+            "base_dir": "/var/../etc",
+        }
+
+        with pytest.raises(
+            RuntimeHostError, match=r"must not contain '\.\.' components"
+        ):
             await handler.execute(envelope)

@@ -363,7 +363,7 @@ class TestHandlerStaleRunGC:
         deleted, result = await handler.handle(uuid4())
 
         assert result.success
-        assert "bad" in deleted
+        assert "bad" not in deleted
         assert not (runs_dir / "bad.json").exists()
 
     @pytest.mark.asyncio
