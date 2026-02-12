@@ -112,9 +112,11 @@ class DeterministicResultDispatcher(ContextCapturingDispatcher):
         self,
         envelope: object,
         context: ModelDispatchContext | None = None,
+        *,
+        started_at: datetime | None = None,
     ) -> ModelDispatchResult:
         """Process the event deterministically - result depends only on input."""
-        await super().handle(envelope, context)
+        await super().handle(envelope, context, started_at=started_at)
 
         # Simulate deterministic processing
         if hasattr(envelope, "payload") and hasattr(envelope.payload, "user_id"):
