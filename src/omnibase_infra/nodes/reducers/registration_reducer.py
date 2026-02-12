@@ -351,7 +351,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from omnibase_core.enums import EnumNodeKind, EnumReductionType, EnumStreamingMode
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
-from omnibase_infra.enums import EnumConfirmationEventType
+from omnibase_infra.enums import EnumConfirmationEventType, EnumRegistrationStatus
 from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeRegistrationRecord,
@@ -366,6 +366,7 @@ from omnibase_infra.nodes.reducers.models.model_registration_confirmation import
     ModelRegistrationConfirmation,
 )
 from omnibase_infra.nodes.reducers.models.model_registration_state import (
+    FailureReason,
     ModelRegistrationState,
 )
 
@@ -504,7 +505,6 @@ class ModelValidationResult(BaseModel):
         )
 
 
-# TODO(OMN-889): Complete pure reducer implementation - add reduce_confirmation() method
 class RegistrationReducer:
     """Pure reducer for node registration workflow.
 
@@ -972,7 +972,8 @@ class RegistrationReducer:
     ) -> ModelReducerOutput[ModelRegistrationState]:
         """Process confirmation event from Effect layer.
 
-        Not yet implemented. See OMN-996 for tracking.
+        Handles confirmation events from Consul and PostgreSQL Effect nodes,
+        transitioning state through pending -> partial -> complete (or -> failed).
 
         Args:
             state: Current registration state (immutable).
@@ -980,22 +981,175 @@ class RegistrationReducer:
 
         Returns:
             ModelReducerOutput with new state and no intents.
-
-        Raises:
-            NotImplementedError: Always raised until implementation is complete.
         """
-        raise NotImplementedError(
-            "reduce_confirmation() is not yet implemented. "
-            "See ticket OMN-996: https://linear.app/omninode/issue/OMN-996"
+        start_time = time.perf_counter()
+
+        # Step 1: Idle guard — confirmation on idle state (event reordering)
+        if state.node_id is None:
+            _logger.debug(
+                "Confirmation received for idle state, skipping",
+                extra={"correlation_id": str(confirmation.correlation_id)},
+            )
+            return self._build_output(
+                state=state,
+                intents=(),
+                processing_time_ms=(time.perf_counter() - start_time) * 1000,
+                items_processed=0,
+            )
+
+        # Step 2: Node ID mismatch
+        if confirmation.node_id != state.node_id:
+            _logger.warning(
+                "Confirmation node_id mismatch, rejecting",
+                extra={
+                    "confirmation_node_id": str(confirmation.node_id),
+                    "state_node_id": str(state.node_id),
+                    "correlation_id": str(confirmation.correlation_id),
+                },
+            )
+            return self._build_output(
+                state=state,
+                intents=(),
+                processing_time_ms=(time.perf_counter() - start_time) * 1000,
+                items_processed=0,
+            )
+
+        # Step 3: Terminal state guard — no-op for complete or failed
+        if state.status in (
+            EnumRegistrationStatus.COMPLETE,
+            EnumRegistrationStatus.FAILED,
+        ):
+            _logger.debug(
+                "Confirmation received in terminal state, skipping",
+                extra={
+                    "status": state.status.value,
+                    "correlation_id": str(confirmation.correlation_id),
+                },
+            )
+            return self._build_output(
+                state=state,
+                intents=(),
+                processing_time_ms=(time.perf_counter() - start_time) * 1000,
+                items_processed=0,
+            )
+
+        # Step 4: Idempotency guard — derive deterministic event_id
+        event_id = self._derive_confirmation_event_id(confirmation)
+        if state.is_duplicate_event(event_id):
+            return self._build_output(
+                state=state,
+                intents=(),
+                processing_time_ms=0.0,
+                items_processed=0,
+            )
+
+        # Step 5: Failure path
+        if not confirmation.success:
+            failure_map: dict[EnumConfirmationEventType, FailureReason] = {
+                EnumConfirmationEventType.CONSUL_REGISTERED: "consul_failed",
+                EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED: "postgres_failed",
+            }
+            failure_reason = failure_map.get(confirmation.event_type)
+            if failure_reason is None:
+                _logger.error(
+                    "Unknown confirmation event type for failure path",
+                    extra={
+                        "event_type": confirmation.event_type.value,
+                        "correlation_id": str(confirmation.correlation_id),
+                    },
+                )
+                return self._build_output(
+                    state=state,
+                    intents=(),
+                    processing_time_ms=(time.perf_counter() - start_time) * 1000,
+                    items_processed=0,
+                )
+            new_state = state.with_failure(failure_reason, event_id)
+            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            if processing_time_ms > PERF_THRESHOLD_REDUCE_MS:
+                _logger.warning(
+                    "Confirmation processing time exceeded threshold",
+                    extra={
+                        "processing_time_ms": processing_time_ms,
+                        "threshold_ms": PERF_THRESHOLD_REDUCE_MS,
+                        "event_type": confirmation.event_type.value,
+                        "correlation_id": str(confirmation.correlation_id),
+                    },
+                )
+            return self._build_output(
+                state=new_state,
+                intents=(),
+                processing_time_ms=processing_time_ms,
+                items_processed=1,
+            )
+
+        # Step 6: Success path
+        if confirmation.event_type == EnumConfirmationEventType.CONSUL_REGISTERED:
+            new_state = state.with_consul_confirmed(event_id)
+        elif (
+            confirmation.event_type
+            == EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED
+        ):
+            new_state = state.with_postgres_confirmed(event_id)
+        else:
+            _logger.error(
+                "Unknown confirmation event type for success path",
+                extra={
+                    "event_type": confirmation.event_type.value,
+                    "correlation_id": str(confirmation.correlation_id),
+                },
+            )
+            return self._build_output(
+                state=state,
+                intents=(),
+                processing_time_ms=(time.perf_counter() - start_time) * 1000,
+                items_processed=0,
+            )
+
+        # Step 7: Performance logging
+        processing_time_ms = (time.perf_counter() - start_time) * 1000
+        if processing_time_ms > PERF_THRESHOLD_REDUCE_MS:
+            _logger.warning(
+                "Confirmation processing time exceeded threshold",
+                extra={
+                    "processing_time_ms": processing_time_ms,
+                    "threshold_ms": PERF_THRESHOLD_REDUCE_MS,
+                    "event_type": confirmation.event_type.value,
+                    "correlation_id": str(confirmation.correlation_id),
+                },
+            )
+
+        # Step 8: Build output — confirmations never emit intents
+        return self._build_output(
+            state=new_state,
+            intents=(),
+            processing_time_ms=processing_time_ms,
+            items_processed=1,
         )
 
-    # TODO(OMN-996): Implement reduce_confirmation() using ModelRegistrationConfirmation
-    # Ticket: https://linear.app/omninode/issue/OMN-996
-    # Status: Backlog - Phase 2 of dual registration event flow
-    #
-    # Scope: Process confirmation events from Effect layer (Consul/PostgreSQL)
-    # to complete state transitions: pending -> partial -> complete
-    #
+    def _derive_confirmation_event_id(
+        self, confirmation: ModelRegistrationConfirmation
+    ) -> UUID:
+        """Derive a deterministic event ID from a confirmation event.
+
+        Uses the confirmation's correlation_id and event_type to produce a
+        stable UUID for idempotency tracking.
+
+        Args:
+            confirmation: The confirmation event to derive an ID from.
+
+        Returns:
+            A deterministic UUID derived from the confirmation's content.
+        """
+        payload = f"{confirmation.correlation_id}:{confirmation.event_type.value}"
+        content_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        uuid_hex = content_hash[:32]
+        uuid_str = (
+            f"{uuid_hex[:8]}-{uuid_hex[8:12]}-{uuid_hex[12:16]}-"
+            f"{uuid_hex[16:20]}-{uuid_hex[20:32]}"
+        )
+        return UUID(uuid_str)
+
     def reduce_reset(
         self,
         state: ModelRegistrationState,
