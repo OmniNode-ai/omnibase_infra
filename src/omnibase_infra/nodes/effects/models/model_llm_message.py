@@ -75,8 +75,8 @@ class ModelLlmMessage(BaseModel):
             if self.tool_calls:
                 raise ValueError("tool_calls must be empty when role is 'tool'.")
         elif self.role in ("system", "user"):
-            if self.content is None:
-                raise ValueError(f"content is required for {self.role} messages.")
+            if self.content is None or not self.content.strip():
+                raise ValueError(f"content must be non-empty for {self.role} messages.")
             if self.tool_calls:
                 raise ValueError(
                     f"tool_calls must be empty when role is '{self.role}'."
@@ -88,6 +88,10 @@ class ModelLlmMessage(BaseModel):
         elif self.role == "assistant":
             if self.tool_call_id is not None:
                 raise ValueError("tool_call_id must be None when role is 'assistant'.")
+            if self.content is None and not self.tool_calls:
+                raise ValueError(
+                    "assistant messages must have content or tool_calls (or both)."
+                )
         return self
 
 

@@ -243,6 +243,10 @@ class ModelLlmInferenceRequest(BaseModel):
                 raise ValueError(
                     "tool_choice must be None when operation_type is EMBEDDING."
                 )
+            if self.system_prompt is not None:
+                raise ValueError(
+                    "system_prompt must be None when operation_type is EMBEDDING."
+                )
         else:
             raise ValueError(f"Unrecognized operation_type: {self.operation_type!r}.")
 
