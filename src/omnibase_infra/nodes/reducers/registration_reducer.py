@@ -1132,8 +1132,10 @@ class RegistrationReducer:
     ) -> UUID:
         """Derive a deterministic event ID from a confirmation event.
 
-        Uses the confirmation's correlation_id and event_type to produce a
-        stable UUID for idempotency tracking.
+        Uses the confirmation's correlation_id, event_type, and node_id to
+        produce a stable UUID for idempotency tracking. Including node_id
+        prevents collisions when different nodes emit confirmations with
+        the same correlation_id and event_type.
 
         Args:
             confirmation: The confirmation event to derive an ID from.
@@ -1141,7 +1143,11 @@ class RegistrationReducer:
         Returns:
             A deterministic UUID derived from the confirmation's content.
         """
-        payload = f"{confirmation.correlation_id}:{confirmation.event_type.value}"
+        payload = (
+            f"{confirmation.correlation_id}:"
+            f"{confirmation.event_type.value}:"
+            f"{confirmation.node_id}"
+        )
         content_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         uuid_hex = content_hash[:32]
         uuid_str = (

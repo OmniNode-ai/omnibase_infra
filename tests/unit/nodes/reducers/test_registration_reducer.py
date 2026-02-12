@@ -6184,6 +6184,58 @@ class TestReduceConfirmation:
         assert output.result.failure_reason == "postgres_failed"
         assert output.intents == ()
 
+    def test_partial_to_complete_postgres_confirmation(
+        self,
+        reducer: RegistrationReducer,
+        partial_consul_state: ModelRegistrationState,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> None:
+        """Postgres success on partial (consul confirmed) state transitions to complete."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
+            correlation_id=correlation_id,
+            node_id=node_id,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output = reducer.reduce_confirmation(partial_consul_state, confirmation)
+
+        assert output.result.status == EnumRegistrationStatus.COMPLETE
+        assert output.result.consul_confirmed is True
+        assert output.result.postgres_confirmed is True
+        assert output.intents == ()
+
+    def test_partial_to_failed_postgres_failure(
+        self,
+        reducer: RegistrationReducer,
+        partial_consul_state: ModelRegistrationState,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> None:
+        """Postgres failure on partial (consul confirmed) state transitions to failed."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
+            correlation_id=correlation_id,
+            node_id=node_id,
+            success=False,
+            error_message="Timeout on upsert",
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output = reducer.reduce_confirmation(partial_consul_state, confirmation)
+
+        assert output.result.status == EnumRegistrationStatus.FAILED
+        assert output.result.failure_reason == "postgres_failed"
+        # Consul confirmation is preserved for diagnostics
+        assert output.result.consul_confirmed is True
+        assert output.intents == ()
+
     def test_duplicate_confirmation_skipped(
         self,
         reducer: RegistrationReducer,
