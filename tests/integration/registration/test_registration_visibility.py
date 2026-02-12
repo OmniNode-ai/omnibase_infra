@@ -226,6 +226,11 @@ class TestConsulRegistrationVisible:
                     f"{type(exc).__name__}: {exc}",
                     stacklevel=1,
                 )
+            # Close the async Consul client to prevent resource leaks
+            try:
+                await client.close()
+            except Exception:
+                pass
 
 
 __all__: list[str] = [

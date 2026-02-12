@@ -129,7 +129,9 @@ class DeterministicResultDispatcher(ContextCapturingDispatcher):
             topic="test.events.v1",
             dispatcher_id=self._dispatcher_id,
             output_count=len(self.processed_user_ids),
-            started_at=datetime(2025, 1, 1, tzinfo=UTC),
+            started_at=started_at
+            if started_at is not None
+            else datetime(2025, 1, 1, tzinfo=UTC),
         )
 
     def reset(self) -> None:

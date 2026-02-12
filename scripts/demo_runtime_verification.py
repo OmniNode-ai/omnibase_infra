@@ -244,7 +244,7 @@ def verify_contract_routing(results: VerificationResult) -> None:
         try:
             mod = importlib.import_module(handler_module)
             importable = hasattr(mod, handler_name)
-        except (ImportError, ModuleNotFoundError) as e:
+        except Exception as e:
             print(
                 f"    WARNING: Could not import {handler_module}: {type(e).__name__}: {e}"
             )
@@ -302,6 +302,7 @@ async def verify_dispatch_routing(results: VerificationResult) -> None:
         received_context = context
         return ModelDispatchResult(
             dispatch_id=uuid4(),
+            correlation_id=uuid4(),
             status=EnumDispatchStatus.SUCCESS,
             topic="onex.evt.platform.node-introspection.v1",
             dispatcher_id="demo-introspection-dispatcher",

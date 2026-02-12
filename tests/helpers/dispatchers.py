@@ -66,18 +66,22 @@ class ContextCapturingDispatcher:
 
     @property
     def dispatcher_id(self) -> str:
+        """Unique identifier for this dispatcher."""
         return self._dispatcher_id
 
     @property
     def category(self) -> EnumMessageCategory:
+        """Message category this dispatcher handles."""
         return self._category
 
     @property
     def message_types(self) -> set[str]:
+        """Set of message type names this dispatcher routes."""
         return self._message_types
 
     @property
     def node_kind(self) -> EnumNodeKind:
+        """Node kind classification for dispatch routing."""
         return self._node_kind
 
     async def handle(
@@ -108,6 +112,7 @@ class ContextCapturingDispatcher:
             dispatcher_id=self._dispatcher_id,
             message_type=type(envelope).__name__ if envelope else None,
             started_at=started_at if started_at is not None else datetime.now(UTC),
+            correlation_id=context.correlation_id if context is not None else uuid4(),
         )
 
     def reset(self) -> None:
