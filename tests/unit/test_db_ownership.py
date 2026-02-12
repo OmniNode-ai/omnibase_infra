@@ -68,9 +68,13 @@ class TestValidateDbOwnership:
 
     @pytest.mark.asyncio
     async def test_missing_table_raises(self) -> None:
-        """Query failure (e.g. table doesn't exist) raises DbOwnershipMissingError."""
+        """UndefinedTableError (table doesn't exist) raises DbOwnershipMissingError."""
+        from asyncpg.exceptions import UndefinedTableError
+
         pool = _make_mock_pool(
-            side_effect=Exception('relation "public.db_metadata" does not exist')
+            side_effect=UndefinedTableError(
+                'relation "public.db_metadata" does not exist'
+            )
         )
         with pytest.raises(DbOwnershipMissingError) as exc_info:
             await validate_db_ownership(
@@ -83,6 +87,17 @@ class TestValidateDbOwnership:
             "run migrations" in str(exc_info.value).lower()
             or "hint" in str(exc_info.value).lower()
         )
+
+    @pytest.mark.asyncio
+    async def test_transient_connection_error_propagates(self) -> None:
+        """Non-table errors (e.g. connection failures) propagate with original type."""
+        pool = _make_mock_pool(side_effect=ConnectionRefusedError("connection refused"))
+        with pytest.raises(ConnectionRefusedError):
+            await validate_db_ownership(
+                pool=pool,
+                expected_owner="omnibase_infra",
+                correlation_id=uuid4(),
+            )
 
     @pytest.mark.asyncio
     async def test_empty_table_raises(self) -> None:
@@ -161,3 +176,96 @@ class TestDbOwnershipErrorTypes:
             expected_owner="omnibase_infra",
         )
         assert err.expected_owner == "omnibase_infra"
+
+
+class TestPluginOwnershipPropagation:
+    """Tests that DB ownership errors propagate out of plugin.initialize().
+
+    PluginRegistration.initialize() has a broad ``except Exception`` that
+    converts failures into ``ModelDomainPluginResult.failed()``. DB ownership
+    errors are P0 hard gates that MUST escape this handler so the kernel
+    terminates. These tests confirm the re-raise path works.
+    """
+
+    @pytest.mark.asyncio
+    async def test_mismatch_error_propagates_from_plugin(self) -> None:
+        """DbOwnershipMismatchError escapes plugin.initialize() (not swallowed)."""
+        from unittest.mock import patch
+
+        from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
+            PluginRegistration,
+        )
+        from omnibase_infra.runtime.protocol_domain_plugin import (
+            ModelDomainPluginConfig,
+        )
+
+        plugin = PluginRegistration()
+        config = MagicMock(spec=ModelDomainPluginConfig)
+        config.correlation_id = uuid4()
+
+        # Simulate: pool creation succeeds, but ownership validation raises mismatch
+        mismatch = DbOwnershipMismatchError(
+            "wrong owner",
+            expected_owner="omnibase_infra",
+            actual_owner="omniclaude",
+        )
+
+        with (
+            patch.dict("os.environ", {"OMNIBASE_INFRA_DB_URL": "postgresql://x/y"}),
+            patch(
+                "omnibase_infra.nodes.node_registration_orchestrator.plugin.ModelPostgresPoolConfig.validate_dsn",
+            ),
+            patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create_pool,
+            patch(
+                "omnibase_infra.runtime.util_db_ownership.validate_db_ownership",
+                new_callable=AsyncMock,
+                side_effect=mismatch,
+            ),
+        ):
+            mock_create_pool.return_value = MagicMock()
+
+            with pytest.raises(DbOwnershipMismatchError) as exc_info:
+                await plugin.initialize(config)
+
+            assert exc_info.value.expected_owner == "omnibase_infra"
+            assert exc_info.value.actual_owner == "omniclaude"
+
+    @pytest.mark.asyncio
+    async def test_missing_error_propagates_from_plugin(self) -> None:
+        """DbOwnershipMissingError escapes plugin.initialize() (not swallowed)."""
+        from unittest.mock import patch
+
+        from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
+            PluginRegistration,
+        )
+        from omnibase_infra.runtime.protocol_domain_plugin import (
+            ModelDomainPluginConfig,
+        )
+
+        plugin = PluginRegistration()
+        config = MagicMock(spec=ModelDomainPluginConfig)
+        config.correlation_id = uuid4()
+
+        missing = DbOwnershipMissingError(
+            "table not found",
+            expected_owner="omnibase_infra",
+        )
+
+        with (
+            patch.dict("os.environ", {"OMNIBASE_INFRA_DB_URL": "postgresql://x/y"}),
+            patch(
+                "omnibase_infra.nodes.node_registration_orchestrator.plugin.ModelPostgresPoolConfig.validate_dsn",
+            ),
+            patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create_pool,
+            patch(
+                "omnibase_infra.runtime.util_db_ownership.validate_db_ownership",
+                new_callable=AsyncMock,
+                side_effect=missing,
+            ),
+        ):
+            mock_create_pool.return_value = MagicMock()
+
+            with pytest.raises(DbOwnershipMissingError) as exc_info:
+                await plugin.initialize(config)
+
+            assert exc_info.value.expected_owner == "omnibase_infra"

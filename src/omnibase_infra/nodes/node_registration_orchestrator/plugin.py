@@ -85,7 +85,11 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.service_intent_executor import IntentExecutor
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import ContainerWiringError
+from omnibase_infra.errors import (
+    ContainerWiringError,
+    DbOwnershipMismatchError,
+    DbOwnershipMissingError,
+)
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -354,6 +358,14 @@ class PluginRegistration:
                 resources_created=resources_created,
                 duration_seconds=duration,
             )
+
+        except (DbOwnershipMismatchError, DbOwnershipMissingError):
+            # Hard gate: must propagate to kill the kernel (OMN-2085).
+            # DB ownership errors indicate the service connected to a database
+            # owned by a different service after the DB-per-repo split.
+            # Swallowing these would defeat the entire safety mechanism.
+            await self._cleanup_on_failure(config)
+            raise
 
         except Exception as e:
             duration = time.time() - start_time

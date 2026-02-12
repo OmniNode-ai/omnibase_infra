@@ -59,15 +59,24 @@ async def validate_db_ownership(
         async with pool.acquire() as conn:
             row = await conn.fetchrow(_OWNERSHIP_QUERY)
     except Exception as exc:
-        # Table does not exist or query failed -- treat as missing
-        raise DbOwnershipMissingError(
-            f"Cannot read public.db_metadata: {exc}. "
-            f"Expected owner '{expected_owner}'. "
-            "Hint: run migrations or check OMNIBASE_INFRA_DB_URL points "
-            "to the correct service database.",
-            expected_owner=expected_owner,
-            correlation_id=correlation_id,
-        ) from exc
+        # Only treat "table does not exist" as a missing-metadata error.
+        # Transient failures (connection errors, timeouts) must propagate
+        # with their original type so callers can distinguish recoverable
+        # errors from a genuinely un-migrated database.
+        import asyncpg.exceptions
+
+        if isinstance(exc, asyncpg.exceptions.UndefinedTableError):
+            raise DbOwnershipMissingError(
+                f"Cannot read public.db_metadata: {exc}. "
+                f"Expected owner '{expected_owner}'. "
+                "Hint: run migrations or check OMNIBASE_INFRA_DB_URL points "
+                "to the correct service database.",
+                expected_owner=expected_owner,
+                correlation_id=correlation_id,
+            ) from exc
+        # Connection errors, timeouts, auth failures, etc. -- propagate as-is
+        # so the caller can apply appropriate retry/backoff logic.
+        raise
 
     if row is None:
         raise DbOwnershipMissingError(
