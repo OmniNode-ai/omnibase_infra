@@ -7,6 +7,12 @@ This module exports models used by Effect layer nodes for external I/O operation
 Available Models:
     - ModelBackendResult: Individual backend operation result (re-exported)
     - ModelEffectIdempotencyConfig: Configuration for effect idempotency store
+    - ModelLlmFunctionCall: Concrete function invocation from an LLM
+    - ModelLlmFunctionDef: JSON-Schema description of a callable function
+    - ModelLlmToolCall: Tool call returned by the model
+    - ModelLlmToolChoice: Caller constraint on tool selection behaviour
+    - ModelLlmToolDefinition: Tool definition sent in request payload
+    - ModelLlmUsage: Token-usage summary from an LLM provider
     - ModelRegistryRequest: Registry effect input request
     - ModelRegistryResponse: Dual-backend registry operation response
 
@@ -19,6 +25,20 @@ from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.nodes.effects.models.model_effect_idempotency_config import (
     ModelEffectIdempotencyConfig,
 )
+from omnibase_infra.nodes.effects.models.model_llm_function_call import (
+    ModelLlmFunctionCall,
+)
+from omnibase_infra.nodes.effects.models.model_llm_function_def import (
+    ModelLlmFunctionDef,
+)
+from omnibase_infra.nodes.effects.models.model_llm_tool_call import ModelLlmToolCall
+from omnibase_infra.nodes.effects.models.model_llm_tool_choice import (
+    ModelLlmToolChoice,
+)
+from omnibase_infra.nodes.effects.models.model_llm_tool_definition import (
+    ModelLlmToolDefinition,
+)
+from omnibase_infra.nodes.effects.models.model_llm_usage import ModelLlmUsage
 from omnibase_infra.nodes.effects.models.model_registry_request import (
     ModelRegistryRequest,
 )
@@ -29,6 +49,12 @@ from omnibase_infra.nodes.effects.models.model_registry_response import (
 __all__ = [
     "ModelBackendResult",
     "ModelEffectIdempotencyConfig",
+    "ModelLlmFunctionCall",
+    "ModelLlmFunctionDef",
+    "ModelLlmToolCall",
+    "ModelLlmToolChoice",
+    "ModelLlmToolDefinition",
+    "ModelLlmUsage",
     "ModelRegistryRequest",
     "ModelRegistryResponse",
 ]
