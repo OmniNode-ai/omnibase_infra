@@ -67,6 +67,8 @@ from pydantic import ValidationError
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
 from omnibase_infra.errors import (
+    DbOwnershipMismatchError,
+    DbOwnershipMissingError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
@@ -971,6 +973,11 @@ async def bootstrap() -> int:
                     plugin_id,
                     correlation_id,
                 )
+            except (DbOwnershipMismatchError, DbOwnershipMissingError):
+                # DB ownership errors are hard gates -- propagate to kill
+                # the kernel. The service must not operate on a database
+                # owned by another service (OMN-2085).
+                raise
             except Exception:
                 logger.warning(
                     "Plugin '%s' failed during lifecycle activation "

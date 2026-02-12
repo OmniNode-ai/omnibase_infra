@@ -85,7 +85,11 @@ if TYPE_CHECKING:
     from omnibase_infra.runtime.service_intent_executor import IntentExecutor
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import ContainerWiringError
+from omnibase_infra.errors import (
+    ContainerWiringError,
+    DbOwnershipMismatchError,
+    DbOwnershipMissingError,
+)
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -94,6 +98,7 @@ from omnibase_infra.runtime.protocol_domain_plugin import (
     ModelDomainPluginResult,
     ProtocolDomainPlugin,
 )
+from omnibase_infra.runtime.util_db_ownership import validate_db_ownership
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
@@ -313,6 +318,15 @@ class PluginRegistration:
                 extra={"dsn_var": "OMNIBASE_INFRA_DB_URL"},
             )
 
+            # 1.5 Validate DB ownership (OMN-2085)
+            # Hard gate: prevents operating on a database owned by another
+            # service after the DB-per-repo split.
+            await validate_db_ownership(
+                pool=self._pool,
+                expected_owner="omnibase_infra",
+                correlation_id=correlation_id,
+            )
+
             # 2. Load projectors from contracts via ProjectorPluginLoader
             await self._load_projector(config)
             if self._projector is not None:
@@ -341,6 +355,14 @@ class PluginRegistration:
                 resources_created=resources_created,
                 duration_seconds=duration,
             )
+
+        except (DbOwnershipMismatchError, DbOwnershipMissingError):
+            # Hard gate: must propagate to kill the kernel (OMN-2085).
+            # DB ownership errors indicate the service connected to a database
+            # owned by a different service after the DB-per-repo split.
+            # Swallowing these would defeat the entire safety mechanism.
+            await self._cleanup_on_failure(config)
+            raise
 
         except Exception as e:
             duration = time.time() - start_time
