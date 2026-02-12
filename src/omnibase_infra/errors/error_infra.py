@@ -535,6 +535,9 @@ class InfraRateLimitedError(RuntimeHostError):
         ...     context=context,
         ...     retry_after_seconds=30.0,
         ... )
+
+    .. versionadded:: 0.7.0
+        Part of OMN-2102 infrastructure error hierarchy.
     """
 
     def __init__(

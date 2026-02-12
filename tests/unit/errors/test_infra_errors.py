@@ -37,6 +37,8 @@ from omnibase_infra.errors.error_infra import (
     SecretResolutionError,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestModelInfraErrorContextWithCorrelation:
     """Tests for ModelInfraErrorContext.with_correlation() factory method."""
@@ -858,10 +860,14 @@ class TestInfraRateLimitedError:
         assert error.model.context["endpoint"] == "/v1/completions"
 
     def test_error_chaining(self) -> None:
-        """Test error chaining from rate limit exception."""
+        """Test error chaining from rate limit exception.
+
+        Uses KAFKA transport to demonstrate InfraRateLimitedError is
+        transport-agnostic (not limited to HTTP).
+        """
         context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.HTTP,
-            target_name="api-gateway",
+            transport_type=EnumInfraTransportType.KAFKA,
+            target_name="kafka-broker",
         )
         rate_limit_exception = ConnectionError("429 Too Many Requests")
         try:
@@ -872,7 +878,7 @@ class TestInfraRateLimitedError:
             ) from rate_limit_exception
         except InfraRateLimitedError as e:
             assert e.__cause__ == rate_limit_exception
-            assert e.model.context["target_name"] == "api-gateway"
+            assert e.model.context["target_name"] == "kafka-broker"
             assert e.retry_after_seconds == 120.0
 
 
