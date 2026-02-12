@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS public.db_metadata (
     owner_service TEXT NOT NULL,
     schema_version TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT db_metadata_single_row CHECK (id = TRUE)
 );
 
@@ -25,4 +26,4 @@ COMMENT ON TABLE public.db_metadata IS
 -- Seed the ownership row for omnibase_infra
 INSERT INTO public.db_metadata (id, owner_service, schema_version)
 VALUES (TRUE, 'omnibase_infra', '029')
-ON CONFLICT (id) DO UPDATE SET owner_service = EXCLUDED.owner_service, schema_version = EXCLUDED.schema_version;
+ON CONFLICT (id) DO UPDATE SET owner_service = EXCLUDED.owner_service, schema_version = EXCLUDED.schema_version, updated_at = NOW();
