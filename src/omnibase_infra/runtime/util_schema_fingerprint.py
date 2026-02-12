@@ -342,9 +342,16 @@ async def validate_schema_fingerprint(
                 _EXPECTED_FINGERPRINT_QUERY
             )
     except Exception as exc:
-        if isinstance(exc, asyncpg.exceptions.UndefinedTableError):
+        if isinstance(
+            exc,
+            (
+                asyncpg.exceptions.UndefinedTableError,
+                asyncpg.exceptions.UndefinedColumnError,
+            ),
+        ):
             raise SchemaFingerprintMissingError(
-                "db_metadata table does not exist -- run migrations first. "
+                "db_metadata table or expected_schema_fingerprint column does "
+                "not exist -- run migrations first. "
                 f"Expected owner '{manifest.owner_service}'. "
                 "Hint: check OMNIBASE_INFRA_DB_URL points to the correct "
                 "service database.",
@@ -386,19 +393,24 @@ async def validate_schema_fingerprint(
 
     # 5. Mismatch -- compute diff and raise
     # Build per-table hash dicts for diff computation.
-    # For expected, we don't have per-table hashes stored in db_metadata,
-    # so the diff is based on actual per-table hashes vs an empty expected
-    # (the overall fingerprint mismatch is the primary signal).
+    # We don't have per-table expected hashes stored in db_metadata, so we
+    # construct expected_per_table from the manifest table list using the
+    # actual hashes for tables that exist (so matching tables don't appear as
+    # "changed"). Missing tables keep an empty sentinel so they surface as
+    # removed in the diff.
     actual_per_table = dict(result.per_table_hashes)
+    expected_per_table = {
+        table: actual_per_table.get(table, "") for table in manifest.tables
+    }
 
-    # We only have the overall expected hash, not per-table breakdown.
-    # Report all tables as "present" so operators can investigate.
-    diff_summary = (
+    table_diff = _compute_schema_diff(expected_per_table, actual_per_table)
+    diff_header = (
         f"Expected fingerprint: {expected_fingerprint}\n"
         f"Actual fingerprint:   {result.fingerprint}\n"
         f"Tables fingerprinted: {result.table_count}\n"
         f"Columns: {result.column_count}, Constraints: {result.constraint_count}"
     )
+    diff_summary = f"{diff_header}\n{table_diff}" if table_diff else diff_header
 
     raise SchemaFingerprintMismatchError(
         f"Schema fingerprint mismatch: expected '{expected_fingerprint[:16]}...', "
