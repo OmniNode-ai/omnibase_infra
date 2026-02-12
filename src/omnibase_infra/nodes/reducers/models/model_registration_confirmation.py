@@ -1,20 +1,19 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Registration Confirmation Model for Phase 2 Implementation.
+"""Registration Confirmation Model for Dual Registration Workflow.
 
 This module provides ModelRegistrationConfirmation, the Pydantic model for
 confirmation events from the Effect layer. These events complete the dual
 registration workflow by confirming Consul and PostgreSQL operations.
 
-Phase Status:
-    This is a Phase 1 placeholder model. The model contract is defined here
-    to ensure Phase 2 implementation aligns with Phase 1 reducer expectations.
+Implementation Status:
+    This model is actively used in production by
+    RegistrationReducer.reduce_confirmation() (OMN-996).
 
-    Phase 2 Implementation (OMN-996):
-        - Effect layer nodes (ConsulAdapter, PostgresAdapter) will publish
-          confirmation events using this model
-        - RegistrationReducer.reduce_confirmation() will process these events
-        - Runtime will route confirmations based on event_type
+    - Effect layer nodes (ConsulAdapter, PostgresAdapter) publish
+      confirmation events using this model
+    - RegistrationReducer.reduce_confirmation() processes these events
+    - Runtime routes confirmations based on event_type
 
 Confirmation Event Flow:
     1. Reducer emits intents (consul.register, postgres.upsert_registration)
@@ -56,7 +55,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.enums import EnumConfirmationEventType
 
@@ -67,9 +66,9 @@ class ModelRegistrationConfirmation(BaseModel):
     This model represents confirmation events published by Effect layer nodes
     (ConsulAdapter, PostgresAdapter) after executing registration intents.
 
-    Phase 1 Stub:
-        This model defines the contract for confirmation events that will be
-        processed in Phase 2 implementation by RegistrationReducer.reduce_confirmation().
+    Usage:
+        This model is consumed by RegistrationReducer.reduce_confirmation()
+        to transition registration state through the confirmation workflow.
 
     Immutability:
         This model uses frozen=True to ensure confirmation events are immutable
@@ -161,6 +160,22 @@ class ModelRegistrationConfirmation(BaseModel):
         ...,
         description="When the confirmation was generated",
     )
+
+    @model_validator(mode="after")
+    def _validate_error_message_consistency(self) -> ModelRegistrationConfirmation:
+        """Enforce that error_message is only set when success is False.
+
+        Invariant:
+            - success=True requires error_message=None
+            - success=False may optionally include an error_message
+        """
+        if self.success and self.error_message is not None:
+            msg = (
+                "error_message must be None when success is True, "
+                f"got error_message={self.error_message!r}"
+            )
+            raise ValueError(msg)
+        return self
 
 
 __all__ = ["ModelRegistrationConfirmation"]

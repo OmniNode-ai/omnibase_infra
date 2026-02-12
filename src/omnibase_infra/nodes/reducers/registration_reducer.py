@@ -20,7 +20,7 @@ Performance Characteristics:
     Typical performance on standard hardware:
     - Simple introspection events: ~0.1-1ms
     - Complex events with full metadata: ~1-5ms
-    - Hash-based event ID derivation: ~0.01ms
+    - uuid5-based event ID derivation: ~0.01ms
 
 Circuit Breaker Considerations:
     This reducer does NOT require a circuit breaker because:
@@ -287,23 +287,21 @@ Confirmation Event Flow:
 
     6. IMPLEMENTATION NOTE - reduce_confirmation():
 
-        The reduce_confirmation() method (to be implemented) will handle
-        confirmation events. It uses the same pure reducer pattern:
+        The reduce_confirmation() method processes confirmation events from
+        the Effect layer, completing the registration workflow cycle. It
+        follows the same pure reducer pattern as reduce():
 
-            def reduce_confirmation(
-                self,
-                state: ModelRegistrationState,
-                confirmation: ModelRegistrationConfirmation,
-            ) -> ModelReducerOutput[ModelRegistrationState]:
-                '''Process confirmation event from Effect layer.'''
-                # Validate confirmation matches current node_id
-                # Transition state based on confirmation type:
-                #   - consul.registered -> with_consul_confirmed()
-                #   - postgres.registration_upserted -> with_postgres_confirmed()
-                #   - error -> with_failure()
-                # Return new state with no intents (confirmations don't emit new intents)
+            1. Guards: idle state, node_id mismatch, terminal state
+            2. Idempotency: derives deterministic event_id, skips duplicates
+            3. Failure path: maps event_type to failure_reason, transitions
+               to failed state via state.with_failure()
+            4. Success path: transitions state based on confirmation type:
+               - consul.registered -> state.with_consul_confirmed()
+               - postgres.registration_upserted -> state.with_postgres_confirmed()
+            5. State progression: pending -> partial -> complete (or -> failed)
+            6. Confirmations never emit new intents
 
-        The confirmation event model should include:
+        The confirmation event model (ModelRegistrationConfirmation) includes:
             - event_type: "consul.registered" | "postgres.registration_upserted"
             - correlation_id: UUID linking to original introspection
             - node_id: UUID of the registered node
@@ -338,20 +336,19 @@ Related:
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import time
 from datetime import UTC, datetime
 from typing import Literal
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from omnibase_core.enums import EnumNodeKind, EnumReductionType, EnumStreamingMode
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
-from omnibase_infra.enums import EnumConfirmationEventType
+from omnibase_infra.enums import EnumConfirmationEventType, EnumRegistrationStatus
 from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeRegistrationRecord,
@@ -366,8 +363,13 @@ from omnibase_infra.nodes.reducers.models.model_registration_confirmation import
     ModelRegistrationConfirmation,
 )
 from omnibase_infra.nodes.reducers.models.model_registration_state import (
+    FailureReason,
     ModelRegistrationState,
 )
+
+# Private namespace for deterministic UUID derivation via uuid5().
+# This is a fixed namespace UUID - do NOT change it, as it would alter all derived IDs.
+_NAMESPACE_REGISTRATION = UUID("f47ac10b-58cc-4372-a567-0d02b2c3d479")
 
 # =============================================================================
 # Performance Threshold Constants (in milliseconds)
@@ -504,7 +506,6 @@ class ModelValidationResult(BaseModel):
         )
 
 
-# TODO(OMN-889): Complete pure reducer implementation - add reduce_confirmation() method
 class RegistrationReducer:
     """Pure reducer for node registration workflow.
 
@@ -797,7 +798,8 @@ class RegistrationReducer:
         from its content to preserve idempotency guarantees. Using uuid4() would
         break idempotency because replayed events would get different IDs.
 
-        The derived ID uses a SHA-256 hash of the event's identifying fields:
+        The derived ID uses uuid5() (RFC 4122 compliant) with a fixed namespace
+        and the event's identifying fields:
         - node_id: Unique node identifier
         - node_type: Node archetype (effect, compute, reducer, orchestrator)
         - timestamp: Event creation timestamp (ISO format for stability)
@@ -805,13 +807,13 @@ class RegistrationReducer:
         This ensures:
         1. Same event content always produces the same ID
         2. Different events produce different IDs (collision-resistant)
-        3. ID format is compatible with existing UUID-based tracking
+        3. ID is a valid RFC 4122 version-5 UUID
 
         Args:
             event: The introspection event to derive an ID from.
 
         Returns:
-            A deterministic UUID derived from the event's content.
+            A deterministic RFC 4122 version-5 UUID derived from the event's content.
         """
         # Build a canonical string from the event's identifying fields.
         # Using ISO format for timestamp ensures string stability across serialization.
@@ -820,19 +822,7 @@ class RegistrationReducer:
             f"{event.node_id}|{event.node_type.value}|{event.timestamp.isoformat()}"
         )
 
-        # Compute SHA-256 hash and convert to UUID format.
-        # SHA-256 provides strong collision resistance for content-derived IDs.
-        content_hash = hashlib.sha256(canonical_content.encode("utf-8")).hexdigest()
-
-        # Take first 32 hex chars (128 bits) and format as UUID.
-        # Insert hyphens in standard UUID format: 8-4-4-4-12
-        uuid_hex = content_hash[:32]
-        uuid_str = (
-            f"{uuid_hex[:8]}-{uuid_hex[8:12]}-{uuid_hex[12:16]}-"
-            f"{uuid_hex[16:20]}-{uuid_hex[20:32]}"
-        )
-
-        return UUID(uuid_str)
+        return uuid5(_NAMESPACE_REGISTRATION, canonical_content)
 
     def _build_consul_intent(
         self,
@@ -950,17 +940,9 @@ class RegistrationReducer:
     # =========================================================================
     # CONFIRMATION EVENT HANDLING (PHASE 2 of the event flow)
     #
-    # The following method will handle confirmation events from Effect layer.
-    # It is documented here as a stub to show the complete event flow.
-    #
-    # Follow-up Ticket: OMN-996 (Implement Confirmation Event Handling)
-    #   https://linear.app/omninode/issue/OMN-996
-    #
-    # Prerequisites:
-    #   - [DONE] ModelRegistrationConfirmation model defined
-    #     See: omnibase_infra.nodes.reducers.models.model_registration_confirmation
-    #   - Effect layer confirmation event publishing implemented
-    #   - Tests added for confirmation event handling
+    # Processes confirmation events from Effect layer (ConsulAdapter,
+    # PostgresAdapter) and transitions registration state through
+    # pending -> partial -> complete (or -> failed).
     #
     # See module docstring section 6 for detailed implementation notes.
     # =========================================================================
@@ -972,7 +954,8 @@ class RegistrationReducer:
     ) -> ModelReducerOutput[ModelRegistrationState]:
         """Process confirmation event from Effect layer.
 
-        Not yet implemented. See OMN-996 for tracking.
+        Handles confirmation events from Consul and PostgreSQL Effect nodes,
+        transitioning state through pending -> partial -> complete (or -> failed).
 
         Args:
             state: Current registration state (immutable).
@@ -980,22 +963,177 @@ class RegistrationReducer:
 
         Returns:
             ModelReducerOutput with new state and no intents.
-
-        Raises:
-            NotImplementedError: Always raised until implementation is complete.
         """
-        raise NotImplementedError(
-            "reduce_confirmation() is not yet implemented. "
-            "See ticket OMN-996: https://linear.app/omninode/issue/OMN-996"
+        start_time = time.perf_counter()
+
+        # Step 1: Idle guard — confirmation on idle state (event reordering)
+        if state.node_id is None:
+            _logger.debug(
+                "Confirmation received for idle state, skipping",
+                extra={"correlation_id": str(confirmation.correlation_id)},
+            )
+            return self._build_output(
+                state=state,
+                intents=(),
+                processing_time_ms=(time.perf_counter() - start_time) * 1000,
+                items_processed=0,
+            )
+
+        # Step 2: Node ID mismatch
+        if confirmation.node_id != state.node_id:
+            _logger.warning(
+                "Confirmation node_id mismatch, rejecting",
+                extra={
+                    "confirmation_node_id": str(confirmation.node_id),
+                    "state_node_id": str(state.node_id),
+                    "correlation_id": str(confirmation.correlation_id),
+                },
+            )
+            return self._build_output(
+                state=state,
+                intents=(),
+                processing_time_ms=(time.perf_counter() - start_time) * 1000,
+                items_processed=0,
+            )
+
+        # Step 3: Terminal state guard — no-op for complete or failed
+        if state.status in (
+            EnumRegistrationStatus.COMPLETE,
+            EnumRegistrationStatus.FAILED,
+        ):
+            _logger.debug(
+                "Confirmation received in terminal state, skipping",
+                extra={
+                    "status": state.status.value,
+                    "correlation_id": str(confirmation.correlation_id),
+                },
+            )
+            return self._build_output(
+                state=state,
+                intents=(),
+                processing_time_ms=(time.perf_counter() - start_time) * 1000,
+                items_processed=0,
+            )
+
+        # Step 4: Idempotency guard — derive deterministic event_id
+        event_id = self._derive_confirmation_event_id(confirmation)
+        if state.is_duplicate_event(event_id):
+            return self._build_output(
+                state=state,
+                intents=(),
+                processing_time_ms=0.0,
+                items_processed=0,
+            )
+
+        # Step 5: Failure path
+        if not confirmation.success:
+            failure_map: dict[EnumConfirmationEventType, FailureReason] = {
+                EnumConfirmationEventType.CONSUL_REGISTERED: "consul_failed",
+                EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED: "postgres_failed",
+            }
+            failure_reason = failure_map.get(confirmation.event_type)
+            if failure_reason is None:
+                _logger.error(
+                    "Unknown confirmation event type for failure path",
+                    extra={
+                        "event_type": confirmation.event_type.value,
+                        "correlation_id": str(confirmation.correlation_id),
+                    },
+                )
+                return self._build_output(
+                    state=state,
+                    intents=(),
+                    processing_time_ms=(time.perf_counter() - start_time) * 1000,
+                    items_processed=0,
+                )
+            new_state = state.with_failure(failure_reason, event_id)
+            processing_time_ms = (time.perf_counter() - start_time) * 1000
+            if processing_time_ms > PERF_THRESHOLD_REDUCE_MS:
+                _logger.warning(
+                    "Confirmation processing time exceeded threshold",
+                    extra={
+                        "processing_time_ms": processing_time_ms,
+                        "threshold_ms": PERF_THRESHOLD_REDUCE_MS,
+                        "event_type": confirmation.event_type.value,
+                        "correlation_id": str(confirmation.correlation_id),
+                    },
+                )
+            return self._build_output(
+                state=new_state,
+                intents=(),
+                processing_time_ms=processing_time_ms,
+                items_processed=1,
+            )
+
+        # Step 6: Success path
+        if confirmation.event_type == EnumConfirmationEventType.CONSUL_REGISTERED:
+            new_state = state.with_consul_confirmed(event_id)
+        elif (
+            confirmation.event_type
+            == EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED
+        ):
+            new_state = state.with_postgres_confirmed(event_id)
+        else:
+            _logger.error(
+                "Unknown confirmation event type for success path",
+                extra={
+                    "event_type": confirmation.event_type.value,
+                    "correlation_id": str(confirmation.correlation_id),
+                },
+            )
+            return self._build_output(
+                state=state,
+                intents=(),
+                processing_time_ms=(time.perf_counter() - start_time) * 1000,
+                items_processed=0,
+            )
+
+        # Step 7: Performance logging
+        processing_time_ms = (time.perf_counter() - start_time) * 1000
+        if processing_time_ms > PERF_THRESHOLD_REDUCE_MS:
+            _logger.warning(
+                "Confirmation processing time exceeded threshold",
+                extra={
+                    "processing_time_ms": processing_time_ms,
+                    "threshold_ms": PERF_THRESHOLD_REDUCE_MS,
+                    "event_type": confirmation.event_type.value,
+                    "correlation_id": str(confirmation.correlation_id),
+                },
+            )
+
+        # Step 8: Build output — confirmations never emit intents
+        return self._build_output(
+            state=new_state,
+            intents=(),
+            processing_time_ms=processing_time_ms,
+            items_processed=1,
         )
 
-    # TODO(OMN-996): Implement reduce_confirmation() using ModelRegistrationConfirmation
-    # Ticket: https://linear.app/omninode/issue/OMN-996
-    # Status: Backlog - Phase 2 of dual registration event flow
-    #
-    # Scope: Process confirmation events from Effect layer (Consul/PostgreSQL)
-    # to complete state transitions: pending -> partial -> complete
-    #
+    def _derive_confirmation_event_id(
+        self, confirmation: ModelRegistrationConfirmation
+    ) -> UUID:
+        """Derive a deterministic event ID from a confirmation event.
+
+        Uses uuid5() (RFC 4122 compliant) with a fixed namespace and the
+        confirmation's correlation_id, event_type, and node_id to produce a
+        stable UUID for idempotency tracking. Including node_id prevents
+        collisions when different nodes emit confirmations with the same
+        correlation_id and event_type.
+
+        Args:
+            confirmation: The confirmation event to derive an ID from.
+
+        Returns:
+            A deterministic RFC 4122 version-5 UUID derived from the
+            confirmation's content.
+        """
+        payload = (
+            f"{confirmation.correlation_id}:"
+            f"{confirmation.event_type.value}:"
+            f"{confirmation.node_id}"
+        )
+        return uuid5(_NAMESPACE_REGISTRATION, payload)
+
     def reduce_reset(
         self,
         state: ModelRegistrationState,

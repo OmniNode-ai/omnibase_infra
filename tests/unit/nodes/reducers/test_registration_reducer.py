@@ -43,7 +43,7 @@ from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
-from omnibase_infra.enums import EnumConfirmationEventType
+from omnibase_infra.enums import EnumConfirmationEventType, EnumRegistrationStatus
 from omnibase_infra.models.registration import (
     ModelNodeCapabilities,
     ModelNodeIntrospectionEvent,
@@ -5979,41 +5979,408 @@ class TestCommandFoldingProhibited:
 
 
 # -----------------------------------------------------------------------------
-# Confirmation Event Handling Tests (Phase 2 Placeholder)
+# Confirmation Event Handling Tests (Phase 2 — OMN-996)
 # -----------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 class TestReduceConfirmation:
-    """Tests for reduce_confirmation() method.
+    """Tests for reduce_confirmation() method — Phase 2 confirmation event handling."""
 
-    The reduce_confirmation() method is a Phase 2 placeholder that raises
-    NotImplementedError until OMN-996 is implemented. This test validates
-    the expected behavior of the placeholder.
+    # -- Fixtures --
 
-    Related:
-        - OMN-996: Implement Confirmation Event Handling
-        - ModelRegistrationConfirmation: Confirmation event model
-    """
+    @pytest.fixture
+    def node_id(self) -> UUID:
+        """Fixed node_id for deterministic tests."""
+        return UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
-    def test_reduce_confirmation_raises_not_implemented_error(
+    @pytest.fixture
+    def correlation_id(self) -> UUID:
+        """Fixed correlation_id for deterministic tests."""
+        return UUID("11111111-2222-3333-4444-555555555555")
+
+    @pytest.fixture
+    def pending_state(self, node_id: UUID) -> ModelRegistrationState:
+        """State with pending registration."""
+        return ModelRegistrationState(
+            status=EnumRegistrationStatus.PENDING,
+            node_id=node_id,
+            consul_confirmed=False,
+            postgres_confirmed=False,
+            last_processed_event_id=uuid4(),
+        )
+
+    @pytest.fixture
+    def partial_consul_state(self, node_id: UUID) -> ModelRegistrationState:
+        """State with consul confirmed, postgres pending."""
+        return ModelRegistrationState(
+            status=EnumRegistrationStatus.PARTIAL,
+            node_id=node_id,
+            consul_confirmed=True,
+            postgres_confirmed=False,
+            last_processed_event_id=uuid4(),
+        )
+
+    @pytest.fixture
+    def complete_state(self, node_id: UUID) -> ModelRegistrationState:
+        """State with both backends confirmed."""
+        return ModelRegistrationState(
+            status=EnumRegistrationStatus.COMPLETE,
+            node_id=node_id,
+            consul_confirmed=True,
+            postgres_confirmed=True,
+            last_processed_event_id=uuid4(),
+        )
+
+    @pytest.fixture
+    def failed_state(self, node_id: UUID) -> ModelRegistrationState:
+        """State in failed status."""
+        return ModelRegistrationState(
+            status=EnumRegistrationStatus.FAILED,
+            node_id=node_id,
+            consul_confirmed=False,
+            postgres_confirmed=False,
+            last_processed_event_id=uuid4(),
+            failure_reason="consul_failed",
+        )
+
+    # -- Tests --
+
+    def test_consul_confirmation_success(
+        self,
+        reducer: RegistrationReducer,
+        pending_state: ModelRegistrationState,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> None:
+        """Consul success confirmation transitions pending -> partial."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            correlation_id=correlation_id,
+            node_id=node_id,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output = reducer.reduce_confirmation(pending_state, confirmation)
+
+        assert output.result.status == EnumRegistrationStatus.PARTIAL
+        assert output.result.consul_confirmed is True
+        assert output.result.postgres_confirmed is False
+        assert output.intents == ()
+
+    def test_postgres_confirmation_success(
+        self,
+        reducer: RegistrationReducer,
+        pending_state: ModelRegistrationState,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> None:
+        """Postgres success confirmation transitions pending -> partial."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
+            correlation_id=correlation_id,
+            node_id=node_id,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output = reducer.reduce_confirmation(pending_state, confirmation)
+
+        assert output.result.status == EnumRegistrationStatus.PARTIAL
+        assert output.result.consul_confirmed is False
+        assert output.result.postgres_confirmed is True
+        assert output.intents == ()
+
+    def test_both_confirmations_complete(
+        self,
+        reducer: RegistrationReducer,
+        pending_state: ModelRegistrationState,
+        node_id: UUID,
+    ) -> None:
+        """Processing consul then postgres confirmation reaches complete state."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        consul_corr = uuid4()
+        postgres_corr = uuid4()
+
+        consul_confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            correlation_id=consul_corr,
+            node_id=node_id,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output1 = reducer.reduce_confirmation(pending_state, consul_confirmation)
+        assert output1.result.status == EnumRegistrationStatus.PARTIAL
+        assert output1.result.consul_confirmed is True
+
+        postgres_confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
+            correlation_id=postgres_corr,
+            node_id=node_id,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output2 = reducer.reduce_confirmation(output1.result, postgres_confirmation)
+        assert output2.result.status == EnumRegistrationStatus.COMPLETE
+        assert output2.result.consul_confirmed is True
+        assert output2.result.postgres_confirmed is True
+        assert output2.intents == ()
+
+    def test_both_confirmations_complete_reverse_order(
+        self,
+        reducer: RegistrationReducer,
+        pending_state: ModelRegistrationState,
+        node_id: UUID,
+    ) -> None:
+        """Processing postgres then consul confirmation reaches complete state."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        postgres_corr = uuid4()
+        consul_corr = uuid4()
+
+        # Step 1: postgres confirmation first -> PARTIAL
+        postgres_confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
+            correlation_id=postgres_corr,
+            node_id=node_id,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output1 = reducer.reduce_confirmation(pending_state, postgres_confirmation)
+        assert output1.result.status == EnumRegistrationStatus.PARTIAL
+        assert output1.result.postgres_confirmed is True
+        assert output1.result.consul_confirmed is False
+
+        # Step 2: consul confirmation second -> COMPLETE
+        consul_confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            correlation_id=consul_corr,
+            node_id=node_id,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output2 = reducer.reduce_confirmation(output1.result, consul_confirmation)
+        assert output2.result.status == EnumRegistrationStatus.COMPLETE
+        assert output2.result.consul_confirmed is True
+        assert output2.result.postgres_confirmed is True
+        assert output2.intents == ()
+
+    def test_consul_confirmation_failure(
+        self,
+        reducer: RegistrationReducer,
+        pending_state: ModelRegistrationState,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> None:
+        """Consul failure confirmation transitions to failed with consul_failed reason."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            correlation_id=correlation_id,
+            node_id=node_id,
+            success=False,
+            error_message="Connection refused",
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output = reducer.reduce_confirmation(pending_state, confirmation)
+
+        assert output.result.status == EnumRegistrationStatus.FAILED
+        assert output.result.failure_reason == "consul_failed"
+        assert output.intents == ()
+
+    def test_postgres_confirmation_failure(
+        self,
+        reducer: RegistrationReducer,
+        pending_state: ModelRegistrationState,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> None:
+        """Postgres failure confirmation transitions to failed with postgres_failed reason."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
+            correlation_id=correlation_id,
+            node_id=node_id,
+            success=False,
+            error_message="Timeout on upsert",
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output = reducer.reduce_confirmation(pending_state, confirmation)
+
+        assert output.result.status == EnumRegistrationStatus.FAILED
+        assert output.result.failure_reason == "postgres_failed"
+        assert output.intents == ()
+
+    def test_partial_to_complete_postgres_confirmation(
+        self,
+        reducer: RegistrationReducer,
+        partial_consul_state: ModelRegistrationState,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> None:
+        """Postgres success on partial (consul confirmed) state transitions to complete."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
+            correlation_id=correlation_id,
+            node_id=node_id,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output = reducer.reduce_confirmation(partial_consul_state, confirmation)
+
+        assert output.result.status == EnumRegistrationStatus.COMPLETE
+        assert output.result.consul_confirmed is True
+        assert output.result.postgres_confirmed is True
+        assert output.intents == ()
+
+    def test_partial_to_failed_postgres_failure(
+        self,
+        reducer: RegistrationReducer,
+        partial_consul_state: ModelRegistrationState,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> None:
+        """Postgres failure on partial (consul confirmed) state transitions to failed."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
+            correlation_id=correlation_id,
+            node_id=node_id,
+            success=False,
+            error_message="Timeout on upsert",
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output = reducer.reduce_confirmation(partial_consul_state, confirmation)
+
+        assert output.result.status == EnumRegistrationStatus.FAILED
+        assert output.result.failure_reason == "postgres_failed"
+        # Consul confirmation is preserved for diagnostics
+        assert output.result.consul_confirmed is True
+        assert output.intents == ()
+
+    def test_duplicate_confirmation_skipped(
+        self,
+        reducer: RegistrationReducer,
+        pending_state: ModelRegistrationState,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> None:
+        """Processing the same confirmation twice returns unchanged state on second call."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            correlation_id=correlation_id,
+            node_id=node_id,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        # First call transitions state
+        output1 = reducer.reduce_confirmation(pending_state, confirmation)
+        assert output1.result.status == EnumRegistrationStatus.PARTIAL
+
+        # Second call on the NEW state with the SAME confirmation is a no-op
+        output2 = reducer.reduce_confirmation(output1.result, confirmation)
+        assert output2.result.model_dump() == output1.result.model_dump()
+
+    def test_wrong_node_id_rejected(
+        self,
+        reducer: RegistrationReducer,
+        pending_state: ModelRegistrationState,
+        correlation_id: UUID,
+    ) -> None:
+        """Confirmation with mismatched node_id leaves state unchanged."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        wrong_node_id = uuid4()
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            correlation_id=correlation_id,
+            node_id=wrong_node_id,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output = reducer.reduce_confirmation(pending_state, confirmation)
+
+        assert output.result.model_dump() == pending_state.model_dump()
+        assert output.intents == ()
+
+    def test_confirmation_after_complete_noop(
+        self,
+        reducer: RegistrationReducer,
+        complete_state: ModelRegistrationState,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> None:
+        """Confirmation on a complete state is a no-op."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            correlation_id=correlation_id,
+            node_id=node_id,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output = reducer.reduce_confirmation(complete_state, confirmation)
+
+        assert output.result.model_dump() == complete_state.model_dump()
+        assert output.intents == ()
+
+    def test_confirmation_after_failed_noop(
+        self,
+        reducer: RegistrationReducer,
+        failed_state: ModelRegistrationState,
+        node_id: UUID,
+        correlation_id: UUID,
+    ) -> None:
+        """Confirmation on a failed state is a no-op."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            correlation_id=correlation_id,
+            node_id=node_id,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output = reducer.reduce_confirmation(failed_state, confirmation)
+
+        assert output.result.model_dump() == failed_state.model_dump()
+        assert output.intents == ()
+
+    def test_confirmation_from_idle_noop(
         self,
         reducer: RegistrationReducer,
         initial_state: ModelRegistrationState,
     ) -> None:
-        """Test that reduce_confirmation raises NotImplementedError until implemented.
-
-        This test ensures:
-        1. The placeholder method exists and is callable
-        2. NotImplementedError is raised with appropriate message
-        3. The error message references OMN-996 for tracking
-
-        This prevents accidental regression when implementing the method
-        and ensures developers are directed to the tracking ticket.
-        """
+        """Confirmation on an idle state (node_id=None) is a no-op."""
         from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
 
-        # Create a valid confirmation event
         confirmation = ModelRegistrationConfirmation(
             event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
             correlation_id=uuid4(),
@@ -6022,35 +6389,39 @@ class TestReduceConfirmation:
             timestamp=TEST_TIMESTAMP,
         )
 
-        # Verify NotImplementedError is raised with OMN-996 reference
-        with pytest.raises(NotImplementedError, match="OMN-996"):
-            reducer.reduce_confirmation(initial_state, confirmation)
+        output = reducer.reduce_confirmation(initial_state, confirmation)
 
-    def test_reduce_confirmation_error_message_includes_ticket_url(
+        assert output.result.model_dump() == initial_state.model_dump()
+        assert output.intents == ()
+
+    def test_event_id_derivation_unique_per_event_type(
         self,
         reducer: RegistrationReducer,
-        initial_state: ModelRegistrationState,
     ) -> None:
-        """Test that error message includes the Linear ticket URL.
-
-        This ensures developers can easily find the implementation
-        tracking ticket when encountering the NotImplementedError.
-        """
+        """Same correlation_id with different event types produces different event IDs."""
         from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
 
-        confirmation = ModelRegistrationConfirmation(
-            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
-            correlation_id=uuid4(),
-            node_id=uuid4(),
-            success=False,
-            error_message="Connection refused",
+        shared_corr = uuid4()
+        shared_node = uuid4()
+
+        consul_confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            correlation_id=shared_corr,
+            node_id=shared_node,
+            success=True,
             timestamp=TEST_TIMESTAMP,
         )
 
-        with pytest.raises(NotImplementedError) as exc_info:
-            reducer.reduce_confirmation(initial_state, confirmation)
-
-        error_message = str(exc_info.value)
-        assert "linear.app/omninode/issue/OMN-996" in error_message, (
-            "Error message should include the Linear ticket URL for tracking"
+        postgres_confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
+            correlation_id=shared_corr,
+            node_id=shared_node,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
         )
+
+        # Access private method for direct verification
+        consul_event_id = reducer._derive_confirmation_event_id(consul_confirmation)
+        postgres_event_id = reducer._derive_confirmation_event_id(postgres_confirmation)
+
+        assert consul_event_id != postgres_event_id
