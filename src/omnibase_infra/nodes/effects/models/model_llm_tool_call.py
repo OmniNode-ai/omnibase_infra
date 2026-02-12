@@ -45,6 +45,7 @@ class ModelLlmToolCall(BaseModel):
 
     id: str = Field(
         ...,
+        min_length=1,
         description="Provider-assigned identifier for this tool call.",
     )
     type: Literal["function"] = Field(

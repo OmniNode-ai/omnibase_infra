@@ -79,12 +79,18 @@ class TestModelLlmToolCallFieldValidation:
         with pytest.raises(ValidationError):
             ModelLlmToolCall(function=fn)  # type: ignore[call-arg]
 
-    def test_id_empty_string_accepted(self) -> None:
-        """Test that id='' is accepted (no min_length constraint on id)."""
+    def test_id_empty_string_rejected(self) -> None:
+        """Test that id='' is rejected (min_length=1 constraint on id)."""
         fn = ModelLlmFunctionCall(name="f", arguments="{}")
-        tc = ModelLlmToolCall(id="", function=fn)
+        with pytest.raises(ValidationError):
+            ModelLlmToolCall(id="", function=fn)
 
-        assert tc.id == ""
+    def test_id_non_empty_accepted(self) -> None:
+        """Test that a non-empty id string is accepted."""
+        fn = ModelLlmFunctionCall(name="f", arguments="{}")
+        tc = ModelLlmToolCall(id="call_valid", function=fn)
+
+        assert tc.id == "call_valid"
 
     def test_function_is_required(self) -> None:
         """Test that omitting function raises ValidationError."""

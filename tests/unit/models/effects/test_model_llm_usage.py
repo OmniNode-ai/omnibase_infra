@@ -7,6 +7,8 @@ Tests cover:
 - Default construction with all-zero tokens and cost_usd=None
 - Auto-computation of tokens_total from tokens_input + tokens_output
 - Consistency validation when tokens_total is explicitly provided
+- Ambiguous sentinel fix: tokens_total=None means auto-compute, explicit 0 is
+  validated against tokens_input + tokens_output
 - Field-level ge=0 constraints on all token fields and cost_usd
 - cost_usd optional float validation
 - Immutability (frozen=True) and extra field rejection (extra="forbid")
@@ -49,11 +51,30 @@ class TestConstruction:
 
         assert usage.tokens_total == 150
 
-    def test_auto_compute_when_total_zero(self) -> None:
-        """Explicit tokens_total=0 still triggers auto-computation."""
-        usage = ModelLlmUsage(tokens_input=100, tokens_output=50, tokens_total=0)
+    def test_auto_compute_when_total_none(self) -> None:
+        """Explicit tokens_total=None triggers auto-computation."""
+        usage = ModelLlmUsage(tokens_input=100, tokens_output=50, tokens_total=None)
 
         assert usage.tokens_total == 150
+
+    def test_explicit_total_zero_with_nonzero_components_raises(self) -> None:
+        """Explicit tokens_total=0 with non-zero input+output raises ValueError.
+
+        This verifies the sentinel-ambiguity fix: 0 is no longer conflated
+        with 'not provided'.
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            ModelLlmUsage(tokens_input=100, tokens_output=50, tokens_total=0)
+
+        error_text = str(exc_info.value)
+        assert "0" in error_text
+        assert "150" in error_text
+
+    def test_explicit_total_zero_with_zero_components_valid(self) -> None:
+        """Explicit tokens_total=0 with input=0 and output=0 is valid."""
+        usage = ModelLlmUsage(tokens_input=0, tokens_output=0, tokens_total=0)
+
+        assert usage.tokens_total == 0
 
     def test_explicit_total_matching_sum(self) -> None:
         """Explicit tokens_total matching the sum is accepted."""

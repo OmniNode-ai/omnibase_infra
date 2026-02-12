@@ -30,14 +30,17 @@ class ModelLlmUsage(BaseModel):
     object even when the provider omits individual fields.
 
     When ``tokens_total`` is not explicitly provided (i.e. left at the
-    default of ``0``), it is auto-computed as ``tokens_input + tokens_output``.
-    When all three values are explicitly supplied, a consistency check
-    ensures ``tokens_total == tokens_input + tokens_output``.
+    default of ``None``), it is auto-computed as
+    ``tokens_input + tokens_output``.  When explicitly supplied, a
+    consistency check ensures
+    ``tokens_total == tokens_input + tokens_output``.
 
     Attributes:
         tokens_input: Number of tokens in the prompt / input messages.
         tokens_output: Number of tokens generated in the completion.
-        tokens_total: Total tokens consumed (input + output).
+        tokens_total: Total tokens consumed (input + output).  Defaults to
+            ``None`` which triggers auto-computation from
+            ``tokens_input + tokens_output``.
         cost_usd: Estimated cost in US dollars.  Always ``None`` in v1;
             reserved for future provider-specific billing integration.
 
@@ -59,10 +62,11 @@ class ModelLlmUsage(BaseModel):
         ge=0,
         description="Number of tokens generated in the completion.",
     )
-    tokens_total: int = Field(
-        default=0,
+    tokens_total: int | None = Field(
+        default=None,
         ge=0,
-        description="Total tokens consumed (input + output).",
+        description="Total tokens consumed (input + output). "
+        "None triggers auto-computation.",
     )
     cost_usd: float | None = Field(
         default=None,
@@ -75,19 +79,20 @@ class ModelLlmUsage(BaseModel):
     def _compute_or_validate_tokens_total(cls, values: object) -> object:
         """Auto-compute tokens_total or validate consistency.
 
-        When tokens_total is omitted or left at the default (0), it is set to
-        tokens_input + tokens_output. When explicitly provided as non-zero, it
-        must equal the sum of tokens_input and tokens_output.
+        When tokens_total is omitted or ``None``, it is set to
+        ``tokens_input + tokens_output``.  When explicitly provided
+        (including zero), it must equal the sum of tokens_input and
+        tokens_output.
         """
         if not isinstance(values, dict):
             return values
 
         tokens_input = values.get("tokens_input", 0)
         tokens_output = values.get("tokens_output", 0)
-        tokens_total = values.get("tokens_total", 0)
+        tokens_total = values.get("tokens_total")
 
         expected = tokens_input + tokens_output
-        if tokens_total == 0:
+        if tokens_total is None:
             values["tokens_total"] = expected
         elif tokens_total != expected:
             raise ValueError(

@@ -37,7 +37,11 @@ class ModelLlmFunctionCall(BaseModel):
     )
     arguments: str = Field(
         ...,
-        description="Serialised JSON string of the call arguments.",
+        description=(
+            "Serialised JSON string of the call arguments. "
+            "No JSON validation is performed at the model level; "
+            "callers are responsible for parsing and validating the content."
+        ),
     )
 
 
