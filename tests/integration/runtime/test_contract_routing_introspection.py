@@ -7,7 +7,7 @@ handler routing. Verifies:
 
 1. Contract YAML declares the correct handler routing for introspection events
 2. Dispatch engine routes introspection events to the correct dispatcher
-3. Introspection handler receives correct dispatch context (time, correlation_id)
+3. DispatchContextEnforcer creates correct context for orchestrator nodes (time, correlation_id)
 4. Contract handler routing matches runtime-importable module paths
 
 Related:
@@ -57,12 +57,18 @@ try:
         / "contract.yaml"
     )
 except RuntimeError:
-    PROJECT_ROOT = None
-    CONTRACT_PATH = None
+    PROJECT_ROOT = None  # type: ignore[assignment]
+    CONTRACT_PATH = None  # type: ignore[assignment]
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(CONTRACT_PATH is None, reason="Project root not found"),
+    pytest.mark.skipif(
+        CONTRACT_PATH is None,
+        reason=(
+            "Project root not found: no pyproject.toml found walking up from "
+            f"{Path(__file__).resolve().parent}. Check test working directory."
+        ),
+    ),
 ]
 
 
@@ -86,7 +92,6 @@ class ContextCapturingDispatcher:
         self._category = category
         self._message_types = message_types or set()
 
-        self.captured_context: ModelDispatchContext | None = None
         self.captured_envelope: object | None = None
         self.invocation_count: int = 0
 
@@ -111,9 +116,8 @@ class ContextCapturingDispatcher:
         envelope: object,
         context: ModelDispatchContext | None = None,
     ) -> ModelDispatchResult:
-        """Handle the message and capture context for assertions."""
+        """Handle the message and capture the envelope for assertions."""
         self.captured_envelope = envelope
-        self.captured_context = context
         self.invocation_count += 1
 
         return ModelDispatchResult(
@@ -244,11 +248,15 @@ class TestDispatchEngineRoutesIntrospection:
         assert result.status == EnumDispatchStatus.SUCCESS
         assert dispatcher.invocation_count == 1
 
-    @pytest.mark.asyncio
-    async def test_introspection_handler_receives_correct_context(self) -> None:
-        """Verify dispatching an introspection event to an orchestrator
-        dispatcher provides a context with ``now`` set (time injection)
-        and correct correlation_id propagation.
+    def test_dispatch_context_enforcer_creates_correct_context(self) -> None:
+        """Verify DispatchContextEnforcer creates a properly-shaped context
+        for ORCHESTRATOR nodes processing introspection events.
+
+        This is a unit-level test of ``DispatchContextEnforcer.create_context_for_node_kind()``.
+        It does NOT test end-to-end dispatch engine context injection; it verifies
+        that the enforcer produces a context with time injection enabled,
+        correct correlation_id propagation, and correct node_kind for an
+        ORCHESTRATOR handling an introspection event.
         """
         from omnibase_core.models.events.model_event_envelope import (
             ModelEventEnvelope,
@@ -257,13 +265,6 @@ class TestDispatchEngineRoutesIntrospection:
         enforcer = DispatchContextEnforcer()
         correlation_id = uuid4()
 
-        dispatcher = ContextCapturingDispatcher(
-            dispatcher_id="test-introspection-context",
-            node_kind=EnumNodeKind.ORCHESTRATOR,
-            category=EnumMessageCategory.EVENT,
-            message_types={"ModelNodeIntrospectionEvent"},
-        )
-
         envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
             correlation_id=correlation_id,
             event_type="ModelNodeIntrospectionEvent",
@@ -271,22 +272,20 @@ class TestDispatchEngineRoutesIntrospection:
         )
 
         before_time = datetime.now(UTC)
-        ctx = enforcer.create_context_for_dispatcher(
-            dispatcher=dispatcher,
+        ctx = enforcer.create_context_for_node_kind(
+            node_kind=EnumNodeKind.ORCHESTRATOR,
             envelope=envelope,
+            dispatcher_id="test-introspection-context",
         )
         after_time = datetime.now(UTC)
 
-        # Simulate dispatch with context
-        await dispatcher.handle(envelope, context=ctx)
-
         # Verify context has time injection (orchestrator should receive now)
-        assert dispatcher.captured_context is not None
-        assert dispatcher.captured_context.now is not None
-        assert before_time <= dispatcher.captured_context.now <= after_time
-        assert dispatcher.captured_context.has_time_injection
-        assert dispatcher.captured_context.correlation_id == correlation_id
-        assert dispatcher.captured_context.node_kind == EnumNodeKind.ORCHESTRATOR
+        assert ctx is not None
+        assert ctx.now is not None
+        assert before_time <= ctx.now <= after_time
+        assert ctx.has_time_injection
+        assert ctx.correlation_id == correlation_id
+        assert ctx.node_kind == EnumNodeKind.ORCHESTRATOR
 
 
 class TestContractHandlerRoutingMatchesRuntime:

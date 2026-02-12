@@ -74,7 +74,19 @@ def _seed_mock_handlers(process: object) -> None:
     """Seed mock handlers on a RuntimeHostProcess to bypass fail-fast validation.
 
     This is the demo-script equivalent of ``seed_mock_handlers`` from
-    ``tests/conftest.py``.  Keep the two implementations in sync.
+    ``tests.helpers.runtime_helpers``.  This script is a standalone entry
+    point that cannot import from the tests package, so the logic is
+    intentionally duplicated here.
+
+    Differences from the canonical ``tests.helpers.runtime_helpers.seed_mock_handlers``:
+
+    * Handler name is ``"demo-handler"`` (vs ``"mock"`` in tests) to make
+      demo output clearly distinguishable from test output.
+    * ``execute`` returns ``{"success": True}`` (vs ``{"success": True,
+      "result": "mock"}`` in tests) because the demo never inspects the
+      result payload.
+    * Does not accept ``handlers`` or ``initialized`` keyword arguments
+      because the demo always uses a single default handler.
 
     The RuntimeHostProcess.start() method validates that handlers are
     registered.  This helper sets up a minimal mock handler to satisfy
@@ -93,6 +105,10 @@ def _seed_mock_handlers(process: object) -> None:
     mock_handler.shutdown = AsyncMock()
     mock_handler.health_check = AsyncMock(return_value={"healthy": True})
     mock_handler.initialized = True
+    # Private attribute access: RuntimeHostProcess does not expose a public API
+    # for handler seeding.  Setting _handlers directly is the only way to inject
+    # handlers without the full registry wiring, which is not available in this
+    # standalone demo script.
     process._handlers = {"demo-handler": mock_handler}  # type: ignore[attr-defined]
 
 

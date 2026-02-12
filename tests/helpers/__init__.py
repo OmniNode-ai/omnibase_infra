@@ -71,6 +71,10 @@ Available Utilities:
 
     Path Utilities:
         - find_project_root: Locate the project root by walking up to pyproject.toml
+
+    Runtime Helpers:
+        - make_runtime_config: Create RuntimeHostProcess config with defaults
+        - seed_mock_handlers: Seed mock handlers to bypass fail-fast validation
 """
 
 from tests.helpers.ast_analysis import (
@@ -104,6 +108,7 @@ from tests.helpers.replay_utils import (
     detect_sequence_number_violations,
     detect_timestamp_order_violations,
 )
+from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 from tests.helpers.statistics_utils import (
     BinomialConfidenceInterval,
     MemorySnapshot,
@@ -196,4 +201,7 @@ __all__ = [
     "check_postgres_reachable",
     "check_postgres_reachable_simple",
     "should_skip_migration",
+    # Runtime helpers
+    "make_runtime_config",
+    "seed_mock_handlers",
 ]

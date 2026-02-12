@@ -1106,124 +1106,14 @@ async def full_infrastructure_cleanup(
 # =============================================================================
 # RuntimeHostProcess Handler Seeding Helpers
 # =============================================================================
-# RuntimeHostProcess.start() performs fail-fast validation requiring handlers
-# to be registered. These helpers allow tests to bypass this validation when
-# testing other aspects of the runtime lifecycle.
-#
-# Why Seeding is Needed:
-#   - RuntimeHostProcess validates handler registration during start()
-#   - Without handlers, start() raises RuntimeHostError (fail-fast)
-#   - Tests focusing on non-handler functionality need to bypass this
-#   - Seeding provides a minimal mock handler to satisfy validation
-#
-# Usage:
-#   1. Direct function call:
-#      from tests.conftest import seed_mock_handlers
-#      seed_mock_handlers(process)
-#      await process.start()
-#
-#   2. With custom handlers dict:
-#      seed_mock_handlers(process, handlers={"db": db_mock, "http": http_mock})
-#
-#   3. Using fixture for the mock handler:
-#      def test_example(mock_runtime_handler):
-#          process._handlers = {"mock": mock_runtime_handler}
+# Canonical implementations live in ``tests.helpers.runtime_helpers``.
+# Re-exported here for backwards compatibility so that existing imports of
+# ``from tests.conftest import make_runtime_config, seed_mock_handlers``
+# continue to work.  New code should import directly from
+# ``tests.helpers.runtime_helpers``.
 # =============================================================================
 
-
-def make_runtime_config(**overrides: object) -> dict[str, object]:
-    """Create a runtime config dict with default required fields and optional overrides.
-
-    RuntimeHostProcess requires 'service_name' and 'node_name' in config for proper
-    node identity construction (OMN-1602). This helper provides default values for
-    these required fields while allowing specific test cases to override any config.
-
-    Args:
-        **overrides: Config keys to override or add to the default config.
-
-    Returns:
-        A config dict suitable for RuntimeHostProcess initialization.
-
-    Example:
-        >>> config = make_runtime_config()
-        >>> config["service_name"]
-        'test-service'
-
-        >>> config = make_runtime_config(input_topic="custom.input")
-        >>> config["input_topic"]
-        'custom.input'
-    """
-    config: dict[str, object] = {
-        "service_name": "test-service",
-        "node_name": "test-node",
-        "env": "test",
-        "version": "v1",
-    }
-    config.update(overrides)
-    return config
-
-
-def seed_mock_handlers(
-    process: object,
-    *,
-    handlers: dict[str, MagicMock] | None = None,
-    initialized: bool = True,
-) -> None:
-    """Seed mock handlers on a RuntimeHostProcess to bypass fail-fast validation.
-
-    The RuntimeHostProcess.start() method validates that handlers are registered.
-    This helper sets up minimal mock handler(s) to satisfy that check, allowing
-    tests to focus on other runtime functionality.
-
-    The default mock handler includes all async lifecycle methods:
-    - execute: AsyncMock for handling envelopes
-    - initialize: AsyncMock for handler initialization
-    - shutdown: AsyncMock for safe cleanup with await process.stop()
-    - health_check: AsyncMock returning {"healthy": True}
-
-    Args:
-        process: The RuntimeHostProcess instance to seed handlers on.
-            Typed as object to avoid import dependency, but must have _handlers attr.
-        handlers: Optional dict of handler name to mock handler. If not provided,
-            a default mock handler named "mock" is created with all lifecycle methods.
-        initialized: If True (default), marks the mock handler as initialized
-            so health_check returns healthy status.
-
-    Example:
-        >>> from tests.conftest import seed_mock_handlers
-        >>> process = RuntimeHostProcess(event_bus=mock_event_bus)
-        >>> seed_mock_handlers(process)
-        >>> await process.start()  # Will not raise fail-fast error
-
-        >>> # With custom handlers
-        >>> seed_mock_handlers(process, handlers={"db": db_mock, "http": http_mock})
-
-    Note:
-        This function directly sets the private _handlers attribute. This is
-        intentional for testing purposes to bypass the normal handler registration
-        flow. Do not use in production code.
-
-    Warning:
-        When providing custom handlers, ensure they have the required async methods
-        (shutdown, health_check) for safe cleanup during process.stop().
-    """
-    if handlers is not None:
-        process._handlers = handlers  # type: ignore[attr-defined]
-        return
-
-    # Create default mock handler with required async methods
-    # These methods are needed for safe cleanup with await process.stop()
-    mock_handler = MagicMock()
-    mock_handler.execute = AsyncMock(return_value={"success": True, "result": "mock"})
-    mock_handler.initialize = AsyncMock()
-    mock_handler.shutdown = AsyncMock()
-    mock_handler.health_check = AsyncMock(return_value={"healthy": True})
-
-    # Mark as initialized for health check compatibility
-    if initialized:
-        mock_handler.initialized = True
-
-    process._handlers = {"mock": mock_handler}  # type: ignore[attr-defined]
+from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
 
 @pytest.fixture
