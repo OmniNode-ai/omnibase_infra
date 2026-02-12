@@ -34,8 +34,6 @@ from omnibase_infra.models.dispatch.model_dispatch_context import ModelDispatchC
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
 from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
 
-pytestmark = pytest.mark.integration
-
 
 def _find_project_root() -> Path:
     """Walk up from this file to find the project root (contains pyproject.toml)."""
@@ -49,15 +47,24 @@ def _find_project_root() -> Path:
 
 
 # Path to the registration orchestrator contract
-PROJECT_ROOT = _find_project_root()
-CONTRACT_PATH = (
-    PROJECT_ROOT
-    / "src"
-    / "omnibase_infra"
-    / "nodes"
-    / "node_registration_orchestrator"
-    / "contract.yaml"
-)
+try:
+    PROJECT_ROOT = _find_project_root()
+    CONTRACT_PATH = (
+        PROJECT_ROOT
+        / "src"
+        / "omnibase_infra"
+        / "nodes"
+        / "node_registration_orchestrator"
+        / "contract.yaml"
+    )
+except RuntimeError:
+    PROJECT_ROOT = None
+    CONTRACT_PATH = None
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(CONTRACT_PATH is None, reason="Project root not found"),
+]
 
 
 # =============================================================================

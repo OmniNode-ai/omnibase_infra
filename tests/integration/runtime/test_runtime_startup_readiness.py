@@ -37,13 +37,14 @@ def _get_aiohttp_bound_port(health_server: ServiceHealth) -> int:
     aiohttp does not expose the bound port publicly when using port=0.
     Accessing internals is the only way to discover the auto-assigned port.
     """
-    site = health_server._site
-    assert site is not None
-    internal_server = site._server
-    assert internal_server is not None
-    sockets = getattr(internal_server, "sockets", None)
-    assert sockets is not None and len(sockets) > 0
-    return sockets[0].getsockname()[1]
+    try:
+        site = health_server._site
+        internal_server = site._server
+        sock = next(iter(internal_server.sockets))
+        return sock.getsockname()[1]
+    except AttributeError as e:
+        msg = f"aiohttp internals changed, update port discovery logic: {e}"
+        raise RuntimeError(msg) from e
 
 
 # SLA: Runtime must reach ready state within this many seconds.

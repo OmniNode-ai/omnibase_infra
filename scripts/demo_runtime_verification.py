@@ -34,8 +34,21 @@ import yaml
 # Constants
 # =============================================================================
 
+
+def _find_project_root() -> Path:
+    """Walk up from this file to find the project root (contains pyproject.toml)."""
+    current = Path(__file__).resolve().parent
+    while current != current.parent:
+        if (current / "pyproject.toml").exists():
+            return current
+        current = current.parent
+    msg = "Could not find project root (no pyproject.toml found)"
+    raise RuntimeError(msg)
+
+
+PROJECT_ROOT = _find_project_root()
 CONTRACT_PATH = (
-    Path(__file__).resolve().parent.parent
+    PROJECT_ROOT
     / "src"
     / "omnibase_infra"
     / "nodes"
@@ -116,28 +129,31 @@ async def verify_runtime_startup(results: VerificationResult) -> None:
 
         t_start = time.monotonic()
         await runtime.start()
-        health = await runtime.health_check()
-        t_elapsed = time.monotonic() - t_start
-        elapsed_ms = t_elapsed * 1000
+        try:
+            health = await runtime.health_check()
+            t_elapsed = time.monotonic() - t_start
+            elapsed_ms = t_elapsed * 1000
 
-        healthy = health.get("healthy", False)
-        is_running = health.get("is_running", False)
+            healthy = health.get("healthy", False)
+            is_running = health.get("is_running", False)
 
-        print(f"  Startup time:  {elapsed_ms:.1f} ms")
-        print(f"  Healthy:       {healthy}")
-        print(f"  Running:       {is_running}")
-        print(
-            f"  SLA (<{READY_STATE_SLA_SECONDS}s): {'PASS' if t_elapsed < READY_STATE_SLA_SECONDS else 'FAIL'}"
-        )
+            print(f"  Startup time:  {elapsed_ms:.1f} ms")
+            print(f"  Healthy:       {healthy}")
+            print(f"  Running:       {is_running}")
+            print(
+                f"  SLA (<{READY_STATE_SLA_SECONDS}s): {'PASS' if t_elapsed < READY_STATE_SLA_SECONDS else 'FAIL'}"
+            )
 
-        results.record(
-            name="Runtime reaches ready state",
-            passed=bool(healthy and is_running and t_elapsed < READY_STATE_SLA_SECONDS),
-            detail=f"{elapsed_ms:.1f} ms startup, healthy={healthy}",
-            elapsed_ms=elapsed_ms,
-        )
-
-        await runtime.stop()
+            results.record(
+                name="Runtime reaches ready state",
+                passed=bool(
+                    healthy and is_running and t_elapsed < READY_STATE_SLA_SECONDS
+                ),
+                detail=f"{elapsed_ms:.1f} ms startup, healthy={healthy}",
+                elapsed_ms=elapsed_ms,
+            )
+        finally:
+            await runtime.stop()
 
 
 # =============================================================================
@@ -307,7 +323,7 @@ async def verify_dispatch_routing(results: VerificationResult) -> None:
 # =============================================================================
 
 
-async def verify_contract_handler_structure(results: VerificationResult) -> None:
+def verify_contract_handler_structure(results: VerificationResult) -> None:
     """Verify loaded contracts declare correct node types and valid handler routing."""
     print("\n--- Step 4: Contract Handler Routing Structure ---")
 
@@ -448,7 +464,7 @@ async def run_verification() -> bool:
     await verify_dispatch_routing(results)
 
     # Step 4: Contract handler routing structure
-    await verify_contract_handler_structure(results)
+    verify_contract_handler_structure(results)
 
     # Summary
     display_summary(results)
