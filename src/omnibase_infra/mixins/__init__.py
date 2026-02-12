@@ -14,6 +14,7 @@ Exports (in __all__):
         - MixinAsyncCircuitBreaker: Coroutine-safe circuit breaker implementation
         - MixinDictLikeAccessors: Dictionary-style access helpers
         - MixinEnvelopeExtraction: Event envelope extraction utilities
+        - MixinLlmHttpTransport: LLM HTTP transport with retry and circuit breaker
         - MixinNodeIntrospection: Node capability introspection
         - MixinPostgresErrorResponse: PostgreSQL exception handling for persistence
         - MixinPostgresOpExecutor: PostgreSQL operation execution with error handling
@@ -53,6 +54,7 @@ from omnibase_infra.enums import EnumCircuitState, EnumRetryErrorCategory
 from omnibase_infra.mixins.mixin_async_circuit_breaker import MixinAsyncCircuitBreaker
 from omnibase_infra.mixins.mixin_dict_like_accessors import MixinDictLikeAccessors
 from omnibase_infra.mixins.mixin_envelope_extraction import MixinEnvelopeExtraction
+from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
 from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
 from omnibase_infra.mixins.mixin_postgres_error_response import (
     MixinPostgresErrorResponse,
@@ -73,6 +75,7 @@ __all__: list[str] = [
     "MixinAsyncCircuitBreaker",
     "MixinDictLikeAccessors",
     "MixinEnvelopeExtraction",
+    "MixinLlmHttpTransport",
     "MixinNodeIntrospection",
     "MixinPostgresErrorResponse",
     "MixinPostgresOpExecutor",
