@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-from urllib.parse import quote_plus
 from uuid import uuid4
 
 import click
@@ -204,18 +203,31 @@ def registry() -> None:
 
 
 def _get_db_dsn() -> str:
-    """Build PostgreSQL DSN from environment variables."""
-    host = os.environ.get("POSTGRES_HOST", "192.168.86.200")
-    port = os.environ.get("POSTGRES_PORT", "5436")
-    user = os.environ.get("POSTGRES_USER", "postgres")
-    password = os.environ.get("POSTGRES_PASSWORD", "")
-    database = os.environ.get("POSTGRES_DATABASE", "omninode_bridge")
-    if not password:
-        click.echo(
-            "Warning: POSTGRES_PASSWORD not set. Set it via environment or .env file.",
-            err=True,
+    """Get PostgreSQL DSN from OMNIBASE_INFRA_DB_URL.
+
+    Generates a correlation_id for traceability in error messages.
+
+    Raises:
+        click.ClickException: If OMNIBASE_INFRA_DB_URL is not set or invalid.
+    """
+    from omnibase_infra.runtime.models.model_postgres_pool_config import (
+        ModelPostgresPoolConfig,
+    )
+
+    correlation_id = uuid4()
+    db_url = (os.environ.get("OMNIBASE_INFRA_DB_URL") or "").strip()
+    if not db_url:
+        raise click.ClickException(
+            f"OMNIBASE_INFRA_DB_URL is required but not set "
+            f"(correlation_id={correlation_id}). "
+            "Set it to a PostgreSQL DSN, e.g. "
+            "postgresql://user:pass@host:5432/omnibase_infra"
         )
-    return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}"
+
+    try:
+        return ModelPostgresPoolConfig.validate_dsn(db_url)
+    except ValueError as exc:
+        raise click.ClickException(f"{exc} (correlation_id={correlation_id})") from exc
 
 
 def _sanitize_dsn(dsn: str) -> str:

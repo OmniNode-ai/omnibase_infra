@@ -10,7 +10,7 @@ Available Fixtures
 ------------------
 Infrastructure Availability Flags:
     CONSUL_AVAILABLE, POSTGRES_AVAILABLE, GRAPH_AVAILABLE,
-    QDRANT_AVAILABLE, VAULT_AVAILABLE, POSTGRES_HOST
+    QDRANT_AVAILABLE, VAULT_AVAILABLE
     - Boolean/string constants indicating if infrastructure is reachable.
 
 Skip Marker Fixtures:
@@ -75,7 +75,6 @@ from tests.integration.handlers.conftest import (
     GRAPH_AVAILABLE,
     # Database fixtures
     POSTGRES_AVAILABLE,
-    POSTGRES_HOST,
     # Qdrant fixtures
     QDRANT_AVAILABLE,
     # Vault fixtures

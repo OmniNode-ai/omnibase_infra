@@ -1,0 +1,97 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodePatternLifecycleEffect
+#
+# Pattern lifecycle tier management effect node.
+# Applies validation verdicts to promote, demote, or suppress patterns.
+#
+# Related Tickets:
+#   - OMN-2147: Validation Skeleton -- Orchestrator + Executor
+# Contract identifiers
+name: "node_pattern_lifecycle_effect"
+contract_name: "node_pattern_lifecycle_effect"
+node_name: "node_pattern_lifecycle_effect"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Description
+description: >
+  Effect node for pattern lifecycle tier management. Applies validation verdicts (PASS, FAIL, QUARANTINE) to pattern lifecycle state and computes tier transitions. Promotion tiers: OBSERVED -> SUGGESTED -> SHADOW_APPLY -> PROMOTED -> DEFAULT. Auto-rollback: 2 consecutive FAILs demote one tier, 3 consecutive FAILs suppress the pattern.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelLifecycleState"
+  module: "omnibase_infra.nodes.node_pattern_lifecycle_effect.models"
+  description: "Current lifecycle state for the pattern being evaluated."
+output_model:
+  name: "ModelLifecycleResult"
+  module: "omnibase_infra.nodes.node_pattern_lifecycle_effect.models"
+  description: "Result of the lifecycle tier update operation."
+# Capability declaration
+capabilities:
+  - name: "lifecycle.update"
+    description: "Apply validation verdict to pattern lifecycle tier"
+# IO operations
+io_operations:
+  - operation: "lifecycle.update"
+    description: "Update pattern lifecycle tier based on validation verdict"
+    idempotent: false
+# Handler routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "lifecycle.update"
+      handler_class: "HandlerLifecycleUpdate"
+      handler_module: "omnibase_infra.nodes.node_pattern_lifecycle_effect.handlers.handler_lifecycle_update"
+      description: "Apply verdict and compute tier transition"
+      input_model:
+        name: "ModelLifecycleState"
+        module: "omnibase_infra.nodes.node_pattern_lifecycle_effect.models"
+        description: "Current lifecycle state plus verdict to apply."
+# Error handling
+error_handling:
+  retry_policy:
+    max_retries: 1
+    initial_delay_ms: 50
+    max_delay_ms: 200
+    exponential_base: 2
+    retry_on:
+      - "OSError"
+  error_types:
+    - name: "LifecycleUpdateError"
+      description: "Failed to apply verdict to lifecycle state"
+      recoverable: true
+    - name: "InvalidTierTransitionError"
+      description: "Requested tier transition violates lifecycle rules"
+      recoverable: false
+# Health check
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  checks:
+    - name: "lifecycle_handler_loaded"
+      type: "handler"
+      critical: true
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-11"
+  tags:
+    - effect
+    - lifecycle
+    - pattern
+    - promotion
+    - validation
+  related_tickets:
+    - "OMN-2147"

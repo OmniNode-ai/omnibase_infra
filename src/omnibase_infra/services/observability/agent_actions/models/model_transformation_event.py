@@ -7,7 +7,9 @@ from Kafka. Transformation events capture when an agent transforms into
 a specialized form (e.g., polymorphic agent becoming api-architect).
 
 Design Decisions:
-    - extra="allow": Phase 1 flexibility - required fields typed, extras preserved
+    - frozen=True: Immutability for thread safety
+    - extra="forbid": Strict validation ensures schema compliance
+    - from_attributes=True: ORM/pytest-xdist compatibility
     - raw_payload: Optional field to preserve complete payload for schema tightening
     - created_at: Required for TTL cleanup job (Phase 2)
 
@@ -65,7 +67,8 @@ class ModelTransformationEvent(BaseModel):
     """
 
     model_config = ConfigDict(
-        extra="allow",
+        frozen=True,
+        extra="forbid",
         from_attributes=True,
     )
 
@@ -107,6 +110,20 @@ class ModelTransformationEvent(BaseModel):
     raw_payload: dict[str, JsonType] | None = Field(
         default=None,
         description="Complete raw payload for Phase 2 schema tightening.",
+    )
+
+    # ---- Project Context (absorbed from omniclaude - OMN-2057) ----
+    project_path: str | None = Field(
+        default=None,
+        description="Absolute path to the project being worked on.",
+    )
+    project_name: str | None = Field(
+        default=None,
+        description="Human-readable project name.",
+    )
+    claude_session_id: str | None = Field(
+        default=None,
+        description="Claude Code session identifier.",
     )
 
     def __str__(self) -> str:

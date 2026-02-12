@@ -2,10 +2,19 @@
 
 Loads from environment variables with OMNIBASE_INFRA_SESSION_STORAGE_ prefix.
 
+Note: This module intentionally uses individual POSTGRES_* env vars (via
+pydantic-settings prefix) rather than a single DSN. The session storage uses
+a separate env prefix (OMNIBASE_INFRA_SESSION_STORAGE_) and may target a
+different database than the main OMNIBASE_INFRA_DB_URL. Migration to DSN-based
+configuration is tracked separately from the OMN-2065 DB split.
+
 Moved from omniclaude as part of OMN-1526 architectural cleanup.
 """
 
 from __future__ import annotations
+
+import ipaddress
+from urllib.parse import quote_plus
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -38,7 +47,7 @@ class ConfigSessionStorage(BaseSettings):
         description="PostgreSQL port",
     )
     postgres_database: str = Field(
-        default="omninode_bridge",
+        default="omnibase_infra",
         description="PostgreSQL database name",
     )
     postgres_user: str = Field(
@@ -89,32 +98,68 @@ class ConfigSessionStorage(BaseSettings):
             )
         return self
 
+    @staticmethod
+    def _format_host(host: str) -> str:
+        """Format host for DSN, wrapping IPv6 addresses in brackets.
+
+        Uses ``ipaddress.IPv6Address`` for definitive detection rather than
+        a ``":" in host`` heuristic, which would false-positive on strings
+        like ``host:port`` accidentally passed as a bare hostname.
+
+        Args:
+            host: Hostname or IP address.
+
+        Returns:
+            Host string suitable for embedding in a DSN.
+        """
+        try:
+            ipaddress.IPv6Address(host)
+        except ValueError:
+            return host
+        return f"[{host}]"
+
     @property
     def dsn(self) -> str:
         """Build PostgreSQL DSN from components.
 
+        Credentials, database name, and host are URL-encoded or formatted
+        to handle special characters that would otherwise break the DSN.
+
         Returns:
             PostgreSQL connection string.
         """
-        password = self.postgres_password.get_secret_value()
+        encoded_user = quote_plus(self.postgres_user, safe="")
+        encoded_password = quote_plus(
+            self.postgres_password.get_secret_value(), safe=""
+        )
+        encoded_database = quote_plus(self.postgres_database, safe="")
+        host = self._format_host(self.postgres_host)
         return (
-            f"postgresql://{self.postgres_user}:{password}"
-            f"@{self.postgres_host}:{self.postgres_port}"
-            f"/{self.postgres_database}"
+            f"postgresql://{encoded_user}:{encoded_password}"
+            f"@{host}:{self.postgres_port}"
+            f"/{encoded_database}"
         )
 
     @property
     def dsn_async(self) -> str:
         """Build async PostgreSQL DSN for asyncpg.
 
+        Credentials, database name, and host are URL-encoded or formatted
+        to handle special characters that would otherwise break the DSN.
+
         Returns:
             PostgreSQL connection string with postgresql+asyncpg scheme.
         """
-        password = self.postgres_password.get_secret_value()
+        encoded_user = quote_plus(self.postgres_user, safe="")
+        encoded_password = quote_plus(
+            self.postgres_password.get_secret_value(), safe=""
+        )
+        encoded_database = quote_plus(self.postgres_database, safe="")
+        host = self._format_host(self.postgres_host)
         return (
-            f"postgresql+asyncpg://{self.postgres_user}:{password}"
-            f"@{self.postgres_host}:{self.postgres_port}"
-            f"/{self.postgres_database}"
+            f"postgresql+asyncpg://{encoded_user}:{encoded_password}"
+            f"@{host}:{self.postgres_port}"
+            f"/{encoded_database}"
         )
 
     @property
@@ -124,10 +169,13 @@ class ConfigSessionStorage(BaseSettings):
         Returns:
             PostgreSQL connection string with password replaced by ***.
         """
+        encoded_user = quote_plus(self.postgres_user, safe="")
+        encoded_database = quote_plus(self.postgres_database, safe="")
+        host = self._format_host(self.postgres_host)
         return (
-            f"postgresql://{self.postgres_user}:***"
-            f"@{self.postgres_host}:{self.postgres_port}"
-            f"/{self.postgres_database}"
+            f"postgresql://{encoded_user}:***"
+            f"@{host}:{self.postgres_port}"
+            f"/{encoded_database}"
         )
 
     def __repr__(self) -> str:

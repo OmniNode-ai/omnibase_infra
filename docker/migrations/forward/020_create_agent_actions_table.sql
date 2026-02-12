@@ -35,7 +35,12 @@ CREATE TABLE IF NOT EXISTS agent_actions (
     duration_ms INTEGER,
     result TEXT,
     error_message TEXT,
-    metadata JSONB
+    metadata JSONB,
+
+    -- Project context (absorbed from omniclaude - OMN-2057)
+    project_path TEXT,
+    project_name VARCHAR(255),
+    working_directory TEXT
 );
 
 -- ============================================================================
@@ -62,3 +67,6 @@ COMMENT ON COLUMN agent_actions.duration_ms IS 'Action execution duration in mil
 COMMENT ON COLUMN agent_actions.result IS 'Action result or output (text)';
 COMMENT ON COLUMN agent_actions.error_message IS 'Error message if action failed';
 COMMENT ON COLUMN agent_actions.metadata IS 'JSON payload with action-specific details';
+COMMENT ON COLUMN agent_actions.project_path IS 'Absolute path to the project being worked on (absorbed from omniclaude OMN-2057)';
+COMMENT ON COLUMN agent_actions.project_name IS 'Human-readable project name (absorbed from omniclaude OMN-2057)';
+COMMENT ON COLUMN agent_actions.working_directory IS 'Working directory where the action was executed (absorbed from omniclaude OMN-2057)';

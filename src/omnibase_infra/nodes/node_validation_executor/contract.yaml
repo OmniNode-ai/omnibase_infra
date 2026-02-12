@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeValidationExecutor
+#
+# Effect node that runs validation checks (typecheck, lint, unit tests).
+# Receives a validation plan and executes checks, producing check results.
+#
+# Related Tickets:
+#   - OMN-2147: Validation Executor Effect Node
+# Contract identifiers
+name: "node_validation_executor"
+contract_name: "node_validation_executor"
+node_name: "node_validation_executor"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Description
+description: >
+  Effect node for running validation checks against a candidate. Receives a ModelValidationPlan and executes each planned check (typecheck, lint, unit tests, integration tests, risk assessment, cost measurement). Each check produces a ModelCheckResult. Results are aggregated into a ModelExecutorResult.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelValidationPlan"
+  module: "omnibase_infra.nodes.node_validation_orchestrator.models"
+  description: "Validation plan containing the checks to execute."
+output_model:
+  name: "ModelExecutorResult"
+  module: "omnibase_infra.nodes.node_validation_executor.models"
+  description: "Aggregated result of all check executions."
+# Capability declaration
+capabilities:
+  - name: "validation.execute_checks"
+    description: "Execute validation checks from a plan"
+# IO operations
+io_operations:
+  - operation: "validation.run_checks"
+    description: "Run all checks defined in the validation plan"
+    idempotent: false
+# Handler routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "validation.run_checks"
+      handler_class: "HandlerRunChecks"
+      handler_module: "omnibase_infra.nodes.node_validation_executor.handlers.handler_run_checks"
+      description: "Execute all checks in a validation plan"
+      input_model:
+        name: "ModelValidationPlan"
+        module: "omnibase_infra.nodes.node_validation_orchestrator.models"
+# Error handling
+error_handling:
+  retry_policy:
+    max_retries: 2
+    initial_delay_ms: 100
+    max_delay_ms: 1000
+    exponential_base: 2
+    retry_on:
+      - "OSError"
+      - "TimeoutError"
+  error_types:
+    - name: "CheckExecutionError"
+      description: "A validation check subprocess failed to execute"
+      recoverable: true
+    - name: "CheckTimeoutError"
+      description: "A validation check exceeded its timeout"
+      recoverable: true
+    - name: "PlanValidationError"
+      description: "The validation plan is malformed or empty"
+      recoverable: false
+# Health check
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  checks:
+    - name: "executor_ready"
+      type: "runtime"
+      critical: true
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-11"
+  tags:
+    - effect
+    - validation
+    - executor
+    - checks
+  related_tickets:
+    - "OMN-2147"

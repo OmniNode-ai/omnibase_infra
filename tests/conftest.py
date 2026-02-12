@@ -922,7 +922,7 @@ async def cleanup_postgres_test_projections() -> AsyncGenerator[None, None]:
         (LIKE '%test%', '%integration%') to target only test data. However:
 
         - NEVER run tests against a production database
-        - Always verify POSTGRES_HOST points to a test/dev environment
+        - Always verify OMNIBASE_INFRA_DB_URL points to a test/dev environment
         - The .env file should specify isolated test infrastructure
         - Production databases should use network isolation or read-only users
 
@@ -932,27 +932,18 @@ async def cleanup_postgres_test_projections() -> AsyncGenerator[None, None]:
 
     yield  # Let the test run
 
-    # Check if PostgreSQL is configured
-    postgres_host = os.getenv("POSTGRES_HOST")
-    postgres_password = os.getenv("POSTGRES_PASSWORD")
+    # Check if PostgreSQL is configured via OMNIBASE_INFRA_DB_URL or fallback vars
+    from tests.helpers.util_postgres import PostgresConfig
 
-    if not postgres_host or not postgres_password:
+    pg_config = PostgresConfig.from_env()
+    if not pg_config.is_configured:
         return  # PostgreSQL not configured, skip cleanup
-
-    # Build connection string
-    postgres_port = os.getenv("POSTGRES_PORT", "5436")
-    postgres_database = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
-    postgres_user = os.getenv("POSTGRES_USER", "postgres")
-
-    dsn = (
-        f"postgresql://{postgres_user}:{postgres_password}"
-        f"@{postgres_host}:{postgres_port}/{postgres_database}"
-    )
+    postgres_dsn = pg_config.build_dsn()
 
     try:
         import asyncpg
 
-        conn = await asyncpg.connect(dsn, timeout=10.0)
+        conn = await asyncpg.connect(postgres_dsn, timeout=10.0)
 
         try:
             # Clean up registration_projections with test-like metadata
@@ -1101,6 +1092,15 @@ async def full_infrastructure_cleanup(
         immediately after they yield.
     """
     return  # Dependent fixtures handle their own teardown
+
+
+# =============================================================================
+# Dependency Materialization Skip Fixture
+# =============================================================================
+# Moved to tests/unit/conftest.py to scope to unit tests only.
+# Integration tests that need this mock should define their own local fixture.
+# See tests/unit/conftest.py for the implementation.
+# =============================================================================
 
 
 # =============================================================================

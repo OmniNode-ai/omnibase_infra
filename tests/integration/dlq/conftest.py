@@ -12,18 +12,20 @@ These integration tests are designed to skip gracefully when infrastructure
 is unavailable, enabling CI/CD pipelines to run without hard failures.
 
 Skip Conditions:
-    - Skips if POSTGRES_HOST not set
-    - Skips if POSTGRES_PASSWORD not set
+    - Skips if OMNIBASE_INFRA_DB_URL (or POSTGRES_HOST/POSTGRES_PASSWORD fallback) not set
 
 Environment Variables
 =====================
 
-    POSTGRES_HOST: PostgreSQL server hostname (required - skip if not set)
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
+        Example: postgresql://postgres:secret@localhost:5432/omnibase_infra
+
+    Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
+    POSTGRES_HOST: PostgreSQL server hostname (fallback - skip if not set)
         Example: localhost or your-server-ip
     POSTGRES_PORT: PostgreSQL server port (default: 5436)
-    POSTGRES_DATABASE: Database name (default: omninode_bridge)
     POSTGRES_USER: Database username (default: postgres)
-    POSTGRES_PASSWORD: Database password (required - tests skip if not set)
+    POSTGRES_PASSWORD: Database password (fallback - tests skip if not set)
 
 Related Ticket: OMN-1032 - Complete DLQ Replay PostgreSQL Tracking Integration
 """
@@ -69,21 +71,20 @@ from tests.infrastructure_config import REMOTE_INFRA_HOST
 # Use shared PostgresConfig for consistent configuration management
 _postgres_config = PostgresConfig.from_env(fallback_host=REMOTE_INFRA_HOST)
 
-# Export individual values for backwards compatibility with existing code
+# Export individual values for use in availability checks and diagnostics
 POSTGRES_HOST = _postgres_config.host
 POSTGRES_PORT = str(_postgres_config.port)
-POSTGRES_DATABASE = _postgres_config.database
 POSTGRES_USER = _postgres_config.user
 POSTGRES_PASSWORD = _postgres_config.password
 
-# Defensive check: warn if POSTGRES_PASSWORD is missing or empty
-if not POSTGRES_PASSWORD:
+# Defensive check: warn if PostgreSQL is not configured at all
+if not _postgres_config.is_configured:
     import warnings
 
     warnings.warn(
-        "POSTGRES_PASSWORD environment variable not set or empty - DLQ tracking "
-        "integration tests will be skipped. Set POSTGRES_PASSWORD in your .env file "
-        "or environment to enable database tests.",
+        "PostgreSQL not configured - DLQ tracking integration tests will be skipped. "
+        "Set OMNIBASE_INFRA_DB_URL (preferred) or POSTGRES_HOST/POSTGRES_PASSWORD in "
+        "your .env file or environment to enable database tests.",
         UserWarning,
         stacklevel=1,
     )
@@ -93,14 +94,14 @@ POSTGRES_AVAILABLE = _postgres_config.is_configured
 
 
 def _build_postgres_dsn() -> str:
-    """Build PostgreSQL DSN from environment variables.
+    """Build PostgreSQL DSN by delegating to PostgresConfig.build_dsn().
 
     Returns:
         PostgreSQL connection string in standard format.
 
-    Note:
-        This function should only be called after verifying
-        POSTGRES_PASSWORD is set.
+    Raises:
+        ProtocolConfigurationError: If configuration is incomplete
+            (host, password, or database missing).
     """
     return _postgres_config.build_dsn()
 
@@ -118,7 +119,8 @@ def dlq_tracking_config() -> ModelDlqTrackingConfig:
     test isolation and prevent conflicts between parallel test executions.
 
     Skip Conditions (CI/CD Graceful Degradation):
-        - Skips if POSTGRES_PASSWORD environment variable is not set
+        - Skips if PostgreSQL is not available (neither OMNIBASE_INFRA_DB_URL
+          nor POSTGRES_HOST/POSTGRES_PASSWORD is set)
 
     Returns:
         ModelDlqTrackingConfig with test-specific table name.
@@ -127,8 +129,11 @@ def dlq_tracking_config() -> ModelDlqTrackingConfig:
         >>> config = dlq_tracking_config()
         >>> config.storage_table  # 'dlq_replay_history_test_a1b2c3d4'
     """
-    if not POSTGRES_PASSWORD:
-        pytest.skip("POSTGRES_PASSWORD not set")
+    if not POSTGRES_AVAILABLE:
+        pytest.skip(
+            "PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or "
+            "POSTGRES_HOST/POSTGRES_PASSWORD)"
+        )
 
     return ModelDlqTrackingConfig(
         dsn=_build_postgres_dsn(),

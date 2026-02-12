@@ -27,6 +27,9 @@ Migration Skip Pattern:
     ...     logger.debug("Skipping production-only migration")
     ...     continue
 """
+# NOTE: This module is the canonical location for PostgreSQL test utilities.
+# Use PostgresConfig.from_env() and build_dsn() instead of inlining DSN
+# construction in individual test conftest files.
 
 from __future__ import annotations
 
@@ -35,7 +38,7 @@ import os
 import re
 import socket
 from dataclasses import dataclass
-from urllib.parse import quote_plus
+from urllib.parse import ParseResult, quote_plus, unquote, urlparse
 from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
@@ -183,6 +186,28 @@ def should_skip_migration(sql: str) -> bool:
 # =============================================================================
 
 
+def _extract_password(parsed: ParseResult, db_url_var: str) -> str | None:
+    """Extract password from a parsed URL, warning on empty-password DSNs.
+
+    Peer/trust-auth DSNs (e.g., ``postgresql://user:@host/db``) have an
+    explicitly empty password which is falsy. This helper logs a warning
+    so the operator knows why ``is_configured`` returns ``False``.
+    """
+    # urlparse ParseResult — password is str | None
+    if parsed.password:
+        return unquote(parsed.password)
+    # Distinguish "no password at all" from "explicitly empty password"
+    netloc: str = parsed.netloc
+    if ":@" in netloc:
+        logger.warning(
+            "%s contains an explicitly empty password (peer/trust auth DSN). "
+            "is_configured will return False; tests will be skipped. "
+            "Set POSTGRES_PASSWORD or include a non-empty password in the DSN.",
+            db_url_var,
+        )
+    return None
+
+
 @dataclass
 class PostgresConfig:
     """Configuration for PostgreSQL connections.
@@ -214,24 +239,31 @@ class PostgresConfig:
     def from_env(
         cls,
         *,
+        db_url_var: str = "OMNIBASE_INFRA_DB_URL",
         host_var: str = "POSTGRES_HOST",
         port_var: str = "POSTGRES_PORT",
-        database_var: str = "POSTGRES_DATABASE",
         user_var: str = "POSTGRES_USER",
         password_var: str = "POSTGRES_PASSWORD",  # noqa: S107 (env var name, not a password)
-        default_database: str = "omninode_bridge",
         default_user: str = "postgres",
         fallback_host: str | None = None,
     ) -> PostgresConfig:
         """Create PostgresConfig from environment variables.
 
+        Resolution order:
+            1. If ``db_url_var`` (default ``OMNIBASE_INFRA_DB_URL``) is set,
+               the DSN is parsed to extract host, port, user, password, and
+               database.
+            2. Otherwise, individual ``POSTGRES_*`` env vars are read as a
+               fallback (host, port, user, password). The database name
+               defaults to ``"omnibase_infra"`` per OMN-2065 when using
+               the fallback path.
+
         Args:
-            host_var: Environment variable name for host.
-            port_var: Environment variable name for port.
-            database_var: Environment variable name for database.
-            user_var: Environment variable name for user.
-            password_var: Environment variable name for password.
-            default_database: Default database name if not set.
+            db_url_var: Environment variable holding a full PostgreSQL DSN.
+            host_var: Environment variable name for host (fallback).
+            port_var: Environment variable name for port (fallback).
+            user_var: Environment variable name for user (fallback).
+            password_var: Environment variable name for password (fallback).
             default_user: Default username if not set.
             fallback_host: Fallback host if POSTGRES_HOST not set. If None,
                 uses REMOTE_INFRA_HOST from infrastructure_config.
@@ -239,6 +271,88 @@ class PostgresConfig:
         Returns:
             PostgresConfig instance with values from environment.
         """
+        # --- Primary: full DSN from db_url_var ---
+        db_url: str | None = os.getenv(db_url_var)
+        # Normalize whitespace-only DSN to None so it falls through to
+        # the individual-env-var path (or yields is_configured=False).
+        if db_url is not None:
+            db_url = db_url.strip() or None
+        if db_url:
+            parsed = urlparse(db_url)
+
+            # Safely extract port — urlparse raises ValueError for non-numeric
+            # ports (e.g., "postgresql://host:abc/db"). Gracefully fall back to
+            # default so test collection isn't crashed by a malformed DSN.
+            try:
+                port = parsed.port or DEFAULT_POSTGRES_PORT
+            except ValueError:
+                logger.warning(
+                    "%s contains a non-numeric port. "
+                    "The resulting PostgresConfig.is_configured will be False "
+                    "and all tests that require a database will be skipped.",
+                    db_url_var,
+                )
+                return cls(
+                    host=parsed.hostname or "localhost",
+                    port=DEFAULT_POSTGRES_PORT,
+                    database="",
+                    user=default_user,
+                    password=None,
+                )
+
+            # Validate scheme for consistency with other DSN consumers
+            if parsed.scheme not in ("postgresql", "postgres"):
+                logger.warning(
+                    "%s has invalid scheme '%s' (expected 'postgresql' or "
+                    "'postgres'). The resulting PostgresConfig.is_configured "
+                    "will be False and tests will be skipped.",
+                    db_url_var,
+                    parsed.scheme,
+                )
+                return cls(
+                    host=parsed.hostname or "localhost",
+                    port=port,
+                    database="",
+                    user=default_user,
+                    password=None,
+                )
+            database = unquote((parsed.path or "").lstrip("/"))
+            if not database:
+                logger.warning(
+                    "%s is set but contains no database name "
+                    "(parsed path: %r from the DSN). "
+                    "Append a database name to the URL "
+                    "(e.g., 'postgresql://user:pass@host:port/DBNAME'). "
+                    "The resulting PostgresConfig.is_configured will be False "
+                    "and all tests that require a database will be skipped.",
+                    db_url_var,
+                    parsed.path,
+                )
+            if "/" in database:
+                logger.warning(
+                    "%s contains sub-path in database name '%s'. "
+                    "Sub-paths are not valid PostgreSQL database names. "
+                    "The resulting PostgresConfig.is_configured will be False "
+                    "and all tests that require a database will be skipped.",
+                    db_url_var,
+                    database,
+                )
+                database = ""
+            return cls(
+                host=parsed.hostname or "localhost",
+                port=port,
+                database=database,
+                # Note: empty-string username (e.g., postgresql://:pass@host/db)
+                # is falsy, correctly falling back to default_user.
+                user=unquote(parsed.username) if parsed.username else default_user,
+                # Note: explicitly empty passwords (e.g., peer/trust auth DSNs like
+                # postgresql://user:@host/db) are falsy, so password becomes None and
+                # is_configured returns False — those DSNs require POSTGRES_PASSWORD
+                # fallback or an explicit non-empty password in the DSN.
+                password=_extract_password(parsed, db_url_var),
+            )
+
+        # --- Fallback: individual env vars ---
         host: str | None = os.getenv(host_var)
         # Normalize empty or whitespace-only host to None
         # This prevents malformed DSN like "postgresql://user:pass@:5432/db"
@@ -259,7 +373,7 @@ class PostgresConfig:
         return cls(
             host=host,
             port=int(os.getenv(port_var, str(DEFAULT_POSTGRES_PORT))),
-            database=os.getenv(database_var, default_database),
+            database="omnibase_infra",
             user=os.getenv(user_var, default_user),
             password=password,
         )
@@ -269,9 +383,11 @@ class PostgresConfig:
         """Check if the configuration is complete for database connections.
 
         Returns:
-            True if host and password are set, False otherwise.
+            True if host, password, and database are all set, False otherwise.
         """
-        return self.host is not None and self.password is not None
+        return (
+            self.host is not None and self.password is not None and bool(self.database)
+        )
 
     def build_dsn(self) -> str:
         """Build PostgreSQL DSN from configuration.
@@ -307,6 +423,8 @@ class PostgresConfig:
                 missing.append("host")
             if self.password is None:
                 missing.append("password")
+            if not self.database:
+                missing.append("database")
 
             # Create error context with correlation ID for tracing
             correlation_id = uuid4()
@@ -314,12 +432,12 @@ class PostgresConfig:
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="build_dsn",
-                target_name=self.database,
+                target_name=self.database or "(unset)",
             )
             raise ProtocolConfigurationError(
                 f"PostgreSQL configuration incomplete. Missing: {', '.join(missing)}. "
-                "Hint: Ensure POSTGRES_HOST and POSTGRES_PASSWORD environment variables "
-                "are set, or provide them explicitly in PostgresConfig.",
+                "Hint: Set OMNIBASE_INFRA_DB_URL to a full PostgreSQL DSN "
+                "(e.g., postgresql://user:pass@host:5432/omnibase_infra).",
                 context=context,
             )
 

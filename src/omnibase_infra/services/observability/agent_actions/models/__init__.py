@@ -8,11 +8,12 @@ and persisted to PostgreSQL.
 
 Model Categories:
     - Envelope (strict): ModelObservabilityEnvelope - common metadata fields
-    - Payload (flexible): All other models - required fields typed, extras allowed
+    - Payload (strict): All other models - frozen, extra="forbid"
 
 Design Decisions:
-    - Envelope uses extra="forbid" for strict schema compliance
-    - Payload models use extra="allow" for Phase 1 flexibility
+    - All models use frozen=True for thread safety
+    - All models use extra="forbid" for strict schema compliance
+    - All models use from_attributes=True for ORM/pytest-xdist compatibility
     - All models have created_at for TTL readiness
     - ModelExecutionLog has updated_at for lifecycle tracking
     - Zero dict[str, Any] - use dict[str, object] when needed
@@ -43,7 +44,7 @@ Example:
     ...     schema_version="1.0.0",
     ... )
     >>>
-    >>> # Flexible payload - extras allowed
+    >>> # Strict payload - no extra fields allowed
     >>> action = ModelAgentAction(
     ...     id=uuid4(),
     ...     correlation_id=uuid4(),
@@ -51,7 +52,6 @@ Example:
     ...     action_type="tool_call",
     ...     action_name="Read",
     ...     created_at=datetime.now(UTC),
-    ...     custom_field="allowed in Phase 1",  # extra field OK
     ... )
 """
 

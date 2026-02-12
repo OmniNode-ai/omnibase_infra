@@ -35,11 +35,20 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
 )
+from omnibase_infra.runtime.models.model_http_client_config import (
+    ModelHttpClientConfig,
+)
+from omnibase_infra.runtime.models.model_kafka_producer_config import (
+    ModelKafkaProducerConfig,
+)
 from omnibase_infra.runtime.models.model_materialized_resources import (
     ModelMaterializedResources,
 )
 from omnibase_infra.runtime.models.model_materializer_config import (
     ModelMaterializerConfig,
+)
+from omnibase_infra.runtime.models.model_postgres_pool_config import (
+    ModelPostgresPoolConfig,
 )
 from omnibase_infra.runtime.providers.provider_http_client import ProviderHttpClient
 from omnibase_infra.runtime.providers.provider_kafka_producer import (
@@ -88,9 +97,14 @@ class DependencyMaterializer:
 
         Args:
             config: Materializer configuration with provider-specific settings.
-                Falls back to environment-driven defaults when None.
+                When ``None`` (the default), individual sub-configs are resolved
+                lazily from environment variables at the point a specific
+                resource type is requested in ``_create_resource()``.  This
+                avoids requiring ALL provider env vars (e.g.
+                ``OMNIBASE_INFRA_DB_URL``) just to construct the materializer
+                when only a subset of resource types will actually be used.
         """
-        self._config = config or ModelMaterializerConfig.from_env()
+        self._config: ModelMaterializerConfig | None = config
         self._lock = asyncio.Lock()
 
         # Resource cache: type -> resource instance (deduplication)
@@ -342,19 +356,34 @@ class DependencyMaterializer:
             ProtocolConfigurationError: If the resource type has no registered provider.
         """
         if resource_type == EnumInfraResourceType.POSTGRES_POOL:
-            provider = ProviderPostgresPool(self._config.postgres)
+            pg_config = (
+                self._config.postgres
+                if self._config is not None
+                else ModelPostgresPoolConfig.from_env()
+            )
+            provider = ProviderPostgresPool(pg_config)
             resource = await provider.create()
             self._close_funcs[resource_type] = ProviderPostgresPool.close
             return resource
 
         if resource_type == EnumInfraResourceType.KAFKA_PRODUCER:
-            provider_kafka = ProviderKafkaProducer(self._config.kafka)
+            kafka_config = (
+                self._config.kafka
+                if self._config is not None
+                else ModelKafkaProducerConfig.from_env()
+            )
+            provider_kafka = ProviderKafkaProducer(kafka_config)
             resource = await provider_kafka.create()
             self._close_funcs[resource_type] = ProviderKafkaProducer.close
             return resource
 
         if resource_type == EnumInfraResourceType.HTTP_CLIENT:
-            provider_http = ProviderHttpClient(self._config.http)
+            http_config = (
+                self._config.http
+                if self._config is not None
+                else ModelHttpClientConfig.from_env()
+            )
+            provider_http = ProviderHttpClient(http_config)
             resource = await provider_http.create()
             self._close_funcs[resource_type] = ProviderHttpClient.close
             return resource

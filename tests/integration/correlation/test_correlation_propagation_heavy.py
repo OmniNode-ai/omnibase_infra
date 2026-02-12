@@ -321,7 +321,7 @@ class TestCorrelationErrorContext:
 
 @pytest.mark.skipif(
     not POSTGRES_AVAILABLE,
-    reason="PostgreSQL not available (POSTGRES_HOST or POSTGRES_PASSWORD not set)",
+    reason="PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST/POSTGRES_PASSWORD)",
 )
 class TestCorrelationDatabase:
     """Tests for correlation ID propagation through database operations.
@@ -330,8 +330,7 @@ class TestCorrelationDatabase:
     from tests/integration/handlers/conftest.py.
 
     Skip Conditions:
-        - Skips if POSTGRES_HOST not set
-        - Skips if POSTGRES_PASSWORD not set
+        - Skips if OMNIBASE_INFRA_DB_URL (or POSTGRES_HOST/POSTGRES_PASSWORD fallback) not set
         - Uses class-level skip condition from POSTGRES_AVAILABLE flag
 
     TODO [OMN-1349]: Add edge case tests for database correlation handling:

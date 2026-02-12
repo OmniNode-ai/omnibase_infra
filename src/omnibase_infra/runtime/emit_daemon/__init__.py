@@ -55,9 +55,13 @@ from omnibase_infra.runtime.emit_daemon.models import (
     ModelNotificationCompleted,
 )
 from omnibase_infra.runtime.emit_daemon.notification_consumer import (
+    NotificationConsumer,
+)
+from omnibase_infra.runtime.emit_daemon.topics import (
+    PHASE_METRICS_REGISTRATION,
     TOPIC_NOTIFICATION_BLOCKED,
     TOPIC_NOTIFICATION_COMPLETED,
-    NotificationConsumer,
+    TOPIC_PHASE_METRICS,
 )
 
 __all__: list[str] = [
@@ -66,6 +70,8 @@ __all__: list[str] = [
     "ModelNotificationBlocked",
     "ModelNotificationCompleted",
     "NotificationConsumer",
+    "PHASE_METRICS_REGISTRATION",
     "TOPIC_NOTIFICATION_BLOCKED",
     "TOPIC_NOTIFICATION_COMPLETED",
+    "TOPIC_PHASE_METRICS",
 ]

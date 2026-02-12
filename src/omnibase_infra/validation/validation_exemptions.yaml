@@ -2241,6 +2241,27 @@ pattern_exemptions:
       - OMN-1908 (Cross-repo validation ledger persistence)
     ticket: OMN-1908
   # ==========================================================================
+  # Session State Node Exemptions (OMN-2117)
+  # ==========================================================================
+  # run_id is a human-readable pipeline run identifier string (e.g., 'pipeline-1'),
+  # NOT a UUID. Used for filesystem paths (runs/{run_id}.json) and human readability.
+  - file_pattern: 'model_run_context\.py'
+    violation_pattern: "Field 'run_id' should use UUID"
+    reason: >
+      run_id is a human-readable pipeline run identifier (e.g., 'pipeline-1'), not a UUID. It is used directly in filesystem paths (runs/{run_id}.json) and for human-readable pipeline identification. The _id suffix triggers a false positive UUID suggestion.
+
+    documentation:
+      - OMN-2117 ticket description (run_id as string identifier)
+    ticket: OMN-2117
+  - file_pattern: 'model_session_lifecycle_state\.py'
+    violation_pattern: "Field 'run_id' should use UUID"
+    reason: >
+      run_id mirrors the string type from ModelRunContext for consistency. Pipeline run identifiers are human-readable strings, not UUIDs.
+
+    documentation:
+      - OMN-2117 ticket description (run_id as string identifier)
+    ticket: OMN-2117
+  # ==========================================================================
   # ModelAuthGateRequest tool_name Exemption (OMN-2125)
   # ==========================================================================
   - file_pattern: 'model_auth_gate_request\.py'
@@ -2302,6 +2323,30 @@ pattern_exemptions:
       'handle' is the standard ONEX handler method name per the ProtocolHandler and ProtocolMessageHandler conventions. All handlers use this name.
 
     ticket: OMN-2136
+  # ==========================================================================
+  # ModelPhasePayloadImplement branch_name Exemption (OMN-2143)
+  # ==========================================================================
+  # branch_name is a git branch string, not an entity reference.
+  - file_pattern: 'model_phase_payload_implement\.py'
+    violation_pattern: "Field 'branch_name' might reference an entity"
+    reason: >
+      branch_name is a git branch string (e.g., "jonah/omn-2143-checkpoint-nodes") identifying the working branch for a pipeline phase. It is not a domain entity requiring ID + display_name.
+
+    documentation:
+      - CLAUDE.md (Node Architecture - EFFECT nodes)
+    ticket: OMN-2143
+  # ==========================================================================
+  # ModelCheckpoint ticket_id Exemption (OMN-2143)
+  # ==========================================================================
+  # ticket_id is a Linear ticket identifier string (e.g., "OMN-2143"), not a UUID.
+  - file_pattern: 'model_checkpoint\.py'
+    violation_pattern: "Field 'ticket_id' should use UUID type instead of str"
+    reason: >
+      ticket_id is a human-readable Linear ticket identifier (e.g., "OMN-2143") used for grouping checkpoint files by ticket. Linear ticket IDs are string-formatted identifiers, not UUIDs.
+
+    documentation:
+      - CLAUDE.md (Node Architecture - EFFECT nodes)
+    ticket: OMN-2143
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

@@ -7,12 +7,12 @@ orchestrator against real infrastructure (Kafka, Consul, PostgreSQL).
 
 Infrastructure Requirements:
     Tests require ALL infrastructure services to be available:
-    - PostgreSQL: POSTGRES_HOST:5436 (database: omninode_bridge)
+    - PostgreSQL: OMNIBASE_INFRA_DB_URL (database: omnibase_infra)
     - Consul: CONSUL_HOST:28500
     - Kafka/Redpanda: KAFKA_BOOTSTRAP_SERVERS
 
     Environment variables required:
-    - POSTGRES_HOST, POSTGRES_PASSWORD (for PostgreSQL)
+    - OMNIBASE_INFRA_DB_URL (preferred) or POSTGRES_HOST, POSTGRES_PASSWORD (for PostgreSQL)
     - CONSUL_HOST (for Consul)
     - KAFKA_BOOTSTRAP_SERVERS (for Kafka)
 
@@ -55,7 +55,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 from unittest.mock import MagicMock
-from urllib.parse import quote_plus
 from uuid import UUID, uuid4
 
 import pytest
@@ -69,7 +68,7 @@ from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.utils import sanitize_error_message
 from tests.conftest import check_service_registry_available
-from tests.infrastructure_config import DEFAULT_CONSUL_PORT, DEFAULT_POSTGRES_PORT
+from tests.infrastructure_config import DEFAULT_CONSUL_PORT
 
 # Load environment configuration with layered priority:
 # 1. .env in project root (base configuration - credentials, shared settings)
@@ -188,18 +187,12 @@ def wrap_event_in_envelope(
 # Infrastructure Availability Checks
 # =============================================================================
 
-# PostgreSQL availability
-POSTGRES_HOST = os.getenv("POSTGRES_HOST")
-POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", str(DEFAULT_POSTGRES_PORT)))
-POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+# PostgreSQL availability - delegates to shared PostgresConfig utility
+# See tests/helpers/util_postgres.py for canonical DSN parsing logic
+from tests.helpers.util_postgres import PostgresConfig
 
-# Normalize empty password to None for consistent checking
-if POSTGRES_PASSWORD and not POSTGRES_PASSWORD.strip():
-    POSTGRES_PASSWORD = None
-
-POSTGRES_AVAILABLE = bool(POSTGRES_HOST and POSTGRES_PASSWORD)
+_postgres_config = PostgresConfig.from_env()
+POSTGRES_AVAILABLE = _postgres_config.is_configured
 
 # Kafka availability
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
@@ -250,7 +243,7 @@ pytestmark = [
             "Full infrastructure required for E2E tests. "
             f"Kafka: {'available' if KAFKA_AVAILABLE else 'MISSING (set KAFKA_BOOTSTRAP_SERVERS)'}. "
             f"Consul: {'available' if CONSUL_AVAILABLE else 'MISSING (set CONSUL_HOST or unreachable)'}. "
-            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set POSTGRES_HOST and POSTGRES_PASSWORD)'}. "
+            f"PostgreSQL: {'available' if POSTGRES_AVAILABLE else 'MISSING (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST and POSTGRES_PASSWORD)'}. "
             f"ServiceRegistry: {'available' if SERVICE_REGISTRY_AVAILABLE else 'MISSING (omnibase_core circular import issue)'}."
         ),
     ),
@@ -273,47 +266,16 @@ SCHEMA_FILE = (
 
 
 def _build_postgres_dsn() -> str:
-    """Build PostgreSQL DSN from environment variables.
-
-    Credentials (user and password) are URL-encoded using quote_plus() to handle
-    special characters like @, :, /, %, etc. that would otherwise break the DSN
-    format.
+    """Build PostgreSQL DSN by delegating to PostgresConfig.build_dsn().
 
     Returns:
         PostgreSQL connection string in standard format.
 
     Raises:
-        ValueError: If POSTGRES_HOST or POSTGRES_PASSWORD is not set.
-
-    Note:
-        This function should only be called after verifying
-        POSTGRES_PASSWORD is set.
-
-    Example:
-        >>> # With special characters in credentials
-        >>> # user="user@domain", password="p@ss:word#123"
-        >>> dsn = _build_postgres_dsn()
-        >>> # Returns: postgresql://user%40domain:p%40ss%3Aword%23123@host:port/db
+        ProtocolConfigurationError: If configuration is incomplete
+            (host, password, or database missing).
     """
-    if not POSTGRES_HOST:
-        raise ValueError(
-            "POSTGRES_HOST is required but not set. "
-            "Set POSTGRES_HOST environment variable to enable E2E tests."
-        )
-    if not POSTGRES_PASSWORD:
-        raise ValueError(
-            "POSTGRES_PASSWORD is required but not set. "
-            "Set POSTGRES_PASSWORD environment variable to enable E2E tests."
-        )
-
-    # URL-encode credentials to handle special characters (@, :, /, %, etc.)
-    encoded_user = quote_plus(POSTGRES_USER, safe="")
-    encoded_password = quote_plus(POSTGRES_PASSWORD, safe="")
-
-    return (
-        f"postgresql://{encoded_user}:{encoded_password}"
-        f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DATABASE}"
-    )
+    return _postgres_config.build_dsn()
 
 
 @pytest.fixture
@@ -335,7 +297,8 @@ async def postgres_pool() -> AsyncGenerator[asyncpg.Pool, None]:
 
     if not POSTGRES_AVAILABLE:
         pytest.skip(
-            "PostgreSQL not available (POSTGRES_HOST or POSTGRES_PASSWORD not set)"
+            "PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or "
+            "POSTGRES_HOST/POSTGRES_PASSWORD)"
         )
 
     dsn = _build_postgres_dsn()
@@ -1119,7 +1082,7 @@ async def cleanup_projections(
         entity_id (unique_node_id) which should be a test-generated UUID.
 
         - NEVER run E2E tests against a production database
-        - Always verify POSTGRES_HOST points to a test/dev environment
+        - Always verify OMNIBASE_INFRA_DB_URL points to a test/dev environment
         - Use .env.docker or dedicated test infrastructure
         - Production databases should have network isolation
     """
@@ -1168,7 +1131,7 @@ async def cleanup_node_ids(
         entity_ids which should be test-generated UUIDs.
 
         - NEVER run E2E tests against a production database
-        - Always verify POSTGRES_HOST points to a test/dev environment
+        - Always verify OMNIBASE_INFRA_DB_URL points to a test/dev environment
         - Use .env.docker or dedicated test infrastructure
         - Production databases should have network isolation
     """

@@ -11,10 +11,12 @@ any type violations, security validation, validation severity, selection strateg
 registration status, confirmation events, and other infrastructure concerns.
 
 Exports:
+    EnumAdjudicatorState: Validation adjudicator FSM states (COLLECTING, ADJUDICATING, VERDICT_EMITTED)
     EnumAnyTypeViolation: Any type violation categories for strong typing validation
     EnumAuthDecision: Authorization decision outcomes (ALLOW, DENY, SOFT_DENY)
     EnumAuthSource: Authorization source classification (PLAN_APPROVAL, TICKET_PIPELINE, etc.)
     EnumBackendType: Infrastructure backend types (CONSUL, POSTGRES)
+    EnumCheckSeverity: Validation check severity (REQUIRED, RECOMMENDED, INFORMATIONAL)
     EnumChainViolationType: Chain violation types for correlation/causation validation
     EnumCircuitState: Circuit breaker states (CLOSED, OPEN, HALF_OPEN)
     EnumConfirmationEventType: Registration confirmation event types
@@ -50,9 +52,12 @@ Exports:
     EnumTopicStandard: Topic standards (ONEX_KAFKA, ENVIRONMENT_AWARE)
     EnumTopicType: Topic types (EVENTS, COMMANDS, INTENTS, SNAPSHOTS)
     EnumValidationSeverity: Validation error severity levels (ERROR, CRITICAL, WARNING)
+    EnumValidationVerdict: Validation pipeline verdict (PASS, FAIL, QUARANTINE)
+    EnumLifecycleTier: Pattern lifecycle promotion tiers (OBSERVED through DEFAULT, SUPPRESSED)
 """
 
 from omnibase_core.enums import EnumTopicType
+from omnibase_infra.enums.enum_adjudicator_state import EnumAdjudicatorState
 from omnibase_infra.enums.enum_any_type_violation import EnumAnyTypeViolation
 from omnibase_infra.enums.enum_auth_decision import EnumAuthDecision
 from omnibase_infra.enums.enum_auth_source import EnumAuthSource
@@ -60,6 +65,8 @@ from omnibase_infra.enums.enum_backend_type import EnumBackendType
 from omnibase_infra.enums.enum_capture_outcome import EnumCaptureOutcome
 from omnibase_infra.enums.enum_capture_state import EnumCaptureState
 from omnibase_infra.enums.enum_chain_violation_type import EnumChainViolationType
+from omnibase_infra.enums.enum_check_severity import EnumCheckSeverity
+from omnibase_infra.enums.enum_checkpoint_phase import EnumCheckpointPhase
 from omnibase_infra.enums.enum_circuit_state import EnumCircuitState
 from omnibase_infra.enums.enum_confirmation_event_type import EnumConfirmationEventType
 from omnibase_infra.enums.enum_consumer_group_purpose import EnumConsumerGroupPurpose
@@ -84,6 +91,7 @@ from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportTyp
 from omnibase_infra.enums.enum_introspection_reason import EnumIntrospectionReason
 from omnibase_infra.enums.enum_kafka_acks import EnumKafkaAcks
 from omnibase_infra.enums.enum_ledger_sink_drop_policy import EnumLedgerSinkDropPolicy
+from omnibase_infra.enums.enum_lifecycle_tier import EnumLifecycleTier
 from omnibase_infra.enums.enum_llm_finish_reason import EnumLlmFinishReason
 from omnibase_infra.enums.enum_llm_operation_type import EnumLlmOperationType
 from omnibase_infra.enums.enum_message_category import EnumMessageCategory
@@ -103,10 +111,15 @@ from omnibase_infra.enums.enum_response_status import EnumResponseStatus
 from omnibase_infra.enums.enum_retry_error_category import EnumRetryErrorCategory
 from omnibase_infra.enums.enum_security_rule_id import EnumSecurityRuleId
 from omnibase_infra.enums.enum_selection_strategy import EnumSelectionStrategy
+from omnibase_infra.enums.enum_session_lifecycle_state import (
+    EnumSessionLifecycleState,
+)
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 from omnibase_infra.enums.enum_validation_severity import EnumValidationSeverity
+from omnibase_infra.enums.enum_validation_verdict import EnumValidationVerdict
 
 __all__: list[str] = [
+    "EnumAdjudicatorState",
     "EnumAnyTypeViolation",
     "EnumAuthDecision",
     "EnumAuthSource",
@@ -114,6 +127,8 @@ __all__: list[str] = [
     "EnumCaptureOutcome",
     "EnumCaptureState",
     "EnumChainViolationType",
+    "EnumCheckSeverity",
+    "EnumCheckpointPhase",
     "EnumCircuitState",
     "EnumConfirmationEventType",
     "EnumConsumerGroupPurpose",
@@ -134,6 +149,7 @@ __all__: list[str] = [
     "EnumIntrospectionReason",
     "EnumKafkaAcks",
     "EnumLedgerSinkDropPolicy",
+    "EnumLifecycleTier",
     "EnumLlmFinishReason",
     "EnumLlmOperationType",
     "EnumMessageCategory",
@@ -149,7 +165,9 @@ __all__: list[str] = [
     "EnumRetryErrorCategory",
     "EnumSecurityRuleId",
     "EnumSelectionStrategy",
+    "EnumSessionLifecycleState",
     "EnumTopicStandard",
     "EnumTopicType",
     "EnumValidationSeverity",
+    "EnumValidationVerdict",
 ]
