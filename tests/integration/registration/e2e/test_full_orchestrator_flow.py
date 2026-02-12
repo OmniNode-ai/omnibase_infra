@@ -61,6 +61,9 @@ from omnibase_infra.models.registration.model_node_metadata import ModelNodeMeta
 from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
     HandlerNodeIntrospected,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.services import (
+    RegistrationReducerService,
+)
 from omnibase_infra.nodes.reducers import RegistrationReducer
 from omnibase_infra.nodes.reducers.models import ModelRegistrationState
 
@@ -244,7 +247,10 @@ class OrchestratorPipeline:
         self._projector = projector
         self._registry_effect = registry_effect
         self._reducer = reducer
-        self._handler = HandlerNodeIntrospected(projection_reader)
+        self._registration_reducer_service = RegistrationReducerService()
+        self._handler = HandlerNodeIntrospected(
+            projection_reader, self._registration_reducer_service
+        )
         self._processed_events: list[UUID] = []
         self._processing_lock = asyncio.Lock()
         self._processing_errors: list[Exception] = []
@@ -1387,7 +1393,9 @@ class TestFullPipelineWithRealInfrastructure:
         )
 
         # Create handler and process directly (for simpler test)
-        handler = HandlerNodeIntrospected(projection_reader)
+        handler = HandlerNodeIntrospected(
+            projection_reader, RegistrationReducerService()
+        )
         now = datetime.now(UTC)
 
         # Wrap event in envelope for handler API

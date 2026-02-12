@@ -28,6 +28,9 @@ from omnibase_infra.runtime.intent_effects.intent_effect_consul_deregister impor
 from omnibase_infra.runtime.intent_effects.intent_effect_consul_register import (
     IntentEffectConsulRegister,
 )
+from omnibase_infra.runtime.intent_effects.intent_effect_postgres_update import (
+    IntentEffectPostgresUpdate,
+)
 from omnibase_infra.runtime.intent_effects.intent_effect_postgres_upsert import (
     IntentEffectPostgresUpsert,
 )
@@ -35,5 +38,6 @@ from omnibase_infra.runtime.intent_effects.intent_effect_postgres_upsert import 
 __all__: list[str] = [
     "IntentEffectConsulDeregister",
     "IntentEffectConsulRegister",
+    "IntentEffectPostgresUpdate",
     "IntentEffectPostgresUpsert",
 ]

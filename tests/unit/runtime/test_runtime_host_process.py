@@ -225,6 +225,8 @@ class MockEventBus:
         self,
         envelope: dict[str, object] | object,
         topic: str,
+        *,
+        key: bytes | None = None,
     ) -> None:
         """Publish an envelope to a topic.
 

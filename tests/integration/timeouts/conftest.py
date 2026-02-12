@@ -97,6 +97,8 @@ class MockEventBus:
         self,
         envelope: BaseModel,
         topic: str,
+        *,
+        key: bytes | None = None,
     ) -> None:
         """Capture published event for later verification.
 

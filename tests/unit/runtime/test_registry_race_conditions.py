@@ -98,7 +98,9 @@ class MockHandler:
 class MockEventBus:
     """Generic mock event bus for testing."""
 
-    async def publish_envelope(self, envelope: object, topic: str) -> None:
+    async def publish_envelope(
+        self, envelope: object, topic: str, *, key: bytes | None = None
+    ) -> None:
         """Mock publish_envelope method for ProtocolEventBus compliance."""
 
 

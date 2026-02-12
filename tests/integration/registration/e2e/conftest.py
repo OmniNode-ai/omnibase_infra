@@ -719,11 +719,14 @@ async def heartbeat_handler(
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeHeartbeat,
     )
+    from omnibase_infra.nodes.node_registration_orchestrator.services import (
+        RegistrationReducerService,
+    )
 
+    reducer = RegistrationReducerService(liveness_window_seconds=90.0)
     return HandlerNodeHeartbeat(
         projection_reader=projection_reader,
-        projector=real_projector,
-        liveness_window_seconds=90.0,
+        reducer=reducer,
     )
 
 

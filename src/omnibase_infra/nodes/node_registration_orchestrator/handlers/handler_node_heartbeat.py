@@ -2,8 +2,12 @@
 # Copyright (c) 2025 OmniNode Team
 """Node Heartbeat Handler for Registration Orchestrator.
 
-Processes NodeHeartbeatReceived events and updates the registration projection
-with `last_heartbeat_at` and extended `liveness_deadline`.
+Processes NodeHeartbeatReceived events and emits intents to update the
+registration projection with `last_heartbeat_at` and extended `liveness_deadline`.
+
+This handler delegates all decision-making to RegistrationReducerService
+(Paradigm B: intent-based). The reducer returns a ModelReducerDecision
+containing intents that the effect layer executes.
 
 This handler is part of the 2-way registration pattern where nodes periodically
 send heartbeats to maintain their ACTIVE registration state.
@@ -19,151 +23,88 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
-
-from pydantic import BaseModel, ConfigDict, Field
+from uuid import uuid4
 
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
-    EnumInfraTransportType,
-    EnumRegistrationState,
-)
-from omnibase_infra.errors import (
-    ModelInfraErrorContext,
-    RuntimeHostError,
 )
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_context import (
+    ModelReducerContext,
+)
+from omnibase_infra.nodes.node_registration_orchestrator.services import (
+    RegistrationReducerService,
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.projectors import ProjectionReaderRegistration
-    from omnibase_infra.runtime.projector_shell import ProjectorShell
 
 logger = logging.getLogger(__name__)
-
-# Default liveness window in seconds (matches mixin_node_introspection heartbeat interval)
-DEFAULT_LIVENESS_WINDOW_SECONDS: float = 90.0
-
-
-class ModelHeartbeatHandlerResult(BaseModel):
-    """Result model for heartbeat handler processing.
-
-    Attributes:
-        success: Whether the heartbeat was processed successfully.
-        node_id: UUID of the node that sent the heartbeat.
-        previous_state: The node's state before processing (if found).
-        last_heartbeat_at: Updated heartbeat timestamp.
-        liveness_deadline: Extended liveness deadline.
-        node_not_found: True if no projection exists for this node.
-        correlation_id: Correlation ID for distributed tracing.
-        error_message: Error message if processing failed (success=False).
-    """
-
-    model_config = ConfigDict(
-        frozen=True,
-        extra="forbid",
-    )
-
-    success: bool = Field(
-        ...,
-        description="Whether the heartbeat was processed successfully",
-    )
-    node_id: UUID = Field(
-        ...,
-        description="UUID of the node that sent the heartbeat",
-    )
-    previous_state: EnumRegistrationState | None = Field(
-        default=None,
-        description="The node's state before processing (if found)",
-    )
-    last_heartbeat_at: datetime | None = Field(
-        default=None,
-        description="Updated heartbeat timestamp",
-    )
-    liveness_deadline: datetime | None = Field(
-        default=None,
-        description="Extended liveness deadline",
-    )
-    node_not_found: bool = Field(
-        default=False,
-        description="True if no projection exists for this node",
-    )
-    correlation_id: UUID = Field(
-        ...,
-        description="Correlation ID for distributed tracing",
-    )
-    error_message: str | None = Field(
-        default=None,
-        description="Error message if processing failed",
-    )
 
 
 class HandlerNodeHeartbeat:
     """Handler for processing node heartbeat events.
 
-    Processes ModelNodeHeartbeatEvent events and updates the registration
-    projection with:
-    - `last_heartbeat_at`: Set to event timestamp (or current time)
-    - `liveness_deadline`: Extended by liveness_window_seconds from now
+    Processes ModelNodeHeartbeatEvent events and delegates the heartbeat
+    decision to RegistrationReducerService.decide_heartbeat(). The reducer
+    returns a ModelReducerDecision containing:
+    - UPDATE intent for PostgreSQL (last_heartbeat_at, liveness_deadline)
+    - No events (heartbeats don't produce domain events)
 
-    The handler requires both a projection reader (for lookups) and a projector
-    (for updates). It is designed to be used by the registration orchestrator.
+    The handler returns these intents via ModelHandlerOutput for the effect
+    layer to execute.
 
     ONEX Contract Compliance:
         This handler belongs to an ORCHESTRATOR node, so it returns result=None
         per ONEX contract rules (ORCHESTRATOR nodes use events[] and intents[]
-        only, not result). Callers should verify success by querying the
-        projection state after handle() returns.
+        only, not result).
 
     Error Handling:
-        - If no projection exists, logs warning and returns empty output
+        - If no projection exists, reducer returns no_op and handler logs warning
         - Only ACTIVE nodes should receive heartbeats; other states log warnings
-        - Database errors are re-raised as InfraConnectionError/InfraTimeoutError
+        - No direct I/O is performed; all writes are via intents
 
     Coroutine Safety:
-        This handler is stateless and coroutine-safe. The projection reader and
-        projector are assumed to be coroutine-safe (they use connection pools).
+        This handler is stateless and coroutine-safe. The projection reader
+        is assumed to be coroutine-safe (it uses connection pools).
 
     Example:
         >>> from omnibase_infra.projectors import ProjectionReaderRegistration
-        >>> from omnibase_infra.runtime.projector_shell import ProjectorShell
+        >>> from omnibase_infra.nodes.node_registration_orchestrator.services import (
+        ...     RegistrationReducerService,
+        ... )
+        >>> reducer = RegistrationReducerService(liveness_window_seconds=90.0)
         >>> handler = HandlerNodeHeartbeat(
         ...     projection_reader=reader,
-        ...     projector=projector,
-        ...     liveness_window_seconds=90.0,
+        ...     reducer=reducer,
         ... )
         >>> output = await handler.handle(envelope)
-        >>> # Verify success by checking projection state
-        >>> projection = await reader.get_entity_state(node_id)
-        >>> if projection and projection.last_heartbeat_at == event.timestamp:
-        ...     print(f"Heartbeat processed, deadline: {projection.liveness_deadline}")
+        >>> # Intents contain the UPDATE payload for the effect layer
+        >>> for intent in output.intents:
+        ...     print(f"Intent: {intent.intent_type} -> {intent.target}")
     """
 
     def __init__(
         self,
         projection_reader: ProjectionReaderRegistration,
-        projector: ProjectorShell,
-        liveness_window_seconds: float = DEFAULT_LIVENESS_WINDOW_SECONDS,
+        reducer: RegistrationReducerService,
     ) -> None:
         """Initialize the heartbeat handler.
 
         Args:
             projection_reader: Projection reader for looking up node state.
-            projector: ProjectorShell for persisting heartbeat updates.
-                Should be loaded from the registration projector contract.
-            liveness_window_seconds: How long to extend liveness_deadline from
-                the heartbeat timestamp. Default: 90 seconds (3x the default
-                30-second heartbeat interval, allowing for 2 missed heartbeats).
+            reducer: RegistrationReducerService for pure-function heartbeat
+                decisions. The reducer's liveness_window_seconds configuration
+                controls how long to extend liveness_deadline from the heartbeat
+                timestamp.
         """
         self._projection_reader = projection_reader
-        self._projector = projector
-        self._liveness_window_seconds = liveness_window_seconds
+        self._reducer = reducer
 
     @property
     def handler_id(self) -> str:
@@ -198,15 +139,10 @@ class HandlerNodeHeartbeat:
     def handler_category(self) -> EnumHandlerTypeCategory:
         """Behavioral classification for this handler.
 
-        Returns EFFECT because this handler performs side-effecting I/O:
-        updates projections in PostgreSQL via the projector.
+        Returns COMPUTE because this handler delegates to a pure-function
+        reducer and returns intents. No direct I/O is performed.
         """
-        return EnumHandlerTypeCategory.EFFECT
-
-    @property
-    def liveness_window_seconds(self) -> float:
-        """Return configured liveness window in seconds."""
-        return self._liveness_window_seconds
+        return EnumHandlerTypeCategory.COMPUTE
 
     async def handle(
         self,
@@ -214,37 +150,23 @@ class HandlerNodeHeartbeat:
     ) -> ModelHandlerOutput[object]:
         """Process a node heartbeat event.
 
-        Looks up the registration projection by node_id and updates:
-        - `last_heartbeat_at`: Set to event.timestamp
-        - `liveness_deadline`: Extended to event.timestamp + liveness_window
+        Looks up the registration projection by node_id and delegates the
+        heartbeat decision to RegistrationReducerService.decide_heartbeat().
+        Returns the reducer's intents via ModelHandlerOutput for the effect
+        layer to execute.
 
         ONEX Contract Compliance:
             This handler belongs to an ORCHESTRATOR node, so it returns
-            result=None per ONEX contract rules. Success/failure should be
-            verified by querying the projection state after handle() returns.
+            result=None per ONEX contract rules. The intents tuple contains
+            the UPDATE payload for PostgreSQL.
 
         Args:
             envelope: Event envelope containing the heartbeat event payload.
 
         Returns:
-            ModelHandlerOutput with result=None. Check projection state via
-            ProjectionReaderRegistration.get_entity_state() to verify heartbeat
-            was processed successfully.
-
-        Raises:
-            RuntimeHostError: Base class for all infrastructure errors. Specific
-                subclasses are preserved and can be caught by callers:
-                - InfraConnectionError: Database connection failures
-                - InfraTimeoutError: Operation timeout exceeded
-                - InfraAuthenticationError: Authentication/authorization failures
-                - InfraUnavailableError: Resource temporarily unavailable
-
-        Example:
-            >>> output = await handler.handle(envelope)
-            >>> # Verify success by checking projection state
-            >>> projection = await reader.get_entity_state(node_id)
-            >>> if projection and projection.last_heartbeat_at == event.timestamp:
-            ...     print("Heartbeat processed successfully")
+            ModelHandlerOutput with result=None and intents from the reducer.
+            The intents contain ModelPayloadPostgresUpdateRegistration payloads
+            for the effect layer to execute.
         """
         start_time = time.perf_counter()
 
@@ -252,14 +174,7 @@ class HandlerNodeHeartbeat:
         event = envelope.payload
         now = envelope.envelope_timestamp
         correlation_id = envelope.correlation_id or uuid4()
-        domain = "registration"  # Was passed as parameter, now hardcoded
-
-        ctx = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.DATABASE,
-            operation="handle_heartbeat",
-            target_name="handler.node_heartbeat",
-            correlation_id=correlation_id,
-        )
+        domain = "registration"
 
         # Look up current projection
         projection = await self._projection_reader.get_entity_state(
@@ -303,57 +218,24 @@ class HandlerNodeHeartbeat:
             # Still process the heartbeat to update tracking, but log the warning
             # This can happen during state transitions or race conditions
 
-        # Calculate new liveness deadline
-        heartbeat_timestamp = event.timestamp
-        new_liveness_deadline = heartbeat_timestamp + timedelta(
-            seconds=self._liveness_window_seconds
+        # Decision: Should we update heartbeat?
+        ctx = ModelReducerContext(correlation_id=correlation_id, now=now)
+        decision = self._reducer.decide_heartbeat(
+            projection=projection,
+            node_id=event.node_id,
+            heartbeat_timestamp=event.timestamp,
+            ctx=ctx,
         )
 
-        # Update projection via projector using partial_update
-        try:
-            updated = await self._projector.partial_update(
-                aggregate_id=event.node_id,
-                updates={
-                    "last_heartbeat_at": heartbeat_timestamp,
-                    "liveness_deadline": new_liveness_deadline,
-                    "updated_at": now,
-                },
-                correlation_id=correlation_id,
-            )
-
-            if not updated:
-                # Entity was not found (unlikely since we just read it, but handle it)
-                logger.warning(
-                    "Failed to update heartbeat - entity not found during update",
-                    extra={
-                        "node_id": str(event.node_id),
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-                processing_time_ms = (time.perf_counter() - start_time) * 1000
-                return ModelHandlerOutput(
-                    input_envelope_id=envelope.envelope_id,
-                    correlation_id=correlation_id,
-                    handler_id=self.handler_id,
-                    node_kind=self.node_kind,
-                    events=(),
-                    intents=(),
-                    projections=(),
-                    result=None,
-                    processing_time_ms=processing_time_ms,
-                    timestamp=now,
-                )
-
-            logger.debug(
-                "Heartbeat processed successfully",
+        if decision.action == "no_op":
+            logger.warning(
+                "Heartbeat decision: no_op",
                 extra={
                     "node_id": str(event.node_id),
-                    "last_heartbeat_at": heartbeat_timestamp.isoformat(),
-                    "liveness_deadline": new_liveness_deadline.isoformat(),
+                    "reason": decision.reason,
                     "correlation_id": str(correlation_id),
                 },
             )
-
             processing_time_ms = (time.perf_counter() - start_time) * 1000
             return ModelHandlerOutput(
                 input_envelope_id=envelope.envelope_id,
@@ -368,32 +250,29 @@ class HandlerNodeHeartbeat:
                 timestamp=now,
             )
 
-        except ModelOnexError:
-            # Re-raise all ONEX errors directly (preserves error type)
-            # This includes:
-            # - RuntimeHostError and all its subclasses (InfraConnectionError, etc.)
-            # - ModelOnexError raised directly by other ONEX components
-            # Callers can catch specific types for differentiated handling
-            raise
-        except Exception as e:
-            # Wrap only non-infrastructure errors in RuntimeHostError
-            # This should be rare - most errors from projector are infrastructure errors
-            logger.exception(
-                "Unexpected error updating heartbeat",
-                extra={
-                    "node_id": str(event.node_id),
-                    "correlation_id": str(correlation_id),
-                    "error_type": type(e).__name__,
-                },
-            )
-            raise RuntimeHostError(
-                f"Unexpected error updating heartbeat: {type(e).__name__}",
-                context=ctx,
-            ) from e
+        logger.debug(
+            "Heartbeat processed, emitting update intent",
+            extra={
+                "node_id": str(event.node_id),
+                "correlation_id": str(correlation_id),
+            },
+        )
+
+        processing_time_ms = (time.perf_counter() - start_time) * 1000
+        return ModelHandlerOutput(
+            input_envelope_id=envelope.envelope_id,
+            correlation_id=correlation_id,
+            handler_id=self.handler_id,
+            node_kind=self.node_kind,
+            events=decision.events,
+            intents=decision.intents,
+            projections=(),
+            result=None,
+            processing_time_ms=processing_time_ms,
+            timestamp=now,
+        )
 
 
 __all__ = [
-    "DEFAULT_LIVENESS_WINDOW_SECONDS",
     "HandlerNodeHeartbeat",
-    "ModelHeartbeatHandlerResult",
 ]

@@ -428,10 +428,12 @@ intent_consumption:
     - "consul.register"
     - "consul.deregister"
     - "postgres.upsert_registration"
+    - "postgres.update_registration"
   intent_routing_table:
     "consul.register": "node_registry_effect"
     "consul.deregister": "node_registry_effect"
     "postgres.upsert_registration": "node_registry_effect"
+    "postgres.update_registration": "node_registry_effect"
 dependencies:
   - name: "reducer_protocol"
     type: "protocol"

@@ -1135,14 +1135,19 @@ class PluginRegistration:
         # Build set of wirable intent_types based on available infrastructure.
         # This avoids duplicating the protocol-match conditional in both the
         # registration loop and the post-registration validation.
+        #
+        # Each intent_type maps to its specific resource gate. This allows
+        # different postgres.* intents to require different resources
+        # (e.g. upsert needs projector, update needs pool directly).
         _protocol_resources = {
-            "postgres": self._projector is not None,
-            "consul": self._consul_handler is not None,
+            "postgres.upsert_registration": self._projector is not None,
+            "postgres.update_registration": self._pool is not None,
+            "consul.register": self._consul_handler is not None,
+            "consul.deregister": self._consul_handler is not None,
         }
         wirable_intent_types: set[str] = set()
         for it in routing_table:
-            protocol = it.split(".", 1)[0] if "." in it else it
-            if _protocol_resources.get(protocol, False):
+            if _protocol_resources.get(it, False):
                 wirable_intent_types.add(it)
 
         registered_count = 0
@@ -1157,23 +1162,42 @@ class PluginRegistration:
                 )
                 continue
 
-            protocol = (
-                intent_type.split(".", 1)[0] if "." in intent_type else intent_type
-            )
-
-            if protocol == "postgres" and self._projector is not None:
+            if (
+                intent_type == "postgres.upsert_registration"
+                and self._projector is not None
+            ):
                 from omnibase_infra.runtime.intent_effects import (
                     IntentEffectPostgresUpsert,
                 )
 
-                pg_effect = IntentEffectPostgresUpsert(projector=self._projector)
-                intent_executor.register_handler(intent_type, pg_effect)
+                pg_upsert_effect = IntentEffectPostgresUpsert(projector=self._projector)
+                intent_executor.register_handler(intent_type, pg_upsert_effect)
                 await self._register_effect_in_container(
-                    config, IntentEffectPostgresUpsert, pg_effect, correlation_id
+                    config, IntentEffectPostgresUpsert, pg_upsert_effect, correlation_id
                 )
                 registered_count += 1
                 logger.debug(
                     "Registered IntentEffectPostgresUpsert for intent_type=%s "
+                    "(correlation_id=%s)",
+                    intent_type,
+                    correlation_id,
+                )
+
+            elif (
+                intent_type == "postgres.update_registration" and self._pool is not None
+            ):
+                from omnibase_infra.runtime.intent_effects import (
+                    IntentEffectPostgresUpdate,
+                )
+
+                pg_update_effect = IntentEffectPostgresUpdate(pool=self._pool)
+                intent_executor.register_handler(intent_type, pg_update_effect)
+                await self._register_effect_in_container(
+                    config, IntentEffectPostgresUpdate, pg_update_effect, correlation_id
+                )
+                registered_count += 1
+                logger.debug(
+                    "Registered IntentEffectPostgresUpdate for intent_type=%s "
                     "(correlation_id=%s)",
                     intent_type,
                     correlation_id,

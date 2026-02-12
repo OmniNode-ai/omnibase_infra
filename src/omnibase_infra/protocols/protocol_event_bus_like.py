@@ -75,6 +75,8 @@ class ProtocolEventBusLike(Protocol):
         self,
         envelope: object,
         topic: str,
+        *,
+        key: bytes | None = None,
     ) -> None:
         """Publish an event envelope to a topic.
 
@@ -101,6 +103,10 @@ class ProtocolEventBusLike(Protocol):
             envelope: The event envelope/model to publish. Typically
                 ModelEventEnvelope, but any Pydantic model or dict is supported.
             topic: The topic to publish to.
+            key: Optional partition key for per-entity ordering. When provided,
+                the underlying transport uses this key for partition assignment
+                so that all events for the same entity land on the same
+                partition.
         """
         ...
 

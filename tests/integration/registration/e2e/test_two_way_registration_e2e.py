@@ -421,6 +421,9 @@ class TestSuite2RegistryDualRegistration:
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeIntrospected,
         )
+        from omnibase_infra.nodes.node_registration_orchestrator.services import (
+            RegistrationReducerService,
+        )
         from omnibase_infra.runtime.util_container_wiring import (
             get_projection_reader_from_container,
         )
@@ -428,8 +431,9 @@ class TestSuite2RegistryDualRegistration:
         # Get projection reader from container
         projection_reader = await get_projection_reader_from_container(wired_container)
 
-        # Create the handler with projection reader
-        handler = HandlerNodeIntrospected(projection_reader)
+        # Create the handler with projection reader and reducer
+        reducer = RegistrationReducerService()
+        handler = HandlerNodeIntrospected(projection_reader, reducer)
 
         # Create introspection event for a new node
         event: ModelNodeIntrospectionEvent = introspection_event_factory(
@@ -784,6 +788,9 @@ class TestSuite2RegistryDualRegistration:
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeIntrospected,
         )
+        from omnibase_infra.nodes.node_registration_orchestrator.services import (
+            RegistrationReducerService,
+        )
         from omnibase_infra.runtime.util_container_wiring import (
             get_projection_reader_from_container,
         )
@@ -792,7 +799,8 @@ class TestSuite2RegistryDualRegistration:
         projection_reader = await get_projection_reader_from_container(wired_container)
 
         # Create the handler
-        handler = HandlerNodeIntrospected(projection_reader)
+        reducer = RegistrationReducerService()
+        handler = HandlerNodeIntrospected(projection_reader, reducer)
 
         # Pre-create a projection in PENDING_REGISTRATION state
         now = datetime.now(UTC)
@@ -871,6 +879,9 @@ class TestSuite2RegistryDualRegistration:
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeIntrospected,
         )
+        from omnibase_infra.nodes.node_registration_orchestrator.services import (
+            RegistrationReducerService,
+        )
         from omnibase_infra.runtime.util_container_wiring import (
             get_projection_reader_from_container,
         )
@@ -879,7 +890,8 @@ class TestSuite2RegistryDualRegistration:
         projection_reader = await get_projection_reader_from_container(wired_container)
 
         # Create the handler
-        handler = HandlerNodeIntrospected(projection_reader)
+        reducer = RegistrationReducerService()
+        handler = HandlerNodeIntrospected(projection_reader, reducer)
 
         # Pre-create a projection in LIVENESS_EXPIRED state (retriable)
         now = datetime.now(UTC)
@@ -1792,6 +1804,9 @@ class TestSuite5RegistryRecovery:
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeIntrospected,
         )
+        from omnibase_infra.nodes.node_registration_orchestrator.services import (
+            RegistrationReducerService,
+        )
         from omnibase_infra.runtime.util_container_wiring import (
             get_projection_reader_from_container,
         )
@@ -1822,7 +1837,8 @@ class TestSuite5RegistryRecovery:
         handler_projection_reader = await get_projection_reader_from_container(
             wired_container
         )
-        handler = HandlerNodeIntrospected(handler_projection_reader)
+        reducer = RegistrationReducerService()
+        handler = HandlerNodeIntrospected(handler_projection_reader, reducer)
 
         event = introspection_event_factory(
             node_id=unique_node_id, correlation_id=unique_correlation_id

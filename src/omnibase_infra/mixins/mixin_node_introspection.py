@@ -459,8 +459,10 @@ class MixinNodeIntrospection:
     # Background task attributes
     _heartbeat_task: asyncio.Task[None] | None
     _registry_listener_task: asyncio.Task[None] | None
+    _ack_listener_task: asyncio.Task[None] | None
     _introspection_stop_event: asyncio.Event | None
     _registry_unsubscribe: Callable[[], None] | Callable[[], Awaitable[None]] | None
+    _ack_unsubscribe: Callable[[], None] | Callable[[], Awaitable[None]] | None
 
     # Configuration attributes
     _introspection_node_id: UUID | None
@@ -472,6 +474,7 @@ class MixinNodeIntrospection:
     _introspection_service: str
     _introspection_start_time: float | None
     _introspection_contract: ModelContractBase | None
+    _registration_accepted_topic: str
 
     # Capability discovery configuration
     _introspection_operation_keywords: frozenset[str]
@@ -668,6 +671,7 @@ class MixinNodeIntrospection:
         self._introspection_topic = config.introspection_topic
         self._heartbeat_topic = config.heartbeat_topic
         self._request_introspection_topic = config.request_introspection_topic
+        self._registration_accepted_topic = config.registration_accepted_topic
 
         # Contract for capability extraction (may be None for legacy nodes)
         self._introspection_contract = config.contract
@@ -680,8 +684,10 @@ class MixinNodeIntrospection:
         # Background tasks
         self._heartbeat_task = None
         self._registry_listener_task = None
+        self._ack_listener_task = None
         self._introspection_stop_event = asyncio.Event()
         self._registry_unsubscribe = None
+        self._ack_unsubscribe = None
 
         # Registry listener callback error tracking
         # Used for rate-limiting error logging to prevent log spam
@@ -1980,6 +1986,230 @@ class MixinNodeIntrospection:
                 )
             self._registry_unsubscribe = None
 
+    # -------------------------------------------------------------------------
+    # ACK listener: subscribe to registration-accepted, emit ACK commands
+    # -------------------------------------------------------------------------
+
+    async def _ack_listener_loop(self) -> None:
+        """Background loop listening for registration-accepted events.
+
+        Subscribes to the registration_accepted_topic and emits ACK commands
+        when this node's registration is accepted. Follows the same retry
+        pattern as ``_registry_listener_loop``.
+        """
+        if self._introspection_event_bus is None:
+            logger.warning(
+                "Cannot start ACK listener - no event bus for "
+                f"{self._introspection_node_id}",
+                extra={"node_id": self._introspection_node_id},
+            )
+            return
+
+        # Ensure stop event is initialized
+        if self._introspection_stop_event is None:
+            self._introspection_stop_event = asyncio.Event()
+
+        logger.info(
+            f"Starting ACK listener for {self._introspection_node_id}",
+            extra={"node_id": self._introspection_node_id},
+        )
+
+        try:
+            event_bus = self._introspection_event_bus
+            if event_bus is None or not hasattr(event_bus, "subscribe"):
+                logger.warning(
+                    "Event bus does not support subscribe for ACK listener "
+                    f"{self._introspection_node_id}",
+                    extra={"node_id": self._introspection_node_id},
+                )
+                return
+
+            topic = self._registration_accepted_topic
+            node_identity = ModelNodeIdentity(
+                env=self._introspection_env,
+                service=self._introspection_service,
+                node_name=self._introspection_node_name,
+                version=self._introspection_version,
+            )
+            unsubscribe = await event_bus.subscribe(
+                topic=topic,
+                node_identity=node_identity,
+                on_message=self._on_registration_accepted,
+            )
+            self._ack_unsubscribe = unsubscribe
+
+            logger.info(
+                f"ACK listener subscribed for {self._introspection_node_id}",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "topic": topic,
+                },
+            )
+
+            # Wait for stop signal
+            await self._introspection_stop_event.wait()
+
+        except asyncio.CancelledError:
+            logger.debug(
+                f"ACK listener cancelled for {self._introspection_node_id}",
+                extra={"node_id": self._introspection_node_id},
+            )
+        except Exception as e:
+            logger.error(
+                f"ACK listener error for {self._introspection_node_id}: {e}",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+                exc_info=True,
+            )
+        finally:
+            await self._cleanup_ack_subscription()
+
+        logger.info(
+            f"ACK listener stopped for {self._introspection_node_id}",
+            extra={"node_id": self._introspection_node_id},
+        )
+
+    async def _on_registration_accepted(self, message: ProtocolEventMessage) -> None:
+        """Handle registration-accepted event by emitting an ACK command.
+
+        Only responds to events matching this node's entity_id / node_id.
+        Parses the incoming message (which may be a raw Kafka message with
+        a JSON-encoded ``value``), extracts entity_id and correlation_id,
+        and publishes a ``ModelNodeRegistrationAcked`` command.
+
+        Args:
+            message: The incoming event message (implements ProtocolEventMessage).
+        """
+        try:
+            # Parse the message value (same pattern as _process_introspection_request)
+            if not hasattr(message, "value") or not message.value:
+                logger.debug(
+                    "ACK listener received message with no value, skipping",
+                    extra={"node_id": self._introspection_node_id},
+                )
+                return
+
+            request_data = json.loads(message.value.decode("utf-8"))
+
+            # Check if this event is for us via entity_id or node_id field
+            entity_id = request_data.get("entity_id") or request_data.get("node_id")
+            if entity_id is None:
+                logger.debug(
+                    "ACK listener received event without entity_id/node_id, skipping",
+                    extra={"node_id": self._introspection_node_id},
+                )
+                return
+
+            if str(entity_id) != str(self._introspection_node_id):
+                return  # Not for this node
+
+            # Extract correlation_id from the accepted event
+            raw_correlation_id = request_data.get("correlation_id")
+            correlation_id: UUID
+            if raw_correlation_id:
+                try:
+                    correlation_id = UUID(str(raw_correlation_id))
+                except ValueError:
+                    correlation_id = uuid4()
+            else:
+                correlation_id = uuid4()
+
+            # Build the ACK command
+            from omnibase_infra.models.registration.commands.model_node_registration_acked import (
+                ModelNodeRegistrationAcked,
+            )
+
+            node_id = self._introspection_node_id
+            if node_id is None:
+                logger.warning(
+                    "Cannot emit ACK - node_id is not initialized",
+                )
+                return
+
+            now = datetime.now(UTC)
+            ack_command = ModelNodeRegistrationAcked(
+                node_id=node_id,
+                correlation_id=correlation_id,
+                timestamp=now,
+            )
+
+            # Publish to ACK command topic
+            ack_topic = "onex.cmd.platform.node-registration-acked.v1"
+            event_bus = self._introspection_event_bus
+            if event_bus is None:
+                logger.warning(
+                    "Cannot emit ACK - event bus is None",
+                    extra={"node_id": self._introspection_node_id},
+                )
+                return
+
+            if hasattr(event_bus, "publish_envelope"):
+                envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+                    payload=ack_command,
+                    correlation_id=correlation_id,
+                )
+                await event_bus.publish_envelope(
+                    envelope=envelope,  # type: ignore[arg-type]
+                    topic=ack_topic,
+                )
+            else:
+                value = json.dumps(ack_command.model_dump(mode="json")).encode("utf-8")
+                await event_bus.publish(
+                    topic=ack_topic,
+                    key=str(self._introspection_node_id).encode("utf-8")
+                    if self._introspection_node_id is not None
+                    else None,
+                    value=value,
+                )
+
+            logger.info(
+                f"Emitted registration ACK for {self._introspection_node_id}",
+                extra={
+                    "node_id": str(self._introspection_node_id),
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to emit registration ACK: {e}",
+                extra={
+                    "node_id": str(self._introspection_node_id),
+                    "error_type": type(e).__name__,
+                },
+            )
+
+    async def _cleanup_ack_subscription(
+        self, correlation_id: UUID | None = None
+    ) -> None:
+        """Clean up the current ACK subscription.
+
+        Args:
+            correlation_id: Optional correlation ID for traceability in logs.
+                If not provided, a new one will be generated.
+        """
+        if self._ack_unsubscribe is not None:
+            cleanup_correlation_id = correlation_id or uuid4()
+            try:
+                result = self._ack_unsubscribe()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as cleanup_error:
+                logger.debug(
+                    "Error unsubscribing ACK listener for "
+                    f"{self._introspection_node_id}",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "correlation_id": str(cleanup_correlation_id),
+                        "error_type": type(cleanup_error).__name__,
+                        "error_message": str(cleanup_error),
+                    },
+                )
+            self._ack_unsubscribe = None
+
     async def _handle_introspection_request(
         self, message: ProtocolEventMessage
     ) -> None:
@@ -2384,6 +2614,20 @@ class MixinNodeIntrospection:
                 extra={"node_id": self._introspection_node_id},
             )
 
+        # Start ACK listener for registration-accepted events (if event bus available)
+        if (
+            self._ack_listener_task is None
+            and self._introspection_event_bus is not None
+        ):
+            self._ack_listener_task = asyncio.create_task(
+                self._ack_listener_loop(),
+                name=f"ack-listener-{self._introspection_node_id}",
+            )
+            logger.debug(
+                f"Started ACK listener task for {self._introspection_node_id}",
+                extra={"node_id": self._introspection_node_id},
+            )
+
     async def start_introspection_tasks_from_config(
         self,
         config: ModelIntrospectionTaskConfig,
@@ -2468,6 +2712,15 @@ class MixinNodeIntrospection:
             except asyncio.CancelledError:
                 pass
             self._registry_listener_task = None
+
+        # Cancel and wait for ACK listener task
+        if self._ack_listener_task is not None:
+            self._ack_listener_task.cancel()
+            try:
+                await self._ack_listener_task
+            except asyncio.CancelledError:
+                pass
+            self._ack_listener_task = None
 
         logger.info(
             f"Introspection tasks stopped for {self._introspection_node_id}",

@@ -10,6 +10,7 @@ Available Models:
     - ModelPayloadConsulRegister: Payload for Consul registration intents
     - ModelPayloadLedgerAppend: Payload for audit ledger append intents
     - ModelPayloadPostgresUpsertRegistration: Payload for PostgreSQL upsert intents
+    - ModelPayloadPostgresUpdateRegistration: Payload for PostgreSQL UPDATE intents
 """
 
 from omnibase_infra.nodes.reducers.models.model_payload_consul_deregister import (
@@ -20,6 +21,9 @@ from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
 )
 from omnibase_infra.nodes.reducers.models.model_payload_ledger_append import (
     ModelPayloadLedgerAppend,
+)
+from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registration import (
+    ModelPayloadPostgresUpdateRegistration,
 )
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
@@ -35,6 +39,7 @@ __all__ = [
     "ModelPayloadConsulDeregister",
     "ModelPayloadConsulRegister",
     "ModelPayloadLedgerAppend",
+    "ModelPayloadPostgresUpdateRegistration",
     "ModelPayloadPostgresUpsertRegistration",
     "ModelRegistrationConfirmation",
     "ModelRegistrationState",

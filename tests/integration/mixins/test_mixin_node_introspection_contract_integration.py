@@ -89,6 +89,8 @@ class MockEventBus:
         self,
         envelope: BaseModel,
         topic: str,
+        *,
+        key: bytes | None = None,
     ) -> None:
         """Mock publish_envelope method.
 

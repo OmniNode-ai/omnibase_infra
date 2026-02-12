@@ -144,6 +144,8 @@ class MixinKafkaBroadcast:
         self: ProtocolKafkaBroadcastHost,
         envelope: object,
         topic: str,
+        *,
+        key: bytes | None = None,
     ) -> None:
         """Publish an OnexEnvelope to a topic.
 
@@ -174,7 +176,7 @@ class MixinKafkaBroadcast:
             timestamp=datetime.now(UTC),
         )
 
-        await self.publish(topic, None, value, headers)
+        await self.publish(topic, key, value, headers)
 
 
 __all__: list[str] = ["MixinKafkaBroadcast"]

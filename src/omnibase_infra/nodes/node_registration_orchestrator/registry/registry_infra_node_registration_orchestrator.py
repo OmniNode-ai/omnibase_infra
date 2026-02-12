@@ -388,21 +388,30 @@ class RegistryInfraNodeRegistrationOrchestrator:
         #
         # See module docstring "Handler Dependency Map - Design Trade-off" for details.
         # =====================================================================
+        from omnibase_infra.nodes.node_registration_orchestrator.services import (
+            RegistrationReducerService,
+        )
+
+        reducer = RegistrationReducerService(
+            consul_enabled=consul_handler is not None,
+        )
+
         handler_dependencies: dict[str, dict[str, object]] = {
             "HandlerNodeIntrospected": {
                 "projection_reader": projection_reader,
-                "projector": projector,
-                "consul_handler": consul_handler,
+                "reducer": reducer,
             },
             "HandlerRuntimeTick": {
                 "projection_reader": projection_reader,
+                "reducer": reducer,
             },
             "HandlerNodeRegistrationAcked": {
                 "projection_reader": projection_reader,
+                "reducer": reducer,
             },
             "HandlerNodeHeartbeat": {
                 "projection_reader": projection_reader,
-                "projector": projector,
+                "reducer": reducer,
             },
         }
 

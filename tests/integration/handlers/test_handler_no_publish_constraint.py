@@ -82,6 +82,9 @@ from omnibase_infra.handlers.handler_qdrant import HandlerQdrant
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected import (
     HandlerNodeIntrospected,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.services import (
+    RegistrationReducerService,
+)
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
 
 pytestmark = pytest.mark.integration
@@ -288,7 +291,8 @@ def introspection_handler() -> HandlerNodeIntrospected:
     because no cleanup is needed for mock dependencies.
     """
     mock_reader = MagicMock()
-    handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+    reducer = RegistrationReducerService()
+    handler = HandlerNodeIntrospected(projection_reader=mock_reader, reducer=reducer)
     return handler
 
 
@@ -527,19 +531,21 @@ class TestHandlerNodeIntrospectedBusIsolation:
         distinguishes domain dependencies from bus infrastructure.
 
         Note: OMN-2050 simplified the handler to accept only projection_reader
-        and ack_timeout_seconds. Intent-based architecture moved Consul and
+        and reducer. Intent-based architecture moved Consul and
         snapshot publishing to the effect layer via ModelIntent objects.
+        The reducer encapsulates all decision logic (ack_timeout, consul_enabled).
         """
         mock_reader = MagicMock()
+        reducer = RegistrationReducerService(ack_timeout_seconds=60.0)
 
         handler = HandlerNodeIntrospected(
             projection_reader=mock_reader,
-            ack_timeout_seconds=60.0,
+            reducer=reducer,
         )
 
         # Verify stored attributes are domain-specific
         assert handler._projection_reader is mock_reader
-        assert handler._ack_timeout_seconds == 60.0
+        assert handler._reducer is reducer
 
         # Verify no attribute implements the event bus protocol.
         # Type-based detection is precise: it catches EventBusKafka,
@@ -566,20 +572,22 @@ class TestHandlerNodeIntrospectedBusIsolation:
         Positive validation: handler DOES store the domain dependencies it
         was initialized with, proving dependency injection works correctly.
 
-        Note: OMN-2050 simplified the handler to accept only projection_reader
-        and ack_timeout_seconds. Consul registration and snapshot publishing
-        are now handled by the effect layer via intent-based architecture.
+        Note: The handler now takes projection_reader and reducer. Configuration
+        such as ack_timeout_seconds and consul_enabled lives on the reducer.
+        Consul registration and snapshot publishing are handled by the effect
+        layer via intent-based architecture.
         """
         mock_reader = MagicMock()
+        reducer = RegistrationReducerService(ack_timeout_seconds=30.0)
 
         handler = HandlerNodeIntrospected(
             projection_reader=mock_reader,
-            ack_timeout_seconds=30.0,
+            reducer=reducer,
         )
 
         # Verify all expected domain attributes exist
         assert hasattr(handler, "_projection_reader"), "Must store projection_reader"
-        assert hasattr(handler, "_ack_timeout_seconds"), "Must store ack_timeout"
+        assert hasattr(handler, "_reducer"), "Must store reducer"
 
     def test_handler_has_required_domain_methods(
         self, introspection_handler: HandlerNodeIntrospected
@@ -824,7 +832,13 @@ class TestHandlerNoPublishConstraintCrossValidation:
         ("handler_class", "init_kwargs"),
         [
             (HandlerHttpRest, {"container": MagicMock(spec=ModelONEXContainer)}),
-            (HandlerNodeIntrospected, {"projection_reader": MagicMock()}),
+            (
+                HandlerNodeIntrospected,
+                {
+                    "projection_reader": MagicMock(),
+                    "reducer": RegistrationReducerService(),
+                },
+            ),
         ],
     )
     def test_handler_has_no_async_context_bus_access(
@@ -916,7 +930,14 @@ class TestHandlerNoPublishConstraintCrossValidation:
                 {"container": MagicMock(spec=ModelONEXContainer)},
                 "execute",
             ),
-            (HandlerNodeIntrospected, {"projection_reader": MagicMock()}, "handle"),
+            (
+                HandlerNodeIntrospected,
+                {
+                    "projection_reader": MagicMock(),
+                    "reducer": RegistrationReducerService(),
+                },
+                "handle",
+            ),
         ],
     )
     def test_handler_entry_method_is_async(
@@ -1090,7 +1111,13 @@ class TestHandlerProtocolCompliance:
         ("handler_class", "init_kwargs"),
         [
             (HandlerHttpRest, {"container": MagicMock(spec=ModelONEXContainer)}),
-            (HandlerNodeIntrospected, {"projection_reader": MagicMock()}),
+            (
+                HandlerNodeIntrospected,
+                {
+                    "projection_reader": MagicMock(),
+                    "reducer": RegistrationReducerService(),
+                },
+            ),
         ],
     )
     def test_handler_has_execute_method(
@@ -1126,7 +1153,13 @@ class TestHandlerProtocolCompliance:
         ("handler_class", "init_kwargs"),
         [
             (HandlerHttpRest, {"container": MagicMock(spec=ModelONEXContainer)}),
-            (HandlerNodeIntrospected, {"projection_reader": MagicMock()}),
+            (
+                HandlerNodeIntrospected,
+                {
+                    "projection_reader": MagicMock(),
+                    "reducer": RegistrationReducerService(),
+                },
+            ),
         ],
     )
     def test_handler_describe_method_if_present(
@@ -1544,13 +1577,14 @@ class TestBusDetectionRegression:
         End-to-end regression: instantiate handler with all accepted
         dependencies, then verify no attribute is flagged as bus infrastructure.
 
-        Note: OMN-2050 simplified the handler signature. The old kwargs
-        (projector, consul_handler, snapshot_publisher) were removed because
-        the intent-based architecture delegates those concerns to the effect layer.
+        Note: The handler now takes projection_reader and reducer. Configuration
+        such as ack_timeout_seconds lives on the RegistrationReducerService.
+        The intent-based architecture delegates Consul and snapshot concerns
+        to the effect layer.
         """
         handler = HandlerNodeIntrospected(
             projection_reader=MagicMock(),
-            ack_timeout_seconds=60.0,
+            reducer=RegistrationReducerService(ack_timeout_seconds=60.0),
         )
 
         for attr in dir(handler):
