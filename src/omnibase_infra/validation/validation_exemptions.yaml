@@ -589,6 +589,16 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Node Identity Model)
   # ==========================================================================
+  # ModelSchemaManifest schema_name Exemption (OMN-2087)
+  # ==========================================================================
+  # schema_name is the PostgreSQL namespace (e.g. "public"), not an entity reference.
+  - file_pattern: 'model_schema_manifest\.py'
+    violation_pattern: "Field 'schema_name' might reference an entity"
+    reason: >
+      schema_name is the PostgreSQL namespace string (e.g., "public") used to scope information_schema/pg_catalog queries during schema fingerprint computation. It is not an entity reference requiring ID + display_name.
+
+    ticket: OMN-2087
+  # ==========================================================================
   # TransitionNotificationOutbox Method Count Exemption (OMN-1139)
   # ==========================================================================
   # Outbox pattern requires lifecycle (start/stop), storage (store/cleanup),

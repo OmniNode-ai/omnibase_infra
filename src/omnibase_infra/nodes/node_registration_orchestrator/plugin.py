@@ -89,9 +89,14 @@ from omnibase_infra.errors import (
     ContainerWiringError,
     DbOwnershipMismatchError,
     DbOwnershipMissingError,
+    SchemaFingerprintMismatchError,
+    SchemaFingerprintMissingError,
 )
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
+)
+from omnibase_infra.runtime.model_schema_manifest import (
+    OMNIBASE_INFRA_SCHEMA_MANIFEST,
 )
 from omnibase_infra.runtime.protocol_domain_plugin import (
     ModelDomainPluginConfig,
@@ -99,6 +104,9 @@ from omnibase_infra.runtime.protocol_domain_plugin import (
     ProtocolDomainPlugin,
 )
 from omnibase_infra.runtime.util_db_ownership import validate_db_ownership
+from omnibase_infra.runtime.util_schema_fingerprint import (
+    validate_schema_fingerprint,
+)
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
@@ -327,6 +335,16 @@ class PluginRegistration:
                 correlation_id=correlation_id,
             )
 
+            # 1.6 Validate schema fingerprint (OMN-2087)
+            # Hard gate: prevents operating on a database whose schema has
+            # drifted from what code expects (missing columns, wrong types,
+            # etc.).
+            await validate_schema_fingerprint(
+                pool=self._pool,
+                manifest=OMNIBASE_INFRA_SCHEMA_MANIFEST,
+                correlation_id=correlation_id,
+            )
+
             # 2. Load projectors from contracts via ProjectorPluginLoader
             await self._load_projector(config)
             if self._projector is not None:
@@ -356,10 +374,15 @@ class PluginRegistration:
                 duration_seconds=duration,
             )
 
-        except (DbOwnershipMismatchError, DbOwnershipMissingError):
-            # Hard gate: must propagate to kill the kernel (OMN-2085).
-            # DB ownership errors indicate the service connected to a database
-            # owned by a different service after the DB-per-repo split.
+        except (
+            DbOwnershipMismatchError,
+            DbOwnershipMissingError,
+            SchemaFingerprintMismatchError,
+            SchemaFingerprintMissingError,
+        ):
+            # Hard gates: must propagate to kill the kernel.
+            # DB ownership errors (OMN-2085) indicate wrong database.
+            # Schema fingerprint errors (OMN-2087) indicate schema drift.
             # Swallowing these would defeat the entire safety mechanism.
             await self._cleanup_on_failure(config)
             raise
