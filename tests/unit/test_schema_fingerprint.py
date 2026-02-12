@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from omnibase_infra.errors.error_schema_fingerprint import (
     SchemaFingerprintMismatchError,
     SchemaFingerprintMissingError,
@@ -590,13 +592,13 @@ class TestDiffSummary:
         assert "~ changed: my_table" in diff
 
     def test_diff_bounded_to_10_lines(self) -> None:
-        """Diff output is bounded to 10 lines + overflow message."""
+        """Diff output is bounded to 10 lines total (including overflow message)."""
         expected = {f"table_{i}": f"hash_{i}" for i in range(15)}
         actual = {f"table_{i}": f"different_{i}" for i in range(15)}
         diff = _compute_schema_diff(expected, actual)
         lines = diff.strip().split("\n")
-        # Should be 10 content lines + 1 overflow line
-        assert len(lines) == 11
+        # Should be exactly 10 lines total (9 content lines + 1 overflow line)
+        assert len(lines) == 10
         assert "... and" in lines[-1]
 
     def test_empty_diff_on_match(self) -> None:

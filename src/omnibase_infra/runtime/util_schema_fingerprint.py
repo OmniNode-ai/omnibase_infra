@@ -110,7 +110,29 @@ _CanonicalRecord = dict[str, object]
 
 
 def _build_constraint_record(row: asyncpg.Record) -> _CanonicalRecord:
-    """Build a canonical constraint dict from a pg_catalog row."""
+    """Build a canonical constraint dict from a pg_catalog row.
+
+    Extracts constraint metadata and normalizes it into a deterministic
+    dictionary structure for hashing. Handles PRIMARY KEY, UNIQUE,
+    FOREIGN KEY, and CHECK constraints.
+
+    Args:
+        row: asyncpg Record from _CONSTRAINTS_QUERY with fields:
+            - constraint_type: 'p' (PRIMARY KEY), 'u' (UNIQUE),
+              'f' (FOREIGN KEY), or 'c' (CHECK)
+            - local_columns: Array of column names
+            - ref_table: Referenced table (for FOREIGN KEY)
+            - ref_columns: Referenced columns (for FOREIGN KEY)
+            - on_update: Update action char (for FOREIGN KEY)
+            - on_delete: Delete action char (for FOREIGN KEY)
+            - constraint_def: Full definition (for CHECK)
+
+    Returns:
+        Canonical constraint dict with type-specific fields:
+        - PRIMARY KEY/UNIQUE: {type, columns}
+        - FOREIGN KEY: {type, columns, ref_table, ref_columns, on_update, on_delete}
+        - CHECK: {type, expression} (whitespace-normalized)
+    """
     con_type: str = row["constraint_type"]
     local_cols: list[str] | None = row["local_columns"]
 
@@ -143,17 +165,67 @@ def _build_constraint_record(row: asyncpg.Record) -> _CanonicalRecord:
 
 
 def _sort_key_for_constraint(c: _CanonicalRecord) -> tuple[str, ...]:
-    """Produce a deterministic sort key for a constraint record."""
+    """Produce a deterministic sort key for a constraint record.
+
+    Creates a tuple key for stable sorting of constraints, ensuring
+    identical schemas produce identical fingerprints regardless of
+    database query result ordering.
+
+    Args:
+        c: Canonical constraint dict from _build_constraint_record with fields:
+            - type: Constraint type ('p', 'u', 'f', 'c')
+            - columns: Column names (for PRIMARY KEY, UNIQUE, FOREIGN KEY)
+            - ref_table: Referenced table (for FOREIGN KEY)
+            - ref_columns: Referenced columns (for FOREIGN KEY)
+            - on_update: Update action (for FOREIGN KEY)
+            - on_delete: Delete action (for FOREIGN KEY)
+            - expression: Normalized expression (for CHECK)
+
+    Returns:
+        Sort key tuple:
+        - PRIMARY KEY/UNIQUE: (type, comma-joined columns)
+        - FOREIGN KEY: (type, local_columns, ref_table, ref_columns,
+          on_update, on_delete)
+        - CHECK: (type, normalized_expression)
+    """
     con_type = str(c.get("type", ""))
-    if con_type in ("p", "u", "f"):
+    if con_type in ("p", "u"):
         cols = c.get("columns", [])
         col_list: list[str] = list(cols) if isinstance(cols, list) else []
         return (con_type, ",".join(col_list))
+    if con_type == "f":
+        # Foreign key - include ref_table, ref_columns, on_update, on_delete
+        cols = c.get("columns", [])
+        local_col_list: list[str] = list(cols) if isinstance(cols, list) else []
+        ref_table = str(c.get("ref_table", ""))
+        ref_cols = c.get("ref_columns", [])
+        ref_col_list: list[str] = list(ref_cols) if isinstance(ref_cols, list) else []
+        on_update = str(c.get("on_update", ""))
+        on_delete = str(c.get("on_delete", ""))
+        return (
+            con_type,
+            ",".join(local_col_list),
+            ref_table,
+            ",".join(ref_col_list),
+            on_update,
+            on_delete,
+        )
     return (con_type, str(c.get("expression", "")))
 
 
 def _sha256_json(obj: object) -> str:
-    """SHA-256 hex digest of a JSON-serialised object."""
+    """SHA-256 hex digest of a JSON-serialized object.
+
+    Produces a deterministic hash by serializing with sorted keys and
+    compact separators (no whitespace). Used for both per-table hashes
+    and the overall schema fingerprint.
+
+    Args:
+        obj: Python object (dict, list, tuple) to hash. Must be JSON-serializable.
+
+    Returns:
+        64-character hexadecimal SHA-256 digest.
+    """
     raw = json.dumps(obj, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()
 
@@ -190,8 +262,9 @@ def _compute_schema_diff(
 
     max_lines = 10
     if len(lines) > max_lines:
-        overflow = len(lines) - max_lines
-        lines = lines[:max_lines]
+        # Reserve one slot for overflow message
+        overflow = len(lines) - (max_lines - 1)
+        lines = lines[: max_lines - 1]
         lines.append(f"  ... and {overflow} more")
 
     return "\n".join(lines)
@@ -338,9 +411,7 @@ async def validate_schema_fingerprint(
     # 1. Read expected fingerprint from db_metadata
     try:
         async with pool.acquire() as conn:
-            expected_fp: str | None = await conn.fetchval(  # type: ignore[assignment]  # asyncpg.fetchval returns Any
-                _EXPECTED_FINGERPRINT_QUERY
-            )
+            expected_fp: str | None = await conn.fetchval(_EXPECTED_FINGERPRINT_QUERY)
     except Exception as exc:
         if isinstance(
             exc,
@@ -410,7 +481,10 @@ async def validate_schema_fingerprint(
         f"Tables fingerprinted: {result.table_count}\n"
         f"Columns: {result.column_count}, Constraints: {result.constraint_count}"
     )
-    diff_summary = f"{diff_header}\n{table_diff}" if table_diff else diff_header
+    if table_diff:
+        diff_summary = f"{diff_header}\n\nPer-table differences:\n{table_diff}"
+    else:
+        diff_summary = diff_header
 
     raise SchemaFingerprintMismatchError(
         f"Schema fingerprint mismatch: expected '{expected_fingerprint[:16]}...', "
