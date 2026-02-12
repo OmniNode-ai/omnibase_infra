@@ -340,6 +340,13 @@ async def compute_schema_fingerprint(
 
     for table_name in sorted(table_list):
         cols = columns_by_table.get(table_name, [])
+
+        # Sort columns by ordinal position for deterministic hashing
+        def _col_ordinal(c: _CanonicalRecord) -> int:
+            pos = c.get("ordinal_position", 0)
+            return pos if isinstance(pos, int) else 0
+
+        cols = sorted(cols, key=_col_ordinal)
         cons = constraints_by_table.get(table_name, [])
 
         # Sort constraints deterministically
@@ -437,8 +444,8 @@ async def validate_schema_fingerprint(
         raise SchemaFingerprintMissingError(
             "expected_schema_fingerprint is NULL in db_metadata. "
             f"Expected owner '{manifest.owner_service}'. "
-            "Hint: run the fingerprint update command to populate: "
-            "poetry run python -m omnibase_infra.runtime.util_schema_fingerprint update",
+            "Hint: run the migration that populates expected_schema_fingerprint "
+            "in db_metadata, then restart.",
             expected_owner=manifest.owner_service,
             correlation_id=correlation_id,
         )
@@ -492,7 +499,12 @@ async def validate_schema_fingerprint(
     if table_diff:
         diff_summary = f"{diff_header}\n\nPer-table differences:\n{table_diff}"
     else:
-        diff_summary = diff_header
+        diff_summary = (
+            f"{diff_header}\n\n"
+            "Per-table expected hashes are not stored in db_metadata; "
+            "cannot identify which specific tables changed. "
+            "Re-run the fingerprint update after applying migrations."
+        )
 
     raise SchemaFingerprintMismatchError(
         f"Schema fingerprint mismatch: expected '{expected_fingerprint[:16]}...', "
