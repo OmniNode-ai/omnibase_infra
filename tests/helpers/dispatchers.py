@@ -84,8 +84,19 @@ class ContextCapturingDispatcher:
         self,
         envelope: object,
         context: ModelDispatchContext | None = None,
+        *,
+        started_at: datetime | None = None,
     ) -> ModelDispatchResult:
-        """Handle the message and capture the context for assertions."""
+        """Handle the message and capture the context for assertions.
+
+        Args:
+            envelope: The message envelope to dispatch.
+            context: Optional dispatch context injected by the engine.
+            started_at: Optional deterministic timestamp for the result.
+                Defaults to ``datetime.now(UTC)`` when not provided, which
+                suits most tests.  Pass an explicit value when the test
+                requires a deterministic, reproducible timestamp.
+        """
         self.captured_envelope = envelope
         self.captured_context = context
         self.invocation_count += 1
@@ -96,7 +107,7 @@ class ContextCapturingDispatcher:
             topic="test.events.v1",
             dispatcher_id=self._dispatcher_id,
             message_type=type(envelope).__name__ if envelope else None,
-            started_at=datetime.now(UTC),
+            started_at=started_at if started_at is not None else datetime.now(UTC),
         )
 
     def reset(self) -> None:

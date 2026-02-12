@@ -142,7 +142,7 @@ class VerificationResult:
 
     @property
     def all_passed(self) -> bool:
-        return all(s["passed"] for s in self.steps)
+        return bool(self.steps) and all(s["passed"] for s in self.steps)
 
 
 # =============================================================================

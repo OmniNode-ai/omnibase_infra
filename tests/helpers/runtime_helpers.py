@@ -7,8 +7,7 @@ both unit and integration tests that exercise RuntimeHostProcess lifecycle
 without needing the full handler registry wiring.
 
 These helpers were extracted from ``tests/conftest.py`` so that test modules
-can import them directly without relying on conftest auto-discovery.  The root
-conftest re-exports them for backwards compatibility.
+can import them directly without relying on conftest auto-discovery.
 
 Usage::
 
