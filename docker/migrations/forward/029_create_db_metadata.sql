@@ -26,4 +26,7 @@ COMMENT ON TABLE public.db_metadata IS
 -- Seed the ownership row for omnibase_infra
 INSERT INTO public.db_metadata (id, owner_service, schema_version)
 VALUES (TRUE, 'omnibase_infra', '029')
-ON CONFLICT (id) DO UPDATE SET owner_service = EXCLUDED.owner_service, schema_version = EXCLUDED.schema_version, updated_at = NOW();
+ON CONFLICT (id) DO UPDATE SET
+    schema_version = EXCLUDED.schema_version,
+    updated_at = NOW()
+WHERE db_metadata.owner_service = EXCLUDED.owner_service;

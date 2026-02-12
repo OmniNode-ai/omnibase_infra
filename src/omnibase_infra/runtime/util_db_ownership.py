@@ -13,16 +13,15 @@ Related:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
+
+import asyncpg
+import asyncpg.exceptions
 
 from omnibase_infra.errors.error_db_ownership import (
     DbOwnershipMismatchError,
     DbOwnershipMissingError,
 )
-
-if TYPE_CHECKING:
-    import asyncpg
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +62,6 @@ async def validate_db_ownership(
         # Transient failures (connection errors, timeouts) must propagate
         # with their original type so callers can distinguish recoverable
         # errors from a genuinely un-migrated database.
-        import asyncpg.exceptions
-
         if isinstance(exc, asyncpg.exceptions.UndefinedTableError):
             raise DbOwnershipMissingError(
                 f"Cannot read public.db_metadata: {exc}. "
