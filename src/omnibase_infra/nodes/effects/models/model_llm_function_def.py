@@ -39,6 +39,7 @@ class ModelLlmFunctionDef(BaseModel):
 
     name: str = Field(
         ...,
+        min_length=1,
         description="Machine-readable function name.",
     )
     description: str = Field(

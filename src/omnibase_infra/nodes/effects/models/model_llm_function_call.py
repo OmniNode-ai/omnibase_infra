@@ -32,6 +32,7 @@ class ModelLlmFunctionCall(BaseModel):
 
     name: str = Field(
         ...,
+        min_length=1,
         description="Name of the function the model chose to call.",
     )
     arguments: str = Field(

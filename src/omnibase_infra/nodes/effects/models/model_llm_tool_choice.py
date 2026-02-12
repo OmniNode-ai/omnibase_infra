@@ -46,6 +46,7 @@ class ModelLlmToolChoice(BaseModel):
     )
     function_name: str | None = Field(
         default=None,
+        min_length=1,
         description="Required when mode='function', forbidden otherwise.",
     )
 

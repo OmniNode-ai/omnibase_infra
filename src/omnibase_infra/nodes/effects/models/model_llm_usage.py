@@ -20,7 +20,7 @@ Related:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ModelLlmUsage(BaseModel):
@@ -28,6 +28,11 @@ class ModelLlmUsage(BaseModel):
 
     All token counts default to zero so callers may construct a usage
     object even when the provider omits individual fields.
+
+    When ``tokens_total`` is not explicitly provided (i.e. left at the
+    default of ``0``), it is auto-computed as ``tokens_input + tokens_output``.
+    When all three values are explicitly supplied, a consistency check
+    ensures ``tokens_total == tokens_input + tokens_output``.
 
     Attributes:
         tokens_input: Number of tokens in the prompt / input messages.
@@ -37,7 +42,7 @@ class ModelLlmUsage(BaseModel):
             reserved for future provider-specific billing integration.
 
     Example:
-        >>> usage = ModelLlmUsage(tokens_input=120, tokens_output=45, tokens_total=165)
+        >>> usage = ModelLlmUsage(tokens_input=120, tokens_output=45)
         >>> usage.tokens_total
         165
     """
@@ -61,8 +66,35 @@ class ModelLlmUsage(BaseModel):
     )
     cost_usd: float | None = Field(
         default=None,
+        ge=0.0,
         description="Cost in USD. Always None in v1.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compute_or_validate_tokens_total(cls, values: object) -> object:
+        """Auto-compute tokens_total or validate consistency.
+
+        When tokens_total is omitted or left at the default (0), it is set to
+        tokens_input + tokens_output. When explicitly provided as non-zero, it
+        must equal the sum of tokens_input and tokens_output.
+        """
+        if not isinstance(values, dict):
+            return values
+
+        tokens_input = values.get("tokens_input", 0)
+        tokens_output = values.get("tokens_output", 0)
+        tokens_total = values.get("tokens_total", 0)
+
+        expected = tokens_input + tokens_output
+        if tokens_total == 0:
+            values["tokens_total"] = expected
+        elif tokens_total != expected:
+            raise ValueError(
+                f"tokens_total ({tokens_total}) does not equal "
+                f"tokens_input + tokens_output ({expected})."
+            )
+        return values
 
 
 __all__ = ["ModelLlmUsage"]
