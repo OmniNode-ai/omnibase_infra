@@ -38,6 +38,11 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_i
 
 pytestmark = pytest.mark.integration
 
+# Fallback values match the remote infrastructure topology documented in
+# ~/.claude/CLAUDE.md (Consul external port 28500 on 192.168.86.200).
+# The handlers conftest uses a different default (8500) because it reads
+# CONSUL_PORT from .env; here we hard-code the external port for direct
+# client access when the env var is absent.
 _CONSUL_HOST = os.environ.get("CONSUL_HOST", "192.168.86.200")
 _CONSUL_PORT = int(os.environ.get("CONSUL_PORT", "28500"))
 
@@ -204,8 +209,14 @@ class TestConsulRegistrationVisible:
             # Cleanup: deregister the test service
             try:
                 await client.agent.service.deregister(service_id)
-            except Exception:
-                pass  # Best-effort cleanup
+            except Exception as exc:
+                import warnings
+
+                warnings.warn(
+                    f"Consul cleanup failed for service '{service_id}': "
+                    f"{type(exc).__name__}: {exc}",
+                    stacklevel=1,
+                )
 
 
 __all__: list[str] = [

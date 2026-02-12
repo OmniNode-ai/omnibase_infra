@@ -68,6 +68,9 @@ Available Utilities:
         - check_postgres_reachable_simple: Simple TCP reachability check
         - should_skip_migration: Check if migration contains CONCURRENTLY DDL
         - CONCURRENT_DDL_PATTERN: Regex pattern for CONCURRENTLY DDL statements
+
+    Path Utilities:
+        - find_project_root: Locate the project root by walking up to pyproject.toml
 """
 
 from tests.helpers.ast_analysis import (
@@ -86,6 +89,7 @@ from tests.helpers.chaos_utils import (
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
 from tests.helpers.log_helpers import filter_handler_warnings, get_warning_messages
 from tests.helpers.mock_helpers import MockStatResult, create_mock_stat_result
+from tests.helpers.path_utils import find_project_root
 from tests.helpers.replay_utils import (
     EventFactory,
     EventSequenceEntry,
@@ -183,6 +187,8 @@ __all__ = [
     "parse_bootstrap_servers",
     "wait_for_consumer_ready",
     "wait_for_topic_metadata",
+    # Path utilities
+    "find_project_root",
     # PostgreSQL testing utilities
     "CONCURRENT_DDL_PATTERN",
     "PostgresConfig",

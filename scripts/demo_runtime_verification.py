@@ -36,7 +36,13 @@ import yaml
 
 
 def _find_project_root() -> Path:
-    """Walk up from this file to find the project root (contains pyproject.toml)."""
+    """Walk up from this file to find the project root (contains pyproject.toml).
+
+    Note: The canonical shared implementation lives in
+    ``tests.helpers.path_utils.find_project_root``.  This script is a
+    standalone entry point that cannot import from the tests package, so the
+    logic is duplicated here.
+    """
     current = Path(__file__).resolve().parent
     while current != current.parent:
         if (current / "pyproject.toml").exists():
@@ -57,6 +63,37 @@ CONTRACT_PATH = (
 )
 
 READY_STATE_SLA_SECONDS = 10.0
+
+
+# =============================================================================
+# Handler seeding helper (mirrors tests/conftest.py seed_mock_handlers)
+# =============================================================================
+
+
+def _seed_mock_handlers(process: object) -> None:
+    """Seed mock handlers on a RuntimeHostProcess to bypass fail-fast validation.
+
+    This is the demo-script equivalent of ``seed_mock_handlers`` from
+    ``tests/conftest.py``.  Keep the two implementations in sync.
+
+    The RuntimeHostProcess.start() method validates that handlers are
+    registered.  This helper sets up a minimal mock handler to satisfy
+    that check, allowing the demo to focus on other runtime functionality.
+
+    Args:
+        process: The RuntimeHostProcess instance to seed handlers on.
+            Typed as ``object`` to avoid import-order issues; must have
+            a ``_handlers`` attribute.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_handler = MagicMock()
+    mock_handler.execute = AsyncMock(return_value={"success": True})
+    mock_handler.initialize = AsyncMock()
+    mock_handler.shutdown = AsyncMock()
+    mock_handler.health_check = AsyncMock(return_value={"healthy": True})
+    mock_handler.initialized = True
+    process._handlers = {"demo-handler": mock_handler}  # type: ignore[attr-defined]
 
 
 # =============================================================================
@@ -112,20 +149,7 @@ async def verify_runtime_startup(results: VerificationResult) -> None:
         pass
 
     with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
-        # Seed mock handlers to bypass fail-fast validation.
-        # This is a standalone demo script (no test fixture access), so the
-        # seeding is inline rather than using seed_mock_handlers from
-        # tests/conftest.py.  Keep this in sync with that helper.
-        from unittest.mock import AsyncMock, MagicMock
-
-        mock_handler = MagicMock()
-        mock_handler.execute = AsyncMock(return_value={"success": True})
-        mock_handler.initialize = AsyncMock()
-        mock_handler.shutdown = AsyncMock()
-        mock_handler.health_check = AsyncMock(return_value={"healthy": True})
-        mock_handler.initialized = True
-        # Access private _handlers (no public API for handler injection in test/demo mode)
-        runtime._handlers = {"demo-handler": mock_handler}
+        _seed_mock_handlers(runtime)
 
         t_start = time.monotonic()
         await runtime.start()
@@ -174,7 +198,7 @@ def verify_contract_routing(results: VerificationResult) -> None:
         )
         return
 
-    with open(CONTRACT_PATH) as f:
+    with open(CONTRACT_PATH, encoding="utf-8") as f:
         contract = yaml.safe_load(f)
 
     handler_routing = contract.get("handler_routing", {})
@@ -199,7 +223,7 @@ def verify_contract_routing(results: VerificationResult) -> None:
         try:
             mod = importlib.import_module(handler_module)
             importable = hasattr(mod, handler_name)
-        except Exception as e:
+        except (ImportError, ModuleNotFoundError) as e:
             print(
                 f"    WARNING: Could not import {handler_module}: {type(e).__name__}: {e}"
             )
@@ -336,7 +360,7 @@ def verify_contract_handler_structure(results: VerificationResult) -> None:
         )
         return
 
-    with open(CONTRACT_PATH) as f:
+    with open(CONTRACT_PATH, encoding="utf-8") as f:
         contract = yaml.safe_load(f)
 
     handler_routing = contract.get("handler_routing", {})
@@ -378,7 +402,7 @@ def verify_contract_handler_structure(results: VerificationResult) -> None:
                     if has_handle_method:
                         handle_method = handler_cls.handle
                         has_handle_method = inspect.iscoroutinefunction(handle_method)
-            except Exception:
+            except (ImportError, ModuleNotFoundError):
                 has_handle_method = False
 
         entry_valid = has_fields and has_handle_method

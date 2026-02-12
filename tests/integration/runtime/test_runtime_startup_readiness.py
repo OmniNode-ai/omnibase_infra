@@ -36,6 +36,13 @@ def _get_aiohttp_bound_port(health_server: ServiceHealth) -> int:
 
     aiohttp does not expose the bound port publicly when using port=0.
     Accessing internals is the only way to discover the auto-assigned port.
+
+    Warning:
+        **Fragile**: This function accesses private aiohttp internals
+        (``_site``, ``_server``, ``.sockets``) that may change without
+        notice across aiohttp releases.  Tested against aiohttp 3.13.x.
+        If aiohttp is upgraded and this breaks, inspect the new internal
+        layout and update the attribute chain accordingly.
     """
     try:
         site = health_server._site

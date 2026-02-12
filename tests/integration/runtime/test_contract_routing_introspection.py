@@ -36,14 +36,14 @@ from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnfo
 
 
 def _find_project_root() -> Path:
-    """Walk up from this file to find the project root (contains pyproject.toml)."""
-    current = Path(__file__).resolve().parent
-    while current != current.parent:
-        if (current / "pyproject.toml").exists():
-            return current
-        current = current.parent
-    msg = "Could not find project root (no pyproject.toml found)"
-    raise RuntimeError(msg)
+    """Walk up from this file to find the project root (contains pyproject.toml).
+
+    Note: Canonical implementation lives in ``tests.helpers.path_utils.find_project_root``.
+    This local wrapper passes the correct start directory.
+    """
+    from tests.helpers.path_utils import find_project_root
+
+    return find_project_root(start=Path(__file__).resolve().parent)
 
 
 # Path to the registration orchestrator contract
@@ -159,7 +159,7 @@ class TestContractDeclaresIntrospectionRouting:
         """
         assert CONTRACT_PATH.exists(), f"Contract not found at {CONTRACT_PATH}"
 
-        with open(CONTRACT_PATH) as f:
+        with open(CONTRACT_PATH, encoding="utf-8") as f:
             contract = yaml.safe_load(f)
 
         # Verify handler_routing section exists
@@ -269,6 +269,10 @@ class TestDispatchEngineRoutesIntrospection:
         dispatcher provides a context with ``now`` set (time injection)
         and correct correlation_id propagation.
         """
+        from omnibase_core.models.events.model_event_envelope import (
+            ModelEventEnvelope,
+        )
+
         enforcer = DispatchContextEnforcer()
         correlation_id = uuid4()
 
@@ -279,7 +283,11 @@ class TestDispatchEngineRoutesIntrospection:
             message_types={"ModelNodeIntrospectionEvent"},
         )
 
-        envelope = _make_mock_envelope(correlation_id=correlation_id)
+        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+            correlation_id=correlation_id,
+            event_type="ModelNodeIntrospectionEvent",
+            payload={"node_id": str(uuid4()), "node_type": "EFFECT"},
+        )
 
         before_time = datetime.now(UTC)
         ctx = enforcer.create_context_for_dispatcher(
@@ -313,7 +321,7 @@ class TestContractHandlerRoutingMatchesRuntime:
         """
         assert CONTRACT_PATH.exists(), f"Contract not found at {CONTRACT_PATH}"
 
-        with open(CONTRACT_PATH) as f:
+        with open(CONTRACT_PATH, encoding="utf-8") as f:
             contract = yaml.safe_load(f)
 
         handler_routing = contract["handler_routing"]
