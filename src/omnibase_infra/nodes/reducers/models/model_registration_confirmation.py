@@ -55,7 +55,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.enums import EnumConfirmationEventType
 
@@ -160,6 +160,22 @@ class ModelRegistrationConfirmation(BaseModel):
         ...,
         description="When the confirmation was generated",
     )
+
+    @model_validator(mode="after")
+    def _validate_error_message_consistency(self) -> ModelRegistrationConfirmation:
+        """Enforce that error_message is only set when success is False.
+
+        Invariant:
+            - success=True requires error_message=None
+            - success=False may optionally include an error_message
+        """
+        if self.success and self.error_message is not None:
+            msg = (
+                "error_message must be None when success is True, "
+                f"got error_message={self.error_message!r}"
+            )
+            raise ValueError(msg)
+        return self
 
 
 __all__ = ["ModelRegistrationConfirmation"]

@@ -6134,6 +6134,47 @@ class TestReduceConfirmation:
         assert output2.result.postgres_confirmed is True
         assert output2.intents == ()
 
+    def test_both_confirmations_complete_reverse_order(
+        self,
+        reducer: RegistrationReducer,
+        pending_state: ModelRegistrationState,
+        node_id: UUID,
+    ) -> None:
+        """Processing postgres then consul confirmation reaches complete state."""
+        from omnibase_infra.nodes.reducers.models import ModelRegistrationConfirmation
+
+        postgres_corr = uuid4()
+        consul_corr = uuid4()
+
+        # Step 1: postgres confirmation first -> PARTIAL
+        postgres_confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.POSTGRES_REGISTRATION_UPSERTED,
+            correlation_id=postgres_corr,
+            node_id=node_id,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output1 = reducer.reduce_confirmation(pending_state, postgres_confirmation)
+        assert output1.result.status == EnumRegistrationStatus.PARTIAL
+        assert output1.result.postgres_confirmed is True
+        assert output1.result.consul_confirmed is False
+
+        # Step 2: consul confirmation second -> COMPLETE
+        consul_confirmation = ModelRegistrationConfirmation(
+            event_type=EnumConfirmationEventType.CONSUL_REGISTERED,
+            correlation_id=consul_corr,
+            node_id=node_id,
+            success=True,
+            timestamp=TEST_TIMESTAMP,
+        )
+
+        output2 = reducer.reduce_confirmation(output1.result, consul_confirmation)
+        assert output2.result.status == EnumRegistrationStatus.COMPLETE
+        assert output2.result.consul_confirmed is True
+        assert output2.result.postgres_confirmed is True
+        assert output2.intents == ()
+
     def test_consul_confirmation_failure(
         self,
         reducer: RegistrationReducer,

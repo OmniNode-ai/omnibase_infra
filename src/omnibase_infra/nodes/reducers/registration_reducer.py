@@ -20,7 +20,7 @@ Performance Characteristics:
     Typical performance on standard hardware:
     - Simple introspection events: ~0.1-1ms
     - Complex events with full metadata: ~1-5ms
-    - Hash-based event ID derivation: ~0.01ms
+    - uuid5-based event ID derivation: ~0.01ms
 
 Circuit Breaker Considerations:
     This reducer does NOT require a circuit breaker because:
@@ -338,13 +338,12 @@ Related:
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import time
 from datetime import UTC, datetime
 from typing import Literal
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -369,6 +368,10 @@ from omnibase_infra.nodes.reducers.models.model_registration_state import (
     FailureReason,
     ModelRegistrationState,
 )
+
+# Private namespace for deterministic UUID derivation via uuid5().
+# This is a fixed namespace UUID - do NOT change it, as it would alter all derived IDs.
+_NAMESPACE_REGISTRATION = UUID("f47ac10b-58cc-4372-a567-0d02b2c3d479")
 
 # =============================================================================
 # Performance Threshold Constants (in milliseconds)
@@ -797,7 +800,8 @@ class RegistrationReducer:
         from its content to preserve idempotency guarantees. Using uuid4() would
         break idempotency because replayed events would get different IDs.
 
-        The derived ID uses a SHA-256 hash of the event's identifying fields:
+        The derived ID uses uuid5() (RFC 4122 compliant) with a fixed namespace
+        and the event's identifying fields:
         - node_id: Unique node identifier
         - node_type: Node archetype (effect, compute, reducer, orchestrator)
         - timestamp: Event creation timestamp (ISO format for stability)
@@ -805,13 +809,13 @@ class RegistrationReducer:
         This ensures:
         1. Same event content always produces the same ID
         2. Different events produce different IDs (collision-resistant)
-        3. ID format is compatible with existing UUID-based tracking
+        3. ID is a valid RFC 4122 version-5 UUID
 
         Args:
             event: The introspection event to derive an ID from.
 
         Returns:
-            A deterministic UUID derived from the event's content.
+            A deterministic RFC 4122 version-5 UUID derived from the event's content.
         """
         # Build a canonical string from the event's identifying fields.
         # Using ISO format for timestamp ensures string stability across serialization.
@@ -820,19 +824,7 @@ class RegistrationReducer:
             f"{event.node_id}|{event.node_type.value}|{event.timestamp.isoformat()}"
         )
 
-        # Compute SHA-256 hash and convert to UUID format.
-        # SHA-256 provides strong collision resistance for content-derived IDs.
-        content_hash = hashlib.sha256(canonical_content.encode("utf-8")).hexdigest()
-
-        # Take first 32 hex chars (128 bits) and format as UUID.
-        # Insert hyphens in standard UUID format: 8-4-4-4-12
-        uuid_hex = content_hash[:32]
-        uuid_str = (
-            f"{uuid_hex[:8]}-{uuid_hex[8:12]}-{uuid_hex[12:16]}-"
-            f"{uuid_hex[16:20]}-{uuid_hex[20:32]}"
-        )
-
-        return UUID(uuid_str)
+        return uuid5(_NAMESPACE_REGISTRATION, canonical_content)
 
     def _build_consul_intent(
         self,
@@ -1132,29 +1124,25 @@ class RegistrationReducer:
     ) -> UUID:
         """Derive a deterministic event ID from a confirmation event.
 
-        Uses the confirmation's correlation_id, event_type, and node_id to
-        produce a stable UUID for idempotency tracking. Including node_id
-        prevents collisions when different nodes emit confirmations with
-        the same correlation_id and event_type.
+        Uses uuid5() (RFC 4122 compliant) with a fixed namespace and the
+        confirmation's correlation_id, event_type, and node_id to produce a
+        stable UUID for idempotency tracking. Including node_id prevents
+        collisions when different nodes emit confirmations with the same
+        correlation_id and event_type.
 
         Args:
             confirmation: The confirmation event to derive an ID from.
 
         Returns:
-            A deterministic UUID derived from the confirmation's content.
+            A deterministic RFC 4122 version-5 UUID derived from the
+            confirmation's content.
         """
         payload = (
             f"{confirmation.correlation_id}:"
             f"{confirmation.event_type.value}:"
             f"{confirmation.node_id}"
         )
-        content_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-        uuid_hex = content_hash[:32]
-        uuid_str = (
-            f"{uuid_hex[:8]}-{uuid_hex[8:12]}-{uuid_hex[12:16]}-"
-            f"{uuid_hex[16:20]}-{uuid_hex[20:32]}"
-        )
-        return UUID(uuid_str)
+        return uuid5(_NAMESPACE_REGISTRATION, payload)
 
     def reduce_reset(
         self,
