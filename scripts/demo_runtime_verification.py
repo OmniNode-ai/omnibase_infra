@@ -66,7 +66,7 @@ READY_STATE_SLA_SECONDS = 10.0
 
 
 # =============================================================================
-# Handler seeding helper (mirrors tests/conftest.py seed_mock_handlers)
+# Handler seeding helper (mirrors tests.helpers.runtime_helpers.seed_mock_handlers)
 # =============================================================================
 
 
