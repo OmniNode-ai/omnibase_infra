@@ -208,8 +208,15 @@ class ModelPostgresPoolConfig(BaseModel):
         # NOTE: parsed.hostname returns None for Unix-socket DSNs
         # (e.g., "postgresql:///dbname"). The fallback to "localhost" means
         # Unix-socket DSNs are silently rewritten to TCP connections.
+        hostname = parsed.hostname
+        if hostname is None:
+            logger.warning(
+                "DSN has no hostname (Unix-socket?); falling back to TCP localhost:5432. "
+                "Original DSN scheme: %s",
+                parsed.scheme,
+            )
         return cls(
-            host=parsed.hostname or "localhost",
+            host=hostname or "localhost",
             port=parsed.port or 5432,
             user=unquote(parsed.username) if parsed.username else "postgres",
             password=unquote(parsed.password) if parsed.password else "",

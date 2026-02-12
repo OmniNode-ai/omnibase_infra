@@ -611,7 +611,7 @@ class HandlerRRHValidate:
             url = env.repo_state.remote_url.rstrip("/")
             # For SSH URLs like git@github.com:org/repo.git, split on ":"
             # first to isolate the path portion.
-            if ":" in url and not url.startswith(("http://", "https://")):
+            if ":" in url and not url.startswith(("http://", "https://", "file://")):
                 url = url.rsplit(":", 1)[-1]
             remote_repo = url.rsplit("/", 1)[-1].removesuffix(".git")
             if remote_repo and remote_repo.lower() != repo_dir.lower():
