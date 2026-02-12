@@ -405,7 +405,7 @@ class HandlerRRHValidate:
                 message=f"Invalid branch pattern: {_truncate_pattern(gov.expected_branch_pattern)}",
             )
         finally:
-            executor.shutdown(wait=False)
+            executor.shutdown(wait=True)
         return ModelRuleCheckResult(
             passed=False,
             rule_id="RRH-1002",

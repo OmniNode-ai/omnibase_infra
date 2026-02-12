@@ -137,6 +137,13 @@ class HandlerCheckpointWrite:
         base_dir_raw = envelope.get("base_dir")
         base_dir = Path(str(base_dir_raw)) if base_dir_raw else _DEFAULT_BASE_DIR
 
+        if not base_dir.is_absolute():
+            raise ValueError(f"base_dir must be an absolute path, got: {base_dir}")
+        if ".." in base_dir.parts:
+            raise ValueError(
+                f"base_dir must not contain '..' components, got: {base_dir}"
+            )
+
         # Build path and guard against path traversal via ticket_id
         target_dir = _checkpoint_dir(base_dir, checkpoint.ticket_id, checkpoint.run_id)
         if not target_dir.resolve().is_relative_to(base_dir.resolve()):

@@ -90,10 +90,9 @@ class HandlerStaleRunGC:
             The caller should use the deleted IDs to update the session index.
             Note: ``len(deleted_ids)`` may exceed ``result.files_affected``
             because a single file can contribute two IDs when its stem differs
-            from the embedded ``run_id``.  Deleted IDs may also include file
-            stems from malformed documents that don't correspond to session
-            index entries; callers should silently ignore missing entries
-            during index cleanup.
+            from the embedded ``run_id``.  Malformed documents are deleted but
+            their stems are NOT added to ``deleted_ids`` to avoid false-positive
+            removal of active runs whose run_id happens to match the file stem.
         """
         return await asyncio.to_thread(self._gc_sync, correlation_id)
 
@@ -209,19 +208,17 @@ class HandlerStaleRunGC:
                     )
             except (json.JSONDecodeError, ValueError, ValidationError) as e:
                 # Malformed files are also GC candidates — delete them.
-                # Note: the stem may not correspond to a valid session index
-                # entry; callers should treat deleted_ids as best-effort and
-                # silently ignore missing entries when updating the index.
+                # Do NOT add stems to deleted_ids: the stem may coincide with
+                # a valid run_id of an active run, causing the caller to
+                # incorrectly remove that active run from the session index.
                 logger.warning(
                     "GC: removing malformed run file %s: %s", run_file.name, e
                 )
-                stem = run_file.stem
                 try:
                     run_file.unlink()
                 except FileNotFoundError:
                     continue  # concurrently deleted
                 files_deleted += 1
-                deleted_ids.append(stem)
             except OSError as e:
                 logger.warning("GC: failed to process %s: %s", run_file.name, e)
 
