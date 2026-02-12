@@ -67,14 +67,12 @@ from pydantic import ValidationError
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportType
 from omnibase_infra.errors import (
+    DbOwnershipMismatchError,
+    DbOwnershipMissingError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
     ServiceResolutionError,
-)
-from omnibase_infra.errors.error_db_ownership import (
-    DbOwnershipMismatchError,
-    DbOwnershipMissingError,
 )
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka

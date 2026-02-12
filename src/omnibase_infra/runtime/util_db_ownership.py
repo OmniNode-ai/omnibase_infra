@@ -42,15 +42,20 @@ async def validate_db_ownership(
     Args:
         pool: asyncpg connection pool (must already be created).
         expected_owner: Service name that should own this database
-            (e.g. ``"omnibase_infra"``).
+            (e.g. ``"omnibase_infra"``). Must be a non-empty, non-whitespace
+            string.
         correlation_id: Optional correlation ID for tracing. Auto-generated
             if not provided.
 
     Raises:
+        ValueError: If ``expected_owner`` is empty or whitespace-only.
         DbOwnershipMismatchError: Database is owned by a different service.
         DbOwnershipMissingError: ``db_metadata`` table or ownership row
             does not exist (database not migrated).
     """
+    if not expected_owner or not expected_owner.strip():
+        raise ValueError("expected_owner must be a non-empty, non-whitespace string")
+
     if correlation_id is None:
         correlation_id = uuid4()
 
@@ -64,9 +69,9 @@ async def validate_db_ownership(
         # errors from a genuinely un-migrated database.
         if isinstance(exc, asyncpg.exceptions.UndefinedTableError):
             raise DbOwnershipMissingError(
-                f"Cannot read public.db_metadata: {exc}. "
+                "db_metadata table does not exist — run migrations first. "
                 f"Expected owner '{expected_owner}'. "
-                "Hint: run migrations or check OMNIBASE_INFRA_DB_URL points "
+                "Hint: check OMNIBASE_INFRA_DB_URL points "
                 "to the correct service database.",
                 expected_owner=expected_owner,
                 correlation_id=correlation_id,

@@ -113,6 +113,28 @@ class TestValidateDbOwnership:
         assert "no rows" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
+    async def test_empty_expected_owner_raises_value_error(self) -> None:
+        """Empty-string expected_owner raises ValueError before any DB query."""
+        pool = _make_mock_pool(row={"owner_service": ""})
+        with pytest.raises(ValueError, match="non-empty"):
+            await validate_db_ownership(
+                pool=pool,
+                expected_owner="",
+                correlation_id=uuid4(),
+            )
+
+    @pytest.mark.asyncio
+    async def test_whitespace_expected_owner_raises_value_error(self) -> None:
+        """Whitespace-only expected_owner raises ValueError before any DB query."""
+        pool = _make_mock_pool(row={"owner_service": ""})
+        with pytest.raises(ValueError, match="non-empty"):
+            await validate_db_ownership(
+                pool=pool,
+                expected_owner="   ",
+                correlation_id=uuid4(),
+            )
+
+    @pytest.mark.asyncio
     async def test_auto_generates_correlation_id(self) -> None:
         """correlation_id is auto-generated when not provided."""
         pool = _make_mock_pool(row={"owner_service": "omnibase_infra"})
@@ -217,7 +239,7 @@ class TestPluginOwnershipPropagation:
             ),
             patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create_pool,
             patch(
-                "omnibase_infra.runtime.util_db_ownership.validate_db_ownership",
+                "omnibase_infra.nodes.node_registration_orchestrator.plugin.validate_db_ownership",
                 new_callable=AsyncMock,
                 side_effect=mismatch,
             ),
@@ -258,7 +280,7 @@ class TestPluginOwnershipPropagation:
             ),
             patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create_pool,
             patch(
-                "omnibase_infra.runtime.util_db_ownership.validate_db_ownership",
+                "omnibase_infra.nodes.node_registration_orchestrator.plugin.validate_db_ownership",
                 new_callable=AsyncMock,
                 side_effect=missing,
             ),

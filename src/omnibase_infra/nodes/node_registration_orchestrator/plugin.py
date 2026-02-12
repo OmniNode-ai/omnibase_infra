@@ -98,6 +98,7 @@ from omnibase_infra.runtime.protocol_domain_plugin import (
     ModelDomainPluginResult,
     ProtocolDomainPlugin,
 )
+from omnibase_infra.runtime.util_db_ownership import validate_db_ownership
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
@@ -320,10 +321,6 @@ class PluginRegistration:
             # 1.5 Validate DB ownership (OMN-2085)
             # Hard gate: prevents operating on a database owned by another
             # service after the DB-per-repo split.
-            from omnibase_infra.runtime.util_db_ownership import (
-                validate_db_ownership,
-            )
-
             await validate_db_ownership(
                 pool=self._pool,
                 expected_owner="omnibase_infra",
