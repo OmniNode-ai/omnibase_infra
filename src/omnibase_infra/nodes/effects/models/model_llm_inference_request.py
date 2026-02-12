@@ -225,6 +225,14 @@ class ModelLlmInferenceRequest(BaseModel):
                 raise ValueError(
                     "system_prompt must be None when operation_type is COMPLETION."
                 )
+            if self.tools:
+                raise ValueError(
+                    "tools must be empty when operation_type is COMPLETION."
+                )
+            if self.tool_choice is not None:
+                raise ValueError(
+                    "tool_choice must be None when operation_type is COMPLETION."
+                )
         elif self.operation_type == EnumLlmOperationType.EMBEDDING:
             if self.prompt is None or not self.prompt.strip():
                 raise ValueError(
