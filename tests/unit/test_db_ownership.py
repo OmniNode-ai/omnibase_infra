@@ -135,6 +135,17 @@ class TestValidateDbOwnership:
             )
 
     @pytest.mark.asyncio
+    async def test_too_long_expected_owner_raises_value_error(self) -> None:
+        """expected_owner exceeding 128 chars raises ValueError."""
+        pool = _make_mock_pool(row={"owner_service": "omnibase_infra"})
+        with pytest.raises(ValueError, match="<= 128"):
+            await validate_db_ownership(
+                pool=pool,
+                expected_owner="a" * 129,
+                correlation_id=uuid4(),
+            )
+
+    @pytest.mark.asyncio
     async def test_auto_generates_correlation_id(self) -> None:
         """correlation_id is auto-generated when not provided."""
         pool = _make_mock_pool(row={"owner_service": "omnibase_infra"})
