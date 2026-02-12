@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.enums import EnumLlmOperationType
 from omnibase_infra.nodes.effects.models.model_llm_message import ModelLlmMessage
@@ -190,6 +190,14 @@ class ModelLlmInferenceRequest(BaseModel):
         description="Arbitrary key-value pairs for observability.",
     )
 
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(cls, v: str) -> str:
+        """Ensure base_url uses an HTTP(S) scheme."""
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("base_url must start with http:// or https://")
+        return v
+
     @model_validator(mode="after")
     def _validate_request_invariants(self) -> ModelLlmInferenceRequest:
         """Enforce cross-field invariants for the inference request."""
@@ -217,6 +225,26 @@ class ModelLlmInferenceRequest(BaseModel):
                 raise ValueError(
                     "system_prompt must be None when operation_type is COMPLETION."
                 )
+        elif self.operation_type == EnumLlmOperationType.EMBEDDING:
+            if self.prompt is None or not self.prompt.strip():
+                raise ValueError(
+                    "prompt must be non-None and non-empty when "
+                    "operation_type is EMBEDDING."
+                )
+            if self.messages:
+                raise ValueError(
+                    "messages must be empty when operation_type is EMBEDDING."
+                )
+            if self.tools:
+                raise ValueError(
+                    "tools must be empty when operation_type is EMBEDDING."
+                )
+            if self.tool_choice is not None:
+                raise ValueError(
+                    "tool_choice must be None when operation_type is EMBEDDING."
+                )
+        else:
+            raise ValueError(f"Unrecognized operation_type: {self.operation_type!r}.")
 
         # -- Tool consistency --
         if self.tool_choice is not None and not self.tools:
