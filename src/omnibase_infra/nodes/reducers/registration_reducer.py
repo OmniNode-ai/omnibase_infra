@@ -287,23 +287,21 @@ Confirmation Event Flow:
 
     6. IMPLEMENTATION NOTE - reduce_confirmation():
 
-        The reduce_confirmation() method (to be implemented) will handle
-        confirmation events. It uses the same pure reducer pattern:
+        The reduce_confirmation() method processes confirmation events from
+        the Effect layer, completing the registration workflow cycle. It
+        follows the same pure reducer pattern as reduce():
 
-            def reduce_confirmation(
-                self,
-                state: ModelRegistrationState,
-                confirmation: ModelRegistrationConfirmation,
-            ) -> ModelReducerOutput[ModelRegistrationState]:
-                '''Process confirmation event from Effect layer.'''
-                # Validate confirmation matches current node_id
-                # Transition state based on confirmation type:
-                #   - consul.registered -> with_consul_confirmed()
-                #   - postgres.registration_upserted -> with_postgres_confirmed()
-                #   - error -> with_failure()
-                # Return new state with no intents (confirmations don't emit new intents)
+            1. Guards: idle state, node_id mismatch, terminal state
+            2. Idempotency: derives deterministic event_id, skips duplicates
+            3. Failure path: maps event_type to failure_reason, transitions
+               to failed state via state.with_failure()
+            4. Success path: transitions state based on confirmation type:
+               - consul.registered -> state.with_consul_confirmed()
+               - postgres.registration_upserted -> state.with_postgres_confirmed()
+            5. State progression: pending -> partial -> complete (or -> failed)
+            6. Confirmations never emit new intents
 
-        The confirmation event model should include:
+        The confirmation event model (ModelRegistrationConfirmation) includes:
             - event_type: "consul.registered" | "postgres.registration_upserted"
             - correlation_id: UUID linking to original introspection
             - node_id: UUID of the registered node
@@ -942,17 +940,9 @@ class RegistrationReducer:
     # =========================================================================
     # CONFIRMATION EVENT HANDLING (PHASE 2 of the event flow)
     #
-    # The following method will handle confirmation events from Effect layer.
-    # It is documented here as a stub to show the complete event flow.
-    #
-    # Follow-up Ticket: OMN-996 (Implement Confirmation Event Handling)
-    #   https://linear.app/omninode/issue/OMN-996
-    #
-    # Prerequisites:
-    #   - [DONE] ModelRegistrationConfirmation model defined
-    #     See: omnibase_infra.nodes.reducers.models.model_registration_confirmation
-    #   - Effect layer confirmation event publishing implemented
-    #   - Tests added for confirmation event handling
+    # Processes confirmation events from Effect layer (ConsulAdapter,
+    # PostgresAdapter) and transitions registration state through
+    # pending -> partial -> complete (or -> failed).
     #
     # See module docstring section 6 for detailed implementation notes.
     # =========================================================================
