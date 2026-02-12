@@ -19,7 +19,7 @@ def get_aiohttp_bound_port(health_server: ServiceHealth) -> int:
     aiohttp does not expose the bound port publicly when using port=0.
     Accessing internals is the only way to discover the auto-assigned port.
 
-    # Verified against aiohttp 3.13.3 (pinned: ^3.9.0 in pyproject.toml)
+    # Verified against aiohttp 3.9.0
 
     Args:
         health_server: A started ServiceHealth instance using port=0.
@@ -33,12 +33,12 @@ def get_aiohttp_bound_port(health_server: ServiceHealth) -> int:
     Warning:
         **Fragile**: This function accesses private aiohttp internals
         (``_site``, ``_server``, ``.sockets``) that may change without
-        notice across aiohttp releases.  Verified against aiohttp 3.13.3 (pinned: ^3.9.0).
+        notice across aiohttp releases. Verified against aiohttp 3.9.0.
         If aiohttp is upgraded and this breaks, inspect the new internal
         layout and update the attribute chain accordingly.
     """
     try:
-        # Verified against aiohttp 3.13.3 (constraint: ^3.9.0) -- attribute chain:
+        # Verified against aiohttp 3.9.0 -- attribute chain:
         #   ServiceHealth._site -> aiohttp.web.TCPSite
         #   TCPSite._server -> asyncio.Server
         #   asyncio.Server.sockets -> list[socket.socket]
@@ -49,7 +49,7 @@ def get_aiohttp_bound_port(health_server: ServiceHealth) -> int:
     except AttributeError as e:
         msg = (
             f"aiohttp internals changed (currently installed: aiohttp "
-            f"{aiohttp.__version__}, verified against 3.13.3, constraint: ^3.9.0). "
+            f"{aiohttp.__version__}, verified against 3.9.0). "
             f"The private attribute chain (_site._server.sockets) is no longer valid. "
             f"Check the aiohttp changelog for internal API changes and update "
             f"this function accordingly. Original error: {e}"

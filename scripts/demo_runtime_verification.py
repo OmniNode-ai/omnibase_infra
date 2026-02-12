@@ -123,7 +123,10 @@ def _seed_mock_handlers(process: object) -> None:
 
 
 class VerificationResult:
-    """Tracks pass/fail results for demo steps."""
+    """Track pass/fail status and timing for verification steps.
+
+    Accumulates test results with optional timing data for summary reporting.
+    """
 
     def __init__(self) -> None:
         self.steps: list[dict[str, Any]] = []
@@ -131,6 +134,14 @@ class VerificationResult:
     def record(
         self, name: str, passed: bool, detail: str = "", elapsed_ms: float = 0.0
     ) -> None:
+        """Record verification step result with optional timing and detail.
+
+        Args:
+            name: Human-readable step name for reporting.
+            passed: Whether the step passed (True) or failed (False).
+            detail: Optional context or diagnostic information.
+            elapsed_ms: Optional execution time in milliseconds.
+        """
         self.steps.append(
             {
                 "name": name,
@@ -142,6 +153,7 @@ class VerificationResult:
 
     @property
     def all_passed(self) -> bool:
+        """Return True if all recorded steps passed, False otherwise."""
         return bool(self.steps) and all(s["passed"] for s in self.steps)
 
 
@@ -151,7 +163,14 @@ class VerificationResult:
 
 
 async def verify_runtime_startup(results: VerificationResult) -> None:
-    """Start runtime with in-memory bus and measure time to ready state."""
+    """Verify runtime reaches ready state within SLA timing.
+
+    Starts a runtime with in-memory event bus, measures startup time, and
+    verifies health status. Records pass/fail based on SLA compliance.
+
+    Args:
+        results: VerificationResult to record step outcome and timing.
+    """
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
     from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 
@@ -207,7 +226,14 @@ async def verify_runtime_startup(results: VerificationResult) -> None:
 
 
 def verify_contract_routing(results: VerificationResult) -> None:
-    """Load contract.yaml and verify handler routing declarations."""
+    """Verify contract.yaml handler routing declarations are importable.
+
+    Loads the ONEX contract YAML, parses handler routing entries, and verifies
+    each handler module/class can be imported successfully.
+
+    Args:
+        results: VerificationResult to record importability check outcome.
+    """
     print("\n--- Step 2: Contract Handler Routing ---")
 
     if not CONTRACT_PATH.exists():
@@ -270,7 +296,15 @@ def verify_contract_routing(results: VerificationResult) -> None:
 
 
 async def verify_dispatch_routing(results: VerificationResult) -> None:
-    """Register a test dispatcher and verify the engine routes correctly."""
+    """Verify dispatch engine routes introspection events to registered dispatchers.
+
+    Registers a capturing dispatcher with the dispatch engine, sends a test
+    introspection event, and verifies the dispatcher is invoked with correct
+    context injection (correlation ID, time for orchestrators).
+
+    Args:
+        results: VerificationResult to record dispatch routing outcome.
+    """
     from omnibase_core.enums.enum_node_kind import EnumNodeKind
     from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
     from omnibase_infra.enums.enum_dispatch_status import EnumDispatchStatus
@@ -370,7 +404,15 @@ async def verify_dispatch_routing(results: VerificationResult) -> None:
 
 
 def verify_contract_handler_structure(results: VerificationResult) -> None:
-    """Verify loaded contracts declare correct node types and valid handler routing."""
+    """Verify contract handler routing entries have valid structure and async methods.
+
+    Validates routing strategy declaration, checks each handler entry has
+    required fields (event model, handler class), and verifies handlers have
+    async handle() methods.
+
+    Args:
+        results: VerificationResult to record structure validation outcome.
+    """
     print("\n--- Step 4: Contract Handler Routing Structure ---")
 
     if not CONTRACT_PATH.exists():
@@ -459,7 +501,11 @@ def verify_contract_handler_structure(results: VerificationResult) -> None:
 
 
 def display_summary(results: VerificationResult) -> None:
-    """Display formatted verification results."""
+    """Display formatted summary table of all verification step results.
+
+    Args:
+        results: VerificationResult containing all recorded steps.
+    """
     print("\n" + "=" * 70)
     print(" ONEX Runtime Contract Routing Verification Summary")
     print("=" * 70)
@@ -492,7 +538,11 @@ def display_summary(results: VerificationResult) -> None:
 
 
 async def run_verification() -> bool:
-    """Run all verification steps and return True if all passed."""
+    """Execute all verification steps and return overall pass/fail status.
+
+    Returns:
+        True if all verification steps passed, False if any failed.
+    """
     results = VerificationResult()
 
     print("=" * 70)
@@ -519,6 +569,7 @@ async def run_verification() -> bool:
 
 
 def main() -> None:
+    """Entry point for runtime verification demo script."""
     all_passed = asyncio.run(run_verification())
     sys.exit(0 if all_passed else 1)
 
