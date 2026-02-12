@@ -5,15 +5,10 @@ Demonstrates the full runtime lifecycle for investor-facing verification:
 1. Runtime starts to ready state with timing measurement
 2. Introspection event dispatched through contract routing
 3. Handler routing resolved from contract YAML
-4. Node registration visible in projections
+4. Contract handler routing entries verified for structural correctness
 
 Usage:
-    # In-memory mode (no external infrastructure required)
     ./scripts/demo_runtime_verification.py
-    ./scripts/demo_runtime_verification.py --mode inmemory
-
-    # Real infrastructure mode (requires Kafka/Consul at 192.168.86.200)
-    ./scripts/demo_runtime_verification.py --mode real
 
 Exit codes:
     0 - All verifications passed
@@ -22,7 +17,6 @@ Exit codes:
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import importlib
 import sys
@@ -84,7 +78,7 @@ class VerificationResult:
 # =============================================================================
 
 
-async def verify_runtime_startup(results: VerificationResult, mode: str) -> None:
+async def verify_runtime_startup(results: VerificationResult) -> None:
     """Start runtime with in-memory bus and measure time to ready state."""
     from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
     from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
@@ -184,7 +178,10 @@ def verify_contract_routing(results: VerificationResult) -> None:
         try:
             mod = importlib.import_module(handler_module)
             importable = hasattr(mod, handler_name)
-        except Exception:
+        except Exception as e:
+            print(
+                f"    WARNING: Could not import {handler_module}: {type(e).__name__}: {e}"
+            )
             importable = False
 
         status = "OK" if importable else "FAIL"
@@ -301,66 +298,93 @@ async def verify_dispatch_routing(results: VerificationResult) -> None:
 
 
 # =============================================================================
-# Step 4: Registration projection
+# Step 4: Contract handler routing structure verification
 # =============================================================================
 
 
-async def verify_registration_projection(results: VerificationResult) -> None:
-    """Verify that processing an introspection event produces a projection."""
-    print("\n--- Step 4: Registration Projection ---")
+async def verify_contract_handler_structure(results: VerificationResult) -> None:
+    """Verify loaded contracts declare correct node types and valid handler routing."""
+    print("\n--- Step 4: Contract Handler Routing Structure ---")
 
-    # Use in-memory projector simulation
-    projections: dict[str, dict[str, Any]] = {}
+    if not CONTRACT_PATH.exists():
+        print(f"  ERROR: Contract not found at {CONTRACT_PATH}")
+        results.record(
+            name="Contract handler routing structure valid",
+            passed=False,
+            detail=f"Not found: {CONTRACT_PATH}",
+        )
+        return
 
-    node_id = uuid4()
-    correlation_id = uuid4()
+    with open(CONTRACT_PATH) as f:
+        contract = yaml.safe_load(f)
 
-    from omnibase_core.enums.enum_node_kind import EnumNodeKind
-    from omnibase_core.models.primitives.model_semver import ModelSemVer
-    from omnibase_infra.models.registration.model_node_introspection_event import (
-        ModelNodeIntrospectionEvent,
-    )
+    handler_routing = contract.get("handler_routing", {})
+    handlers = handler_routing.get("handlers", [])
+    routing_strategy = handler_routing.get("routing_strategy", "")
 
-    event = ModelNodeIntrospectionEvent(
-        node_id=node_id,
-        node_type=EnumNodeKind.EFFECT,
-        node_version=ModelSemVer(major=1, minor=0, patch=0),
-        correlation_id=correlation_id,
-        timestamp=datetime.now(UTC),
-    )
+    # Verify routing strategy is declared
+    has_strategy = routing_strategy == "payload_type_match"
 
-    # Simulate projection upsert
-    projections[str(event.node_id)] = {
-        "entity_id": str(event.node_id),
-        "node_type": event.node_type.value,
-        "status": "PENDING_REGISTRATION",
-        "correlation_id": str(event.correlation_id),
-        "node_version": str(event.node_version),
-        "timestamp": event.timestamp.isoformat(),
-    }
+    # Verify each handler entry has required structure and importable modules
+    all_valid = True
+    handler_count = 0
+    for entry in handlers:
+        event_model = entry.get("event_model", {})
+        handler_def = entry.get("handler", {})
 
-    projection = projections.get(str(node_id))
-    projection_exists = projection is not None
-    correct_status = (
-        projection is not None and projection["status"] == "PENDING_REGISTRATION"
-    )
-    correct_type = (
-        projection is not None and projection["node_type"] == EnumNodeKind.EFFECT.value
-    )
+        event_name = event_model.get("name", "")
+        event_module = event_model.get("module", "")
+        handler_name = handler_def.get("name", "")
+        handler_module = handler_def.get("module", "")
 
-    print(f"  Node ID:          {node_id}")
-    print(f"  Projection exists: {projection_exists}")
+        # Verify required fields exist
+        has_fields = bool(
+            event_name and event_module and handler_name and handler_module
+        )
+
+        # Verify handler class is importable and has a handle method
+        has_handle_method = False
+        if has_fields:
+            try:
+                mod = importlib.import_module(handler_module)
+                handler_cls = getattr(mod, handler_name, None)
+                if handler_cls is not None:
+                    import inspect
+
+                    # Check the class has a handle method
+                    has_handle_method = hasattr(handler_cls, "handle") and callable(
+                        handler_cls.handle
+                    )
+                    # Verify handle is async
+                    if has_handle_method:
+                        handle_method = handler_cls.handle
+                        has_handle_method = inspect.iscoroutinefunction(handle_method)
+            except Exception:
+                has_handle_method = False
+
+        entry_valid = has_fields and has_handle_method
+        status = "OK" if entry_valid else "FAIL"
+        print(
+            f"  [{status}] {event_name} -> {handler_name} (async handle: {has_handle_method})"
+        )
+
+        if not entry_valid:
+            all_valid = False
+        handler_count += 1
+
+    overall_passed = has_strategy and all_valid and handler_count > 0
+
+    print()
     print(
-        f"  Status:           {projection.get('status', 'N/A') if projection else 'N/A'}"
+        f"  Routing strategy:   {routing_strategy} ({'OK' if has_strategy else 'FAIL'})"
     )
-    print(
-        f"  Node type:        {projection.get('node_type', 'N/A') if projection else 'N/A'}"
-    )
+    print(f"  Handlers verified:  {handler_count}")
+    print(f"  All handlers valid: {all_valid}")
 
     results.record(
-        name="Registration projection created",
-        passed=projection_exists and correct_status and correct_type,
-        detail=f"node_id={node_id}, status=PENDING_REGISTRATION",
+        name="Contract handler routing structure valid",
+        passed=overall_passed,
+        detail=f"{handler_count} handlers, strategy={routing_strategy}, all_valid={all_valid}",
     )
 
 
@@ -402,18 +426,17 @@ def display_summary(results: VerificationResult) -> None:
 # =============================================================================
 
 
-async def run_verification(mode: str) -> bool:
+async def run_verification() -> bool:
     """Run all verification steps and return True if all passed."""
     results = VerificationResult()
 
     print("=" * 70)
     print(" OMN-2081: ONEX Runtime Contract Routing Verification")
-    print(f" Mode: {mode}")
     print(f" Time: {datetime.now(UTC).isoformat()}")
     print("=" * 70)
 
     # Step 1: Runtime startup timing
-    await verify_runtime_startup(results, mode)
+    await verify_runtime_startup(results)
 
     # Step 2: Contract routing verification (sync)
     verify_contract_routing(results)
@@ -421,8 +444,8 @@ async def run_verification(mode: str) -> bool:
     # Step 3: Dispatch engine routing
     await verify_dispatch_routing(results)
 
-    # Step 4: Registration projection
-    await verify_registration_projection(results)
+    # Step 4: Contract handler routing structure
+    await verify_contract_handler_structure(results)
 
     # Summary
     display_summary(results)
@@ -431,23 +454,7 @@ async def run_verification(mode: str) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Demo: ONEX Runtime Contract Routing Verification (OMN-2081)."
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["inmemory", "real"],
-        default="inmemory",
-        help=(
-            "inmemory: Use in-memory event bus (no external infra needed). "
-            "real: Use Kafka/Consul at 192.168.86.200."
-        ),
-    )
-
-    args = parser.parse_args()
-
-    all_passed = asyncio.run(run_verification(args.mode))
-
+    all_passed = asyncio.run(run_verification())
     sys.exit(0 if all_passed else 1)
 
 

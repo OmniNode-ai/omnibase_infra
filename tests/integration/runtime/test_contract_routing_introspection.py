@@ -22,7 +22,7 @@ import importlib
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import yaml
@@ -103,7 +103,7 @@ class ContextCapturingDispatcher:
             topic="test.events.v1",
             dispatcher_id=self._dispatcher_id,
             message_type=type(envelope).__name__ if envelope else None,
-            started_at=datetime(2025, 1, 1, tzinfo=UTC),
+            started_at=datetime.now(UTC),
         )
 
 
@@ -113,8 +113,8 @@ class ContextCapturingDispatcher:
 
 
 def _make_mock_envelope(
-    correlation_id: None | object = None,
-    trace_id: None | object = None,
+    correlation_id: UUID | None = None,
+    trace_id: UUID | None = None,
     payload: object | None = None,
 ) -> MagicMock:
     """Create a mock ModelEventEnvelope."""

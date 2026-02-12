@@ -2,11 +2,11 @@
 # Copyright (c) 2025 OmniNode Team
 """Integration tests for registration visibility (OMN-2081).
 
-Tests that after introspection event processing, registration state is
-visible in projections and log output. Verifies:
+Tests that the registration handler pipeline is correctly wired:
 
-1. Processing an introspection event produces a registration projection
-2. Registration state transitions are logged to stdout
+1. HandlerNodeIntrospected is importable and has the correct async interface
+2. HandlerNodeIntrospected can be instantiated with a mock projection reader
+   and its handle method produces ModelHandlerOutput when given a valid envelope
 3. Consul registration is visible after processing (when Consul is available)
 
 Related:
@@ -17,80 +17,25 @@ Related:
 
 from __future__ import annotations
 
-import logging
+import asyncio
+import inspect
 from datetime import UTC, datetime
-from typing import Any
-from uuid import UUID, uuid4
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected import (
+    HandlerNodeIntrospected,
+)
 
 pytestmark = pytest.mark.integration
-
-
-# =============================================================================
-# Mock Projector
-# =============================================================================
-
-
-class MockProjector:
-    """Dict-based projector that captures upsert calls for testing.
-
-    Simulates a projection store by keeping an in-memory dict of
-    entity_id -> projection data. This allows tests to verify that
-    introspection events produce the expected registration projections
-    without requiring PostgreSQL.
-    """
-
-    def __init__(self) -> None:
-        self.projections: dict[str, dict[str, Any]] = {}
-        self.upsert_calls: list[dict[str, Any]] = []
-
-    async def upsert(
-        self,
-        entity_id: str,
-        node_type: str,
-        status: str,
-        **kwargs: Any,
-    ) -> None:
-        """Record an upsert operation."""
-        record = {
-            "entity_id": entity_id,
-            "node_type": node_type,
-            "status": status,
-            **kwargs,
-        }
-        self.upsert_calls.append(record)
-        self.projections[entity_id] = record
-
-    def get(self, entity_id: str) -> dict[str, Any] | None:
-        """Retrieve a projection by entity_id."""
-        return self.projections.get(entity_id)
-
-
-# =============================================================================
-# Helper: create a minimal introspection event
-# =============================================================================
-
-
-def _make_introspection_event(
-    node_id: UUID | None = None,
-    node_type: EnumNodeKind = EnumNodeKind.EFFECT,
-    correlation_id: UUID | None = None,
-) -> ModelNodeIntrospectionEvent:
-    """Create a minimal ModelNodeIntrospectionEvent for testing."""
-    return ModelNodeIntrospectionEvent(
-        node_id=node_id or uuid4(),
-        node_type=node_type,
-        node_version=ModelSemVer(major=1, minor=0, patch=0),
-        correlation_id=correlation_id or uuid4(),
-        timestamp=datetime.now(UTC),
-    )
 
 
 # =============================================================================
@@ -98,86 +43,114 @@ def _make_introspection_event(
 # =============================================================================
 
 
-class TestRegistrationProjectionCreated:
-    """Tests that introspection events produce registration projections."""
+class TestRegistrationHandlerInterface:
+    """Tests that HandlerNodeIntrospected has the correct interface and produces output."""
+
+    def test_handler_class_importable_and_has_async_handle(self) -> None:
+        """Verify HandlerNodeIntrospected is importable and exposes an async
+        handle method that accepts an envelope parameter.
+
+        This proves the contract routing pipeline is wired correctly:
+        the handler class declared in contract.yaml actually exists
+        and has the expected interface.
+        """
+        # Verify the class exists (import already succeeded above)
+        assert HandlerNodeIntrospected is not None
+
+        # Verify handle method exists and is async
+        assert hasattr(HandlerNodeIntrospected, "handle")
+        handle_method = HandlerNodeIntrospected.handle
+        assert callable(handle_method)
+        assert asyncio.iscoroutinefunction(handle_method), (
+            "HandlerNodeIntrospected.handle must be async"
+        )
+
+        # Verify handle method signature accepts 'envelope' parameter
+        sig = inspect.signature(handle_method)
+        param_names = list(sig.parameters.keys())
+        # First param is 'self', second should be 'envelope'
+        assert "envelope" in param_names, (
+            f"handle() must accept 'envelope' parameter, got: {param_names}"
+        )
 
     @pytest.mark.asyncio
-    async def test_registration_projection_created_after_introspection(
-        self,
-    ) -> None:
-        """Use a mock projector to verify that processing an introspection
-        event produces a registration projection with correct entity_id,
-        node_type, and status fields.
-
-        This test is CI-safe -- it uses an in-memory mock projector
-        instead of requiring PostgreSQL.
+    async def test_handler_produces_output_for_new_node(self) -> None:
+        """Instantiate HandlerNodeIntrospected with a mock projection reader
+        and verify that calling handle() with a valid envelope produces a
+        ModelHandlerOutput with events and intents (for a new node with no
+        existing projection).
         """
-        projector = MockProjector()
+        # Create a mock projection reader that returns None (new node)
+        mock_reader = MagicMock()
+        mock_reader.get_entity_state = AsyncMock(return_value=None)
 
-        # Create introspection event
+        handler = HandlerNodeIntrospected(
+            projection_reader=mock_reader,
+            consul_enabled=False,  # Avoid consul intent generation
+        )
+
+        # Build a valid envelope with ModelNodeIntrospectionEvent payload
         node_id = uuid4()
-        event = _make_introspection_event(
+        correlation_id = uuid4()
+        event = ModelNodeIntrospectionEvent(
             node_id=node_id,
             node_type=EnumNodeKind.EFFECT,
+            node_version=ModelSemVer(major=1, minor=0, patch=0),
+            correlation_id=correlation_id,
+            timestamp=datetime.now(UTC),
         )
 
-        # Simulate projection upsert that a real handler would trigger
-        await projector.upsert(
-            entity_id=str(event.node_id),
-            node_type=event.node_type.value,
-            status="PENDING_REGISTRATION",
-            correlation_id=str(event.correlation_id),
-            node_version=str(event.node_version),
-            timestamp=event.timestamp.isoformat(),
+        envelope: ModelEventEnvelope[ModelNodeIntrospectionEvent] = ModelEventEnvelope(
+            correlation_id=correlation_id,
+            event_type="ModelNodeIntrospectionEvent",
+            payload=event,
         )
 
-        # Verify projection was created
-        assert len(projector.upsert_calls) == 1
+        output = await handler.handle(envelope)
 
-        projection = projector.get(str(node_id))
-        assert projection is not None
-        assert projection["entity_id"] == str(node_id)
-        assert projection["node_type"] == EnumNodeKind.EFFECT.value
-        assert projection["status"] == "PENDING_REGISTRATION"
-        assert projection["correlation_id"] == str(event.correlation_id)
+        # Verify output structure - handler should emit registration initiated event
+        assert output is not None
+        assert output.events is not None
+        assert len(output.events) > 0, (
+            "Handler should emit at least one event for a new node"
+        )
+        # Verify intents were generated (at least postgres upsert)
+        assert output.intents is not None
+        assert len(output.intents) > 0, (
+            "Handler should emit at least one intent for a new node"
+        )
+        # Verify correlation_id propagation
+        assert output.correlation_id == correlation_id
 
 
-class TestRegistrationStateLogged:
-    """Tests that registration state transitions appear in log output."""
+class TestRegistrationHandlerProperties:
+    """Tests that HandlerNodeIntrospected exposes expected classification properties."""
 
-    @pytest.mark.asyncio
-    async def test_registration_state_logged_to_stdout(
-        self,
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        """Publish introspection event, capture log output with caplog,
-        verify log messages include the node_id and registration state.
+    def test_handler_has_expected_properties(self) -> None:
+        """Verify the handler class defines handler_id, category, message_types,
+        and node_kind properties that the dispatch engine uses for routing.
         """
-        node_id = uuid4()
-        event = _make_introspection_event(node_id=node_id)
+        expected_properties = [
+            "handler_id",
+            "category",
+            "message_types",
+            "node_kind",
+            "handler_type",
+            "handler_category",
+        ]
 
-        # Simulate logging that the registration handler would produce
-        logger = logging.getLogger("omnibase_infra.registration")
-
-        with caplog.at_level(logging.INFO, logger="omnibase_infra.registration"):
-            logger.info(
-                "Processing introspection event for node_id=%s, "
-                "node_type=%s, status=PENDING_REGISTRATION",
-                event.node_id,
-                event.node_type.value,
-                extra={
-                    "node_id": str(event.node_id),
-                    "node_type": event.node_type.value,
-                    "correlation_id": str(event.correlation_id),
-                },
+        for prop_name in expected_properties:
+            assert hasattr(HandlerNodeIntrospected, prop_name), (
+                f"HandlerNodeIntrospected must have '{prop_name}' property"
             )
 
-        # Verify log output contains expected data
-        assert len(caplog.records) >= 1
-
-        log_text = caplog.text
-        assert str(node_id) in log_text
-        assert "PENDING_REGISTRATION" in log_text
+    def test_handler_message_types_includes_introspection_event(self) -> None:
+        """Verify the handler declares ModelNodeIntrospectionEvent in its
+        message_types, matching the contract.yaml declaration.
+        """
+        mock_reader = MagicMock()
+        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+        assert "ModelNodeIntrospectionEvent" in handler.message_types
 
 
 class TestConsulRegistrationVisible:
@@ -200,10 +173,12 @@ class TestConsulRegistrationVisible:
         if not consul_available:
             pytest.skip("Consul not available")
 
+        import os
+
         import consul.aio
 
-        consul_host = "192.168.86.200"
-        consul_port = 28500
+        consul_host = os.environ.get("CONSUL_HOST", "192.168.86.200")
+        consul_port = int(os.environ.get("CONSUL_PORT", "28500"))
 
         client = consul.aio.Consul(host=consul_host, port=consul_port)
 
@@ -235,7 +210,7 @@ class TestConsulRegistrationVisible:
 
 
 __all__: list[str] = [
-    "TestRegistrationProjectionCreated",
-    "TestRegistrationStateLogged",
+    "TestRegistrationHandlerInterface",
+    "TestRegistrationHandlerProperties",
     "TestConsulRegistrationVisible",
 ]

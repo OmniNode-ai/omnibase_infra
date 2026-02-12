@@ -102,7 +102,10 @@ class TestRuntimeStartupReadiness:
             await runtime.start()
             await health_server.start()
 
-            # Retrieve the auto-assigned port
+            # Retrieve the auto-assigned port.
+            # aiohttp does not expose the bound port publicly when using
+            # port=0 (OS-assigned); accessing internals (_site, _server,
+            # sockets) is the only way to discover the actual port.
             site = health_server._site
             assert site is not None
             internal_server = site._server
