@@ -15,7 +15,12 @@ Error Hierarchy:
         ├── InfraTimeoutError
         ├── InfraAuthenticationError
         ├── InfraUnavailableError
-        └── InfraRateLimitedError
+        ├── InfraRateLimitedError
+        ├── InfraRequestRejectedError
+        ├── InfraProtocolError
+        ├── EnvelopeValidationError
+        ├── UnknownHandlerTypeError
+        └── ProtocolDependencyResolutionError
 
 All errors:
     - Extend ModelOnexError from omnibase_core

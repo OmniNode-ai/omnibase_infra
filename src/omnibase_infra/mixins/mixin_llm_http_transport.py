@@ -116,6 +116,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
     _max_retry_after_seconds: float
     _http_client: httpx.AsyncClient | None
     _owns_http_client: bool
+    _http_client_lock: asyncio.Lock
 
     def _init_llm_http_transport(
         self,
@@ -148,6 +149,8 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
             service_name=target_name,
             transport_type=EnumInfraTransportType.HTTP,
         )
+        # MixinAsyncCircuitBreaker._init_circuit_breaker does not set this flag;
+        # it is required by MixinRetryExecution to gate circuit breaker helper calls.
         self._circuit_breaker_initialized = True
 
         # Satisfy MixinRetryExecution type hint
@@ -159,6 +162,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         self._max_retry_after_seconds = max_retry_after_seconds
 
         # HTTP client management
+        self._http_client_lock = asyncio.Lock()
         if http_client is not None:
             self._http_client = http_client
             self._owns_http_client = False
@@ -357,18 +361,15 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                         raise error
 
                     classification = self._classify_error(error, operation)
-
-                    if (
-                        classification.should_retry
-                        and retry_state.attempt < total_attempts - 1
-                    ):
-                        if classification.record_circuit_failure:
-                            await self._record_circuit_failure_if_enabled(
-                                operation, correlation_id
-                            )
-                        retry_state = retry_state.next_attempt(
-                            error_message=classification.error_message,
+                    if classification.record_circuit_failure:
+                        await self._record_circuit_failure_if_enabled(
+                            operation, correlation_id
                         )
+                    next_state = retry_state.next_attempt(
+                        error_message=classification.error_message,
+                    )
+                    if classification.should_retry and next_state.is_retriable():
+                        retry_state = next_state
                         logger.debug(
                             "Retrying after HTTP error",
                             extra={
@@ -382,16 +383,14 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                         )
                         await asyncio.sleep(retry_state.delay_seconds)
                         continue
-
-                    if classification.record_circuit_failure:
-                        await self._record_circuit_failure_if_enabled(
-                            operation, correlation_id
-                        )
                     raise error
 
                 # 2xx response: validate content-type
+                # Only reject when a non-JSON content-type is explicitly present.
+                # Missing/empty content-type falls through to JSON parsing which
+                # will raise InfraProtocolError on its own if the body is invalid.
                 content_type = response.headers.get("content-type", "")
-                if "json" not in content_type:
+                if content_type and "json" not in content_type:
                     await self._record_circuit_failure_if_enabled(
                         operation, correlation_id
                     )
@@ -658,20 +657,28 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         that client is returned directly. Otherwise, a new client is created
         with reasonable defaults for LLM API communication.
 
+        Uses double-checked locking to prevent concurrent coroutines from
+        creating duplicate clients (one would leak).
+
         Returns:
             An httpx.AsyncClient ready for use.
         """
         if self._http_client is not None:
             return self._http_client
 
-        self._http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0),
-            limits=httpx.Limits(
-                max_connections=100,
-                max_keepalive_connections=20,
-            ),
-        )
-        return self._http_client
+        async with self._http_client_lock:
+            # Double-check after acquiring lock to avoid creating a second client
+            if self._http_client is not None:
+                return self._http_client
+
+            self._http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(30.0),
+                limits=httpx.Limits(
+                    max_connections=100,
+                    max_keepalive_connections=20,
+                ),
+            )
+            return self._http_client
 
     async def _close_http_client(self) -> None:
         """Close the HTTP client if this mixin owns it.
