@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import inspect
 import sys
 import time
 from datetime import UTC, datetime
@@ -98,7 +99,10 @@ async def verify_runtime_startup(results: VerificationResult) -> None:
         pass
 
     with patch.object(runtime, "_populate_handlers_from_registry", noop_populate):
-        # Seed mock handlers to bypass fail-fast validation
+        # Seed mock handlers to bypass fail-fast validation.
+        # This is a standalone demo script (no test fixture access), so the
+        # seeding is inline rather than using seed_mock_handlers from
+        # tests/conftest.py.  Keep this in sync with that helper.
         from unittest.mock import AsyncMock, MagicMock
 
         mock_handler = MagicMock()
@@ -107,6 +111,7 @@ async def verify_runtime_startup(results: VerificationResult) -> None:
         mock_handler.shutdown = AsyncMock()
         mock_handler.health_check = AsyncMock(return_value={"healthy": True})
         mock_handler.initialized = True
+        # Access private _handlers (no public API for handler injection in test/demo mode)
         runtime._handlers = {"demo-handler": mock_handler}
 
         t_start = time.monotonic()
@@ -349,8 +354,6 @@ async def verify_contract_handler_structure(results: VerificationResult) -> None
                 mod = importlib.import_module(handler_module)
                 handler_cls = getattr(mod, handler_name, None)
                 if handler_cls is not None:
-                    import inspect
-
                     # Check the class has a handle method
                     has_handle_method = hasattr(handler_cls, "handle") and callable(
                         handler_cls.handle

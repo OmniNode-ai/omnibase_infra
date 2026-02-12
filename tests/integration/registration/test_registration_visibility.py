@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -36,6 +37,9 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_i
 )
 
 pytestmark = pytest.mark.integration
+
+_CONSUL_HOST = os.environ.get("CONSUL_HOST", "192.168.86.200")
+_CONSUL_PORT = int(os.environ.get("CONSUL_PORT", "28500"))
 
 
 # =============================================================================
@@ -173,14 +177,9 @@ class TestConsulRegistrationVisible:
         if not consul_available:
             pytest.skip("Consul not available")
 
-        import os
-
         import consul.aio
 
-        consul_host = os.environ.get("CONSUL_HOST", "192.168.86.200")
-        consul_port = int(os.environ.get("CONSUL_PORT", "28500"))
-
-        client = consul.aio.Consul(host=consul_host, port=consul_port)
+        client = consul.aio.Consul(host=_CONSUL_HOST, port=_CONSUL_PORT)
 
         service_id = f"test-omn2081-{uuid4().hex[:8]}"
         service_name = "test-omn2081-introspection"

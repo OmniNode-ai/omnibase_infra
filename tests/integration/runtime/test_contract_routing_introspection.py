@@ -36,9 +36,22 @@ from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnfo
 
 pytestmark = pytest.mark.integration
 
+
+def _find_project_root() -> Path:
+    """Walk up from this file to find the project root (contains pyproject.toml)."""
+    current = Path(__file__).resolve().parent
+    while current != current.parent:
+        if (current / "pyproject.toml").exists():
+            return current
+        current = current.parent
+    msg = "Could not find project root (no pyproject.toml found)"
+    raise RuntimeError(msg)
+
+
 # Path to the registration orchestrator contract
+PROJECT_ROOT = _find_project_root()
 CONTRACT_PATH = (
-    Path(__file__).resolve().parents[3]
+    PROJECT_ROOT
     / "src"
     / "omnibase_infra"
     / "nodes"

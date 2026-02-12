@@ -30,6 +30,22 @@ from tests.conftest import make_runtime_config, seed_mock_handlers
 
 pytestmark = pytest.mark.integration
 
+
+def _get_aiohttp_bound_port(health_server: ServiceHealth) -> int:
+    """Extract the auto-assigned port from a ServiceHealth server.
+
+    aiohttp does not expose the bound port publicly when using port=0.
+    Accessing internals is the only way to discover the auto-assigned port.
+    """
+    site = health_server._site
+    assert site is not None
+    internal_server = site._server
+    assert internal_server is not None
+    sockets = getattr(internal_server, "sockets", None)
+    assert sockets is not None and len(sockets) > 0
+    return sockets[0].getsockname()[1]
+
+
 # SLA: Runtime must reach ready state within this many seconds.
 READY_STATE_SLA_SECONDS = 10.0
 
@@ -103,16 +119,7 @@ class TestRuntimeStartupReadiness:
             await health_server.start()
 
             # Retrieve the auto-assigned port.
-            # aiohttp does not expose the bound port publicly when using
-            # port=0 (OS-assigned); accessing internals (_site, _server,
-            # sockets) is the only way to discover the actual port.
-            site = health_server._site
-            assert site is not None
-            internal_server = site._server
-            assert internal_server is not None
-            sockets = getattr(internal_server, "sockets", None)
-            assert sockets is not None and len(sockets) > 0
-            actual_port: int = sockets[0].getsockname()[1]
+            actual_port = _get_aiohttp_bound_port(health_server)
 
             try:
                 async with aiohttp.ClientSession() as session:
