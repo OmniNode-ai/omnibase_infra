@@ -18,7 +18,7 @@ from omnibase_infra.idempotency import (
     StoreIdempotencyInmemory,
 )
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
-from tests.conftest import make_runtime_config, seed_mock_handlers
+from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
 
 @pytest.fixture

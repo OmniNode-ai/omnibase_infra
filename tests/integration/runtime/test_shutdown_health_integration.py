@@ -24,7 +24,7 @@ import pytest
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from omnibase_infra.services.service_health import ServiceHealth
-from tests.conftest import seed_mock_handlers
+from tests.helpers.runtime_helpers import seed_mock_handlers
 
 # Test config required for RuntimeHostProcess (OMN-1602)
 # RuntimeHostProcess now requires service_name and node_name for consumer group derivation

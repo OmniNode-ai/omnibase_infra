@@ -31,7 +31,7 @@ from omnibase_infra.enums import EnumIntrospectionReason
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.models.runtime import ModelRuntimeIntrospectionConfig
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
-from tests.conftest import make_runtime_config, seed_mock_handlers
+from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
 if TYPE_CHECKING:
     from omnibase_infra.protocols import ProtocolNodeIntrospection

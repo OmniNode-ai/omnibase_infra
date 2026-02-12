@@ -41,8 +41,8 @@ import pytest
 
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
-from tests.conftest import make_runtime_config, seed_mock_handlers
 from tests.helpers import DeterministicClock, DeterministicIdGenerator
+from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 
 # =============================================================================
 # TDD Skip Helper - Check if RuntimeHostProcess is implemented

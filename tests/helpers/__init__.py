@@ -68,8 +68,22 @@ Available Utilities:
         - check_postgres_reachable_simple: Simple TCP reachability check
         - should_skip_migration: Check if migration contains CONCURRENTLY DDL
         - CONCURRENT_DDL_PATTERN: Regex pattern for CONCURRENTLY DDL statements
+
+    Path Utilities:
+        - find_project_root: Locate the project root by walking up to pyproject.toml
+
+    Runtime Helpers:
+        - make_runtime_config: Create RuntimeHostProcess config with defaults
+        - seed_mock_handlers: Seed mock handlers to bypass fail-fast validation
+
+    Dispatchers:
+        - ContextCapturingDispatcher: Test dispatcher capturing context for assertions
+
+    aiohttp Utilities:
+        - get_aiohttp_bound_port: Extract auto-assigned port from ServiceHealth server
 """
 
+from tests.helpers.aiohttp_utils import get_aiohttp_bound_port
 from tests.helpers.ast_analysis import (
     find_datetime_now_calls,
     find_io_method_calls,
@@ -84,8 +98,10 @@ from tests.helpers.chaos_utils import (
     create_envelope_from_chained_message,
 )
 from tests.helpers.deterministic import DeterministicClock, DeterministicIdGenerator
+from tests.helpers.dispatchers import ContextCapturingDispatcher
 from tests.helpers.log_helpers import filter_handler_warnings, get_warning_messages
 from tests.helpers.mock_helpers import MockStatResult, create_mock_stat_result
+from tests.helpers.path_utils import find_project_root
 from tests.helpers.replay_utils import (
     EventFactory,
     EventSequenceEntry,
@@ -100,6 +116,7 @@ from tests.helpers.replay_utils import (
     detect_sequence_number_violations,
     detect_timestamp_order_violations,
 )
+from tests.helpers.runtime_helpers import make_runtime_config, seed_mock_handlers
 from tests.helpers.statistics_utils import (
     BinomialConfidenceInterval,
     MemorySnapshot,
@@ -183,6 +200,8 @@ __all__ = [
     "parse_bootstrap_servers",
     "wait_for_consumer_ready",
     "wait_for_topic_metadata",
+    # Path utilities
+    "find_project_root",
     # PostgreSQL testing utilities
     "CONCURRENT_DDL_PATTERN",
     "PostgresConfig",
@@ -190,4 +209,11 @@ __all__ = [
     "check_postgres_reachable",
     "check_postgres_reachable_simple",
     "should_skip_migration",
+    # Runtime helpers
+    "make_runtime_config",
+    "seed_mock_handlers",
+    # Dispatchers
+    "ContextCapturingDispatcher",
+    # aiohttp utilities
+    "get_aiohttp_bound_port",
 ]

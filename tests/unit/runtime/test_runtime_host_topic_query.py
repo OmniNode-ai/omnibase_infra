@@ -22,7 +22,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
-from tests.conftest import make_runtime_config
+from tests.helpers.runtime_helpers import make_runtime_config
 
 
 class TestGetSubscribersForTopic:
