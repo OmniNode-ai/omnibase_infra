@@ -227,6 +227,14 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                 error_message=f"Request rejected during {operation}: {error}",
             )
 
+        if isinstance(error, InfraProtocolError):
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.CONNECTION,
+                should_retry=True,
+                record_circuit_failure=True,
+                error_message=f"Protocol error during {operation}: {error}",
+            )
+
         if isinstance(error, ProtocolConfigurationError):
             return ModelRetryErrorClassification(
                 category=EnumRetryErrorCategory.NOT_FOUND,
