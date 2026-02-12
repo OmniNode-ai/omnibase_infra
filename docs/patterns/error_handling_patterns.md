@@ -58,6 +58,7 @@ ModelOnexError (omnibase_core)
     ├── InfraConnectionError (transport-aware error codes)
     ├── InfraTimeoutError
     ├── InfraAuthenticationError
+    ├── InfraRateLimitedError
     └── InfraUnavailableError
 ```
 
@@ -66,7 +67,7 @@ ModelOnexError (omnibase_core)
 ```mermaid
 flowchart TB
     accTitle: ONEX Error Class Hierarchy
-    accDescr: Class hierarchy diagram showing the ONEX infrastructure error types. ModelOnexError from omnibase_core is the root. RuntimeHostError extends it, and six specialized error types extend RuntimeHostError: ProtocolConfigurationError for invalid configs, SecretResolutionError for Vault and secret issues, InfraConnectionError for network failures with transport-aware error codes, InfraTimeoutError for operation timeouts, InfraAuthenticationError for auth failures, and InfraUnavailableError for service outages.
+    accDescr: Class hierarchy diagram showing the ONEX infrastructure error types. ModelOnexError from omnibase_core is the root. RuntimeHostError extends it, and seven specialized error types extend RuntimeHostError: ProtocolConfigurationError for invalid configs, SecretResolutionError for Vault and secret issues, InfraConnectionError for network failures with transport-aware error codes, InfraTimeoutError for operation timeouts, InfraAuthenticationError for auth failures, InfraRateLimitedError for rate limiting and throttling, and InfraUnavailableError for service outages.
 
     ONEX["ModelOnexError<br/>(omnibase_core)"] --> RH["RuntimeHostError"]
 
@@ -75,6 +76,7 @@ flowchart TB
     RH --> ICE["InfraConnectionError<br/>Network failures<br/>(transport-aware codes)"]
     RH --> ITE["InfraTimeoutError<br/>Operation timeouts"]
     RH --> IAE["InfraAuthenticationError<br/>Auth/credential failures"]
+    RH --> IRLE["InfraRateLimitedError<br/>Rate limiting (429)"]
     RH --> IUE["InfraUnavailableError<br/>Service outages"]
 
     style ONEX fill:#e3f2fd

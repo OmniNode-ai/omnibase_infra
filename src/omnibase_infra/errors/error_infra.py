@@ -554,8 +554,8 @@ class InfraRateLimitedError(RuntimeHostError):
         """
         if retry_after_seconds is not None:
             extra_context = {
-                "retry_after_seconds": retry_after_seconds,
                 **extra_context,
+                "retry_after_seconds": retry_after_seconds,
             }
         super().__init__(
             message=message,

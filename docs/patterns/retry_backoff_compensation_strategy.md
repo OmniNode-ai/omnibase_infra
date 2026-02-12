@@ -139,6 +139,7 @@ Orchestrator (owns retry logic)
 ```python
 from omnibase_infra.errors import (
     InfraConnectionError,
+    InfraRateLimitedError,
     InfraTimeoutError,
     InfraUnavailableError,
     InfraAuthenticationError,
@@ -166,6 +167,7 @@ def is_retryable(error: Exception) -> bool:
     # Retryable error types (transient failures)
     if isinstance(error, (
         InfraConnectionError,
+        InfraRateLimitedError,
         InfraTimeoutError,
         InfraUnavailableError,
     )):
