@@ -53,8 +53,10 @@ from omnibase_infra.models.registration.events.model_node_registration_ack_timed
 from omnibase_infra.models.registration.events.model_node_registration_initiated import (
     ModelNodeRegistrationInitiated,
 )
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_decision import (
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_context import (
     ModelReducerContext,
+)
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_decision import (
     ModelReducerDecision,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.services import (
