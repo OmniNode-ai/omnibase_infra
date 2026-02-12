@@ -62,14 +62,15 @@ class DbOwnershipMismatchError(RuntimeHostError):
                 correlation_id=correlation_id,
             )
 
-        extra_context["expected_owner"] = expected_owner
-        extra_context["actual_owner"] = actual_owner
+        ctx = dict(extra_context)
+        ctx["expected_owner"] = expected_owner
+        ctx["actual_owner"] = actual_owner
 
         super().__init__(
             message=message,
             error_code=EnumCoreErrorCode.CONTRACT_VIOLATION,
             context=context,
-            **extra_context,
+            **ctx,
         )
 
 
@@ -104,13 +105,14 @@ class DbOwnershipMissingError(RuntimeHostError):
                 correlation_id=correlation_id,
             )
 
-        extra_context["expected_owner"] = expected_owner
+        ctx = dict(extra_context)
+        ctx["expected_owner"] = expected_owner
 
         super().__init__(
             message=message,
             error_code=EnumCoreErrorCode.CONTRACT_VIOLATION,
             context=context,
-            **extra_context,
+            **ctx,
         )
 
 

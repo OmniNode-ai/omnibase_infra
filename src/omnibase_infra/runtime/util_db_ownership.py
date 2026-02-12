@@ -25,7 +25,9 @@ from omnibase_infra.errors.error_db_ownership import (
 
 logger = logging.getLogger(__name__)
 
-_OWNERSHIP_QUERY = "SELECT owner_service FROM public.db_metadata LIMIT 1"
+_OWNERSHIP_QUERY = (
+    "SELECT owner_service FROM public.db_metadata WHERE id = TRUE LIMIT 1"
+)
 
 
 async def validate_db_ownership(
@@ -91,13 +93,20 @@ async def validate_db_ownership(
 
     actual_owner = row["owner_service"]
     if actual_owner != expected_owner:
+        # Truncate actual_owner for log/error safety -- a crafted value in the
+        # DB should not be able to flood logs or exploit error rendering.
+        safe_actual = (
+            actual_owner[:64]
+            if isinstance(actual_owner, str)
+            else str(actual_owner)[:64]
+        )
         raise DbOwnershipMismatchError(
             f"Database ownership mismatch: expected '{expected_owner}', "
-            f"found '{actual_owner}'. "
+            f"found '{safe_actual}'. "
             "Hint: check OMNIBASE_INFRA_DB_URL points to the correct "
             "service database, not a database owned by another service.",
             expected_owner=expected_owner,
-            actual_owner=actual_owner,
+            actual_owner=safe_actual,
             correlation_id=correlation_id,
         )
 

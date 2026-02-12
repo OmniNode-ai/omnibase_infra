@@ -31,15 +31,15 @@ ON CONFLICT (id) DO UPDATE SET
     updated_at = NOW()
 WHERE db_metadata.owner_service = EXCLUDED.owner_service;
 
--- Warn (do not error) if a different service already owns this database.
--- Preserves idempotency for same-owner re-runs while surfacing
--- deployment misconfigurations visibly in migration logs.
+-- Fail hard if a different service already owns this database.
+-- Preserves idempotency for same-owner re-runs while preventing
+-- cross-service data corruption with an immediate migration failure.
 DO $$
 DECLARE
     current_owner TEXT;
 BEGIN
     SELECT owner_service INTO current_owner FROM public.db_metadata WHERE id = TRUE;
     IF current_owner IS NOT NULL AND current_owner != 'omnibase_infra' THEN
-        RAISE WARNING 'db_metadata.owner_service is "%" but this migration expects "omnibase_infra". Possible misconfiguration.', current_owner;
+        RAISE EXCEPTION 'db_metadata.owner_service is "%" but this migration expects "omnibase_infra". Possible misconfiguration.', current_owner;
     END IF;
 END $$;
