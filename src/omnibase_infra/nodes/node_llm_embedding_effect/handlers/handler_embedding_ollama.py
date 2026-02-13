@@ -38,7 +38,12 @@ from datetime import UTC, datetime
 
 from omnibase_core.models.vector import ModelEmbedding
 from omnibase_core.types import JsonType
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.errors import InfraProtocolError, ModelInfraErrorContext
 from omnibase_infra.mixins import MixinLlmHttpTransport
 from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.nodes.effects.models.model_llm_usage import ModelLlmUsage
@@ -117,6 +122,7 @@ class HandlerEmbeddingOllama(MixinLlmHttpTransport):
             InfraRequestRejectedError: On 400/422 responses.
             ProtocolConfigurationError: On 404 responses.
             InfraUnavailableError: On 5xx or circuit breaker open.
+            InfraProtocolError: On malformed embedding response body.
         """
         url = f"{request.base_url.rstrip('/')}/api/embed"
 
@@ -137,10 +143,22 @@ class HandlerEmbeddingOllama(MixinLlmHttpTransport):
 
         elapsed_ms = (time.monotonic() - start_time) * 1000.0
 
-        # Parse response
-        embeddings = _parse_ollama_embeddings(data)
+        # Parse response — wrap ValueError from parsers in typed infra error
+        try:
+            embeddings = _parse_ollama_embeddings(data)
+        except ValueError as exc:
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=request.correlation_id,
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="parse_ollama_embeddings",
+                target_name=self._llm_target_name,
+            )
+            raise InfraProtocolError(
+                f"Malformed Ollama embedding response: {exc}",
+                context=ctx,
+            ) from exc
         usage = _parse_ollama_usage(data)
-        dimensions = len(embeddings[0].vector) if embeddings else 0
+        dimensions = len(embeddings[0].vector)
 
         return ModelLlmEmbeddingResponse(
             embeddings=tuple(embeddings),

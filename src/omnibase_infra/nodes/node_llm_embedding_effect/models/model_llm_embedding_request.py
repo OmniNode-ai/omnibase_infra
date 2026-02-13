@@ -41,7 +41,8 @@ class ModelLlmEmbeddingRequest(BaseModel):
         correlation_id: Caller-provided or auto-generated correlation ID
             for distributed tracing.
         execution_id: Unique identifier for this specific embedding call.
-        metadata: Arbitrary key-value pairs for observability.
+        metadata: Arbitrary key-value pairs for observability. Use
+            ``dict(metadata)`` at point of use to convert to a mapping.
 
     Example:
         >>> req = ModelLlmEmbeddingRequest(
@@ -123,12 +124,9 @@ class ModelLlmEmbeddingRequest(BaseModel):
         default_factory=uuid4,
         description="Unique identifier for this specific embedding call.",
     )
-    # WARNING: ``dict`` is mutable despite ``frozen=True`` on the model.
-    # See ModelLlmInferenceRequest for rationale on why MappingProxyType
-    # cannot be used here. Callers MUST NOT mutate metadata after construction.
-    metadata: dict[str, str] = Field(
-        default_factory=dict,
-        description="Arbitrary key-value pairs for observability.",
+    metadata: tuple[tuple[str, str], ...] = Field(
+        default_factory=tuple,
+        description="Arbitrary key-value pairs for observability. Use dict(metadata) at point of use.",
     )
 
     @field_validator("texts")

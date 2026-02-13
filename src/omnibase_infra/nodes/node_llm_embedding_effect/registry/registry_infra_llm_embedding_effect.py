@@ -21,7 +21,7 @@ Usage:
         )
 
         container = ModelONEXContainer()
-        RegistryInfraLlmEmbeddingEffect.register(container)
+        await RegistryInfraLlmEmbeddingEffect.register_openai_compatible(container)
 
 Related:
     - NodeLlmEmbeddingEffect: Node that consumes registered dependencies
@@ -60,78 +60,86 @@ class RegistryInfraLlmEmbeddingEffect:
         Args:
             container: ONEX dependency injection container.
 
-        Note:
-            This method provides no-op registration for forward
-            compatibility. Use ``register_openai_compatible()`` or
-            ``register_ollama()`` to explicitly provide a handler.
+        Raises:
+            NotImplementedError: Always. Use ``register_openai_compatible()``
+                or ``register_ollama()`` instead.
         """
-        if container.service_registry is None:
-            return
-
-        logger.debug(
-            "LLM embedding handler factory registration skipped - "
-            "factory registration not implemented in v1.0. "
-            "Use register_openai_compatible() or register_ollama() "
-            "to register an explicit handler instance."
+        raise NotImplementedError(
+            "register() is not implemented. "
+            "Use register_openai_compatible() or register_ollama() instead."
         )
 
     @staticmethod
-    def register_openai_compatible(
+    async def register_openai_compatible(
         container: ModelONEXContainer,
         target_name: str = "openai-embedding",
     ) -> None:
         """Register an OpenAI-compatible embedding handler.
 
         Creates and registers a ``HandlerEmbeddingOpenaiCompatible``
-        instance with the given target name.
+        instance with the given target name using the container's
+        service registry API.
 
         Args:
             container: ONEX dependency injection container.
             target_name: Identifier for the target (used in error context
                 and logging). Default: ``"openai-embedding"``.
         """
+        from omnibase_core.enums import EnumInjectionScope
         from omnibase_infra.nodes.node_llm_embedding_effect.handlers import (
             HandlerEmbeddingOpenaiCompatible,
         )
 
         handler = HandlerEmbeddingOpenaiCompatible(target_name=target_name)
+
+        if container.service_registry is None:
+            return
+
+        await container.service_registry.register_instance(
+            interface=HandlerEmbeddingOpenaiCompatible,
+            instance=handler,
+            scope=EnumInjectionScope.GLOBAL,
+        )
         logger.info(
             "Registered OpenAI-compatible embedding handler: %s",
             target_name,
         )
-        # Store on container for manual resolution
-        if not hasattr(container, "_embedding_handlers"):
-            container._embedding_handlers = {}  # type: ignore[attr-defined]
-        container._embedding_handlers["openai_compatible"] = handler  # type: ignore[attr-defined]
 
     @staticmethod
-    def register_ollama(
+    async def register_ollama(
         container: ModelONEXContainer,
         target_name: str = "ollama-embedding",
     ) -> None:
         """Register an Ollama embedding handler.
 
         Creates and registers a ``HandlerEmbeddingOllama`` instance
-        with the given target name.
+        with the given target name using the container's service
+        registry API.
 
         Args:
             container: ONEX dependency injection container.
             target_name: Identifier for the target (used in error context
                 and logging). Default: ``"ollama-embedding"``.
         """
+        from omnibase_core.enums import EnumInjectionScope
         from omnibase_infra.nodes.node_llm_embedding_effect.handlers import (
             HandlerEmbeddingOllama,
         )
 
         handler = HandlerEmbeddingOllama(target_name=target_name)
+
+        if container.service_registry is None:
+            return
+
+        await container.service_registry.register_instance(
+            interface=HandlerEmbeddingOllama,
+            instance=handler,
+            scope=EnumInjectionScope.GLOBAL,
+        )
         logger.info(
             "Registered Ollama embedding handler: %s",
             target_name,
         )
-        # Store on container for manual resolution
-        if not hasattr(container, "_embedding_handlers"):
-            container._embedding_handlers = {}  # type: ignore[attr-defined]
-        container._embedding_handlers["ollama"] = handler  # type: ignore[attr-defined]
 
 
 __all__ = ["RegistryInfraLlmEmbeddingEffect"]

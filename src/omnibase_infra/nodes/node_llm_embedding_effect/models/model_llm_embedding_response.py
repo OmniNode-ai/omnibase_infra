@@ -161,8 +161,6 @@ class ModelLlmEmbeddingResponse(BaseModel):
         ``dimensions`` field. Mixed dimensionalities indicate a provider
         bug or response parsing error and must be rejected.
         """
-        if not self.embeddings:
-            return self
         lengths = {len(e.vector) for e in self.embeddings}
         if len(lengths) > 1:
             msg = f"Embedding dimension mismatch: found lengths {sorted(lengths)}"
