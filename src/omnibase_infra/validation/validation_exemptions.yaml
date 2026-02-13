@@ -2357,6 +2357,37 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Node Architecture - EFFECT nodes)
     ticket: OMN-2143
+  # ==========================================================================
+  # ArtifactStore Method Count Exemption (OMN-2151)
+  # ==========================================================================
+  # ArtifactStore manages on-disk validation artifacts with cohesive file I/O
+  # methods: directory helpers (5), write methods (5), read methods (2),
+  # symlink management (2), listing (2), and ensure_run_dirs (1).
+  # All methods operate on the same root directory and serve a unified purpose.
+  - file_pattern: 'artifact_store\.py'
+    class_pattern: "Class 'ArtifactStore'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Cohesive file I/O class managing validation artifacts on disk. Methods cover directory structure, write/read operations, symlink management, and listing. All operate on the same root directory. Breaking into smaller classes would reduce cohesion without meaningful benefit.
+
+    documentation:
+      - CLAUDE.md (Validation Pipeline - Artifact Storage)
+    ticket: OMN-2151
+  # ==========================================================================
+  # CheckExecutor._make_result Parameter Count Exemption (OMN-2151)
+  # ==========================================================================
+  # _make_result is a convenience factory for ModelCheckResult that takes
+  # the essential fields (passed, message, error_output, duration_ms, skipped).
+  # All parameters map directly to ModelCheckResult fields.
+  - file_pattern: 'check_executor\.py'
+    method_pattern: "Function '_make_result'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Convenience factory for ModelCheckResult. All 6 parameters map directly to the model fields (self + 5 result fields). Using a builder pattern or config object would add indirection without benefit for this internal helper.
+
+    documentation:
+      - CLAUDE.md (Validation Pipeline - Check Executors)
+    ticket: OMN-2151
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

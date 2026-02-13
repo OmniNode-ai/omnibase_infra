@@ -31,7 +31,7 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 # Third-party imports
 import yaml
@@ -166,7 +166,8 @@ def _load_exemptions_yaml() -> dict[str, list[ExemptionPattern]]:
         }
 
 
-def _convert_yaml_exemptions(yaml_list: list[dict]) -> list[ExemptionPattern]:
+# ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict, values vary by exemption schema
+def _convert_yaml_exemptions(yaml_list: list[dict[str, Any]]) -> list[ExemptionPattern]:
     """
     Convert YAML exemption entries to ExemptionPattern format.
 
@@ -460,7 +461,9 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #                     register_handler(): Write | Read | List handler type param
 # - 125 (2026-02-13): reducer-authoritative registration followups
 #                     ModelPayloadPostgresUpdateRegistration.updates: AckUpdate | HeartbeatUpdate
-INFRA_MAX_UNIONS = 125
+# - 126 (2026-02-13): OMN-2151 validation checks, artifacts, flake detection
+#                     ArtifactStore.write_artifact(): content: str | bytes parameter
+INFRA_MAX_UNIONS = 126
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

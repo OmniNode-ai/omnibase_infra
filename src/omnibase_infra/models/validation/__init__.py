@@ -63,6 +63,10 @@ from omnibase_infra.models.validation.model_execution_shape_violation import (
     ModelExecutionShapeViolationResult,
 )
 from omnibase_infra.models.validation.model_executor_result import ModelExecutorResult
+from omnibase_infra.models.validation.model_flake_detection_result import (
+    ModelFlakeDetectionResult,
+)
+from omnibase_infra.models.validation.model_flake_record import ModelFlakeRecord
 from omnibase_infra.models.validation.model_localhandler_validation_result import (
     ModelLocalHandlerValidationResult,
 )
@@ -98,6 +102,8 @@ __all__ = [
     "ModelExecutionShapeValidationResult",
     "ModelExecutionShapeViolationResult",
     "ModelExecutorResult",
+    "ModelFlakeDetectionResult",
+    "ModelFlakeRecord",
     "ModelLocalHandlerValidationResult",
     "ModelLocalHandlerViolation",
     "ModelOutputValidationParams",
