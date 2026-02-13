@@ -156,7 +156,7 @@ RUN /app/.venv/bin/pip freeze | grep -v '^\(-e\|@\)' > /tmp/constraints.txt
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     /app/.venv/bin/pip install --constraint /tmp/constraints.txt \
-    omniintelligence==0.1.0
+    omniintelligence==0.1.1
 
 # ============================================================================
 # Runtime Stage - Minimal production image
