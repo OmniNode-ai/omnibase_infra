@@ -196,6 +196,14 @@ class ModelLlmInferenceRequest(BaseModel):
         description="Arbitrary key-value pairs for observability.",
     )
 
+    @field_validator("system_prompt")
+    @classmethod
+    def _validate_system_prompt(cls, v: str | None) -> str | None:
+        """Reject empty or whitespace-only system prompts."""
+        if v is not None and not v.strip():
+            raise ValueError("system_prompt must be non-empty when set.")
+        return v
+
     @field_validator("stop")
     @classmethod
     def _validate_stop_sequences(cls, v: tuple[str, ...]) -> tuple[str, ...]:
