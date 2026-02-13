@@ -40,7 +40,7 @@ SAMPLE_REGISTRATION = ModelEventRegistration(
     event_type="test.event",
     topic_template="onex.evt.test.topic.v1",
     partition_key_field="session_id",
-    required_fields=["field_a"],
+    required_fields=("field_a",),
     schema_version="1.0.0",
 )
 
@@ -66,7 +66,7 @@ class TestModelEventRegistration:
         assert reg.event_type == "test.event"
         assert reg.topic_template == "onex.evt.test.topic.v1"
         assert reg.partition_key_field is None
-        assert reg.required_fields == []
+        assert reg.required_fields == ()
         assert reg.schema_version == "1.0.0"
 
     def test_full_registration(self) -> None:
@@ -75,13 +75,13 @@ class TestModelEventRegistration:
             event_type="custom.event",
             topic_template="onex.evt.custom.topic.v2",
             partition_key_field="user_id",
-            required_fields=["user_id", "action"],
+            required_fields=("user_id", "action"),
             schema_version="2.0.0",
         )
         assert reg.event_type == "custom.event"
         assert reg.topic_template == "onex.evt.custom.topic.v2"
         assert reg.partition_key_field == "user_id"
-        assert reg.required_fields == ["user_id", "action"]
+        assert reg.required_fields == ("user_id", "action")
         assert reg.schema_version == "2.0.0"
 
     def test_registration_is_frozen(self) -> None:
@@ -416,7 +416,7 @@ class TestEventRegistryValidatePayload:
             ModelEventRegistration(
                 event_type="multi.required",
                 topic_template="onex.evt.multi.v1",
-                required_fields=["field_a", "field_b", "field_c"],
+                required_fields=("field_a", "field_b", "field_c"),
             )
         )
         with pytest.raises(OnexError) as exc_info:
@@ -438,7 +438,7 @@ class TestEventRegistryValidatePayload:
             ModelEventRegistration(
                 event_type="optional.all",
                 topic_template="onex.evt.optional.v1",
-                required_fields=[],
+                required_fields=(),
             )
         )
         result = registry.validate_payload("optional.all", {})
@@ -801,7 +801,7 @@ class TestEventRegistryGetRegistration:
             event_type="custom.event",
             topic_template="onex.evt.custom.v1",
             partition_key_field="custom_key",
-            required_fields=["a", "b"],
+            required_fields=("a", "b"),
             schema_version="3.0.0",
         )
         registry.register(custom)
@@ -809,7 +809,7 @@ class TestEventRegistryGetRegistration:
         retrieved = registry.get_registration("custom.event")
         assert retrieved is not None
         assert retrieved.partition_key_field == "custom_key"
-        assert retrieved.required_fields == ["a", "b"]
+        assert retrieved.required_fields == ("a", "b")
         assert retrieved.schema_version == "3.0.0"
 
 
