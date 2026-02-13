@@ -49,7 +49,7 @@ def _make_embedding(idx: int, dim: int = 768) -> ModelEmbedding:
     )
 
 
-def _valid_kwargs(dim: int = 3, count: int = 1) -> dict:
+def _valid_kwargs(dim: int = 3, count: int = 1) -> dict[str, object]:
     """Return minimal valid kwargs for constructing a response."""
     embeddings = tuple(_make_embedding(i, dim) for i in range(count))
     return {

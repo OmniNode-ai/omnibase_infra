@@ -26,6 +26,7 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import InfraProtocolError
 from omnibase_infra.nodes.node_llm_embedding_effect.handlers.handler_embedding_ollama import (
@@ -47,7 +48,7 @@ pytestmark = [pytest.mark.unit]
 
 def _make_request(**overrides: object) -> ModelLlmEmbeddingRequest:
     """Create a valid embedding request with optional overrides."""
-    defaults: dict = {
+    defaults: dict[str, object] = {
         "base_url": "http://192.168.86.200:11434",
         "model": "nomic-embed-text",
         "texts": ("Hello, world!",),
@@ -62,7 +63,7 @@ def _ollama_response(
     embeddings: list[list[float]],
     prompt_eval_count: int = 5,
     model: str = "nomic-embed-text",
-) -> dict:
+) -> dict[str, object]:
     """Build a mock Ollama embedding response."""
     return {
         "model": model,
@@ -402,7 +403,7 @@ class TestParseOllamaEmbeddings:
 
     def test_valid_single(self) -> None:
         """Single embedding parses correctly."""
-        data = {"embeddings": [[1.0, 2.0, 3.0]]}
+        data: dict[str, JsonType] = {"embeddings": [[1.0, 2.0, 3.0]]}
         result = _parse_ollama_embeddings(data)
         assert len(result) == 1
         assert result[0].id == "0"
@@ -410,7 +411,7 @@ class TestParseOllamaEmbeddings:
 
     def test_valid_batch(self) -> None:
         """Multiple embeddings parse correctly with sequential IDs."""
-        data = {"embeddings": [[1.0, 2.0], [3.0, 4.0]]}
+        data: dict[str, JsonType] = {"embeddings": [[1.0, 2.0], [3.0, 4.0]]}
         result = _parse_ollama_embeddings(data)
         assert len(result) == 2
         assert result[0].id == "0"
@@ -447,7 +448,7 @@ class TestParseOllamaUsage:
 
     def test_valid_usage(self) -> None:
         """Valid prompt_eval_count parses correctly."""
-        data = {"prompt_eval_count": 42}
+        data: dict[str, JsonType] = {"prompt_eval_count": 42}
         usage = _parse_ollama_usage(data)
         assert usage.tokens_input == 42
         assert usage.tokens_output == 0

@@ -37,7 +37,7 @@ pytestmark = [pytest.mark.unit]
 # =============================================================================
 
 
-def _valid_kwargs() -> dict:
+def _valid_kwargs() -> dict[str, object]:
     """Return minimal valid kwargs for constructing a request."""
     return {
         "base_url": "http://192.168.86.201:8002",
