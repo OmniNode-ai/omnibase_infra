@@ -36,6 +36,8 @@ Exports:
     DbOwnershipMissingError: db_metadata table or ownership row missing
     SchemaFingerprintMismatchError: Live schema fingerprint != expected
     SchemaFingerprintMissingError: Expected fingerprint not in db_metadata
+    EventRegistryFingerprintMismatchError: Live event registry fingerprint != expected
+    EventRegistryFingerprintMissingError: Event registry artifact file not found
 
 Correlation ID Assignment:
     All infrastructure errors support correlation_id for distributed tracing.
@@ -120,6 +122,10 @@ from omnibase_infra.errors.error_db_ownership import (
     DbOwnershipMissingError,
 )
 from omnibase_infra.errors.error_event_bus_registry import EventBusRegistryError
+from omnibase_infra.errors.error_event_registry_fingerprint import (
+    EventRegistryFingerprintMismatchError,
+    EventRegistryFingerprintMissingError,
+)
 from omnibase_infra.errors.error_infra import (
     EnvelopeValidationError,
     InfraAuthenticationError,
@@ -172,6 +178,9 @@ __all__: list[str] = [
     "DbOwnershipMissingError",
     "EnvelopeValidationError",
     "EventBusRegistryError",
+    # Event registry fingerprint errors
+    "EventRegistryFingerprintMismatchError",
+    "EventRegistryFingerprintMissingError",
     "InfraAuthenticationError",
     "InfraConnectionError",
     # Service-specific connection errors

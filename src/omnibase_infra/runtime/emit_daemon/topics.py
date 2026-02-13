@@ -25,7 +25,15 @@ PHASE_METRICS_REGISTRATION = ModelEventRegistration(
     schema_version="1.0.0",
 )
 
+# All known event registrations for omnibase_infra.
+# Add new registrations to this tuple. CLI stamp/verify and startup
+# validation all use this list as the canonical source of truth.
+ALL_EVENT_REGISTRATIONS: tuple[ModelEventRegistration, ...] = (
+    PHASE_METRICS_REGISTRATION,
+)
+
 __all__: list[str] = [
+    "ALL_EVENT_REGISTRATIONS",
     "TOPIC_PHASE_METRICS",
     "TOPIC_NOTIFICATION_BLOCKED",
     "TOPIC_NOTIFICATION_COMPLETED",

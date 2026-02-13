@@ -89,6 +89,8 @@ from omnibase_infra.errors import (
     ContainerWiringError,
     DbOwnershipMismatchError,
     DbOwnershipMissingError,
+    EventRegistryFingerprintMismatchError,
+    EventRegistryFingerprintMissingError,
     SchemaFingerprintMismatchError,
     SchemaFingerprintMissingError,
 )
@@ -345,6 +347,15 @@ class PluginRegistration:
                 correlation_id=correlation_id,
             )
 
+            # 1.7 Validate event registry fingerprint (OMN-2088)
+            # Hard gate: prevents operating with drifted event registrations
+            # (wrong topics, missing events, changed schemas).
+            from omnibase_infra.runtime.emit_daemon.event_registry import (
+                validate_event_registry_fingerprint,
+            )
+
+            validate_event_registry_fingerprint()
+
             # 2. Load projectors from contracts via ProjectorPluginLoader
             await self._load_projector(config)
             if self._projector is not None:
@@ -379,10 +390,14 @@ class PluginRegistration:
             DbOwnershipMissingError,
             SchemaFingerprintMismatchError,
             SchemaFingerprintMissingError,
+            EventRegistryFingerprintMismatchError,
+            EventRegistryFingerprintMissingError,
         ):
             # Hard gates: must propagate to kill the kernel.
             # DB ownership errors (OMN-2085) indicate wrong database.
             # Schema fingerprint errors (OMN-2087) indicate schema drift.
+            # Event registry fingerprint errors (OMN-2088) indicate
+            # drifted event registrations.
             # Swallowing these would defeat the entire safety mechanism.
             await self._cleanup_on_failure(config)
             raise
