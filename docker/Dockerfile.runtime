@@ -229,6 +229,10 @@ COPY --chown=omniinfra:omniinfra LICENSE /app/LICENSE
 # Copy contracts directory (must exist in build context)
 COPY --chown=omniinfra:omniinfra contracts/ /app/contracts/
 
+# Copy entrypoint script that stamps schema fingerprint before kernel start
+COPY --chown=omniinfra:omniinfra docker/entrypoint-runtime.sh /app/entrypoint-runtime.sh
+RUN chmod +x /app/entrypoint-runtime.sh
+
 # Create runtime directories with proper permissions
 RUN mkdir -p /app/logs /app/data /app/tmp && \
     chown -R omniinfra:omniinfra /app
@@ -252,7 +256,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Without tini, signals like SIGTERM aren't properly forwarded to the Python process,
 # causing Docker to send SIGKILL after timeout (exit code 137 instead of 0/143).
 # tini reaps zombie processes and forwards signals correctly.
-ENTRYPOINT ["/usr/bin/tini", "--"]
+#
+# The entrypoint script stamps the schema fingerprint into db_metadata before
+# starting the kernel. This prevents crash-loops caused by NULL fingerprints.
+# tini runs as PID 1, spawns the entrypoint script, which exec's into the CMD.
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/entrypoint-runtime.sh"]
 
 # Default command runs the ONEX kernel via Poetry-installed script
 # The kernel loads configuration from ONEX_CONTRACTS_DIR and starts the runtime

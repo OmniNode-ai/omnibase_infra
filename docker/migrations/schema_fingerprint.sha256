@@ -1,5 +1,5 @@
 # Schema fingerprint for omnibase_infra (auto-generated)
-# Populate by running: poetry run python -m omnibase_infra.runtime.util_schema_fingerprint update
+# Populate by running: poetry run python -m omnibase_infra.runtime.util_schema_fingerprint stamp
 # This file is for code review visibility. Runtime reads from db_metadata.
 sha256:PENDING
 generated_at: PENDING
