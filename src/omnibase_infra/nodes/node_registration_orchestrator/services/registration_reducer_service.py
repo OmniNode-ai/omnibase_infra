@@ -77,6 +77,8 @@ from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
 )
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registration import (
     ModelPayloadPostgresUpdateRegistration,
+    ModelRegistrationAckUpdate,
+    ModelRegistrationHeartbeatUpdate,
 )
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
@@ -361,11 +363,11 @@ class RegistrationReducerService:
                 correlation_id=correlation_id,
                 entity_id=node_id,
                 domain="registration",
-                updates={
-                    "current_state": EnumRegistrationState.ACTIVE.value,
-                    "liveness_deadline": liveness_deadline,
-                    "updated_at": now,
-                },
+                updates=ModelRegistrationAckUpdate(
+                    current_state=EnumRegistrationState.ACTIVE.value,
+                    liveness_deadline=liveness_deadline,
+                    updated_at=now,
+                ),
             )
             update_intent = ModelIntent(
                 intent_type=update_payload.intent_type,
@@ -435,11 +437,11 @@ class RegistrationReducerService:
             correlation_id=ctx.correlation_id,
             entity_id=node_id,
             domain="registration",
-            updates={
-                "last_heartbeat_at": heartbeat_timestamp,
-                "liveness_deadline": new_liveness_deadline,
-                "updated_at": ctx.now,
-            },
+            updates=ModelRegistrationHeartbeatUpdate(
+                last_heartbeat_at=heartbeat_timestamp,
+                liveness_deadline=new_liveness_deadline,
+                updated_at=ctx.now,
+            ),
         )
         update_intent = ModelIntent(
             intent_type=update_payload.intent_type,

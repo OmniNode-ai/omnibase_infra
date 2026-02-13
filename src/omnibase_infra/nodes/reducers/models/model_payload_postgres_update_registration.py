@@ -17,10 +17,17 @@ Related:
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.nodes.reducers.models.model_registration_ack_update import (
+    ModelRegistrationAckUpdate,
+)
+from omnibase_infra.nodes.reducers.models.model_registration_heartbeat_update import (
+    ModelRegistrationHeartbeatUpdate,
+)
 
 
 class ModelPayloadPostgresUpdateRegistration(BaseModel):
@@ -35,7 +42,7 @@ class ModelPayloadPostgresUpdateRegistration(BaseModel):
         correlation_id: Correlation ID for distributed tracing.
         entity_id: Entity UUID for WHERE clause.
         domain: Domain for WHERE clause (composite PK).
-        updates: Column name -> value pairs for SET clause.
+        updates: Typed column set for SET clause (structural union).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -56,12 +63,12 @@ class ModelPayloadPostgresUpdateRegistration(BaseModel):
         default="registration",
         description="Domain for WHERE clause (composite PK).",
     )
-    # ONEX_EXCLUDE: any_type - dict[str, Any] required for dynamic column updates
-    # that vary by caller (heartbeat updates vs. state transitions).
-    updates: dict[str, Any] = Field(
+    updates: ModelRegistrationAckUpdate | ModelRegistrationHeartbeatUpdate = Field(
         ...,
-        description="Column name -> value pairs for SET clause.",
+        description="Typed column set for SET clause.",
     )
 
 
-__all__: list[str] = ["ModelPayloadPostgresUpdateRegistration"]
+__all__: list[str] = [
+    "ModelPayloadPostgresUpdateRegistration",
+]

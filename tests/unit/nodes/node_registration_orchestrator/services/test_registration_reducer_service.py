@@ -69,6 +69,8 @@ from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
 )
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registration import (
     ModelPayloadPostgresUpdateRegistration,
+    ModelRegistrationAckUpdate,
+    ModelRegistrationHeartbeatUpdate,
 )
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
@@ -491,8 +493,7 @@ class TestDecideAckEmitPath:
         assert intent.payload.intent_type == "postgres.update_registration"
         assert intent.payload.entity_id == node_id
         assert (
-            intent.payload.updates["current_state"]
-            == EnumRegistrationState.ACTIVE.value
+            intent.payload.updates.current_state == EnumRegistrationState.ACTIVE.value
         )
 
 
@@ -626,8 +627,8 @@ class TestDecideHeartbeat:
         assert len(decision.intents) == 1
         intent = decision.intents[0]
         assert isinstance(intent.payload, ModelPayloadPostgresUpdateRegistration)
-        assert intent.payload.updates["last_heartbeat_at"] == heartbeat_ts
-        assert "liveness_deadline" in intent.payload.updates
+        assert intent.payload.updates.last_heartbeat_at == heartbeat_ts
+        assert isinstance(intent.payload.updates, ModelRegistrationHeartbeatUpdate)
 
     def test_heartbeat_no_events(self) -> None:
         """Verify events tuple is empty (heartbeat produces no events)."""
@@ -685,7 +686,7 @@ class TestDecideHeartbeat:
 
         assert decision.action == "emit"
         expected_deadline = heartbeat_ts + timedelta(seconds=liveness_window)
-        actual_deadline = decision.intents[0].payload.updates["liveness_deadline"]
+        actual_deadline = decision.intents[0].payload.updates.liveness_deadline
         assert actual_deadline == expected_deadline
 
 

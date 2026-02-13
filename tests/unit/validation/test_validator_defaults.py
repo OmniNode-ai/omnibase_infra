@@ -112,11 +112,13 @@ class TestInfraValidatorConstants:
         - 124 (2026-02-11): OMN-2143 checkpoint nodes (+2 unions)
           - PhasePayload: 5-type discriminated Union in ModelCheckpoint
           - register_handler(): Write | Read | List handler type param
+        - 125 (2026-02-13): reducer-authoritative registration followups (+1 union)
+          - ModelPayloadPostgresUpdateRegistration.updates: AckUpdate | HeartbeatUpdate
 
-        Current: 124 (as of OMN-2143 + OMN-2146). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
+        Current: 125 (as of reducer-authoritative followups). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 124, (
-            "INFRA_MAX_UNIONS should be 124 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 125, (
+            "INFRA_MAX_UNIONS should be 125 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

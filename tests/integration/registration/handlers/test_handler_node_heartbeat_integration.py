@@ -59,6 +59,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.services import (
 )
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registration import (
     ModelPayloadPostgresUpdateRegistration,
+    ModelRegistrationHeartbeatUpdate,
 )
 
 if TYPE_CHECKING:
@@ -314,8 +315,8 @@ class TestHandlerNodeHeartbeatHappyPath:
         payload = intent.payload
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
         assert payload.entity_id == node_id
-        assert payload.updates["last_heartbeat_at"] == event.timestamp
-        assert payload.updates["liveness_deadline"] is not None
+        assert payload.updates.last_heartbeat_at == event.timestamp
+        assert payload.updates.liveness_deadline is not None
 
     async def test_handle_heartbeat_extends_liveness_deadline(
         self,
@@ -343,11 +344,7 @@ class TestHandlerNodeHeartbeatHappyPath:
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
         expected_deadline = event_time + timedelta(seconds=5.0)
         assert (
-            abs(
-                (
-                    payload.updates["liveness_deadline"] - expected_deadline
-                ).total_seconds()
-            )
+            abs((payload.updates.liveness_deadline - expected_deadline).total_seconds())
             < 0.1
         )
 
@@ -426,13 +423,7 @@ class TestHandlerNodeHeartbeatHappyPath:
         assert len(output.intents) == 1
         payload = output.intents[0].payload
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
-        assert "last_heartbeat_at" in payload.updates
-        assert "liveness_deadline" in payload.updates
-        assert "updated_at" in payload.updates
-        # Should NOT include non-heartbeat fields
-        assert "node_version" not in payload.updates
-        assert "current_state" not in payload.updates
-        assert "node_type" not in payload.updates
+        assert isinstance(payload.updates, ModelRegistrationHeartbeatUpdate)
 
 
 # =============================================================================
@@ -549,8 +540,8 @@ class TestHandlerNodeHeartbeatNonActiveNode:
         payload = output.intents[0].payload
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
         assert payload.entity_id == node_id
-        assert payload.updates["last_heartbeat_at"] == event.timestamp
-        assert payload.updates["liveness_deadline"] is not None
+        assert payload.updates.last_heartbeat_at == event.timestamp
+        assert payload.updates.liveness_deadline is not None
 
 
 # =============================================================================
@@ -594,7 +585,7 @@ class TestHandlerNodeHeartbeatLivenessWindow:
         payload = output.intents[0].payload
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
         expected_deadline = event_time + timedelta(seconds=90.0)
-        actual_deadline = payload.updates["liveness_deadline"]
+        actual_deadline = payload.updates.liveness_deadline
         assert abs((actual_deadline - expected_deadline).total_seconds()) < 0.1
 
     async def test_liveness_deadline_uses_event_timestamp(
@@ -622,7 +613,7 @@ class TestHandlerNodeHeartbeatLivenessWindow:
         payload = output.intents[0].payload
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
         expected_deadline = past_time + timedelta(seconds=90.0)
-        actual_deadline = payload.updates["liveness_deadline"]
+        actual_deadline = payload.updates.liveness_deadline
         assert abs((actual_deadline - expected_deadline).total_seconds()) < 0.1
 
     async def test_consecutive_heartbeats_extend_deadline(
@@ -646,7 +637,7 @@ class TestHandlerNodeHeartbeatLivenessWindow:
         assert len(output1.intents) == 1
         payload1 = output1.intents[0].payload
         assert isinstance(payload1, ModelPayloadPostgresUpdateRegistration)
-        deadline1 = payload1.updates["liveness_deadline"]
+        deadline1 = payload1.updates.liveness_deadline
 
         # Second heartbeat 2 seconds later
         time2 = time1 + timedelta(seconds=2)
@@ -658,7 +649,7 @@ class TestHandlerNodeHeartbeatLivenessWindow:
         assert len(output2.intents) == 1
         payload2 = output2.intents[0].payload
         assert isinstance(payload2, ModelPayloadPostgresUpdateRegistration)
-        deadline2 = payload2.updates["liveness_deadline"]
+        deadline2 = payload2.updates.liveness_deadline
 
         # Deadlines should be different and progressive
         assert deadline2 > deadline1
@@ -711,7 +702,7 @@ class TestHandlerNodeHeartbeatConcurrency:
             payload = output.intents[0].payload
             assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
             assert payload.entity_id == node_id
-            assert payload.updates["last_heartbeat_at"] == event.timestamp
+            assert payload.updates.last_heartbeat_at == event.timestamp
 
     async def test_rapid_heartbeats_same_node(
         self,
@@ -764,8 +755,8 @@ class TestHandlerNodeHeartbeatConcurrency:
             assert payload.entity_id == node_id
 
             # Each intent should have consistent deadline calculation
-            heartbeat_ts = payload.updates["last_heartbeat_at"]
-            deadline = payload.updates["liveness_deadline"]
+            heartbeat_ts = payload.updates.last_heartbeat_at
+            deadline = payload.updates.liveness_deadline
             expected_deadline = heartbeat_ts + timedelta(seconds=window_seconds)
             assert abs((deadline - expected_deadline).total_seconds()) < 0.1, (
                 f"Output {i}: deadline {deadline} should be "
@@ -777,7 +768,7 @@ class TestHandlerNodeHeartbeatConcurrency:
         latest_valid_deadline = latest_event_time + timedelta(seconds=window_seconds)
         for i, output in enumerate(outputs):
             payload = output.intents[0].payload
-            deadline = payload.updates["liveness_deadline"]
+            deadline = payload.updates.liveness_deadline
             assert deadline >= earliest_valid_deadline, (
                 f"Output {i}: deadline {deadline} is before "
                 f"earliest valid {earliest_valid_deadline}"
@@ -914,7 +905,7 @@ class TestModelHandlerOutputStructure:
         payload = intent.payload
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
         assert payload.entity_id == node_id
-        assert payload.updates["last_heartbeat_at"] == event.timestamp
+        assert payload.updates.last_heartbeat_at == event.timestamp
 
     async def test_output_contains_input_envelope_id(
         self,
@@ -968,9 +959,9 @@ class TestHandlerNodeHeartbeatIntentPayload:
         assert len(output.intents) == 1
         payload = output.intents[0].payload
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
-        assert payload.updates["last_heartbeat_at"] == event_time
-        assert payload.updates["liveness_deadline"] is not None
-        assert payload.updates["updated_at"] is not None
+        assert payload.updates.last_heartbeat_at == event_time
+        assert payload.updates.liveness_deadline is not None
+        assert payload.updates.updated_at is not None
 
     async def test_intent_does_not_include_timeout_markers(
         self,
@@ -991,8 +982,7 @@ class TestHandlerNodeHeartbeatIntentPayload:
         assert len(output.intents) == 1
         payload = output.intents[0].payload
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
-        assert "liveness_timeout_emitted_at" not in payload.updates
-        assert "ack_timeout_emitted_at" not in payload.updates
+        assert isinstance(payload.updates, ModelRegistrationHeartbeatUpdate)
 
     async def test_intent_does_not_include_ack_deadline(
         self,
@@ -1021,7 +1011,7 @@ class TestHandlerNodeHeartbeatIntentPayload:
         assert len(output.intents) == 1
         payload = output.intents[0].payload
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
-        assert "ack_deadline" not in payload.updates
+        assert isinstance(payload.updates, ModelRegistrationHeartbeatUpdate)
 
 
 # =============================================================================
@@ -1074,9 +1064,9 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
         assert len(output.intents) == 1
         payload = output.intents[0].payload
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
-        assert payload.updates["last_heartbeat_at"] == event_time, (
+        assert payload.updates.last_heartbeat_at == event_time, (
             f"Intent last_heartbeat_at should be exactly {event_time}, "
-            f"got {payload.updates['last_heartbeat_at']}"
+            f"got {payload.updates.last_heartbeat_at}"
         )
 
     async def test_liveness_deadline_calculation_precision(
@@ -1115,7 +1105,7 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
         assert len(output.intents) == 1
         payload = output.intents[0].payload
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
-        actual_deadline = payload.updates["liveness_deadline"]
+        actual_deadline = payload.updates.liveness_deadline
         # Allow 1 millisecond tolerance for floating point
         delta = abs((actual_deadline - expected_deadline).total_seconds())
         assert delta < 0.001, (
@@ -1149,8 +1139,8 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
         assert len(output.intents) == 1
         payload = output.intents[0].payload
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
-        assert payload.updates["last_heartbeat_at"] is not None
-        assert payload.updates["liveness_deadline"] is not None
+        assert payload.updates.last_heartbeat_at is not None
+        assert payload.updates.liveness_deadline is not None
 
     async def test_successive_heartbeats_produce_monotonic_timestamps(
         self,
@@ -1185,17 +1175,17 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
         # Verify monotonic increase in timestamps via intent payloads
         for i in range(1, len(intent_payloads)):
             assert (
-                intent_payloads[i].updates["last_heartbeat_at"]
-                > intent_payloads[i - 1].updates["last_heartbeat_at"]
+                intent_payloads[i].updates.last_heartbeat_at
+                > intent_payloads[i - 1].updates.last_heartbeat_at
             ), f"Heartbeat {i} timestamp should be > heartbeat {i - 1}"
 
             assert (
-                intent_payloads[i].updates["liveness_deadline"]
-                > intent_payloads[i - 1].updates["liveness_deadline"]
+                intent_payloads[i].updates.liveness_deadline
+                > intent_payloads[i - 1].updates.liveness_deadline
             ), f"Heartbeat {i} deadline should be > heartbeat {i - 1}"
 
         # Verify final intent has latest timestamp
-        assert intent_payloads[-1].updates["last_heartbeat_at"] == timestamps[-1]
+        assert intent_payloads[-1].updates.last_heartbeat_at == timestamps[-1]
 
     async def test_timestamp_accuracy_for_liveness_expired_event_reporting(
         self,
@@ -1236,8 +1226,8 @@ class TestHandlerNodeHeartbeatTimestampAccuracy:
         payload = output.intents[0].payload
         assert isinstance(payload, ModelPayloadPostgresUpdateRegistration)
 
-        intent_last_heartbeat = payload.updates["last_heartbeat_at"]
-        intent_liveness_deadline = payload.updates["liveness_deadline"]
+        intent_last_heartbeat = payload.updates.last_heartbeat_at
+        intent_liveness_deadline = payload.updates.liveness_deadline
 
         assert intent_last_heartbeat is not None, (
             "last_heartbeat_at should be set for liveness expired event"

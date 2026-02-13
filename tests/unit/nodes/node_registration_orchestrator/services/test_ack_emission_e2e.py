@@ -184,11 +184,10 @@ class TestAckEmissionE2EFromAccepted:
         assert intent.payload.correlation_id == correlation_id
         assert intent.payload.domain == "registration"
         assert (
-            intent.payload.updates["current_state"]
-            == EnumRegistrationState.ACTIVE.value
+            intent.payload.updates.current_state == EnumRegistrationState.ACTIVE.value
         )
-        assert intent.payload.updates["liveness_deadline"] == expected_liveness
-        assert intent.payload.updates["updated_at"] == TEST_NOW
+        assert intent.payload.updates.liveness_deadline == expected_liveness
+        assert intent.payload.updates.updated_at == TEST_NOW
 
         # Step 4: Verify intent target URI follows convention
         assert intent.target == f"postgres://node_registrations/{node_id}"
@@ -250,7 +249,7 @@ class TestAckEmissionE2EFromAccepted:
         # Intent should also reflect the custom liveness deadline
         intent = decision.intents[0]
         assert isinstance(intent.payload, ModelPayloadPostgresUpdateRegistration)
-        assert intent.payload.updates["liveness_deadline"] == expected
+        assert intent.payload.updates.liveness_deadline == expected
 
 
 @pytest.mark.unit

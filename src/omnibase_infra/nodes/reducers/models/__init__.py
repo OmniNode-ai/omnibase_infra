@@ -28,8 +28,14 @@ from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registra
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
 )
+from omnibase_infra.nodes.reducers.models.model_registration_ack_update import (
+    ModelRegistrationAckUpdate,
+)
 from omnibase_infra.nodes.reducers.models.model_registration_confirmation import (
     ModelRegistrationConfirmation,
+)
+from omnibase_infra.nodes.reducers.models.model_registration_heartbeat_update import (
+    ModelRegistrationHeartbeatUpdate,
 )
 from omnibase_infra.nodes.reducers.models.model_registration_state import (
     ModelRegistrationState,
@@ -41,6 +47,8 @@ __all__ = [
     "ModelPayloadLedgerAppend",
     "ModelPayloadPostgresUpdateRegistration",
     "ModelPayloadPostgresUpsertRegistration",
+    "ModelRegistrationAckUpdate",
     "ModelRegistrationConfirmation",
+    "ModelRegistrationHeartbeatUpdate",
     "ModelRegistrationState",
 ]

@@ -21,9 +21,10 @@ on last_heartbeat_at to ensure idempotent heartbeat processing:
     WHERE entity_id = $N AND domain = $M
       AND (last_heartbeat_at IS NULL OR last_heartbeat_at < $heartbeat_param)
 
-The heartbeat guard is only applied when the updates dict contains a
-`last_heartbeat_at` key. For non-heartbeat updates (e.g., ACK state
-transitions), the guard is omitted.
+The heartbeat guard is only applied when the typed updates model
+(ModelRegistrationAckUpdate or ModelRegistrationHeartbeatUpdate)
+contains a ``last_heartbeat_at`` field. For non-heartbeat updates
+(e.g., ACK state transitions), the guard is omitted.
 
 Related:
     - ModelPayloadPostgresUpdateRegistration: Intent payload model
@@ -197,8 +198,9 @@ class IntentEffectPostgresUpdate:
             WHERE entity_id = $e AND domain = $d
               [AND (last_heartbeat_at IS NULL OR last_heartbeat_at < $hb)]
 
-        The heartbeat monotonic guard is applied only when the updates
-        dict contains a ``last_heartbeat_at`` key.
+        The heartbeat monotonic guard is applied only when the typed
+        updates model contains a ``last_heartbeat_at`` field (i.e.,
+        ModelRegistrationHeartbeatUpdate).
 
         Args:
             payload: The ModelPayloadPostgresUpdateRegistration intent payload.
@@ -224,7 +226,7 @@ class IntentEffectPostgresUpdate:
                 context=context,
             )
 
-        updates = payload.updates
+        updates = payload.updates.model_dump()
         if not updates:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=effective_correlation_id,
@@ -232,13 +234,13 @@ class IntentEffectPostgresUpdate:
                 operation="intent_effect_postgres_update",
             )
             raise RuntimeHostError(
-                "Intent payload has empty updates dict -- UPDATE would be a no-op",
+                "Intent payload has empty updates model -- UPDATE would be a no-op",
                 context=context,
             )
 
         try:
-            # Normalize types for asyncpg
-            normalized_updates = self._normalize_for_asyncpg(dict(updates))
+            # Normalize types for asyncpg (model_dump() already returns a dict)
+            normalized_updates = self._normalize_for_asyncpg(updates)
             entity_id = payload.entity_id
             domain = payload.domain
 
@@ -362,11 +364,16 @@ class IntentEffectPostgresUpdate:
             if value is None:
                 normalized[key] = value
             elif key in _UUID_COLUMNS:
+                # Defence-in-depth: typed models always provide native UUID,
+                # but the str->UUID branch guards against untyped callers.
                 normalized[key] = (
                     UUID(str(value)) if not isinstance(value, UUID) else value
                 )
             elif key in _TIMESTAMP_COLUMNS:
                 if isinstance(value, str):
+                    # Defence-in-depth: typed models always provide native
+                    # datetime, but the str->datetime branch guards against
+                    # untyped callers.
                     dt = datetime.fromisoformat(value)
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=UTC)

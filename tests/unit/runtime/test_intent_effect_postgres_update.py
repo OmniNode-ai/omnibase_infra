@@ -26,6 +26,8 @@ import pytest
 from omnibase_infra.errors import ContainerWiringError, RuntimeHostError
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registration import (
     ModelPayloadPostgresUpdateRegistration,
+    ModelRegistrationAckUpdate,
+    ModelRegistrationHeartbeatUpdate,
 )
 from omnibase_infra.runtime.intent_effects.intent_effect_postgres_update import (
     _TIMESTAMP_COLUMNS,
@@ -95,17 +97,17 @@ class TestIntentEffectPostgresUpdateExecute:
         """Verify SET clause, WHERE with monotonic guard, and params."""
         entity_id = uuid4()
         correlation_id = uuid4()
-        heartbeat_ts = "2025-06-15T12:00:00+00:00"
+        heartbeat_ts = datetime.fromisoformat("2025-06-15T12:00:00+00:00")
 
         payload = ModelPayloadPostgresUpdateRegistration(
             correlation_id=correlation_id,
             entity_id=entity_id,
             domain="registration",
-            updates={
-                "last_heartbeat_at": heartbeat_ts,
-                "liveness_deadline": "2025-06-15T12:05:00+00:00",
-                "updated_at": "2025-06-15T12:00:00+00:00",
-            },
+            updates=ModelRegistrationHeartbeatUpdate(
+                last_heartbeat_at=heartbeat_ts,
+                liveness_deadline=datetime.fromisoformat("2025-06-15T12:05:00+00:00"),
+                updated_at=datetime.fromisoformat("2025-06-15T12:00:00+00:00"),
+            ),
         )
 
         await effect.execute(payload, correlation_id=correlation_id)
@@ -152,10 +154,11 @@ class TestIntentEffectPostgresUpdateExecute:
             correlation_id=correlation_id,
             entity_id=entity_id,
             domain="registration",
-            updates={
-                "current_state": "ack_received",
-                "updated_at": "2025-06-15T12:00:00+00:00",
-            },
+            updates=ModelRegistrationAckUpdate(
+                current_state="ack_received",
+                liveness_deadline=datetime.fromisoformat("2025-06-15T12:05:00+00:00"),
+                updated_at=datetime.fromisoformat("2025-06-15T12:00:00+00:00"),
+            ),
         )
 
         await effect.execute(payload, correlation_id=correlation_id)
@@ -171,9 +174,9 @@ class TestIntentEffectPostgresUpdateExecute:
             "last_heartbeat_at" not in sql.split("WHERE")[1] if "WHERE" in sql else True
         ), "No monotonic guard should be present for state-transition updates"
 
-        # Verify positional params: 2 SET values + entity_id + domain = 4
+        # Verify positional params: 3 SET values + entity_id + domain = 5
         positional_params = call_args.args[1:]
-        assert len(positional_params) == 4
+        assert len(positional_params) == 5
 
     @pytest.mark.asyncio
     async def test_execute_rejects_wrong_payload_type(
@@ -198,17 +201,21 @@ class TestIntentEffectPostgresUpdateExecute:
         entity_id = uuid4()
         correlation_id = uuid4()
 
-        # Use model_construct to bypass validation since empty updates might be
-        # rejected by model validators in the future.
+        # Use model_construct to bypass validation. With typed update models,
+        # empty updates are structurally impossible via normal construction.
+        # This tests defence-in-depth in the intent effect.
+        empty_updates = MagicMock()
+        empty_updates.model_dump.return_value = {}
+
         payload = ModelPayloadPostgresUpdateRegistration.model_construct(
             intent_type="postgres.update_registration",
             correlation_id=correlation_id,
             entity_id=entity_id,
             domain="registration",
-            updates={},
+            updates=empty_updates,
         )
 
-        with pytest.raises(RuntimeHostError, match="empty updates dict"):
+        with pytest.raises(RuntimeHostError, match="empty updates model"):
             await effect.execute(payload, correlation_id=correlation_id)
 
     @pytest.mark.asyncio
@@ -223,7 +230,11 @@ class TestIntentEffectPostgresUpdateExecute:
             correlation_id=correlation_id,
             entity_id=entity_id,
             domain="registration",
-            updates={"current_state": "active"},
+            updates=ModelRegistrationAckUpdate(
+                current_state="active",
+                liveness_deadline=datetime(2025, 6, 15, 12, 5, 0, tzinfo=UTC),
+                updated_at=datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC),
+            ),
         )
 
         conn = mock_pool._mock_conn
@@ -246,7 +257,11 @@ class TestIntentEffectPostgresUpdateExecute:
             correlation_id=payload_correlation_id,
             entity_id=entity_id,
             domain="registration",
-            updates={"current_state": "active"},
+            updates=ModelRegistrationAckUpdate(
+                current_state="active",
+                liveness_deadline=datetime(2025, 6, 15, 12, 5, 0, tzinfo=UTC),
+                updated_at=datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC),
+            ),
         )
 
         # Call without explicit correlation_id
