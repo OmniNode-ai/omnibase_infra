@@ -71,6 +71,7 @@ _OLLAMA_FINISH_REASON_MAP: dict[str, EnumLlmFinishReason] = {
     "stop": EnumLlmFinishReason.STOP,
     "length": EnumLlmFinishReason.LENGTH,
     "tool_calls": EnumLlmFinishReason.TOOL_CALLS,
+    "content_filter": EnumLlmFinishReason.CONTENT_FILTER,
 }
 
 
@@ -200,6 +201,8 @@ def _parse_ollama_tool_calls(
         func_raw = raw_tc.get("function", {})
         func = func_raw if isinstance(func_raw, dict) else {}
         name = str(func.get("name", ""))
+        if not name:
+            logger.warning("Tool call has empty function name, raw=%r", raw_tc)
         raw_args = func.get("arguments")
         # Handle arguments: dict->JSON string, None->"{}", string->passthrough
         if raw_args is None:
@@ -431,6 +434,8 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
         options = _build_ollama_options(request)
         if options:
             payload["options"] = options
+        if request.system_prompt:
+            payload["system"] = request.system_prompt
         if request.tools:
             payload["tools"] = cast("JsonType", _serialize_ollama_tools(request.tools))
         return payload
