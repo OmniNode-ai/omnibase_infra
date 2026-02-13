@@ -57,8 +57,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Column type sets for asyncpg normalization.
+#
+# These sets MUST stay in sync with schema_registration_projection.sql
+# (src/omnibase_infra/schemas/schema_registration_projection.sql).
+#
+# When the database schema adds, renames, or removes UUID or TIMESTAMPTZ
+# columns, update the corresponding frozenset below AND the
+# _ALLOWED_COLUMNS frozenset on IntentEffectPostgresUpdate.
+#
+# Recommended: add a schema-sync test that parses the CREATE TABLE DDL
+# and asserts parity with these sets.  See the sibling upsert effect
+# (intent_effect_postgres_upsert.py) for the same pattern.
+# ---------------------------------------------------------------------------
+
 # TIMESTAMPTZ columns that need str -> datetime conversion for asyncpg.
-# Must stay in sync with schema_registration_projection.sql.
 _TIMESTAMP_COLUMNS: frozenset[str] = frozenset(
     {
         "ack_deadline",
@@ -91,9 +105,61 @@ class IntentEffectPostgresUpdate:
 
     Attributes:
         _pool: asyncpg connection pool for executing UPDATE queries.
+        _ALLOWED_COLUMNS: Frozenset of column names permitted in UPDATE SET
+            and WHERE clauses. Any column not in this set is rejected before
+            query construction to prevent SQL injection via identifier
+            interpolation.
 
     .. versionadded:: 0.8.0
     """
+
+    # -----------------------------------------------------------------------
+    # Column allowlist for SQL identifier injection prevention.
+    #
+    # Every column used in SET or WHERE clauses MUST appear here. This set
+    # is the union of all columns in the registration_projections table as
+    # defined in schema_registration_projection.sql
+    # (src/omnibase_infra/schemas/schema_registration_projection.sql).
+    #
+    # When the schema changes, update this frozenset AND the type-specific
+    # _TIMESTAMP_COLUMNS / _UUID_COLUMNS sets above.
+    # -----------------------------------------------------------------------
+    _ALLOWED_COLUMNS: frozenset[str] = frozenset(
+        {
+            # Identity (composite primary key)
+            "entity_id",
+            "domain",
+            # FSM State
+            "current_state",
+            # Node Information
+            "node_type",
+            "node_version",
+            "capabilities",
+            # Capability fields (OMN-1134)
+            "contract_type",
+            "intent_types",
+            "protocols",
+            "capability_tags",
+            "contract_version",
+            # Timeout Deadlines
+            "ack_deadline",
+            "liveness_deadline",
+            "last_heartbeat_at",
+            # Timeout Emission Markers
+            "ack_timeout_emitted_at",
+            "liveness_timeout_emitted_at",
+            # Idempotency and Ordering
+            "last_applied_event_id",
+            "last_applied_offset",
+            "last_applied_sequence",
+            "last_applied_partition",
+            # Timestamps
+            "registered_at",
+            "updated_at",
+            # Tracing
+            "correlation_id",
+        }
+    )
 
     def __init__(self, pool: asyncpg.Pool) -> None:
         """Initialize the PostgreSQL UPDATE intent effect.
@@ -174,6 +240,46 @@ class IntentEffectPostgresUpdate:
             normalized_updates = self._normalize_for_asyncpg(dict(updates))
             entity_id = payload.entity_id
             domain = payload.domain
+
+            # ------------------------------------------------------------------
+            # Column allowlist validation.
+            # Reject any column name not in the schema to prevent identifier
+            # injection. Values are already parameterized ($1, $2, ...) but
+            # column names are interpolated via quote_identifier(), so this
+            # allowlist is a defence-in-depth measure.
+            # ------------------------------------------------------------------
+            disallowed_set_cols = set(normalized_updates.keys()) - self._ALLOWED_COLUMNS
+            if disallowed_set_cols:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=effective_correlation_id,
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="intent_effect_postgres_update",
+                )
+                raise RuntimeHostError(
+                    f"UPDATE SET contains column(s) not in allowlist: "
+                    f"{sorted(disallowed_set_cols)}. "
+                    f"If this is a new schema column, add it to "
+                    f"IntentEffectPostgresUpdate._ALLOWED_COLUMNS.",
+                    context=context,
+                )
+
+            # Validate WHERE clause keys (entity_id, domain are hardcoded but
+            # the check is included for completeness and future-proofing).
+            where_columns = {"entity_id", "domain"}
+            disallowed_where_cols = where_columns - self._ALLOWED_COLUMNS
+            if disallowed_where_cols:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=effective_correlation_id,
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="intent_effect_postgres_update",
+                )
+                raise RuntimeHostError(
+                    f"UPDATE WHERE contains column(s) not in allowlist: "
+                    f"{sorted(disallowed_where_cols)}. "
+                    f"If this is a new schema column, add it to "
+                    f"IntentEffectPostgresUpdate._ALLOWED_COLUMNS.",
+                    context=context,
+                )
 
             # Build SET clause
             set_parts: list[str] = []

@@ -32,7 +32,9 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
+    EnumInfraTransportType,
 )
+from omnibase_infra.errors import ModelInfraErrorContext
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_context import (
     ModelReducerContext,
@@ -40,6 +42,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_co
 from omnibase_infra.nodes.node_registration_orchestrator.services import (
     RegistrationReducerService,
 )
+from omnibase_infra.utils import validate_timezone_aware_with_context
 
 if TYPE_CHECKING:
     from omnibase_infra.projectors import ProjectionReaderRegistration
@@ -139,10 +142,11 @@ class HandlerNodeHeartbeat:
     def handler_category(self) -> EnumHandlerTypeCategory:
         """Behavioral classification for this handler.
 
-        Returns COMPUTE because this handler delegates to a pure-function
-        reducer and returns intents. No direct I/O is performed.
+        Returns EFFECT because this handler reads from the PostgreSQL
+        projection store via ProjectionReaderRegistration.get_entity_state().
+        Writes are intent-based but reads are direct I/O.
         """
-        return EnumHandlerTypeCategory.COMPUTE
+        return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
         self,
@@ -175,6 +179,15 @@ class HandlerNodeHeartbeat:
         now = envelope.envelope_timestamp
         correlation_id = envelope.correlation_id or uuid4()
         domain = "registration"
+
+        # Validate timezone-awareness for time injection pattern
+        error_ctx = ModelInfraErrorContext(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="handle_heartbeat_event",
+            target_name="handler.node_heartbeat",
+            correlation_id=correlation_id,
+        )
+        validate_timezone_aware_with_context(now, error_ctx)
 
         # Look up current projection
         projection = await self._projection_reader.get_entity_state(
