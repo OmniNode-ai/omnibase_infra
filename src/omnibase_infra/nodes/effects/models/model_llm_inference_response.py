@@ -211,20 +211,18 @@ class ModelLlmInferenceResponse(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _enforce_finish_reason_error_consistency(self) -> Self:
-        """Reject finish_reason=ERROR when backend reports success.
+    def _reject_error_finish_reason(self) -> Self:
+        """Reject finish_reason=ERROR on successful response models.
 
-        If the model's finish reason indicates an error, the backend result
-        cannot simultaneously report success -- these are semantically
-        contradictory.
+        This model represents a successful LLM inference response (backend_result
+        .success is always True, enforced by ``_enforce_backend_success``).
+        A finish_reason of ERROR is therefore never valid on this model -- error
+        responses must be raised as exceptions, not encoded in the response.
         """
-        if (
-            self.finish_reason == EnumLlmFinishReason.ERROR
-            and self.backend_result.success
-        ):
+        if self.finish_reason == EnumLlmFinishReason.ERROR:
             msg = (
-                "finish_reason=ERROR is contradictory with backend_result.success=True; "
-                "error responses must not be encoded as successful"
+                "finish_reason=ERROR is not permitted on ModelLlmInferenceResponse; "
+                "error responses must be raised as exceptions, not encoded as successful"
             )
             raise ValueError(msg)
         return self
@@ -249,6 +247,24 @@ class ModelLlmInferenceResponse(BaseModel):
                 "truncated=False is contradictory with finish_reason=LENGTH; "
                 "length-limited output is by definition truncated"
             )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _enforce_tool_calls_finish_reason_consistency(self) -> Self:
+        """Reject contradictory tool_calls/finish_reason combinations.
+
+        - finish_reason=TOOL_CALLS with no tool_calls present is invalid:
+          the model claims it stopped to make tool calls but none exist.
+        - tool_calls present with finish_reason != TOOL_CALLS is invalid:
+          tool calls should only appear when the finish reason indicates them.
+        """
+        has_tools = len(self.tool_calls) > 0
+        if self.finish_reason == EnumLlmFinishReason.TOOL_CALLS and not has_tools:
+            msg = "finish_reason is TOOL_CALLS but no tool_calls are present"
+            raise ValueError(msg)
+        if has_tools and self.finish_reason != EnumLlmFinishReason.TOOL_CALLS:
+            msg = "tool_calls are present but finish_reason is not TOOL_CALLS"
             raise ValueError(msg)
         return self
 
