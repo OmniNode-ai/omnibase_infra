@@ -70,8 +70,10 @@ from typing import TYPE_CHECKING, Final
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ValidationError as _ValidationError
 
 from omnibase_core.errors import OnexError
+from omnibase_infra.utils.util_error_sanitization import sanitize_secret_path
 
 if TYPE_CHECKING:
     from omnibase_infra.runtime.emit_daemon.model_event_registry_fingerprint import (
@@ -550,6 +552,8 @@ class EventRegistry:
     def assert_fingerprint(
         self,
         expected: ModelEventRegistryFingerprint,
+        *,
+        correlation_id: UUID | None = None,
     ) -> None:
         """Hard gate: compare live fingerprint to expected manifest.
 
@@ -563,6 +567,9 @@ class EventRegistry:
         Args:
             expected: Parsed fingerprint manifest (typically loaded from an
                 artifact file via ``ModelEventRegistryFingerprint.from_json_path``).
+            correlation_id: Optional correlation ID propagated to the error
+                for distributed tracing. When ``None``, the error constructor
+                auto-generates one.
 
         Raises:
             EventRegistryFingerprintMismatchError: Live fingerprint differs
@@ -592,6 +599,7 @@ class EventRegistry:
             expected_fingerprint=expected.fingerprint_sha256,
             actual_fingerprint=actual.fingerprint_sha256,
             diff_summary=diff_summary,
+            correlation_id=correlation_id,
         )
 
 
@@ -683,6 +691,21 @@ _ARTIFACT_DEFAULT_PATH: Final[str] = str(
 )
 
 
+def _sanitize_artifact_path(path: str) -> str:
+    """Sanitize an artifact file path for safe inclusion in error messages.
+
+    Applies ``sanitize_secret_path`` to remove potentially sensitive directory
+    structure from the path before it appears in logs or error messages.
+
+    Args:
+        path: The raw artifact file path.
+
+    Returns:
+        Sanitized path safe for error messages.
+    """
+    return sanitize_secret_path(path) or path
+
+
 def validate_event_registry_fingerprint(
     artifact_path: str = "",
     *,
@@ -729,9 +752,37 @@ def validate_event_registry_fingerprint(
 
     try:
         expected = ModelEventRegistryFingerprint.from_json_path(dest)
-    except Exception as exc:
+    except PermissionError as exc:
+        safe_path = _sanitize_artifact_path(str(dest))
         raise EventRegistryFingerprintMissingError(
-            f"Event registry fingerprint artifact unreadable: {dest}. "
+            f"Event registry fingerprint artifact not readable "
+            f"(permission denied): {safe_path}. "
+            "Check file permissions on the artifact.",
+            artifact_path=str(dest),
+            correlation_id=correlation_id,
+        ) from exc
+    except json.JSONDecodeError as exc:
+        safe_path = _sanitize_artifact_path(str(dest))
+        raise EventRegistryFingerprintMissingError(
+            f"Event registry fingerprint artifact contains invalid JSON: "
+            f"{safe_path}. "
+            "Run 'stamp' to regenerate the artifact.",
+            artifact_path=str(dest),
+            correlation_id=correlation_id,
+        ) from exc
+    except _ValidationError as exc:
+        safe_path = _sanitize_artifact_path(str(dest))
+        raise EventRegistryFingerprintMissingError(
+            f"Event registry fingerprint artifact has invalid schema: "
+            f"{safe_path}. "
+            "Run 'stamp' to regenerate the artifact.",
+            artifact_path=str(dest),
+            correlation_id=correlation_id,
+        ) from exc
+    except Exception as exc:
+        safe_path = _sanitize_artifact_path(str(dest))
+        raise EventRegistryFingerprintMissingError(
+            f"Event registry fingerprint artifact unreadable: {safe_path}. "
             "Run 'stamp' to regenerate the artifact.",
             artifact_path=str(dest),
             correlation_id=correlation_id,
@@ -740,7 +791,7 @@ def validate_event_registry_fingerprint(
     registry = EventRegistry()
     registry.register_batch(ALL_EVENT_REGISTRATIONS)
 
-    registry.assert_fingerprint(expected)
+    registry.assert_fingerprint(expected, correlation_id=correlation_id)
 
 
 def _cli_stamp(artifact_path: str, *, dry_run: bool = False) -> None:

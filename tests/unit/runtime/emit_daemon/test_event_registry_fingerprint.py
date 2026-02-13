@@ -24,8 +24,10 @@ Test coverage includes:
 from __future__ import annotations
 
 import json
+import stat
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 
@@ -598,6 +600,140 @@ class TestValidateEventRegistryFingerprint:
 
         with pytest.raises(EventRegistryFingerprintMismatchError):
             validate_event_registry_fingerprint(artifact_path=str(artifact))
+
+
+class TestAssertFingerprintCorrelationId:
+    """Tests that assert_fingerprint() propagates correlation_id to the error."""
+
+    def test_correlation_id_propagated_on_mismatch(self) -> None:
+        """Mismatch error carries the correlation_id passed to assert_fingerprint()."""
+        registry_original = EventRegistry()
+        registry_original.register(REG_ALPHA)
+        expected = registry_original.compute_fingerprint()
+
+        registry_modified = EventRegistry()
+        registry_modified.register(REG_BETA)
+
+        cid = uuid4()
+        with pytest.raises(EventRegistryFingerprintMismatchError) as exc_info:
+            registry_modified.assert_fingerprint(expected, correlation_id=cid)
+
+        # The error should carry the correlation_id as a top-level attribute
+        assert exc_info.value.correlation_id == cid
+
+    def test_correlation_id_none_auto_generates(self) -> None:
+        """assert_fingerprint() without correlation_id auto-generates one."""
+        registry_original = EventRegistry()
+        registry_original.register(REG_ALPHA)
+        expected = registry_original.compute_fingerprint()
+
+        registry_modified = EventRegistry()
+        registry_modified.register(REG_BETA)
+
+        with pytest.raises(EventRegistryFingerprintMismatchError) as exc_info:
+            registry_modified.assert_fingerprint(expected)
+
+        # Auto-generated correlation_id should still be present
+        assert exc_info.value.correlation_id is not None
+
+
+class TestValidateArtifactErrorHandling:
+    """Tests for specific error handling when loading fingerprint artifacts."""
+
+    def test_permission_error_raises_missing_with_message(self, tmp_path: Path) -> None:
+        """PermissionError on artifact produces specific 'permission denied' message."""
+        artifact = tmp_path / "fingerprint.json"
+        # Write a valid artifact first, then remove read permission
+        _cli_stamp(str(artifact))
+        artifact.chmod(0o000)
+
+        try:
+            with pytest.raises(EventRegistryFingerprintMissingError) as exc_info:
+                validate_event_registry_fingerprint(artifact_path=str(artifact))
+
+            assert "permission denied" in exc_info.value.message.lower()
+        finally:
+            # Restore permissions for cleanup
+            artifact.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    def test_json_decode_error_raises_missing_with_message(
+        self, tmp_path: Path
+    ) -> None:
+        """Invalid JSON in artifact produces specific 'invalid JSON' message."""
+        artifact = tmp_path / "fingerprint.json"
+        artifact.write_text("this is not json {{{{", encoding="utf-8")
+
+        with pytest.raises(EventRegistryFingerprintMissingError) as exc_info:
+            validate_event_registry_fingerprint(artifact_path=str(artifact))
+
+        assert "invalid json" in exc_info.value.message.lower()
+
+    def test_validation_error_raises_missing_with_message(self, tmp_path: Path) -> None:
+        """Valid JSON but invalid schema produces specific 'invalid schema' message."""
+        artifact = tmp_path / "fingerprint.json"
+        # Write valid JSON that does not match ModelEventRegistryFingerprint schema
+        artifact.write_text(
+            json.dumps({"not_a_valid_field": True}),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(EventRegistryFingerprintMissingError) as exc_info:
+            validate_event_registry_fingerprint(artifact_path=str(artifact))
+
+        assert "invalid schema" in exc_info.value.message.lower()
+
+    def test_unexpected_error_raises_missing_with_generic_message(
+        self, tmp_path: Path
+    ) -> None:
+        """Unexpected exception produces generic 'unreadable' message."""
+        artifact = tmp_path / "fingerprint.json"
+        _cli_stamp(str(artifact))
+
+        # Patch from_json_path to raise an unexpected error.
+        # Must patch at the class definition, not the local import site.
+        with (
+            patch(
+                "omnibase_infra.runtime.emit_daemon."
+                "model_event_registry_fingerprint."
+                "ModelEventRegistryFingerprint.from_json_path",
+                side_effect=RuntimeError("unexpected internal error"),
+            ),
+            pytest.raises(EventRegistryFingerprintMissingError) as exc_info,
+        ):
+            validate_event_registry_fingerprint(artifact_path=str(artifact))
+
+        assert "unreadable" in exc_info.value.message.lower()
+
+    def test_artifact_path_sanitized_in_error_message(self, tmp_path: Path) -> None:
+        """Artifact path in error message is sanitized (not raw)."""
+        # Use a path with multiple segments to trigger sanitization
+        deep_path = tmp_path / "secret" / "config" / "fingerprint.json"
+        deep_path.parent.mkdir(parents=True, exist_ok=True)
+        deep_path.write_text("not json", encoding="utf-8")
+
+        with pytest.raises(EventRegistryFingerprintMissingError) as exc_info:
+            validate_event_registry_fingerprint(artifact_path=str(deep_path))
+
+        # The raw deep path should NOT appear in the error message.
+        # sanitize_secret_path preserves only the first segment and masks the rest.
+        # For absolute paths like /tmp/.../secret/config/fingerprint.json,
+        # the sanitized form starts with the root empty-string segment.
+        # Check that the full unsanitized path is not present.
+        assert str(deep_path) not in exc_info.value.message
+
+    def test_correlation_id_propagated_through_validate(self, tmp_path: Path) -> None:
+        """correlation_id passed to validate_event_registry_fingerprint reaches the error."""
+        artifact = tmp_path / "fingerprint.json"
+        artifact.write_text("not json", encoding="utf-8")
+
+        cid = uuid4()
+        with pytest.raises(EventRegistryFingerprintMissingError) as exc_info:
+            validate_event_registry_fingerprint(
+                artifact_path=str(artifact),
+                correlation_id=cid,
+            )
+
+        assert exc_info.value.correlation_id == cid
 
 
 class TestMainCli:

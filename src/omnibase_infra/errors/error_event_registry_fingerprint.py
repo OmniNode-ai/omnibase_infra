@@ -27,7 +27,10 @@ from omnibase_infra.errors.error_infra import RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
-from omnibase_infra.utils.util_error_sanitization import sanitize_secret_path
+from omnibase_infra.utils.util_error_sanitization import (
+    sanitize_error_string,
+    sanitize_secret_path,
+)
 
 
 class EventRegistryFingerprintMismatchError(RuntimeHostError):
@@ -73,10 +76,15 @@ class EventRegistryFingerprintMismatchError(RuntimeHostError):
                 correlation_id=correlation_id,
             )
 
+        # SHA-256 hex hashes are inherently safe; diff_summary can contain
+        # event type names and topic template strings that reveal infrastructure
+        # topology, so bound and sanitize it before propagating to error context.
+        safe_diff_summary = sanitize_error_string(diff_summary, max_length=500)
+
         ctx = dict(extra_context)
         ctx.setdefault("expected_fingerprint", expected_fingerprint)
         ctx.setdefault("actual_fingerprint", actual_fingerprint)
-        ctx.setdefault("diff_summary", diff_summary)
+        ctx.setdefault("diff_summary", safe_diff_summary)
 
         super().__init__(
             message=message,
