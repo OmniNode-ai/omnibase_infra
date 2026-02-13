@@ -9,8 +9,9 @@ Available Models:
     - ModelEffectIdempotencyConfig: Configuration for effect idempotency store
     - ModelLlmFunctionCall: Concrete function invocation from an LLM
     - ModelLlmFunctionDef: JSON-Schema description of a callable function
-    - ModelLlmInferenceRequest: LLM inference input request
+    - ModelLlmInferenceRequest: Input model for the LLM inference effect node
     - ModelLlmInferenceResponse: LLM inference output with text XOR tool_calls invariant
+    - ModelLlmMessage: Chat message for multi-turn LLM conversations
     - ModelLlmToolCall: Tool call returned by the model
     - ModelLlmToolChoice: Caller constraint on tool selection behaviour
     - ModelLlmToolDefinition: Tool definition sent in request payload
@@ -33,9 +34,13 @@ from omnibase_infra.nodes.effects.models.model_llm_function_call import (
 from omnibase_infra.nodes.effects.models.model_llm_function_def import (
     ModelLlmFunctionDef,
 )
+from omnibase_infra.nodes.effects.models.model_llm_inference_request import (
+    ModelLlmInferenceRequest,
+)
 from omnibase_infra.nodes.effects.models.model_llm_inference_response import (
     ModelLlmInferenceResponse,
 )
+from omnibase_infra.nodes.effects.models.model_llm_message import ModelLlmMessage
 from omnibase_infra.nodes.effects.models.model_llm_tool_call import ModelLlmToolCall
 from omnibase_infra.nodes.effects.models.model_llm_tool_choice import (
     ModelLlmToolChoice,
@@ -50,9 +55,6 @@ from omnibase_infra.nodes.effects.models.model_registry_request import (
 from omnibase_infra.nodes.effects.models.model_registry_response import (
     ModelRegistryResponse,
 )
-from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
-    ModelLlmInferenceRequest,
-)
 
 __all__ = [
     "ModelBackendResult",
@@ -61,6 +63,7 @@ __all__ = [
     "ModelLlmFunctionDef",
     "ModelLlmInferenceRequest",
     "ModelLlmInferenceResponse",
+    "ModelLlmMessage",
     "ModelLlmToolCall",
     "ModelLlmToolChoice",
     "ModelLlmToolDefinition",

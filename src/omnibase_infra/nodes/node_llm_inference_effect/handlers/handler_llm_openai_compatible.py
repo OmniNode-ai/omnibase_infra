@@ -100,8 +100,7 @@ _OPERATION_PATHS: dict[EnumLlmOperationType, str] = {
     EnumLlmOperationType.COMPLETION: "/v1/completions",
 }
 
-# Default timeout and connection limits for auth-injected httpx clients.
-_AUTH_CLIENT_TIMEOUT: httpx.Timeout = httpx.Timeout(30.0)
+# Default connection limits for auth-injected httpx clients.
 _AUTH_CLIENT_LIMITS: httpx.Limits = httpx.Limits(
     max_connections=100,
     max_keepalive_connections=20,
@@ -214,6 +213,7 @@ class HandlerLlmOpenaiCompatible:
             payload=payload,
             api_key=request.api_key,
             correlation_id=correlation_id,
+            timeout_seconds=request.timeout_seconds,
         )
 
         latency_ms = (time.perf_counter() - start_time) * 1000
@@ -324,6 +324,7 @@ class HandlerLlmOpenaiCompatible:
         payload: dict[str, JsonType],
         api_key: str | None,
         correlation_id: UUID,
+        timeout_seconds: float = 30.0,
     ) -> dict[str, JsonType]:
         """Execute HTTP call via transport, injecting auth if needed.
 
@@ -340,6 +341,9 @@ class HandlerLlmOpenaiCompatible:
             payload: JSON payload.
             api_key: Optional Bearer token. None means no auth.
             correlation_id: Correlation ID for tracing.
+            timeout_seconds: HTTP request timeout in seconds for the
+                auth-injected client. Sourced from the request model so
+                callers can override the default (30.0) per-request.
 
         Returns:
             Parsed JSON response dictionary.
@@ -380,7 +384,7 @@ class HandlerLlmOpenaiCompatible:
         async with auth_lock:
             auth_client = httpx.AsyncClient(
                 headers={"Authorization": f"Bearer {api_key}"},
-                timeout=_AUTH_CLIENT_TIMEOUT,
+                timeout=httpx.Timeout(timeout_seconds),
                 limits=_AUTH_CLIENT_LIMITS,
             )
             # TECH DEBT: Direct access to _http_client and _owns_http_client

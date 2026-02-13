@@ -52,6 +52,9 @@ class ModelLlmInferenceRequest(BaseModel):
         tools: Tool definitions to make available to the model.
         tool_choice: Constraint on how the model should use tools.
         api_key: Optional API key for Bearer auth. If None, no auth header is sent.
+        timeout_seconds: HTTP request timeout in seconds (default 30.0). Applied
+            to both authenticated and unauthenticated calls. Must be between 1.0
+            and 600.0 inclusive.
 
     Example:
         >>> req = ModelLlmInferenceRequest(
@@ -128,6 +131,12 @@ class ModelLlmInferenceRequest(BaseModel):
         default=None,
         repr=False,
         description="Optional API key for Bearer auth.",
+    )
+    timeout_seconds: float = Field(
+        default=30.0,
+        ge=1.0,
+        le=600.0,
+        description="HTTP request timeout in seconds.",
     )
 
     @field_validator("base_url")
