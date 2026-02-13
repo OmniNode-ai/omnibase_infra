@@ -55,7 +55,7 @@ import logging
 import threading
 import time
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import cast
 from uuid import UUID, uuid4
 
 import httpx
@@ -638,7 +638,7 @@ def _serialize_tool_choice(
 
 
 def _parse_tool_calls(
-    raw_calls: list[Any],
+    raw_calls: list[dict[str, object]],
 ) -> tuple[ModelLlmToolCall, ...]:
     """Parse raw tool call dictionaries into ModelLlmToolCall instances.
 
