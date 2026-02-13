@@ -42,6 +42,9 @@ io_operations:
       - dimensions
       - timeout_seconds
       - max_retries
+      - provider_label
+      - stream
+      - metadata
       - correlation_id
       - execution_id
     output_fields:
@@ -66,6 +69,9 @@ io_operations:
       - dimensions # optional; may be ignored by some Ollama models
       - timeout_seconds
       - max_retries
+      - provider_label
+      - stream
+      - metadata
       - correlation_id
       - execution_id
     output_fields:
