@@ -744,7 +744,7 @@ def validate_event_registry_fingerprint(
     dest = Path(artifact_path) if artifact_path else Path(_ARTIFACT_DEFAULT_PATH)
     if not dest.exists() or not dest.is_file():
         raise EventRegistryFingerprintMissingError(
-            f"Event registry fingerprint artifact not found: {dest}. "
+            f"Event registry fingerprint artifact not found: {_sanitize_artifact_path(str(dest))}. "
             "Run 'stamp' to generate the artifact.",
             artifact_path=str(dest),
             correlation_id=correlation_id,
