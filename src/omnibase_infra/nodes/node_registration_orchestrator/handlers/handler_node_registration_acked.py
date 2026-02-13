@@ -358,10 +358,10 @@ class HandlerNodeRegistrationAcked:
                         intent.payload, ModelPayloadPostgresUpdateRegistration
                     ):
                         updates = intent.payload.updates
-                        if "liveness_deadline" in updates:
-                            snapshot_update["liveness_deadline"] = updates[
-                                "liveness_deadline"
-                            ]
+                        if hasattr(updates, "liveness_deadline"):
+                            snapshot_update["liveness_deadline"] = (
+                                updates.liveness_deadline
+                            )
                         break
 
                 active_projection = projection.model_copy(update=snapshot_update)
