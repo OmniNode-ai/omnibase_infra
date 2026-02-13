@@ -123,10 +123,14 @@ def _serialize_ollama_messages(
                 try:
                     parsed_args = json.loads(tc.function.arguments)
                 except json.JSONDecodeError as exc:
-                    raise ValueError(
+                    raise ProtocolConfigurationError(
                         f"Malformed JSON in tool call arguments for "
                         f"function '{tc.function.name}': "
-                        f"{tc.function.arguments!r}"
+                        f"{tc.function.arguments!r}",
+                        context=ModelInfraErrorContext.with_correlation(
+                            transport_type=EnumInfraTransportType.HTTP,
+                            operation="serialize_ollama_messages",
+                        ),
                     ) from exc
                 serialized_tool_calls.append(
                     {
