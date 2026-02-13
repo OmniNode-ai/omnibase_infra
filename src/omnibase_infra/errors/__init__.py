@@ -17,6 +17,8 @@ Exports:
     InfraAuthenticationError: Infrastructure authentication errors
     InfraUnavailableError: Infrastructure resource unavailable errors
     InfraRateLimitedError: Infrastructure rate limit errors
+    InfraRequestRejectedError: Request rejected by provider (400/422)
+    InfraProtocolError: Invalid response format from provider
     EnvelopeValidationError: Envelope validation errors (pre-dispatch)
     UnknownHandlerTypeError: Unknown handler type prefix errors
     PolicyRegistryError: Policy registry operation errors
@@ -32,6 +34,8 @@ Exports:
     RepositoryTimeoutError: Query timeout exceeded
     DbOwnershipMismatchError: Database is owned by a different service
     DbOwnershipMissingError: db_metadata table or ownership row missing
+    SchemaFingerprintMismatchError: Live schema fingerprint != expected
+    SchemaFingerprintMissingError: Expected fingerprint not in db_metadata
 
 Correlation ID Assignment:
     All infrastructure errors support correlation_id for distributed tracing.
@@ -120,7 +124,9 @@ from omnibase_infra.errors.error_infra import (
     EnvelopeValidationError,
     InfraAuthenticationError,
     InfraConnectionError,
+    InfraProtocolError,
     InfraRateLimitedError,
+    InfraRequestRejectedError,
     InfraTimeoutError,
     InfraUnavailableError,
     ProtocolConfigurationError,
@@ -132,6 +138,10 @@ from omnibase_infra.errors.error_infra import (
 from omnibase_infra.errors.error_message_type_registry import MessageTypeRegistryError
 from omnibase_infra.errors.error_payload_registry import PayloadRegistryError
 from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
+from omnibase_infra.errors.error_schema_fingerprint import (
+    SchemaFingerprintMismatchError,
+    SchemaFingerprintMissingError,
+)
 from omnibase_infra.errors.error_vault import InfraVaultError
 from omnibase_infra.errors.repository import (
     RepositoryContractError,
@@ -166,7 +176,11 @@ __all__: list[str] = [
     "InfraConnectionError",
     # Service-specific connection errors
     "InfraConsulError",
+    # Protocol/format errors
+    "InfraProtocolError",
     "InfraRateLimitedError",
+    # Request rejection errors
+    "InfraRequestRejectedError",
     "InfraTimeoutError",
     "InfraUnavailableError",
     "InfraVaultError",
@@ -189,6 +203,9 @@ __all__: list[str] = [
     "RepositoryValidationError",
     # Error classes
     "RuntimeHostError",
+    # Schema fingerprint errors
+    "SchemaFingerprintMismatchError",
+    "SchemaFingerprintMissingError",
     "SecretResolutionError",
     "ServiceRegistrationError",
     "ServiceRegistryUnavailableError",

@@ -15,7 +15,12 @@ Error Hierarchy:
         ├── InfraTimeoutError
         ├── InfraAuthenticationError
         ├── InfraUnavailableError
-        └── InfraRateLimitedError
+        ├── InfraRateLimitedError
+        ├── InfraRequestRejectedError
+        ├── InfraProtocolError
+        ├── EnvelopeValidationError
+        ├── UnknownHandlerTypeError
+        └── ProtocolDependencyResolutionError
 
 All errors:
     - Extend ModelOnexError from omnibase_core
@@ -81,6 +86,7 @@ from omnibase_infra.models.errors.model_infra_error_context import (
 from omnibase_infra.models.errors.model_timeout_error_context import (
     ModelTimeoutErrorContext,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 
 class RuntimeHostError(ModelOnexError):
@@ -569,6 +575,128 @@ class InfraRateLimitedError(RuntimeHostError):
         self.retry_after_seconds = retry_after_seconds
 
 
+class InfraRequestRejectedError(RuntimeHostError):
+    """Request rejected by external service (400/422).
+
+    Distinct from ProtocolConfigurationError because:
+    - Provider rejected the request payload, not a misconfiguration
+    - May include content policy violations, context length exceeded, etc.
+    - Carries status_code and response body snippet for debugging
+
+    Example:
+        >>> context = ModelInfraErrorContext(
+        ...     transport_type=EnumInfraTransportType.HTTP,
+        ...     operation="chat_completion",
+        ...     target_name="llm-provider",
+        ... )
+        >>> raise InfraRequestRejectedError(
+        ...     "Content policy violation",
+        ...     context=context,
+        ...     status_code=422,
+        ...     response_body='{"error": "content_policy_violation"}',
+        ... )
+
+    .. versionadded:: 0.7.0
+        Part of OMN-2104 LLM HTTP transport.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        context: ModelInfraErrorContext | None = None,
+        status_code: int | None = None,
+        response_body: str = "",
+        **extra_context: object,
+    ) -> None:
+        """Initialize InfraRequestRejectedError.
+
+        Args:
+            message: Human-readable error message
+            context: Bundled infrastructure context
+            status_code: HTTP status code from the rejection
+            response_body: Truncated response body snippet (max 500 chars)
+            **extra_context: Additional context information
+        """
+        _sanitized_body = sanitize_error_string(response_body) if response_body else ""
+        if status_code is not None:
+            extra_context = {**extra_context, "status_code": status_code}
+        if _sanitized_body:
+            extra_context = {**extra_context, "response_body": _sanitized_body}
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.INVALID_INPUT,
+            context=context,
+            **extra_context,
+        )
+        self.status_code = status_code
+        self.response_body = _sanitized_body
+
+
+class InfraProtocolError(RuntimeHostError):
+    """Provider returned invalid/unexpected response format.
+
+    Raised when:
+    - 2xx response with non-JSON content-type
+    - 2xx response with unparseable body
+    - Proxy returning HTML instead of JSON
+
+    CB failure: Yes (provider misbehaving)
+
+    Example:
+        >>> context = ModelInfraErrorContext(
+        ...     transport_type=EnumInfraTransportType.HTTP,
+        ...     operation="chat_completion",
+        ...     target_name="llm-provider",
+        ... )
+        >>> raise InfraProtocolError(
+        ...     "Expected JSON response, got text/html",
+        ...     context=context,
+        ...     status_code=200,
+        ...     content_type="text/html",
+        ...     response_body="<html>...",
+        ... )
+
+    .. versionadded:: 0.7.0
+        Part of OMN-2104 LLM HTTP transport.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        context: ModelInfraErrorContext | None = None,
+        status_code: int | None = None,
+        content_type: str = "",
+        response_body: str = "",
+        **extra_context: object,
+    ) -> None:
+        """Initialize InfraProtocolError.
+
+        Args:
+            message: Human-readable error message
+            context: Bundled infrastructure context
+            status_code: HTTP status code from the response
+            content_type: Content-Type header value from the response
+            response_body: Truncated response body snippet (max 500 chars)
+            **extra_context: Additional context information
+        """
+        _sanitized_body = sanitize_error_string(response_body) if response_body else ""
+        if status_code is not None:
+            extra_context = {**extra_context, "status_code": status_code}
+        if content_type:
+            extra_context = {**extra_context, "content_type": content_type}
+        if _sanitized_body:
+            extra_context = {**extra_context, "response_body": _sanitized_body}
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.OPERATION_FAILED,
+            context=context,
+            **extra_context,
+        )
+        self.status_code = status_code
+        self.content_type = content_type
+        self.response_body = _sanitized_body
+
+
 class EnvelopeValidationError(RuntimeHostError):
     """Raised when envelope validation fails before dispatch.
 
@@ -714,7 +842,9 @@ __all__: list[str] = [
     "EnvelopeValidationError",
     "InfraAuthenticationError",
     "InfraConnectionError",
+    "InfraProtocolError",
     "InfraRateLimitedError",
+    "InfraRequestRejectedError",
     "InfraTimeoutError",
     "InfraUnavailableError",
     "ProtocolConfigurationError",

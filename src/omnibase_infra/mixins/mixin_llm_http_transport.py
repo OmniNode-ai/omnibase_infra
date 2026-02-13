@@ -1,0 +1,730 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""LLM HTTP Transport Mixin for infrastructure components.
+
+This module provides a reusable mixin class that encapsulates HTTP transport
+logic for communicating with LLM providers (OpenAI-compatible APIs, vLLM,
+local inference servers, etc.).
+
+Features:
+    - Self-contained retry loop with exponential backoff
+    - Circuit breaker integration via MixinAsyncCircuitBreaker
+    - HTTP status code to typed exception mapping
+    - Retry-After header parsing for 429 rate limit responses
+    - Lazy httpx.AsyncClient management (create or inject)
+    - Content-type validation for JSON responses (case-insensitive)
+    - Correlation ID propagation on all errors
+
+Security:
+    - Response bodies are sanitized via ``sanitize_error_string()`` before
+      inclusion in error context or exception messages, preventing accidental
+      leakage of secrets or PII through error propagation paths.
+
+Design Rationale:
+    This mixin extracts common HTTP transport patterns from LLM-calling nodes
+    into a reusable component. It builds on MixinAsyncCircuitBreaker and
+    MixinRetryExecution to provide a high-level ``_execute_llm_http_call``
+    method that handles the full lifecycle of an HTTP POST to an LLM endpoint.
+
+Error Mapping:
+    HTTP status codes are mapped to typed infrastructure exceptions:
+    - 401/403 -> InfraAuthenticationError (no retry, no CB failure)
+    - 404     -> ProtocolConfigurationError (assumed misconfiguration)
+    - 429     -> InfraRateLimitedError (retry with Retry-After)
+    - 400/422 -> InfraRequestRejectedError (provider rejection)
+    - 500-504 -> InfraUnavailableError (retry, CB failure)
+    - Other   -> InfraUnavailableError (retry, CB failure)
+
+See Also:
+    - MixinAsyncCircuitBreaker for circuit breaker state management
+    - MixinRetryExecution for retry pattern abstractions
+    - docs/patterns/error_recovery_patterns.md for retry documentation
+
+.. versionadded:: 0.7.0
+    Part of OMN-2104 LLM HTTP transport.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from json import JSONDecodeError
+from typing import TYPE_CHECKING, cast
+from uuid import UUID
+
+import httpx
+
+from omnibase_core.types import JsonType
+from omnibase_infra.enums import EnumInfraTransportType, EnumRetryErrorCategory
+from omnibase_infra.errors import (
+    InfraAuthenticationError,
+    InfraConnectionError,
+    InfraProtocolError,
+    InfraRateLimitedError,
+    InfraRequestRejectedError,
+    InfraTimeoutError,
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
+    ProtocolConfigurationError,
+    RuntimeHostError,
+)
+from omnibase_infra.mixins.mixin_async_circuit_breaker import MixinAsyncCircuitBreaker
+from omnibase_infra.mixins.mixin_retry_execution import MixinRetryExecution
+from omnibase_infra.models.model_retry_error_classification import (
+    ModelRetryErrorClassification,
+)
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
+
+if TYPE_CHECKING:
+    from omnibase_infra.handlers.models.model_retry_state import ModelRetryState
+
+logger = logging.getLogger(__name__)
+
+
+class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
+    """HTTP transport mixin for LLM provider communication.
+
+    Provides ``_execute_llm_http_call`` for making resilient HTTP POST requests
+    to LLM endpoints with retry logic, circuit breaker protection, and typed
+    error handling.
+
+    This mixin implements the abstract methods required by MixinRetryExecution
+    (``_classify_error``, ``_get_transport_type``, ``_get_target_name``) with
+    HTTP/LLM-specific error classification.
+
+    Required Initialization:
+        Call ``_init_llm_http_transport()`` during subclass ``__init__``.
+
+    Example:
+        ```python
+        class NodeLlmInferenceEffect(NodeEffect, MixinLlmHttpTransport):
+            def __init__(self, container: ModelONEXContainer) -> None:
+                super().__init__(container)
+                self._init_llm_http_transport(
+                    target_name="vllm-coder",
+                    max_timeout_seconds=120.0,
+                )
+
+            async def execute_effect(self, input_data):
+                result = await self._execute_llm_http_call(
+                    url="http://192.168.86.201:8000/v1/chat/completions",
+                    payload={"messages": [...]},
+                    correlation_id=input_data.correlation_id,
+                )
+                return result
+        ```
+    """
+
+    # Type hints for instance attributes set by _init_llm_http_transport
+    _llm_target_name: str
+    _max_timeout_seconds: float
+    _max_retry_after_seconds: float
+    _http_client: httpx.AsyncClient | None
+    _owns_http_client: bool
+    _http_client_lock: asyncio.Lock
+
+    def _init_llm_http_transport(
+        self,
+        target_name: str,
+        max_timeout_seconds: float = 120.0,
+        max_retry_after_seconds: float = 30.0,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
+        """Initialize LLM HTTP transport with circuit breaker and client management.
+
+        Circuit breaker uses defaults (threshold=5, reset_timeout=60.0).
+        For custom CB configuration, call ``_init_circuit_breaker()`` or
+        ``_init_circuit_breaker_from_config()`` after this method.
+
+        Args:
+            target_name: Identifier for the LLM target (e.g., "vllm-coder").
+                Used in error context and logging.
+            max_timeout_seconds: Maximum allowed timeout for any single request.
+                Per-call timeouts are clamped to this value. Default: 120.0.
+            max_retry_after_seconds: Maximum Retry-After delay to honor from
+                429 responses. Values above this cap are clamped. Default: 30.0.
+            http_client: Optional pre-configured httpx.AsyncClient. If None,
+                a client is created lazily on first use. When provided, the
+                caller retains ownership and must close it.
+        """
+        # Initialize circuit breaker from parent mixin
+        self._init_circuit_breaker(
+            threshold=5,
+            reset_timeout=60.0,
+            service_name=target_name,
+            transport_type=EnumInfraTransportType.HTTP,
+        )
+        # MixinAsyncCircuitBreaker._init_circuit_breaker does not set this flag;
+        # it is required by MixinRetryExecution to gate circuit breaker helper calls.
+        self._circuit_breaker_initialized = True
+
+        # Satisfy MixinRetryExecution type hint
+        self._executor = None
+
+        # Transport configuration
+        self._llm_target_name = target_name
+        self._max_timeout_seconds = max_timeout_seconds
+        self._max_retry_after_seconds = max_retry_after_seconds
+
+        # HTTP client management
+        self._http_client_lock = asyncio.Lock()
+        if http_client is not None:
+            self._http_client = http_client
+            self._owns_http_client = False
+        else:
+            self._http_client = None
+            self._owns_http_client = True
+
+    # ── MixinRetryExecution abstract method implementations ──────────────
+
+    def _classify_error(
+        self, error: Exception, operation: str
+    ) -> ModelRetryErrorClassification:
+        """Classify an exception for retry handling.
+
+        Maps both raw httpx exceptions and typed infrastructure exceptions
+        to retry classifications.
+
+        Args:
+            error: The exception to classify.
+            operation: The operation name for context.
+
+        Returns:
+            ModelRetryErrorClassification with retry decision and error details.
+        """
+        if isinstance(error, httpx.ConnectError):
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.CONNECTION,
+                should_retry=True,
+                record_circuit_failure=True,
+                error_message=f"Connection error during {operation}: {error}",
+            )
+
+        if isinstance(error, httpx.TimeoutException):
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.TIMEOUT,
+                should_retry=True,
+                record_circuit_failure=True,
+                error_message=f"Timeout during {operation}: {error}",
+            )
+
+        if isinstance(error, InfraAuthenticationError):
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.AUTHENTICATION,
+                should_retry=False,
+                record_circuit_failure=False,
+                error_message=f"Authentication failed during {operation}",
+            )
+
+        if isinstance(error, InfraRateLimitedError):
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.UNKNOWN,
+                should_retry=True,
+                record_circuit_failure=False,
+                error_message=f"Rate limited during {operation}",
+            )
+
+        if isinstance(error, InfraRequestRejectedError):
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.NOT_FOUND,
+                should_retry=False,
+                record_circuit_failure=False,
+                error_message=f"Request rejected during {operation}: {error}",
+            )
+
+        if isinstance(error, InfraProtocolError):
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.CONNECTION,
+                should_retry=True,
+                record_circuit_failure=True,
+                error_message=f"Protocol error during {operation}: {error}",
+            )
+
+        if isinstance(error, ProtocolConfigurationError):
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.NOT_FOUND,
+                should_retry=False,
+                record_circuit_failure=False,
+                error_message=f"Configuration error during {operation}: {error}",
+            )
+
+        if isinstance(error, InfraUnavailableError):
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.CONNECTION,
+                should_retry=True,
+                record_circuit_failure=True,
+                error_message=f"Service unavailable during {operation}: {error}",
+            )
+
+        # Default: unknown errors are retriable with CB failure
+        return ModelRetryErrorClassification(
+            category=EnumRetryErrorCategory.UNKNOWN,
+            should_retry=True,
+            record_circuit_failure=True,
+            error_message=f"Unexpected error during {operation}: {type(error).__name__}: {error}",
+        )
+
+    def _get_transport_type(self) -> EnumInfraTransportType:
+        """Return the transport type for error context.
+
+        Returns:
+            EnumInfraTransportType.HTTP for LLM HTTP transport.
+        """
+        return EnumInfraTransportType.HTTP
+
+    def _get_target_name(self) -> str:
+        """Return the target name for error context.
+
+        Returns:
+            The configured LLM target name.
+        """
+        return self._llm_target_name
+
+    # ── Core HTTP execution ──────────────────────────────────────────────
+
+    async def _execute_llm_http_call(
+        self,
+        url: str,
+        payload: dict[str, JsonType],
+        correlation_id: UUID,
+        max_retries: int = 3,
+        timeout_seconds: float = 30.0,
+    ) -> dict[str, JsonType]:
+        """Execute an HTTP POST to an LLM endpoint with retry and circuit breaker.
+
+        This is the primary method for making LLM API calls. It handles:
+        - Circuit breaker checking before each attempt
+        - HTTP POST with JSON payload
+        - Status code to typed exception mapping
+        - Retry-After header honoring for 429 responses
+        - Content-type validation for JSON responses
+        - Exponential backoff between retries
+        - Circuit breaker state updates on success/failure
+
+        Args:
+            url: The full URL of the LLM endpoint.
+            payload: JSON-serializable request payload.
+            correlation_id: Correlation ID for distributed tracing.
+            max_retries: Maximum number of retry attempts (default: 3).
+                Total attempts = 1 + max_retries.
+            timeout_seconds: Per-request timeout in seconds (default: 30.0).
+                Clamped to [0.1, self._max_timeout_seconds].
+
+        Returns:
+            Parsed JSON response as a dictionary.
+
+        Raises:
+            InfraAuthenticationError: On 401/403 responses.
+            InfraRateLimitedError: On 429 when retries exhausted.
+            InfraRequestRejectedError: On 400/422 responses.
+            ProtocolConfigurationError: On 404 responses.
+            InfraProtocolError: On non-JSON 2xx responses.
+            InfraConnectionError: On connection failures after retries.
+            InfraTimeoutError: On timeout after retries.
+            InfraUnavailableError: On 5xx or circuit breaker open.
+
+        Note:
+            Response bodies are sanitized via ``sanitize_error_string()``
+            before being attached to error context, ensuring that sensitive
+            data from LLM provider responses is never leaked through
+            exception messages or logging.
+        """
+        # Runtime import to avoid circular dependency:
+        # mixins/__init__ -> mixin_llm_http_transport -> handlers.models -> handlers/__init__
+        # -> handler_consul -> mixins/__init__ (cycle)
+        from omnibase_infra.handlers.models.model_retry_state import ModelRetryState
+
+        operation = f"llm_http_call:{url}"
+        total_attempts = 1 + max_retries
+        effective_timeout = max(min(timeout_seconds, self._max_timeout_seconds), 0.1)
+        retry_state = ModelRetryState(max_attempts=total_attempts)
+
+        client = await self._get_http_client()
+
+        while retry_state.is_retriable():
+            try:
+                # Check circuit breaker
+                await self._check_circuit_if_enabled(operation, correlation_id)
+
+                # Make HTTP POST
+                response = await client.post(
+                    url,
+                    json=payload,
+                    timeout=effective_timeout,
+                )
+
+                # Handle non-2xx responses
+                if response.status_code < 200 or response.status_code >= 300:
+                    error = self._map_http_status_to_error(response, correlation_id)
+
+                    # Special 429 handling: use Retry-After as delay
+                    if response.status_code == 429:
+                        retry_after = self._parse_retry_after(response)
+                        next_state = retry_state.next_attempt(
+                            error_message=f"Rate limited (429), retry after {retry_after}s",
+                        )
+                        if next_state.is_retriable():
+                            logger.debug(
+                                "Rate limited, waiting before retry",
+                                extra={
+                                    "retry_after_seconds": retry_after,
+                                    "attempt": next_state.attempt,
+                                    "max_attempts": next_state.max_attempts,
+                                    "correlation_id": str(correlation_id),
+                                    "target": self._llm_target_name,
+                                },
+                            )
+                            await asyncio.sleep(retry_after)
+                            retry_state = next_state
+                            continue
+                        raise error
+
+                    classification = self._classify_error(error, operation)
+                    if classification.record_circuit_failure:
+                        await self._record_circuit_failure_if_enabled(
+                            operation, correlation_id
+                        )
+                    next_state = retry_state.next_attempt(
+                        error_message=classification.error_message,
+                    )
+                    if classification.should_retry and next_state.is_retriable():
+                        retry_state = next_state
+                        logger.debug(
+                            "Retrying after HTTP error",
+                            extra={
+                                "status_code": response.status_code,
+                                "attempt": retry_state.attempt,
+                                "max_attempts": retry_state.max_attempts,
+                                "delay_seconds": retry_state.delay_seconds,
+                                "correlation_id": str(correlation_id),
+                                "target": self._llm_target_name,
+                            },
+                        )
+                        await asyncio.sleep(retry_state.delay_seconds)
+                        continue
+                    raise error
+
+                # 2xx response: validate content-type
+                # Only reject when a non-JSON content-type is explicitly present.
+                # Missing/empty content-type falls through to JSON parsing which
+                # will raise InfraProtocolError on its own if the body is invalid.
+                content_type = response.headers.get("content-type", "")
+                if content_type and "json" not in content_type.lower():
+                    await self._record_circuit_failure_if_enabled(
+                        operation, correlation_id
+                    )
+                    body_snippet = (
+                        sanitize_error_string(response.text) if response.text else ""
+                    )
+                    ctx = self._build_error_context(operation, correlation_id)
+                    raise InfraProtocolError(
+                        f"Expected JSON response from {self._llm_target_name}, "
+                        f"got content-type: {content_type}",
+                        context=ctx,
+                        status_code=response.status_code,
+                        content_type=content_type,
+                        response_body=body_snippet,
+                    )
+
+                # Parse JSON
+                try:
+                    data = cast("dict[str, JsonType]", response.json())
+                except (JSONDecodeError, ValueError) as exc:
+                    await self._record_circuit_failure_if_enabled(
+                        operation, correlation_id
+                    )
+                    body_snippet = (
+                        sanitize_error_string(response.text) if response.text else ""
+                    )
+                    ctx = self._build_error_context(operation, correlation_id)
+                    raise InfraProtocolError(
+                        f"Failed to parse JSON response from {self._llm_target_name}: {exc}",
+                        context=ctx,
+                        status_code=response.status_code,
+                        content_type=content_type,
+                        response_body=body_snippet,
+                    ) from exc
+
+                # Success - reset circuit breaker
+                await self._reset_circuit_if_enabled()
+                return data
+
+            except httpx.ConnectError as exc:
+                classification = self._classify_error(exc, operation)
+                if classification.record_circuit_failure:
+                    await self._record_circuit_failure_if_enabled(
+                        operation, correlation_id
+                    )
+                next_state = retry_state.next_attempt(
+                    error_message=classification.error_message,
+                )
+                if next_state.is_retriable():
+                    retry_state = next_state
+                    logger.debug(
+                        "Retrying after connection error",
+                        extra={
+                            "attempt": retry_state.attempt,
+                            "max_attempts": retry_state.max_attempts,
+                            "delay_seconds": retry_state.delay_seconds,
+                            "correlation_id": str(correlation_id),
+                            "target": self._llm_target_name,
+                        },
+                    )
+                    await asyncio.sleep(retry_state.delay_seconds)
+                    continue
+                ctx = self._build_error_context(operation, correlation_id)
+                raise InfraConnectionError(
+                    f"Connection to {self._llm_target_name} failed after "
+                    f"{retry_state.attempt + 1} attempts: {exc}",
+                    context=ctx,
+                ) from exc
+
+            except httpx.TimeoutException as exc:
+                classification = self._classify_error(exc, operation)
+                if classification.record_circuit_failure:
+                    await self._record_circuit_failure_if_enabled(
+                        operation, correlation_id
+                    )
+                next_state = retry_state.next_attempt(
+                    error_message=classification.error_message,
+                )
+                if next_state.is_retriable():
+                    retry_state = next_state
+                    logger.debug(
+                        "Retrying after timeout",
+                        extra={
+                            "attempt": retry_state.attempt,
+                            "max_attempts": retry_state.max_attempts,
+                            "delay_seconds": retry_state.delay_seconds,
+                            "timeout_seconds": effective_timeout,
+                            "correlation_id": str(correlation_id),
+                            "target": self._llm_target_name,
+                        },
+                    )
+                    await asyncio.sleep(retry_state.delay_seconds)
+                    continue
+                timeout_ctx = ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation=operation,
+                    target_name=self._llm_target_name,
+                    correlation_id=correlation_id,
+                    timeout_seconds=effective_timeout,
+                )
+                raise InfraTimeoutError(
+                    f"Request to {self._llm_target_name} timed out after "
+                    f"{effective_timeout}s ({retry_state.attempt + 1} attempts)",
+                    context=timeout_ctx,
+                ) from exc
+
+            except (
+                InfraRateLimitedError,
+                InfraRequestRejectedError,
+                InfraAuthenticationError,
+                ProtocolConfigurationError,
+                InfraProtocolError,
+            ):
+                raise  # Already typed, don't wrap
+
+            except InfraUnavailableError:
+                raise  # Already handled (e.g., circuit breaker open)
+
+            except Exception as exc:
+                # Unexpected error - classify and handle
+                classification = self._classify_error(exc, operation)
+                if classification.record_circuit_failure:
+                    await self._record_circuit_failure_if_enabled(
+                        operation, correlation_id
+                    )
+                next_state = retry_state.next_attempt(
+                    error_message=classification.error_message,
+                )
+                if classification.should_retry and next_state.is_retriable():
+                    retry_state = next_state
+                    logger.debug(
+                        "Retrying after unexpected error",
+                        extra={
+                            "error_type": type(exc).__name__,
+                            "attempt": retry_state.attempt,
+                            "max_attempts": retry_state.max_attempts,
+                            "delay_seconds": retry_state.delay_seconds,
+                            "correlation_id": str(correlation_id),
+                            "target": self._llm_target_name,
+                        },
+                    )
+                    await asyncio.sleep(retry_state.delay_seconds)
+                    continue
+                ctx = self._build_error_context(operation, correlation_id)
+                raise InfraConnectionError(
+                    f"Unexpected error calling {self._llm_target_name}: "
+                    f"{type(exc).__name__}: {exc}",
+                    context=ctx,
+                ) from exc
+
+        # Loop exited without return or raise - all retries exhausted
+        ctx = self._build_error_context(operation, correlation_id)
+        raise InfraUnavailableError(
+            f"All retry attempts exhausted for {self._llm_target_name} "
+            f"({total_attempts} attempts)",
+            context=ctx,
+        )
+
+    # ── HTTP status to error mapping ─────────────────────────────────────
+
+    def _map_http_status_to_error(
+        self,
+        response: httpx.Response,
+        correlation_id: UUID,
+    ) -> RuntimeHostError:
+        """Map an HTTP response status code to a typed infrastructure exception.
+
+        Response body snippets included in exceptions are sanitized via
+        ``sanitize_error_string()`` to prevent leakage of secrets or PII.
+
+        Args:
+            response: The httpx.Response with a non-2xx status code.
+            correlation_id: Correlation ID for error context.
+
+        Returns:
+            A typed infrastructure exception instance (not raised). The caller
+            is responsible for raising or classifying the returned exception.
+        """
+        ctx = self._build_error_context(f"llm_http_call:{response.url}", correlation_id)
+        body_snippet = sanitize_error_string(response.text) if response.text else ""
+        status = response.status_code
+
+        if status in (401, 403):
+            return InfraAuthenticationError(
+                f"Authentication failed ({status}) from {self._llm_target_name}",
+                context=ctx,
+                status_code=status,
+                response_body=body_snippet,
+            )
+
+        if status == 429:
+            retry_after = self._parse_retry_after(response)
+            return InfraRateLimitedError(
+                f"Rate limited (429) by {self._llm_target_name}",
+                context=ctx,
+                retry_after_seconds=retry_after,
+            )
+
+        if status == 404:
+            return ProtocolConfigurationError(
+                f"Endpoint not found (404) at {self._llm_target_name} - "
+                "assumed misconfiguration",
+                context=ctx,
+                status_code=status,
+                response_body=body_snippet,
+            )
+
+        if status in (400, 422):
+            return InfraRequestRejectedError(
+                f"Request rejected ({status}) by {self._llm_target_name}",
+                context=ctx,
+                status_code=status,
+                response_body=body_snippet,
+            )
+
+        if status in (500, 502, 503, 504):
+            return InfraUnavailableError(
+                f"Server error ({status}) from {self._llm_target_name}",
+                context=ctx,
+                status_code=status,
+                response_body=body_snippet,
+            )
+
+        # Other non-2xx: treat as unavailable
+        return InfraUnavailableError(
+            f"Unexpected HTTP {status} from {self._llm_target_name}",
+            context=ctx,
+            status_code=status,
+            response_body=body_snippet,
+        )
+
+    # ── Retry-After parsing ──────────────────────────────────────────────
+
+    def _parse_retry_after(self, response: httpx.Response) -> float:
+        """Parse the Retry-After header from an HTTP response.
+
+        Supports delta-seconds format (integer or float). HTTP-date format
+        is not supported and falls back to default backoff.
+
+        Args:
+            response: The httpx.Response (typically 429).
+
+        Returns:
+            Seconds to wait before retrying, clamped to
+            [0.0, self._max_retry_after_seconds]. Returns 1.0 if header
+            is absent or unparseable.
+        """
+        retry_after_raw = response.headers.get("retry-after")
+        if retry_after_raw is None:
+            return 1.0
+
+        try:
+            retry_after = float(retry_after_raw)
+        except (ValueError, OverflowError):
+            logger.debug(
+                "Could not parse Retry-After header, using default backoff",
+                extra={
+                    "retry_after_raw": retry_after_raw,
+                    "target": self._llm_target_name,
+                },
+            )
+            return 1.0
+
+        return max(0.0, min(retry_after, self._max_retry_after_seconds))
+
+    # ── HTTP client management ───────────────────────────────────────────
+
+    async def _get_http_client(self) -> httpx.AsyncClient:
+        """Return the HTTP client, creating a lazy singleton if needed.
+
+        If an external client was injected via ``_init_llm_http_transport``,
+        that client is returned directly. Otherwise, a new client is created
+        with reasonable defaults for LLM API communication.
+
+        Uses double-checked locking to prevent concurrent coroutines from
+        creating duplicate clients (one would leak).
+
+        Returns:
+            An httpx.AsyncClient ready for use.
+        """
+        if self._http_client is not None:
+            return self._http_client
+
+        async with self._http_client_lock:
+            # Double-check after acquiring lock to avoid creating a second client
+            if self._http_client is not None:
+                return self._http_client
+
+            self._http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(30.0),
+                limits=httpx.Limits(
+                    max_connections=100,
+                    max_keepalive_connections=20,
+                ),
+            )
+            return self._http_client
+
+    async def _close_http_client(self) -> None:
+        """Close the HTTP client if this mixin owns it.
+
+        Only closes the client if it was created internally (not injected).
+        After closing, the client reference is set to None so a new one
+        can be created lazily if needed.
+
+        Thread-safety is ensured by acquiring ``_http_client_lock``
+        (an ``asyncio.Lock``) to prevent races with the lazy creation
+        in ``_get_http_client``.
+        """
+        async with self._http_client_lock:
+            if self._owns_http_client and self._http_client is not None:
+                await self._http_client.aclose()
+                self._http_client = None
+
+
+__all__: list[str] = [
+    "MixinLlmHttpTransport",
+]

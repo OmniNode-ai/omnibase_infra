@@ -10,6 +10,7 @@ Available Models:
     - ModelLlmFunctionCall: Concrete function invocation from an LLM
     - ModelLlmFunctionDef: JSON-Schema description of a callable function
     - ModelLlmInferenceRequest: Input model for the LLM inference effect node
+    - ModelLlmInferenceResponse: LLM inference output with text XOR tool_calls invariant
     - ModelLlmMessage: Chat message for multi-turn LLM conversations
     - ModelLlmToolCall: Tool call returned by the model
     - ModelLlmToolChoice: Caller constraint on tool selection behaviour
@@ -20,7 +21,7 @@ Available Models:
 
 Note:
     ModelBackendResult canonical location is omnibase_infra.models.model_backend_result.
-    Re-exported here for backward compatibility.
+    Re-exported here for ergonomic access.
 """
 
 from omnibase_infra.models.model_backend_result import ModelBackendResult
@@ -35,6 +36,9 @@ from omnibase_infra.nodes.effects.models.model_llm_function_def import (
 )
 from omnibase_infra.nodes.effects.models.model_llm_inference_request import (
     ModelLlmInferenceRequest,
+)
+from omnibase_infra.nodes.effects.models.model_llm_inference_response import (
+    ModelLlmInferenceResponse,
 )
 from omnibase_infra.nodes.effects.models.model_llm_message import ModelLlmMessage
 from omnibase_infra.nodes.effects.models.model_llm_tool_call import ModelLlmToolCall
@@ -58,6 +62,7 @@ __all__ = [
     "ModelLlmFunctionCall",
     "ModelLlmFunctionDef",
     "ModelLlmInferenceRequest",
+    "ModelLlmInferenceResponse",
     "ModelLlmMessage",
     "ModelLlmToolCall",
     "ModelLlmToolChoice",
