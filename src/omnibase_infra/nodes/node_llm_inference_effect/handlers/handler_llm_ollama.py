@@ -374,6 +374,17 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
         # Parse usage
         tokens_output = raw_response.get("eval_count", 0)
         tokens_input = raw_response.get("prompt_eval_count", 0)
+        if not isinstance(tokens_input, (int, float)):
+            logger.debug(
+                "Non-numeric usage value for prompt_eval_count, "
+                "defaulting to 0: type=%s",
+                type(tokens_input).__name__,
+            )
+        if not isinstance(tokens_output, (int, float)):
+            logger.debug(
+                "Non-numeric usage value for eval_count, defaulting to 0: type=%s",
+                type(tokens_output).__name__,
+            )
         usage = ModelLlmUsage(
             tokens_input=int(tokens_input)
             if isinstance(tokens_input, (int, float))
@@ -386,6 +397,14 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
         # Enforce text XOR tool_calls BEFORE constructing response
         tool_calls = _parse_ollama_tool_calls(raw_tool_calls, request.correlation_id)
         if tool_calls:
+            if content:
+                logger.warning(
+                    "Discarding non-empty text content in favor of tool_calls "
+                    "to satisfy text-XOR-tool_calls invariant: "
+                    "correlation_id=%s, content_length=%d",
+                    request.correlation_id,
+                    len(content),
+                )
             generated_text = None  # tool calls present -> no text
             finish_reason = EnumLlmFinishReason.TOOL_CALLS
         else:
