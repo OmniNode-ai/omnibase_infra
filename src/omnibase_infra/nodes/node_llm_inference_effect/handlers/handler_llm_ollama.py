@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 OmniNode Team
+# Copyright (c) 2026 OmniNode Team
 """Ollama LLM inference handler.
 
 Implements the Ollama-specific HTTP transport for LLM inference operations.
@@ -325,10 +325,20 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
         if request.operation_type == EnumLlmOperationType.CHAT_COMPLETION:
             url = f"{request.base_url.rstrip('/')}/api/chat"
             payload = self._build_chat_payload(request)
-        else:
-            # COMPLETION
+        elif request.operation_type == EnumLlmOperationType.COMPLETION:
             url = f"{request.base_url.rstrip('/')}/api/generate"
             payload = self._build_generate_payload(request)
+        else:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=request.correlation_id,
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="ollama_inference",
+            )
+            raise ProtocolConfigurationError(
+                f"Unsupported operation type for Ollama handler: "
+                f"{request.operation_type!r}",
+                context=context,
+            )
 
         # Execute HTTP call — time ONLY the HTTP call
         start_time = time.perf_counter()

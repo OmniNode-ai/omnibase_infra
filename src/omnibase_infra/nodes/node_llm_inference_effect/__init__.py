@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 OmniNode Team
+# Copyright (c) 2026 OmniNode Team
 """LLM Inference Effect Node.
 
 Provides the declarative effect node for LLM inference operations
