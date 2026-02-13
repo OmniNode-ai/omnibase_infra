@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -105,6 +106,11 @@ _AUTH_CLIENT_LIMITS: httpx.Limits = httpx.Limits(
     max_connections=100,
     max_keepalive_connections=20,
 )
+
+# Threading lock that guards lazy creation of the per-transport asyncio.Lock.
+# This prevents the TOCTOU race where two coroutines both see hasattr() as False
+# and each create a separate asyncio.Lock, with only the last assignment surviving.
+_TRANSPORT_LOCK_GUARD: threading.Lock = threading.Lock()
 
 
 class HandlerLlmOpenaiCompatible:
@@ -363,9 +369,12 @@ class HandlerLlmOpenaiCompatible:
 
         # Lock lives on the transport so that ALL handler instances sharing
         # the same transport serialize their client-swap sections against each
-        # other.  Created lazily on first use.
-        if not hasattr(self._transport, "_auth_lock"):
-            self._transport._auth_lock = asyncio.Lock()  # type: ignore[attr-defined]
+        # other.  Created lazily on first use.  The threading lock guards the
+        # hasattr + assignment to prevent a TOCTOU race where two coroutines
+        # both evaluate hasattr() as False before either assigns the lock.
+        with _TRANSPORT_LOCK_GUARD:
+            if not hasattr(self._transport, "_auth_lock"):
+                self._transport._auth_lock = asyncio.Lock()  # type: ignore[attr-defined]
         auth_lock: asyncio.Lock = self._transport._auth_lock  # type: ignore[attr-defined]
 
         async with auth_lock:
@@ -438,7 +447,7 @@ class HandlerLlmOpenaiCompatible:
             finish_reason=EnumLlmFinishReason.UNKNOWN,
             usage=ModelLlmUsage(),
             latency_ms=latency_ms,
-            backend_result=ModelBackendResult(success=True, duration_ms=latency_ms),
+            backend_result=ModelBackendResult(success=False, duration_ms=latency_ms),
             correlation_id=correlation_id,
             execution_id=execution_id,
             timestamp=datetime.now(UTC),
@@ -688,6 +697,8 @@ def _safe_int(value: JsonType, default: int = 0) -> int:
         The integer conversion of *value*, or *default* if the conversion
         fails or the type is unsupported.
     """
+    if isinstance(value, bool):
+        return default
     if isinstance(value, int):
         return value
     if isinstance(value, float):
@@ -715,6 +726,8 @@ def _safe_int_or_none(value: JsonType) -> int | None:
         ``None``, an unsupported type, or a non-numeric string.
     """
     if value is None:
+        return None
+    if isinstance(value, bool):
         return None
     if isinstance(value, int):
         return value
