@@ -62,6 +62,16 @@ Published when a node responds to an introspection request. Contains node
 capabilities, supported operations, and current state.
 """
 
+SUFFIX_REGISTRY_REQUEST_INTROSPECTION: str = (
+    "onex.evt.platform.registry-request-introspection.v1"
+)
+"""Topic suffix for registry-initiated introspection request events.
+
+Published when the registry requests introspection from nodes during the
+registration workflow. The registration orchestrator subscribes to this topic
+to trigger node registration processing.
+"""
+
 SUFFIX_NODE_HEARTBEAT: str = "onex.evt.platform.node-heartbeat.v1"
 """Topic suffix for node heartbeat events.
 
@@ -134,6 +144,7 @@ def _snapshot_kafka_config() -> dict[str, str]:
 ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_INTROSPECTION, partitions=6),
+    ModelTopicSpec(suffix=SUFFIX_REGISTRY_REQUEST_INTROSPECTION, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_HEARTBEAT, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_REQUEST_INTROSPECTION, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_FSM_STATE_TRANSITIONS, partitions=6),

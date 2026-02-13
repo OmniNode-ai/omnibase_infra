@@ -12,20 +12,14 @@ These integration tests are designed to skip gracefully when infrastructure
 is unavailable, enabling CI/CD pipelines to run without hard failures.
 
 Skip Conditions:
-    - Skips if OMNIBASE_INFRA_DB_URL (or POSTGRES_HOST/POSTGRES_PASSWORD fallback) not set
+    - Skips if OMNIBASE_INFRA_DB_URL not set
 
 Environment Variables
 =====================
 
-    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (preferred, overrides individual vars)
+    OMNIBASE_INFRA_DB_URL: Full PostgreSQL DSN (required, no fallback)
         Example: postgresql://postgres:secret@localhost:5432/omnibase_infra
-
-    Fallback (used only if OMNIBASE_INFRA_DB_URL is not set):
-    POSTGRES_HOST: PostgreSQL server hostname (fallback - skip if not set)
-        Example: localhost or your-server-ip
-    POSTGRES_PORT: PostgreSQL server port (default: 5436)
-    POSTGRES_USER: Database username (default: postgres)
-    POSTGRES_PASSWORD: Database password (fallback - tests skip if not set)
+        Tests skip if this variable is not set or malformed.
 
 Related Ticket: OMN-1032 - Complete DLQ Replay PostgreSQL Tracking Integration
 """
@@ -57,19 +51,14 @@ from omnibase_infra.dlq import (
 # From tests/helpers/util_postgres:
 #   - PostgresConfig: Configuration dataclass for PostgreSQL connections
 #
-# From tests/infrastructure_config.py:
-#   - REMOTE_INFRA_HOST: Default infrastructure server hostname (localhost by default)
-#     Used as fallback when POSTGRES_HOST is not set.
-#
 # This ensures consistent infrastructure endpoint configuration across all
 # DLQ integration tests. See tests/infrastructure_config.py for full
 # documentation on environment variable overrides and CI/CD graceful skip behavior.
 # =============================================================================
 from tests.helpers.util_postgres import PostgresConfig
-from tests.infrastructure_config import REMOTE_INFRA_HOST
 
 # Use shared PostgresConfig for consistent configuration management
-_postgres_config = PostgresConfig.from_env(fallback_host=REMOTE_INFRA_HOST)
+_postgres_config = PostgresConfig.from_env()
 
 # Export individual values for use in availability checks and diagnostics
 POSTGRES_HOST = _postgres_config.host
@@ -83,8 +72,8 @@ if not _postgres_config.is_configured:
 
     warnings.warn(
         "PostgreSQL not configured - DLQ tracking integration tests will be skipped. "
-        "Set OMNIBASE_INFRA_DB_URL (preferred) or POSTGRES_HOST/POSTGRES_PASSWORD in "
-        "your .env file or environment to enable database tests.",
+        "Set OMNIBASE_INFRA_DB_URL in your .env file or environment to enable "
+        "database tests.",
         UserWarning,
         stacklevel=1,
     )
@@ -119,8 +108,7 @@ def dlq_tracking_config() -> ModelDlqTrackingConfig:
     test isolation and prevent conflicts between parallel test executions.
 
     Skip Conditions (CI/CD Graceful Degradation):
-        - Skips if PostgreSQL is not available (neither OMNIBASE_INFRA_DB_URL
-          nor POSTGRES_HOST/POSTGRES_PASSWORD is set)
+        - Skips if PostgreSQL is not available (OMNIBASE_INFRA_DB_URL not set)
 
     Returns:
         ModelDlqTrackingConfig with test-specific table name.
@@ -130,10 +118,7 @@ def dlq_tracking_config() -> ModelDlqTrackingConfig:
         >>> config.storage_table  # 'dlq_replay_history_test_a1b2c3d4'
     """
     if not POSTGRES_AVAILABLE:
-        pytest.skip(
-            "PostgreSQL not available (set OMNIBASE_INFRA_DB_URL or "
-            "POSTGRES_HOST/POSTGRES_PASSWORD)"
-        )
+        pytest.skip("PostgreSQL not available (set OMNIBASE_INFRA_DB_URL)")
 
     return ModelDlqTrackingConfig(
         dsn=_build_postgres_dsn(),
