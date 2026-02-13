@@ -226,6 +226,19 @@ def _sort_key_for_constraint(c: _CanonicalRecord) -> tuple[str, ...]:
     return (con_type, str(c.get("expression", "")))
 
 
+def _pg_json_default(obj: object) -> str:
+    """Handle asyncpg types that are not natively JSON-serializable.
+
+    PostgreSQL ``"char"`` (the internal single-byte type used for
+    ``pg_constraint.contype``, ``confupdtype``, ``confdeltype``) is
+    returned by asyncpg as ``bytes``.  Decode to UTF-8 so that
+    ``json.dumps`` can serialize it.
+    """
+    if isinstance(obj, (bytes, bytearray)):
+        return obj.decode("utf-8", errors="replace")
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 def _sha256_json(obj: object) -> str:
     """SHA-256 hex digest of a JSON-serialized object.
 
@@ -239,7 +252,9 @@ def _sha256_json(obj: object) -> str:
     Returns:
         64-character hexadecimal SHA-256 digest.
     """
-    raw = json.dumps(obj, sort_keys=True, separators=(",", ":"))
+    raw = json.dumps(
+        obj, sort_keys=True, separators=(",", ":"), default=_pg_json_default
+    )
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
