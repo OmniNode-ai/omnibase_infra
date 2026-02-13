@@ -18,6 +18,7 @@ Related:
 from __future__ import annotations
 
 from typing import Literal
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from pydantic import (
@@ -66,7 +67,9 @@ class ModelLlmInferenceRequest(BaseModel):
         correlation_id: Caller-provided or auto-generated correlation ID
             for distributed tracing.
         execution_id: Unique identifier for this specific inference call.
-        metadata: Arbitrary key-value pairs for observability.
+        metadata: Arbitrary key-value pairs for observability. The underlying
+            ``dict`` is mutable despite ``frozen=True``; callers must not
+            mutate after construction (see field comment for rationale).
 
     Example:
         >>> req = ModelLlmInferenceRequest(
@@ -191,6 +194,13 @@ class ModelLlmInferenceRequest(BaseModel):
         default_factory=uuid4,
         description="Unique identifier for this specific inference call.",
     )
+    # WARNING: ``dict`` is mutable despite ``frozen=True`` on the model.
+    # Pydantic's frozen config prevents *reassignment* (``req.metadata = {}``),
+    # but it does NOT prevent in-place mutation (``req.metadata['k'] = 'v'``).
+    # MappingProxyType was attempted (ec045c42) but breaks ``model_copy()``
+    # because Pydantic cannot serialize/reconstruct proxy objects.
+    # This is an accepted trade-off -- callers MUST NOT mutate metadata after
+    # construction.  Treat it as read-only by convention.
     metadata: dict[str, str] = Field(
         default_factory=dict,
         description="Arbitrary key-value pairs for observability.",
@@ -216,18 +226,30 @@ class ModelLlmInferenceRequest(BaseModel):
     @field_validator("base_url")
     @classmethod
     def _validate_base_url(cls, v: str) -> str:
-        """Ensure base_url uses an HTTP(S) scheme with a host."""
+        """Ensure base_url uses an HTTP(S) scheme with a valid host.
+
+        Uses ``urllib.parse.urlparse`` for robust host extraction instead of
+        naive string-prefix checks alone.
+        """
         if not v.startswith(("http://", "https://")):
             raise ValueError("base_url must start with http:// or https://")
         # Ensure there's content after the scheme
         scheme_end = v.index("://") + 3
         if len(v) <= scheme_end or not v[scheme_end:].strip("/"):
             raise ValueError("base_url must include a host after the scheme")
+        # Use urlparse for robust hostname validation (catches e.g. "http://!!!:8000")
+        parsed = urlparse(v)
+        if not parsed.hostname:
+            raise ValueError("base_url must include a valid host after the scheme")
         return v
 
     @model_validator(mode="after")
     def _validate_request_invariants(self) -> ModelLlmInferenceRequest:
         """Enforce cross-field invariants for the inference request."""
+        # NOTE: Update this validator when adding new EnumLlmOperationType members.
+        # Every branch below corresponds to an enum member; the trailing `else`
+        # catches unknown values added without a matching branch.
+
         # -- Operation type consistency --
         if self.operation_type == EnumLlmOperationType.CHAT_COMPLETION:
             if not self.messages:

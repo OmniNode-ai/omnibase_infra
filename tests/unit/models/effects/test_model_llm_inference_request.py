@@ -607,6 +607,57 @@ class TestImmutability:
 
 
 # ==============================================================================
+# Metadata Validation
+# ==============================================================================
+
+
+class TestMetadataValidation:
+    """Tests for metadata field type enforcement."""
+
+    def test_metadata_non_string_values_rejected(self) -> None:
+        """Test that metadata with non-string values raises ValidationError."""
+        with pytest.raises(ValidationError, match="metadata"):
+            _chat_request(metadata={"key": 123})
+
+    def test_metadata_non_string_keys_rejected(self) -> None:
+        """Test that metadata with non-string keys raises ValidationError."""
+        with pytest.raises(ValidationError, match="metadata"):
+            _chat_request(metadata={42: "value"})  # type: ignore[dict-item]
+
+
+# ==============================================================================
+# model_copy Regression
+# ==============================================================================
+
+
+class TestModelCopy:
+    """Tests for model_copy behaviour, guarding against metadata repr regressions.
+
+    See commit ec045c42 which reverted MappingProxyType metadata because it
+    broke model_copy.
+    """
+
+    def test_model_copy_preserves_metadata(self) -> None:
+        """Test that model_copy(update=...) succeeds and preserves metadata."""
+        original = _chat_request(metadata={"env": "staging", "team": "infra"})
+        copied = original.model_copy(update={"model": "new-model"})
+
+        assert copied.model == "new-model"
+        assert copied.metadata == {"env": "staging", "team": "infra"}
+        # Other fields should carry over
+        assert copied.base_url == original.base_url
+        assert copied.correlation_id == original.correlation_id
+
+    def test_model_copy_with_empty_metadata(self) -> None:
+        """Test that model_copy works when metadata is the default empty dict."""
+        original = _chat_request()
+        copied = original.model_copy(update={"model": "another-model"})
+
+        assert copied.model == "another-model"
+        assert copied.metadata == {}
+
+
+# ==============================================================================
 # Serialization
 # ==============================================================================
 
