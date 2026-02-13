@@ -19,7 +19,7 @@ Related:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -113,10 +113,11 @@ class TestModelLlmEmbeddingResponseConstruction:
     def test_timestamp_with_non_utc_tz(self) -> None:
         """Timestamp with non-UTC timezone is accepted (tzinfo present)."""
         kwargs = _valid_kwargs()
-        est = timezone(offset=datetime.now(UTC) - datetime.now(UTC))
-        kwargs["timestamp"] = datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC)
+        est = timezone(timedelta(hours=-5))
+        kwargs["timestamp"] = datetime(2025, 6, 15, 12, 0, 0, tzinfo=est)
         resp = ModelLlmEmbeddingResponse(**kwargs)
         assert resp.timestamp.tzinfo is not None
+        assert resp.timestamp.tzinfo == est
 
 
 # =============================================================================
