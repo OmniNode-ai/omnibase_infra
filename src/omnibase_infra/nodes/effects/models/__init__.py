@@ -19,7 +19,7 @@ Available Models:
 
 Note:
     ModelBackendResult canonical location is omnibase_infra.models.model_backend_result.
-    Re-exported here for backward compatibility.
+    Re-exported here for ergonomic access.
 """
 
 from omnibase_infra.models.model_backend_result import ModelBackendResult

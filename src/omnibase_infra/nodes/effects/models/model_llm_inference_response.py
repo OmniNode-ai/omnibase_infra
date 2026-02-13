@@ -53,6 +53,9 @@ class ModelLlmInferenceResponse(BaseModel):
         - ``generated_text=""`` means a valid empty completion (e.g., STOP with
           no content).
         - Both ``generated_text=None, tool_calls=()`` is valid (no output at all).
+          This represents a legitimate empty response, such as content-filter
+          suppression or a model returning no output. Callers should check for
+          this state explicitly rather than assuming at least one field is populated.
 
     Attributes:
         status: Always ``"success"``. Non-success states are exceptions.
@@ -204,6 +207,48 @@ class ModelLlmInferenceResponse(BaseModel):
         """
         if not self.backend_result.success:
             msg = "backend_result.success must be True; errors are raised as exceptions"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _enforce_finish_reason_error_consistency(self) -> Self:
+        """Reject finish_reason=ERROR when backend reports success.
+
+        If the model's finish reason indicates an error, the backend result
+        cannot simultaneously report success -- these are semantically
+        contradictory.
+        """
+        if (
+            self.finish_reason == EnumLlmFinishReason.ERROR
+            and self.backend_result.success
+        ):
+            msg = (
+                "finish_reason=ERROR is contradictory with backend_result.success=True; "
+                "error responses must not be encoded as successful"
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _enforce_truncated_finish_reason_consistency(self) -> Self:
+        """Reject contradictory truncated/finish_reason combinations.
+
+        - truncated=True with finish_reason=STOP is invalid: output cannot
+          be truncated if generation stopped naturally.
+        - truncated=False with finish_reason=LENGTH is invalid: a length-
+          limited response is by definition truncated.
+        """
+        if self.truncated and self.finish_reason == EnumLlmFinishReason.STOP:
+            msg = (
+                "truncated=True is contradictory with finish_reason=STOP; "
+                "output cannot be truncated if generation completed naturally"
+            )
+            raise ValueError(msg)
+        if not self.truncated and self.finish_reason == EnumLlmFinishReason.LENGTH:
+            msg = (
+                "truncated=False is contradictory with finish_reason=LENGTH; "
+                "length-limited output is by definition truncated"
+            )
             raise ValueError(msg)
         return self
 
