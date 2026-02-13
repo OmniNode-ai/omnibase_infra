@@ -1260,7 +1260,7 @@ class PluginRegistration:
                 "Intent routing table declares %d intent type(s) with no "
                 "registered effect handler: %s. Intents of these types will "
                 "raise RuntimeHostError at runtime. Check that the required "
-                "infrastructure (projector, consul_handler) is available. "
+                "infrastructure (projector, pool, consul_handler) is available. "
                 "(correlation_id=%s)",
                 len(unwired_intents),
                 unwired_intents,

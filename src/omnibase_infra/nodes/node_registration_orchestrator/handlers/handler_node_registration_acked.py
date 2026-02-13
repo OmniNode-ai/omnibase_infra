@@ -63,6 +63,9 @@ from omnibase_infra.models.registration.commands.model_node_registration_acked i
 from omnibase_infra.nodes.node_registration_orchestrator.services import (
     RegistrationReducerService,
 )
+from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registration import (
+    ModelPayloadPostgresUpdateRegistration,
+)
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
@@ -332,18 +335,36 @@ class HandlerNodeRegistrationAcked:
         # (ACTIVE) because `projection` still holds the pre-transition state
         # (AWAITING_ACK/ACCEPTED). The emitted events will transition the
         # state in the reducer, but the snapshot must reflect the target state.
+        #
+        # We also extract reducer-calculated fields (e.g. liveness_deadline)
+        # from the update intent so the snapshot stays consistent with the
+        # state that will be persisted by the effect layer.
         if (
             self._snapshot_publisher is not None
             and projection is not None
             and decision.new_state == EnumRegistrationState.ACTIVE
         ):
             try:
-                active_projection = projection.model_copy(
-                    update={
-                        "current_state": EnumRegistrationState.ACTIVE,
-                        "updated_at": now,
-                    }
-                )
+                # Build the base update dict with mandatory fields.
+                snapshot_update: dict[str, object] = {
+                    "current_state": EnumRegistrationState.ACTIVE,
+                    "updated_at": now,
+                }
+
+                # Extract reducer-calculated fields from the update intent.
+                # Don't assume intent ordering -- search for the correct type.
+                for intent in decision.intents:
+                    if isinstance(
+                        intent.payload, ModelPayloadPostgresUpdateRegistration
+                    ):
+                        updates = intent.payload.updates
+                        if "liveness_deadline" in updates:
+                            snapshot_update["liveness_deadline"] = updates[
+                                "liveness_deadline"
+                            ]
+                        break
+
+                active_projection = projection.model_copy(update=snapshot_update)
                 # node_name is None because neither the ack command nor the
                 # registration projection carries a human-readable node name.
                 # The introspection event that originally provided the name is

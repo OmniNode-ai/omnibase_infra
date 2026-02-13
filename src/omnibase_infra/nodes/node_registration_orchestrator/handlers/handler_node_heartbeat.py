@@ -177,7 +177,7 @@ class HandlerNodeHeartbeat:
         # Extract from envelope
         event = envelope.payload
         now = envelope.envelope_timestamp
-        correlation_id = envelope.correlation_id or uuid4()
+        correlation_id = envelope.correlation_id or event.correlation_id or uuid4()
         domain = "registration"
 
         # Validate timezone-awareness for time injection pattern
@@ -188,6 +188,7 @@ class HandlerNodeHeartbeat:
             target_name="handler.node_heartbeat",
         )
         validate_timezone_aware_with_context(now, error_ctx)
+        validate_timezone_aware_with_context(event.timestamp, error_ctx)
 
         # Look up current projection
         projection = await self._projection_reader.get_entity_state(

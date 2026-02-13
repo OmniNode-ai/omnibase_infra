@@ -155,6 +155,10 @@ class MixinKafkaBroadcast:
         Args:
             envelope: Envelope object to publish (ModelOnexEnvelope)
             topic: Target topic name
+            key: Optional partition key for per-entity ordering. When provided,
+                the underlying transport uses this key for partition assignment
+                so that all events for the same entity land on the same
+                partition.
         """
         # Serialize envelope to JSON bytes
         envelope_dict: object

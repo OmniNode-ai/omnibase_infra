@@ -39,10 +39,11 @@ class TestWireRegistrationHandlers:
         # Verify summary contains all services
         assert "services" in summary
         assert "ProjectionReaderRegistration" in summary["services"]
+        assert "RegistrationReducerService" in summary["services"]
         assert "HandlerNodeIntrospected" in summary["services"]
         assert "HandlerRuntimeTick" in summary["services"]
         assert "HandlerNodeRegistrationAcked" in summary["services"]
-        assert len(summary["services"]) == 4
+        assert len(summary["services"]) == 5
 
     @pytest.mark.asyncio
     async def test_registers_instances_with_correct_interfaces(self) -> None:
@@ -51,6 +52,9 @@ class TestWireRegistrationHandlers:
             HandlerNodeIntrospected,
             HandlerNodeRegistrationAcked,
             HandlerRuntimeTick,
+        )
+        from omnibase_infra.nodes.node_registration_orchestrator.services import (
+            RegistrationReducerService,
         )
         from omnibase_infra.projectors import ProjectionReaderRegistration
 
@@ -72,6 +76,7 @@ class TestWireRegistrationHandlers:
 
         # Verify all expected interfaces were registered
         assert ProjectionReaderRegistration in registered_interfaces
+        assert RegistrationReducerService in registered_interfaces
         assert HandlerNodeIntrospected in registered_interfaces
         assert HandlerRuntimeTick in registered_interfaces
         assert HandlerNodeRegistrationAcked in registered_interfaces

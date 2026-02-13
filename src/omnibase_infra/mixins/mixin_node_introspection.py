@@ -235,7 +235,7 @@ from omnibase_infra.models.registration.model_node_event_bus_config import (
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
-from omnibase_infra.topics import TopicResolver
+from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION_ACKED, TopicResolver
 
 if TYPE_CHECKING:
     from omnibase_core.models.contracts import ModelContractBase
@@ -475,6 +475,7 @@ class MixinNodeIntrospection:
     _introspection_start_time: float | None
     _introspection_contract: ModelContractBase | None
     _registration_accepted_topic: str
+    _time_provider: Callable[[], datetime]
 
     # Capability discovery configuration
     _introspection_operation_keywords: frozenset[str]
@@ -672,6 +673,9 @@ class MixinNodeIntrospection:
         self._heartbeat_topic = config.heartbeat_topic
         self._request_introspection_topic = config.request_introspection_topic
         self._registration_accepted_topic = config.registration_accepted_topic
+
+        # Time provider (injectable for testing)
+        self._time_provider = lambda: datetime.now(UTC)
 
         # Contract for capability extraction (may be None for legacy nodes)
         self._introspection_contract = config.contract
@@ -1990,12 +1994,21 @@ class MixinNodeIntrospection:
     # ACK listener: subscribe to registration-accepted, emit ACK commands
     # -------------------------------------------------------------------------
 
-    async def _ack_listener_loop(self) -> None:
+    async def _ack_listener_loop(
+        self,
+        max_retries: int = 3,
+        base_backoff_seconds: float = 1.0,
+    ) -> None:
         """Background loop listening for registration-accepted events.
 
         Subscribes to the registration_accepted_topic and emits ACK commands
         when this node's registration is accepted. Follows the same retry
-        pattern as ``_registry_listener_loop``.
+        pattern as ``_registry_listener_loop`` with exponential backoff on
+        transient subscribe failures.
+
+        Args:
+            max_retries: Maximum subscription retry attempts (default: 3)
+            base_backoff_seconds: Base backoff time for exponential retry
         """
         if self._introspection_event_bus is None:
             logger.warning(
@@ -2014,63 +2027,167 @@ class MixinNodeIntrospection:
             extra={"node_id": self._introspection_node_id},
         )
 
-        try:
-            event_bus = self._introspection_event_bus
-            if event_bus is None or not hasattr(event_bus, "subscribe"):
-                logger.warning(
-                    "Event bus does not support subscribe for ACK listener "
-                    f"{self._introspection_node_id}",
-                    extra={"node_id": self._introspection_node_id},
+        # Retry loop with exponential backoff for subscription failures
+        retry_count = 0
+        while not self._introspection_stop_event.is_set():
+            # Generate correlation_id for this subscription attempt
+            subscription_correlation_id = uuid4()
+            try:
+                if await self._attempt_ack_subscription(
+                    subscription_correlation_id,
+                ):
+                    # Wait for stop signal
+                    await self._introspection_stop_event.wait()
+                # Exit loop after subscription ends or not supported
+                break
+
+            except asyncio.CancelledError:
+                logger.debug(
+                    f"ACK listener cancelled for {self._introspection_node_id}",
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "correlation_id": str(subscription_correlation_id),
+                    },
                 )
-                return
+                break
+            except Exception as e:
+                retry_count += 1
+                if not await self._handle_ack_subscription_error(
+                    e,
+                    retry_count,
+                    max_retries,
+                    base_backoff_seconds,
+                    subscription_correlation_id,
+                ):
+                    break
 
-            topic = self._registration_accepted_topic
-            node_identity = ModelNodeIdentity(
-                env=self._introspection_env,
-                service=self._introspection_service,
-                node_name=self._introspection_node_name,
-                version=self._introspection_version,
-            )
-            unsubscribe = await event_bus.subscribe(
-                topic=topic,
-                node_identity=node_identity,
-                on_message=self._on_registration_accepted,
-            )
-            self._ack_unsubscribe = unsubscribe
-
-            logger.info(
-                f"ACK listener subscribed for {self._introspection_node_id}",
-                extra={
-                    "node_id": self._introspection_node_id,
-                    "topic": topic,
-                },
-            )
-
-            # Wait for stop signal
-            await self._introspection_stop_event.wait()
-
-        except asyncio.CancelledError:
-            logger.debug(
-                f"ACK listener cancelled for {self._introspection_node_id}",
-                extra={"node_id": self._introspection_node_id},
-            )
-        except Exception as e:
-            logger.error(
-                f"ACK listener error for {self._introspection_node_id}: {e}",
-                extra={
-                    "node_id": self._introspection_node_id,
-                    "error_type": type(e).__name__,
-                    "error_message": str(e),
-                },
-                exc_info=True,
-            )
-        finally:
-            await self._cleanup_ack_subscription()
+        # Final cleanup
+        await self._cleanup_ack_subscription()
 
         logger.info(
             f"ACK listener stopped for {self._introspection_node_id}",
             extra={"node_id": self._introspection_node_id},
         )
+
+    async def _attempt_ack_subscription(
+        self,
+        correlation_id: UUID,
+    ) -> bool:
+        """Attempt to subscribe to the registration-accepted topic.
+
+        Args:
+            correlation_id: Correlation ID for traceability in logs.
+
+        Returns:
+            True if subscription was successful, False if not supported.
+        """
+        event_bus = self._introspection_event_bus
+        if event_bus is None or not hasattr(event_bus, "subscribe"):
+            logger.warning(
+                "Event bus does not support subscribe for ACK listener "
+                f"{self._introspection_node_id}",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return False
+
+        topic = self._registration_accepted_topic
+        node_identity = ModelNodeIdentity(
+            env=self._introspection_env,
+            service=self._introspection_service,
+            node_name=self._introspection_node_name,
+            version=self._introspection_version,
+        )
+        unsubscribe = await event_bus.subscribe(
+            topic=topic,
+            node_identity=node_identity,
+            on_message=self._on_registration_accepted,
+        )
+        self._ack_unsubscribe = unsubscribe
+
+        logger.info(
+            f"ACK listener subscribed for {self._introspection_node_id}",
+            extra={
+                "node_id": self._introspection_node_id,
+                "correlation_id": str(correlation_id),
+                "topic": topic,
+            },
+        )
+        return True
+
+    async def _handle_ack_subscription_error(
+        self,
+        error: Exception,
+        retry_count: int,
+        max_retries: int,
+        base_backoff_seconds: float,
+        correlation_id: UUID,
+    ) -> bool:
+        """Handle ACK subscription error with retry logic.
+
+        Mirrors ``_handle_subscription_error`` used by the registry listener.
+
+        Args:
+            error: The exception that occurred
+            retry_count: Current retry attempt number
+            max_retries: Maximum retry attempts
+            base_backoff_seconds: Base backoff time for exponential retry
+            correlation_id: Correlation ID for traceability in logs
+
+        Returns:
+            True if should continue retrying, False if should stop
+        """
+        logger.error(
+            f"Error in ACK listener for {self._introspection_node_id}",
+            extra={
+                "node_id": self._introspection_node_id,
+                "correlation_id": str(correlation_id),
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+                "retry_count": retry_count,
+                "max_retries": max_retries,
+            },
+            exc_info=True,
+        )
+
+        # Clean up any partial subscription before retry
+        await self._cleanup_ack_subscription(correlation_id)
+
+        # Check if we should retry
+        if retry_count >= max_retries:
+            logger.error(
+                "ACK listener exhausted retries",
+                extra={
+                    "node_id": self._introspection_node_id,
+                    "correlation_id": str(correlation_id),
+                    "retry_count": retry_count,
+                    "max_retries": max_retries,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                },
+                exc_info=True,
+            )
+            return False
+
+        # Exponential backoff before retry
+        backoff = base_backoff_seconds * (2 ** (retry_count - 1))
+        logger.info(
+            f"ACK listener retrying in {backoff}s for {self._introspection_node_id}",
+            extra={
+                "node_id": self._introspection_node_id,
+                "correlation_id": str(correlation_id),
+                "backoff_seconds": backoff,
+                "retry_count": retry_count,
+            },
+        )
+
+        # Wait for backoff period or stop signal
+        if await self._wait_for_backoff_or_stop(backoff):
+            return False  # Stop signal received
+
+        return True  # Continue retrying
 
     async def _on_registration_accepted(self, message: ProtocolEventMessage) -> None:
         """Handle registration-accepted event by emitting an ACK command.
@@ -2083,6 +2200,8 @@ class MixinNodeIntrospection:
         Args:
             message: The incoming event message (implements ProtocolEventMessage).
         """
+        # Initialize correlation_id before try block so it is available in except
+        correlation_id: UUID = uuid4()
         try:
             # Parse the message value (same pattern as _process_introspection_request)
             if not hasattr(message, "value") or not message.value:
@@ -2108,7 +2227,6 @@ class MixinNodeIntrospection:
 
             # Extract correlation_id from the accepted event
             raw_correlation_id = request_data.get("correlation_id")
-            correlation_id: UUID
             if raw_correlation_id:
                 try:
                     correlation_id = UUID(str(raw_correlation_id))
@@ -2129,7 +2247,7 @@ class MixinNodeIntrospection:
                 )
                 return
 
-            now = datetime.now(UTC)
+            now = self._time_provider()
             ack_command = ModelNodeRegistrationAcked(
                 node_id=node_id,
                 correlation_id=correlation_id,
@@ -2137,31 +2255,34 @@ class MixinNodeIntrospection:
             )
 
             # Publish to ACK command topic
-            ack_topic = "onex.cmd.platform.node-registration-acked.v1"
+            ack_topic = SUFFIX_NODE_REGISTRATION_ACKED
             event_bus = self._introspection_event_bus
             if event_bus is None:
                 logger.warning(
                     "Cannot emit ACK - event bus is None",
-                    extra={"node_id": self._introspection_node_id},
+                    extra={
+                        "node_id": self._introspection_node_id,
+                        "correlation_id": str(correlation_id),
+                    },
                 )
                 return
 
+            partition_key = str(node_id).encode("utf-8")
             if hasattr(event_bus, "publish_envelope"):
                 envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
                     payload=ack_command,
                     correlation_id=correlation_id,
                 )
-                await event_bus.publish_envelope(
+                await event_bus.publish_envelope(  # type: ignore[call-arg]
                     envelope=envelope,  # type: ignore[arg-type]
                     topic=ack_topic,
+                    key=partition_key,
                 )
             else:
                 value = json.dumps(ack_command.model_dump(mode="json")).encode("utf-8")
                 await event_bus.publish(
                     topic=ack_topic,
-                    key=str(self._introspection_node_id).encode("utf-8")
-                    if self._introspection_node_id is not None
-                    else None,
+                    key=partition_key,
                     value=value,
                 )
 
@@ -2178,6 +2299,7 @@ class MixinNodeIntrospection:
                 f"Failed to emit registration ACK: {e}",
                 extra={
                     "node_id": str(self._introspection_node_id),
+                    "correlation_id": str(correlation_id),
                     "error_type": type(e).__name__,
                 },
             )

@@ -11,6 +11,7 @@ from omnibase_infra.topics import (
     SUFFIX_NODE_HEARTBEAT,
     SUFFIX_NODE_INTROSPECTION,
     SUFFIX_NODE_REGISTRATION,
+    SUFFIX_NODE_REGISTRATION_ACKED,
     SUFFIX_REGISTRATION_SNAPSHOTS,
     SUFFIX_REGISTRY_REQUEST_INTROSPECTION,
     SUFFIX_REQUEST_INTROSPECTION,
@@ -40,6 +41,7 @@ class TestPlatformTopicSuffixes:
             SUFFIX_REGISTRATION_SNAPSHOTS,
             SUFFIX_CONTRACT_REGISTERED,
             SUFFIX_CONTRACT_DEREGISTERED,
+            SUFFIX_NODE_REGISTRATION_ACKED,
         }
         assert set(ALL_PLATFORM_SUFFIXES) == expected_suffixes
 
@@ -62,6 +64,7 @@ class TestPlatformTopicSuffixes:
         assert isinstance(SUFFIX_FSM_STATE_TRANSITIONS, str)
         assert isinstance(SUFFIX_RUNTIME_TICK, str)
         assert isinstance(SUFFIX_REGISTRATION_SNAPSHOTS, str)
+        assert isinstance(SUFFIX_NODE_REGISTRATION_ACKED, str)
 
     def test_suffix_kinds_are_valid(self) -> None:
         """All suffixes should use valid message kinds."""
@@ -104,6 +107,13 @@ class TestPlatformTopicSuffixes:
         assert (
             SUFFIX_REGISTRATION_SNAPSHOTS
             == "onex.snapshot.platform.registration-snapshots.v1"
+        )
+
+    def test_node_registration_acked_suffix_format(self) -> None:
+        """Node registration ACK suffix should have correct format."""
+        assert (
+            SUFFIX_NODE_REGISTRATION_ACKED
+            == "onex.cmd.platform.node-registration-acked.v1"
         )
 
     def test_all_platform_suffixes_is_tuple(self) -> None:

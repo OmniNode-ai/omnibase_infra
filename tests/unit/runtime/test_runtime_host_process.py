@@ -233,6 +233,7 @@ class MockEventBus:
         Args:
             envelope: The envelope to publish.
             topic: Topic to publish to.
+            key: Optional partition key for per-entity ordering.
         """
         if hasattr(envelope, "model_dump"):
             value = json.dumps(envelope.model_dump()).encode("utf-8")
@@ -240,7 +241,7 @@ class MockEventBus:
             value = json.dumps(envelope).encode("utf-8")
         else:
             value = str(envelope).encode("utf-8")
-        self.published.append((topic, None, value))
+        self.published.append((topic, key, value))
 
     async def health_check(self) -> dict[str, object]:
         """Return health check status."""

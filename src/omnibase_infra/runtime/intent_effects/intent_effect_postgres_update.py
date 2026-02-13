@@ -308,7 +308,9 @@ class IntentEffectPostgresUpdate:
             async with self._pool.acquire() as conn:
                 result = await conn.execute(sql, *params, timeout=30.0)
 
-            # Parse row count (e.g., "UPDATE 1" -> 1)
+            # Parse row count from asyncpg result string.
+            # NOTE: Assumes PostgreSQL/asyncpg CommandComplete format
+            # (e.g., "UPDATE 1", "INSERT 0 1"). Other backends may differ.
             rows_affected = 0
             parts = result.split()
             if parts and parts[-1].isdigit():

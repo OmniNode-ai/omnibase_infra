@@ -144,6 +144,7 @@ class MockEventBus:
                 since all event envelopes are Pydantic models. The production code
                 wraps events in ModelEventEnvelope before publishing.
             topic: Event topic.
+            key: Optional partition key for per-entity ordering.
 
         Raises:
             RuntimeError: If should_fail is True.

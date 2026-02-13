@@ -16,9 +16,14 @@ Usage:
     from omnibase_infra.nodes.node_registration_orchestrator.registry import (
         RegistryInfraNodeRegistrationOrchestrator,
     )
+    from omnibase_infra.nodes.node_registration_orchestrator.services import (
+        RegistrationReducerService,
+    )
 
+    reducer = RegistrationReducerService(consul_enabled=True)
     registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
         projection_reader=reader,
+        reducer=reducer,
         projector=projector,
         consul_handler=consul_handler,
     )

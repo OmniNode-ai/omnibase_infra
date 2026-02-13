@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Tests for RegistrationReducerService -- pure function, no I/O.
+"""Tests for RegistrationReducerService -- reducer-driven, pure function, no I/O.
 
-Validates all four decide_* methods:
+Validates all four reducer-driven decide_* methods:
     - decide_introspection: New-node and re-registration decisions
     - decide_ack: Acknowledgment processing
     - decide_heartbeat: Liveness deadline extension
     - decide_timeout: Ack timeout and liveness expiry detection
 
-All tests exercise the service directly (no mocked handlers or event bus).
+All tests exercise the reducer service directly (no mocked handlers or event bus).
 The service is stateless and pure-functional, so tests instantiate it directly.
 
 Related Tickets:
@@ -23,6 +23,8 @@ from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+
+pytestmark = pytest.mark.unit
 
 from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
@@ -152,7 +154,7 @@ def make_ack_command(
 
 
 class TestDecideIntrospectionNewAndRetriable:
-    """Tests for decide_introspection: emit path (new node + retriable states)."""
+    """Tests for reducer-driven decide_introspection: emit path (new node + retriable states)."""
 
     def test_new_node_emits_registration(self) -> None:
         """projection=None (new node) -> action='emit', 2 events, postgres upsert intent."""
@@ -231,7 +233,7 @@ class TestDecideIntrospectionNewAndRetriable:
 
 
 class TestDecideIntrospectionBlockingStates:
-    """Tests for decide_introspection: no-op path (blocking states)."""
+    """Tests for reducer-driven decide_introspection: no-op path (blocking states)."""
 
     def test_pending_registration_blocks(self) -> None:
         """state=PENDING_REGISTRATION -> action='no_op'."""
@@ -312,7 +314,7 @@ class TestDecideIntrospectionBlockingStates:
 
 
 class TestDecideIntrospectionEventFields:
-    """Tests for decide_introspection: event field correctness."""
+    """Tests for reducer-driven decide_introspection: event field correctness."""
 
     def test_emits_accepted_event(self) -> None:
         """Verify ModelNodeRegistrationAccepted has correct ack_deadline."""
@@ -364,7 +366,7 @@ class TestDecideIntrospectionEventFields:
 
 
 class TestDecideIntrospectionConsulToggle:
-    """Tests for decide_introspection: consul intent toggle."""
+    """Tests for reducer-driven decide_introspection: consul intent toggle."""
 
     def test_consul_intent_when_enabled(self) -> None:
         """consul_enabled=True -> 2 intents (postgres + consul)."""
@@ -417,7 +419,7 @@ class TestDecideIntrospectionConsulToggle:
 
 
 class TestDecideAckEmitPath:
-    """Tests for decide_ack: emit path (valid ack states)."""
+    """Tests for reducer-driven decide_ack: emit path (valid ack states)."""
 
     def test_awaiting_ack_emits_activation(self) -> None:
         """state=AWAITING_ACK -> action='emit', events include AckReceived + BecameActive."""
@@ -495,7 +497,7 @@ class TestDecideAckEmitPath:
 
 
 class TestDecideAckNoOpPath:
-    """Tests for decide_ack: no-op path (invalid states)."""
+    """Tests for reducer-driven decide_ack: no-op path (invalid states)."""
 
     def test_none_projection_noop(self) -> None:
         """projection=None -> action='no_op'."""
@@ -599,7 +601,7 @@ class TestDecideAckNoOpPath:
 
 
 class TestDecideHeartbeat:
-    """Tests for decide_heartbeat: liveness deadline extension."""
+    """Tests for reducer-driven decide_heartbeat: liveness deadline extension."""
 
     def test_heartbeat_emits_update_intent(self) -> None:
         """projection exists -> action='emit', 1 intent with last_heartbeat_at + liveness_deadline."""
@@ -693,7 +695,7 @@ class TestDecideHeartbeat:
 
 
 class TestDecideTimeout:
-    """Tests for decide_timeout: ack timeout and liveness expiry detection."""
+    """Tests for reducer-driven decide_timeout: ack timeout and liveness expiry detection."""
 
     def test_ack_timeout_emits_events(self) -> None:
         """overdue_ack projections -> ModelNodeRegistrationAckTimedOut events."""

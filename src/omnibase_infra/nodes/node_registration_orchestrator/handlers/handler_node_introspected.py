@@ -66,6 +66,23 @@ class HandlerNodeIntrospected:
     themselves to the cluster. It queries the current projection state
     and delegates the registration decision to RegistrationReducerService.
 
+    Dependency Injection:
+        This handler receives its dependencies (``projection_reader`` and
+        ``reducer``) via constructor injection. The dependencies are wired
+        through the registry's ``handler_dependencies`` pattern in
+        ``RegistryInfraNodeRegistrationOrchestrator.create_registry()``.
+
+        This is an intentional design choice: handlers accept concrete
+        dependencies directly rather than resolving them from
+        ``ModelONEXContainer`` at runtime. This provides:
+
+        - **Type safety**: Constructor signatures are validated by mypy
+        - **Testability**: Tests inject mocks directly without container setup
+        - **Explicitness**: Each handler's dependencies are visible in its signature
+
+        See ``registry_infra_node_registration_orchestrator.py`` module docstring
+        section "Handler Dependency Map - Design Trade-off" for the full rationale.
+
     Reducer-Authoritative Pattern:
         All state decision logic, intent construction, and event creation
         are encapsulated in RegistrationReducerService.decide_introspection().
@@ -109,11 +126,12 @@ class HandlerNodeIntrospected:
     ) -> None:
         """Initialize the handler with a projection reader and reducer service.
 
-        Direct injection is used here instead of resolving through
-        ``ModelONEXContainer`` because orchestrator handlers require
-        explicit dependencies for testability. This allows tests
-        to inject mock projection readers and reducer services without
-        wiring a full DI container.
+        Dependencies are injected via the registry's ``handler_dependencies``
+        pattern in ``RegistryInfraNodeRegistrationOrchestrator.create_registry()``.
+        The registry resolves dependencies from ``ModelONEXContainer`` and passes
+        them as explicit constructor arguments. This allows tests to inject mocks
+        directly without wiring a full DI container while maintaining container-
+        managed lifecycle in production.
 
         Args:
             projection_reader: Reader for querying registration projection state.

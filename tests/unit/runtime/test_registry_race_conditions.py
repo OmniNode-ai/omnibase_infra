@@ -29,6 +29,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import ComputeRegistryError, PolicyRegistryError
 from omnibase_infra.runtime import handler_registry as registry_module

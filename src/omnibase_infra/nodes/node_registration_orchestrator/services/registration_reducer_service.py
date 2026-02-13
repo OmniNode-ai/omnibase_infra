@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
+# TODO(convention): File should be service_registration_reducer.py / ServiceRegistrationReducer
+# per naming conventions. Deferred to dedicated PR due to import blast radius.
 """Pure-function Registration Reducer Service.
 
 Encapsulates all four registration workflow decisions as pure functions.
@@ -109,6 +111,12 @@ def _no_op(reason: str) -> ModelReducerDecision:
 class RegistrationReducerService:
     """Pure-function service for registration workflow decisions.
 
+    This service is the **authoritative decision-maker** for all registration
+    state transitions. Handlers MUST delegate decisions here rather than
+    implementing their own state logic. This ensures a single source of truth
+    for the registration FSM, making it easier to audit, test, and reason
+    about correctness.
+
     All four ``decide_*`` methods return a frozen ModelReducerDecision.
     No I/O is performed; no event bus, projector, or database access occurs.
     Callers are responsible for applying the returned events and intents.
@@ -127,10 +135,23 @@ class RegistrationReducerService:
         liveness_window_seconds: float = 90.0,
         consul_enabled: bool = True,
     ) -> None:
+        """Initialize the reducer service with timing and feature configuration.
+
+        Args:
+            ack_timeout_seconds: How long to wait for a node ack before timeout.
+            liveness_interval_seconds: Initial liveness deadline offset from activation.
+            liveness_window_seconds: Liveness deadline extension per heartbeat.
+            consul_enabled: Whether to emit Consul registration intents.
+        """
         self._ack_timeout_seconds = ack_timeout_seconds
         self._liveness_interval_seconds = liveness_interval_seconds
         self._liveness_window_seconds = liveness_window_seconds
         self._consul_enabled = consul_enabled
+
+    @property
+    def liveness_interval_seconds(self) -> int:
+        """Return the configured liveness interval in seconds."""
+        return self._liveness_interval_seconds
 
     # ------------------------------------------------------------------
     # Method 1: decide_introspection

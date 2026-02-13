@@ -27,6 +27,7 @@ import pytest
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_infra.mixins.mixin_node_introspection import MixinNodeIntrospection
+from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION_ACKED
 
 # Deterministic test UUIDs
 TEST_NODE_ID = UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
@@ -34,7 +35,7 @@ TEST_OTHER_NODE_ID = UUID("11111111-2222-3333-4444-555555555555")
 TEST_CORRELATION_ID = UUID("cccccccc-dddd-eeee-ffff-000000000000")
 
 # The topic that _on_registration_accepted publishes ACKs to
-ACK_COMMAND_TOPIC = "onex.cmd.platform.node-registration-acked.v1"
+ACK_COMMAND_TOPIC = SUFFIX_NODE_REGISTRATION_ACKED
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +64,7 @@ class StubAckNode(MixinNodeIntrospection):
         self._introspection_service = "test-service"
         self._introspection_node_name = "test-node"
         self._introspection_version = "1.0.0"
+        self._time_provider = lambda: datetime.now(UTC)
 
 
 # ---------------------------------------------------------------------------

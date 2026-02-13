@@ -124,6 +124,14 @@ SUFFIX_CONTRACT_DEREGISTERED: str = "onex.evt.platform.contract-deregistered.v1"
 Published when a node contract is deregistered from the runtime.
 """
 
+# Registration ACK commands
+SUFFIX_NODE_REGISTRATION_ACKED: str = "onex.cmd.platform.node-registration-acked.v1"
+"""Topic suffix for node registration ACK commands.
+
+Published by a node after it receives a registration-accepted event,
+confirming that the node acknowledges successful registration.
+"""
+
 # =============================================================================
 # PLATFORM TOPIC SPEC REGISTRY
 # =============================================================================
@@ -156,6 +164,7 @@ ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ),
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_REGISTERED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_DEREGISTERED, partitions=6),
+    ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACKED, partitions=6),
 )
 """Complete tuple of all platform topic specs with per-topic configuration.
 

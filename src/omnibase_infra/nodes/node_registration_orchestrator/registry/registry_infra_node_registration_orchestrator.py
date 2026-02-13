@@ -22,6 +22,7 @@ Handler Implementation:
 
 Handler Dependencies:
     All handlers require ProjectionReaderRegistration for state queries.
+    All handlers require RegistrationReducerService for pure-function decisions.
     Some handlers optionally accept:
     - ProjectorShell: For projection persistence
     - HandlerConsul: For Consul service registration (dual registration)
@@ -64,9 +65,14 @@ Usage:
     from omnibase_infra.nodes.node_registration_orchestrator.registry import (
         RegistryInfraNodeRegistrationOrchestrator,
     )
+    from omnibase_infra.nodes.node_registration_orchestrator.services import (
+        RegistrationReducerService,
+    )
 
+    reducer = RegistrationReducerService(consul_enabled=True)
     registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
         projection_reader=reader,
+        reducer=reducer,
         projector=projector,
         consul_handler=consul_handler,
     )
@@ -237,6 +243,9 @@ def _load_handler_class(class_name: str, module_path: str) -> type[object]:
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers import HandlerConsul
+    from omnibase_infra.nodes.node_registration_orchestrator.services import (
+        RegistrationReducerService,
+    )
     from omnibase_infra.projectors import ProjectionReaderRegistration
     from omnibase_infra.runtime import ProjectorShell
 
@@ -258,8 +267,10 @@ class RegistryInfraNodeRegistrationOrchestrator:
 
     Usage:
         ```python
+        reducer = RegistrationReducerService(consul_enabled=True)
         registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
             projection_reader=reader,
+            reducer=reducer,
             projector=projector,
             consul_handler=consul_handler,
         )
@@ -271,8 +282,9 @@ class RegistryInfraNodeRegistrationOrchestrator:
     @staticmethod
     def create_registry(
         projection_reader: ProjectionReaderRegistration,
+        reducer: RegistrationReducerService,
         projector: ProjectorShell | None = None,
-        consul_handler: HandlerConsul | None = None,
+        _consul_handler: HandlerConsul | None = None,
         *,
         require_heartbeat_handler: bool = True,
     ) -> ServiceHandlerRegistry:
@@ -303,6 +315,12 @@ class RegistryInfraNodeRegistrationOrchestrator:
 
         Args:
             projection_reader: Projection reader for state queries.
+            reducer: Pure-function reducer service for registration decisions.
+                Instantiated by the caller (typically ``wire_registration_handlers``
+                in wiring.py) and registered in ``ModelONEXContainer`` before being
+                passed here. This ensures the reducer's configuration (e.g.,
+                consul_enabled, ack_timeout_seconds) is managed at the container
+                wiring layer, not duplicated in the registry.
             projector: Projector for state persistence. Required for
                 HandlerNodeHeartbeat to persist heartbeat timestamps.
             consul_handler: Optional Consul handler for service registration.
@@ -324,16 +342,20 @@ class RegistryInfraNodeRegistrationOrchestrator:
 
         Example:
             ```python
-            # Production usage - projector required
+            # Production usage - reducer and projector required
+            reducer = RegistrationReducerService(consul_enabled=True)
             registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
                 projection_reader=reader,
+                reducer=reducer,
                 projector=projector,
                 consul_handler=consul_handler,
             )
 
             # Testing without heartbeat support (explicit opt-in)
+            reducer = RegistrationReducerService(consul_enabled=False)
             registry = RegistryInfraNodeRegistrationOrchestrator.create_registry(
                 projection_reader=reader,
+                reducer=reducer,
                 projector=None,
                 require_heartbeat_handler=False,  # Explicitly disable
             )
@@ -388,14 +410,6 @@ class RegistryInfraNodeRegistrationOrchestrator:
         #
         # See module docstring "Handler Dependency Map - Design Trade-off" for details.
         # =====================================================================
-        from omnibase_infra.nodes.node_registration_orchestrator.services import (
-            RegistrationReducerService,
-        )
-
-        reducer = RegistrationReducerService(
-            consul_enabled=consul_handler is not None,
-        )
-
         handler_dependencies: dict[str, dict[str, object]] = {
             "HandlerNodeIntrospected": {
                 "projection_reader": projection_reader,

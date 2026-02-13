@@ -39,7 +39,7 @@ class ModelReducerDecision(BaseModel):
         reason: Human-readable explanation for logging and debugging.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     action: Literal["emit", "no_op"] = Field(
         ...,

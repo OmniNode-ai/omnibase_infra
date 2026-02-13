@@ -31,7 +31,7 @@ class ModelReducerContext(BaseModel):
         tick_id: UUID of the RuntimeTick that triggered this check (optional).
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(
         ...,

@@ -544,6 +544,18 @@ async def wire_registration_handlers(
             liveness_interval_seconds=resolved_liveness_interval,
             consul_enabled=consul_handler is not None,
         )
+        await container.service_registry.register_instance(
+            interface=RegistrationReducerService,
+            instance=reducer,
+            scope=EnumInjectionScope.GLOBAL,
+            metadata={
+                "description": "Registration reducer service (pure-function decisions)",
+                "version": str(semver_default),
+            },
+        )
+        services_registered.append("RegistrationReducerService")
+        logger.debug("Registered RegistrationReducerService in container")
+
         handler_introspected = HandlerNodeIntrospected(
             projection_reader,
             reducer=reducer,

@@ -19,6 +19,8 @@ from uuid import uuid4
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from omnibase_core.errors import ModelOnexError
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
