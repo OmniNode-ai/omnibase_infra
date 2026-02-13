@@ -44,6 +44,8 @@ import httpx
 
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
     EnumInfraTransportType,
     EnumLlmFinishReason,
     EnumLlmOperationType,
@@ -116,17 +118,25 @@ def _serialize_ollama_messages(
         if msg.content is not None:
             m["content"] = msg.content
         if msg.tool_calls:
-            m["tool_calls"] = [
-                {
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": cast(
-                            "JsonType", json.loads(tc.function.arguments)
-                        ),
-                    },
-                }
-                for tc in msg.tool_calls
-            ]
+            serialized_tool_calls: list[dict[str, JsonType]] = []
+            for tc in msg.tool_calls:
+                try:
+                    parsed_args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"Malformed JSON in tool call arguments for "
+                        f"function '{tc.function.name}': "
+                        f"{tc.function.arguments!r}"
+                    ) from exc
+                serialized_tool_calls.append(
+                    {
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": cast("JsonType", parsed_args),
+                        },
+                    }
+                )
+            m["tool_calls"] = serialized_tool_calls
         if msg.tool_call_id is not None:
             m["tool_call_id"] = msg.tool_call_id
         result.append(m)
@@ -257,6 +267,16 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
             http_client=http_client,
         )
 
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role classification."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification."""
+        return EnumHandlerTypeCategory.EFFECT
+
     async def handle(
         self, request: ModelLlmInferenceRequest
     ) -> ModelLlmInferenceResponse:
@@ -371,7 +391,8 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
             truncated=(finish_reason == EnumLlmFinishReason.LENGTH),
             usage=usage,
             latency_ms=latency_ms,
-            retry_count=0,  # MixinLlmHttpTransport handles retries internally
+            # TODO(OMN-2108): retry_count not exposed by MixinLlmHttpTransport — always 0
+            retry_count=0,
             backend_result=ModelBackendResult(success=True, duration_ms=latency_ms),
             correlation_id=request.correlation_id,
             execution_id=request.execution_id,
@@ -415,6 +436,10 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
     ) -> dict[str, JsonType]:
         """Build the Ollama ``/api/generate`` request payload.
 
+        Note: This method is only called for COMPLETION operations.
+        ``ModelLlmInferenceRequest`` validates that ``system_prompt`` is
+        ``None`` for COMPLETION, so no system prompt handling is needed here.
+
         Args:
             request: The LLM inference request.
 
@@ -426,8 +451,6 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
             "prompt": request.prompt,
             "stream": False,
         }
-        if request.system_prompt:
-            payload["system"] = request.system_prompt
         options = _build_ollama_options(request)
         if options:
             payload["options"] = options
