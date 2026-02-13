@@ -471,9 +471,10 @@ class EventBusInmemory:
     async def subscribe(
         self,
         topic: str,
-        node_identity: ModelNodeIdentity,
-        on_message: Callable[[ModelEventMessage], Awaitable[None]],
+        node_identity: ModelNodeIdentity | None = None,
+        on_message: Callable[[ModelEventMessage], Awaitable[None]] | None = None,
         *,
+        group_id: str | None = None,
         purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
         required_for_readiness: bool = False,
     ) -> Callable[[], Awaitable[None]]:
@@ -482,8 +483,9 @@ class EventBusInmemory:
         Registers a callback to be invoked for each message published to the topic.
         Returns an unsubscribe function to remove the subscription.
 
-        The consumer group ID is derived from the node identity using the canonical
-        format: ``{env}.{service}.{node_name}.{purpose}.{version}``.
+        The consumer group ID is either provided directly via ``group_id`` or
+        derived from ``node_identity`` using the canonical format:
+        ``{env}.{service}.{node_name}.{purpose}.{version}``.
 
         Note: For the in-memory implementation, the consumer group ID is used for
         internal tracking and circuit breaker isolation, but does not affect actual
@@ -493,15 +495,24 @@ class EventBusInmemory:
             topic: Topic to subscribe to
             node_identity: Node identity used to derive the consumer group ID.
                 Contains env, service, node_name, and version components.
+                Required if ``group_id`` is not provided.
             on_message: Async callback invoked for each message
+            group_id: Explicit consumer group ID. When provided, takes precedence
+                over derivation from ``node_identity``. Useful for domain plugins
+                that manage their own group naming.
             purpose: Consumer group purpose classification. Defaults to CONSUME.
                 Used in the consumer group ID derivation for disambiguation.
+                Ignored when ``group_id`` is provided explicitly.
             required_for_readiness: Whether this subscription must be active for
                 the runtime to report as ready. Ignored by the in-memory
                 implementation (always ready). Defaults to False.
 
         Returns:
             Async unsubscribe function to remove this subscription
+
+        Raises:
+            ValueError: If neither ``node_identity`` nor ``group_id`` is provided,
+                or if ``on_message`` is not provided.
 
         Example:
             ```python
@@ -521,18 +532,25 @@ class EventBusInmemory:
             # Standard subscription (group_id: dev.my-service.event-processor.consume.v1)
             unsubscribe = await bus.subscribe("events", identity, handler)
 
-            # With explicit purpose
+            # With explicit group_id (domain plugins)
             unsubscribe = await bus.subscribe(
-                "events", identity, handler,
-                purpose=EnumConsumerGroupPurpose.INTROSPECTION,
+                topic="events", group_id="my-group", on_message=handler,
             )
 
             # ... later ...
             await unsubscribe()
             ```
         """
-        # Derive consumer group ID from node identity (no overrides allowed)
-        effective_group_id = compute_consumer_group_id(node_identity, purpose)
+        if on_message is None:
+            raise ValueError("on_message callback is required")
+
+        # Resolve consumer group ID: explicit group_id takes precedence
+        if group_id is not None:
+            effective_group_id = group_id
+        elif node_identity is not None:
+            effective_group_id = compute_consumer_group_id(node_identity, purpose)
+        else:
+            raise ValueError("subscribe() requires either node_identity or group_id")
 
         async with self._lock:
             self._subscribers[topic].append((effective_group_id, on_message))
