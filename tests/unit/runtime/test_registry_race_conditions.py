@@ -29,6 +29,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from omnibase_infra.enums import EnumPolicyType
 from omnibase_infra.errors import ComputeRegistryError, PolicyRegistryError
 from omnibase_infra.runtime import handler_registry as registry_module
@@ -98,7 +100,9 @@ class MockHandler:
 class MockEventBus:
     """Generic mock event bus for testing."""
 
-    async def publish_envelope(self, envelope: object, topic: str) -> None:
+    async def publish_envelope(
+        self, envelope: object, topic: str, *, key: bytes | None = None
+    ) -> None:
         """Mock publish_envelope method for ProtocolEventBus compliance."""
 
 

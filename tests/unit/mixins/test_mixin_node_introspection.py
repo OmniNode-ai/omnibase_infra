@@ -134,6 +134,8 @@ class MockEventBus:
         self,
         envelope: BaseModel,
         topic: str,
+        *,
+        key: bytes | None = None,
     ) -> None:
         """Mock publish_envelope method.
 
@@ -142,6 +144,7 @@ class MockEventBus:
                 since all event envelopes are Pydantic models. The production code
                 wraps events in ModelEventEnvelope before publishing.
             topic: Event topic.
+            key: Optional partition key for per-entity ordering.
 
         Raises:
             RuntimeError: If should_fail is True.
@@ -938,7 +941,9 @@ class TestMixinNodeIntrospectionGracefulDegradation:
         # Create event bus that raises unexpected exception
         # Must implement publish_envelope and publish methods for duck typing
         class BrokenEventBus:
-            async def publish_envelope(self, envelope: object, topic: str) -> None:
+            async def publish_envelope(
+                self, envelope: object, topic: str, *, key: bytes | None = None
+            ) -> None:
                 raise ValueError("Unexpected error")
 
             async def publish(

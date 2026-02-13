@@ -458,7 +458,9 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 124 (2026-02-11): OMN-2143 checkpoint nodes (+2 unions)
 #                     PhasePayload: 5-type discriminated Union in ModelCheckpoint
 #                     register_handler(): Write | Read | List handler type param
-INFRA_MAX_UNIONS = 124
+# - 125 (2026-02-13): reducer-authoritative registration followups
+#                     ModelPayloadPostgresUpdateRegistration.updates: AckUpdate | HeartbeatUpdate
+INFRA_MAX_UNIONS = 125
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

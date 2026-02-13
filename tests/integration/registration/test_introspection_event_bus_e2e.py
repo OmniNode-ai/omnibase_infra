@@ -66,7 +66,9 @@ class MockEventBus:
         """Initialize mock event bus."""
         self.published_envelopes: list[tuple[object, str]] = []
 
-    async def publish_envelope(self, envelope: object, topic: str) -> None:
+    async def publish_envelope(
+        self, envelope: object, topic: str, *, key: bytes | None = None
+    ) -> None:
         """Mock publish_envelope method."""
         self.published_envelopes.append((envelope, topic))
 

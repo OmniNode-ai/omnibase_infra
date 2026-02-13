@@ -19,6 +19,8 @@ from uuid import uuid4
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from omnibase_core.errors import ModelOnexError
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -191,7 +193,9 @@ class TestEventBusRegistryErrorIntegration:
         """Test that registry raises EventBusRegistryError on duplicate registration."""
 
         class MockEventBus:
-            async def publish_envelope(self, envelope: object, topic: str) -> None:
+            async def publish_envelope(
+                self, envelope: object, topic: str, *, key: bytes | None = None
+            ) -> None:
                 pass
 
         registry = RegistryEventBusBinding()
@@ -313,7 +317,9 @@ class TestEventBusRegistryErrorCorrelationId:
         """Test that duplicate registration error includes correlation_id."""
 
         class MockEventBus:
-            async def publish_envelope(self, envelope: object, topic: str) -> None:
+            async def publish_envelope(
+                self, envelope: object, topic: str, *, key: bytes | None = None
+            ) -> None:
                 pass
 
         registry = RegistryEventBusBinding()

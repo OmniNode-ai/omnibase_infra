@@ -4,22 +4,26 @@
 
 This handler processes NodeRegistrationAcked commands from nodes that
 are acknowledging their registration. It queries the projection for
-current state and emits appropriate events.
+current state, delegates the decision to RegistrationReducerService.decide_ack(),
+and applies the returned events, intents, and snapshot publishing.
 
-Processing Logic:
-    If state is AWAITING_ACK:
-        - Emit NodeRegistrationAckReceived
-        - Emit NodeBecameActive (with capabilities snapshot)
-        - Set liveness_deadline for heartbeat monitoring
+The handler owns I/O (projection read, snapshot publish); the reducer
+service owns pure decision logic (state checks, event/intent construction).
 
-    If state is ACTIVE:
+Processing Logic (delegated to RegistrationReducerService.decide_ack):
+    If state is AWAITING_ACK or ACCEPTED:
+        - Emit NodeRegistrationAckReceived + NodeBecameActive
+        - Emit PostgreSQL UPDATE intent (state -> ACTIVE)
+        - Publish ACTIVE snapshot (best-effort)
+
+    If state is ACTIVE or ACK_RECEIVED:
         - Duplicate ack, no-op (idempotent)
 
-    If state is terminal (REJECTED, LIVENESS_EXPIRED):
-        - Ack is too late, no-op (log warning)
+    If state is terminal (REJECTED, LIVENESS_EXPIRED, ACK_TIMED_OUT):
+        - Ack is too late, no-op
 
     If no projection exists:
-        - Ack for unknown node, no-op (log warning)
+        - Ack for unknown node, no-op
 
 Coroutine Safety:
     This handler is stateless and coroutine-safe for concurrent calls
@@ -36,7 +40,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, Final
 from uuid import UUID, uuid4
 
@@ -45,6 +49,7 @@ from pydantic import BaseModel
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -52,17 +57,14 @@ from omnibase_infra.enums import (
     EnumRegistrationState,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
-from omnibase_infra.models.projection.model_registration_projection import (
-    ModelRegistrationProjection,
-)
 from omnibase_infra.models.registration.commands.model_node_registration_acked import (
     ModelNodeRegistrationAcked,
 )
-from omnibase_infra.models.registration.events.model_node_became_active import (
-    ModelNodeBecameActive,
+from omnibase_infra.nodes.node_registration_orchestrator.services import (
+    RegistrationReducerService,
 )
-from omnibase_infra.models.registration.events.model_node_registration_ack_received import (
-    ModelNodeRegistrationAckReceived,
+from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registration import (
+    ModelPayloadPostgresUpdateRegistration,
 )
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
@@ -178,7 +180,8 @@ class HandlerNodeRegistrationAcked:
 
     Attributes:
         _projection_reader: Reader for registration projection state.
-        _liveness_interval_seconds: Interval for liveness deadline.
+        _reducer: Pure-function reducer service for ack decision logic.
+        _snapshot_publisher: Optional snapshot publisher for ACTIVE transitions.
 
     Example:
         >>> from datetime import datetime, UTC
@@ -191,7 +194,7 @@ class HandlerNodeRegistrationAcked:
         ...     envelope_timestamp=now,
         ...     correlation_id=uuid4(),
         ... )
-        >>> handler = HandlerNodeRegistrationAcked(projection_reader)
+        >>> handler = HandlerNodeRegistrationAcked(projection_reader, reducer)
         >>> output = await handler.handle(envelope)
         >>> # output.events may contain (AckReceived, BecameActive)
     """
@@ -199,25 +202,22 @@ class HandlerNodeRegistrationAcked:
     def __init__(
         self,
         projection_reader: ProjectionReaderRegistration,
-        liveness_interval_seconds: int | None = None,
+        reducer: RegistrationReducerService,
         snapshot_publisher: ProtocolSnapshotPublisher | None = None,
     ) -> None:
-        """Initialize the handler with a projection reader.
+        """Initialize the handler with a projection reader and reducer service.
 
         Args:
             projection_reader: Reader for querying registration projection state.
-            liveness_interval_seconds: Interval for liveness deadline calculation.
-                Pass None to use environment variable ONEX_LIVENESS_INTERVAL_SECONDS
-                or default (60 seconds).
+            reducer: Pure-function reducer service that encapsulates the ack
+                decision logic (state checks, event/intent creation).
             snapshot_publisher: Optional ProtocolSnapshotPublisher for publishing
                 compacted snapshots to Kafka after ACTIVE transition. If None,
                 snapshot publishing is skipped. Snapshot publishing is always
                 best-effort and non-blocking.
         """
         self._projection_reader = projection_reader
-        self._liveness_interval_seconds = get_liveness_interval_seconds(
-            liveness_interval_seconds
-        )
+        self._reducer = reducer
         self._snapshot_publisher = snapshot_publisher
 
     @property
@@ -311,201 +311,100 @@ class HandlerNodeRegistrationAcked:
             correlation_id=correlation_id,
         )
 
-        # Decision: Is this a valid ack?
-        if projection is None:
-            # Unknown node - ack for non-existent registration
-            logger.warning(
-                "Received ack for unknown node",
-                extra={
-                    "node_id": str(node_id),
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return self._create_output(ctx=ctx, events=())
+        # Delegate state decision to the pure-function reducer service
+        decision = self._reducer.decide_ack(
+            projection=projection,
+            command=command,
+            correlation_id=correlation_id,
+            now=now,
+        )
 
-        current_state = projection.current_state
-
-        # Check if ack is valid for current state
-        if current_state in {
-            EnumRegistrationState.ACCEPTED,
-            EnumRegistrationState.AWAITING_ACK,
-        }:
-            # Valid ack - emit events
-            events = self._emit_activation_events(
-                command=command,
-                now=now,
-                correlation_id=correlation_id,
-                projection=projection,
-            )
-
-            # Publish snapshot after ACTIVE transition (best-effort, non-blocking).
-            # We construct a synthetic projection with the post-transition state
-            # (ACTIVE) because `projection` still holds the pre-transition state
-            # (AWAITING_ACK/ACCEPTED). The emitted events will transition the
-            # state in the reducer, but the snapshot must reflect the target state.
-            if self._snapshot_publisher is not None:
-                try:
-                    active_projection = projection.model_copy(
-                        update={
-                            "current_state": EnumRegistrationState.ACTIVE,
-                            "updated_at": now,
-                        }
-                    )
-                    # node_name is None because neither the ack command nor the
-                    # registration projection carries a human-readable node name.
-                    # The introspection event that originally provided the name is
-                    # not available in this handler's scope.  The snapshot consumer
-                    # can resolve it via entity_id if needed.
-                    await self._snapshot_publisher.publish_from_projection(
-                        active_projection,
-                        node_name=None,
-                        correlation_id=correlation_id,
-                    )
-                except Exception as snap_err:
-                    logger.warning(
-                        "Snapshot publish failed (non-blocking): %s",
-                        sanitize_error_message(snap_err),
-                        extra={
-                            "node_id": str(node_id),
-                            "correlation_id": str(correlation_id),
-                            "error_type": type(snap_err).__name__,
-                        },
-                    )
-
-            return self._create_output(ctx=ctx, events=tuple(events))
-
-        # Handle other states
-        if current_state in {
-            EnumRegistrationState.ACK_RECEIVED,
-            EnumRegistrationState.ACTIVE,
-        }:
-            # Duplicate ack - idempotent no-op
+        if decision.action == "no_op":
             logger.debug(
-                "Duplicate ack received, ignoring",
+                "ACK decision: no_op",
                 extra={
                     "node_id": str(node_id),
-                    "current_state": str(current_state),
+                    "reason": decision.reason,
                     "correlation_id": str(correlation_id),
                 },
             )
             return self._create_output(ctx=ctx, events=())
 
-        if current_state == EnumRegistrationState.PENDING_REGISTRATION:
-            # Ack too early - not yet accepted
-            logger.warning(
-                "Ack received before registration accepted",
-                extra={
-                    "node_id": str(node_id),
-                    "current_state": str(current_state),
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return self._create_output(ctx=ctx, events=())
+        # Publish snapshot after ACTIVE transition (best-effort, non-blocking).
+        # We construct a synthetic projection with the post-transition state
+        # (ACTIVE) because `projection` still holds the pre-transition state
+        # (AWAITING_ACK/ACCEPTED). The emitted events will transition the
+        # state in the reducer, but the snapshot must reflect the target state.
+        #
+        # We also extract reducer-calculated fields (e.g. liveness_deadline)
+        # from the update intent so the snapshot stays consistent with the
+        # state that will be persisted by the effect layer.
+        if (
+            self._snapshot_publisher is not None
+            and projection is not None
+            and decision.new_state == EnumRegistrationState.ACTIVE
+        ):
+            try:
+                # Build the base update dict with mandatory fields.
+                snapshot_update: dict[str, object] = {
+                    "current_state": EnumRegistrationState.ACTIVE,
+                    "updated_at": now,
+                }
 
-        if current_state == EnumRegistrationState.ACK_TIMED_OUT:
-            # Ack too late - already timed out
-            logger.warning(
-                "Ack received after timeout",
-                extra={
-                    "node_id": str(node_id),
-                    "current_state": str(current_state),
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return self._create_output(ctx=ctx, events=())
+                # Extract reducer-calculated fields from the update intent.
+                # Don't assume intent ordering -- search for the correct type.
+                for intent in decision.intents:
+                    if isinstance(
+                        intent.payload, ModelPayloadPostgresUpdateRegistration
+                    ):
+                        updates = intent.payload.updates
+                        if hasattr(updates, "liveness_deadline"):
+                            snapshot_update["liveness_deadline"] = (
+                                updates.liveness_deadline
+                            )
+                        break
 
-        if current_state.is_terminal():
-            # Terminal state - ack is meaningless
-            logger.warning(
-                "Ack received for node in terminal state",
-                extra={
-                    "node_id": str(node_id),
-                    "current_state": str(current_state),
-                    "correlation_id": str(correlation_id),
-                },
-            )
-            return self._create_output(ctx=ctx, events=())
+                active_projection = projection.model_copy(update=snapshot_update)
+                # node_name is None because neither the ack command nor the
+                # registration projection carries a human-readable node name.
+                # The introspection event that originally provided the name is
+                # not available in this handler's scope.  The snapshot consumer
+                # can resolve it via entity_id if needed.
+                await self._snapshot_publisher.publish_from_projection(
+                    active_projection,
+                    node_name=None,
+                    correlation_id=correlation_id,
+                )
+            except Exception as snap_err:
+                logger.warning(
+                    "Snapshot publish failed (non-blocking): %s",
+                    sanitize_error_message(snap_err),
+                    extra={
+                        "node_id": str(node_id),
+                        "correlation_id": str(correlation_id),
+                        "error_type": type(snap_err).__name__,
+                    },
+                )
 
-        # Unexpected state - log and return empty
-        logger.warning(
-            "Ack received for node in unexpected state",
-            extra={
-                "node_id": str(node_id),
-                "current_state": str(current_state),
-                "correlation_id": str(correlation_id),
-            },
+        return self._create_output(
+            ctx=ctx, events=decision.events, intents=decision.intents
         )
-        return self._create_output(ctx=ctx, events=())
-
-    def _emit_activation_events(
-        self,
-        command: ModelNodeRegistrationAcked,
-        now: datetime,
-        correlation_id: UUID,
-        projection: ModelRegistrationProjection,
-    ) -> list[BaseModel]:
-        """Emit events for successful registration acknowledgment.
-
-        Creates and returns the events that represent the node becoming
-        active after successful ack.
-
-        Args:
-            command: The registration ack command.
-            now: Current time for liveness deadline calculation.
-            correlation_id: Correlation ID for tracing.
-            projection: Current projection state (for capabilities).
-
-        Returns:
-            List containing [NodeRegistrationAckReceived, NodeBecameActive].
-        """
-
-        node_id = command.node_id
-        liveness_deadline = now + timedelta(seconds=self._liveness_interval_seconds)
-
-        # Event 1: Ack received
-        ack_received = ModelNodeRegistrationAckReceived(
-            entity_id=node_id,
-            node_id=node_id,
-            correlation_id=correlation_id,
-            causation_id=command.command_id,
-            emitted_at=now,  # Use injected time for consistency
-            liveness_deadline=liveness_deadline,
-        )
-
-        # Event 2: Node became active
-        became_active = ModelNodeBecameActive(
-            entity_id=node_id,
-            node_id=node_id,
-            correlation_id=correlation_id,
-            causation_id=command.command_id,
-            emitted_at=now,  # Use injected time for consistency
-            capabilities=projection.capabilities,
-        )
-
-        logger.info(
-            "Emitting activation events",
-            extra={
-                "node_id": str(node_id),
-                "liveness_deadline": liveness_deadline.isoformat(),
-                "correlation_id": str(correlation_id),
-            },
-        )
-
-        return [ack_received, became_active]
 
     def _create_output(
         self,
         ctx: OutputContext,
         events: tuple[BaseModel, ...],
+        intents: tuple[ModelIntent, ...] = (),
     ) -> ModelHandlerOutput[object]:
-        """Create a ModelHandlerOutput with the given events.
+        """Create a ModelHandlerOutput with the given events and intents.
 
         Args:
             ctx: Output context containing envelope, correlation_id, now, start_time.
             events: Tuple of events to include in the output.
+            intents: Tuple of intents for the effect layer (default empty).
 
         Returns:
-            ModelHandlerOutput with the provided events and metadata.
+            ModelHandlerOutput with the provided events, intents, and metadata.
         """
         processing_time_ms = (time.perf_counter() - ctx.start_time) * 1000
         return ModelHandlerOutput(
@@ -514,7 +413,7 @@ class HandlerNodeRegistrationAcked:
             handler_id=self.handler_id,
             node_kind=self.node_kind,
             events=events,
-            intents=(),
+            intents=intents,
             projections=(),
             result=None,
             processing_time_ms=processing_time_ms,

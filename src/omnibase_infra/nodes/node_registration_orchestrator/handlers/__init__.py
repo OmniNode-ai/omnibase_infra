@@ -32,9 +32,7 @@ Related Tickets:
 """
 
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_heartbeat import (
-    DEFAULT_LIVENESS_WINDOW_SECONDS,
     HandlerNodeHeartbeat,
-    ModelHeartbeatHandlerResult,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected import (
     HandlerNodeIntrospected,
@@ -51,12 +49,10 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_runtim
 
 __all__: list[str] = [
     "DEFAULT_LIVENESS_INTERVAL_SECONDS",
-    "DEFAULT_LIVENESS_WINDOW_SECONDS",
     "ENV_LIVENESS_INTERVAL_SECONDS",
     "HandlerNodeHeartbeat",
     "HandlerNodeIntrospected",
     "HandlerNodeRegistrationAcked",
     "HandlerRuntimeTick",
-    "ModelHeartbeatHandlerResult",
     "get_liveness_interval_seconds",
 ]

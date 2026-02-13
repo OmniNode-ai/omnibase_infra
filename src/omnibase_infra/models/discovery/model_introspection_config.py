@@ -92,6 +92,10 @@ class ModelIntrospectionConfig(BaseModel):
         request_introspection_topic: Topic for receiving introspection requests.
             Defaults to SUFFIX_REQUEST_INTROSPECTION (onex.cmd.platform.request-introspection.v1).
             ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).
+        registration_accepted_topic: Topic for registration acceptance events.
+            The mixin subscribes to this to emit ACK commands in response.
+            Defaults to "onex.evt.platform.node-registration-accepted.v1".
+            ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).
         contract: Optional typed contract model for capability extraction.
             When provided, MixinNodeIntrospection extracts contract_capabilities
             using ContractCapabilityExtractor. None for legacy nodes.
@@ -218,6 +222,13 @@ class ModelIntrospectionConfig(BaseModel):
         "ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).",
     )
 
+    registration_accepted_topic: str = Field(
+        default="onex.evt.platform.node-registration-accepted.v1",
+        description="Topic for registration acceptance events. "
+        "The mixin subscribes to this to emit ACK commands. "
+        "ONEX topics (onex.*) require version suffix (.v1, .v2, etc.).",
+    )
+
     contract: ModelContractBase | None = Field(
         default=None,
         description="Typed contract model for capability extraction. "
@@ -258,7 +269,10 @@ class ModelIntrospectionConfig(BaseModel):
             ) from None
 
     @field_validator(
-        "introspection_topic", "heartbeat_topic", "request_introspection_topic"
+        "introspection_topic",
+        "heartbeat_topic",
+        "request_introspection_topic",
+        "registration_accepted_topic",
     )
     @classmethod
     def validate_topic_name(cls, v: str) -> str:

@@ -29,7 +29,6 @@ Event Handlers (all co-located in handlers/ subdirectory):
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
-        ModelHeartbeatHandlerResult,
     )
     ```
 

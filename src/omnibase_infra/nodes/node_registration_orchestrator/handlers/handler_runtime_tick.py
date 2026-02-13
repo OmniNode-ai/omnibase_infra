@@ -4,23 +4,21 @@
 
 This handler processes RuntimeTick events from the runtime scheduler
 and detects overdue ack and liveness deadlines. It queries the projection
-for entities that need timeout events emitted.
+for entities that need timeout events emitted, then delegates the decision
+logic to RegistrationReducerService.decide_timeout().
 
 Detection Logic:
-    For Ack Timeout:
-        - Query projection for entities with overdue ack deadlines
-        - Use projection.needs_ack_timeout_event() for deduplication
-        - Emit NodeRegistrationAckTimedOut for each overdue entity
-
-    For Liveness Expiry:
-        - Query projection for entities with overdue liveness deadlines
-        - Use projection.needs_liveness_timeout_event() for deduplication
-        - Emit NodeLivenessExpired for each overdue entity
+    1. Query projection for overdue ack and liveness deadlines (I/O)
+    2. Pass overdue projections to RegistrationReducerService.decide_timeout()
+    3. The reducer decides which timeout events to emit (pure logic)
+    4. Publish tombstones for liveness-expired nodes (best-effort I/O)
 
 Deduplication (per C2 Durable Timeout Handling):
     The projection stores emission markers (ack_timeout_emitted_at,
     liveness_timeout_emitted_at) to prevent duplicate timeout events.
     The projection reader filters out already-emitted timeouts.
+    The reducer performs a secondary deduplication check via
+    projection.needs_*_timeout_event() helpers.
 
 Coroutine Safety:
     This handler is stateless and coroutine-safe for concurrent calls
@@ -37,11 +35,8 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
-
-from pydantic import BaseModel
+from uuid import uuid4
 
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
@@ -55,8 +50,11 @@ from omnibase_infra.errors import ModelInfraErrorContext
 from omnibase_infra.models.registration.events.model_node_liveness_expired import (
     ModelNodeLivenessExpired,
 )
-from omnibase_infra.models.registration.events.model_node_registration_ack_timed_out import (
-    ModelNodeRegistrationAckTimedOut,
+from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_context import (
+    ModelReducerContext,
+)
+from omnibase_infra.nodes.node_registration_orchestrator.services import (
+    RegistrationReducerService,
 )
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
@@ -78,15 +76,16 @@ logger = logging.getLogger(__name__)
 class HandlerRuntimeTick:
     """Handler for RuntimeTick - timeout detection.
 
-    This handler processes runtime tick events and scans the projection
-    for entities with overdue deadlines. It emits timeout events for
-    entities that need them, using projection emission markers for
-    deduplication.
+    This handler processes runtime tick events by querying projections for
+    overdue deadlines and delegating timeout decision logic to the
+    RegistrationReducerService. The handler owns I/O (projection reads,
+    snapshot tombstones); the reducer owns pure decision logic.
 
     Timeout Detection:
-        The handler performs two scans on each tick:
-        1. Ack timeout: Find entities waiting for ack past their deadline
-        2. Liveness expiry: Find active entities past their liveness deadline
+        On each tick the handler:
+        1. Queries overdue ack and liveness projections (I/O)
+        2. Calls reducer.decide_timeout() for event/intent decisions (pure)
+        3. Publishes tombstones for liveness-expired nodes (best-effort I/O)
 
     Projection Queries:
         Uses dedicated projection reader methods that filter by:
@@ -96,6 +95,8 @@ class HandlerRuntimeTick:
 
     Attributes:
         _projection_reader: Reader for registration projection state.
+        _reducer: Pure-function service for timeout decisions.
+        _snapshot_publisher: Optional publisher for tombstone snapshots.
 
     Example:
         >>> from datetime import datetime, timezone
@@ -112,12 +113,8 @@ class HandlerRuntimeTick:
         ...     scheduler_id="runtime-001",
         ...     tick_interval_ms=1000,
         ... )
-        >>> handler = HandlerRuntimeTick(projection_reader)
-        >>> events = await handler.handle(
-        ...     tick=runtime_tick,
-        ...     now=tick_time,
-        ...     correlation_id=runtime_tick.correlation_id,
-        ... )
+        >>> handler = HandlerRuntimeTick(projection_reader, reducer)
+        >>> output = await handler.handle(envelope)
         >>> # Output events use injected `now` for emitted_at:
         >>> # ModelNodeRegistrationAckTimedOut(emitted_at=tick_time, ...)
         >>> # ModelNodeLivenessExpired(emitted_at=tick_time, last_heartbeat_at=<datetime|None>, ...)
@@ -127,17 +124,20 @@ class HandlerRuntimeTick:
     def __init__(
         self,
         projection_reader: ProjectionReaderRegistration,
+        reducer: RegistrationReducerService,
         snapshot_publisher: ProtocolSnapshotPublisher | None = None,
     ) -> None:
-        """Initialize the handler with a projection reader.
+        """Initialize the handler with a projection reader and reducer service.
 
         Args:
             projection_reader: Reader for querying registration projection state.
+            reducer: Pure-function service for timeout decision logic.
             snapshot_publisher: Optional ProtocolSnapshotPublisher for publishing
                 tombstones when nodes expire. If None, tombstone publishing is skipped.
                 Tombstone publishing is always best-effort and non-blocking.
         """
         self._projection_reader = projection_reader
+        self._reducer = reducer
         self._snapshot_publisher = snapshot_publisher
 
     @property
@@ -185,9 +185,8 @@ class HandlerRuntimeTick:
     ) -> ModelHandlerOutput[object]:
         """Process runtime tick and emit timeout events.
 
-        Scans the projection for overdue deadlines and emits appropriate
-        timeout events. Uses projection emission markers to prevent
-        duplicate timeout events.
+        Queries projections for overdue deadlines, delegates decision logic
+        to the reducer, and publishes tombstones for expired nodes.
 
         Args:
             envelope: The event envelope containing the runtime tick event.
@@ -216,148 +215,13 @@ class HandlerRuntimeTick:
         )
         validate_timezone_aware_with_context(now, ctx)
 
-        events: list[BaseModel] = []
-
-        # 1. Check for overdue ack deadlines
-        ack_timeout_events = await self._check_ack_timeouts(
-            tick=tick,
+        # 1. Query overdue projections (I/O stays in handler)
+        overdue_ack = await self._projection_reader.get_overdue_ack_registrations(
             now=now,
+            domain="registration",
             correlation_id=correlation_id,
         )
-        events.extend(ack_timeout_events)
-
-        # 2. Check for overdue liveness deadlines
-        liveness_expired_events = await self._check_liveness_expiry(
-            tick=tick,
-            now=now,
-            correlation_id=correlation_id,
-        )
-        events.extend(liveness_expired_events)
-
-        if events:
-            logger.info(
-                "RuntimeTick processed, emitting timeout events",
-                extra={
-                    "tick_id": str(tick.tick_id),
-                    "ack_timeout_count": len(ack_timeout_events),
-                    "liveness_expired_count": len(liveness_expired_events),
-                    "correlation_id": str(correlation_id),
-                },
-            )
-
-        # Wrap result in ModelHandlerOutput
-        processing_time_ms = (time.perf_counter() - start_time) * 1000
-        return ModelHandlerOutput(
-            input_envelope_id=envelope.envelope_id,
-            correlation_id=correlation_id,
-            handler_id=self.handler_id,
-            node_kind=self.node_kind,
-            events=tuple(events),
-            intents=(),
-            projections=(),
-            result=None,
-            processing_time_ms=processing_time_ms,
-            timestamp=now,
-        )
-
-    async def _check_ack_timeouts(
-        self,
-        tick: ModelRuntimeTick,
-        now: datetime,
-        correlation_id: UUID,
-    ) -> list[ModelNodeRegistrationAckTimedOut]:
-        """Check for entities with overdue ack deadlines.
-
-        Queries the projection for entities in ack-waiting states
-        (ACCEPTED, AWAITING_ACK) that have passed their ack_deadline
-        and haven't had a timeout event emitted yet.
-
-        Args:
-            tick: The runtime tick event (used for causation_id).
-            now: Current time for deadline comparison.
-            correlation_id: Correlation ID for tracing.
-
-        Returns:
-            List of ModelNodeRegistrationAckTimedOut events to emit.
-        """
-        # Query projection for overdue ack registrations
-        overdue_projections = (
-            await self._projection_reader.get_overdue_ack_registrations(
-                now=now,
-                domain="registration",
-                correlation_id=correlation_id,
-            )
-        )
-
-        events: list[ModelNodeRegistrationAckTimedOut] = []
-
-        for projection in overdue_projections:
-            # Double-check with projection helper (defensive)
-            if not projection.needs_ack_timeout_event(now):
-                continue
-
-            # Type narrowing: needs_ack_timeout_event() guarantees ack_deadline is not None
-            ack_deadline = projection.ack_deadline
-            if ack_deadline is None:
-                # This should never happen - needs_ack_timeout_event() ensures ack_deadline
-                # is not None. Log and skip this projection as a defensive measure.
-                logger.warning(
-                    "Skipping projection with None ack_deadline despite passing "
-                    "needs_ack_timeout_event() check - this indicates a bug",
-                    extra={
-                        "entity_id": str(projection.entity_id),
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-                continue
-
-            event = ModelNodeRegistrationAckTimedOut(
-                entity_id=projection.entity_id,
-                node_id=projection.entity_id,
-                correlation_id=correlation_id,
-                causation_id=tick.tick_id,  # Link to triggering tick
-                emitted_at=now,
-                deadline_at=ack_deadline,
-            )
-            events.append(event)
-
-            logger.info(
-                "Detected ack timeout",
-                extra={
-                    "node_id": str(projection.entity_id),
-                    "ack_deadline": (
-                        projection.ack_deadline.isoformat()
-                        if projection.ack_deadline
-                        else None
-                    ),
-                    "correlation_id": str(correlation_id),
-                },
-            )
-
-        return events
-
-    async def _check_liveness_expiry(
-        self,
-        tick: ModelRuntimeTick,
-        now: datetime,
-        correlation_id: UUID,
-    ) -> list[ModelNodeLivenessExpired]:
-        """Check for active entities with overdue liveness deadlines.
-
-        Queries the projection for ACTIVE entities that have passed
-        their liveness_deadline and haven't had a liveness expired
-        event emitted yet.
-
-        Args:
-            tick: The runtime tick event (used for causation_id).
-            now: Current time for deadline comparison.
-            correlation_id: Correlation ID for tracing.
-
-        Returns:
-            List of ModelNodeLivenessExpired events to emit.
-        """
-        # Query projection for overdue liveness registrations
-        overdue_projections = (
+        overdue_liveness = (
             await self._projection_reader.get_overdue_liveness_registrations(
                 now=now,
                 domain="registration",
@@ -365,57 +229,60 @@ class HandlerRuntimeTick:
             )
         )
 
-        events: list[ModelNodeLivenessExpired] = []
+        # 2. Reducer decides what events to emit
+        reducer_ctx = ModelReducerContext(
+            correlation_id=correlation_id,
+            now=now,
+            tick_id=tick.tick_id,
+        )
+        decision = self._reducer.decide_timeout(
+            overdue_ack_projections=overdue_ack,
+            overdue_liveness_projections=overdue_liveness,
+            ctx=reducer_ctx,
+        )
 
-        for projection in overdue_projections:
-            # Double-check with projection helper (defensive)
-            if not projection.needs_liveness_timeout_event(now):
-                continue
-
-            # last_heartbeat_at semantic: None if no heartbeats were ever received.
-            # This is intentionally different from registered_at - registration is
-            # not a heartbeat. The projection tracks this field explicitly.
-            event = ModelNodeLivenessExpired(
-                entity_id=projection.entity_id,
-                node_id=projection.entity_id,
-                correlation_id=correlation_id,
-                causation_id=tick.tick_id,  # Link to triggering tick
-                emitted_at=now,
-                last_heartbeat_at=projection.last_heartbeat_at,
-            )
-            events.append(event)
-
+        if decision.action == "emit" and decision.events:
             logger.info(
-                "Detected liveness expiry",
+                "RuntimeTick processed, emitting timeout events",
                 extra={
-                    "node_id": str(projection.entity_id),
-                    "liveness_deadline": (
-                        projection.liveness_deadline.isoformat()
-                        if projection.liveness_deadline
-                        else None
-                    ),
+                    "tick_id": str(tick.tick_id),
+                    "event_count": len(decision.events),
                     "correlation_id": str(correlation_id),
                 },
             )
 
-            # Publish tombstone to snapshot topic (best-effort, non-blocking)
-            if self._snapshot_publisher is not None:
-                try:
-                    await self._snapshot_publisher.delete_snapshot(
-                        str(projection.entity_id), projection.domain
-                    )
-                except Exception as snap_err:
-                    logger.warning(
-                        "Snapshot tombstone publish failed (non-blocking): %s",
-                        sanitize_error_message(snap_err),
-                        extra={
-                            "node_id": str(projection.entity_id),
-                            "correlation_id": str(correlation_id),
-                            "error_type": type(snap_err).__name__,
-                        },
-                    )
+        # 3. Publish tombstones for liveness-expired nodes (best-effort)
+        if self._snapshot_publisher is not None:
+            for event in decision.events:
+                if isinstance(event, ModelNodeLivenessExpired):
+                    try:
+                        await self._snapshot_publisher.delete_snapshot(
+                            str(event.entity_id), "registration"
+                        )
+                    except Exception as snap_err:
+                        logger.warning(
+                            "Snapshot tombstone publish failed (non-blocking): %s",
+                            sanitize_error_message(snap_err),
+                            extra={
+                                "node_id": str(event.entity_id),
+                                "correlation_id": str(correlation_id),
+                                "error_type": type(snap_err).__name__,
+                            },
+                        )
 
-        return events
+        processing_time_ms = (time.perf_counter() - start_time) * 1000
+        return ModelHandlerOutput(
+            input_envelope_id=envelope.envelope_id,
+            correlation_id=correlation_id,
+            handler_id=self.handler_id,
+            node_kind=self.node_kind,
+            events=decision.events,
+            intents=decision.intents,
+            projections=(),
+            result=None,
+            processing_time_ms=processing_time_ms,
+            timestamp=now,
+        )
 
 
 __all__: list[str] = ["HandlerRuntimeTick"]

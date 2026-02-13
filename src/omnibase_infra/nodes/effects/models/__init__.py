@@ -9,6 +9,7 @@ Available Models:
     - ModelEffectIdempotencyConfig: Configuration for effect idempotency store
     - ModelLlmFunctionCall: Concrete function invocation from an LLM
     - ModelLlmFunctionDef: JSON-Schema description of a callable function
+    - ModelLlmInferenceResponse: LLM inference output with text XOR tool_calls invariant
     - ModelLlmToolCall: Tool call returned by the model
     - ModelLlmToolChoice: Caller constraint on tool selection behaviour
     - ModelLlmToolDefinition: Tool definition sent in request payload
@@ -18,7 +19,7 @@ Available Models:
 
 Note:
     ModelBackendResult canonical location is omnibase_infra.models.model_backend_result.
-    Re-exported here for backward compatibility.
+    Re-exported here for ergonomic access.
 """
 
 from omnibase_infra.models.model_backend_result import ModelBackendResult
@@ -30,6 +31,9 @@ from omnibase_infra.nodes.effects.models.model_llm_function_call import (
 )
 from omnibase_infra.nodes.effects.models.model_llm_function_def import (
     ModelLlmFunctionDef,
+)
+from omnibase_infra.nodes.effects.models.model_llm_inference_response import (
+    ModelLlmInferenceResponse,
 )
 from omnibase_infra.nodes.effects.models.model_llm_tool_call import ModelLlmToolCall
 from omnibase_infra.nodes.effects.models.model_llm_tool_choice import (
@@ -51,6 +55,7 @@ __all__ = [
     "ModelEffectIdempotencyConfig",
     "ModelLlmFunctionCall",
     "ModelLlmFunctionDef",
+    "ModelLlmInferenceResponse",
     "ModelLlmToolCall",
     "ModelLlmToolChoice",
     "ModelLlmToolDefinition",

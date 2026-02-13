@@ -3,7 +3,8 @@
 """Unit tests for HandlerNodeIntrospected.
 
 Tests validate:
-- Handler emits NodeRegistrationInitiated for new nodes
+- Handler delegates to RegistrationReducerService for decisions
+- Handler emits registration events for new nodes
 - Handler skips registration for nodes in blocking states
 - Handler re-initiates registration for nodes in retriable states
 - Handler returns intents for effect layer execution (OMN-2050)
@@ -15,6 +16,7 @@ G2 Acceptance Criteria:
 
 Related Tickets:
     - OMN-888 (C1): Registration Orchestrator
+    - OMN-889 (D1): Registration Reducer
     - G2: Test orchestrator logic
     - OMN-2050: Wire MessageDispatchEngine as single consumer path
 """
@@ -43,6 +45,9 @@ from omnibase_infra.models.registration.events import ModelNodeRegistrationIniti
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected import (
     HandlerNodeIntrospected,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.services import (
+    RegistrationReducerService,
+)
 from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
     ModelPayloadConsulRegister,
 )
@@ -62,6 +67,17 @@ def create_mock_projection_reader() -> AsyncMock:
     mock = AsyncMock(spec=ProjectionReaderRegistration)
     mock.get_entity_state = AsyncMock(return_value=None)
     return mock
+
+
+def create_default_reducer(
+    ack_timeout_seconds: float = 30.0,
+    consul_enabled: bool = True,
+) -> RegistrationReducerService:
+    """Create a RegistrationReducerService with test defaults."""
+    return RegistrationReducerService(
+        ack_timeout_seconds=ack_timeout_seconds,
+        consul_enabled=consul_enabled,
+    )
 
 
 def create_projection(
@@ -125,7 +141,7 @@ class TestHandlerNodeIntrospectedEmitsInitiated:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None  # New node
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         node_id = uuid4()
         correlation_id = uuid4()
@@ -140,7 +156,7 @@ class TestHandlerNodeIntrospectedEmitsInitiated:
         # Assert
         assert isinstance(output, ModelHandlerOutput)
         assert output.handler_id == "handler-node-introspected"
-        assert len(output.events) == 1
+        assert len(output.events) == 2
         initiated = output.events[0]
         assert isinstance(initiated, ModelNodeRegistrationInitiated)
         assert initiated.node_id == node_id
@@ -159,14 +175,14 @@ class TestHandlerNodeIntrospectedEmitsInitiated:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
         introspection_event = create_introspection_event()
         envelope = create_envelope(introspection_event, now=TEST_NOW)
 
         output = await handler.handle(envelope)
 
         assert isinstance(output, ModelHandlerOutput)
-        assert len(output.events) == 1
+        assert len(output.events) == 2
         assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
 
@@ -188,7 +204,7 @@ class TestHandlerNodeIntrospectedSkipsBlockingStates:
         )
         mock_reader.get_entity_state.return_value = active_projection
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
         introspection_event = create_introspection_event(node_id=node_id)
         envelope = create_envelope(introspection_event, now=TEST_NOW)
 
@@ -223,7 +239,7 @@ class TestHandlerNodeIntrospectedSkipsBlockingStates:
         )
         mock_reader.get_entity_state.return_value = blocking_projection
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
         introspection_event = create_introspection_event(node_id=node_id)
         envelope = create_envelope(introspection_event, now=TEST_NOW)
 
@@ -260,14 +276,14 @@ class TestHandlerNodeIntrospectedRetriableStates:
         )
         mock_reader.get_entity_state.return_value = retriable_projection
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
         introspection_event = create_introspection_event(node_id=node_id)
         envelope = create_envelope(introspection_event, now=TEST_NOW)
 
         output = await handler.handle(envelope)
 
         assert isinstance(output, ModelHandlerOutput)
-        assert len(output.events) == 1
+        assert len(output.events) == 2
         assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
         assert output.events[0].node_id == node_id
 
@@ -282,14 +298,14 @@ class TestHandlerNodeIntrospectedRetriableStates:
         )
         mock_reader.get_entity_state.return_value = expired_projection
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
         introspection_event = create_introspection_event(node_id=node_id)
         envelope = create_envelope(introspection_event, now=TEST_NOW)
 
         output = await handler.handle(envelope)
 
         assert isinstance(output, ModelHandlerOutput)
-        assert len(output.events) == 1
+        assert len(output.events) == 2
         assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
     @pytest.mark.asyncio
@@ -303,14 +319,14 @@ class TestHandlerNodeIntrospectedRetriableStates:
         )
         mock_reader.get_entity_state.return_value = rejected_projection
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
         introspection_event = create_introspection_event(node_id=node_id)
         envelope = create_envelope(introspection_event, now=TEST_NOW)
 
         output = await handler.handle(envelope)
 
         assert isinstance(output, ModelHandlerOutput)
-        assert len(output.events) == 1
+        assert len(output.events) == 2
         assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
     @pytest.mark.asyncio
@@ -324,14 +340,14 @@ class TestHandlerNodeIntrospectedRetriableStates:
         )
         mock_reader.get_entity_state.return_value = timed_out_projection
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
         introspection_event = create_introspection_event(node_id=node_id)
         envelope = create_envelope(introspection_event, now=TEST_NOW)
 
         output = await handler.handle(envelope)
 
         assert isinstance(output, ModelHandlerOutput)
-        assert len(output.events) == 1
+        assert len(output.events) == 2
         assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
 
 
@@ -344,7 +360,7 @@ class TestHandlerNodeIntrospectedEventFields:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         # Process same event twice
         introspection_event = create_introspection_event()
@@ -354,9 +370,9 @@ class TestHandlerNodeIntrospectedEventFields:
         output1 = await handler.handle(envelope1)
         output2 = await handler.handle(envelope2)
 
-        # Both should succeed
-        assert len(output1.events) == 1
-        assert len(output2.events) == 1
+        # Both should succeed (2 events each: initiated + accepted)
+        assert len(output1.events) == 2
+        assert len(output2.events) == 2
 
         # But registration attempt IDs should differ
         assert (
@@ -370,7 +386,7 @@ class TestHandlerNodeIntrospectedEventFields:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         introspection_correlation_id = uuid4()
         introspection_event = ModelNodeIntrospectionEvent(
@@ -383,7 +399,7 @@ class TestHandlerNodeIntrospectedEventFields:
 
         output = await handler.handle(envelope)
 
-        assert len(output.events) == 1
+        assert len(output.events) == 2
         # Causation should link to the introspection event's correlation ID
         assert output.events[0].causation_id == introspection_correlation_id
 
@@ -393,7 +409,7 @@ class TestHandlerNodeIntrospectedEventFields:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         node_id = uuid4()
         introspection_event = create_introspection_event(node_id=node_id)
@@ -401,7 +417,7 @@ class TestHandlerNodeIntrospectedEventFields:
 
         output = await handler.handle(envelope)
 
-        assert len(output.events) == 1
+        assert len(output.events) == 2
         assert output.events[0].entity_id == node_id
         assert output.events[0].node_id == node_id
         assert output.events[0].entity_id == output.events[0].node_id
@@ -416,7 +432,7 @@ class TestHandlerNodeIntrospectedProjectionQueries:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         node_id = uuid4()
         correlation_id = uuid4()
@@ -441,7 +457,7 @@ class TestHandlerNodeIntrospectedTimezoneValidation:
     async def test_raises_protocol_configuration_error_for_naive_datetime(self) -> None:
         """Test that handler raises ProtocolConfigurationError if envelope_timestamp is naive (no tzinfo)."""
         mock_reader = create_mock_projection_reader()
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         # Create a naive datetime (no timezone info)
         naive_now = datetime(2025, 1, 15, 12, 0, 0)  # No tzinfo!
@@ -462,7 +478,7 @@ class TestHandlerNodeIntrospectedTimezoneValidation:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         # Use timezone-aware datetime
         aware_now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
@@ -475,7 +491,9 @@ class TestHandlerNodeIntrospectedTimezoneValidation:
         output = await handler.handle(envelope)
 
         assert isinstance(output, ModelHandlerOutput)
-        assert len(output.events) == 1  # New node triggers registration
+        assert (
+            len(output.events) == 2
+        )  # New node triggers registration (initiated + accepted)
 
 
 class TestHandlerNodeIntrospectedIntents:
@@ -487,7 +505,7 @@ class TestHandlerNodeIntrospectedIntents:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None  # New node
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         node_id = uuid4()
         correlation_id = uuid4()
@@ -512,7 +530,7 @@ class TestHandlerNodeIntrospectedIntents:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         node_id = uuid4()
         correlation_id = uuid4()
@@ -539,9 +557,7 @@ class TestHandlerNodeIntrospectedIntents:
         record = postgres_payload.record.model_dump()
         assert record["entity_id"] == node_id
         assert record["domain"] == "registration"
-        assert (
-            record["current_state"] == EnumRegistrationState.PENDING_REGISTRATION.value
-        )
+        assert record["current_state"] == EnumRegistrationState.AWAITING_ACK.value
         assert record["node_type"] == "effect"
 
         # Verify intent envelope
@@ -554,7 +570,7 @@ class TestHandlerNodeIntrospectedIntents:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         node_id = uuid4()
         introspection_event = create_introspection_event(node_id=node_id)
@@ -588,7 +604,7 @@ class TestHandlerNodeIntrospectedIntents:
             state=EnumRegistrationState.ACTIVE,
         )
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         introspection_event = create_introspection_event(node_id=node_id)
         envelope = create_envelope(introspection_event, now=TEST_NOW)
@@ -610,7 +626,7 @@ class TestHandlerNodeIntrospectedIntents:
             state=EnumRegistrationState.LIVENESS_EXPIRED,
         )
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         introspection_event = create_introspection_event(node_id=node_id)
         envelope = create_envelope(introspection_event, now=TEST_NOW)
@@ -618,7 +634,7 @@ class TestHandlerNodeIntrospectedIntents:
         output = await handler.handle(envelope)
 
         # Should have events and intents for re-registration
-        assert len(output.events) == 1
+        assert len(output.events) == 2
         assert isinstance(output.events[0], ModelNodeRegistrationInitiated)
         assert len(output.intents) == 2
 
@@ -629,10 +645,8 @@ class TestHandlerNodeIntrospectedIntents:
         mock_reader.get_entity_state.return_value = None
 
         ack_timeout_seconds = 60.0
-        handler = HandlerNodeIntrospected(
-            mock_reader,
-            ack_timeout_seconds=ack_timeout_seconds,
-        )
+        reducer = create_default_reducer(ack_timeout_seconds=ack_timeout_seconds)
+        handler = HandlerNodeIntrospected(mock_reader, reducer)
 
         introspection_event = create_introspection_event()
         envelope = create_envelope(introspection_event, now=TEST_NOW)
@@ -657,7 +671,7 @@ class TestHandlerNodeIntrospectedIntents:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         introspection_event = create_introspection_event()
         envelope = create_envelope(introspection_event, now=TEST_NOW)
@@ -679,7 +693,7 @@ class TestHandlerNodeIntrospectedIntents:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         capabilities = ModelNodeCapabilities(
             postgres=True,
@@ -709,91 +723,67 @@ class TestHandlerNodeIntrospectedIntents:
 
 
 class TestSanitizeToolName:
-    """Test MCP tool name sanitization for Consul tags."""
+    """Test MCP tool name sanitization for Consul tags.
+
+    _sanitize_tool_name is now a static method on RegistrationReducerService.
+    These tests validate the method via the reducer service directly.
+    """
 
     def test_sanitize_simple_name(self) -> None:
         """Test that simple names pass through with lowercase."""
-        mock_reader = create_mock_projection_reader()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
-        result = handler._sanitize_tool_name("MyTool")
+        result = RegistrationReducerService._sanitize_tool_name("MyTool")
         assert result == "mytool"
 
     def test_sanitize_spaces_become_dashes(self) -> None:
         """Test that spaces are replaced with dashes."""
-        mock_reader = create_mock_projection_reader()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
-        result = handler._sanitize_tool_name("My Cool Tool")
+        result = RegistrationReducerService._sanitize_tool_name("My Cool Tool")
         assert result == "my-cool-tool"
 
     def test_sanitize_special_chars_become_dashes(self) -> None:
         """Test that special characters are replaced with dashes."""
-        mock_reader = create_mock_projection_reader()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
-        result = handler._sanitize_tool_name("Tool (v2.0) - Beta!")
+        result = RegistrationReducerService._sanitize_tool_name("Tool (v2.0) - Beta!")
         assert result == "tool-v2-0-beta"
 
     def test_sanitize_multiple_special_chars_collapse(self) -> None:
         """Test that multiple consecutive special chars become single dash."""
-        mock_reader = create_mock_projection_reader()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
-        result = handler._sanitize_tool_name("Tool   &&&   Name")
+        result = RegistrationReducerService._sanitize_tool_name("Tool   &&&   Name")
         assert result == "tool-name"
 
     def test_sanitize_leading_trailing_dashes_removed(self) -> None:
         """Test that leading/trailing dashes are removed."""
-        mock_reader = create_mock_projection_reader()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
-        result = handler._sanitize_tool_name("  @@@Tool Name###  ")
+        result = RegistrationReducerService._sanitize_tool_name("  @@@Tool Name###  ")
         assert result == "tool-name"
 
     def test_sanitize_preserves_alphanumeric(self) -> None:
         """Test that alphanumeric characters are preserved."""
-        mock_reader = create_mock_projection_reader()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
-        result = handler._sanitize_tool_name("Tool123Name456")
+        result = RegistrationReducerService._sanitize_tool_name("Tool123Name456")
         assert result == "tool123name456"
 
     def test_sanitize_truncates_to_63_chars(self) -> None:
         """Test that result is truncated to 63 characters (DNS label limit)."""
-        mock_reader = create_mock_projection_reader()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
         long_name = "a" * 100  # 100 characters
-        result = handler._sanitize_tool_name(long_name)
+        result = RegistrationReducerService._sanitize_tool_name(long_name)
         assert len(result) == 63
         assert result == "a" * 63
 
     def test_sanitize_free_form_description(self) -> None:
         """Test sanitization of typical free-form description text."""
-        mock_reader = create_mock_projection_reader()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
         # Typical description that might come from metadata.description
         description = "Node Registration Orchestrator (handles service discovery)"
-        result = handler._sanitize_tool_name(description)
+        result = RegistrationReducerService._sanitize_tool_name(description)
         assert result == "node-registration-orchestrator-handles-service-discovery"
 
     def test_sanitize_unicode_chars(self) -> None:
         """Test that unicode characters are replaced with dashes."""
-        mock_reader = create_mock_projection_reader()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
-        result = handler._sanitize_tool_name("Tool\u2019s Name")  # Smart apostrophe
+        result = RegistrationReducerService._sanitize_tool_name(
+            "Tool\u2019s Name"
+        )  # Smart apostrophe
         assert result == "tool-s-name"
 
     def test_sanitize_empty_after_sanitization(self) -> None:
         """Test handling of names that become empty after sanitization."""
-        mock_reader = create_mock_projection_reader()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
-
         # All special characters
-        result = handler._sanitize_tool_name("@#$%^&*()")
+        result = RegistrationReducerService._sanitize_tool_name("@#$%^&*()")
         assert result == ""
 
 
@@ -811,7 +801,7 @@ class TestCapabilitiesJsonbCompatibility:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         capabilities = ModelNodeCapabilities(
             postgres=True,
@@ -856,7 +846,7 @@ class TestCapabilitiesJsonbCompatibility:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        handler = HandlerNodeIntrospected(mock_reader)
+        handler = HandlerNodeIntrospected(mock_reader, create_default_reducer())
 
         introspection_event = create_introspection_event()
         envelope = create_envelope(introspection_event, now=TEST_NOW)
