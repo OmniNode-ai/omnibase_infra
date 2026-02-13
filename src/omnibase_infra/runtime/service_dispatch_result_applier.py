@@ -63,6 +63,13 @@ class DispatchResultApplier:
     2. Publishes output events to the configured output topic
     3. Records dispatch metrics for observability
 
+    Partition Key Extraction:
+        When publishing output events, the applier extracts a partition key
+        from the event payload to ensure per-entity ordering in Kafka. The
+        key is resolved from the first available field in precedence order:
+        ``entity_id > node_id > session_id > correlation_id``. If no key
+        field is found, the event is published without a key (round-robin).
+
     Thread Safety:
         This class is designed for single-threaded async use. The underlying
         event bus implementations handle their own thread safety.
@@ -107,6 +114,31 @@ class DispatchResultApplier:
         self._output_topic = output_topic
         self._intent_executor = intent_executor
         self._clock = clock or (lambda: datetime.now(UTC))
+
+    def _resolve_partition_key(self, event: BaseModel) -> bytes | None:
+        """Extract partition key from event model for per-entity ordering.
+
+        Scans the event model for well-known identity fields and returns the
+        first non-None value encoded as UTF-8 bytes. This key is intended for
+        Kafka partition assignment so that all events for the same entity land
+        on the same partition, preserving per-entity ordering.
+
+        Precedence: ``entity_id > node_id > session_id > correlation_id``.
+
+        Returns ``None`` (round-robin) if no key field is found on the event.
+
+        Args:
+            event: The output event payload (a Pydantic BaseModel).
+
+        Returns:
+            UTF-8 encoded partition key bytes, or ``None`` if no identity
+            field is present on the event model.
+        """
+        for attr in ("entity_id", "node_id", "session_id", "correlation_id"):
+            value = getattr(event, attr, None)
+            if value is not None:
+                return str(value).encode("utf-8")
+        return None
 
     async def apply(
         self,
@@ -215,9 +247,21 @@ class DispatchResultApplier:
                         envelope_timestamp=self._clock(),
                     )
 
+                    # Extract partition key for per-entity ordering.
+                    partition_key = self._resolve_partition_key(output_event)
+                    if partition_key is not None:
+                        logger.debug(
+                            "Resolved partition key for output event "
+                            "(type=%s, key=%s, correlation_id=%s)",
+                            type(output_event).__name__,
+                            partition_key.decode("utf-8"),
+                            str(effective_correlation_id),
+                        )
+
                     await self._event_bus.publish_envelope(
                         envelope=output_envelope,
                         topic=self._output_topic,
+                        key=partition_key,
                     )
 
                     logger.info(
@@ -228,6 +272,11 @@ class DispatchResultApplier:
                             "output_event_type": type(output_event).__name__,
                             "envelope_id": str(output_envelope.envelope_id),
                             "dispatcher_id": result.dispatcher_id,
+                            "partition_key": (
+                                partition_key.decode("utf-8")
+                                if partition_key is not None
+                                else None
+                            ),
                         },
                     )
                 except Exception as pub_err:

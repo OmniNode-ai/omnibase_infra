@@ -35,6 +35,9 @@ from omnibase_infra.models.registration.model_node_introspection_event import (
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected import (
     HandlerNodeIntrospected,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.services import (
+    RegistrationReducerService,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -85,9 +88,13 @@ class TestRegistrationHandlerInterface:
         mock_reader = MagicMock()
         mock_reader.get_entity_state = AsyncMock(return_value=None)
 
+        reducer = RegistrationReducerService(
+            ack_timeout_seconds=30.0,
+            consul_enabled=False,  # Avoid consul intent generation
+        )
         handler = HandlerNodeIntrospected(
             projection_reader=mock_reader,
-            consul_enabled=False,  # Avoid consul intent generation
+            reducer=reducer,
         )
 
         # Build a valid envelope with ModelNodeIntrospectionEvent payload
@@ -150,7 +157,11 @@ class TestRegistrationHandlerProperties:
         message_types, matching the contract.yaml declaration.
         """
         mock_reader = MagicMock()
-        handler = HandlerNodeIntrospected(projection_reader=mock_reader)
+        reducer = RegistrationReducerService(ack_timeout_seconds=30.0)
+        handler = HandlerNodeIntrospected(
+            projection_reader=mock_reader,
+            reducer=reducer,
+        )
         assert "ModelNodeIntrospectionEvent" in handler.message_types
 
 

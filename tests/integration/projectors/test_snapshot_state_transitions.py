@@ -47,6 +47,9 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_r
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_runtime_tick import (
     HandlerRuntimeTick,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.services import (
+    RegistrationReducerService,
+)
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
@@ -124,6 +127,7 @@ class TestSnapshotStateTransitions:
 
         handler = HandlerNodeIntrospected(
             projection_reader=mock_reader,
+            reducer=RegistrationReducerService(),
         )
 
         # Create introspection event
@@ -149,8 +153,8 @@ class TestSnapshotStateTransitions:
         # Act
         output = await handler.handle(envelope)
 
-        # Assert - handler should emit registration initiated event
-        assert len(output.events) == 1
+        # Assert - handler should emit registration initiated + accepted events
+        assert len(output.events) == 2
 
         # Assert - handler emits 2 intents for effect layer execution
         assert len(output.intents) == 2
@@ -170,7 +174,7 @@ class TestSnapshotStateTransitions:
         # Verify the projection record in the intent payload
         record = postgres_intent.payload.record
         record_data = record.model_dump()
-        assert record_data["current_state"] == "pending_registration"
+        assert record_data["current_state"] == "awaiting_ack"
         assert record_data["entity_id"] == node_id
 
         # Find the consul register intent
@@ -221,8 +225,10 @@ class TestSnapshotStateTransitions:
 
         mock_reader = _create_mock_reader(entity_state=awaiting_projection)
 
+        reducer = RegistrationReducerService()
         handler = HandlerNodeRegistrationAcked(
             projection_reader=mock_reader,
+            reducer=reducer,
             snapshot_publisher=publisher,
         )
 
@@ -317,8 +323,10 @@ class TestSnapshotStateTransitions:
             return_value=[overdue_projection]
         )
 
+        reducer = RegistrationReducerService()
         handler = HandlerRuntimeTick(
             projection_reader=mock_reader,
+            reducer=reducer,
             snapshot_publisher=publisher,
         )
 

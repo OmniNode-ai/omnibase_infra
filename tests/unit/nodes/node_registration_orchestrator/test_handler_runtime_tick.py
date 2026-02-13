@@ -40,6 +40,9 @@ from omnibase_infra.models.registration.events import (
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_runtime_tick import (
     HandlerRuntimeTick,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.services import (
+    RegistrationReducerService,
+)
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
@@ -47,6 +50,9 @@ from omnibase_infra.runtime.models.model_runtime_tick import ModelRuntimeTick
 
 # Fixed test time for deterministic testing
 TEST_NOW = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
+
+# Default reducer for tests
+_DEFAULT_REDUCER = RegistrationReducerService()
 
 
 def create_mock_projection_reader() -> AsyncMock:
@@ -135,7 +141,7 @@ class TestHandlerRuntimeTickDetectsAckTimeout:
         mock_reader.get_overdue_ack_registrations.return_value = [overdue_projection]
         mock_reader.get_overdue_liveness_registrations.return_value = []
 
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
         tick = create_runtime_tick(now=TEST_NOW)
         envelope = create_envelope(
             tick, now=TEST_NOW, correlation_id=tick.correlation_id
@@ -171,7 +177,7 @@ class TestHandlerRuntimeTickDetectsAckTimeout:
         )
         mock_reader.get_overdue_ack_registrations.return_value = [overdue_projection]
 
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
         tick = create_runtime_tick(now=TEST_NOW)
         envelope = create_envelope(
             tick, now=TEST_NOW, correlation_id=tick.correlation_id
@@ -198,7 +204,7 @@ class TestHandlerRuntimeTickDetectsAckTimeout:
         )
         mock_reader.get_overdue_ack_registrations.return_value = [overdue_projection]
 
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
         tick = create_runtime_tick(now=TEST_NOW)
         envelope = create_envelope(
             tick, now=TEST_NOW, correlation_id=tick.correlation_id
@@ -239,7 +245,7 @@ class TestHandlerRuntimeTickDeduplicatesTimeout:
         ]
         mock_reader.get_overdue_liveness_registrations.return_value = []
 
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
         tick = create_runtime_tick(now=TEST_NOW)
         envelope = create_envelope(
             tick, now=TEST_NOW, correlation_id=tick.correlation_id
@@ -268,7 +274,7 @@ class TestHandlerRuntimeTickDeduplicatesTimeout:
         )
         mock_reader.get_overdue_ack_registrations.return_value = [already_emitted]
 
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
         tick = create_runtime_tick(now=TEST_NOW)
         envelope = create_envelope(
             tick, now=TEST_NOW, correlation_id=tick.correlation_id
@@ -302,7 +308,7 @@ class TestHandlerRuntimeTickLivenessExpiry:
             overdue_projection
         ]
 
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
         tick = create_runtime_tick(now=TEST_NOW)
         envelope = create_envelope(
             tick, now=TEST_NOW, correlation_id=tick.correlation_id
@@ -340,7 +346,7 @@ class TestHandlerRuntimeTickLivenessExpiry:
         )
         mock_reader.get_overdue_liveness_registrations.return_value = [already_emitted]
 
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
         tick = create_runtime_tick(now=TEST_NOW)
         envelope = create_envelope(
             tick, now=TEST_NOW, correlation_id=tick.correlation_id
@@ -376,7 +382,7 @@ class TestHandlerRuntimeTickMultipleTimeouts:
         mock_reader.get_overdue_ack_registrations.return_value = projections
         mock_reader.get_overdue_liveness_registrations.return_value = []
 
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
         tick = create_runtime_tick(now=TEST_NOW)
         envelope = create_envelope(
             tick, now=TEST_NOW, correlation_id=tick.correlation_id
@@ -413,7 +419,7 @@ class TestHandlerRuntimeTickMultipleTimeouts:
         mock_reader.get_overdue_ack_registrations.return_value = [ack_overdue]
         mock_reader.get_overdue_liveness_registrations.return_value = [liveness_overdue]
 
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
         tick = create_runtime_tick(now=TEST_NOW)
         envelope = create_envelope(
             tick, now=TEST_NOW, correlation_id=tick.correlation_id
@@ -443,7 +449,7 @@ class TestHandlerRuntimeTickNoTimeouts:
         mock_reader.get_overdue_ack_registrations.return_value = []
         mock_reader.get_overdue_liveness_registrations.return_value = []
 
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
         tick = create_runtime_tick(now=TEST_NOW)
         envelope = create_envelope(
             tick, now=TEST_NOW, correlation_id=tick.correlation_id
@@ -466,7 +472,7 @@ class TestHandlerRuntimeTickInjectedNow:
         mock_reader.get_overdue_ack_registrations.return_value = []
         mock_reader.get_overdue_liveness_registrations.return_value = []
 
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
 
         custom_now = datetime(2025, 6, 15, 10, 30, 0, tzinfo=UTC)
         correlation_id = uuid4()
@@ -489,7 +495,7 @@ class TestHandlerRuntimeTickInjectedNow:
         mock_reader.get_overdue_ack_registrations.return_value = []
         mock_reader.get_overdue_liveness_registrations.return_value = []
 
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
 
         custom_now = datetime(2025, 6, 15, 10, 30, 0, tzinfo=UTC)
         correlation_id = uuid4()
@@ -520,7 +526,7 @@ class TestHandlerRuntimeTickInjectedNow:
         )
         mock_reader.get_overdue_ack_registrations.return_value = [overdue_projection]
 
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
         tick = create_runtime_tick(now=custom_now)
         envelope = create_envelope(
             tick, now=custom_now, correlation_id=tick.correlation_id
@@ -542,7 +548,7 @@ class TestHandlerRuntimeTickTimezoneValidation:
     async def test_raises_protocol_configuration_error_for_naive_datetime(self) -> None:
         """Test that handler raises ProtocolConfigurationError if envelope timestamp is naive."""
         mock_reader = create_mock_projection_reader()
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
 
         # Create a naive datetime (no timezone info)
         naive_now = datetime(2025, 1, 15, 12, 0, 0)  # No tzinfo!
@@ -563,7 +569,7 @@ class TestHandlerRuntimeTickTimezoneValidation:
         mock_reader.get_overdue_ack_registrations.return_value = []
         mock_reader.get_overdue_liveness_registrations.return_value = []
 
-        handler = HandlerRuntimeTick(mock_reader)
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
 
         # Use timezone-aware datetime
         aware_now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)

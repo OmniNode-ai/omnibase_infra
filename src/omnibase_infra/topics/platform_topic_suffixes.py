@@ -62,6 +62,16 @@ Published when a node responds to an introspection request. Contains node
 capabilities, supported operations, and current state.
 """
 
+SUFFIX_REGISTRY_REQUEST_INTROSPECTION: str = (
+    "onex.evt.platform.registry-request-introspection.v1"
+)
+"""Topic suffix for registry-initiated introspection request events.
+
+Published when the registry requests introspection from nodes during the
+registration workflow. The registration orchestrator subscribes to this topic
+to trigger node registration processing.
+"""
+
 SUFFIX_NODE_HEARTBEAT: str = "onex.evt.platform.node-heartbeat.v1"
 """Topic suffix for node heartbeat events.
 
@@ -114,6 +124,14 @@ SUFFIX_CONTRACT_DEREGISTERED: str = "onex.evt.platform.contract-deregistered.v1"
 Published when a node contract is deregistered from the runtime.
 """
 
+# Registration ACK commands
+SUFFIX_NODE_REGISTRATION_ACKED: str = "onex.cmd.platform.node-registration-acked.v1"
+"""Topic suffix for node registration ACK commands.
+
+Published by a node after it receives a registration-accepted event,
+confirming that the node acknowledges successful registration.
+"""
+
 # =============================================================================
 # PLATFORM TOPIC SPEC REGISTRY
 # =============================================================================
@@ -134,6 +152,7 @@ def _snapshot_kafka_config() -> dict[str, str]:
 ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_INTROSPECTION, partitions=6),
+    ModelTopicSpec(suffix=SUFFIX_REGISTRY_REQUEST_INTROSPECTION, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_HEARTBEAT, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_REQUEST_INTROSPECTION, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_FSM_STATE_TRANSITIONS, partitions=6),
@@ -145,6 +164,7 @@ ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ),
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_REGISTERED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_DEREGISTERED, partitions=6),
+    ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACKED, partitions=6),
 )
 """Complete tuple of all platform topic specs with per-topic configuration.
 

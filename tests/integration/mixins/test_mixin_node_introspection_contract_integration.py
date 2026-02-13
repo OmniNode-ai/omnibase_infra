@@ -89,6 +89,8 @@ class MockEventBus:
         self,
         envelope: BaseModel,
         topic: str,
+        *,
+        key: bytes | None = None,
     ) -> None:
         """Mock publish_envelope method.
 
@@ -97,6 +99,7 @@ class MockEventBus:
                 since all event envelopes are Pydantic models. May be wrapped
                 in ModelEventEnvelope.
             topic: Event topic.
+            key: Optional partition key for per-entity ordering.
         """
         # Handle ModelEventEnvelope wrapping - extract payload for storage
         if isinstance(envelope, ModelEventEnvelope):

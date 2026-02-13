@@ -45,6 +45,9 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_r
     HandlerNodeRegistrationAcked,
     get_liveness_interval_seconds,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.services import (
+    RegistrationReducerService,
+)
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
 )
@@ -54,6 +57,15 @@ TEST_NOW = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 # Alias for test readability (uses the constant from the handler module)
 TEST_DEFAULT_LIVENESS_INTERVAL = DEFAULT_LIVENESS_INTERVAL_SECONDS
+
+
+def _default_reducer(
+    liveness_interval_seconds: int = DEFAULT_LIVENESS_INTERVAL_SECONDS,
+) -> RegistrationReducerService:
+    """Create a RegistrationReducerService with default test configuration."""
+    return RegistrationReducerService(
+        liveness_interval_seconds=liveness_interval_seconds,
+    )
 
 
 def create_mock_projection_reader() -> AsyncMock:
@@ -131,7 +143,7 @@ class TestHandlerAckedEmitsActiveEvents:
         )
         mock_reader.get_entity_state.return_value = awaiting_projection
 
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        handler = HandlerNodeRegistrationAcked(mock_reader, _default_reducer())
         correlation_id = uuid4()
         ack_command = ModelNodeRegistrationAcked(
             node_id=node_id,
@@ -187,7 +199,7 @@ class TestHandlerAckedEmitsActiveEvents:
         )
         mock_reader.get_entity_state.return_value = accepted_projection
 
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        handler = HandlerNodeRegistrationAcked(mock_reader, _default_reducer())
         ack_command = create_ack_command(node_id)
 
         envelope = create_envelope(ack_command, TEST_NOW, uuid4())
@@ -218,7 +230,7 @@ class TestHandlerAckedIgnoresDuplicate:
         )
         mock_reader.get_entity_state.return_value = active_projection
 
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        handler = HandlerNodeRegistrationAcked(mock_reader, _default_reducer())
         ack_command = create_ack_command(node_id)
 
         # Act
@@ -241,7 +253,7 @@ class TestHandlerAckedIgnoresDuplicate:
         )
         mock_reader.get_entity_state.return_value = ack_received_projection
 
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        handler = HandlerNodeRegistrationAcked(mock_reader, _default_reducer())
         ack_command = create_ack_command(node_id)
 
         envelope = create_envelope(ack_command, TEST_NOW, uuid4())
@@ -260,7 +272,7 @@ class TestHandlerAckedUnknownNode:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None  # Unknown node
 
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        handler = HandlerNodeRegistrationAcked(mock_reader, _default_reducer())
         ack_command = create_ack_command(uuid4())
 
         envelope = create_envelope(ack_command, TEST_NOW, uuid4())
@@ -285,7 +297,7 @@ class TestHandlerAckedPendingState:
         )
         mock_reader.get_entity_state.return_value = pending_projection
 
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        handler = HandlerNodeRegistrationAcked(mock_reader, _default_reducer())
         ack_command = create_ack_command(node_id)
 
         envelope = create_envelope(ack_command, TEST_NOW, uuid4())
@@ -321,7 +333,7 @@ class TestHandlerAckedTerminalStates:
         )
         mock_reader.get_entity_state.return_value = terminal_projection
 
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        handler = HandlerNodeRegistrationAcked(mock_reader, _default_reducer())
         ack_command = create_ack_command(node_id)
 
         envelope = create_envelope(ack_command, TEST_NOW, uuid4())
@@ -345,7 +357,7 @@ class TestHandlerAckedTerminalStates:
         )
         mock_reader.get_entity_state.return_value = timed_out_projection
 
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        handler = HandlerNodeRegistrationAcked(mock_reader, _default_reducer())
         ack_command = create_ack_command(node_id)
 
         envelope = create_envelope(ack_command, TEST_NOW, uuid4())
@@ -371,7 +383,7 @@ class TestHandlerAckedLivenessDeadline:
         )
         mock_reader.get_entity_state.return_value = awaiting_projection
 
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        handler = HandlerNodeRegistrationAcked(mock_reader, _default_reducer())
         ack_command = create_ack_command(node_id)
 
         custom_now = datetime(2025, 6, 15, 10, 30, 0, tzinfo=UTC)
@@ -400,11 +412,10 @@ class TestHandlerAckedLivenessDeadline:
         )
         mock_reader.get_entity_state.return_value = awaiting_projection
 
-        # Create handler with custom liveness interval
+        # Create handler with custom liveness interval via reducer
         custom_interval = 120  # 2 minutes
-        handler = HandlerNodeRegistrationAcked(
-            mock_reader, liveness_interval_seconds=custom_interval
-        )
+        reducer = _default_reducer(liveness_interval_seconds=custom_interval)
+        handler = HandlerNodeRegistrationAcked(mock_reader, reducer)
         ack_command = create_ack_command(node_id)
 
         envelope = create_envelope(ack_command, TEST_NOW, uuid4())
@@ -441,7 +452,7 @@ class TestHandlerAckedCapabilitiesSnapshot:
         )
         mock_reader.get_entity_state.return_value = awaiting_projection
 
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        handler = HandlerNodeRegistrationAcked(mock_reader, _default_reducer())
         ack_command = create_ack_command(node_id)
 
         envelope = create_envelope(ack_command, TEST_NOW, uuid4())
@@ -475,7 +486,7 @@ class TestHandlerAckedEventCausation:
         )
         mock_reader.get_entity_state.return_value = awaiting_projection
 
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        handler = HandlerNodeRegistrationAcked(mock_reader, _default_reducer())
         ack_command = create_ack_command(node_id)
 
         envelope = create_envelope(ack_command, TEST_NOW, uuid4())
@@ -498,7 +509,7 @@ class TestHandlerAckedProjectionQueries:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        handler = HandlerNodeRegistrationAcked(mock_reader, _default_reducer())
 
         node_id = uuid4()
         correlation_id = uuid4()
@@ -576,18 +587,19 @@ class TestGetLivenessIntervalSeconds:
         assert ENV_LIVENESS_INTERVAL_SECONDS in str(exc_info.value)
         assert "not_a_number" in str(exc_info.value)
 
-    def test_handler_uses_get_liveness_interval_internally(
+    def test_get_liveness_interval_resolves_env_var(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test that handler respects env var when no explicit value provided."""
+        """Test that get_liveness_interval_seconds resolves from env var."""
         monkeypatch.setenv(ENV_LIVENESS_INTERVAL_SECONDS, "300")
-        mock_reader = create_mock_projection_reader()
 
-        # Create handler without explicit liveness_interval_seconds
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        # The function should resolve from env var
+        interval = get_liveness_interval_seconds()
+        assert interval == 300
 
-        # Handler should use the value from env var (resolved via get_liveness_interval_seconds)
-        assert handler._liveness_interval_seconds == 300
+        # This value can be used to create a reducer
+        reducer = RegistrationReducerService(liveness_interval_seconds=interval)
+        assert reducer._liveness_interval_seconds == 300
 
 
 class TestHandlerAckedTimezoneValidation:
@@ -597,7 +609,7 @@ class TestHandlerAckedTimezoneValidation:
     async def test_raises_protocol_configuration_error_for_naive_datetime(self) -> None:
         """Test that handler raises ProtocolConfigurationError if envelope_timestamp is naive (no tzinfo)."""
         mock_reader = create_mock_projection_reader()
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        handler = HandlerNodeRegistrationAcked(mock_reader, _default_reducer())
 
         # Create a naive datetime (no timezone info)
         naive_now = datetime(2025, 1, 15, 12, 0, 0)  # No tzinfo!
@@ -620,7 +632,7 @@ class TestHandlerAckedTimezoneValidation:
         mock_reader = create_mock_projection_reader()
         mock_reader.get_entity_state.return_value = None
 
-        handler = HandlerNodeRegistrationAcked(mock_reader)
+        handler = HandlerNodeRegistrationAcked(mock_reader, _default_reducer())
 
         # Use timezone-aware datetime
         aware_now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)

@@ -49,8 +49,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
-    DEFAULT_LIVENESS_WINDOW_SECONDS,
+from omnibase_infra.nodes.node_registration_orchestrator.services import (
+    RegistrationReducerService,
 )
 
 # =============================================================================
@@ -123,12 +123,13 @@ def heartbeat_handler(
 ) -> HandlerNodeHeartbeat:
     """Function-scoped HandlerNodeHeartbeat instance.
 
-    Creates a handler with the default liveness window (DEFAULT_LIVENESS_WINDOW_SECONDS).
+    Creates a handler with the default liveness window (90.0 seconds).
     Suitable for most integration tests.
 
     Args:
         reader: ProjectionReaderRegistration fixture for state lookups.
-        projector: ProjectorShell fixture for state updates (contract-driven).
+        projector: ProjectorShell fixture (unused by intent-based handler,
+            but kept for test infrastructure compatibility).
 
     Returns:
         HandlerNodeHeartbeat configured with default liveness window.
@@ -137,10 +138,10 @@ def heartbeat_handler(
         HandlerNodeHeartbeat,
     )
 
+    reducer = RegistrationReducerService(liveness_window_seconds=90.0)
     return HandlerNodeHeartbeat(
         projection_reader=reader,
-        projector=projector,
-        liveness_window_seconds=DEFAULT_LIVENESS_WINDOW_SECONDS,
+        reducer=reducer,
     )
 
 
@@ -156,7 +157,8 @@ def heartbeat_handler_fast_window(
 
     Args:
         reader: ProjectionReaderRegistration fixture.
-        projector: ProjectorShell fixture (contract-driven).
+        projector: ProjectorShell fixture (unused by intent-based handler,
+            but kept for test infrastructure compatibility).
 
     Returns:
         HandlerNodeHeartbeat configured with 5-second liveness window.
@@ -165,8 +167,8 @@ def heartbeat_handler_fast_window(
         HandlerNodeHeartbeat,
     )
 
+    reducer = RegistrationReducerService(liveness_window_seconds=5.0)
     return HandlerNodeHeartbeat(
         projection_reader=reader,
-        projector=projector,
-        liveness_window_seconds=5.0,
+        reducer=reducer,
     )

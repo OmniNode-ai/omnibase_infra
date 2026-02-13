@@ -421,6 +421,9 @@ class TestSuite2RegistryDualRegistration:
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeIntrospected,
         )
+        from omnibase_infra.nodes.node_registration_orchestrator.services import (
+            RegistrationReducerService,
+        )
         from omnibase_infra.runtime.util_container_wiring import (
             get_projection_reader_from_container,
         )
@@ -428,8 +431,9 @@ class TestSuite2RegistryDualRegistration:
         # Get projection reader from container
         projection_reader = await get_projection_reader_from_container(wired_container)
 
-        # Create the handler with projection reader
-        handler = HandlerNodeIntrospected(projection_reader)
+        # Create the handler with projection reader and reducer
+        reducer = RegistrationReducerService()
+        handler = HandlerNodeIntrospected(projection_reader, reducer)
 
         # Create introspection event for a new node
         event: ModelNodeIntrospectionEvent = introspection_event_factory(
@@ -448,19 +452,25 @@ class TestSuite2RegistryDualRegistration:
         handler_output = await handler.handle(envelope)
         result_events = handler_output.events
 
-        # For a new node, handler should emit NodeRegistrationInitiated
-        assert len(result_events) == 1, (
-            f"Expected 1 event (NodeRegistrationInitiated), got {len(result_events)}"
+        # For a new node, handler should emit NodeRegistrationInitiated + Accepted
+        from omnibase_infra.models.registration.events.model_node_registration_accepted import (
+            ModelNodeRegistrationAccepted,
         )
-
-        # Verify the emitted event type
         from omnibase_infra.models.registration.events.model_node_registration_initiated import (
             ModelNodeRegistrationInitiated,
+        )
+
+        assert len(result_events) == 2, (
+            f"Expected 2 events (Initiated + Accepted), got {len(result_events)}"
         )
 
         assert isinstance(result_events[0], ModelNodeRegistrationInitiated), (
             f"Expected ModelNodeRegistrationInitiated, "
             f"got {type(result_events[0]).__name__}"
+        )
+        assert isinstance(result_events[1], ModelNodeRegistrationAccepted), (
+            f"Expected ModelNodeRegistrationAccepted, "
+            f"got {type(result_events[1]).__name__}"
         )
 
         # Verify event properties
@@ -784,6 +794,9 @@ class TestSuite2RegistryDualRegistration:
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeIntrospected,
         )
+        from omnibase_infra.nodes.node_registration_orchestrator.services import (
+            RegistrationReducerService,
+        )
         from omnibase_infra.runtime.util_container_wiring import (
             get_projection_reader_from_container,
         )
@@ -792,7 +805,8 @@ class TestSuite2RegistryDualRegistration:
         projection_reader = await get_projection_reader_from_container(wired_container)
 
         # Create the handler
-        handler = HandlerNodeIntrospected(projection_reader)
+        reducer = RegistrationReducerService()
+        handler = HandlerNodeIntrospected(projection_reader, reducer)
 
         # Pre-create a projection in PENDING_REGISTRATION state
         now = datetime.now(UTC)
@@ -871,6 +885,9 @@ class TestSuite2RegistryDualRegistration:
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeIntrospected,
         )
+        from omnibase_infra.nodes.node_registration_orchestrator.services import (
+            RegistrationReducerService,
+        )
         from omnibase_infra.runtime.util_container_wiring import (
             get_projection_reader_from_container,
         )
@@ -879,7 +896,8 @@ class TestSuite2RegistryDualRegistration:
         projection_reader = await get_projection_reader_from_container(wired_container)
 
         # Create the handler
-        handler = HandlerNodeIntrospected(projection_reader)
+        reducer = RegistrationReducerService()
+        handler = HandlerNodeIntrospected(projection_reader, reducer)
 
         # Pre-create a projection in LIVENESS_EXPIRED state (retriable)
         now = datetime.now(UTC)
@@ -920,9 +938,9 @@ class TestSuite2RegistryDualRegistration:
         handler_output = await handler.handle(envelope)
         result_events = handler_output.events
 
-        # For a node in retriable state, handler should emit NodeRegistrationInitiated
-        assert len(result_events) == 1, (
-            f"Expected 1 event for retriable state, got {len(result_events)}"
+        # For a node in retriable state, handler emits Initiated + Accepted
+        assert len(result_events) == 2, (
+            f"Expected 2 events for retriable state, got {len(result_events)}"
         )
         assert isinstance(result_events[0], ModelNodeRegistrationInitiated), (
             f"Expected ModelNodeRegistrationInitiated, "
@@ -1456,6 +1474,7 @@ class TestSuite4HeartbeatPublishing:
         real_projector: ProjectorShell,
         introspectable_test_node: ProtocolIntrospectableTestNode,
         unique_node_id: UUID,
+        postgres_pool: asyncpg.Pool,
     ) -> None:
         """Test heartbeat updates liveness_deadline in projection.
 
@@ -1468,10 +1487,14 @@ class TestSuite4HeartbeatPublishing:
         Steps:
             1. Create a projection record (simulating completed registration)
             2. Record the initial heartbeat time
-            3. Send a heartbeat event
-            4. Verify projection's last_heartbeat_at was updated
+            3. Send a heartbeat event through the handler
+            4. Execute the returned intents against PostgreSQL
+            5. Verify projection's last_heartbeat_at was updated
         """
         from omnibase_infra.models.projection import ModelRegistrationProjection
+        from omnibase_infra.runtime.intent_effects.intent_effect_postgres_update import (
+            IntentEffectPostgresUpdate,
+        )
 
         correlation_id = uuid4()
         now = datetime.now(UTC)
@@ -1529,7 +1552,15 @@ class TestSuite4HeartbeatPublishing:
             correlation_id=correlation_id,
             source="e2e-test",
         )
-        await heartbeat_handler.handle(heartbeat_envelope)
+        handler_output = await heartbeat_handler.handle(heartbeat_envelope)
+
+        # Execute the returned intents against PostgreSQL.
+        # The handler is pure compute (returns intents), so we must apply
+        # the UPDATE intents to the database manually, mirroring what the
+        # runtime's IntentExecutionRouter does in production.
+        intent_effect = IntentEffectPostgresUpdate(pool=postgres_pool)
+        for intent in handler_output.intents:
+            await intent_effect.execute(intent.payload, correlation_id=correlation_id)
 
         # Query the projection to verify heartbeat was processed
         projection = await projection_reader.get_entity_state(
@@ -1792,6 +1823,9 @@ class TestSuite5RegistryRecovery:
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerNodeIntrospected,
         )
+        from omnibase_infra.nodes.node_registration_orchestrator.services import (
+            RegistrationReducerService,
+        )
         from omnibase_infra.runtime.util_container_wiring import (
             get_projection_reader_from_container,
         )
@@ -1822,7 +1856,8 @@ class TestSuite5RegistryRecovery:
         handler_projection_reader = await get_projection_reader_from_container(
             wired_container
         )
-        handler = HandlerNodeIntrospected(handler_projection_reader)
+        reducer = RegistrationReducerService()
+        handler = HandlerNodeIntrospected(handler_projection_reader, reducer)
 
         event = introspection_event_factory(
             node_id=unique_node_id, correlation_id=unique_correlation_id

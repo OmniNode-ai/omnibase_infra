@@ -4,31 +4,18 @@
 
 This handler processes NodeIntrospectionEvent payloads from nodes announcing
 their presence in the cluster. It queries the projection for current state
-and returns intents for the effect layer to execute.
+and delegates the registration decision to RegistrationReducerService.
 
-Decision Logic:
-    The handler emits NodeRegistrationInitiated when:
-    - No projection exists (new node)
-    - State is LIVENESS_EXPIRED (re-registration after death)
-    - State is REJECTED (retry after rejection)
-    - State is ACK_TIMED_OUT (retry after timeout)
+Architecture:
+    This handler follows the Reducer-Authoritative pattern:
 
-    The handler does NOT emit when:
-    - State is PENDING_REGISTRATION (already processing)
-    - State is ACCEPTED (already accepted, waiting for ack)
-    - State is AWAITING_ACK (already waiting for ack)
-    - State is ACK_RECEIVED (already acknowledged)
-    - State is ACTIVE (already active - heartbeat should be used)
+    1. Handler reads projection state (direct I/O via ProjectionReaderRegistration)
+    2. Handler delegates decision to RegistrationReducerService (pure function)
+    3. Handler returns ModelHandlerOutput with events and intents from the decision
 
-Intent-Based Architecture (OMN-2050):
-    This handler performs no direct write I/O. Instead, it returns ModelIntent
-    objects that the effect layer executes via IntentExecutor:
-
-    - ModelPayloadPostgresUpsertRegistration: Persists the projection
-    - ModelPayloadConsulRegister: Registers with Consul for service discovery
-
-    Reads (projection state) are still direct I/O via ProjectionReaderRegistration.
-    Writes are delegated to the effect layer through intents.
+    The reducer service owns all state decision logic, intent construction,
+    and event creation. The handler is a thin coordination layer that bridges
+    the I/O boundary (projection read) with the pure decision function.
 
 Coroutine Safety:
     This handler is stateless and coroutine-safe for concurrent calls
@@ -36,6 +23,7 @@ Coroutine Safety:
 
 Related Tickets:
     - OMN-888 (C1): Registration Orchestrator
+    - OMN-889 (D1): Registration Reducer
     - OMN-944 (F1): Registration Projection Schema
     - OMN-892: 2-Way Registration E2E Integration Test
     - OMN-2050: Wire MessageDispatchEngine as single consumer path
@@ -44,37 +32,24 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-import re
 import time
-from datetime import datetime, timedelta
-from urllib.parse import urlparse
+from datetime import datetime
 from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
-    EnumRegistrationState,
 )
 from omnibase_infra.errors import ModelInfraErrorContext
-from omnibase_infra.models.registration.events.model_node_registration_initiated import (
-    ModelNodeRegistrationInitiated,
-)
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
-from omnibase_infra.nodes.node_registration_orchestrator.models.model_projection_record import (
-    ModelProjectionRecord,
-)
-from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
-    ModelPayloadConsulRegister,
-)
-from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
-    ModelPayloadPostgresUpsertRegistration,
+from omnibase_infra.nodes.node_registration_orchestrator.services import (
+    RegistrationReducerService,
 )
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,
@@ -84,54 +59,46 @@ from omnibase_infra.utils import validate_timezone_aware_with_context
 logger = logging.getLogger(__name__)
 
 
-# States that allow re-registration (node can try again)
-_RETRIABLE_STATES: frozenset[EnumRegistrationState] = frozenset(
-    {
-        EnumRegistrationState.LIVENESS_EXPIRED,
-        EnumRegistrationState.REJECTED,
-        EnumRegistrationState.ACK_TIMED_OUT,
-    }
-)
-
-# States that block new registration (already in progress or active)
-_BLOCKING_STATES: frozenset[EnumRegistrationState] = frozenset(
-    {
-        EnumRegistrationState.PENDING_REGISTRATION,
-        EnumRegistrationState.ACCEPTED,
-        EnumRegistrationState.AWAITING_ACK,
-        EnumRegistrationState.ACK_RECEIVED,
-        EnumRegistrationState.ACTIVE,
-    }
-)
-
-
 class HandlerNodeIntrospected:
     """Handler for NodeIntrospectionEvent - canonical registration trigger.
 
     This handler processes introspection events from nodes announcing
     themselves to the cluster. It queries the current projection state
-    and decides whether to initiate a new registration workflow.
+    and delegates the registration decision to RegistrationReducerService.
 
-    Intent-Based Output (OMN-2050):
-        When initiating registration, the handler returns ModelIntent objects
-        for the effect layer to execute:
+    Dependency Injection:
+        This handler receives its dependencies (``projection_reader`` and
+        ``reducer``) via constructor injection. The dependencies are wired
+        through the registry's ``handler_dependencies`` pattern in
+        ``RegistryInfraNodeRegistrationOrchestrator.create_registry()``.
 
-        1. Handler decides to initiate registration
-        2. Returns ModelPayloadPostgresUpsertRegistration intent
-        3. Returns ModelPayloadConsulRegister intent (if applicable)
-        4. Returns ModelNodeRegistrationInitiated event
+        This is an intentional design choice: handlers accept concrete
+        dependencies directly rather than resolving them from
+        ``ModelONEXContainer`` at runtime. This provides:
 
-        The effect layer (IntentExecutor) handles persistence and
-        service discovery registration. Reads are direct I/O; writes
-        are delegated through intents.
+        - **Type safety**: Constructor signatures are validated by mypy
+        - **Testability**: Tests inject mocks directly without container setup
+        - **Explicitness**: Each handler's dependencies are visible in its signature
 
-    State Decision Matrix:
+        See ``registry_infra_node_registration_orchestrator.py`` module docstring
+        section "Handler Dependency Map - Design Trade-off" for the full rationale.
+
+    Reducer-Authoritative Pattern:
+        All state decision logic, intent construction, and event creation
+        are encapsulated in RegistrationReducerService.decide_introspection().
+        This handler is responsible only for:
+
+        1. Reading projection state (I/O)
+        2. Calling the reducer service (pure function)
+        3. Returning the decision as ModelHandlerOutput
+
+    State Decision Matrix (owned by RegistrationReducerService):
         | Current State       | Action                          |
         |---------------------|----------------------------------|
-        | None (new node)     | Emit NodeRegistrationInitiated   |
-        | LIVENESS_EXPIRED    | Emit NodeRegistrationInitiated   |
-        | REJECTED            | Emit NodeRegistrationInitiated   |
-        | ACK_TIMED_OUT       | Emit NodeRegistrationInitiated   |
+        | None (new node)     | Emit registration events         |
+        | LIVENESS_EXPIRED    | Emit registration events         |
+        | REJECTED            | Emit registration events         |
+        | ACK_TIMED_OUT       | Emit registration events         |
         | PENDING_REGISTRATION| No-op (already processing)       |
         | ACCEPTED            | No-op (waiting for ack)          |
         | AWAITING_ACK        | No-op (waiting for ack)          |
@@ -140,52 +107,41 @@ class HandlerNodeIntrospected:
 
     Attributes:
         _projection_reader: Reader for registration projection state.
-        _ack_timeout_seconds: Timeout for node acknowledgment (default: 30s).
+        _reducer: Pure-function reducer service for registration decisions.
 
     Example:
         >>> from datetime import datetime, UTC
         >>> from uuid import uuid4
-        >>> handler = HandlerNodeIntrospected(projection_reader)
+        >>> reducer = RegistrationReducerService(ack_timeout_seconds=30.0)
+        >>> handler = HandlerNodeIntrospected(projection_reader, reducer)
         >>> output = await handler.handle(envelope)
         >>> # output.intents contains ModelIntent objects for effect layer
-        >>> # output.events contains ModelNodeRegistrationInitiated
+        >>> # output.events contains registration events from reducer decision
     """
-
-    # Default timeout for node acknowledgment (30 seconds)
-    DEFAULT_ACK_TIMEOUT_SECONDS: float = 30.0
 
     def __init__(
         self,
         projection_reader: ProjectionReaderRegistration,
-        ack_timeout_seconds: float | None = None,
-        consul_enabled: bool = True,
+        reducer: RegistrationReducerService,
     ) -> None:
-        """Initialize the handler with a projection reader.
+        """Initialize the handler with a projection reader and reducer service.
 
-        Direct injection is used here instead of resolving through
-        ``ModelONEXContainer`` because orchestrator handlers require
-        explicit reader dependencies for testability. This allows tests
-        to inject mock projection readers without wiring a full DI
-        container, and makes the handler's read-side dependency visible
-        in the constructor signature rather than hidden behind a
-        service-locator call.
+        Dependencies are injected via the registry's ``handler_dependencies``
+        pattern in ``RegistryInfraNodeRegistrationOrchestrator.create_registry()``.
+        The registry resolves dependencies from ``ModelONEXContainer`` and passes
+        them as explicit constructor arguments. This allows tests to inject mocks
+        directly without wiring a full DI container while maintaining container-
+        managed lifecycle in production.
 
         Args:
             projection_reader: Reader for querying registration projection state.
-            ack_timeout_seconds: Timeout in seconds for node acknowledgment.
-                Default: 30 seconds. Used to calculate ack_deadline in intents.
-            consul_enabled: Whether to emit consul.register intents.
-                Set to False when Consul is not configured to avoid
-                IntentExecutor raising RuntimeHostError for unregistered
-                intent types. Default: True.
+            reducer: Pure-function reducer service that encapsulates all
+                registration decision logic (state checks, event creation,
+                intent construction). Configuration such as ack_timeout_seconds
+                and consul_enabled lives on the reducer, not on this handler.
         """
         self._projection_reader = projection_reader
-        self._ack_timeout_seconds = (
-            ack_timeout_seconds
-            if ack_timeout_seconds is not None
-            else self.DEFAULT_ACK_TIMEOUT_SECONDS
-        )
-        self._consul_enabled = consul_enabled
+        self._reducer = reducer
 
     @property
     def handler_id(self) -> str:
@@ -226,52 +182,18 @@ class HandlerNodeIntrospected:
         """
         return EnumHandlerTypeCategory.EFFECT
 
-    def _sanitize_tool_name(self, name: str) -> str:
-        """Sanitize tool name for use in Consul tags.
-
-        Converts free-form text (like descriptions) into stable, Consul-safe
-        identifiers. This ensures consistent service discovery matching.
-
-        Transformation rules:
-            1. Convert to lowercase
-            2. Replace non-alphanumeric characters with dashes
-            3. Collapse multiple consecutive dashes into one
-            4. Remove leading/trailing dashes
-            5. Truncate to 63 characters (Consul tag limit)
-
-        Args:
-            name: Raw tool name or description text.
-
-        Returns:
-            Sanitized string suitable for Consul tags (lowercase, alphanumeric
-            with dashes, max 63 chars).
-
-        Example:
-            >>> handler._sanitize_tool_name("My Cool Tool (v2.0)")
-            'my-cool-tool-v2-0'
-            >>> handler._sanitize_tool_name("  Spaces & Special!Chars  ")
-            'spaces-special-chars'
-        """
-        # Replace non-alphanumeric with dash, lowercase
-        sanitized = re.sub(r"[^a-zA-Z0-9]+", "-", name.lower())
-        # Remove leading/trailing dashes
-        sanitized = sanitized.strip("-")
-        # Truncate to Consul tag limit (63 chars is common limit for DNS labels)
-        return sanitized[:63]
-
     async def handle(
         self,
         envelope: ModelEventEnvelope[ModelNodeIntrospectionEvent],
     ) -> ModelHandlerOutput[object]:
         """Process introspection event and decide on registration.
 
-        Queries the current projection state for the node and decides
-        whether to emit a NodeRegistrationInitiated event and intents
-        for the effect layer to execute.
+        Queries the current projection state for the node and delegates
+        the registration decision to RegistrationReducerService.
 
         Returns ModelHandlerOutput with:
-        - events: (ModelNodeRegistrationInitiated,) if registration initiated
-        - intents: (postgres_upsert_intent, consul_register_intent) for effect layer
+        - events: Registration events from reducer decision (if initiating)
+        - intents: Effect layer intents from reducer decision (if initiating)
 
         Args:
             envelope: Event envelope containing ModelNodeIntrospectionEvent payload.
@@ -308,47 +230,15 @@ class HandlerNodeIntrospected:
             correlation_id=correlation_id,
         )
 
-        # Decision: Should we initiate registration?
-        should_initiate = False
-        current_state: EnumRegistrationState | None = None
+        # Delegate decision to reducer service (pure function, no I/O)
+        decision = self._reducer.decide_introspection(
+            projection=projection,
+            event=event,
+            correlation_id=correlation_id,
+            now=now,
+        )
 
-        if projection is None:
-            # New node - initiate registration
-            should_initiate = True
-            logger.info(
-                "New node detected, initiating registration",
-                extra={
-                    "node_id": str(node_id),
-                    "correlation_id": str(correlation_id),
-                },
-            )
-        else:
-            current_state = projection.current_state
-
-            if current_state in _RETRIABLE_STATES:
-                # Retriable state - allow re-registration
-                should_initiate = True
-                logger.info(
-                    "Node in retriable state, initiating re-registration",
-                    extra={
-                        "node_id": str(node_id),
-                        "current_state": str(current_state),
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-            elif current_state in _BLOCKING_STATES:
-                # Blocking state - no-op
-                should_initiate = False
-                logger.debug(
-                    "Node in blocking state, skipping registration",
-                    extra={
-                        "node_id": str(node_id),
-                        "current_state": str(current_state),
-                        "correlation_id": str(correlation_id),
-                    },
-                )
-
-        if not should_initiate:
+        if decision.action == "no_op":
             processing_time_ms = (time.perf_counter() - start_time) * 1000
             return ModelHandlerOutput(
                 input_envelope_id=envelope.envelope_id,
@@ -363,142 +253,13 @@ class HandlerNodeIntrospected:
                 timestamp=now,
             )
 
-        # Build NodeRegistrationInitiated event
-        registration_attempt_id = uuid4()
-        initiated_event = ModelNodeRegistrationInitiated(
-            entity_id=node_id,
-            node_id=node_id,
-            correlation_id=correlation_id,
-            causation_id=event.correlation_id,  # Link to triggering event
-            emitted_at=now,  # Use injected time for consistency
-            registration_attempt_id=registration_attempt_id,
-        )
-
-        # Build intents for effect layer execution (OMN-2050)
-        intents: list[ModelIntent] = []
-
-        # Intent 1: PostgreSQL upsert registration
-        ack_deadline = now + timedelta(seconds=self._ack_timeout_seconds)
-        node_type = event.node_type
-        node_version = event.node_version
-        capabilities = event.declared_capabilities
-        # model_dump(mode="json") returns a JSON-safe dict (not a string).
-        # asyncpg's JSONB codec expects Python dicts — passing a JSON string
-        # would cause double-encoding (string wrapped in another JSON string).
-        # mode="json" guarantees only JSON-primitive types (str, int, float,
-        # bool, None, list, dict) — all of which asyncpg handles natively for
-        # JSONB columns. This dict is stored as an extra field in
-        # ModelProjectionRecord and passed through to asyncpg unchanged.
-        capabilities_data = capabilities.model_dump(mode="json") if capabilities else {}
-
-        # Pass native types directly to avoid fragile string round-trips.
-        # ModelProjectionRecord validates entity_id/current_state/domain/node_type
-        # explicitly; remaining columns are stored in the ``data`` dict field.
-        # IntentEffectPostgresUpsert merges ``data`` into the top-level record
-        # dict and _normalize_for_asyncpg() passes native UUID/datetime values
-        # through unchanged (no string parsing needed).
-        projection_record = ModelProjectionRecord(
-            entity_id=node_id,
-            domain="registration",
-            current_state=EnumRegistrationState.PENDING_REGISTRATION.value,
-            node_type=node_type.value,
-            data={
-                "node_version": str(node_version) if node_version is not None else None,
-                "capabilities": capabilities_data,
-                "contract_type": None,
-                "intent_types": [],
-                "protocols": [],
-                "capability_tags": [],
-                "contract_version": None,
-                "ack_deadline": ack_deadline,
-                "last_applied_event_id": registration_attempt_id,
-                "registered_at": now,
-                "updated_at": now,
-                "correlation_id": correlation_id,
-            },
-        )
-        postgres_payload = ModelPayloadPostgresUpsertRegistration(
-            correlation_id=correlation_id,
-            record=projection_record,
-        )
-
-        intents.append(
-            ModelIntent(
-                intent_type=postgres_payload.intent_type,
-                target=f"postgres://node_registrations/{node_id}",
-                payload=postgres_payload,
-            )
-        )
-
-        # Intent 2: Consul service registration (conditional on consul_enabled).
-        # When Consul is not configured, the IntentExecutor has no registered
-        # handler for "consul.register" and would raise RuntimeHostError,
-        # preventing Kafka offset commit and causing infinite redelivery.
-        if self._consul_enabled:
-            service_name = f"onex-{node_type.value}"
-            service_id = f"onex-{node_type.value}-{node_id}"
-
-            # Build tags
-            tags: list[str] = ["onex", f"node-type:{node_type.value}"]
-
-            # Add MCP tags for orchestrators with MCP config enabled
-            mcp_config = (
-                event.declared_capabilities.mcp
-                if event.declared_capabilities is not None
-                else None
-            )
-            if node_type.value == "orchestrator" and mcp_config is not None:
-                if mcp_config.expose:
-                    mcp_tool_name_raw = mcp_config.tool_name
-                    if not mcp_tool_name_raw:
-                        node_name = (
-                            event.metadata.description if event.metadata else None
-                        )
-                        mcp_tool_name_raw = node_name or service_name
-                    mcp_tool_name = self._sanitize_tool_name(mcp_tool_name_raw)
-                    tags.extend(["mcp-enabled", f"mcp-tool:{mcp_tool_name}"])
-
-            # Extract address and port from endpoints if available
-            address: str | None = None
-            port: int | None = None
-            endpoints = event.endpoints
-            if endpoints:
-                health_url = endpoints.get("health") or endpoints.get("api")
-                if health_url:
-                    try:
-                        parsed = urlparse(health_url)
-                        if parsed.hostname:
-                            address = parsed.hostname
-                        if parsed.port:
-                            port = parsed.port
-                    except ValueError:
-                        pass
-
-            consul_payload = ModelPayloadConsulRegister(
-                correlation_id=correlation_id,
-                service_id=service_id,
-                service_name=service_name,
-                tags=tags,
-                address=address,
-                port=port,
-            )
-
-            intents.append(
-                ModelIntent(
-                    intent_type=consul_payload.intent_type,
-                    target=f"consul://service/{service_name}",
-                    payload=consul_payload,
-                )
-            )
-
         logger.info(
-            "Emitting NodeRegistrationInitiated with %d intents",
-            len(intents),
+            "Emitting registration events with %d intents",
+            len(decision.intents),
             extra={
                 "node_id": str(node_id),
-                "registration_attempt_id": str(initiated_event.registration_attempt_id),
+                "intent_types": [i.intent_type for i in decision.intents],
                 "correlation_id": str(correlation_id),
-                "intent_types": [i.intent_type for i in intents],
             },
         )
 
@@ -508,8 +269,8 @@ class HandlerNodeIntrospected:
             correlation_id=correlation_id,
             handler_id=self.handler_id,
             node_kind=self.node_kind,
-            events=(initiated_event,),
-            intents=tuple(intents),
+            events=decision.events,
+            intents=decision.intents,
             projections=(),
             result=None,
             processing_time_ms=processing_time_ms,

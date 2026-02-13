@@ -97,13 +97,16 @@ class MockEventBus:
         self,
         envelope: BaseModel,
         topic: str,
+        *,
+        key: bytes | None = None,
     ) -> None:
         """Capture published event for later verification.
 
         Args:
             envelope: The event envelope/model being published.
                 Uses BaseModel for type safety.
-            topic: The topic to publish to
+            topic: The topic to publish to.
+            key: Optional partition key for per-entity ordering.
         """
         async with self._lock:
             self.published_events.append((topic, envelope))

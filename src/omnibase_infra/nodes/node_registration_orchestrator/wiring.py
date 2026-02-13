@@ -536,9 +536,29 @@ async def wire_registration_handlers(
             services_registered.append("ProjectorShell")
             logger.debug("Registered ProjectorShell in container")
 
+        from omnibase_infra.nodes.node_registration_orchestrator.services import (
+            RegistrationReducerService,
+        )
+
+        reducer = RegistrationReducerService(
+            liveness_interval_seconds=resolved_liveness_interval,
+            consul_enabled=consul_handler is not None,
+        )
+        await container.service_registry.register_instance(
+            interface=RegistrationReducerService,
+            instance=reducer,
+            scope=EnumInjectionScope.GLOBAL,
+            metadata={
+                "description": "Registration reducer service (pure-function decisions)",
+                "version": str(semver_default),
+            },
+        )
+        services_registered.append("RegistrationReducerService")
+        logger.debug("Registered RegistrationReducerService in container")
+
         handler_introspected = HandlerNodeIntrospected(
             projection_reader,
-            consul_enabled=consul_handler is not None,
+            reducer=reducer,
         )
         await container.service_registry.register_instance(
             interface=HandlerNodeIntrospected,
@@ -554,6 +574,7 @@ async def wire_registration_handlers(
 
         handler_runtime_tick = HandlerRuntimeTick(
             projection_reader,
+            reducer=reducer,
             snapshot_publisher=snapshot_publisher,
         )
         await container.service_registry.register_instance(
@@ -570,7 +591,7 @@ async def wire_registration_handlers(
 
         handler_acked = HandlerNodeRegistrationAcked(
             projection_reader,
-            liveness_interval_seconds=resolved_liveness_interval,
+            reducer=reducer,
             snapshot_publisher=snapshot_publisher,
         )
         await container.service_registry.register_instance(
@@ -595,7 +616,7 @@ async def wire_registration_handlers(
 
             handler_heartbeat = HandlerNodeHeartbeat(
                 projection_reader,
-                projector=projector,
+                reducer=reducer,
             )
             await container.service_registry.register_instance(
                 interface=ProtocolNodeHeartbeat,  # type: ignore[type-abstract]

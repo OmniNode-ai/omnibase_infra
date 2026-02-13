@@ -126,7 +126,9 @@ class TestEventBusBindingRegistryCorrelationId:
         """Test that duplicate registration error includes correlation_id."""
 
         class MockEventBus:
-            async def publish_envelope(self, envelope: object, topic: str) -> None:
+            async def publish_envelope(
+                self, envelope: object, topic: str, *, key: bytes | None = None
+            ) -> None:
                 pass
 
         registry = RegistryEventBusBinding()

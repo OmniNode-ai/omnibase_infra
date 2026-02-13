@@ -88,9 +88,24 @@ _project_env_file = _project_root / ".env"
 if _project_env_file.exists():
     load_dotenv(_project_env_file)
 
-# Layer 2: Override with .env.docker for local Docker infrastructure endpoints
+# Layer 2: Override with .env.docker for infrastructure endpoints
 if _docker_env_file.exists():
     load_dotenv(_docker_env_file, override=True)
+
+# Synthesize OMNIBASE_INFRA_DB_URL from individual POSTGRES_* vars if not set.
+# PostgresConfig.from_env() requires a full DSN — no fallback path.
+if not os.getenv("OMNIBASE_INFRA_DB_URL"):
+    _pg_host = os.getenv("POSTGRES_HOST")
+    _pg_port = os.getenv("POSTGRES_PORT", "5436")
+    _pg_user = os.getenv("POSTGRES_USER", "postgres")
+    _pg_pass = os.getenv("POSTGRES_PASSWORD")
+    _pg_db = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
+    if _pg_host and _pg_pass:
+        from urllib.parse import quote_plus as _qp
+
+        os.environ["OMNIBASE_INFRA_DB_URL"] = (
+            f"postgresql://{_qp(_pg_user)}:{_qp(_pg_pass)}@{_pg_host}:{_pg_port}/{_pg_db}"
+        )
 
 if TYPE_CHECKING:
     import asyncpg
@@ -719,11 +734,14 @@ async def heartbeat_handler(
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeHeartbeat,
     )
+    from omnibase_infra.nodes.node_registration_orchestrator.services import (
+        RegistrationReducerService,
+    )
 
+    reducer = RegistrationReducerService(liveness_window_seconds=90.0)
     return HandlerNodeHeartbeat(
         projection_reader=projection_reader,
-        projector=real_projector,
-        liveness_window_seconds=90.0,
+        reducer=reducer,
     )
 
 

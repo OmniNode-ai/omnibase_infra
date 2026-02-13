@@ -146,7 +146,9 @@ class ValidHandlerWithBoth:
 class ValidEventBus:
     """Valid event bus class with publish_envelope() method."""
 
-    async def publish_envelope(self, envelope: object, topic: str) -> None:
+    async def publish_envelope(
+        self, envelope: object, topic: str, *, key: bytes | None = None
+    ) -> None:
         pass
 
 

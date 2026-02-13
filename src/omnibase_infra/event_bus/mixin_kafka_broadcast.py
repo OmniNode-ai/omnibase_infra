@@ -144,6 +144,8 @@ class MixinKafkaBroadcast:
         self: ProtocolKafkaBroadcastHost,
         envelope: object,
         topic: str,
+        *,
+        key: bytes | None = None,
     ) -> None:
         """Publish an OnexEnvelope to a topic.
 
@@ -153,6 +155,10 @@ class MixinKafkaBroadcast:
         Args:
             envelope: Envelope object to publish (ModelOnexEnvelope)
             topic: Target topic name
+            key: Optional partition key for per-entity ordering. When provided,
+                the underlying transport uses this key for partition assignment
+                so that all events for the same entity land on the same
+                partition.
         """
         # Serialize envelope to JSON bytes
         envelope_dict: object
@@ -174,7 +180,7 @@ class MixinKafkaBroadcast:
             timestamp=datetime.now(UTC),
         )
 
-        await self.publish(topic, None, value, headers)
+        await self.publish(topic, key, value, headers)
 
 
 __all__: list[str] = ["MixinKafkaBroadcast"]

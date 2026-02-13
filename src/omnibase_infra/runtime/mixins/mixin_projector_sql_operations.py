@@ -426,6 +426,12 @@ class MixinProjectorSqlOperations:
     def _parse_row_count(self, result: str) -> int:
         """Parse row count from asyncpg execute result.
 
+        Note:
+            Assumes PostgreSQL/asyncpg CommandComplete format where the last
+            token is the affected row count (e.g., ``"INSERT 0 1"``,
+            ``"UPDATE 3"``). Other database backends may use different
+            result formats.
+
         Args:
             result: Result string from conn.execute (e.g., "INSERT 0 1").
 
@@ -433,7 +439,7 @@ class MixinProjectorSqlOperations:
             Number of rows affected.
         """
         # asyncpg returns strings like "INSERT 0 1", "UPDATE 3", etc.
-        # The last number is the row count
+        # The last number is the row count.
         parts = result.split()
         if parts and parts[-1].isdigit():
             return int(parts[-1])

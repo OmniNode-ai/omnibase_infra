@@ -43,7 +43,7 @@ from uuid import uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
-from tests.infrastructure_config import DEFAULT_POSTGRES_PORT, REMOTE_INFRA_HOST
+from tests.infrastructure_config import DEFAULT_POSTGRES_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -240,142 +240,87 @@ class PostgresConfig:
         cls,
         *,
         db_url_var: str = "OMNIBASE_INFRA_DB_URL",
-        host_var: str = "POSTGRES_HOST",
-        port_var: str = "POSTGRES_PORT",
-        user_var: str = "POSTGRES_USER",
-        password_var: str = "POSTGRES_PASSWORD",  # noqa: S107 (env var name, not a password)
-        default_user: str = "postgres",
-        fallback_host: str | None = None,
     ) -> PostgresConfig:
-        """Create PostgresConfig from environment variables.
+        """Create PostgresConfig from OMNIBASE_INFRA_DB_URL.
 
-        Resolution order:
-            1. If ``db_url_var`` (default ``OMNIBASE_INFRA_DB_URL``) is set,
-               the DSN is parsed to extract host, port, user, password, and
-               database.
-            2. Otherwise, individual ``POSTGRES_*`` env vars are read as a
-               fallback (host, port, user, password). The database name
-               defaults to ``"omnibase_infra"`` per OMN-2065 when using
-               the fallback path.
+        Requires a full DSN in ``OMNIBASE_INFRA_DB_URL``. No fallback
+        to individual ``POSTGRES_*`` env vars — if the DSN is missing
+        or malformed, ``is_configured`` returns False and tests skip.
 
         Args:
             db_url_var: Environment variable holding a full PostgreSQL DSN.
-            host_var: Environment variable name for host (fallback).
-            port_var: Environment variable name for port (fallback).
-            user_var: Environment variable name for user (fallback).
-            password_var: Environment variable name for password (fallback).
-            default_user: Default username if not set.
-            fallback_host: Fallback host if POSTGRES_HOST not set. If None,
-                uses REMOTE_INFRA_HOST from infrastructure_config.
 
         Returns:
-            PostgresConfig instance with values from environment.
+            PostgresConfig instance. Check ``is_configured`` before use.
         """
-        # --- Primary: full DSN from db_url_var ---
         db_url: str | None = os.getenv(db_url_var)
-        # Normalize whitespace-only DSN to None so it falls through to
-        # the individual-env-var path (or yields is_configured=False).
         if db_url is not None:
             db_url = db_url.strip() or None
-        if db_url:
-            parsed = urlparse(db_url)
 
-            # Safely extract port — urlparse raises ValueError for non-numeric
-            # ports (e.g., "postgresql://host:abc/db"). Gracefully fall back to
-            # default so test collection isn't crashed by a malformed DSN.
-            try:
-                port = parsed.port or DEFAULT_POSTGRES_PORT
-            except ValueError:
-                logger.warning(
-                    "%s contains a non-numeric port. "
-                    "The resulting PostgresConfig.is_configured will be False "
-                    "and all tests that require a database will be skipped.",
-                    db_url_var,
-                )
-                return cls(
-                    host=parsed.hostname or "localhost",
-                    port=DEFAULT_POSTGRES_PORT,
-                    database="",
-                    user=default_user,
-                    password=None,
-                )
-
-            # Validate scheme for consistency with other DSN consumers
-            if parsed.scheme not in ("postgresql", "postgres"):
-                logger.warning(
-                    "%s has invalid scheme '%s' (expected 'postgresql' or "
-                    "'postgres'). The resulting PostgresConfig.is_configured "
-                    "will be False and tests will be skipped.",
-                    db_url_var,
-                    parsed.scheme,
-                )
-                return cls(
-                    host=parsed.hostname or "localhost",
-                    port=port,
-                    database="",
-                    user=default_user,
-                    password=None,
-                )
-            database = unquote((parsed.path or "").lstrip("/"))
-            if not database:
-                logger.warning(
-                    "%s is set but contains no database name "
-                    "(parsed path: %r from the DSN). "
-                    "Append a database name to the URL "
-                    "(e.g., 'postgresql://user:pass@host:port/DBNAME'). "
-                    "The resulting PostgresConfig.is_configured will be False "
-                    "and all tests that require a database will be skipped.",
-                    db_url_var,
-                    parsed.path,
-                )
-            if "/" in database:
-                logger.warning(
-                    "%s contains sub-path in database name '%s'. "
-                    "Sub-paths are not valid PostgreSQL database names. "
-                    "The resulting PostgresConfig.is_configured will be False "
-                    "and all tests that require a database will be skipped.",
-                    db_url_var,
-                    database,
-                )
-                database = ""
+        if not db_url:
+            logger.warning(
+                "%s is not set. All integration tests requiring PostgreSQL "
+                "will be skipped. Set it to a full DSN, e.g.: "
+                "postgresql://user:pass@host:port/dbname",
+                db_url_var,
+            )
             return cls(
-                host=parsed.hostname or "localhost",
-                port=port,
-                database=database,
-                # Note: empty-string username (e.g., postgresql://:pass@host/db)
-                # is falsy, correctly falling back to default_user.
-                user=unquote(parsed.username) if parsed.username else default_user,
-                # Note: explicitly empty passwords (e.g., peer/trust auth DSNs like
-                # postgresql://user:@host/db) are falsy, so password becomes None and
-                # is_configured returns False — those DSNs require POSTGRES_PASSWORD
-                # fallback or an explicit non-empty password in the DSN.
-                password=_extract_password(parsed, db_url_var),
+                host=None,
+                port=DEFAULT_POSTGRES_PORT,
+                database="",
+                user="postgres",
+                password=None,
             )
 
-        # --- Fallback: individual env vars ---
-        host: str | None = os.getenv(host_var)
-        # Normalize empty or whitespace-only host to None
-        # This prevents malformed DSN like "postgresql://user:pass@:5432/db"
-        if host is not None and not host.strip():
-            host = None
+        parsed = urlparse(db_url)
 
-        if host is None and fallback_host is not None:
-            host = fallback_host
-        elif host is None:
-            host = os.getenv("REMOTE_INFRA_HOST", REMOTE_INFRA_HOST)
+        if parsed.scheme not in ("postgresql", "postgres"):
+            logger.warning(
+                "%s has invalid scheme '%s' (expected 'postgresql' or 'postgres').",
+                db_url_var,
+                parsed.scheme,
+            )
+            return cls(
+                host=None,
+                port=DEFAULT_POSTGRES_PORT,
+                database="",
+                user="postgres",
+                password=None,
+            )
 
-        password: str | None = os.getenv(password_var)
-        # Normalize empty or whitespace-only password to None
-        # This prevents malformed DSN like "postgresql://user:@host:5432/db"
-        if password is not None and not password.strip():
-            password = None
+        try:
+            port = parsed.port or DEFAULT_POSTGRES_PORT
+        except ValueError:
+            logger.warning("%s contains a non-numeric port.", db_url_var)
+            return cls(
+                host=None,
+                port=DEFAULT_POSTGRES_PORT,
+                database="",
+                user="postgres",
+                password=None,
+            )
+
+        database = unquote((parsed.path or "").lstrip("/"))
+        if not database or "/" in database:
+            logger.warning(
+                "%s has invalid database name (parsed: %r). DSN must end with /DBNAME.",
+                db_url_var,
+                parsed.path,
+            )
+            return cls(
+                host=parsed.hostname,
+                port=port,
+                database="",
+                user="postgres",
+                password=None,
+            )
 
         return cls(
-            host=host,
-            port=int(os.getenv(port_var, str(DEFAULT_POSTGRES_PORT))),
-            database="omnibase_infra",
-            user=os.getenv(user_var, default_user),
-            password=password,
+            host=parsed.hostname or None,
+            port=port,
+            database=database,
+            user=unquote(parsed.username) if parsed.username else "postgres",
+            password=_extract_password(parsed, db_url_var),
         )
 
     @property

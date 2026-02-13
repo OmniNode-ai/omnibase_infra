@@ -24,7 +24,6 @@ from uuid import UUID, uuid4
 import pytest
 
 from tests.helpers.util_postgres import PostgresConfig
-from tests.infrastructure_config import REMOTE_INFRA_HOST
 
 if TYPE_CHECKING:
     import asyncpg
@@ -38,13 +37,12 @@ pytestmark = [pytest.mark.postgres]
 def _get_postgres_dsn() -> str | None:
     """Build PostgreSQL DSN using shared PostgresConfig utility.
 
-    Primary source: ``OMNIBASE_INFRA_DB_URL``.
-    Fallback: individual ``POSTGRES_*`` env vars.
+    Requires ``OMNIBASE_INFRA_DB_URL`` (no fallback to individual env vars).
 
     Returns:
         DSN string if configuration is available, None otherwise.
     """
-    config = PostgresConfig.from_env(fallback_host=REMOTE_INFRA_HOST)
+    config = PostgresConfig.from_env()
     if not config.is_configured:
         return None
     return config.build_dsn()
@@ -62,9 +60,7 @@ def postgres_dsn() -> str:
     """
     dsn = _get_postgres_dsn()
     if dsn is None:
-        pytest.skip(
-            "PostgreSQL not configured (set OMNIBASE_INFRA_DB_URL or POSTGRES_HOST+POSTGRES_PASSWORD)"
-        )
+        pytest.skip("PostgreSQL not configured (set OMNIBASE_INFRA_DB_URL)")
     return dsn
 
 

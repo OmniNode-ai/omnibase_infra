@@ -388,6 +388,8 @@ class EventBusInmemory:
         self,
         envelope: object,
         topic: str,
+        *,
+        key: bytes | None = None,
     ) -> None:
         """Publish an event envelope to a topic.
 
@@ -466,7 +468,7 @@ class EventBusInmemory:
             timestamp=datetime.now(UTC),
         )
 
-        await self.publish(topic, None, value, headers)
+        await self.publish(topic, key, value, headers)
 
     async def subscribe(
         self,
