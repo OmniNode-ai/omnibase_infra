@@ -92,11 +92,18 @@ TRUSTED_HANDLER_NAMESPACE_PREFIXES: Final[tuple[str, ...]] = (
 #   the entry point with status namespace_rejected (OMN-2047)
 # - omniclaude is a first-party package maintained in the same monorepo ecosystem
 #
+# Why omniintelligence. is included:
+# - omniintelligence provides PluginIntelligence, a first-party domain plugin
+#   registered via pyproject.toml entry_points (onex.domain_plugins group)
+# - Without this prefix, discover_from_entry_points() rejects it (OMN-2192)
+# - omniintelligence is a first-party package in the OmniNode ecosystem
+#
 # Third-party plugin namespaces must be explicitly configured via security config file.
 TRUSTED_PLUGIN_NAMESPACE_PREFIXES: Final[tuple[str, ...]] = (
     "omnibase_core.",
     "omnibase_infra.",
     "omniclaude.",
+    "omniintelligence.",
 )
 
 # PEP 621 entry_points group name for domain plugin discovery.

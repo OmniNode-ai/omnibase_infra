@@ -148,7 +148,7 @@ RUN --mount=type=cache,target=/tmp/poetry_cache \
 # not a build-time dependency of omnibase_infra. Installing it here enables
 # plugin auto-discovery by the runtime's handler loader.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    /app/.venv/bin/pip install --no-deps omniintelligence==0.1.0
+    /app/.venv/bin/pip install omniintelligence==0.1.0
 
 # ============================================================================
 # Runtime Stage - Minimal production image
