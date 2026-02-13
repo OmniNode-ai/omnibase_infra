@@ -24,11 +24,14 @@
 
 set -e
 
-echo "[entrypoint] Stamping schema fingerprint into db_metadata..."
+if [ -n "${OMNIBASE_INFRA_DB_URL:-}" ]; then
+  echo "[entrypoint] Stamping schema fingerprint into db_metadata..."
+  python -m omnibase_infra.runtime.util_schema_fingerprint stamp
+  echo "[entrypoint] Schema fingerprint stamped successfully."
+else
+  echo "[entrypoint] OMNIBASE_INFRA_DB_URL not set, skipping schema fingerprint stamp."
+fi
 
-python -m omnibase_infra.runtime.util_schema_fingerprint stamp
-
-echo "[entrypoint] Schema fingerprint stamped successfully."
 echo "[entrypoint] Starting runtime kernel..."
 
 exec "$@"
