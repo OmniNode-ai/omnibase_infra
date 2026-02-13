@@ -72,6 +72,8 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
+    SchemaFingerprintMismatchError,
+    SchemaFingerprintMissingError,
     ServiceResolutionError,
 )
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
@@ -973,10 +975,15 @@ async def bootstrap() -> int:
                     plugin_id,
                     correlation_id,
                 )
-            except (DbOwnershipMismatchError, DbOwnershipMissingError):
-                # DB ownership errors are hard gates -- propagate to kill
-                # the kernel. The service must not operate on a database
-                # owned by another service (OMN-2085).
+            except (
+                DbOwnershipMismatchError,
+                DbOwnershipMissingError,
+                SchemaFingerprintMismatchError,
+                SchemaFingerprintMissingError,
+            ):
+                # Hard gates -- propagate to kill the kernel.
+                # DB ownership errors (OMN-2085): wrong database.
+                # Schema fingerprint errors (OMN-2087): schema drift.
                 raise
             except Exception:
                 logger.warning(
