@@ -355,21 +355,35 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
         if request.operation_type == EnumLlmOperationType.CHAT_COMPLETION:
             message_raw = raw_response.get("message", {})
             message = message_raw if isinstance(message_raw, dict) else {}
-            content = (
-                str(message.get("content"))
-                if message.get("content") is not None
-                else None
-            )
+            content = message.get("content")
+            if content is not None:
+                if not isinstance(content, str):
+                    logger.warning(
+                        "Unexpected content type from Ollama: %s, converting to string",
+                        type(content).__name__,
+                    )
+                    content = str(content)
             raw_tool_calls_val = message.get("tool_calls")
             raw_tool_calls = (
                 cast("list[dict[str, JsonType]]", raw_tool_calls_val)
                 if isinstance(raw_tool_calls_val, list)
                 else None
             )
-        else:
+        elif request.operation_type == EnumLlmOperationType.COMPLETION:
             raw_content = raw_response.get("response")
             content = str(raw_content) if raw_content is not None else None
             raw_tool_calls = None
+        else:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=request.correlation_id,
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="ollama_response_parsing",
+            )
+            raise ProtocolConfigurationError(
+                f"Unsupported operation type for Ollama response parsing: "
+                f"{request.operation_type!r}",
+                context=context,
+            )
 
         # Parse usage
         tokens_output = raw_response.get("eval_count", 0)
@@ -386,10 +400,10 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
                 type(tokens_output).__name__,
             )
         usage = ModelLlmUsage(
-            tokens_input=int(tokens_input)
+            tokens_input=round(tokens_input)
             if isinstance(tokens_input, (int, float))
             else 0,
-            tokens_output=int(tokens_output)
+            tokens_output=round(tokens_output)
             if isinstance(tokens_output, (int, float))
             else 0,
         )
@@ -485,6 +499,9 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
         Returns:
             JSON-serializable payload dictionary.
         """
+        assert request.prompt is not None, (
+            "prompt must be non-None for COMPLETION operation type"
+        )
         payload: dict[str, JsonType] = {
             "model": request.model,
             "prompt": request.prompt,
