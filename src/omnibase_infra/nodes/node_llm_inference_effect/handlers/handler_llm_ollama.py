@@ -203,6 +203,7 @@ def _parse_ollama_tool_calls(
         name = str(func.get("name", ""))
         if not name:
             logger.warning("Tool call has empty function name, raw=%r", raw_tc)
+            continue
         raw_args = func.get("arguments")
         # Handle arguments: dict->JSON string, None->"{}", string->passthrough
         if raw_args is None:
