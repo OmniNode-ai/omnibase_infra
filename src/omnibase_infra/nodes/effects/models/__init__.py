@@ -36,9 +36,6 @@ from omnibase_infra.nodes.effects.models.model_llm_function_def import (
 from omnibase_infra.nodes.effects.models.model_llm_inference_response import (
     ModelLlmInferenceResponse,
 )
-from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
-    ModelLlmInferenceRequest,
-)
 from omnibase_infra.nodes.effects.models.model_llm_tool_call import ModelLlmToolCall
 from omnibase_infra.nodes.effects.models.model_llm_tool_choice import (
     ModelLlmToolChoice,
@@ -52,6 +49,9 @@ from omnibase_infra.nodes.effects.models.model_registry_request import (
 )
 from omnibase_infra.nodes.effects.models.model_registry_response import (
     ModelRegistryResponse,
+)
+from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
+    ModelLlmInferenceRequest,
 )
 
 __all__ = [

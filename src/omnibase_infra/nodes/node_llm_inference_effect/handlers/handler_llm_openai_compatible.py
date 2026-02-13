@@ -51,8 +51,8 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import UTC, datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import httpx
@@ -239,14 +239,21 @@ class HandlerLlmOpenaiCompatible:
         payload: dict[str, JsonType] = {"model": request.model}
 
         if request.operation_type == EnumLlmOperationType.CHAT_COMPLETION:
-            messages: list[dict[str, Any]] = []
+            messages: list[JsonType] = []
 
             # Prepend system prompt as first system message
             if request.system_prompt:
-                messages.append({"role": "system", "content": request.system_prompt})
+                messages.append(
+                    cast(
+                        "dict[str, JsonType]",
+                        {"role": "system", "content": request.system_prompt},
+                    )
+                )
 
             # Add user-provided messages
-            messages.extend(dict(m) for m in request.messages)
+            messages.extend(
+                cast("dict[str, JsonType]", dict(m)) for m in request.messages
+            )
 
             payload["messages"] = messages
         # COMPLETION mode
@@ -583,9 +590,15 @@ def _parse_usage(raw_usage: JsonType) -> ModelLlmUsage:
     tokens_total = raw_usage.get("total_tokens")
 
     return ModelLlmUsage(
-        tokens_input=int(tokens_input) if tokens_input is not None else 0,
-        tokens_output=int(tokens_output) if tokens_output is not None else 0,
-        tokens_total=int(tokens_total) if tokens_total is not None else None,
+        tokens_input=int(tokens_input)
+        if isinstance(tokens_input, (int, float, str))
+        else 0,
+        tokens_output=int(tokens_output)
+        if isinstance(tokens_output, (int, float, str))
+        else 0,
+        tokens_total=int(tokens_total)
+        if isinstance(tokens_total, (int, float, str))
+        else None,
     )
 
 
