@@ -143,6 +143,13 @@ COPY src/ ./src/
 RUN --mount=type=cache,target=/tmp/poetry_cache \
     poetry install --only=main
 
+# Install omniintelligence as a composition-layer dependency.
+# This is NOT declared in pyproject.toml because it is a runtime plugin,
+# not a build-time dependency of omnibase_infra. Installing it here enables
+# plugin auto-discovery by the runtime's handler loader.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    /app/.venv/bin/pip install --no-deps omniintelligence==0.1.0
+
 # ============================================================================
 # Runtime Stage - Minimal production image
 # ============================================================================

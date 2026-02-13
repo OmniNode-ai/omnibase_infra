@@ -125,6 +125,8 @@ x-runtime-env: &runtime-env
   OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omninode-runtime}
   OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-otlp}
   OTEL_METRICS_EXPORTER: ${OTEL_METRICS_EXPORTER:-otlp}
+  # OmniIntelligence domain plugin
+  OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:-}
 # ==========================================================================
 # Services
 # ==========================================================================
