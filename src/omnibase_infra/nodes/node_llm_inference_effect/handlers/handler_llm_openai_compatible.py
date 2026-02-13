@@ -33,8 +33,9 @@ Auth Strategy:
 
 Coroutine Safety:
     This handler is coroutine-safe for concurrent calls. When ``api_key``
-    is provided, an ``asyncio.Lock`` serializes the client injection to
-    prevent concurrent calls from swapping each other's transport clients.
+    is provided, an ``asyncio.Lock`` attached to the transport instance
+    serializes client injection so that all handler instances sharing the
+    same transport are mutually excluded from swapping each other's clients.
 
 Related Tickets:
     - OMN-2107: Phase 7 OpenAI-compatible inference handler
@@ -118,6 +119,18 @@ class HandlerLlmOpenaiCompatible:
     ``_execute_llm_http_call``) via constructor injection, following the
     ONEX handler pattern where handlers are stateless and transport-agnostic.
 
+    Protocol Conformance Note:
+        This handler intentionally does NOT implement ``ProtocolHandler``
+        or ``ProtocolMessageHandler``. Those protocols operate on
+        ``ModelOnexEnvelope`` and ``ModelEventEnvelope`` respectively,
+        which are envelope-based dispatch interfaces for the node runtime.
+        This handler operates at the infrastructure layer with a typed
+        request model (``ModelLlmInferenceRequest``) and returns a typed
+        response model (``ModelLlmInferenceResponse``), bypassing
+        envelope-based dispatch entirely. This is a documented deviation
+        from the standard ONEX handler pattern because LLM inference
+        calls are direct infrastructure effects, not routed events.
+
     Auth Strategy:
         When a request includes ``api_key``, the handler creates a
         temporary ``httpx.AsyncClient`` with the ``Authorization: Bearer``
@@ -128,9 +141,9 @@ class HandlerLlmOpenaiCompatible:
 
     Attributes:
         _transport: The LLM HTTP transport mixin instance for making calls.
-        _auth_lock: An ``asyncio.Lock`` that serializes auth-injected calls
-            to prevent concurrent calls from swapping each other's transport
-            clients.
+            An ``asyncio.Lock`` (``_auth_lock``) is lazily attached to the
+            transport on first auth-injected call so that all handler
+            instances sharing the same transport serialize their client swaps.
 
     Example:
         >>> from unittest.mock import AsyncMock, MagicMock
@@ -147,7 +160,6 @@ class HandlerLlmOpenaiCompatible:
                 node or adapter that mixes in MixinLlmHttpTransport.
         """
         self._transport = transport
-        self._auth_lock = asyncio.Lock()
 
     async def handle(
         self,
@@ -327,26 +339,48 @@ class HandlerLlmOpenaiCompatible:
             Parsed JSON response dictionary.
 
         Raises:
+            ValueError: If api_key is an empty string (misconfiguration).
             InfraAuthenticationError: On 401/403 from the provider.
             InfraRateLimitedError: On 429 when retries are exhausted.
             InfraConnectionError: On connection failures after retries.
             InfraTimeoutError: On timeout after retries.
             InfraUnavailableError: On 5xx or circuit breaker open.
         """
-        if not api_key:
+        if api_key is None:
             return await self._transport._execute_llm_http_call(
                 url=url,
                 payload=payload,
                 correlation_id=correlation_id,
             )
 
-        # Lock prevents concurrent calls from swapping each other's clients.
-        async with self._auth_lock:
+        if not api_key:
+            msg = (
+                "api_key is an empty string, which indicates misconfiguration. "
+                "Provide a valid API key or omit api_key (set to None) to skip "
+                "authentication."
+            )
+            raise ValueError(msg)
+
+        # Lock lives on the transport so that ALL handler instances sharing
+        # the same transport serialize their client-swap sections against each
+        # other.  Created lazily on first use.
+        if not hasattr(self._transport, "_auth_lock"):
+            self._transport._auth_lock = asyncio.Lock()  # type: ignore[attr-defined]
+        auth_lock: asyncio.Lock = self._transport._auth_lock  # type: ignore[attr-defined]
+
+        async with auth_lock:
             auth_client = httpx.AsyncClient(
                 headers={"Authorization": f"Bearer {api_key}"},
                 timeout=_AUTH_CLIENT_TIMEOUT,
                 limits=_AUTH_CLIENT_LIMITS,
             )
+            # TECH DEBT: Direct access to _http_client and _owns_http_client
+            # couples this handler to MixinLlmHttpTransport's private state.
+            # The transport mixin (defined in omnibase_infra.mixins) should
+            # expose a public context manager or method for auth-scoped calls,
+            # e.g. ``async with transport.auth_scope(api_key) as scoped:``.
+            # Until that API exists, we reach into private attributes here.
+            # See: OMN-2104 (MixinLlmHttpTransport) for the transport layer.
             original_client = self._transport._http_client
             original_owns = self._transport._owns_http_client
             self._transport._http_client = auth_client
@@ -390,6 +424,13 @@ class HandlerLlmOpenaiCompatible:
             A ModelLlmInferenceResponse with no generated text, unknown
             finish reason, and empty usage.
         """
+        logger.warning(
+            "Provider returned no usable choices; building empty response. "
+            "correlation_id=%s model=%s provider_id=%s",
+            correlation_id,
+            request.model,
+            provider_id_str,
+        )
         return ModelLlmInferenceResponse(
             generated_text=None,
             model_used=request.model,
@@ -484,6 +525,14 @@ class HandlerLlmOpenaiCompatible:
                     tool_calls = _parse_tool_calls(raw_tool_calls)
                     # When we have tool calls, generated_text must be None
                     # (text XOR tool_calls invariant)
+                    if generated_text:
+                        logger.debug(
+                            "Discarding content text in favor of tool_calls "
+                            "per text-XOR-tool_calls invariant. "
+                            "correlation_id=%s discarded_length=%d",
+                            correlation_id,
+                            len(generated_text),
+                        )
                     generated_text = None
         else:
             # COMPLETION mode -- text is in choice.text

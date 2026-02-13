@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.enums import EnumLlmOperationType
 from omnibase_infra.nodes.effects.models.model_llm_tool_choice import (
@@ -126,8 +126,29 @@ class ModelLlmInferenceRequest(BaseModel):
     )
     api_key: str | None = Field(
         default=None,
+        repr=False,
         description="Optional API key for Bearer auth.",
     )
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url_scheme(cls, v: str) -> str:
+        """Validate that base_url starts with http:// or https://.
+
+        Args:
+            v: The base_url value to validate.
+
+        Returns:
+            The validated base_url value (unchanged).
+
+        Raises:
+            ValueError: If the URL does not start with ``http://`` or ``https://``.
+        """
+        if not v.startswith(("http://", "https://")):
+            raise ValueError(
+                f"base_url must start with 'http://' or 'https://', got: {v!r}"
+            )
+        return v
 
     @model_validator(mode="after")
     def _validate_prompt_or_messages(self) -> ModelLlmInferenceRequest:
