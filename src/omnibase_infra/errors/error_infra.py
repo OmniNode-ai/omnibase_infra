@@ -86,6 +86,7 @@ from omnibase_infra.models.errors.model_infra_error_context import (
 from omnibase_infra.models.errors.model_timeout_error_context import (
     ModelTimeoutErrorContext,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 
 class RuntimeHostError(ModelOnexError):
@@ -616,10 +617,11 @@ class InfraRequestRejectedError(RuntimeHostError):
             response_body: Truncated response body snippet (max 500 chars)
             **extra_context: Additional context information
         """
+        _sanitized_body = sanitize_error_string(response_body) if response_body else ""
         if status_code is not None:
             extra_context = {**extra_context, "status_code": status_code}
-        if response_body:
-            extra_context = {**extra_context, "response_body": response_body[:500]}
+        if _sanitized_body:
+            extra_context = {**extra_context, "response_body": _sanitized_body}
         super().__init__(
             message=message,
             error_code=EnumCoreErrorCode.INVALID_INPUT,
@@ -627,7 +629,7 @@ class InfraRequestRejectedError(RuntimeHostError):
             **extra_context,
         )
         self.status_code = status_code
-        self.response_body = response_body[:500]
+        self.response_body = _sanitized_body
 
 
 class InfraProtocolError(RuntimeHostError):
@@ -677,12 +679,13 @@ class InfraProtocolError(RuntimeHostError):
             response_body: Truncated response body snippet (max 500 chars)
             **extra_context: Additional context information
         """
+        _sanitized_body = sanitize_error_string(response_body) if response_body else ""
         if status_code is not None:
             extra_context = {**extra_context, "status_code": status_code}
         if content_type:
             extra_context = {**extra_context, "content_type": content_type}
-        if response_body:
-            extra_context = {**extra_context, "response_body": response_body[:500]}
+        if _sanitized_body:
+            extra_context = {**extra_context, "response_body": _sanitized_body}
         super().__init__(
             message=message,
             error_code=EnumCoreErrorCode.OPERATION_FAILED,
@@ -691,7 +694,7 @@ class InfraProtocolError(RuntimeHostError):
         )
         self.status_code = status_code
         self.content_type = content_type
-        self.response_body = response_body[:500]
+        self.response_body = _sanitized_body
 
 
 class EnvelopeValidationError(RuntimeHostError):

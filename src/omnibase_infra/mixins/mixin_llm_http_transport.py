@@ -12,8 +12,13 @@ Features:
     - HTTP status code to typed exception mapping
     - Retry-After header parsing for 429 rate limit responses
     - Lazy httpx.AsyncClient management (create or inject)
-    - Content-type validation for JSON responses
+    - Content-type validation for JSON responses (case-insensitive)
     - Correlation ID propagation on all errors
+
+Security:
+    - Response bodies are sanitized via ``sanitize_error_string()`` before
+      inclusion in error context or exception messages, preventing accidental
+      leakage of secrets or PII through error propagation paths.
 
 Design Rationale:
     This mixin extracts common HTTP transport patterns from LLM-calling nodes
@@ -69,6 +74,7 @@ from omnibase_infra.mixins.mixin_retry_execution import MixinRetryExecution
 from omnibase_infra.models.model_retry_error_classification import (
     ModelRetryErrorClassification,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 if TYPE_CHECKING:
     from omnibase_infra.handlers.models.model_retry_state import ModelRetryState
@@ -317,6 +323,12 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
             InfraConnectionError: On connection failures after retries.
             InfraTimeoutError: On timeout after retries.
             InfraUnavailableError: On 5xx or circuit breaker open.
+
+        Note:
+            Response bodies are sanitized via ``sanitize_error_string()``
+            before being attached to error context, ensuring that sensitive
+            data from LLM provider responses is never leaked through
+            exception messages or logging.
         """
         # Runtime import to avoid circular dependency:
         # mixins/__init__ -> mixin_llm_http_transport -> handlers.models -> handlers/__init__
@@ -398,11 +410,13 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                 # Missing/empty content-type falls through to JSON parsing which
                 # will raise InfraProtocolError on its own if the body is invalid.
                 content_type = response.headers.get("content-type", "")
-                if content_type and "json" not in content_type:
+                if content_type and "json" not in content_type.lower():
                     await self._record_circuit_failure_if_enabled(
                         operation, correlation_id
                     )
-                    body_snippet = response.text[:500] if response.text else ""
+                    body_snippet = (
+                        sanitize_error_string(response.text) if response.text else ""
+                    )
                     ctx = self._build_error_context(operation, correlation_id)
                     raise InfraProtocolError(
                         f"Expected JSON response from {self._llm_target_name}, "
@@ -420,7 +434,9 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                     await self._record_circuit_failure_if_enabled(
                         operation, correlation_id
                     )
-                    body_snippet = response.text[:500] if response.text else ""
+                    body_snippet = (
+                        sanitize_error_string(response.text) if response.text else ""
+                    )
                     ctx = self._build_error_context(operation, correlation_id)
                     raise InfraProtocolError(
                         f"Failed to parse JSON response from {self._llm_target_name}: {exc}",
@@ -562,15 +578,19 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
     ) -> RuntimeHostError:
         """Map an HTTP response status code to a typed infrastructure exception.
 
+        Response body snippets included in exceptions are sanitized via
+        ``sanitize_error_string()`` to prevent leakage of secrets or PII.
+
         Args:
             response: The httpx.Response with a non-2xx status code.
             correlation_id: Correlation ID for error context.
 
         Returns:
-            A typed infrastructure exception instance (not raised).
+            A typed infrastructure exception instance (not raised). The caller
+            is responsible for raising or classifying the returned exception.
         """
         ctx = self._build_error_context(f"llm_http_call:{response.url}", correlation_id)
-        body_snippet = response.text[:500] if response.text else ""
+        body_snippet = sanitize_error_string(response.text) if response.text else ""
         status = response.status_code
 
         if status in (401, 403):
@@ -694,10 +714,15 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         Only closes the client if it was created internally (not injected).
         After closing, the client reference is set to None so a new one
         can be created lazily if needed.
+
+        Thread-safety is ensured by acquiring ``_http_client_lock``
+        (an ``asyncio.Lock``) to prevent races with the lazy creation
+        in ``_get_http_client``.
         """
-        if self._owns_http_client and self._http_client is not None:
-            await self._http_client.aclose()
-            self._http_client = None
+        async with self._http_client_lock:
+            if self._owns_http_client and self._http_client is not None:
+                await self._http_client.aclose()
+                self._http_client = None
 
 
 __all__: list[str] = [
