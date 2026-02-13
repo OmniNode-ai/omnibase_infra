@@ -1,0 +1,129 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract - LLM Embedding Effect Node
+#
+# Provides embedding generation via pluggable handlers (OpenAI-compatible, Ollama).
+# Ticket: OMN-2112
+#
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+name: "node_llm_embedding_effect"
+node_type: "EFFECT_GENERIC"
+description: >
+  Effect node for LLM embedding generation. Provides batch embedding generation via OpenAI-compatible and Ollama endpoints with retry logic, circuit breaker protection, and dimension uniformity validation.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelLlmEmbeddingRequest"
+  module: "omnibase_infra.nodes.node_llm_embedding_effect.models"
+  description: "Input model for embedding generation requests."
+output_model:
+  name: "ModelLlmEmbeddingResponse"
+  module: "omnibase_infra.nodes.node_llm_embedding_effect.models"
+  description: "Output model with embedding vectors and dimension uniformity validation."
+# Capability declaration
+capabilities:
+  - name: "llm.embedding"
+    description: >
+      Generate vector embeddings from text inputs. Supports batch embedding of 1 to 2048 texts with dimension uniformity validation.
+
+# IO operations (EFFECT node specific)
+io_operations:
+  - operation: "embedding.openai_compatible"
+    description: "Generate embeddings via OpenAI-compatible /v1/embeddings endpoint"
+    input_fields:
+      - base_url
+      - model
+      - texts
+      - dimensions
+      - timeout_seconds
+      - max_retries
+      - correlation_id
+      - execution_id
+    output_fields:
+      - embeddings
+      - dimensions
+      - model_used
+      - usage
+      - latency_ms
+  - operation: "embedding.ollama"
+    description: "Generate embeddings via Ollama /api/embed endpoint"
+    input_fields:
+      - base_url
+      - model
+      - texts
+      - timeout_seconds
+      - max_retries
+      - correlation_id
+      - execution_id
+    output_fields:
+      - embeddings
+      - dimensions
+      - model_used
+      - usage
+      - latency_ms
+# Handler routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "embedding.openai_compatible"
+      handler:
+        name: "HandlerEmbeddingOpenaiCompatible"
+        module: "omnibase_infra.nodes.node_llm_embedding_effect.handlers.handler_embedding_openai_compatible"
+    - operation: "embedding.ollama"
+      handler:
+        name: "HandlerEmbeddingOllama"
+        module: "omnibase_infra.nodes.node_llm_embedding_effect.handlers.handler_embedding_ollama"
+# Error handling configuration
+error_handling:
+  retry_policy:
+    max_retries: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+    exponential_base: 2
+    retry_on:
+      - "InfraConnectionError"
+      - "InfraTimeoutError"
+      - "InfraRateLimitedError"
+      - "InfraUnavailableError"
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    reset_timeout_ms: 60000
+  error_types:
+    - name: "InfraConnectionError"
+      description: "Connection to embedding provider failed"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "InfraTimeoutError"
+      description: "Embedding request timed out"
+      recoverable: true
+      retry_strategy: "exponential_backoff"
+    - name: "InfraRateLimitedError"
+      description: "Rate limited by embedding provider"
+      recoverable: true
+      retry_strategy: "retry_after"
+    - name: "InfraAuthenticationError"
+      description: "Authentication to embedding provider failed"
+      recoverable: false
+# Health check configuration
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2025-01-15"
+  tags:
+    - effect
+    - llm
+    - embedding
+    - openai-compatible
+    - ollama
+    - vector
