@@ -599,7 +599,7 @@ class EventRegistry:
 # ---------------------------------------------------------------------------
 
 
-def _sha256_json(obj: object) -> str:
+def _sha256_json(obj: object) -> str:  # obj must be JSON-serializable at runtime
     """SHA-256 hex digest of a JSON-serialized object.
 
     Produces a deterministic hash by serializing with sorted keys and
@@ -607,7 +607,9 @@ def _sha256_json(obj: object) -> str:
 
     Args:
         obj: JSON-serializable value (dict, list, tuple, str, int, float,
-            bool, or None) to hash.
+            bool, or None) to hash.  The ``object`` annotation is intentionally
+            broad; a ``JsonSerializable`` TypeAlias was rejected by pre-commit
+            (ruff UP040 + ONEX union validator).
 
     Returns:
         64-character hexadecimal SHA-256 digest.
@@ -827,7 +829,7 @@ def _main() -> None:
         EventRegistryFingerprintMismatchError,
         EventRegistryFingerprintMissingError,
     ) as exc:
-        print(f"FAILED: {exc}", file=sys.stderr)
+        print(f"FAILED: {exc.message}", file=sys.stderr)
         sys.exit(2)
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

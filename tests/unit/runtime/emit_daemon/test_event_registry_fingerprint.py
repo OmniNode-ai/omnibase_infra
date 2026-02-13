@@ -42,6 +42,7 @@ from omnibase_infra.runtime.emit_daemon.event_registry import (
     _compute_registry_diff,
     _main,
     _sha256_json,
+    validate_event_registry_fingerprint,
 )
 from omnibase_infra.runtime.emit_daemon.model_event_registry_fingerprint import (
     ModelEventRegistryFingerprint,
@@ -561,6 +562,42 @@ class TestCli:
         # Verify against live registry (which has phase.metrics, not fake.event)
         with pytest.raises(EventRegistryFingerprintMismatchError):
             _cli_verify(str(artifact))
+
+
+class TestValidateEventRegistryFingerprint:
+    """Tests for validate_event_registry_fingerprint() called directly."""
+
+    def test_passes_with_valid_fingerprint(self, tmp_path: Path) -> None:
+        """Valid fingerprint artifact passes without error."""
+        artifact = tmp_path / "fingerprint.json"
+        # Stamp a valid artifact from ALL_EVENT_REGISTRATIONS
+        _cli_stamp(str(artifact))
+        # Should not raise
+        validate_event_registry_fingerprint(artifact_path=str(artifact))
+
+    def test_raises_missing_when_artifact_absent(self, tmp_path: Path) -> None:
+        """Missing artifact file raises EventRegistryFingerprintMissingError."""
+        missing = tmp_path / "does_not_exist.json"
+        with pytest.raises(EventRegistryFingerprintMissingError):
+            validate_event_registry_fingerprint(artifact_path=str(missing))
+
+    def test_raises_mismatch_when_fingerprint_differs(self, tmp_path: Path) -> None:
+        """Mismatched artifact raises EventRegistryFingerprintMismatchError."""
+        artifact = tmp_path / "fingerprint.json"
+
+        # Write an artifact from a fake registry that differs from ALL_EVENT_REGISTRATIONS
+        fake_registry = EventRegistry()
+        fake_registry.register(
+            ModelEventRegistration(
+                event_type="fake.unrelated.event",
+                topic_template="onex.evt.fake.unrelated.event.v1",
+            )
+        )
+        fake_fp = fake_registry.compute_fingerprint()
+        fake_fp.to_json(artifact)
+
+        with pytest.raises(EventRegistryFingerprintMismatchError):
+            validate_event_registry_fingerprint(artifact_path=str(artifact))
 
 
 class TestMainCli:
