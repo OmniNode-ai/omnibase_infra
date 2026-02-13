@@ -532,8 +532,7 @@ class HandlerLlmOpenaiCompatible:
                 raw_tool_calls = message.get("tool_calls")
                 if isinstance(raw_tool_calls, list) and raw_tool_calls:
                     tool_calls = _parse_tool_calls(raw_tool_calls)
-                    # When we have tool calls, generated_text must be None
-                    # (text XOR tool_calls invariant)
+                    # Text XOR tool_calls invariant: clear any content text.
                     if generated_text:
                         logger.debug(
                             "Discarding content text in favor of tool_calls "
@@ -542,7 +541,7 @@ class HandlerLlmOpenaiCompatible:
                             correlation_id,
                             len(generated_text),
                         )
-                    generated_text = None
+                        generated_text = None
         else:
             # COMPLETION mode -- text is in choice.text
             text = choice.get("text")
