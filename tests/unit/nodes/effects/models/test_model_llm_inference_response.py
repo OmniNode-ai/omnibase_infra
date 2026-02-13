@@ -13,10 +13,11 @@ Related:
     - OMN-2106: Phase 6 LLM inference response model
 """
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumLlmFinishReason, EnumLlmOperationType
 from omnibase_infra.models.model_backend_result import ModelBackendResult
@@ -278,3 +279,51 @@ class TestModelLlmInferenceResponseToolCallsFinishReasonConsistency:
         )
         assert resp.finish_reason == EnumLlmFinishReason.TOOL_CALLS
         assert len(resp.tool_calls) == 1
+
+
+@pytest.mark.unit
+class TestModelLlmInferenceResponseTimestamp:
+    """Tests for timestamp timezone-awareness validation."""
+
+    def test_naive_datetime_raises(self) -> None:
+        """A naive datetime (no tzinfo) must be rejected by the field validator."""
+        with pytest.raises(ValueError, match="timezone-aware"):
+            ModelLlmInferenceResponse(
+                **_base_kwargs(timestamp=datetime(2025, 1, 1)),
+            )
+
+
+@pytest.mark.unit
+class TestModelLlmInferenceResponseFieldConstraints:
+    """Tests for individual field constraints."""
+
+    def test_empty_model_used_raises(self) -> None:
+        """model_used with empty string must be rejected (min_length=1)."""
+        with pytest.raises(ValidationError):
+            ModelLlmInferenceResponse(
+                **_base_kwargs(model_used=""),
+            )
+
+
+@pytest.mark.unit
+class TestModelLlmInferenceResponseSerialization:
+    """Tests for JSON serialization round-trip correctness."""
+
+    def test_json_round_trip(self) -> None:
+        """Serialize to JSON dict and deserialize back; key fields must match."""
+        tc = _tool_call()
+        original = ModelLlmInferenceResponse(
+            **_base_kwargs(
+                generated_text=None,
+                tool_calls=(tc,),
+                finish_reason=EnumLlmFinishReason.TOOL_CALLS,
+            ),
+        )
+        data = original.model_dump(mode="json")
+        restored = ModelLlmInferenceResponse.model_validate(data)
+
+        assert len(restored.tool_calls) == len(original.tool_calls)
+        assert restored.generated_text == original.generated_text
+        assert restored.finish_reason == original.finish_reason
+        assert restored.model_used == original.model_used
+        assert restored.correlation_id == original.correlation_id
