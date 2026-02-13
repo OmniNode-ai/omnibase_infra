@@ -38,7 +38,7 @@ import logging
 import time
 from datetime import UTC, datetime
 from typing import ClassVar, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -208,7 +208,7 @@ def _parse_ollama_tool_calls(
         # Handle arguments: dict->JSON string, None->"{}", string->passthrough
         if raw_args is None:
             arguments = "{}"
-        elif isinstance(raw_args, dict):
+        elif isinstance(raw_args, (dict, list)):
             arguments = json.dumps(raw_args, separators=(",", ":"))
         else:
             arguments = str(raw_args)
@@ -277,12 +277,23 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
 
     @property
     def handler_type(self) -> EnumHandlerType:
-        """Architectural role classification."""
+        """Architectural role classification.
+
+        Returns:
+            ``EnumHandlerType.INFRA_HANDLER`` indicating this handler
+            provides infrastructure-level LLM transport, not domain
+            business logic.
+        """
         return EnumHandlerType.INFRA_HANDLER
 
     @property
     def handler_category(self) -> EnumHandlerTypeCategory:
-        """Behavioral classification."""
+        """Behavioral classification.
+
+        Returns:
+            ``EnumHandlerTypeCategory.EFFECT`` indicating this handler
+            performs external I/O (HTTP calls to the Ollama API).
+        """
         return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
@@ -308,10 +319,12 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
             InfraTimeoutError: On timeout after retries.
             InfraUnavailableError: On 5xx or circuit breaker open.
         """
+        correlation_id: UUID = request.correlation_id or uuid4()
+
         # Validate operation type
         if request.operation_type == EnumLlmOperationType.EMBEDDING:
             context = ModelInfraErrorContext.with_correlation(
-                correlation_id=request.correlation_id,
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="ollama_inference",
             )
@@ -330,7 +343,7 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
             payload = self._build_generate_payload(request)
         else:
             context = ModelInfraErrorContext.with_correlation(
-                correlation_id=request.correlation_id,
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="ollama_inference",
             )
@@ -345,7 +358,7 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
         raw_response = await self._execute_llm_http_call(
             url=url,
             payload=payload,
-            correlation_id=request.correlation_id,
+            correlation_id=correlation_id,
             max_retries=request.max_retries,
             timeout_seconds=request.timeout_seconds,
         )
@@ -375,7 +388,7 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
             raw_tool_calls = None
         else:
             context = ModelInfraErrorContext.with_correlation(
-                correlation_id=request.correlation_id,
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="ollama_response_parsing",
             )
@@ -409,14 +422,14 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
         )
 
         # Enforce text XOR tool_calls BEFORE constructing response
-        tool_calls = _parse_ollama_tool_calls(raw_tool_calls, request.correlation_id)
+        tool_calls = _parse_ollama_tool_calls(raw_tool_calls, correlation_id)
         if tool_calls:
             if content:
                 logger.warning(
                     "Discarding non-empty text content in favor of tool_calls "
                     "to satisfy text-XOR-tool_calls invariant: "
                     "correlation_id=%s, content_length=%d",
-                    request.correlation_id,
+                    correlation_id,
                     len(content),
                 )
             generated_text = None  # tool calls present -> no text
@@ -445,7 +458,7 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
             # TODO(OMN-2108): retry_count not exposed by MixinLlmHttpTransport — always 0
             retry_count=0,
             backend_result=ModelBackendResult(success=True, duration_ms=latency_ms),
-            correlation_id=request.correlation_id,
+            correlation_id=correlation_id,
             execution_id=request.execution_id,
             timestamp=datetime.now(UTC),
         )
