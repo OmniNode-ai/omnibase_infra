@@ -98,6 +98,13 @@ _OPERATION_PATHS: dict[EnumLlmOperationType, str] = {
     EnumLlmOperationType.COMPLETION: "/v1/completions",
 }
 
+# Default timeout and connection limits for auth-injected httpx clients.
+_AUTH_CLIENT_TIMEOUT: httpx.Timeout = httpx.Timeout(30.0)
+_AUTH_CLIENT_LIMITS: httpx.Limits = httpx.Limits(
+    max_connections=100,
+    max_keepalive_connections=20,
+)
+
 
 class HandlerLlmOpenaiCompatible:
     """OpenAI wire-format handler for LLM inference calls.
@@ -121,6 +128,9 @@ class HandlerLlmOpenaiCompatible:
 
     Attributes:
         _transport: The LLM HTTP transport mixin instance for making calls.
+        _auth_lock: An ``asyncio.Lock`` that serializes auth-injected calls
+            to prevent concurrent calls from swapping each other's transport
+            clients.
 
     Example:
         >>> from unittest.mock import AsyncMock, MagicMock
@@ -142,7 +152,7 @@ class HandlerLlmOpenaiCompatible:
     async def handle(
         self,
         request: ModelLlmInferenceRequest,
-        correlation_id: UUID,
+        correlation_id: UUID | None = None,
     ) -> ModelLlmInferenceResponse:
         """Execute an LLM inference call using the OpenAI wire format.
 
@@ -152,7 +162,8 @@ class HandlerLlmOpenaiCompatible:
 
         Args:
             request: The inference request with all parameters.
-            correlation_id: Correlation ID for distributed tracing.
+            correlation_id: Correlation ID for distributed tracing. If None,
+                a new UUID is auto-generated.
 
         Returns:
             ModelLlmInferenceResponse with parsed results.
@@ -167,6 +178,9 @@ class HandlerLlmOpenaiCompatible:
             InfraUnavailableError: On 5xx or circuit breaker open.
             ValueError: If operation_type has no known URL path.
         """
+        if correlation_id is None:
+            correlation_id = uuid4()
+
         start_time = time.perf_counter()
         execution_id = uuid4()
 
@@ -311,6 +325,13 @@ class HandlerLlmOpenaiCompatible:
 
         Returns:
             Parsed JSON response dictionary.
+
+        Raises:
+            InfraAuthenticationError: On 401/403 from the provider.
+            InfraRateLimitedError: On 429 when retries are exhausted.
+            InfraConnectionError: On connection failures after retries.
+            InfraTimeoutError: On timeout after retries.
+            InfraUnavailableError: On 5xx or circuit breaker open.
         """
         if not api_key:
             return await self._transport._execute_llm_http_call(
@@ -323,11 +344,8 @@ class HandlerLlmOpenaiCompatible:
         async with self._auth_lock:
             auth_client = httpx.AsyncClient(
                 headers={"Authorization": f"Bearer {api_key}"},
-                timeout=httpx.Timeout(30.0),
-                limits=httpx.Limits(
-                    max_connections=100,
-                    max_keepalive_connections=20,
-                ),
+                timeout=_AUTH_CLIENT_TIMEOUT,
+                limits=_AUTH_CLIENT_LIMITS,
             )
             original_client = self._transport._http_client
             original_owns = self._transport._owns_http_client
@@ -343,6 +361,48 @@ class HandlerLlmOpenaiCompatible:
                 self._transport._http_client = original_client
                 self._transport._owns_http_client = original_owns
                 await auth_client.aclose()
+
+    # ── Empty response builder ──────────────────────────────────────────
+
+    @staticmethod
+    def _build_empty_response(
+        request: ModelLlmInferenceRequest,
+        correlation_id: UUID,
+        execution_id: UUID,
+        latency_ms: float,
+        provider_id_str: str | None,
+    ) -> ModelLlmInferenceResponse:
+        """Build a response for empty or malformed provider output.
+
+        Used when the provider returns no choices array or a non-dict choice
+        entry, so no content or tool calls can be extracted. The response
+        is marked with ``finish_reason=UNKNOWN`` and empty usage.
+
+        Args:
+            request: The original inference request (for model and
+                operation_type metadata).
+            correlation_id: Correlation ID for distributed tracing.
+            execution_id: Unique execution identifier.
+            latency_ms: End-to-end latency in milliseconds.
+            provider_id_str: Provider-assigned response ID, or None.
+
+        Returns:
+            A ModelLlmInferenceResponse with no generated text, unknown
+            finish reason, and empty usage.
+        """
+        return ModelLlmInferenceResponse(
+            generated_text=None,
+            model_used=request.model,
+            operation_type=request.operation_type,
+            finish_reason=EnumLlmFinishReason.UNKNOWN,
+            usage=ModelLlmUsage(),
+            latency_ms=latency_ms,
+            backend_result=ModelBackendResult(success=True, duration_ms=latency_ms),
+            correlation_id=correlation_id,
+            execution_id=execution_id,
+            timestamp=datetime.now(UTC),
+            provider_id=provider_id_str,
+        )
 
     # ── Response parsing ─────────────────────────────────────────────────
 
@@ -360,6 +420,10 @@ class HandlerLlmOpenaiCompatible:
         reason from the response. Unknown finish_reason values are mapped
         to UNKNOWN to prevent crashes.
 
+        When the ``choices`` array is empty or the first choice is malformed,
+        delegates to ``_build_empty_response`` to return a well-formed
+        response with ``finish_reason=UNKNOWN`` and empty usage.
+
         Args:
             data: Parsed JSON response from the provider.
             request: The original inference request (for metadata).
@@ -368,7 +432,8 @@ class HandlerLlmOpenaiCompatible:
             latency_ms: End-to-end latency in milliseconds.
 
         Returns:
-            ModelLlmInferenceResponse with parsed content.
+            ModelLlmInferenceResponse with parsed content, or an empty
+            response when the provider output is empty or malformed.
         """
         # Extract provider ID
         provider_id = data.get("id")
@@ -378,35 +443,23 @@ class HandlerLlmOpenaiCompatible:
         choices = data.get("choices", [])
         if not isinstance(choices, list) or len(choices) == 0:
             # No choices -- empty response
-            return ModelLlmInferenceResponse(
-                generated_text=None,
-                model_used=request.model,
-                operation_type=request.operation_type,
-                finish_reason=EnumLlmFinishReason.UNKNOWN,
-                usage=ModelLlmUsage(),
-                latency_ms=latency_ms,
-                backend_result=ModelBackendResult(success=True, duration_ms=latency_ms),
+            return HandlerLlmOpenaiCompatible._build_empty_response(
+                request=request,
                 correlation_id=correlation_id,
                 execution_id=execution_id,
-                timestamp=datetime.now(UTC),
-                provider_id=provider_id_str,
+                latency_ms=latency_ms,
+                provider_id_str=provider_id_str,
             )
 
         choice = choices[0]
         if not isinstance(choice, dict):
             # Malformed choice -- treat as empty
-            return ModelLlmInferenceResponse(
-                generated_text=None,
-                model_used=request.model,
-                operation_type=request.operation_type,
-                finish_reason=EnumLlmFinishReason.UNKNOWN,
-                usage=ModelLlmUsage(),
-                latency_ms=latency_ms,
-                backend_result=ModelBackendResult(success=True, duration_ms=latency_ms),
+            return HandlerLlmOpenaiCompatible._build_empty_response(
+                request=request,
                 correlation_id=correlation_id,
                 execution_id=execution_id,
-                timestamp=datetime.now(UTC),
-                provider_id=provider_id_str,
+                latency_ms=latency_ms,
+                provider_id_str=provider_id_str,
             )
 
         # Parse finish reason (unknown -> UNKNOWN, no crash)
@@ -572,10 +625,66 @@ def _parse_tool_calls(
     return tuple(parsed)
 
 
+def _safe_int(value: JsonType, default: int = 0) -> int:
+    """Safely convert a JSON value to int, returning *default* on failure.
+
+    Guards against ``ValueError`` when the value is a non-numeric string
+    (e.g. ``"abc"``), which ``int()`` would reject.
+
+    Args:
+        value: A JSON-compatible value (int, float, str, or other).
+        default: Fallback value when conversion is impossible.
+
+    Returns:
+        The integer conversion of *value*, or *default* if the conversion
+        fails or the type is unsupported.
+    """
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _safe_int_or_none(value: JsonType) -> int | None:
+    """Safely convert a JSON value to int, returning ``None`` on failure.
+
+    Identical to :func:`_safe_int` but returns ``None`` instead of a
+    numeric default when the value is missing, unsupported, or
+    non-numeric.
+
+    Args:
+        value: A JSON-compatible value (int, float, str, None, or other).
+
+    Returns:
+        The integer conversion of *value*, or ``None`` if the value is
+        ``None``, an unsupported type, or a non-numeric string.
+    """
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
 def _parse_usage(raw_usage: JsonType) -> ModelLlmUsage:
     """Parse the usage block from an OpenAI-compatible response.
 
     Handles missing or malformed usage data by defaulting to zeros.
+    Non-numeric string values (e.g. ``"abc"``) are treated as zero
+    (or ``None`` for ``tokens_total``) rather than raising ``ValueError``.
 
     Args:
         raw_usage: The ``usage`` field from the response JSON, or None.
@@ -591,15 +700,9 @@ def _parse_usage(raw_usage: JsonType) -> ModelLlmUsage:
     tokens_total = raw_usage.get("total_tokens")
 
     return ModelLlmUsage(
-        tokens_input=int(tokens_input)
-        if isinstance(tokens_input, (int, float, str))
-        else 0,
-        tokens_output=int(tokens_output)
-        if isinstance(tokens_output, (int, float, str))
-        else 0,
-        tokens_total=int(tokens_total)
-        if isinstance(tokens_total, (int, float, str))
-        else None,
+        tokens_input=_safe_int(tokens_input, 0),
+        tokens_output=_safe_int(tokens_output, 0),
+        tokens_total=_safe_int_or_none(tokens_total),
     )
 
 

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.enums import EnumLlmOperationType
 from omnibase_infra.nodes.effects.models.model_llm_tool_choice import (
@@ -128,6 +128,33 @@ class ModelLlmInferenceRequest(BaseModel):
         default=None,
         description="Optional API key for Bearer auth.",
     )
+
+    @model_validator(mode="after")
+    def _validate_prompt_or_messages(self) -> ModelLlmInferenceRequest:
+        """Enforce that the correct input field is populated for the operation type.
+
+        - CHAT_COMPLETION requires at least one message in ``messages``.
+        - COMPLETION requires a non-None ``prompt``.
+
+        Returns:
+            The validated instance (unchanged).
+
+        Raises:
+            ValueError: If the required field is missing for the operation type.
+        """
+        if (
+            self.operation_type is EnumLlmOperationType.CHAT_COMPLETION
+            and len(self.messages) == 0
+        ):
+            raise ValueError(
+                "CHAT_COMPLETION requires at least one message in messages"
+            )
+        if (
+            self.operation_type is EnumLlmOperationType.COMPLETION
+            and self.prompt is None
+        ):
+            raise ValueError("COMPLETION requires a non-None prompt")
+        return self
 
 
 __all__: list[str] = ["ModelLlmInferenceRequest"]
