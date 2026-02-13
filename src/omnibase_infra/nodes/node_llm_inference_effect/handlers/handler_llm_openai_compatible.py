@@ -32,9 +32,9 @@ Auth Strategy:
     client is used as-is.
 
 Coroutine Safety:
-    This handler is stateless and coroutine-safe for concurrent calls
-    with different request instances. The per-call auth client injection
-    is scoped to each invocation.
+    This handler is coroutine-safe for concurrent calls. When ``api_key``
+    is provided, an ``asyncio.Lock`` serializes the client injection to
+    prevent concurrent calls from swapping each other's transport clients.
 
 Related Tickets:
     - OMN-2107: Phase 7 OpenAI-compatible inference handler
@@ -49,6 +49,7 @@ See Also:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import UTC, datetime
@@ -136,6 +137,7 @@ class HandlerLlmOpenaiCompatible:
                 node or adapter that mixes in MixinLlmHttpTransport.
         """
         self._transport = transport
+        self._auth_lock = asyncio.Lock()
 
     async def handle(
         self,
@@ -317,31 +319,30 @@ class HandlerLlmOpenaiCompatible:
                 correlation_id=correlation_id,
             )
 
-        # Create a temporary client with the auth header
-        auth_client = httpx.AsyncClient(
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=httpx.Timeout(30.0),
-            limits=httpx.Limits(
-                max_connections=100,
-                max_keepalive_connections=20,
-            ),
-        )
-        # Save the transport's original client and inject the auth client
-        original_client = self._transport._http_client
-        original_owns = self._transport._owns_http_client
-        self._transport._http_client = auth_client
-        self._transport._owns_http_client = False
-        try:
-            return await self._transport._execute_llm_http_call(
-                url=url,
-                payload=payload,
-                correlation_id=correlation_id,
+        # Lock prevents concurrent calls from swapping each other's clients.
+        async with self._auth_lock:
+            auth_client = httpx.AsyncClient(
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=httpx.Timeout(30.0),
+                limits=httpx.Limits(
+                    max_connections=100,
+                    max_keepalive_connections=20,
+                ),
             )
-        finally:
-            # Restore the original client
-            self._transport._http_client = original_client
-            self._transport._owns_http_client = original_owns
-            await auth_client.aclose()
+            original_client = self._transport._http_client
+            original_owns = self._transport._owns_http_client
+            self._transport._http_client = auth_client
+            self._transport._owns_http_client = False
+            try:
+                return await self._transport._execute_llm_http_call(
+                    url=url,
+                    payload=payload,
+                    correlation_id=correlation_id,
+                )
+            finally:
+                self._transport._http_client = original_client
+                self._transport._owns_http_client = original_owns
+                await auth_client.aclose()
 
     # ── Response parsing ─────────────────────────────────────────────────
 
