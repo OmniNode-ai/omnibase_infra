@@ -353,7 +353,7 @@ class PluginRegistration:
             # 1.7 Validate event registry fingerprint (OMN-2088)
             # Hard gate: prevents operating with drifted event registrations
             # (wrong topics, missing events, changed schemas).
-            validate_event_registry_fingerprint()
+            validate_event_registry_fingerprint(correlation_id=correlation_id)
 
             # 2. Load projectors from contracts via ProjectorPluginLoader
             await self._load_projector(config)

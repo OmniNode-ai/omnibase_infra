@@ -14,6 +14,7 @@ no domain-specific knowledge.
 from omnibase_infra.runtime.emit_daemon.event_registry import ModelEventRegistration
 
 TOPIC_PHASE_METRICS = "onex.evt.omniclaude.phase-metrics.v1"
+# Consumed (not emitted) by omnibase_infra, so no ModelEventRegistration needed.
 TOPIC_NOTIFICATION_BLOCKED = "onex.evt.omniclaude.notification-blocked.v1"
 TOPIC_NOTIFICATION_COMPLETED = "onex.evt.omniclaude.notification-completed.v1"
 
@@ -21,7 +22,7 @@ PHASE_METRICS_REGISTRATION = ModelEventRegistration(
     event_type="phase.metrics",
     topic_template=TOPIC_PHASE_METRICS,
     partition_key_field="run_id",
-    required_fields=["run_id", "phase"],
+    required_fields=("run_id", "phase"),
     schema_version="1.0.0",
 )
 

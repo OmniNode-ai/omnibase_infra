@@ -19,7 +19,7 @@ Error Hierarchy:
 
 from __future__ import annotations
 
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_infra.enums import EnumInfraTransportType
@@ -27,6 +27,7 @@ from omnibase_infra.errors.error_infra import RuntimeHostError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_secret_path
 
 
 class EventRegistryFingerprintMismatchError(RuntimeHostError):
@@ -57,13 +58,18 @@ class EventRegistryFingerprintMismatchError(RuntimeHostError):
         self.actual_fingerprint = actual_fingerprint
         self.diff_summary = diff_summary
 
-        if correlation_id is None:
-            correlation_id = uuid4()
-
         if context is None:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="validate_event_registry_fingerprint",
+                correlation_id=correlation_id,
+            )
+        elif context.correlation_id is None:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=context.transport_type,
+                operation=context.operation,
+                target_name=context.target_name,
+                namespace=context.namespace,
                 correlation_id=correlation_id,
             )
 
@@ -101,18 +107,24 @@ class EventRegistryFingerprintMissingError(RuntimeHostError):
     ) -> None:
         self.artifact_path = artifact_path
 
-        if correlation_id is None:
-            correlation_id = uuid4()
-
         if context is None:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="validate_event_registry_fingerprint",
                 correlation_id=correlation_id,
             )
+        elif context.correlation_id is None:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=context.transport_type,
+                operation=context.operation,
+                target_name=context.target_name,
+                namespace=context.namespace,
+                correlation_id=correlation_id,
+            )
 
+        safe_artifact_path = sanitize_secret_path(artifact_path)
         ctx = dict(extra_context)
-        ctx.setdefault("artifact_path", artifact_path)
+        ctx.setdefault("artifact_path", safe_artifact_path)
 
         super().__init__(
             message=message,

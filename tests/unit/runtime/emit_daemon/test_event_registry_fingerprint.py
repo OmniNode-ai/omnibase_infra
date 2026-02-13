@@ -59,7 +59,7 @@ REG_ALPHA = ModelEventRegistration(
     event_type="alpha.event",
     topic_template="onex.evt.alpha.event.v1",
     partition_key_field="alpha_id",
-    required_fields=["alpha_id", "payload"],
+    required_fields=("alpha_id", "payload"),
     schema_version="1.0.0",
 )
 
@@ -67,7 +67,7 @@ REG_BETA = ModelEventRegistration(
     event_type="beta.event",
     topic_template="onex.evt.beta.event.v1",
     partition_key_field=None,
-    required_fields=["data"],
+    required_fields=("data",),
     schema_version="2.0.0",
 )
 
@@ -75,7 +75,7 @@ REG_GAMMA = ModelEventRegistration(
     event_type="gamma.event",
     topic_template="onex.evt.gamma.event.v1",
     partition_key_field="gid",
-    required_fields=[],
+    required_fields=(),
     schema_version="1.0.0",
 )
 
@@ -175,7 +175,7 @@ class TestComputeFingerprint:
         reg = ModelEventRegistration(
             event_type="test.sort",
             topic_template="onex.evt.test.sort.v1",
-            required_fields=["zebra", "apple", "middle"],
+            required_fields=("zebra", "apple", "middle"),
         )
         registry = EventRegistry()
         registry.register(reg)
@@ -268,7 +268,7 @@ class TestAssertFingerprint:
             event_type="alpha.event",
             topic_template="onex.evt.alpha.event.v2",  # changed
             partition_key_field="alpha_id",
-            required_fields=["alpha_id", "payload", "extra"],  # changed
+            required_fields=("alpha_id", "payload", "extra"),  # changed
             schema_version="1.0.0",
         )
         registry_modified = EventRegistry()
@@ -352,7 +352,7 @@ class TestComputeRegistryDiff:
             event_type="alpha.event",
             topic_template="onex.evt.alpha.event.v2",  # changed
             partition_key_field="alpha_id",
-            required_fields=["alpha_id", "payload"],
+            required_fields=("alpha_id", "payload"),
             schema_version="1.0.0",
         )
         actual = self._make_fingerprint([modified])
@@ -366,7 +366,7 @@ class TestComputeRegistryDiff:
             event_type="alpha.event",
             topic_template="onex.evt.alpha.event.v2",
             partition_key_field="new_key",
-            required_fields=["new_field"],
+            required_fields=("new_field",),
             schema_version="3.0.0",
         )
         actual = self._make_fingerprint([modified])

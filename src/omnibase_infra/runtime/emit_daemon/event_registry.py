@@ -30,13 +30,13 @@ Example Usage:
             event_type="myapp.submitted",
             topic_template="onex.evt.myapp.submitted.v1",
             partition_key_field="session_id",
-            required_fields=["session_id", "payload"],
+            required_fields=("session_id", "payload"),
         ),
         ModelEventRegistration(
             event_type="myapp.completed",
             topic_template="onex.evt.myapp.completed.v1",
             partition_key_field="session_id",
-            required_fields=["session_id"],
+            required_fields=("session_id",),
         ),
     ])
 
@@ -67,7 +67,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -96,7 +96,7 @@ class ModelEventRegistration(BaseModel):
             enforced via envelope identity, not topic naming.
         partition_key_field: Optional field name in payload to use as partition key.
             When set, ensures events with same key go to same partition for ordering.
-        required_fields: List of field names that must be present in payload.
+        required_fields: Tuple of field names that must be present in payload.
             Validation will fail if any required field is missing.
         schema_version: Semantic version of the event schema (default: "1.0.0").
             Injected into event metadata for schema evolution tracking.
@@ -106,7 +106,7 @@ class ModelEventRegistration(BaseModel):
         ...     event_type="myapp.submitted",
         ...     topic_template="onex.evt.myapp.submitted.v1",
         ...     partition_key_field="session_id",
-        ...     required_fields=["session_id", "payload"],
+        ...     required_fields=("session_id", "payload"),
         ...     schema_version="1.0.0",
         ... )
     """
@@ -115,6 +115,7 @@ class ModelEventRegistration(BaseModel):
         strict=True,
         frozen=True,
         extra="forbid",
+        from_attributes=True,
     )
 
     event_type: str = Field(
@@ -127,9 +128,9 @@ class ModelEventRegistration(BaseModel):
         default=None,
         description="Optional field name in payload to use as partition key",
     )
-    required_fields: list[str] = Field(
-        default_factory=list,
-        description="List of field names that must be present in payload",
+    required_fields: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description="Tuple of field names that must be present in payload",
     )
     schema_version: str = Field(
         default="1.0.0",
@@ -158,7 +159,7 @@ class EventRegistry:
         ...     ModelEventRegistration(
         ...         event_type="myapp.submitted",
         ...         topic_template="onex.evt.myapp.submitted.v1",
-        ...         required_fields=["payload"],
+        ...         required_fields=("payload",),
         ...     )
         ... )
         >>> registry.resolve_topic("myapp.submitted")
@@ -348,7 +349,7 @@ class EventRegistry:
             ...     ModelEventRegistration(
             ...         event_type="myapp.submitted",
             ...         topic_template="onex.evt.myapp.submitted.v1",
-            ...         required_fields=["payload"],
+            ...         required_fields=("payload",),
             ...     )
             ... )
             >>> registry.validate_payload("myapp.submitted", {"payload": "data"})
@@ -684,6 +685,8 @@ _ARTIFACT_DEFAULT_PATH: Final[str] = str(
 
 def validate_event_registry_fingerprint(
     artifact_path: str = "",
+    *,
+    correlation_id: UUID | None = None,
 ) -> None:
     """Hard gate: validate event registry against expected fingerprint artifact.
 
@@ -698,10 +701,14 @@ def validate_event_registry_fingerprint(
     Args:
         artifact_path: Path to the expected fingerprint artifact. If empty,
             defaults to ``_ARTIFACT_DEFAULT_PATH`` (co-located with module).
+        correlation_id: Optional correlation ID propagated to error context
+            for distributed tracing. When ``None``, the error constructor
+            auto-generates one.
 
     Raises:
         EventRegistryFingerprintMismatchError: Live registry != expected.
-        EventRegistryFingerprintMissingError: Artifact file not found.
+        EventRegistryFingerprintMissingError: Artifact file not found or
+            unreadable.
     """
     from omnibase_infra.errors.error_event_registry_fingerprint import (
         EventRegistryFingerprintMissingError,
@@ -712,14 +719,23 @@ def validate_event_registry_fingerprint(
     from omnibase_infra.runtime.emit_daemon.topics import ALL_EVENT_REGISTRATIONS
 
     dest = Path(artifact_path) if artifact_path else Path(_ARTIFACT_DEFAULT_PATH)
-    if not dest.exists():
+    if not dest.exists() or not dest.is_file():
         raise EventRegistryFingerprintMissingError(
             f"Event registry fingerprint artifact not found: {dest}. "
             "Run 'stamp' to generate the artifact.",
             artifact_path=str(dest),
+            correlation_id=correlation_id,
         )
 
-    expected = ModelEventRegistryFingerprint.from_json_path(dest)
+    try:
+        expected = ModelEventRegistryFingerprint.from_json_path(dest)
+    except Exception as exc:
+        raise EventRegistryFingerprintMissingError(
+            f"Event registry fingerprint artifact unreadable: {dest}. "
+            "Run 'stamp' to regenerate the artifact.",
+            artifact_path=str(dest),
+            correlation_id=correlation_id,
+        ) from exc
 
     registry = EventRegistry()
     registry.register_batch(ALL_EVENT_REGISTRATIONS)
