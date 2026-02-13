@@ -148,11 +148,11 @@ RUN --mount=type=cache,target=/tmp/poetry_cache \
 # not a build-time dependency of omnibase_infra. Installing it here enables
 # plugin auto-discovery by the runtime's handler loader.
 #
-# We export a constraints file from poetry.lock so that pip cannot mutate
-# any transitive dependency version already locked by Poetry (e.g.
-# python-dotenv). This ensures the runtime image is fully reproducible.
-RUN poetry export --only=main --without-hashes --format=constraints.txt \
-    -o /tmp/constraints.txt
+# We freeze the venv's installed packages into a constraints file so that
+# pip cannot mutate any transitive dependency version already locked by
+# Poetry (e.g. python-dotenv). This ensures the runtime image is fully
+# reproducible.
+RUN /app/.venv/bin/pip freeze > /tmp/constraints.txt
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     /app/.venv/bin/pip install --constraint /tmp/constraints.txt \
