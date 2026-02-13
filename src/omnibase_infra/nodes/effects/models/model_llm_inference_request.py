@@ -237,7 +237,7 @@ class ModelLlmInferenceRequest(BaseModel):
         scheme_end = v.index("://") + 3
         if len(v) <= scheme_end or not v[scheme_end:].strip("/"):
             raise ValueError("base_url must include a host after the scheme")
-        # Use urlparse for robust hostname validation (catches e.g. "http://!!!:8000")
+        # Use urlparse to extract hostname (catches empty hosts and scheme-only URLs)
         parsed = urlparse(v)
         if not parsed.hostname:
             raise ValueError("base_url must include a valid host after the scheme")
