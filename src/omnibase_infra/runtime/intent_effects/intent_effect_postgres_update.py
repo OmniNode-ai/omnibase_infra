@@ -68,8 +68,9 @@ logger = logging.getLogger(__name__)
 # _ALLOWED_COLUMNS frozenset on IntentEffectPostgresUpdate.
 #
 # Recommended: add a schema-sync test that parses the CREATE TABLE DDL
-# and asserts parity with these sets.  See the sibling upsert effect
-# (intent_effect_postgres_upsert.py) for the same pattern.
+# and asserts parity with these sets.  See schema_registration_projection.sql
+# (src/omnibase_infra/schemas/schema_registration_projection.sql) for the
+# authoritative column definitions.
 # ---------------------------------------------------------------------------
 
 # TIMESTAMPTZ columns that need str -> datetime conversion for asyncpg.
@@ -258,24 +259,6 @@ class IntentEffectPostgresUpdate:
                 raise RuntimeHostError(
                     f"UPDATE SET contains column(s) not in allowlist: "
                     f"{sorted(disallowed_set_cols)}. "
-                    f"If this is a new schema column, add it to "
-                    f"IntentEffectPostgresUpdate._ALLOWED_COLUMNS.",
-                    context=context,
-                )
-
-            # Validate WHERE clause keys (entity_id, domain are hardcoded but
-            # the check is included for completeness and future-proofing).
-            where_columns = {"entity_id", "domain"}
-            disallowed_where_cols = where_columns - self._ALLOWED_COLUMNS
-            if disallowed_where_cols:
-                context = ModelInfraErrorContext.with_correlation(
-                    correlation_id=effective_correlation_id,
-                    transport_type=EnumInfraTransportType.DATABASE,
-                    operation="intent_effect_postgres_update",
-                )
-                raise RuntimeHostError(
-                    f"UPDATE WHERE contains column(s) not in allowlist: "
-                    f"{sorted(disallowed_where_cols)}. "
                     f"If this is a new schema column, add it to "
                     f"IntentEffectPostgresUpdate._ALLOWED_COLUMNS.",
                     context=context,

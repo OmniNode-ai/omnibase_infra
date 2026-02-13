@@ -70,7 +70,7 @@ class HandlerNodeHeartbeat:
     Error Handling:
         - If no projection exists, reducer returns no_op and handler logs warning
         - Only ACTIVE nodes should receive heartbeats; other states log warnings
-        - No direct I/O is performed; all writes are via intents
+        - Reads are direct I/O (projection store); all writes are via intents
 
     Coroutine Safety:
         This handler is stateless and coroutine-safe. The projection reader
@@ -181,11 +181,11 @@ class HandlerNodeHeartbeat:
         domain = "registration"
 
         # Validate timezone-awareness for time injection pattern
-        error_ctx = ModelInfraErrorContext(
+        error_ctx = ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="handle_heartbeat_event",
             target_name="handler.node_heartbeat",
-            correlation_id=correlation_id,
         )
         validate_timezone_aware_with_context(now, error_ctx)
 
