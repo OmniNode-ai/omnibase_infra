@@ -136,7 +136,7 @@ def _serialize_ollama_messages(
                         },
                     }
                 )
-            m["tool_calls"] = serialized_tool_calls
+            m["tool_calls"] = cast("JsonType", serialized_tool_calls)
         if msg.tool_call_id is not None:
             m["tool_call_id"] = msg.tool_call_id
         result.append(m)
