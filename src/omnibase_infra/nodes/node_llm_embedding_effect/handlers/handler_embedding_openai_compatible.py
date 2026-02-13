@@ -197,10 +197,13 @@ def _parse_openai_usage(data: dict[str, JsonType]) -> ModelLlmUsage:
     if not isinstance(usage_raw, dict):
         return ModelLlmUsage()
 
+    prompt_tokens = usage_raw.get("prompt_tokens", 0)
+    if not isinstance(prompt_tokens, int):
+        prompt_tokens = 0
+
     return ModelLlmUsage(
-        tokens_input=usage_raw.get("prompt_tokens", 0),
+        tokens_input=prompt_tokens,
         tokens_output=0,
-        tokens_total=usage_raw.get("total_tokens", None),
     )
 
 
