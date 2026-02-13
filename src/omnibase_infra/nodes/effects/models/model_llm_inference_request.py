@@ -17,15 +17,13 @@ Related:
 
 from __future__ import annotations
 
-from types import MappingProxyType
-from typing import Annotated, Literal
+from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    PlainSerializer,
     field_validator,
     model_validator,
 )
@@ -38,17 +36,6 @@ from omnibase_infra.nodes.effects.models.model_llm_tool_choice import (
 from omnibase_infra.nodes.effects.models.model_llm_tool_definition import (
     ModelLlmToolDefinition,
 )
-
-# Annotated type that serialises MappingProxyType back to a plain dict so
-# model_dump() / model_dump_json() produce standard JSON while the live
-# attribute remains immutable.
-_ImmutableMetadata = Annotated[
-    dict[str, str],
-    PlainSerializer(
-        lambda v: dict(v) if isinstance(v, MappingProxyType) else v,
-        return_type=dict[str, str],
-    ),
-]
 
 
 class ModelLlmInferenceRequest(BaseModel):
@@ -204,13 +191,9 @@ class ModelLlmInferenceRequest(BaseModel):
         default_factory=uuid4,
         description="Unique identifier for this specific inference call.",
     )
-    metadata: _ImmutableMetadata = Field(
+    metadata: dict[str, str] = Field(
         default_factory=dict,
-        description=(
-            "Arbitrary key-value pairs for observability. "
-            "Stored as an immutable MappingProxyType at runtime to uphold "
-            "the frozen-model invariant; serialises to a plain dict."
-        ),
+        description="Arbitrary key-value pairs for observability.",
     )
 
     @field_validator("stop")
@@ -311,21 +294,6 @@ class ModelLlmInferenceRequest(BaseModel):
         else:
             raise ValueError(f"Unrecognized operation_type: {self.operation_type!r}.")
 
-        return self
-
-    @model_validator(mode="after")
-    def _freeze_mutable_collections(self) -> ModelLlmInferenceRequest:
-        """Replace mutable metadata dict with an immutable MappingProxyType.
-
-        Pydantic's ``frozen=True`` prevents field *reassignment* but does not
-        prevent in-place mutation of mutable containers.  This validator runs
-        after all other validation and converts the metadata dict to a
-        ``types.MappingProxyType`` so that ``request.metadata['k'] = 'v'``
-        raises ``TypeError`` at runtime.
-
-        Uses ``object.__setattr__`` because the model is frozen.
-        """
-        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
         return self
 
 
