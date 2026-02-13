@@ -242,7 +242,7 @@ class TestCliStamp:
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """With dry_run=False the UPDATE query IS executed with the fingerprint."""
-        mock_pool = _make_mock_pool()
+        mock_pool = _make_mock_pool(execute=AsyncMock(return_value="UPDATE 1"))
 
         with (
             patch(
@@ -267,6 +267,35 @@ class TestCliStamp:
 
         captured = capsys.readouterr()
         assert "updated" in captured.out.lower()
+
+    @pytest.mark.asyncio
+    async def test_stamp_fails_on_zero_rows_updated(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """When conn.execute returns 'UPDATE 0', _cli_stamp exits with code 1."""
+        mock_pool = _make_mock_pool(execute=AsyncMock(return_value="UPDATE 0"))
+
+        with (
+            patch(
+                "omnibase_infra.runtime.util_schema_fingerprint.asyncpg.create_pool",
+                new_callable=AsyncMock,
+                return_value=mock_pool,
+            ),
+            patch(
+                "omnibase_infra.runtime.util_schema_fingerprint.compute_schema_fingerprint",
+                new_callable=AsyncMock,
+                return_value=_FAKE_FINGERPRINT_RESULT,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            await _cli_stamp(_FAKE_DSN, dry_run=False)
+
+        assert exc_info.value.code == 1
+
+        captured = capsys.readouterr()
+        assert "No rows updated" in captured.out
+
+        mock_pool.close.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_stamp_prints_stats(self, capsys: pytest.CaptureFixture[str]) -> None:

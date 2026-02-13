@@ -585,7 +585,15 @@ async def _cli_stamp(db_url: str, *, dry_run: bool = False) -> None:
             return
 
         async with pool.acquire() as conn:
-            await conn.execute(_STAMP_QUERY, result.fingerprint)
+            status = await conn.execute(_STAMP_QUERY, result.fingerprint)
+
+        rows_affected = int(status.split()[-1])
+        if rows_affected == 0:
+            print(
+                "\nERROR: No rows updated in db_metadata. Table may not be initialized."
+            )
+            print("Ensure db_metadata table has a row with id = TRUE before stamping.")
+            raise SystemExit(1)
 
         print("\ndb_metadata.expected_schema_fingerprint updated")
     finally:

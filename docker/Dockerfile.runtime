@@ -147,8 +147,16 @@ RUN --mount=type=cache,target=/tmp/poetry_cache \
 # This is NOT declared in pyproject.toml because it is a runtime plugin,
 # not a build-time dependency of omnibase_infra. Installing it here enables
 # plugin auto-discovery by the runtime's handler loader.
+#
+# We export a constraints file from poetry.lock so that pip cannot mutate
+# any transitive dependency version already locked by Poetry (e.g.
+# python-dotenv). This ensures the runtime image is fully reproducible.
+RUN poetry export --only=main --without-hashes --format=constraints.txt \
+    -o /tmp/constraints.txt
+
 RUN --mount=type=cache,target=/root/.cache/pip \
-    /app/.venv/bin/pip install omniintelligence==0.1.0
+    /app/.venv/bin/pip install --constraint /tmp/constraints.txt \
+    omniintelligence==0.1.0
 
 # ============================================================================
 # Runtime Stage - Minimal production image
