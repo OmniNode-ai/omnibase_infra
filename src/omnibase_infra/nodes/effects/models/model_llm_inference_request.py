@@ -17,10 +17,18 @@ Related:
 
 from __future__ import annotations
 
-from typing import Literal
+from types import MappingProxyType
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    field_validator,
+    model_validator,
+)
 
 from omnibase_infra.enums import EnumLlmOperationType
 from omnibase_infra.nodes.effects.models.model_llm_message import ModelLlmMessage
@@ -30,6 +38,17 @@ from omnibase_infra.nodes.effects.models.model_llm_tool_choice import (
 from omnibase_infra.nodes.effects.models.model_llm_tool_definition import (
     ModelLlmToolDefinition,
 )
+
+# Annotated type that serialises MappingProxyType back to a plain dict so
+# model_dump() / model_dump_json() produce standard JSON while the live
+# attribute remains immutable.
+_ImmutableMetadata = Annotated[
+    dict[str, str],
+    PlainSerializer(
+        lambda v: dict(v) if isinstance(v, MappingProxyType) else v,
+        return_type=dict[str, str],
+    ),
+]
 
 
 class ModelLlmInferenceRequest(BaseModel):
@@ -128,23 +147,23 @@ class ModelLlmInferenceRequest(BaseModel):
 
     # -- Generation --
 
-    max_tokens: int = Field(
-        default=1024,
+    max_tokens: int | None = Field(
+        default=None,
         ge=1,
         le=128_000,
-        description="Maximum tokens to generate.",
+        description="Maximum tokens to generate; None for EMBEDDING.",
     )
-    temperature: float = Field(
-        default=0.7,
+    temperature: float | None = Field(
+        default=None,
         ge=0.0,
         le=2.0,
-        description="Sampling temperature.",
+        description="Sampling temperature; None for EMBEDDING.",
     )
-    top_p: float = Field(
-        default=1.0,
+    top_p: float | None = Field(
+        default=None,
         ge=0.0,
         le=1.0,
-        description="Nucleus sampling threshold.",
+        description="Nucleus sampling threshold; None for EMBEDDING.",
     )
     stop: tuple[str, ...] = Field(
         default_factory=tuple,
@@ -185,9 +204,13 @@ class ModelLlmInferenceRequest(BaseModel):
         default_factory=uuid4,
         description="Unique identifier for this specific inference call.",
     )
-    metadata: dict[str, str] = Field(
+    metadata: _ImmutableMetadata = Field(
         default_factory=dict,
-        description="Arbitrary key-value pairs for observability.",
+        description=(
+            "Arbitrary key-value pairs for observability. "
+            "Stored as an immutable MappingProxyType at runtime to uphold "
+            "the frozen-model invariant; serialises to a plain dict."
+        ),
     )
 
     @field_validator("stop")
@@ -224,6 +247,11 @@ class ModelLlmInferenceRequest(BaseModel):
                 raise ValueError(
                     "prompt must be None when operation_type is CHAT_COMPLETION."
                 )
+            # Tool consistency: tool_choice requires tools. This check is
+            # scoped to CHAT_COMPLETION because the COMPLETION and EMBEDDING
+            # branches already reject both tools and tool_choice outright.
+            if self.tool_choice is not None and not self.tools:
+                raise ValueError("tools must be non-empty when tool_choice is set.")
         elif self.operation_type == EnumLlmOperationType.COMPLETION:
             if self.prompt is None or not self.prompt.strip():
                 raise ValueError(
@@ -268,13 +296,36 @@ class ModelLlmInferenceRequest(BaseModel):
                 raise ValueError(
                     "system_prompt must be None when operation_type is EMBEDDING."
                 )
+            if self.max_tokens is not None:
+                raise ValueError(
+                    "max_tokens must be None when operation_type is EMBEDDING."
+                )
+            if self.temperature is not None:
+                raise ValueError(
+                    "temperature must be None when operation_type is EMBEDDING."
+                )
+            if self.top_p is not None:
+                raise ValueError("top_p must be None when operation_type is EMBEDDING.")
+            if self.stop:
+                raise ValueError("stop must be empty when operation_type is EMBEDDING.")
         else:
             raise ValueError(f"Unrecognized operation_type: {self.operation_type!r}.")
 
-        # -- Tool consistency --
-        if self.tool_choice is not None and not self.tools:
-            raise ValueError("tools must be non-empty when tool_choice is set.")
+        return self
 
+    @model_validator(mode="after")
+    def _freeze_mutable_collections(self) -> ModelLlmInferenceRequest:
+        """Replace mutable metadata dict with an immutable MappingProxyType.
+
+        Pydantic's ``frozen=True`` prevents field *reassignment* but does not
+        prevent in-place mutation of mutable containers.  This validator runs
+        after all other validation and converts the metadata dict to a
+        ``types.MappingProxyType`` so that ``request.metadata['k'] = 'v'``
+        raises ``TypeError`` at runtime.
+
+        Uses ``object.__setattr__`` because the model is frozen.
+        """
+        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
         return self
 
 

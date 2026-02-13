@@ -70,6 +70,10 @@ class ModelLlmMessage(BaseModel):
     def _validate_role_field_invariants(self) -> ModelLlmMessage:
         """Enforce field constraints based on message role."""
         if self.role == "tool":
+            if self.content is None or not self.content.strip():
+                raise ValueError(
+                    "tool messages must include content (the tool result)."
+                )
             if self.tool_call_id is None:
                 raise ValueError("tool_call_id is required when role is 'tool'.")
             if self.tool_calls:
