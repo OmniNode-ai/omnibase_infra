@@ -97,6 +97,9 @@ from omnibase_infra.errors import (
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
+from omnibase_infra.runtime.emit_daemon.event_registry import (
+    validate_event_registry_fingerprint,
+)
 from omnibase_infra.runtime.model_schema_manifest import (
     OMNIBASE_INFRA_SCHEMA_MANIFEST,
 )
@@ -350,10 +353,6 @@ class PluginRegistration:
             # 1.7 Validate event registry fingerprint (OMN-2088)
             # Hard gate: prevents operating with drifted event registrations
             # (wrong topics, missing events, changed schemas).
-            from omnibase_infra.runtime.emit_daemon.event_registry import (
-                validate_event_registry_fingerprint,
-            )
-
             validate_event_registry_fingerprint()
 
             # 2. Load projectors from contracts via ProjectorPluginLoader

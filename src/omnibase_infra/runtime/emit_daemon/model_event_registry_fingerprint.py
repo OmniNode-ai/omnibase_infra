@@ -35,7 +35,7 @@ class ModelEventRegistryFingerprint(BaseModel):
         elements: Tuple of per-registration fingerprint elements.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     version: int = Field(default=1, description="Manifest format version")
     fingerprint_sha256: str = Field(
@@ -81,5 +81,4 @@ class ModelEventRegistryFingerprint(BaseModel):
 
 __all__: list[str] = [
     "ModelEventRegistryFingerprint",
-    "ModelEventRegistryFingerprintElement",
 ]

@@ -506,6 +506,8 @@ class EventRegistry:
         """
         from omnibase_infra.runtime.emit_daemon.model_event_registry_fingerprint import (
             ModelEventRegistryFingerprint,
+        )
+        from omnibase_infra.runtime.emit_daemon.model_event_registry_fingerprint_element import (
             ModelEventRegistryFingerprintElement,
         )
 
@@ -533,7 +535,9 @@ class EventRegistry:
             )
 
         # Overall fingerprint: hash of sorted (event_type, element_sha256) pairs
-        overall_input = [(e.event_type, e.element_sha256) for e in elements]
+        overall_input: list[list[str]] = [
+            [e.event_type, e.element_sha256] for e in elements
+        ]
         overall_hash = _sha256_json(overall_input)
 
         return ModelEventRegistryFingerprint(
@@ -602,7 +606,8 @@ def _sha256_json(obj: object) -> str:
     compact separators (no whitespace).
 
     Args:
-        obj: Python object (dict, list, tuple) to hash. Must be JSON-serializable.
+        obj: JSON-serializable value (dict, list, tuple, str, int, float,
+            bool, or None) to hash.
 
     Returns:
         64-character hexadecimal SHA-256 digest.
@@ -718,11 +723,6 @@ def validate_event_registry_fingerprint(
     registry.register_batch(ALL_EVENT_REGISTRATIONS)
 
     registry.assert_fingerprint(expected)
-    logger.info(
-        "Event registry fingerprint validated: %s (%d registrations)",
-        expected.fingerprint_sha256[:16],
-        len(expected.elements),
-    )
 
 
 def _cli_stamp(artifact_path: str, *, dry_run: bool = False) -> None:

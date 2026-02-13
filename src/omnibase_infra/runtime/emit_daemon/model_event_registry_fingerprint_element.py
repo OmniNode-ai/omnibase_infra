@@ -30,7 +30,7 @@ class ModelEventRegistryFingerprintElement(BaseModel):
         element_sha256: SHA-256 hex digest of the canonical tuple for this element.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     event_type: str = Field(..., description="Semantic event type identifier")
     topic_template: str = Field(
