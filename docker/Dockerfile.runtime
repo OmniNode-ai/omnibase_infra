@@ -152,7 +152,7 @@ RUN --mount=type=cache,target=/tmp/poetry_cache \
 # pip cannot mutate any transitive dependency version already locked by
 # Poetry (e.g. python-dotenv). This ensures the runtime image is fully
 # reproducible.
-RUN /app/.venv/bin/pip freeze > /tmp/constraints.txt
+RUN /app/.venv/bin/pip freeze | grep -v '^\(-e\|@\)' > /tmp/constraints.txt
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     /app/.venv/bin/pip install --constraint /tmp/constraints.txt \
