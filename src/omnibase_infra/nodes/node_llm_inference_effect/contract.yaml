@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeLlmInferenceEffect
+#
+# This contract defines the interface for the LLM Inference Effect node,
+# which handles provider-agnostic LLM inference operations via delegated
+# handlers (e.g., Ollama, vLLM, OpenAI-compatible endpoints).
+# Contract identifiers
+name: "node_llm_inference_effect"
+contract_name: "node_llm_inference_effect"
+node_name: "node_llm_inference_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Node type
+node_type: "EFFECT_GENERIC"
+# Description
+description: >
+  LLM inference effect node for provider-agnostic inference operations. Delegates to provider-specific handlers (Ollama, vLLM, OpenAI-compatible) via declarative operation routing.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelLlmInferenceRequest"
+  module: "omnibase_infra.nodes.effects.models"
+  description: "Input model containing LLM inference parameters and routing configuration."
+output_model:
+  name: "ModelLlmInferenceResponse"
+  module: "omnibase_infra.nodes.effects.models"
+  description: "Output model containing inference result, usage, and tracing metadata."
+# =============================================================================
+# HANDLER ROUTING (Declarative Handler Dispatch)
+# =============================================================================
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "ollama_inference"
+      handler:
+        name: "HandlerLlmOllama"
+        module: "omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_ollama"
+      description: "Execute LLM inference via Ollama API"
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-13"
+  updated: "2026-02-13"
+  tags:
+    - effect
+    - llm
+    - inference
+    - ollama
