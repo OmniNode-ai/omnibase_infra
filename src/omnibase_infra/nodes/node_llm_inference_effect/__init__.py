@@ -31,7 +31,7 @@ from omnibase_infra.nodes.node_llm_inference_effect.registry import (
     RegistryInfraLlmInferenceEffect,
 )
 
-# Derived from registry (which reads contract.yaml) so there is a single
+# Derived from registry (which mirrors contract.yaml) so there is a single
 # source of truth for supported operations.
 ALLOWED_INFERENCE_OPERATIONS: frozenset[str] = frozenset(
     RegistryInfraLlmInferenceEffect.get_supported_operations()

@@ -138,7 +138,7 @@ class RegistryInfraLlmInferenceEffect:
         if container.service_registry is not None:
             try:
                 container.get_service(MixinLlmHttpTransport)
-            except Exception:
+            except Exception as exc:
                 from omnibase_core.errors import OnexError
 
                 msg = (
@@ -147,7 +147,7 @@ class RegistryInfraLlmInferenceEffect:
                     f"Call register_openai_compatible() or register_ollama() "
                     f"before creating the node."
                 )
-                raise OnexError(msg)
+                raise OnexError(msg) from exc
 
         return NodeLlmInferenceEffect(container)
 
@@ -168,6 +168,7 @@ class RegistryInfraLlmInferenceEffect:
                 and logging). Default: ``"openai-inference"``.
         """
         from omnibase_core.enums import EnumInjectionScope
+        from omnibase_infra.mixins import MixinLlmHttpTransport
         from omnibase_infra.nodes.node_llm_inference_effect.handlers import (
             HandlerLlmOpenaiCompatible,
         )
@@ -180,6 +181,11 @@ class RegistryInfraLlmInferenceEffect:
 
         await container.service_registry.register_instance(
             interface=HandlerLlmOpenaiCompatible,
+            instance=handler,
+            scope=EnumInjectionScope.GLOBAL,
+        )
+        await container.service_registry.register_instance(
+            interface=MixinLlmHttpTransport,
             instance=handler,
             scope=EnumInjectionScope.GLOBAL,
         )
@@ -205,6 +211,7 @@ class RegistryInfraLlmInferenceEffect:
                 and logging). Default: ``"ollama-inference"``.
         """
         from omnibase_core.enums import EnumInjectionScope
+        from omnibase_infra.mixins import MixinLlmHttpTransport
         from omnibase_infra.nodes.node_llm_inference_effect.handlers import (
             HandlerLlmOllama,
         )
@@ -216,6 +223,11 @@ class RegistryInfraLlmInferenceEffect:
 
         await container.service_registry.register_instance(
             interface=HandlerLlmOllama,
+            instance=handler,
+            scope=EnumInjectionScope.GLOBAL,
+        )
+        await container.service_registry.register_instance(
+            interface=MixinLlmHttpTransport,
             instance=handler,
             scope=EnumInjectionScope.GLOBAL,
         )
