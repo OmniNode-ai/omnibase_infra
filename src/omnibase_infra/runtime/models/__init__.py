@@ -35,6 +35,8 @@ Exports:
     ModelBatchLifecycleResult: Result of batch handler lifecycle operations
     ModelFailedComponent: Represents a component that failed during shutdown
     ModelShutdownBatchResult: Result of batch shutdown operation
+    ModelHandshakeCheckResult: Result of a single handshake validation check
+    ModelHandshakeResult: Aggregated result of plugin handshake validation
     ModelHealthCheckResult: Result of component health check operation
     ModelHealthCheckResponse: HTTP response model for health check endpoints
     ModelProjectorPluginLoaderConfig: Projector plugin loader configuration model

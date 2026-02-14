@@ -21,6 +21,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
+from omnibase_infra.runtime.models.model_handshake_result import ModelHandshakeResult
 from omnibase_infra.runtime.models.model_security_config import ModelSecurityConfig
 from omnibase_infra.runtime.protocol_domain_plugin import (
     ProtocolDomainPlugin,
@@ -52,8 +53,45 @@ class _FakePlugin:
     async def initialize(self, config: object) -> object:
         return MagicMock(success=True)
 
-    async def validate_handshake(self, config: object) -> object:
-        return MagicMock(passed=True, checks=[])
+    async def validate_handshake(self, config: object) -> ModelHandshakeResult:
+        return ModelHandshakeResult.default_pass(self._plugin_id)
+
+    async def wire_handlers(self, config: object) -> object:
+        return MagicMock(success=True)
+
+    async def wire_dispatchers(self, config: object) -> object:
+        return MagicMock(success=True)
+
+    async def start_consumers(self, config: object) -> object:
+        return MagicMock(success=True)
+
+    async def shutdown(self, config: object) -> object:
+        return MagicMock(success=True)
+
+
+class _FakePluginWithoutHandshake:
+    """Minimal plugin satisfying ProtocolDomainPlugin WITHOUT validate_handshake.
+
+    Proves that validate_handshake is optional: plugins omitting it must still
+    pass isinstance(plugin, ProtocolDomainPlugin) and be accepted by discovery.
+    """
+
+    def __init__(self, plugin_id: str = "no-handshake") -> None:
+        self._plugin_id = plugin_id
+
+    @property
+    def plugin_id(self) -> str:
+        return self._plugin_id
+
+    @property
+    def display_name(self) -> str:
+        return self._plugin_id.title()
+
+    def should_activate(self, config: object) -> bool:
+        return True
+
+    async def initialize(self, config: object) -> object:
+        return MagicMock(success=True)
 
     async def wire_handlers(self, config: object) -> object:
         return MagicMock(success=True)
@@ -390,6 +428,41 @@ class TestDiscoverFromEntryPoints:
 
         mock_ep.assert_called_once_with(group="custom.group")
         assert report.group == "custom.group"
+
+    @patch("omnibase_infra.runtime.protocol_domain_plugin.entry_points")
+    def test_plugin_without_handshake_passes_discovery(
+        self, mock_ep: MagicMock
+    ) -> None:
+        """A plugin WITHOUT validate_handshake must satisfy the protocol and be accepted.
+
+        validate_handshake is intentionally excluded from ProtocolDomainPlugin
+        so that isinstance() checks do not reject plugins that omit it. This
+        test proves the optional contract holds for entry-point discovery.
+        """
+        ep = _make_entry_point(
+            "no_handshake",
+            "omnibase_infra.plugins.nhs:PluginNoHandshake",
+        )
+        plugin_instance = _FakePluginWithoutHandshake("no-handshake")
+
+        loaded_cls = MagicMock(return_value=plugin_instance)
+        ep.load.return_value = loaded_cls
+
+        mock_ep.return_value = [ep]
+
+        # Verify the protocol contract: isinstance must pass even without
+        # validate_handshake defined on the class.
+        assert isinstance(plugin_instance, ProtocolDomainPlugin)
+
+        registry = RegistryDomainPlugin()
+        config = ModelSecurityConfig()
+        report = registry.discover_from_entry_points(security_config=config)
+
+        assert report.discovered_count == 1
+        assert report.accepted == ("no-handshake",)
+        assert len(report.entries) == 1
+        assert report.entries[0].status == "accepted"
+        assert registry.get("no-handshake") is plugin_instance
 
 
 # ---------------------------------------------------------------------------
