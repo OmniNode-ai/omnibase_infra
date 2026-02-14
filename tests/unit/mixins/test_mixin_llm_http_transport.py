@@ -26,6 +26,7 @@ Related Ticket: OMN-2114 Phase 14
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 from unittest.mock import patch
@@ -104,8 +105,6 @@ def _json_response(
     headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     """Build a mock httpx.Response with JSON body."""
-    import json
-
     all_headers = {"content-type": "application/json"}
     if headers:
         all_headers.update(headers)
@@ -608,6 +607,36 @@ class TestConnectionErrors:
                 max_retries=0,
             )
 
+    async def test_unexpected_non_httpx_exception_raises_infra_connection_error(
+        self, correlation_id: UUID
+    ) -> None:
+        """An unexpected non-httpx exception (e.g. RuntimeError) from the transport
+        must be caught by the generic Exception handler and raised as
+        InfraConnectionError after retries are exhausted.
+        """
+        call_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError("unexpected transport failure")
+
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client)
+
+        with pytest.raises(InfraConnectionError, match="RuntimeError") as exc_info:
+            await harness._execute_llm_http_call(
+                url=URL,
+                payload=PAYLOAD,
+                correlation_id=correlation_id,
+                max_retries=0,
+            )
+
+        # Should have attempted exactly once (max_retries=0)
+        assert call_count == 1
+        # Original exception preserved in chain
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+
 
 # ── Retry Behavior ──────────────────────────────────────────────────────
 
@@ -685,21 +714,33 @@ class TestRetryBehavior:
         assert result == {"result": "success"}
         assert call_count == 3
 
+    @pytest.mark.parametrize(
+        ("status_code", "expected_error"),
+        [
+            (401, InfraAuthenticationError),
+            (404, ProtocolConfigurationError),
+            (400, InfraRequestRejectedError),
+        ],
+        ids=["401-auth", "404-config", "400-rejected"],
+    )
     async def test_non_retriable_errors_do_not_retry(
-        self, correlation_id: UUID
+        self,
+        status_code: int,
+        expected_error: type[Exception],
+        correlation_id: UUID,
     ) -> None:
-        """401 (non-retriable) must not trigger retry attempts."""
+        """Non-retriable status codes (401, 404, 400) must not trigger retry attempts."""
         call_count = 0
 
         def handler(request: httpx.Request) -> httpx.Response:
             nonlocal call_count
             call_count += 1
-            return _json_response({"error": "unauthorized"}, status_code=401)
+            return _json_response({"error": "error"}, status_code=status_code)
 
         client = _make_mock_client(handler)
         harness = LlmTransportHarness(http_client=client)
 
-        with pytest.raises(InfraAuthenticationError):
+        with pytest.raises(expected_error):
             await harness._execute_llm_http_call(
                 url=URL,
                 payload=PAYLOAD,
@@ -707,7 +748,7 @@ class TestRetryBehavior:
                 max_retries=3,
             )
 
-        # 401 is non-retriable, so only 1 attempt
+        # Non-retriable errors must produce exactly 1 attempt
         assert call_count == 1
 
     async def test_exponential_backoff_timing(self, correlation_id: UUID) -> None:
@@ -787,8 +828,11 @@ class TestRetryBehavior:
             )
 
         assert result == {"result": "ok"}
-        # The 429 delays should use the Retry-After value (3.0)
-        assert any(delay == 3.0 for delay in sleep_calls)
+        # The first two sleeps correspond to the two 429 responses and must
+        # each use the Retry-After value (3.0), not exponential backoff.
+        assert len(sleep_calls) >= 2
+        assert sleep_calls[0] == 3.0
+        assert sleep_calls[1] == 3.0
 
 
 # ── Circuit Breaker State Transitions ────────────────────────────────────
@@ -844,12 +888,11 @@ class TestCircuitBreakerStateTransitions:
 
         # Next call should be rejected by circuit breaker (InfraUnavailableError)
         call_count = 0
-        original_handler = handler
 
         def counting_handler(request: httpx.Request) -> httpx.Response:
             nonlocal call_count
             call_count += 1
-            return original_handler(request)
+            raise AssertionError("HTTP handler should not be called")
 
         # Replace transport
         harness._http_client = _make_mock_client(counting_handler)
@@ -1066,6 +1109,76 @@ class TestProtocolErrors:
                 status_code=200,
                 content=b'{"result": "ok"}',
                 headers={},  # No content-type
+            )
+
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client)
+
+        result = await harness._execute_llm_http_call(
+            url=URL,
+            payload=PAYLOAD,
+            correlation_id=correlation_id,
+        )
+        assert result == {"result": "ok"}
+
+    async def test_non_json_content_type_not_retried_despite_max_retries(
+        self, correlation_id: UUID
+    ) -> None:
+        """InfraProtocolError from non-JSON content-type must NOT be retried.
+
+        Although _classify_error marks InfraProtocolError as should_retry=True,
+        _execute_llm_http_call explicitly re-raises it in the typed-exception
+        handler block (alongside InfraAuthenticationError, etc.), bypassing the
+        retry loop. This is by design: protocol errors on 2xx indicate a
+        fundamental misconfiguration that retrying won't fix.
+
+        This test verifies the end-to-end behavior: even with max_retries > 0,
+        a non-JSON 2xx response produces exactly one attempt.
+        """
+        call_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            return _text_response(
+                "<html>Service Unavailable</html>",
+                status_code=200,
+                content_type="text/html",
+            )
+
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client)
+
+        with pytest.raises(InfraProtocolError, match="text/html"):
+            await harness._execute_llm_http_call(
+                url=URL,
+                payload=PAYLOAD,
+                correlation_id=correlation_id,
+                max_retries=3,
+            )
+
+        # InfraProtocolError is re-raised immediately, no retries
+        assert call_count == 1
+
+    @pytest.mark.parametrize(
+        "content_type",
+        [
+            "application/json",
+            "application/json; charset=utf-8",
+            "Application/JSON; charset=utf-8",
+        ],
+        ids=["plain-json", "json-with-charset", "mixed-case-with-charset"],
+    )
+    async def test_json_content_type_variants_succeed(
+        self, content_type: str, correlation_id: UUID
+    ) -> None:
+        """JSON content-type variants (with/without charset, mixed case) must all succeed."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                status_code=200,
+                content=b'{"result": "ok"}',
+                headers={"content-type": content_type},
             )
 
         client = _make_mock_client(handler)
