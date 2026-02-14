@@ -466,17 +466,17 @@ class TestSchemaFingerprintErrorTypes:
 
 
 class TestPluginFingerprintPropagation:
-    """Tests that schema fingerprint errors propagate out of plugin.initialize().
+    """Tests that schema fingerprint errors propagate out of plugin.validate_handshake().
 
-    PluginRegistration.initialize() has a broad ``except Exception`` that
-    converts failures into ``ModelDomainPluginResult.failed()``. Schema
-    fingerprint errors are P0 hard gates that MUST escape this handler so
-    the kernel terminates. These tests confirm the re-raise path works.
+    PluginRegistration.validate_handshake() runs B1-B3 checks (OMN-2089).
+    Schema fingerprint errors are P0 hard gates that MUST escape the
+    handshake validation so the kernel terminates. These tests confirm
+    the re-raise path works through the handshake gate.
     """
 
     @pytest.mark.asyncio
     async def test_mismatch_error_propagates_from_plugin(self) -> None:
-        """SchemaFingerprintMismatchError escapes plugin.initialize()."""
+        """SchemaFingerprintMismatchError escapes plugin.validate_handshake()."""
         from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
             PluginRegistration,
         )
@@ -495,33 +495,57 @@ class TestPluginFingerprintPropagation:
             diff_summary="changed: foo",
         )
 
+        _plugin_mod = "omnibase_infra.nodes.node_registration_orchestrator.plugin"
+
         with (
             patch.dict("os.environ", {"OMNIBASE_INFRA_DB_URL": "postgresql://x/y"}),
-            patch(
-                "omnibase_infra.nodes.node_registration_orchestrator.plugin.ModelPostgresPoolConfig.validate_dsn",
-            ),
+            patch(f"{_plugin_mod}.ModelPostgresPoolConfig.validate_dsn"),
             patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create_pool,
-            patch(
-                "omnibase_infra.nodes.node_registration_orchestrator.plugin.validate_db_ownership",
+            patch.object(
+                PluginRegistration,
+                "_load_projector",
+                new_callable=AsyncMock,
+            ),
+            patch.object(
+                PluginRegistration,
+                "_initialize_schema",
+                new_callable=AsyncMock,
+            ),
+            patch.object(
+                PluginRegistration,
+                "_initialize_consul_handler",
+                new_callable=AsyncMock,
+            ),
+            patch.object(
+                PluginRegistration,
+                "_initialize_snapshot_publisher",
                 new_callable=AsyncMock,
             ),
             patch(
-                "omnibase_infra.nodes.node_registration_orchestrator.plugin.validate_schema_fingerprint",
+                f"{_plugin_mod}.validate_db_ownership",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                f"{_plugin_mod}.validate_schema_fingerprint",
                 new_callable=AsyncMock,
                 side_effect=mismatch,
             ),
         ):
             mock_create_pool.return_value = MagicMock()
 
+            # initialize() succeeds (creates pool) -- B1-B3 checks moved to validate_handshake()
+            init_result = await plugin.initialize(config)
+            assert init_result.success
+
             with pytest.raises(SchemaFingerprintMismatchError) as exc_info:
-                await plugin.initialize(config)
+                await plugin.validate_handshake(config)
 
             assert exc_info.value.expected_fingerprint == "expected_hash"
             assert exc_info.value.actual_fingerprint == "actual_hash"
 
     @pytest.mark.asyncio
     async def test_missing_error_propagates_from_plugin(self) -> None:
-        """SchemaFingerprintMissingError escapes plugin.initialize()."""
+        """SchemaFingerprintMissingError escapes plugin.validate_handshake()."""
         from omnibase_infra.nodes.node_registration_orchestrator.plugin import (
             PluginRegistration,
         )
@@ -538,26 +562,50 @@ class TestPluginFingerprintPropagation:
             expected_owner="omnibase_infra",
         )
 
+        _plugin_mod = "omnibase_infra.nodes.node_registration_orchestrator.plugin"
+
         with (
             patch.dict("os.environ", {"OMNIBASE_INFRA_DB_URL": "postgresql://x/y"}),
-            patch(
-                "omnibase_infra.nodes.node_registration_orchestrator.plugin.ModelPostgresPoolConfig.validate_dsn",
-            ),
+            patch(f"{_plugin_mod}.ModelPostgresPoolConfig.validate_dsn"),
             patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create_pool,
-            patch(
-                "omnibase_infra.nodes.node_registration_orchestrator.plugin.validate_db_ownership",
+            patch.object(
+                PluginRegistration,
+                "_load_projector",
+                new_callable=AsyncMock,
+            ),
+            patch.object(
+                PluginRegistration,
+                "_initialize_schema",
+                new_callable=AsyncMock,
+            ),
+            patch.object(
+                PluginRegistration,
+                "_initialize_consul_handler",
+                new_callable=AsyncMock,
+            ),
+            patch.object(
+                PluginRegistration,
+                "_initialize_snapshot_publisher",
                 new_callable=AsyncMock,
             ),
             patch(
-                "omnibase_infra.nodes.node_registration_orchestrator.plugin.validate_schema_fingerprint",
+                f"{_plugin_mod}.validate_db_ownership",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                f"{_plugin_mod}.validate_schema_fingerprint",
                 new_callable=AsyncMock,
                 side_effect=missing,
             ),
         ):
             mock_create_pool.return_value = MagicMock()
 
+            # initialize() succeeds (creates pool) -- B1-B3 checks moved to validate_handshake()
+            init_result = await plugin.initialize(config)
+            assert init_result.success
+
             with pytest.raises(SchemaFingerprintMissingError) as exc_info:
-                await plugin.initialize(config)
+                await plugin.validate_handshake(config)
 
             assert exc_info.value.expected_owner == "omnibase_infra"
 

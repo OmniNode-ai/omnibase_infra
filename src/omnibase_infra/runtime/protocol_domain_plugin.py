@@ -44,10 +44,11 @@ Lifecycle Hooks:
 
     1. `should_activate()` - Check if plugin should activate based on environment
     2. `initialize()` - Create domain-specific resources (pools, connections)
-    3. `wire_handlers()` - Register handlers in the container
-    4. `wire_dispatchers()` - Register dispatchers with MessageDispatchEngine
-    5. `start_consumers()` - Start event consumers
-    6. `shutdown()` - Clean up resources during kernel shutdown
+    3. `validate_handshake()` - Run prerequisite checks (B1-B3) before wiring
+    4. `wire_handlers()` - Register handlers in the container
+    5. `wire_dispatchers()` - Register dispatchers with MessageDispatchEngine
+    6. `start_consumers()` - Start event consumers
+    7. `shutdown()` - Clean up resources during kernel shutdown
 
 Plugin Discovery:
     Plugins can be registered in two ways:
@@ -73,6 +74,9 @@ Example Implementation:
     from omnibase_infra.runtime.models import (
         ModelDomainPluginConfig,
         ModelDomainPluginResult,
+    )
+    from omnibase_infra.runtime.models.model_handshake_result import (
+        ModelHandshakeResult,
     )
 
     class PluginMyDomain:
@@ -100,6 +104,13 @@ Example Implementation:
                 success=True,
                 resources_created=["pool"],
             )
+
+        async def validate_handshake(
+            self,
+            config: ModelDomainPluginConfig,
+        ) -> ModelHandshakeResult:
+            # Optional: run prerequisite checks before wiring
+            return ModelHandshakeResult.default_pass(self.plugin_id)
 
         async def wire_handlers(
             self,
@@ -138,6 +149,9 @@ from omnibase_infra.runtime.models import (
     ModelDomainPluginConfig,
     ModelDomainPluginResult,
 )
+from omnibase_infra.runtime.models.model_handshake_result import (
+    ModelHandshakeResult,
+)
 from omnibase_infra.runtime.models.model_plugin_discovery_entry import (
     ModelPluginDiscoveryEntry,
 )
@@ -169,10 +183,21 @@ class ProtocolDomainPlugin(Protocol):
     Lifecycle Order:
         1. should_activate() - Check environment/config
         2. initialize() - Create pools, connections
-        3. wire_handlers() - Register handlers in container
-        4. wire_dispatchers() - Register with dispatch engine (optional)
-        5. start_consumers() - Start event consumers (optional)
-        6. shutdown() - Clean up during kernel shutdown
+        3. validate_handshake() - Run prerequisite checks (optional, default pass)
+        4. wire_handlers() - Register handlers in container
+        5. wire_dispatchers() - Register with dispatch engine (optional)
+        6. start_consumers() - Start event consumers (optional)
+        7. shutdown() - Clean up during kernel shutdown
+
+    Optional Methods:
+        ``validate_handshake()`` is **not** part of this Protocol definition
+        because it is optional. Plugins that implement it will be detected at
+        runtime via ``hasattr()`` in the kernel. Plugins that omit it pass
+        the handshake gate by default.
+
+        This design avoids a ``@runtime_checkable`` pitfall: if an optional
+        method were declared in the Protocol, ``isinstance()`` checks in
+        entry-point discovery would reject plugins that omit it.
 
     Example:
         ```python
@@ -189,6 +214,12 @@ class ProtocolDomainPlugin(Protocol):
             ) -> ModelDomainPluginResult:
                 # Initialize domain resources
                 return ModelDomainPluginResult.succeeded("my-domain")
+
+            async def validate_handshake(
+                self, config: ModelDomainPluginConfig
+            ) -> ModelHandshakeResult:
+                # Optional: run prerequisite checks
+                return ModelHandshakeResult.default_pass("my-domain")
 
             # ... other methods
         ```
@@ -817,6 +848,7 @@ class RegistryDomainPlugin:
 __all__: list[str] = [
     "ModelDomainPluginConfig",
     "ModelDomainPluginResult",
+    "ModelHandshakeResult",
     "ProtocolDomainPlugin",
     "RegistryDomainPlugin",
 ]
