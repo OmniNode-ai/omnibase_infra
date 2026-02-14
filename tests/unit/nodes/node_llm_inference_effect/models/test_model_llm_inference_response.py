@@ -340,7 +340,7 @@ class TestTimestampValidation:
         """A naive datetime (no tzinfo) must be rejected."""
         with pytest.raises(ValueError, match="timezone-aware"):
             ModelLlmInferenceResponse(
-                **_base_kwargs(timestamp=datetime(2025, 1, 1)),  # noqa: DTZ001
+                **_base_kwargs(timestamp=datetime(2025, 1, 1)),
             )
 
     def test_utc_datetime_valid(self) -> None:

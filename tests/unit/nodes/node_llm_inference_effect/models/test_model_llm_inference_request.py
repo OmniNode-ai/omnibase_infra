@@ -251,7 +251,8 @@ class TestCompletionValidation:
     def test_messages_with_completion_raises(self) -> None:
         """COMPLETION with messages set raises ValueError."""
         with pytest.raises(
-            ValidationError, match="messages must be empty when operation_type is COMPLETION"
+            ValidationError,
+            match="messages must be empty when operation_type is COMPLETION",
         ):
             ModelLlmInferenceRequest(
                 **_completion_kwargs(messages=(_user_message(),)),
@@ -422,17 +423,15 @@ class TestBaseUrlValidation:
 
     def test_missing_scheme_rejected(self) -> None:
         """base_url without http:// or https:// is rejected."""
-        with pytest.raises(
-            ValidationError, match="base_url must start with http"
-        ):
+        with pytest.raises(ValidationError, match="base_url must start with http"):
             ModelLlmInferenceRequest(**_chat_kwargs(base_url="192.168.86.201:8000"))
 
     def test_ftp_scheme_rejected(self) -> None:
         """Non-HTTP scheme is rejected."""
-        with pytest.raises(
-            ValidationError, match="base_url must start with http"
-        ):
-            ModelLlmInferenceRequest(**_chat_kwargs(base_url="ftp://192.168.86.201:8000"))
+        with pytest.raises(ValidationError, match="base_url must start with http"):
+            ModelLlmInferenceRequest(
+                **_chat_kwargs(base_url="ftp://192.168.86.201:8000")
+            )
 
     def test_scheme_only_rejected(self) -> None:
         """Scheme without host is rejected."""
@@ -462,16 +461,12 @@ class TestSystemPromptValidation:
 
     def test_whitespace_only_system_prompt_rejected(self) -> None:
         """Whitespace-only system_prompt is rejected."""
-        with pytest.raises(
-            ValidationError, match="system_prompt must be non-empty"
-        ):
+        with pytest.raises(ValidationError, match="system_prompt must be non-empty"):
             ModelLlmInferenceRequest(**_chat_kwargs(system_prompt="   "))
 
     def test_empty_string_system_prompt_rejected(self) -> None:
         """Empty string system_prompt is rejected."""
-        with pytest.raises(
-            ValidationError, match="system_prompt must be non-empty"
-        ):
+        with pytest.raises(ValidationError, match="system_prompt must be non-empty"):
             ModelLlmInferenceRequest(**_chat_kwargs(system_prompt=""))
 
     def test_none_system_prompt_valid(self) -> None:
