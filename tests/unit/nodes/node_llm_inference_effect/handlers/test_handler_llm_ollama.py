@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 

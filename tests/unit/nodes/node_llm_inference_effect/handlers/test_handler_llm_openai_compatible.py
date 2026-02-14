@@ -23,10 +23,9 @@ Related:
 
 from __future__ import annotations
 
-import logging
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID, uuid4
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 import httpx
 import pytest
@@ -1009,16 +1008,31 @@ class TestAuthHeaderHandling:
 
     @pytest.mark.asyncio
     async def test_api_key_injects_auth_client(self) -> None:
-        """When api_key is provided, a temporary auth client is created."""
+        """When api_key is provided, a temporary auth client is injected."""
         transport = _make_transport()
         handler = _make_handler(transport)
         transport._execute_llm_http_call.return_value = _make_openai_chat_response()
+
+        # Capture the http_client that is set on the transport during the call
+        captured_client: httpx.AsyncClient | None = None
+
+        async def _capture_client(**kwargs: Any) -> dict[str, Any]:
+            nonlocal captured_client
+            captured_client = transport._http_client
+            return _make_openai_chat_response()
+
+        transport._execute_llm_http_call.side_effect = _capture_client
 
         request = _make_chat_request(api_key="sk-test-key-123")
         await handler.handle(request, correlation_id=_CORRELATION_ID)
 
         # Verify the transport's _execute_llm_http_call was called
         transport._execute_llm_http_call.assert_awaited_once()
+
+        # Verify an httpx.AsyncClient with the Authorization header was injected
+        assert captured_client is not None
+        assert isinstance(captured_client, httpx.AsyncClient)
+        assert captured_client.headers["authorization"] == "Bearer sk-test-key-123"
 
     @pytest.mark.asyncio
     async def test_empty_api_key_raises_value_error(self) -> None:
