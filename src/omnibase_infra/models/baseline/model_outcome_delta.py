@@ -16,16 +16,21 @@ from omnibase_infra.models.baseline.model_outcome_metrics import ModelOutcomeMet
 class ModelOutcomeDelta(BaseModel):
     """Delta between baseline and candidate outcome metrics.
 
-    Positive ``check_delta`` means the candidate passed more checks.
-    Negative ``flake_rate_delta`` means the candidate had fewer flakes.
+    All delta fields use a "positive is good" convention: a positive
+    value means the candidate performed better than the baseline on
+    that dimension.  Note that the arithmetic direction differs per
+    field (see :meth:`from_metrics` for details).
 
     Attributes:
         baseline_passed: Whether the baseline run passed.
         candidate_passed: Whether the candidate run passed.
         check_delta: Difference in passed checks (candidate - baseline).
+            Positive means candidate passed more checks.
         flake_rate_delta: Difference in flake rate (baseline - candidate).
+            Positive means candidate had a lower flake rate.
         review_iteration_delta: Difference in review iterations
-            (baseline - candidate).
+            (baseline - candidate).  Positive means candidate needed
+            fewer iterations.
         quality_improved: True if the candidate outcome is strictly
             better than the baseline.
     """
@@ -64,7 +69,18 @@ class ModelOutcomeDelta(BaseModel):
     ) -> ModelOutcomeDelta:
         """Compute the outcome delta between baseline and candidate.
 
-        Quality is considered "improved" when:
+        Sign conventions differ per field to keep positive values
+        uniformly "good" (candidate is better):
+
+            - ``check_delta``: ``candidate - baseline``.
+              Positive means the candidate passed **more** checks.
+            - ``flake_rate_delta``: ``baseline - candidate``.
+              Positive means the candidate had a **lower** flake rate.
+            - ``review_iteration_delta``: ``baseline - candidate``.
+              Positive means the candidate needed **fewer** review
+              iterations.
+
+        ``quality_improved`` is ``True`` when:
         - Candidate passed and baseline did not, OR
         - Both passed but candidate has more passed checks, OR
         - Both passed, same checks, but candidate has lower flake rate.

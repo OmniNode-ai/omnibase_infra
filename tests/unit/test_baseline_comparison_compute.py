@@ -328,6 +328,62 @@ class TestBaselineRunConfig:
         )
         assert config.requires_baseline() is False
 
+    def test_requires_baseline_noop_suggested(self) -> None:
+        """No-op SUGGESTED -> SUGGESTED does NOT require baseline."""
+        config = _make_config(
+            current_tier=EnumLifecycleTier.SUGGESTED,
+            target_tier=EnumLifecycleTier.SUGGESTED,
+        )
+        assert config.requires_baseline() is False
+
+    def test_requires_baseline_noop_shadow_apply(self) -> None:
+        """No-op SHADOW_APPLY -> SHADOW_APPLY does NOT require baseline."""
+        config = _make_config(
+            current_tier=EnumLifecycleTier.SHADOW_APPLY,
+            target_tier=EnumLifecycleTier.SHADOW_APPLY,
+        )
+        assert config.requires_baseline() is False
+
+    def test_requires_baseline_noop_promoted(self) -> None:
+        """No-op PROMOTED -> PROMOTED does NOT require baseline."""
+        config = _make_config(
+            current_tier=EnumLifecycleTier.PROMOTED,
+            target_tier=EnumLifecycleTier.PROMOTED,
+        )
+        assert config.requires_baseline() is False
+
+    def test_requires_baseline_demotion_promoted_to_shadow(self) -> None:
+        """Demotion PROMOTED -> SHADOW_APPLY does NOT require baseline."""
+        config = _make_config(
+            current_tier=EnumLifecycleTier.PROMOTED,
+            target_tier=EnumLifecycleTier.SHADOW_APPLY,
+        )
+        assert config.requires_baseline() is False
+
+    def test_requires_baseline_demotion_shadow_to_suggested(self) -> None:
+        """Demotion SHADOW_APPLY -> SUGGESTED does NOT require baseline."""
+        config = _make_config(
+            current_tier=EnumLifecycleTier.SHADOW_APPLY,
+            target_tier=EnumLifecycleTier.SUGGESTED,
+        )
+        assert config.requires_baseline() is False
+
+    def test_requires_baseline_demotion_promoted_to_observed(self) -> None:
+        """Demotion PROMOTED -> OBSERVED does NOT require baseline."""
+        config = _make_config(
+            current_tier=EnumLifecycleTier.PROMOTED,
+            target_tier=EnumLifecycleTier.OBSERVED,
+        )
+        assert config.requires_baseline() is False
+
+    def test_requires_baseline_target_suppressed(self) -> None:
+        """Transition to SUPPRESSED does NOT require baseline."""
+        config = _make_config(
+            current_tier=EnumLifecycleTier.SUGGESTED,
+            target_tier=EnumLifecycleTier.SUPPRESSED,
+        )
+        assert config.requires_baseline() is False
+
     def test_frozen_immutability(self) -> None:
         """Frozen model rejects attribute mutation."""
         config = _make_config()
@@ -841,6 +897,64 @@ class TestComputeRoi:
         assert (
             HandlerBaselineComparison._compute_roi(cost_delta, outcome_delta) is False
         )
+
+    def test_roi_negative_when_flake_rate_regresses(self) -> None:
+        """Negative ROI: flake rate regression despite cost savings and check parity."""
+        cost_delta = ModelCostDelta(token_delta=100, token_savings_pct=10.0)
+        outcome_delta = ModelOutcomeDelta(
+            baseline_passed=True,
+            candidate_passed=True,
+            check_delta=0,
+            flake_rate_delta=-0.05,
+            review_iteration_delta=0,
+            quality_improved=False,
+        )
+        assert (
+            HandlerBaselineComparison._compute_roi(cost_delta, outcome_delta) is False
+        )
+
+    def test_roi_negative_when_review_iterations_regress(self) -> None:
+        """Negative ROI: review iteration regression despite cost savings and check parity."""
+        cost_delta = ModelCostDelta(token_delta=100, token_savings_pct=10.0)
+        outcome_delta = ModelOutcomeDelta(
+            baseline_passed=True,
+            candidate_passed=True,
+            check_delta=0,
+            flake_rate_delta=0.0,
+            review_iteration_delta=-2,
+            quality_improved=False,
+        )
+        assert (
+            HandlerBaselineComparison._compute_roi(cost_delta, outcome_delta) is False
+        )
+
+    def test_roi_negative_when_both_flake_and_review_regress(self) -> None:
+        """Negative ROI: both flake rate and review iterations regress."""
+        cost_delta = ModelCostDelta(token_delta=100, token_savings_pct=10.0)
+        outcome_delta = ModelOutcomeDelta(
+            baseline_passed=True,
+            candidate_passed=True,
+            check_delta=0,
+            flake_rate_delta=-0.1,
+            review_iteration_delta=-3,
+            quality_improved=False,
+        )
+        assert (
+            HandlerBaselineComparison._compute_roi(cost_delta, outcome_delta) is False
+        )
+
+    def test_roi_positive_when_quality_improved_despite_flake_regression(self) -> None:
+        """Positive ROI: quality_improved=True short-circuits flake regression."""
+        cost_delta = ModelCostDelta(token_delta=100, token_savings_pct=10.0)
+        outcome_delta = ModelOutcomeDelta(
+            baseline_passed=True,
+            candidate_passed=True,
+            check_delta=2,
+            flake_rate_delta=-0.05,
+            review_iteration_delta=-1,
+            quality_improved=True,
+        )
+        assert HandlerBaselineComparison._compute_roi(cost_delta, outcome_delta) is True
 
 
 # ============================================================================

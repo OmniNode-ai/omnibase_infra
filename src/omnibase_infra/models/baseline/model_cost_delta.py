@@ -2,9 +2,10 @@
 # Copyright (c) 2026 OmniNode Team
 """Cost delta between baseline and candidate runs.
 
-Computes the difference in cost metrics to quantify the token/time/retry
-savings (or overhead) from applying a pattern.  Negative deltas indicate
-the candidate (with pattern) used *fewer* resources than the baseline.
+Computes the difference in cost metrics (``baseline - candidate``) to
+quantify the token/time/retry savings (or overhead) from applying a
+pattern.  Positive deltas indicate the candidate (with pattern) used
+*fewer* resources than the baseline; negative deltas indicate overhead.
 """
 
 from __future__ import annotations
@@ -68,6 +69,20 @@ class ModelCostDelta(BaseModel):
         candidate: ModelCostMetrics,
     ) -> ModelCostDelta:
         """Compute the cost delta between baseline and candidate.
+
+        All deltas are computed as ``baseline - candidate``.
+
+        Sign conventions:
+            - **Positive** delta means the candidate used fewer resources
+              (savings from the pattern).
+            - **Negative** delta means the candidate used more resources
+              (overhead from the pattern).
+            - **Zero** means no change.
+
+        Percentage fields (``token_savings_pct``, ``time_savings_pct``)
+        follow the same sign convention and are expressed relative to
+        the baseline value.  They are 0.0 when the baseline value is zero
+        to avoid division-by-zero.
 
         Args:
             baseline: Cost metrics from the baseline run.

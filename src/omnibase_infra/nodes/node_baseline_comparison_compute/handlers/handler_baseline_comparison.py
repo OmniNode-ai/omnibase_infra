@@ -160,10 +160,23 @@ class HandlerBaselineComparison:
     ) -> bool:
         """Determine whether the pattern demonstrates positive ROI.
 
-        ROI is positive when:
-        - Token delta is non-negative (candidate uses same or fewer tokens)
-        - Candidate passed validation
-        - Quality did not regress (outcome is same or better)
+        ROI is positive when **all** of the following hold:
+
+        1. **No cost regression** -- ``token_delta >= 0`` (candidate
+           uses the same or fewer tokens than baseline).
+        2. **Candidate passed** -- ``candidate_passed`` is ``True``.
+        3. **No quality regression** -- either ``quality_improved`` is
+           ``True``, or all three outcome dimensions are non-negative:
+
+           - ``check_delta >= 0`` (no fewer passed checks),
+           - ``flake_rate_delta >= 0`` (flake rate did not increase),
+           - ``review_iteration_delta >= 0`` (review iterations did
+             not increase).
+
+        The quality gate uses the "positive is good" sign convention
+        from :meth:`ModelOutcomeDelta.from_metrics`, so a non-negative
+        value in each dimension means the candidate is at least as good
+        as the baseline on that dimension.
 
         Args:
             cost_delta: Cost delta between baseline and candidate.
@@ -178,9 +191,11 @@ class HandlerBaselineComparison:
         # Candidate must pass
         candidate_passed = outcome_delta.candidate_passed
 
-        # Quality must not regress
-        no_quality_regression = (
-            outcome_delta.quality_improved or outcome_delta.check_delta >= 0
+        # Quality must not regress across all outcome dimensions
+        no_quality_regression = outcome_delta.quality_improved or (
+            outcome_delta.check_delta >= 0
+            and outcome_delta.flake_rate_delta >= 0
+            and outcome_delta.review_iteration_delta >= 0
         )
 
         return cost_acceptable and candidate_passed and no_quality_regression

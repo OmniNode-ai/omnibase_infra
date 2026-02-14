@@ -71,20 +71,45 @@ class ModelBaselineRunConfig(BaseModel):
     def requires_baseline(self) -> bool:
         """Return True if this promotion decision requires a baseline run.
 
-        Baseline runs are only required for Tier 2+ promotions
-        (SHADOW_APPLY and above).  Tier 0->1 (OBSERVED->SUGGESTED)
-        promotions do not require baseline comparison.
+        Baseline runs are only required for **upward** promotions from
+        Tier 1+ (SUGGESTED and above).  Returns ``False`` for:
+
+        - Tier 0->1 (OBSERVED->SUGGESTED) promotions
+        - No-op transitions (target == current)
+        - Demotions (target tier is lower than current)
+        - Tiers outside the promotion ladder (SUPPRESSED)
 
         Returns:
-            True if current_tier is SUGGESTED or higher (i.e. the
-            promotion is from SUGGESTED->SHADOW_APPLY or above).
+            True only when ``current_tier`` is SUGGESTED or higher
+            **and** ``target_tier`` is strictly above ``current_tier``.
         """
         tiers_requiring_baseline = {
             EnumLifecycleTier.SUGGESTED,
             EnumLifecycleTier.SHADOW_APPLY,
             EnumLifecycleTier.PROMOTED,
         }
-        return self.current_tier in tiers_requiring_baseline
+        if self.current_tier not in tiers_requiring_baseline:
+            return False
+
+        # Rank ordering: higher rank = further along the lifecycle.
+        # SUPPRESSED is excluded (cannot promote).
+        tier_rank: dict[EnumLifecycleTier, int] = {
+            EnumLifecycleTier.OBSERVED: 0,
+            EnumLifecycleTier.SUGGESTED: 1,
+            EnumLifecycleTier.SHADOW_APPLY: 2,
+            EnumLifecycleTier.PROMOTED: 3,
+            EnumLifecycleTier.DEFAULT: 4,
+        }
+
+        current_rank = tier_rank.get(self.current_tier)
+        target_rank = tier_rank.get(self.target_tier)
+
+        # Unknown tiers (e.g. SUPPRESSED target) never require baseline.
+        if current_rank is None or target_rank is None:
+            return False
+
+        # Only upward promotions require a baseline comparison.
+        return target_rank > current_rank
 
 
 __all__: list[str] = ["ModelBaselineRunConfig"]
