@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeBaselineComparisonCompute
+#
+# A/B baseline comparison compute node.
+# Computes cost and outcome deltas between baseline and candidate runs
+# to produce an attribution record proving pattern ROI.
+#
+# Related Tickets:
+#   - OMN-2155: Baselines + ROI -- A/B Run Infrastructure
+# Contract identifiers
+name: "node_baseline_comparison_compute"
+contract_name: "node_baseline_comparison_compute"
+node_name: "node_baseline_comparison_compute"
+contract_version:
+  major: 0
+  minor: 1
+  patch: 0
+node_version:
+  major: 0
+  minor: 1
+  patch: 0
+# Node type
+node_type: "COMPUTE_GENERIC"
+# Description
+description: >
+  Compute node for A/B baseline comparison. Takes paired baseline and candidate run results and computes cost deltas (token, time, retry savings), outcome deltas (quality improvement), and overall ROI determination. Produces a ModelAttributionRecord for promotion decisions at Tier 2+.
+
+# Strongly typed I/O models
+input_model:
+  name: "ModelBaselineComparisonInput"
+  module: "omnibase_infra.nodes.node_baseline_comparison_compute.models"
+  description: "Paired baseline and candidate run results with config."
+output_model:
+  name: "ModelAttributionRecord"
+  module: "omnibase_infra.models.baseline"
+  description: "Attribution record with cost/outcome deltas and ROI."
+# Capability declaration
+capabilities:
+  - name: "baseline.compare"
+    description: "Compare baseline and candidate run metrics to compute ROI"
+# Handler routing
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "baseline.compare"
+      handler_class: "HandlerBaselineComparison"
+      handler_module: "omnibase_infra.nodes.node_baseline_comparison_compute.handlers.handler_baseline_comparison"
+      description: "Compute cost/outcome deltas and ROI from paired run results"
+      input_model:
+        name: "ModelBaselineComparisonInput"
+        module: "omnibase_infra.nodes.node_baseline_comparison_compute.models"
+        description: "Paired baseline and candidate run results."
+# Error handling
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "BaselineComparisonError"
+      description: "Failed to compute baseline comparison deltas"
+      recoverable: false
+    - name: "MissingVariantError"
+      description: "One or both run variants are missing or errored"
+      recoverable: false
+# Health check
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 30
+  checks:
+    - name: "comparison_handler_loaded"
+      type: "handler"
+      critical: true
+# Metadata
+metadata:
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-02-14"
+  tags:
+    - compute
+    - baseline
+    - comparison
+    - roi
+    - attribution
+    - metrics
+  related_tickets:
+    - "OMN-2155"
