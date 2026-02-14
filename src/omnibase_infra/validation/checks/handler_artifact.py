@@ -159,10 +159,18 @@ class HandlerArtifactCompleteness(HandlerCheckExecutor):
         """Initialize with an artifact directory.
 
         Args:
-            artifact_dir: Path to the artifact storage directory.  When
-                ``None``, :meth:`execute` returns a ``skipped`` result.
-                This allows the default registry to instantiate the
-                handler without knowing the deployment-specific path.
+            artifact_dir: Path to the artifact storage directory.  Must
+                point to the specific validation run directory (i.e.
+                ``~/.claude/validation/{candidate_id}/{run_id}/``), not
+                just the candidate-level directory, because artifacts are
+                stored per-run.
+
+                When ``None``, the handler is in an unconfigured state
+                and :meth:`execute` will raise :class:`ValueError`.
+                The default registry instantiates the handler this way;
+                callers that need the check to run must provide a
+                configured instance via
+                ``get_check_executor("CHECK-VAL-002", artifact_dir=...)``.
         """
         self._artifact_dir = artifact_dir
 
@@ -200,14 +208,12 @@ class HandlerArtifactCompleteness(HandlerCheckExecutor):
         artifact_dir = self._artifact_dir
 
         if artifact_dir is None:
-            duration_ms = (time.monotonic() - start) * 1000.0
-            # Skipped checks are non-blocking: passed=True because the check
-            # was not applicable (no artifact_dir configured).
-            return self._make_result(
-                passed=True,
-                message="Skipped: no artifact_dir configured.",
-                skipped=True,
-                duration_ms=duration_ms,
+            raise ValueError(
+                "HandlerArtifactCompleteness requires an explicit artifact_dir "
+                "pointing to the validation run directory "
+                "(~/.claude/validation/{candidate_id}/{run_id}/). "
+                "Use get_check_executor('CHECK-VAL-002', artifact_dir=...) "
+                "to obtain a configured instance."
             )
 
         if not artifact_dir.is_dir():

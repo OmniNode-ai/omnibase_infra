@@ -19,7 +19,7 @@ The detector tracks rerun history per check code to prevent
 infinite rerun loops. Each check gets at most one rerun opportunity.
 
 Usage:
-    detector = FlakeDetector()
+    detector = ServiceFlakeDetector()
     first_result = await executor.run(check)
     detector.record_first_run(first_result)
     if not first_result.passed:
@@ -27,8 +27,7 @@ Usage:
         if should_rerun:
             rerun_result = await executor.run(check)
             detector.record_rerun(first_result, rerun_result)
-
-    detection_result = detector.get_result()
+    report = detector.get_result()
 
 Ticket: OMN-2151
 """
@@ -47,7 +46,7 @@ from omnibase_infra.models.validation.model_flake_record import ModelFlakeRecord
 logger = logging.getLogger(__name__)
 
 
-class FlakeDetector:
+class ServiceFlakeDetector:
     """Detects non-deterministic (flaky) check failures.
 
     Implements the rerun-once rule: each failing check is rerun once.
@@ -60,7 +59,7 @@ class FlakeDetector:
         than reusing across runs.
 
     Usage:
-        detector = FlakeDetector()
+        detector = ServiceFlakeDetector()
         first_result = await executor.run(check)
         detector.record_first_run(first_result)
         if not first_result.passed:
@@ -68,8 +67,7 @@ class FlakeDetector:
             if should_rerun:
                 rerun_result = await executor.run(check)
                 detector.record_rerun(first_result, rerun_result)
-
-        detection_result = detector.get_result()
+        report = detector.get_result()
     """
 
     def __init__(self, max_reruns_per_check: int = 1) -> None:
@@ -142,7 +140,16 @@ class FlakeDetector:
 
         Returns:
             Updated ModelFlakeRecord with flake detection status.
+
+        Raises:
+            ValueError: If ``rerun_result.check_code`` does not match
+                ``first_result.check_code``.
         """
+        if rerun_result.check_code != first_result.check_code:
+            raise ValueError(
+                f"rerun check_code {rerun_result.check_code!r} does not match "
+                f"first_result check_code {first_result.check_code!r}"
+            )
         check_code = first_result.check_code
         if check_code not in self._records:
             logger.warning(
@@ -236,7 +243,7 @@ def is_promotion_blocked(verdict: EnumValidationVerdict) -> bool:
 
 
 __all__: list[str] = [
-    "FlakeDetector",
+    "ServiceFlakeDetector",
     "is_promotion_blocked",
     "should_quarantine_verdict",
 ]

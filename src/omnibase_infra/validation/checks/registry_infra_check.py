@@ -24,6 +24,7 @@ Ticket: OMN-2151
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import MappingProxyType
 
 from omnibase_infra.enums import EnumCheckSeverity
@@ -132,16 +133,27 @@ CHECK_CATALOG_ORDER: tuple[str, ...] = (
 )
 
 
-def get_check_executor(check_code: str) -> HandlerCheckExecutor | None:
+def get_check_executor(
+    check_code: str,
+    *,
+    artifact_dir: Path | None = None,
+) -> HandlerCheckExecutor | None:
     """Retrieve a check executor by its code.
 
     Args:
-        check_code: Check identifier (e.g., CHECK-PY-001).
+        check_code: Check identifier (e.g., ``CHECK-PY-001``).
+        artifact_dir: Optional artifact storage directory.  When provided
+            and *check_code* is ``CHECK-VAL-002``, the returned executor
+            is configured with this directory so the artifact-completeness
+            check can actually run instead of returning ``skipped=True``.
+            For all other check codes this parameter is ignored.
 
     Returns:
-        The executor instance, or None if no executor is registered
+        The executor instance, or ``None`` if no executor is registered
         for the given check code.
     """
+    if check_code == "CHECK-VAL-002" and artifact_dir is not None:
+        return HandlerArtifactCompleteness(artifact_dir=artifact_dir)
     return CHECK_REGISTRY.get(check_code)
 
 

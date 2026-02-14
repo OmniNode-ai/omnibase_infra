@@ -122,6 +122,23 @@ class TestCheckRegistryCompleteness:
         result = get_check_executor("CHECK-UNKNOWN-999")
         assert result is None
 
+    def test_get_check_executor_with_artifact_dir(self, tmp_path: Path) -> None:
+        """get_check_executor configures CHECK-VAL-002 with artifact_dir."""
+        executor = get_check_executor("CHECK-VAL-002", artifact_dir=tmp_path)
+        assert executor is not None
+        assert executor.check_code == "CHECK-VAL-002"
+        assert isinstance(executor, HandlerArtifactCompleteness)
+        # Verify the handler is properly configured with the given path
+        assert executor._artifact_dir == tmp_path
+
+    def test_get_check_executor_artifact_dir_ignored_for_other_checks(
+        self, tmp_path: Path
+    ) -> None:
+        """artifact_dir parameter is ignored for non-CHECK-VAL-002 codes."""
+        executor = get_check_executor("CHECK-PY-001", artifact_dir=tmp_path)
+        assert executor is not None
+        assert executor.check_code == "CHECK-PY-001"
+
     @pytest.mark.parametrize(
         ("code", "severity"),
         [
@@ -443,6 +460,29 @@ class TestHandlerTimeWallClockDelta:
         assert result.passed is True
         assert "baseline" in result.message.lower()
 
+    @pytest.mark.asyncio
+    async def test_with_wall_clock_seconds(self) -> None:
+        """Injected wall_clock_seconds is used as elapsed time."""
+        candidate = _make_candidate()
+        result = await HandlerTimeWallClockDelta(
+            wall_clock_seconds=2.5,
+        ).execute(candidate, _default_config())
+        assert result.passed is True
+        assert result.duration_ms == pytest.approx(2500.0)
+        assert "2500" in result.message
+
+    @pytest.mark.asyncio
+    async def test_with_wall_clock_seconds_and_baseline(self) -> None:
+        """Injected wall_clock_seconds with baseline reports delta."""
+        candidate = _make_candidate()
+        result = await HandlerTimeWallClockDelta(
+            baseline_ms=2000.0,
+            wall_clock_seconds=3.0,
+        ).execute(candidate, _default_config())
+        assert result.passed is True
+        assert "delta" in result.message.lower()
+        assert "baseline" in result.message.lower()
+
 
 # ============================================================================
 # Artifact / Replay Checks
@@ -491,6 +531,14 @@ class TestHandlerArtifactCompleteness:
         check = HandlerArtifactCompleteness()
         assert check.check_code == "CHECK-VAL-002"
         assert check.severity == EnumCheckSeverity.REQUIRED
+
+    @pytest.mark.asyncio
+    async def test_no_artifact_dir_raises_value_error(self) -> None:
+        """Executing without artifact_dir raises ValueError."""
+        candidate = _make_candidate()
+        check = HandlerArtifactCompleteness()
+        with pytest.raises(ValueError, match="requires an explicit artifact_dir"):
+            await check.execute(candidate, _default_config())
 
     @pytest.mark.asyncio
     async def test_missing_artifact_dir_fails(self) -> None:

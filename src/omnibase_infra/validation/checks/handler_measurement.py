@@ -120,14 +120,23 @@ class HandlerTimeWallClockDelta(HandlerCheckExecutor):
     a stored baseline. Always passes (informational).
     """
 
-    def __init__(self, baseline_ms: float = 0.0) -> None:
+    def __init__(
+        self,
+        baseline_ms: float = 0.0,
+        wall_clock_seconds: float | None = None,
+    ) -> None:
         """Initialize with a wall-clock baseline.
 
         Args:
             baseline_ms: Baseline duration in milliseconds.
                 Zero means no baseline available.
+            wall_clock_seconds: Pre-measured wall-clock duration in seconds.
+                When provided, this value is used instead of the near-zero
+                self-measurement. Typically injected by the orchestrator
+                after the full validation run completes.
         """
         self._baseline_ms = baseline_ms
+        self._wall_clock_seconds = wall_clock_seconds
 
     @property
     def check_code(self) -> str:
@@ -151,9 +160,9 @@ class HandlerTimeWallClockDelta(HandlerCheckExecutor):
     ) -> ModelCheckResult:
         """Record wall-clock delta.
 
-        This check is a measurement point, not a real computation.
-        The actual wall-clock time of the full validation run is
-        tracked by the executor and injected here as a reference.
+        When ``wall_clock_seconds`` was provided at construction time,
+        the check reports that value as the true elapsed duration.
+        Otherwise it falls back to a near-zero self-measurement.
 
         Args:
             candidate: Pattern candidate.
@@ -162,24 +171,22 @@ class HandlerTimeWallClockDelta(HandlerCheckExecutor):
         Returns:
             Informational check result with timing data.
         """
-        start = time.monotonic()
-
-        # TODO(OMN-2151): This is a placeholder -- elapsed_ms will be
-        # near-zero because no real work happens here. The actual
-        # validation start time needs to be injected (e.g. via
-        # constructor or candidate metadata) so that this check can
-        # report the true wall-clock delta. Currently the real delta
-        # comes from the executor's total_duration_ms after all checks
-        # complete and is recorded separately.
-        elapsed_ms = (time.monotonic() - start) * 1000.0
+        if self._wall_clock_seconds is not None:
+            elapsed_ms = self._wall_clock_seconds * 1000.0
+        else:
+            start = time.monotonic()
+            elapsed_ms = (time.monotonic() - start) * 1000.0
 
         if self._baseline_ms > 0:
+            delta_ms = elapsed_ms - self._baseline_ms
+            delta_pct = (delta_ms / self._baseline_ms) * 100 if self._baseline_ms else 0
             message = (
-                f"Wall-clock check: baseline {self._baseline_ms:.0f}ms "
-                f"(measurement recorded)"
+                f"Wall-clock: {elapsed_ms:.0f}ms "
+                f"(baseline: {self._baseline_ms:.0f}ms, "
+                f"delta: {delta_ms:+.0f}ms, {delta_pct:+.1f}%)"
             )
         else:
-            message = "Wall-clock check: no baseline available (measurement recorded)"
+            message = f"Wall-clock: {elapsed_ms:.0f}ms (no baseline available)"
 
         return self._make_result(
             passed=True,

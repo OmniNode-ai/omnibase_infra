@@ -400,6 +400,42 @@ class TestPathTraversalProtection:
         with pytest.raises(ValueError, match="Path traversal detected"):
             ServiceArtifactStore._validate_path_within("../escape.txt", root)
 
+    def test_validate_path_rejects_symlink_escape(self, tmp_path: Path) -> None:
+        """_validate_path_within rejects symlinks that point outside root."""
+        root = tmp_path / "safe"
+        root.mkdir()
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+
+        # Create a symlink inside root that points outside it
+        escape_link = root / "escape_link"
+        escape_link.symlink_to(outside)
+
+        # A filename that traverses through the symlink should be rejected
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            ServiceArtifactStore._validate_path_within("escape_link/secret.txt", root)
+
+    def test_write_artifact_rejects_symlink_escape(
+        self, store: ServiceArtifactStore, tmp_path: Path
+    ) -> None:
+        """write_artifact rejects filenames that traverse through symlinks."""
+        cid = uuid4()
+        rid = uuid4()
+
+        # Create the artifacts directory first
+        artifacts = store.artifacts_dir(cid, rid)
+        artifacts.mkdir(parents=True, exist_ok=True)
+
+        # Create a symlink inside artifacts that points outside the tree
+        outside = tmp_path / "outside_target"
+        outside.mkdir()
+        escape_link = artifacts / "evil_link"
+        escape_link.symlink_to(outside)
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            store.write_artifact(cid, rid, "evil_link/payload.txt", "malicious")
+
 
 # ============================================================================
 # Configuration

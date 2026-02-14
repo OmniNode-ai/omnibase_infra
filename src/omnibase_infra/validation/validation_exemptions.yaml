@@ -2436,6 +2436,16 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (File & Class Naming - Service convention)
     ticket: OMN-2151
+  # ServiceFlakeDetector naming exemption
+  - file_pattern: 'service_flake_detector\.py'
+    class_pattern: "Class name 'ServiceFlakeDetector'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention per PR #330 review. Service files use service_<name>.py with Service<Name> class names.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-2151
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

@@ -104,12 +104,15 @@ class ServiceArtifactStore:
         """Validate that *filename* does not escape *allowed_root*.
 
         Prevents path-traversal attacks where a caller-supplied filename
-        such as ``../../etc/passwd`` could escape the intended directory.
+        such as ``../../etc/passwd`` could escape the intended directory,
+        **including attacks via symlinks** inside the allowed root that
+        point to locations outside it.
 
-        The check works **before** any directories are created on disk
-        by normalising the joined path with :func:`os.path.normpath`
-        (which collapses ``..`` segments) and verifying the result is
-        still under *allowed_root*.
+        Uses :meth:`Path.resolve` with ``strict=False`` (Python 3.6+) to
+        resolve symlinks without requiring the target path to exist.  This
+        catches symlink escapes even for paths that haven't been created
+        yet, unlike :func:`os.path.normpath` which only collapses ``..``
+        segments textually.
 
         Args:
             filename: Caller-supplied filename (may include subdirectory
@@ -118,16 +121,17 @@ class ServiceArtifactStore:
                 reside within.  Must already be resolved / absolute.
 
         Returns:
-            The normalised absolute path, guaranteed to be within
+            The resolved absolute path, guaranteed to be within
             *allowed_root*.
 
         Raises:
             ValueError: If the resulting path escapes *allowed_root*.
         """
         resolved_root = allowed_root.resolve()
-        # Build the candidate path and collapse any ".." segments
-        # without touching the filesystem.
-        candidate = Path(os.path.normpath(resolved_root / filename))
+        # Build the candidate path and resolve symlinks + collapse ".."
+        # segments.  ``strict=False`` allows the target to not yet exist
+        # while still resolving any symlink components that *do* exist.
+        candidate = (resolved_root / filename).resolve(strict=False)
 
         if not candidate.is_relative_to(resolved_root):
             raise ValueError(
@@ -137,10 +141,8 @@ class ServiceArtifactStore:
             )
 
         # Secondary defence: if the candidate (or any component) already
-        # exists on disk and involves a symlink, resolve through the
-        # filesystem and re-check.  A symlink *within* allowed_root could
-        # point to an arbitrary location outside it.  For paths that do
-        # not yet exist (pre-creation validation), normpath is sufficient.
+        # exists on disk, re-resolve to catch any symlinks created
+        # between the first resolve and now (TOCTOU mitigation).
         if candidate.exists() or candidate.is_symlink():
             real_candidate = candidate.resolve()
             if not real_candidate.is_relative_to(resolved_root):

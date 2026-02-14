@@ -3,7 +3,7 @@
 """Unit tests for flake detection (OMN-2151).
 
 Tests:
-- FlakeDetector rerun-once rule
+- ServiceFlakeDetector rerun-once rule
 - ModelFlakeRecord model
 - ModelFlakeDetectionResult aggregate
 - should_quarantine_verdict adjustment
@@ -21,9 +21,9 @@ from pydantic import ValidationError
 from omnibase_infra.enums import EnumCheckSeverity, EnumValidationVerdict
 from omnibase_infra.models.validation.model_check_result import ModelCheckResult
 from omnibase_infra.validation.service_flake_detector import (
-    FlakeDetector,
     ModelFlakeDetectionResult,
     ModelFlakeRecord,
+    ServiceFlakeDetector,
     is_promotion_blocked,
     should_quarantine_verdict,
 )
@@ -145,34 +145,34 @@ class TestModelFlakeDetectionResult:
 
 
 # ============================================================================
-# FlakeDetector
+# ServiceFlakeDetector
 # ============================================================================
 
 
-class TestFlakeDetector:
-    """Tests for FlakeDetector rerun-once logic."""
+class TestServiceFlakeDetector:
+    """Tests for ServiceFlakeDetector rerun-once logic."""
 
     def test_should_rerun_failed_check(self) -> None:
         """Failed required check should be rerun."""
-        detector = FlakeDetector()
+        detector = ServiceFlakeDetector()
         result = _make_check_result(passed=False)
         assert detector.should_rerun(result) is True
 
     def test_should_not_rerun_passed_check(self) -> None:
         """Passed check should not be rerun."""
-        detector = FlakeDetector()
+        detector = ServiceFlakeDetector()
         result = _make_check_result(passed=True)
         assert detector.should_rerun(result) is False
 
     def test_should_not_rerun_skipped_check(self) -> None:
         """Skipped check should not be rerun."""
-        detector = FlakeDetector()
+        detector = ServiceFlakeDetector()
         result = _make_check_result(passed=False, skipped=True)
         assert detector.should_rerun(result) is False
 
     def test_should_not_rerun_informational_check(self) -> None:
         """Informational check should not be rerun."""
-        detector = FlakeDetector()
+        detector = ServiceFlakeDetector()
         result = _make_check_result(
             passed=False, severity=EnumCheckSeverity.INFORMATIONAL
         )
@@ -180,7 +180,7 @@ class TestFlakeDetector:
 
     def test_rerun_once_limit(self) -> None:
         """Check is only rerun once (rerun-once rule)."""
-        detector = FlakeDetector(max_reruns_per_check=1)
+        detector = ServiceFlakeDetector(max_reruns_per_check=1)
         first = _make_check_result(check_code="C1", passed=False)
         rerun = _make_check_result(check_code="C1", passed=True)
 
@@ -193,7 +193,7 @@ class TestFlakeDetector:
 
     def test_record_first_run(self) -> None:
         """record_first_run stores the initial result."""
-        detector = FlakeDetector()
+        detector = ServiceFlakeDetector()
         result = _make_check_result(check_code="C1", passed=False)
         detector.record_first_run(result)
 
@@ -204,7 +204,7 @@ class TestFlakeDetector:
 
     def test_record_rerun_flake_suspected(self) -> None:
         """Rerun with different result suspects a flake."""
-        detector = FlakeDetector()
+        detector = ServiceFlakeDetector()
         first = _make_check_result(check_code="C1", passed=False)
         rerun = _make_check_result(check_code="C1", passed=True)
 
@@ -215,7 +215,7 @@ class TestFlakeDetector:
 
     def test_record_rerun_consistent_failure(self) -> None:
         """Rerun with same failure result does not suspect a flake."""
-        detector = FlakeDetector()
+        detector = ServiceFlakeDetector()
         first = _make_check_result(check_code="C1", passed=False)
         rerun = _make_check_result(check_code="C1", passed=False)
 
@@ -224,7 +224,7 @@ class TestFlakeDetector:
 
     def test_get_result_aggregate(self) -> None:
         """get_result aggregates all recorded flake data."""
-        detector = FlakeDetector()
+        detector = ServiceFlakeDetector()
 
         # Record a flake
         first_fail = _make_check_result(check_code="C1", passed=False)
@@ -243,7 +243,7 @@ class TestFlakeDetector:
 
     def test_multiple_checks_independent(self) -> None:
         """Different checks maintain independent rerun counts."""
-        detector = FlakeDetector(max_reruns_per_check=1)
+        detector = ServiceFlakeDetector(max_reruns_per_check=1)
 
         c1 = _make_check_result(check_code="C1", passed=False)
         c2 = _make_check_result(check_code="C2", passed=False)
@@ -256,6 +256,15 @@ class TestFlakeDetector:
         # C1 is now exhausted, C2 still available
         assert detector.should_rerun(c1) is False
         assert detector.should_rerun(c2) is True
+
+    def test_record_rerun_check_code_mismatch_raises(self) -> None:
+        """record_rerun raises ValueError when check_codes differ."""
+        detector = ServiceFlakeDetector()
+        first = _make_check_result(check_code="C1", passed=False)
+        rerun = _make_check_result(check_code="C2", passed=True)
+
+        with pytest.raises(ValueError, match="does not match"):
+            detector.record_rerun(first, rerun)
 
 
 # ============================================================================
