@@ -49,7 +49,7 @@ from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
 from omnibase_infra.models.errors.model_timeout_error_context import (
     ModelTimeoutErrorContext,
 )
-from omnibase_infra.models.types import JsonType
+from omnibase_core.types import JsonType
 from omnibase_infra.nodes.effects.models import (
     ModelLlmFunctionDef,
     ModelLlmToolChoice,
