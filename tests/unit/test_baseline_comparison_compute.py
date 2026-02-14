@@ -543,6 +543,43 @@ class TestBaselineComparisonInput:
 
 
 # ============================================================================
+# ModelBaselineComparisonInput -- Variant Pairing Validation
+# ============================================================================
+
+
+class TestBaselineComparisonInputVariantValidation:
+    """Tests for ModelBaselineComparisonInput variant pairing validator."""
+
+    def test_rejects_swapped_variants(self) -> None:
+        """Rejects when baseline_result has CANDIDATE variant."""
+        with pytest.raises(
+            ValidationError, match=r"baseline_result\.variant must be BASELINE"
+        ):
+            ModelBaselineComparisonInput(
+                config=_make_config(),
+                baseline_result=_make_run_result(variant=EnumRunVariant.CANDIDATE),
+                candidate_result=_make_run_result(variant=EnumRunVariant.CANDIDATE),
+            )
+
+    def test_rejects_both_baseline_variants(self) -> None:
+        """Rejects when candidate_result has BASELINE variant."""
+        with pytest.raises(
+            ValidationError, match=r"candidate_result\.variant must be CANDIDATE"
+        ):
+            ModelBaselineComparisonInput(
+                config=_make_config(),
+                baseline_result=_make_run_result(variant=EnumRunVariant.BASELINE),
+                candidate_result=_make_run_result(variant=EnumRunVariant.BASELINE),
+            )
+
+    def test_accepts_correct_variants(self) -> None:
+        """Accepts correctly paired BASELINE and CANDIDATE variants."""
+        comp_input = _make_comparison_input()
+        assert comp_input.baseline_result.variant == EnumRunVariant.BASELINE
+        assert comp_input.candidate_result.variant == EnumRunVariant.CANDIDATE
+
+
+# ============================================================================
 # HandlerBaselineComparison -- Properties
 # ============================================================================
 
