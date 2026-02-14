@@ -26,7 +26,6 @@ Related Ticket: OMN-2114 Phase 14
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import Any
 from unittest.mock import patch
@@ -250,6 +249,27 @@ class TestHttpStatusToExceptionMapping:
                 max_retries=0,
             )
 
+    async def test_unexpected_status_code_raises_unavailable_error(
+        self, correlation_id: UUID
+    ) -> None:
+        """Unmapped HTTP status codes (e.g. 418) must fall back to InfraUnavailableError."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _json_response({"error": "I'm a teapot"}, status_code=418)
+
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client)
+
+        with pytest.raises(InfraUnavailableError) as exc_info:
+            await harness._execute_llm_http_call(
+                url=URL,
+                payload=PAYLOAD,
+                correlation_id=correlation_id,
+                max_retries=0,
+            )
+
+        assert "418" in str(exc_info.value)
+
 
 # ── 429 Circuit Breaker Exclusion ────────────────────────────────────────
 
@@ -333,7 +353,7 @@ class TestRetryAfterParsing:
 
         assert exc_info.value.retry_after_seconds == 5.0
 
-    async def test_429_without_retry_after_header_sets_retry_after_none_on_error(
+    async def test_429_without_retry_after_header_uses_default_retry_after(
         self, correlation_id: UUID
     ) -> None:
         """429 without Retry-After header must set retry_after_seconds to default (1.0)."""
@@ -469,6 +489,8 @@ class TestTimeoutCapping:
             timeout_seconds=60.0,
         )
         assert result == {"result": "ok"}
+        assert len(call_records) == 1
+        assert call_records[0] == 10.0
 
     async def test_timeout_below_minimum_clamped_to_0_1(
         self, correlation_id: UUID
@@ -492,21 +514,56 @@ class TestTimeoutCapping:
     async def test_effective_timeout_is_min_of_request_and_max(
         self, correlation_id: UUID
     ) -> None:
-        """The effective timeout must be min(request, contract.max), clamped to >= 0.1."""
-        harness = LlmTransportHarness(max_timeout_seconds=10.0)
+        """The effective timeout must be min(request, contract.max), clamped to >= 0.1.
 
-        # Test clamping logic directly (same as code in _execute_llm_http_call)
-        # Case 1: request < max -> uses request
-        effective = max(min(5.0, harness._max_timeout_seconds), 0.1)
-        assert effective == 5.0
+        Exercises _execute_llm_http_call with different timeout_seconds values
+        and captures the effective timeout passed through to httpx via the mock
+        transport's request.extensions["timeout"].
+        """
+        captured_timeouts: list[float] = []
 
-        # Case 2: request > max -> clamps to max
-        effective = max(min(60.0, harness._max_timeout_seconds), 0.1)
-        assert effective == 10.0
+        def handler(request: httpx.Request) -> httpx.Response:
+            timeout_ext = request.extensions.get("timeout")
+            if timeout_ext is not None:
+                # httpx passes timeout as a dict with pool/connect/read/write keys
+                # or as a Timeout object; extract the pool value as representative
+                if isinstance(timeout_ext, dict):
+                    captured_timeouts.append(timeout_ext.get("pool", 0.0))
+                else:
+                    captured_timeouts.append(float(timeout_ext))
+            return _json_response({"result": "ok"})
 
-        # Case 3: request very small -> clamps to 0.1
-        effective = max(min(0.001, harness._max_timeout_seconds), 0.1)
-        assert effective == 0.1
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client, max_timeout_seconds=10.0)
+
+        # Case 1: request (5.0) < max (10.0) -> uses request (5.0)
+        await harness._execute_llm_http_call(
+            url=URL,
+            payload=PAYLOAD,
+            correlation_id=correlation_id,
+            timeout_seconds=5.0,
+        )
+
+        # Case 2: request (30.0) > max (10.0) -> clamps to max (10.0)
+        await harness._execute_llm_http_call(
+            url=URL,
+            payload=PAYLOAD,
+            correlation_id=correlation_id,
+            timeout_seconds=30.0,
+        )
+
+        # Case 3: request (0.05) very small -> clamps to floor (0.1)
+        await harness._execute_llm_http_call(
+            url=URL,
+            payload=PAYLOAD,
+            correlation_id=correlation_id,
+            timeout_seconds=0.05,
+        )
+
+        assert len(captured_timeouts) == 3
+        assert captured_timeouts[0] == 5.0
+        assert captured_timeouts[1] == 10.0
+        assert captured_timeouts[2] == 0.1
 
 
 # ── Connection Errors ────────────────────────────────────────────────────
@@ -673,7 +730,10 @@ class TestRetryBehavior:
         client = _make_mock_client(handler)
         harness = LlmTransportHarness(http_client=client)
 
-        with patch("asyncio.sleep", side_effect=mock_sleep):
+        with patch(
+            "omnibase_infra.mixins.mixin_llm_http_transport.asyncio.sleep",
+            side_effect=mock_sleep,
+        ):
             with pytest.raises(InfraUnavailableError):
                 await harness._execute_llm_http_call(
                     url=URL,
@@ -683,14 +743,14 @@ class TestRetryBehavior:
                 )
 
         # ModelRetryState default: delay_seconds=1.0, backoff_multiplier=2.0
-        # Attempt 0 -> fail, next_attempt -> delay=2.0, sleep(2.0)
-        # Attempt 1 -> fail, next_attempt -> delay=4.0, sleep(4.0)
-        # Attempt 2 -> fail, next_attempt -> delay=8.0, but exhausted so no sleep
-        # Total sleeps: 2 (between retry attempts before the final attempt)
-        assert len(sleep_calls) >= 2
-        # Delays should be increasing (exponential backoff)
-        for i in range(1, len(sleep_calls)):
-            assert sleep_calls[i] >= sleep_calls[i - 1]
+        # Attempt 0 -> fail, next_attempt -> delay=1.0*2.0=2.0, sleep(2.0)
+        # Attempt 1 -> fail, next_attempt -> delay=2.0*2.0=4.0, sleep(4.0)
+        # Attempt 2 -> fail, next_attempt -> delay=4.0*2.0=8.0, sleep(8.0)
+        # Attempt 3 -> fail, next_attempt -> attempt=4 >= max_attempts=4, raise
+        assert len(sleep_calls) == 3
+        assert sleep_calls[0] == 2.0
+        assert sleep_calls[1] == 4.0
+        assert sleep_calls[2] == 8.0
 
     async def test_429_retry_uses_retry_after_delay(self, correlation_id: UUID) -> None:
         """429 retry should use Retry-After as the delay, not exponential backoff."""
@@ -717,7 +777,10 @@ class TestRetryBehavior:
         client = _make_mock_client(handler)
         harness = LlmTransportHarness(http_client=client)
 
-        with patch("asyncio.sleep", side_effect=mock_sleep):
+        with patch(
+            "omnibase_infra.mixins.mixin_llm_http_transport.asyncio.sleep",
+            side_effect=mock_sleep,
+        ):
             result = await harness._execute_llm_http_call(
                 url=URL,
                 payload=PAYLOAD,
