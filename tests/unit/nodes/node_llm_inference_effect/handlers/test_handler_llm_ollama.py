@@ -60,7 +60,7 @@ from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_ollama 
 # Constants
 # ---------------------------------------------------------------------------
 
-_BASE_URL = "http://localhost:11434"
+_BASE_URL = "http://test-ollama-host:11434"
 _MODEL = "llama3.2"
 _CORRELATION_ID = UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 _EXECUTION_ID = UUID("11111111-2222-3333-4444-555555555555")
