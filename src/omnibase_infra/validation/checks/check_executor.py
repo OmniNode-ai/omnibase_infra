@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shlex
 import time
 from abc import ABC, abstractmethod
@@ -116,8 +117,6 @@ class CheckExecutor(ABC):
 
         env_dict: dict[str, str] | None = None
         if config.env_overrides:
-            import os
-
             env_dict = {**os.environ, **dict(config.env_overrides)}
 
         argv = shlex.split(command)

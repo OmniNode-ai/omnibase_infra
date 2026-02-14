@@ -423,7 +423,6 @@ class ArtifactStore:
             symlink_dir.mkdir(parents=True, exist_ok=True)
 
         symlink_path = symlink_dir / str(pattern_id)
-        target = self.run_dir(candidate_id, run_id)
 
         # Use relative target for portability
         relative_target = Path("..") / str(candidate_id) / str(run_id)

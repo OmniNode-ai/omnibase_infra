@@ -56,8 +56,8 @@ UNSAFE_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\bpickle\.loads?\s*\(", "pickle.load/loads() call detected"),
     (r"\b__import__\s*\(", "__import__() call detected"),
     (r"\bos\.system\s*\(", "os.system() call detected"),
-    (r"\bcompile\s*\(.*\bexec\b", "compile() with exec mode"),
-    (r"\byaml\.load\s*\((?!.*Loader)", "yaml.load() without explicit Loader"),
+    (r"\bcompile\s*\([\s\S]*?\bexec\b", "compile() with exec mode"),
+    (r"\byaml\.load\s*\((?![\s\S]*?Loader)", "yaml.load() without explicit Loader"),
 )
 
 # Default diff size threshold (number of changed files)
