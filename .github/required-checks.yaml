@@ -1,0 +1,56 @@
+# Required Status Checks for `main` Branch Protection
+#
+# This manifest documents the canonical list of required checks.
+# If you rename a CI job, you MUST update both this file and the
+# branch protection settings (Settings > Branches > main).
+#
+# Added: OMN-2184
+# Last verified: 2026-02-14
+required_checks:
+  # -- test.yml (primary pipeline) -------------------------------------------
+  - name: "Lint"
+    workflow: test.yml
+    job_id: lint
+    rationale: "Ruff format, lint, and mypy type checking"
+  - name: "ONEX Validators"
+    workflow: test.yml
+    job_id: onex-validation
+    rationale: "Architecture layers, ONEX rules, I/O purity audit, markdown links"
+  - name: "Migration Freeze Check"
+    workflow: test.yml
+    job_id: migration-freeze
+    rationale: "Blocks new migrations during DB-SPLIT freeze (OMN-2055)"
+  - name: "CI Tests Gate"
+    workflow: test.yml
+    job_id: tests-gate
+    rationale: "Aggregator for 10-split test matrix -- split count can change without updating branch protection"
+# -- Explicitly excluded ------------------------------------------------------
+excluded_checks:
+  - name: "Tests (Split 1/10) through Tests (Split 10/10)"
+    reason: "Individual matrix legs -- aggregated by CI Tests Gate"
+  - name: "Test Summary"
+    reason: "Reporting aggregator -- not a correctness gate (CI Tests Gate covers this)"
+  - name: "Check architecture handshake"
+    workflow: check-handshake.yml
+    reason: "paths: filter skips this on most PRs -- requiring it would block unrelated PRs"
+  - name: "Build Runtime Image"
+    workflow: docker-build.yml
+    reason: "paths: filter skips this on non-Docker PRs"
+  - name: "Docker Integration Tests"
+    workflow: docker-build.yml
+    reason: "paths: filter skips this on non-Docker PRs"
+  - name: "Security Scan (Trivy)"
+    workflow: docker-build.yml
+    reason: "Only runs on main branch pushes, never on PRs"
+  - name: "Image Size Analysis"
+    workflow: docker-build.yml
+    reason: "Only runs on main branch pushes, never on PRs"
+  - name: "Build Summary"
+    workflow: docker-build.yml
+    reason: "paths: filter skips this on non-Docker PRs"
+  - name: "Slow & Chaos Tests"
+    workflow: nightly-tests.yml
+    reason: "Nightly schedule only -- never runs on PRs"
+  - name: "Nightly Summary"
+    workflow: nightly-tests.yml
+    reason: "Nightly schedule only -- never runs on PRs"

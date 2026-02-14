@@ -246,33 +246,54 @@ jobs:
           path: junit-${{ matrix.split }}.xml
           retention-days: 7
 
+  # ============================================================================
+  # CI Tests Gate (aggregator for branch protection)
+  # Required check: "CI Tests Gate" -- do not rename without updating
+  # branch protection AND .github/required-checks.yaml
+  # ============================================================================
+  tests-gate:
+    name: CI Tests Gate
+    runs-on: ubuntu-latest
+    needs: test-parallel
+    if: always()
+    steps:
+      - name: Check test matrix results
+        env:
+          TESTS_RESULT: ${{ needs.test-parallel.result }}
+        run: |
+          if [ "$TESTS_RESULT" != "success" ]; then
+            echo "::error::Test matrix failed (result: $TESTS_RESULT)"
+            exit 1
+          fi
+          echo "All 10 test splits passed"
+
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
-    needs: [test-parallel, lint, onex-validation, migration-freeze]
+    needs: [tests-gate, lint, onex-validation, migration-freeze]
     if: always()
 
     steps:
       - name: Check test results
         run: |
-          parallel="${{ needs.test-parallel.result }}"
+          gate="${{ needs.tests-gate.result }}"
           lint="${{ needs.lint.result }}"
           onex="${{ needs.onex-validation.result }}"
           migrationfreeze="${{ needs.migration-freeze.result }}"
 
-          if [[ "$parallel" == "success" ]] && \
+          if [[ "$gate" == "success" ]] && \
              [[ "$lint" == "success" ]] && \
              [[ "$onex" == "success" ]] && \
              [[ "$migrationfreeze" == "success" ]]; then
-            echo "All tests passed successfully"
-            echo "Parallel Tests (10 splits): Passed"
+            echo "All checks passed successfully"
+            echo "CI Tests Gate (10 splits): Passed"
             echo "Code Quality: Passed"
             echo "ONEX Validators: Passed"
             echo "Migration Freeze: Passed"
             exit 0
           else
-            echo "Tests failed"
-            echo "Parallel Tests: $parallel"
+            echo "Checks failed"
+            echo "CI Tests Gate: $gate"
             echo "Lint: $lint"
             echo "ONEX Validators: $onex"
             echo "Migration Freeze: $migrationfreeze"
