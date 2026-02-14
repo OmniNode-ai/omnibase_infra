@@ -189,6 +189,16 @@ class ProtocolDomainPlugin(Protocol):
         6. start_consumers() - Start event consumers (optional)
         7. shutdown() - Clean up during kernel shutdown
 
+    Optional Methods:
+        ``validate_handshake()`` is **not** part of this Protocol definition
+        because it is optional. Plugins that implement it will be detected at
+        runtime via ``hasattr()`` in the kernel. Plugins that omit it pass
+        the handshake gate by default.
+
+        This design avoids a ``@runtime_checkable`` pitfall: if an optional
+        method were declared in the Protocol, ``isinstance()`` checks in
+        entry-point discovery would reject plugins that omit it.
+
     Example:
         ```python
         class PluginMyDomain:
@@ -287,65 +297,6 @@ class ProtocolDomainPlugin(Protocol):
                 return ModelDomainPluginResult.succeeded(
                     "my-domain",
                     resources_created=["postgres_pool"],
-                )
-            ```
-        """
-        ...
-
-    async def validate_handshake(
-        self,
-        config: ModelDomainPluginConfig,
-    ) -> ModelHandshakeResult:
-        """Run prerequisite validation checks before handler wiring.
-
-        Called after initialize() and before wire_handlers(). This method
-        runs all bootstrap attestation checks (B1-B3) to verify that the
-        plugin's infrastructure is correctly configured before any consumers,
-        dispatchers, or handlers are wired.
-
-        This method is **optional**. Plugins that do not implement it pass
-        by default -- the kernel treats a missing implementation as an
-        unconditional pass.
-
-        Phase State Machine:
-            INITIALIZING -> HANDSHAKE_VALIDATE -> HANDSHAKE_ATTEST -> WIRING -> READY
-
-            This method executes during HANDSHAKE_VALIDATE. If it returns a
-            failed result, the kernel aborts before entering WIRING.
-
-        Args:
-            config: Plugin configuration with container and correlation_id.
-
-        Returns:
-            ModelHandshakeResult indicating whether all checks passed.
-            If any check fails, the kernel will abort startup for this
-            plugin (and may abort the entire kernel depending on severity).
-
-        Example:
-            ```python
-            async def validate_handshake(
-                self, config: ModelDomainPluginConfig
-            ) -> ModelHandshakeResult:
-                checks = []
-                # B1: Verify database ownership
-                try:
-                    await validate_db_ownership(self._pool, "my-service")
-                    checks.append(ModelHandshakeCheckResult(
-                        check_name="db_ownership", passed=True,
-                    ))
-                except DbOwnershipMismatchError as e:
-                    checks.append(ModelHandshakeCheckResult(
-                        check_name="db_ownership", passed=False,
-                        message=str(e),
-                    ))
-                    return ModelHandshakeResult.failed(
-                        plugin_id=self.plugin_id,
-                        error_message=str(e),
-                        checks=checks,
-                    )
-                return ModelHandshakeResult.all_passed(
-                    plugin_id=self.plugin_id,
-                    checks=checks,
                 )
             ```
         """

@@ -17,6 +17,8 @@ from uuid import uuid4
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from omnibase_infra.runtime.models.model_handshake_check_result import (
     ModelHandshakeCheckResult,
 )
