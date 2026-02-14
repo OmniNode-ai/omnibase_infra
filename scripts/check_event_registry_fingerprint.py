@@ -82,6 +82,9 @@ def cmd_verify(artifact_path: str) -> int:
             file=sys.stderr,
         )
         return 2
+    except Exception as exc:
+        print(f"FAILED: unexpected error during verification: {exc}", file=sys.stderr)
+        return 2
 
 
 def cmd_stamp(artifact_path: str, *, dry_run: bool = False) -> int:
