@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-# TODO(convention): File should be service_registration_reducer.py / ServiceRegistrationReducer
-# per naming conventions. Deferred to dedicated PR due to import blast radius.
 """Pure-function Registration Reducer Service.
 
 Encapsulates all four registration workflow decisions as pure functions.

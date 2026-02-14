@@ -15,7 +15,9 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from omnibase_infra.utils import validate_timezone_aware_datetime
 
 
 class ModelReducerContext(BaseModel):
@@ -41,6 +43,16 @@ class ModelReducerContext(BaseModel):
         ...,
         description="Current time (injected, not generated)",
     )
+
+    @field_validator("now")
+    @classmethod
+    def validate_now_timezone_aware(cls, v: datetime) -> datetime:
+        """Validate that now is timezone-aware.
+
+        Delegates to shared utility for consistent validation across all models.
+        """
+        return validate_timezone_aware_datetime(v)
+
     tick_id: UUID | None = Field(
         default=None,
         description="UUID of the RuntimeTick that triggered this check",

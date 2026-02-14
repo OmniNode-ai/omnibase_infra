@@ -322,8 +322,11 @@ CREATE INDEX IF NOT EXISTS idx_disabled_patterns_current_pattern_class ON disabl
 -- Add signature_hash to learned_patterns
 ALTER TABLE learned_patterns ADD COLUMN IF NOT EXISTS signature_hash TEXT;
 UPDATE learned_patterns SET signature_hash = encode(digest(pattern_signature, 'sha256'), 'hex') WHERE signature_hash IS NULL;
-ALTER TABLE learned_patterns ALTER COLUMN signature_hash SET NOT NULL;
-ALTER TABLE learned_patterns ADD CONSTRAINT unique_signature_hash_domain_version UNIQUE (domain_id, signature_hash, version);
+ALTER TABLE learned_patterns ALTER COLUMN signature_hash SET NOT NULL;  -- idempotent: PostgreSQL accepts SET NOT NULL on an already-NOT-NULL column
+DO $$ BEGIN
+    ALTER TABLE learned_patterns ADD CONSTRAINT unique_signature_hash_domain_version UNIQUE (domain_id, signature_hash, version);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_current_pattern_hash ON learned_patterns (signature_hash, domain_id) WHERE is_current = TRUE;
 CREATE INDEX IF NOT EXISTS idx_learned_patterns_domain_hash ON learned_patterns(domain_id, signature_hash);
 
