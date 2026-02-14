@@ -92,7 +92,12 @@ def read_artifact(artifact_path: Path) -> str | None:
     if not artifact_path.exists():
         return None
 
-    for line in artifact_path.read_text(encoding="utf-8").splitlines():
+    try:
+        text = artifact_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+    for line in text.splitlines():
         stripped = line.strip()
         if stripped.startswith("sha256:"):
             value = stripped[len("sha256:") :]
@@ -135,8 +140,19 @@ def cmd_verify(
 ) -> int:
     """Verify that the committed artifact matches current migration files.
 
+    Computes the fingerprint from the migration source files and compares
+    it to the value stored in the committed artifact. Prints diagnostics
+    to stdout and errors to stderr.
+
+    Args:
+        migrations_dir: Path to the directory containing forward migration
+            SQL files.
+        artifact_path: Path to the committed ``schema_fingerprint.sha256``
+            artifact file.
+
     Returns:
-        Exit code: 0 if matching, 2 if stale.
+        Exit code: 0 if the artifact matches, 2 if the artifact is missing,
+        pending, or stale.
     """
     fingerprint, file_count = compute_migration_fingerprint(migrations_dir)
     committed = read_artifact(artifact_path)
@@ -189,7 +205,15 @@ def cmd_stamp(
     *,
     dry_run: bool = False,
 ) -> int:
-    """Regenerate the fingerprint artifact.
+    """Regenerate the fingerprint artifact from current migration files.
+
+    Args:
+        migrations_dir: Path to the directory containing forward migration
+            SQL files.
+        artifact_path: Path where the ``schema_fingerprint.sha256`` artifact
+            will be written.
+        dry_run: If True, compute and display the fingerprint without
+            writing the artifact file.
 
     Returns:
         Exit code: 0 on success.
@@ -213,7 +237,19 @@ def cmd_stamp(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry point."""
+    """CLI entry point for schema fingerprint drift detection.
+
+    Parses command-line arguments and dispatches to ``cmd_verify`` or
+    ``cmd_stamp``.
+
+    Args:
+        argv: Command-line arguments. Defaults to ``sys.argv[1:]`` when
+            None.
+
+    Returns:
+        Exit code: 0 on success, 1 on usage error, 2 on fingerprint
+        mismatch.
+    """
     parser = argparse.ArgumentParser(
         prog="check_schema_fingerprint",
         description="CI twin: schema fingerprint drift detection (OMN-2149).",

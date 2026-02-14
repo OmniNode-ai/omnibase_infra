@@ -49,8 +49,20 @@ _DEFAULT_ARTIFACT = str(
 def cmd_verify(artifact_path: str) -> int:
     """Verify committed artifact matches live event registrations.
 
+    Delegates to ``validate_event_registry_fingerprint()`` and translates
+    domain-specific exceptions into CLI exit codes.
+
+    Args:
+        artifact_path: Path to the committed
+            ``event_registry_fingerprint.json`` artifact file.
+
     Returns:
-        Exit code: 0 if matching, 2 if stale or missing.
+        Exit code: 0 if matching, 2 if stale, missing, or on unexpected
+        error.
+
+    Raises:
+        No exceptions are raised; all errors are caught and converted to
+        non-zero exit codes with diagnostic output on stderr.
     """
     from omnibase_infra.errors.error_event_registry_fingerprint import (
         EventRegistryFingerprintMismatchError,
@@ -90,17 +102,39 @@ def cmd_verify(artifact_path: str) -> int:
 def cmd_stamp(artifact_path: str, *, dry_run: bool = False) -> int:
     """Regenerate the fingerprint artifact from ALL_EVENT_REGISTRATIONS.
 
+    Args:
+        artifact_path: Path where the ``event_registry_fingerprint.json``
+            artifact will be written.
+        dry_run: If True, compute and display the fingerprint without
+            writing the artifact file.
+
     Returns:
-        Exit code: 0 on success.
+        Exit code: 0 on success, 1 on failure.
     """
     from omnibase_infra.runtime.emit_daemon.event_registry import _cli_stamp
 
-    _cli_stamp(artifact_path, dry_run=dry_run)
-    return 0
+    try:
+        _cli_stamp(artifact_path, dry_run=dry_run)
+        return 0
+    except Exception as exc:
+        print(f"FAILED: unexpected error during stamp: {exc}", file=sys.stderr)
+        return 1
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry point."""
+    """CLI entry point for event registry fingerprint drift detection.
+
+    Parses command-line arguments and dispatches to ``cmd_verify`` or
+    ``cmd_stamp``.
+
+    Args:
+        argv: Command-line arguments. Defaults to ``sys.argv[1:]`` when
+            None.
+
+    Returns:
+        Exit code: 0 on success, 1 on usage error, 2 on fingerprint
+        mismatch.
+    """
     parser = argparse.ArgumentParser(
         prog="check_event_registry_fingerprint",
         description="CI twin: event registry fingerprint drift detection (OMN-2149).",
