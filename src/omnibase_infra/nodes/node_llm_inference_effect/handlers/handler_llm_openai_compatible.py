@@ -111,6 +111,9 @@ _AUTH_CLIENT_LIMITS: httpx.Limits = httpx.Limits(
 # and each create a separate asyncio.Lock, with only the last assignment surviving.
 _TRANSPORT_LOCK_GUARD: threading.Lock = threading.Lock()
 
+# Default timeout for auth-injected httpx clients (seconds).
+_DEFAULT_TIMEOUT_SECONDS: float = 30.0
+
 
 class HandlerLlmOpenaiCompatible:
     """OpenAI wire-format handler for LLM inference calls.
@@ -324,7 +327,7 @@ class HandlerLlmOpenaiCompatible:
         payload: dict[str, JsonType],
         api_key: str | None,
         correlation_id: UUID,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
     ) -> dict[str, JsonType]:
         """Execute HTTP call via transport, injecting auth if needed.
 
@@ -451,7 +454,7 @@ class HandlerLlmOpenaiCompatible:
             finish_reason=EnumLlmFinishReason.UNKNOWN,
             usage=ModelLlmUsage(),
             latency_ms=latency_ms,
-            backend_result=ModelBackendResult(success=False, duration_ms=latency_ms),
+            backend_result=ModelBackendResult(success=True, duration_ms=latency_ms),
             correlation_id=correlation_id,
             execution_id=execution_id,
             timestamp=datetime.now(UTC),
@@ -537,7 +540,7 @@ class HandlerLlmOpenaiCompatible:
                 if isinstance(raw_tool_calls, list) and raw_tool_calls:
                     tool_calls = _parse_tool_calls(raw_tool_calls)
                     # Text XOR tool_calls invariant: clear any content text.
-                    if generated_text:
+                    if generated_text is not None:
                         logger.debug(
                             "Discarding content text in favor of tool_calls "
                             "per text-XOR-tool_calls invariant. "

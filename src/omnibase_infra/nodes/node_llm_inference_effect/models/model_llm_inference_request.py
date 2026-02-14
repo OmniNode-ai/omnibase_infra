@@ -163,7 +163,8 @@ class ModelLlmInferenceRequest(BaseModel):
     def _validate_prompt_or_messages(self) -> ModelLlmInferenceRequest:
         """Enforce that the correct input field is populated for the operation type.
 
-        - CHAT_COMPLETION requires at least one message in ``messages``.
+        - CHAT_COMPLETION requires at least one message in ``messages``, or a
+          non-empty ``system_prompt`` (the handler prepends it as a system message).
         - COMPLETION requires a non-None ``prompt``.
 
         Returns:
@@ -175,9 +176,11 @@ class ModelLlmInferenceRequest(BaseModel):
         if (
             self.operation_type is EnumLlmOperationType.CHAT_COMPLETION
             and len(self.messages) == 0
+            and not self.system_prompt
         ):
             raise ValueError(
                 "CHAT_COMPLETION requires at least one message in messages"
+                " or a non-empty system_prompt"
             )
         if (
             self.operation_type is EnumLlmOperationType.COMPLETION
