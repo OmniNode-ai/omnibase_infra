@@ -45,9 +45,12 @@ class ModelBaselineRunConfig(BaseModel):
         ...,
         description="Identifier of the test scenario to execute.",
     )
-    correlation_id: UUID = Field(
-        ...,
-        description="Correlation ID for distributed tracing.",
+    correlation_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Correlation ID for distributed tracing. "
+            "Auto-generated via uuid4() if not provided."
+        ),
     )
     current_tier: EnumLifecycleTier = Field(
         ...,

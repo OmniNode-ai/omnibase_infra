@@ -43,8 +43,9 @@ class HandlerBaselineComparison:
 
     Note:
         This is an infrastructure handler (``INFRA_HANDLER``) with
-        ``COMPUTE`` category because it performs pure computation
-        with no external I/O.
+        ``NONDETERMINISTIC_COMPUTE`` category because it performs
+        computation with no external I/O but uses ``uuid4()`` and
+        ``datetime.now()``, making it non-deterministic.
     """
 
     # ------------------------------------------------------------------
@@ -68,13 +69,14 @@ class HandlerBaselineComparison:
 
     @property
     def handler_category(self) -> EnumHandlerTypeCategory:
-        """Behavioral classification: pure computation.
+        """Behavioral classification: non-deterministic computation.
 
         Returns:
-            EnumHandlerTypeCategory.COMPUTE - This handler performs pure
-            computation with no external I/O.
+            EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE - This handler
+            performs computation with no external I/O but uses uuid4() and
+            datetime.now(), making it non-deterministic.
         """
-        return EnumHandlerTypeCategory.COMPUTE
+        return EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE
 
     # ------------------------------------------------------------------
     # Core handle method
@@ -97,6 +99,11 @@ class HandlerBaselineComparison:
         config = comparison_input.config
         baseline = comparison_input.baseline_result
         candidate = comparison_input.candidate_result
+
+        # Fallback to auto-generated correlation_id per repo guidelines
+        correlation_id = (
+            config.correlation_id if config.correlation_id is not None else uuid4()
+        )
 
         # Compute deltas
         cost_delta = ModelCostDelta.from_metrics(
@@ -124,20 +131,20 @@ class HandlerBaselineComparison:
             cost_delta.time_savings_pct,
             outcome_delta.quality_improved,
             roi_positive,
-            config.correlation_id,
+            correlation_id,
         )
 
         return ModelAttributionRecord(
             record_id=record_id,
             pattern_id=config.pattern_id,
             scenario_id=config.scenario_id,
-            correlation_id=config.correlation_id,
+            correlation_id=correlation_id,
             current_tier=config.current_tier,
             target_tier=config.target_tier,
             baseline_result=baseline,
             candidate_result=candidate,
-            cost_metrics=cost_delta,
-            outcome_metrics=outcome_delta,
+            cost_delta=cost_delta,
+            outcome_delta=outcome_delta,
             roi_positive=roi_positive,
             created_at=datetime.now(tz=UTC),
         )

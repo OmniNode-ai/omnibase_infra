@@ -598,9 +598,11 @@ class TestHandlerBaselineComparisonProperties:
         assert handler.handler_type == EnumHandlerType.INFRA_HANDLER
 
     def test_handler_category(self) -> None:
-        """handler_category is COMPUTE."""
+        """handler_category is NONDETERMINISTIC_COMPUTE."""
         handler = HandlerBaselineComparison()
-        assert handler.handler_category == EnumHandlerTypeCategory.COMPUTE
+        assert (
+            handler.handler_category == EnumHandlerTypeCategory.NONDETERMINISTIC_COMPUTE
+        )
 
 
 # ============================================================================
@@ -636,9 +638,9 @@ class TestHandlerBaselineComparisonHandle:
         result = await handler.handle(comp_input)
 
         assert isinstance(result, ModelAttributionRecord)
-        assert result.cost_metrics.token_delta == 300
-        assert result.cost_metrics.token_savings_pct == 30.0
-        assert result.outcome_metrics.quality_improved is True
+        assert result.cost_delta.token_delta == 300
+        assert result.cost_delta.token_savings_pct == 30.0
+        assert result.outcome_delta.quality_improved is True
         assert result.roi_positive is True
 
     @pytest.mark.asyncio
@@ -661,7 +663,7 @@ class TestHandlerBaselineComparisonHandle:
 
         result = await handler.handle(comp_input)
 
-        assert result.cost_metrics.token_delta == -500
+        assert result.cost_delta.token_delta == -500
         assert result.roi_positive is False
 
     @pytest.mark.asyncio
@@ -698,6 +700,23 @@ class TestHandlerBaselineComparisonHandle:
         assert result.correlation_id == config.correlation_id
         assert result.pattern_id == config.pattern_id
         assert result.scenario_id == config.scenario_id
+
+    @pytest.mark.asyncio
+    async def test_handle_generates_correlation_id_when_none(self) -> None:
+        """Result gets auto-generated correlation_id when config has None."""
+        handler = HandlerBaselineComparison()
+        config = ModelBaselineRunConfig(
+            pattern_id=uuid4(),
+            scenario_id=uuid4(),
+            correlation_id=None,
+            current_tier=EnumLifecycleTier.SUGGESTED,
+            target_tier=EnumLifecycleTier.SHADOW_APPLY,
+        )
+        comp_input = _make_comparison_input(config=config)
+
+        result = await handler.handle(comp_input)
+
+        assert result.correlation_id is not None
 
     @pytest.mark.asyncio
     async def test_handle_preserves_tier_info(self) -> None:
@@ -755,7 +774,7 @@ class TestHandlerBaselineComparisonHandle:
 
         # Same metrics: token_delta=0 (non-negative), candidate passed,
         # check_delta=0 (non-negative) -> ROI is positive
-        assert result.cost_metrics.token_delta == 0
+        assert result.cost_delta.token_delta == 0
         assert result.roi_positive is True
 
 
@@ -844,8 +863,8 @@ class TestAttributionRecord:
             target_tier=EnumLifecycleTier.SHADOW_APPLY,
             baseline_result=_make_run_result(variant=EnumRunVariant.BASELINE),
             candidate_result=_make_run_result(variant=EnumRunVariant.CANDIDATE),
-            cost_metrics=ModelCostDelta(token_delta=100),
-            outcome_metrics=ModelOutcomeDelta(
+            cost_delta=ModelCostDelta(token_delta=100),
+            outcome_delta=ModelOutcomeDelta(
                 baseline_passed=True, candidate_passed=True
             ),
             roi_positive=True,
@@ -866,8 +885,8 @@ class TestAttributionRecord:
             target_tier=EnumLifecycleTier.SHADOW_APPLY,
             baseline_result=_make_run_result(variant=EnumRunVariant.BASELINE),
             candidate_result=_make_run_result(variant=EnumRunVariant.CANDIDATE),
-            cost_metrics=ModelCostDelta(token_delta=100),
-            outcome_metrics=ModelOutcomeDelta(
+            cost_delta=ModelCostDelta(token_delta=100),
+            outcome_delta=ModelOutcomeDelta(
                 baseline_passed=True, candidate_passed=True
             ),
             roi_positive=True,
@@ -889,8 +908,8 @@ class TestAttributionRecord:
                 target_tier=EnumLifecycleTier.SHADOW_APPLY,
                 baseline_result=_make_run_result(variant=EnumRunVariant.BASELINE),
                 candidate_result=_make_run_result(variant=EnumRunVariant.CANDIDATE),
-                cost_metrics=ModelCostDelta(token_delta=100),
-                outcome_metrics=ModelOutcomeDelta(
+                cost_delta=ModelCostDelta(token_delta=100),
+                outcome_delta=ModelOutcomeDelta(
                     baseline_passed=True, candidate_passed=True
                 ),
                 roi_positive=True,

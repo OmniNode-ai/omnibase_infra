@@ -37,8 +37,8 @@ class ModelAttributionRecord(BaseModel):
         target_tier: Tier the pattern is being promoted to.
         baseline_result: Full result of the baseline run.
         candidate_result: Full result of the candidate run.
-        cost_metrics: Cost delta between baseline and candidate.
-        outcome_metrics: Outcome delta between baseline and candidate.
+        cost_delta: Cost delta between baseline and candidate.
+        outcome_delta: Outcome delta between baseline and candidate.
         roi_positive: Whether the pattern demonstrates positive ROI
             (cost savings AND quality maintained or improved).
         created_at: Timestamp when this record was created.
@@ -78,11 +78,11 @@ class ModelAttributionRecord(BaseModel):
         ...,
         description="Full result of the candidate run.",
     )
-    cost_metrics: ModelCostDelta = Field(
+    cost_delta: ModelCostDelta = Field(
         ...,
         description="Cost delta between baseline and candidate.",
     )
-    outcome_metrics: ModelOutcomeDelta = Field(
+    outcome_delta: ModelOutcomeDelta = Field(
         ...,
         description="Outcome delta between baseline and candidate.",
     )
