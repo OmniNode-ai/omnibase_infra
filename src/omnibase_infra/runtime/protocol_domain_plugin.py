@@ -44,10 +44,11 @@ Lifecycle Hooks:
 
     1. `should_activate()` - Check if plugin should activate based on environment
     2. `initialize()` - Create domain-specific resources (pools, connections)
-    3. `wire_handlers()` - Register handlers in the container
-    4. `wire_dispatchers()` - Register dispatchers with MessageDispatchEngine
-    5. `start_consumers()` - Start event consumers
-    6. `shutdown()` - Clean up resources during kernel shutdown
+    3. `validate_handshake()` - Run prerequisite checks (B1-B3) before wiring
+    4. `wire_handlers()` - Register handlers in the container
+    5. `wire_dispatchers()` - Register dispatchers with MessageDispatchEngine
+    6. `start_consumers()` - Start event consumers
+    7. `shutdown()` - Clean up resources during kernel shutdown
 
 Plugin Discovery:
     Plugins can be registered in two ways:
@@ -73,6 +74,9 @@ Example Implementation:
     from omnibase_infra.runtime.models import (
         ModelDomainPluginConfig,
         ModelDomainPluginResult,
+    )
+    from omnibase_infra.runtime.models.model_handshake_result import (
+        ModelHandshakeResult,
     )
 
     class PluginMyDomain:
@@ -100,6 +104,13 @@ Example Implementation:
                 success=True,
                 resources_created=["pool"],
             )
+
+        async def validate_handshake(
+            self,
+            config: ModelDomainPluginConfig,
+        ) -> ModelHandshakeResult:
+            # Optional: run prerequisite checks before wiring
+            return ModelHandshakeResult.default_pass(self.plugin_id)
 
         async def wire_handlers(
             self,
@@ -138,6 +149,9 @@ from omnibase_infra.runtime.models import (
     ModelDomainPluginConfig,
     ModelDomainPluginResult,
 )
+from omnibase_infra.runtime.models.model_handshake_result import (
+    ModelHandshakeResult,
+)
 from omnibase_infra.runtime.models.model_plugin_discovery_entry import (
     ModelPluginDiscoveryEntry,
 )
@@ -169,10 +183,11 @@ class ProtocolDomainPlugin(Protocol):
     Lifecycle Order:
         1. should_activate() - Check environment/config
         2. initialize() - Create pools, connections
-        3. wire_handlers() - Register handlers in container
-        4. wire_dispatchers() - Register with dispatch engine (optional)
-        5. start_consumers() - Start event consumers (optional)
-        6. shutdown() - Clean up during kernel shutdown
+        3. validate_handshake() - Run prerequisite checks (optional, default pass)
+        4. wire_handlers() - Register handlers in container
+        5. wire_dispatchers() - Register with dispatch engine (optional)
+        6. start_consumers() - Start event consumers (optional)
+        7. shutdown() - Clean up during kernel shutdown
 
     Example:
         ```python
@@ -189,6 +204,12 @@ class ProtocolDomainPlugin(Protocol):
             ) -> ModelDomainPluginResult:
                 # Initialize domain resources
                 return ModelDomainPluginResult.succeeded("my-domain")
+
+            async def validate_handshake(
+                self, config: ModelDomainPluginConfig
+            ) -> ModelHandshakeResult:
+                # Optional: run prerequisite checks
+                return ModelHandshakeResult.default_pass("my-domain")
 
             # ... other methods
         ```
@@ -266,6 +287,65 @@ class ProtocolDomainPlugin(Protocol):
                 return ModelDomainPluginResult.succeeded(
                     "my-domain",
                     resources_created=["postgres_pool"],
+                )
+            ```
+        """
+        ...
+
+    async def validate_handshake(
+        self,
+        config: ModelDomainPluginConfig,
+    ) -> ModelHandshakeResult:
+        """Run prerequisite validation checks before handler wiring.
+
+        Called after initialize() and before wire_handlers(). This method
+        runs all bootstrap attestation checks (B1-B3) to verify that the
+        plugin's infrastructure is correctly configured before any consumers,
+        dispatchers, or handlers are wired.
+
+        This method is **optional**. Plugins that do not implement it pass
+        by default -- the kernel treats a missing implementation as an
+        unconditional pass.
+
+        Phase State Machine:
+            INITIALIZING -> HANDSHAKE_VALIDATE -> HANDSHAKE_ATTEST -> WIRING -> READY
+
+            This method executes during HANDSHAKE_VALIDATE. If it returns a
+            failed result, the kernel aborts before entering WIRING.
+
+        Args:
+            config: Plugin configuration with container and correlation_id.
+
+        Returns:
+            ModelHandshakeResult indicating whether all checks passed.
+            If any check fails, the kernel will abort startup for this
+            plugin (and may abort the entire kernel depending on severity).
+
+        Example:
+            ```python
+            async def validate_handshake(
+                self, config: ModelDomainPluginConfig
+            ) -> ModelHandshakeResult:
+                checks = []
+                # B1: Verify database ownership
+                try:
+                    await validate_db_ownership(self._pool, "my-service")
+                    checks.append(ModelHandshakeCheckResult(
+                        check_name="db_ownership", passed=True,
+                    ))
+                except DbOwnershipMismatchError as e:
+                    checks.append(ModelHandshakeCheckResult(
+                        check_name="db_ownership", passed=False,
+                        message=str(e),
+                    ))
+                    return ModelHandshakeResult.failed(
+                        plugin_id=self.plugin_id,
+                        error_message=str(e),
+                        checks=checks,
+                    )
+                return ModelHandshakeResult.all_passed(
+                    plugin_id=self.plugin_id,
+                    checks=checks,
                 )
             ```
         """
@@ -817,6 +897,7 @@ class RegistryDomainPlugin:
 __all__: list[str] = [
     "ModelDomainPluginConfig",
     "ModelDomainPluginResult",
+    "ModelHandshakeResult",
     "ProtocolDomainPlugin",
     "RegistryDomainPlugin",
 ]

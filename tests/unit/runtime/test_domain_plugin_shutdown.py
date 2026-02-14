@@ -17,6 +17,9 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.runtime.models.model_handshake_result import (
+    ModelHandshakeResult,
+)
 from omnibase_infra.runtime.protocol_domain_plugin import (
     ModelDomainPluginConfig,
     ModelDomainPluginResult,
@@ -63,6 +66,13 @@ class MockPlugin:
     ) -> ModelDomainPluginResult:
         """Initialize plugin resources."""
         return ModelDomainPluginResult.succeeded(plugin_id=self.plugin_id)
+
+    async def validate_handshake(
+        self,
+        config: ModelDomainPluginConfig,
+    ) -> ModelHandshakeResult:
+        """Validate handshake (default pass for testing)."""
+        return ModelHandshakeResult.default_pass(self.plugin_id)
 
     async def wire_handlers(
         self,

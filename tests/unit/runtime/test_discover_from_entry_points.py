@@ -52,6 +52,9 @@ class _FakePlugin:
     async def initialize(self, config: object) -> object:
         return MagicMock(success=True)
 
+    async def validate_handshake(self, config: object) -> object:
+        return MagicMock(passed=True, checks=[])
+
     async def wire_handlers(self, config: object) -> object:
         return MagicMock(success=True)
 
