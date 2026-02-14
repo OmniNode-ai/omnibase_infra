@@ -23,7 +23,7 @@ Related:
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
@@ -1033,6 +1033,7 @@ class TestAuthHeaderHandling:
         assert captured_client is not None
         assert isinstance(captured_client, httpx.AsyncClient)
         assert captured_client.headers["authorization"] == "Bearer sk-test-key-123"
+        assert captured_client.is_closed
 
     @pytest.mark.asyncio
     async def test_empty_api_key_raises_value_error(self) -> None:
