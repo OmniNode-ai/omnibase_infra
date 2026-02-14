@@ -1101,9 +1101,17 @@ class EventBusKafka(
         correlation_id = uuid4()
         sanitized_servers = self._sanitize_bootstrap_servers(self._bootstrap_servers)
 
-        # Use group_id directly - it's already fully qualified from compute_consumer_group_id()
-        # or an explicit override. Empty group_id indicates a bug in the caller.
-        effective_group_id = group_id.strip()
+        # Scope group_id per topic to prevent rebalance storms.
+        #
+        # Each subscribe() call creates a separate AIOKafkaConsumer for one topic.
+        # If multiple consumers share the same group_id, Kafka treats them as
+        # competing members and constantly rebalances partitions between them —
+        # but since each consumer is subscribed to only its own topic, the
+        # partition assignments thrash without any messages being processed.
+        #
+        # Appending the topic name ensures each per-topic consumer gets its own
+        # consumer group, which is the correct Kafka semantics for this pattern.
+        effective_group_id = f"{group_id.strip()}.{topic}"
         if not effective_group_id:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
