@@ -638,7 +638,7 @@ def _serialize_tool_choice(
 
 
 def _parse_tool_calls(
-    raw_calls: list[dict[str, object]],
+    raw_calls: list[JsonType],
 ) -> tuple[ModelLlmToolCall, ...]:
     """Parse raw tool call dictionaries into ModelLlmToolCall instances.
 
