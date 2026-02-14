@@ -473,9 +473,7 @@ class TestTimeoutCapping:
         call_records: list[float] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
-            call_records.append(
-                request.extensions.get("timeout", {}).get("pool", 0)  # type: ignore[union-attr]
-            )
+            call_records.append(request.extensions.get("timeout", {}).get("pool", 0))
             return _json_response({"result": "ok"})
 
         client = _make_mock_client(handler)
