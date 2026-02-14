@@ -91,11 +91,11 @@ class RegistryInfraLlmInferenceEffect:
         """Get the node type classification.
 
         Returns:
-            Node type string ("EFFECT").
+            Node type string matching contract.yaml ("EFFECT_GENERIC").
 
         .. versionadded:: 0.8.0
         """
-        return "EFFECT"
+        return "EFFECT_GENERIC"
 
     @staticmethod
     def get_node_name() -> str:
