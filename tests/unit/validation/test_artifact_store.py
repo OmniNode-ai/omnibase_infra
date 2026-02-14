@@ -8,6 +8,7 @@ Tests:
 - Artifact file writing (text and bytes)
 - Latest-by-pattern symlink management
 - Candidate and run listing
+- Path traversal protection
 - Configuration
 """
 
@@ -285,6 +286,103 @@ class TestListing:
 
         runs = store.list_runs(cid)
         assert str(rid) in runs
+
+
+# ============================================================================
+# Path Traversal Protection
+# ============================================================================
+
+
+class TestPathTraversalProtection:
+    """Tests for path traversal validation in write_artifact."""
+
+    def test_write_artifact_rejects_parent_traversal(
+        self, store: ArtifactStore
+    ) -> None:
+        """write_artifact raises ValueError for ../../ traversal."""
+        cid = uuid4()
+        rid = uuid4()
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            store.write_artifact(cid, rid, "../../etc/passwd", "malicious")
+
+    def test_write_artifact_rejects_absolute_path(self, store: ArtifactStore) -> None:
+        """write_artifact raises ValueError for absolute paths."""
+        cid = uuid4()
+        rid = uuid4()
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            store.write_artifact(cid, rid, "/etc/passwd", "malicious")
+
+    def test_write_artifact_rejects_single_parent_traversal(
+        self, store: ArtifactStore
+    ) -> None:
+        """write_artifact raises ValueError for single ../ traversal."""
+        cid = uuid4()
+        rid = uuid4()
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            store.write_artifact(cid, rid, "../escape.txt", "malicious")
+
+    def test_write_artifact_rejects_deeply_nested_traversal(
+        self, store: ArtifactStore
+    ) -> None:
+        """write_artifact raises ValueError for nested-then-escape paths."""
+        cid = uuid4()
+        rid = uuid4()
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            store.write_artifact(cid, rid, "subdir/../../escape.txt", "malicious")
+
+    def test_write_artifact_allows_nested_subdir(self, store: ArtifactStore) -> None:
+        """write_artifact allows legitimate nested filenames."""
+        cid = uuid4()
+        rid = uuid4()
+
+        path = store.write_artifact(cid, rid, "logs/check.log", "log data")
+        assert path.is_file()
+        assert path.read_text() == "log data"
+        # Must be within the artifacts directory
+        artifacts = store.artifacts_dir(cid, rid)
+        assert path.is_relative_to(artifacts)
+
+    def test_write_artifact_allows_simple_filename(self, store: ArtifactStore) -> None:
+        """write_artifact allows simple filenames without subdirs."""
+        cid = uuid4()
+        rid = uuid4()
+
+        path = store.write_artifact(cid, rid, "output.json", '{"ok": true}')
+        assert path.is_file()
+        assert path.read_text() == '{"ok": true}'
+
+    def test_write_artifact_no_dirs_created_on_traversal(
+        self, store: ArtifactStore, tmp_path: Path
+    ) -> None:
+        """Path traversal must not create directories outside artifacts."""
+        cid = uuid4()
+        rid = uuid4()
+
+        escape_target = tmp_path / "escaped"
+        assert not escape_target.exists()
+
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            store.write_artifact(cid, rid, "../../escaped/pwned.txt", "bad")
+
+        # The escaped directory must NOT have been created
+        assert not escape_target.exists()
+
+    def test_validate_path_within_static_method(self, tmp_path: Path) -> None:
+        """_validate_path_within rejects traversal as a standalone check."""
+        root = tmp_path / "safe"
+        root.mkdir()
+
+        # Valid path
+        result = ArtifactStore._validate_path_within("file.txt", root)
+        assert result.is_relative_to(root)
+
+        # Traversal
+        with pytest.raises(ValueError, match="Path traversal detected"):
+            ArtifactStore._validate_path_within("../escape.txt", root)
 
 
 # ============================================================================

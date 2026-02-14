@@ -34,7 +34,7 @@ from omnibase_infra.validation.checks.check_artifact import (
     CheckReplaySanity,
 )
 from omnibase_infra.validation.checks.check_executor import (
-    CheckExecutorConfig,
+    ModelCheckExecutorConfig,
     SubprocessCheckExecutor,
 )
 from omnibase_infra.validation.checks.check_measurement import (
@@ -78,9 +78,9 @@ def _make_candidate(
     )
 
 
-def _default_config() -> CheckExecutorConfig:
+def _default_config() -> ModelCheckExecutorConfig:
     """Create a default executor config."""
-    return CheckExecutorConfig(working_dir="/tmp", timeout_ms=5000.0)  # noqa: S108
+    return ModelCheckExecutorConfig(working_dir="/tmp", timeout_ms=5000.0)  # noqa: S108
 
 
 # ============================================================================
@@ -536,27 +536,27 @@ class TestCheckArtifactCompleteness:
 
 
 # ============================================================================
-# CheckExecutorConfig
+# ModelCheckExecutorConfig
 # ============================================================================
 
 
-class TestCheckExecutorConfig:
-    """Tests for CheckExecutorConfig model."""
+class TestModelCheckExecutorConfig:
+    """Tests for ModelCheckExecutorConfig model."""
 
     def test_default_values(self) -> None:
         """Default config has sensible defaults."""
-        config = CheckExecutorConfig()
+        config = ModelCheckExecutorConfig()
         assert config.working_dir == "."
         assert config.timeout_ms == 120_000.0
         assert config.env_overrides == ()
 
     def test_frozen(self) -> None:
         """Config is frozen (immutable)."""
-        config = CheckExecutorConfig()
+        config = ModelCheckExecutorConfig()
         with pytest.raises(Exception):
             config.working_dir = "/other"  # type: ignore[misc]
 
     def test_extra_forbid(self) -> None:
         """Extra fields are forbidden."""
         with pytest.raises(Exception):
-            CheckExecutorConfig(unknown_field="x")  # type: ignore[call-arg]
+            ModelCheckExecutorConfig(unknown_field="x")  # type: ignore[call-arg]

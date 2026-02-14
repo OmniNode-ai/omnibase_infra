@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumCheckSeverity
@@ -51,7 +52,7 @@ SENSITIVE_PATH_PATTERNS: tuple[str, ...] = (
 UNSAFE_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\beval\s*\(", "eval() call detected"),
     (r"\bexec\s*\(", "exec() call detected"),
-    (r"subprocess\.\w+\(.*shell\s*=\s*True", "subprocess with shell=True"),
+    (r"subprocess\.\w+\([\s\S]*?shell\s*=\s*True", "subprocess with shell=True"),
     (r"\bpickle\.loads?\s*\(", "pickle.load/loads() call detected"),
     (r"\b__import__\s*\(", "__import__() call detected"),
     (r"\bos\.system\s*\(", "os.system() call detected"),
@@ -259,8 +260,6 @@ class CheckRiskUnsafeOperations(CheckExecutor):
             Check result indicating whether unsafe operations were detected.
         """
         start = time.monotonic()
-
-        from pathlib import Path
 
         compiled_patterns = [(re.compile(p), desc) for p, desc in UNSAFE_PATTERNS]
         violations: list[str] = []

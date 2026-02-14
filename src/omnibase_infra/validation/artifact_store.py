@@ -29,6 +29,7 @@ Ticket: OMN-2151
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -82,6 +83,48 @@ class ArtifactStore:
         config = config or ModelArtifactStoreConfig()
         self.root = Path(config.root_dir)
         self._create_dirs = config.create_dirs
+
+    # ------------------------------------------------------------------
+    # Security helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_path_within(filename: str, allowed_root: Path) -> Path:
+        """Validate that *filename* does not escape *allowed_root*.
+
+        Prevents path-traversal attacks where a caller-supplied filename
+        such as ``../../etc/passwd`` could escape the intended directory.
+
+        The check works **before** any directories are created on disk
+        by normalising the joined path with :func:`os.path.normpath`
+        (which collapses ``..`` segments) and verifying the result is
+        still under *allowed_root*.
+
+        Args:
+            filename: Caller-supplied filename (may include subdirectory
+                components like ``logs/check.log``).
+            allowed_root: The directory that the resulting path must
+                reside within.  Must already be resolved / absolute.
+
+        Returns:
+            The normalised absolute path, guaranteed to be within
+            *allowed_root*.
+
+        Raises:
+            ValueError: If the resulting path escapes *allowed_root*.
+        """
+        resolved_root = allowed_root.resolve()
+        # Build the candidate path and collapse any ".." segments
+        # without touching the filesystem.
+        candidate = Path(os.path.normpath(resolved_root / filename))
+
+        if not candidate.is_relative_to(resolved_root):
+            raise ValueError(
+                f"Path traversal detected: filename {filename!r} "
+                f"resolves to {candidate}, "
+                f"which is outside {resolved_root}"
+            )
+        return candidate
 
     # ------------------------------------------------------------------
     # Directory structure helpers
@@ -275,17 +318,27 @@ class ArtifactStore:
         Args:
             candidate_id: Unique candidate identifier.
             run_id: Unique validation run identifier.
-            filename: Filename within the artifacts directory.
+            filename: Filename within the artifacts directory.  Must not
+                contain path components that escape the artifacts
+                directory (e.g. ``../../etc/passwd``).
             content: File content (string or bytes).
 
         Returns:
             Path to the written artifact file.
+
+        Raises:
+            ValueError: If *filename* resolves to a path outside the
+                artifacts directory (path traversal).
         """
         artifacts = self.artifacts_dir(candidate_id, run_id)
         if self._create_dirs:
             artifacts.mkdir(parents=True, exist_ok=True)
 
-        artifact_path = artifacts / filename
+        # Validate BEFORE creating any subdirectories to prevent
+        # traversal attacks from creating directories outside the
+        # artifacts tree.
+        artifact_path = self._validate_path_within(filename, artifacts)
+
         # Ensure parent dir exists for nested filenames (e.g., "logs/check.log")
         artifact_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -316,7 +369,10 @@ class ArtifactStore:
             return None
         content = plan_path.read_text(encoding="utf-8")
         # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict
-        result: dict[str, Any] = yaml.safe_load(content)
+        result: dict[str, Any] | None = yaml.safe_load(content)
+        # Distinguish "file exists but empty" ({}) from "file not found" (None)
+        if result is None:
+            return {}
         return result
 
     # ONEX_EXCLUDE: any_type - YAML verdict data is heterogeneous dict from yaml.safe_load
@@ -370,10 +426,7 @@ class ArtifactStore:
         target = self.run_dir(candidate_id, run_id)
 
         # Use relative target for portability
-        try:
-            relative_target = Path("..") / str(candidate_id) / str(run_id)
-        except ValueError:
-            relative_target = target
+        relative_target = Path("..") / str(candidate_id) / str(run_id)
 
         # Remove existing symlink if present
         if symlink_path.is_symlink() or symlink_path.exists():

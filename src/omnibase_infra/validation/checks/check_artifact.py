@@ -15,12 +15,14 @@ Ticket: OMN-2151
 
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumCheckSeverity
 from omnibase_infra.models.validation.model_check_result import ModelCheckResult
+from omnibase_infra.validation.artifact_store import DEFAULT_ARTIFACT_ROOT
 from omnibase_infra.validation.checks.check_executor import (
     CheckExecutor,
     ModelCheckExecutorConfig,
@@ -107,8 +109,6 @@ class CheckReplaySanity(CheckExecutor):
                 continue
 
             # Check for random/time-dependent patterns
-            import re
-
             if re.search(r"\brandom\.\w+\(", content):
                 nondeterministic_indicators.append(f"{file_path}: uses random module")
             if re.search(r"\btime\.time\s*\(\s*\)", content):
@@ -183,9 +183,7 @@ class CheckArtifactCompleteness(CheckExecutor):
         artifact_dir = self._artifact_dir
         if artifact_dir is None:
             # Default location based on candidate_id
-            artifact_dir = (
-                Path.home() / ".claude" / "validation" / str(candidate.candidate_id)
-            )
+            artifact_dir = DEFAULT_ARTIFACT_ROOT / str(candidate.candidate_id)
 
         if not artifact_dir.is_dir():
             duration_ms = (time.monotonic() - start) * 1000.0

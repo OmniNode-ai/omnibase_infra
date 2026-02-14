@@ -23,7 +23,6 @@ Check Catalog:
 
 from omnibase_infra.validation.checks.check_executor import (
     CheckExecutor,
-    CheckExecutorConfig,
     ModelCheckExecutorConfig,
 )
 from omnibase_infra.validation.checks.check_registry import (
@@ -34,7 +33,6 @@ from omnibase_infra.validation.checks.check_registry import (
 __all__: list[str] = [
     "CHECK_REGISTRY",
     "CheckExecutor",
-    "CheckExecutorConfig",
     "ModelCheckExecutorConfig",
     "get_check_executor",
 ]

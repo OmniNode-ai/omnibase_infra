@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 import time
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
@@ -53,10 +54,6 @@ class ModelCheckExecutorConfig(BaseModel):
         default_factory=tuple,
         description="Additional environment variables as (key, value) pairs.",
     )
-
-
-CheckExecutorConfig = ModelCheckExecutorConfig
-"""Alias for backwards-compatible usage in tests and __init__ exports."""
 
 
 class CheckExecutor(ABC):
@@ -102,10 +99,13 @@ class CheckExecutor(ABC):
         command: str,
         config: ModelCheckExecutorConfig,
     ) -> tuple[int, str, str]:
-        """Run a shell command as a subprocess.
+        """Run a command as a subprocess.
+
+        Uses ``asyncio.create_subprocess_exec`` with ``shlex.split`` to
+        avoid shell injection surfaces.
 
         Args:
-            command: Shell command to execute.
+            command: Command string to execute (parsed via shlex.split).
             config: Executor configuration with timeout and working dir.
 
         Returns:
@@ -120,9 +120,10 @@ class CheckExecutor(ABC):
 
             env_dict = {**os.environ, **dict(config.env_overrides)}
 
+        argv = shlex.split(command)
         try:
-            process = await asyncio.create_subprocess_shell(
-                command,
+            process = await asyncio.create_subprocess_exec(
+                *argv,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=working_dir,
@@ -144,6 +145,7 @@ class CheckExecutor(ABC):
                 config.timeout_ms,
             )
             process.kill()
+            await process.wait()
             return (-1, "", f"Timed out after {config.timeout_ms:.0f}ms")
         except OSError as exc:
             logger.warning("Check %s subprocess error: %s", self.check_code, exc)
@@ -183,7 +185,7 @@ class CheckExecutor(ABC):
 
 
 class SubprocessCheckExecutor(CheckExecutor):
-    """Check executor that runs a shell command and checks the exit code.
+    """Check executor that runs a command and checks the exit code.
 
     Used for simple checks like mypy, ruff, and pytest where
     exit code 0 = pass, non-zero = fail.
@@ -267,7 +269,6 @@ class SubprocessCheckExecutor(CheckExecutor):
 
 __all__: list[str] = [
     "CheckExecutor",
-    "CheckExecutorConfig",
     "ModelCheckExecutorConfig",
     "SubprocessCheckExecutor",
 ]

@@ -24,6 +24,8 @@ Ticket: OMN-2151
 
 from __future__ import annotations
 
+from types import MappingProxyType
+
 from omnibase_infra.enums import EnumCheckSeverity
 from omnibase_infra.validation.checks.check_artifact import (
     CheckArtifactCompleteness,
@@ -94,8 +96,9 @@ def _build_registry() -> dict[str, CheckExecutor]:
     }
 
 
-# Module-level singleton registry
-CHECK_REGISTRY: dict[str, CheckExecutor] = _build_registry()
+# Module-level singleton registry (read-only view)
+_CHECK_REGISTRY: dict[str, CheckExecutor] = _build_registry()
+CHECK_REGISTRY: MappingProxyType[str, CheckExecutor] = MappingProxyType(_CHECK_REGISTRY)
 
 # Ordered check codes matching the catalog order
 CHECK_CATALOG_ORDER: tuple[str, ...] = (
