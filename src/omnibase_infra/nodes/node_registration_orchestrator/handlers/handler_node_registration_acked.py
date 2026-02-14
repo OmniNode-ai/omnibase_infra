@@ -109,6 +109,9 @@ DEFAULT_LIVENESS_INTERVAL_SECONDS: Final[int] = 60
 def get_liveness_interval_seconds(explicit_value: int | None = None) -> int:
     """Get liveness interval from explicit value, environment, or default.
 
+    Env vars are resolved at call time (not module load), so changes to
+    ONEX_LIVENESS_INTERVAL_SECONDS take effect without process restart.
+
     Resolution order (first non-None wins):
         1. Explicit value passed as parameter
         2. Environment variable ONEX_LIVENESS_INTERVAL_SECONDS

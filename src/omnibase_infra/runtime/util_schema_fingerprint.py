@@ -572,7 +572,11 @@ async def _cli_stamp(db_url: str, *, dry_run: bool = False) -> None:
     )
 
     pool = await asyncpg.create_pool(db_url)
-    assert pool is not None, "asyncpg.create_pool() returned None"
+    if pool is None:
+        print(
+            "ERROR: asyncpg.create_pool() returned None — cannot connect to database."
+        )
+        raise SystemExit(1)
     try:
         result = await compute_schema_fingerprint(pool, OMNIBASE_INFRA_SCHEMA_MANIFEST)
         print(f"fingerprint: {result.fingerprint}")
@@ -607,7 +611,11 @@ async def _cli_verify(db_url: str) -> None:
     )
 
     pool = await asyncpg.create_pool(db_url)
-    assert pool is not None, "asyncpg.create_pool() returned None"
+    if pool is None:
+        print(
+            "ERROR: asyncpg.create_pool() returned None — cannot connect to database."
+        )
+        raise SystemExit(1)
     try:
         await validate_schema_fingerprint(pool, OMNIBASE_INFRA_SCHEMA_MANIFEST)
         print("Schema fingerprint OK")
