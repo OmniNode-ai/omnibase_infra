@@ -77,8 +77,9 @@ class HandlerCostTokenDelta(HandlerCheckExecutor):
         """Measure token usage delta.
 
         In the current implementation, this is a placeholder that
-        estimates token cost based on the number and size of changed
-        files. A future version will integrate with actual LLM token
+        estimates token cost based on the number of changed files
+        (each file is assumed to consume ``_ESTIMATED_TOKENS_PER_FILE``
+        tokens). A future version will integrate with actual LLM token
         tracking.
 
         Args:

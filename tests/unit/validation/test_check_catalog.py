@@ -274,6 +274,69 @@ class TestHandlerRiskSensitivePaths:
         result = await HandlerRiskSensitivePaths().execute(candidate, _default_config())
         assert result.passed is False
 
+    @pytest.mark.asyncio
+    async def test_root_level_env_file_is_sensitive(self) -> None:
+        """A root-level .env file triggers sensitive path detection."""
+        candidate = _make_candidate(
+            changed_files=(".env",),
+        )
+        result = await HandlerRiskSensitivePaths().execute(candidate, _default_config())
+        assert result.passed is False
+
+    @pytest.mark.asyncio
+    async def test_root_level_dockerfile_is_sensitive(self) -> None:
+        """A root-level Dockerfile triggers sensitive path detection."""
+        candidate = _make_candidate(
+            changed_files=("Dockerfile",),
+        )
+        result = await HandlerRiskSensitivePaths().execute(candidate, _default_config())
+        assert result.passed is False
+
+    @pytest.mark.asyncio
+    async def test_root_level_docker_compose_is_sensitive(self) -> None:
+        """A root-level docker-compose.yml triggers sensitive path detection."""
+        candidate = _make_candidate(
+            changed_files=("docker-compose.yml",),
+        )
+        result = await HandlerRiskSensitivePaths().execute(candidate, _default_config())
+        assert result.passed is False
+
+    @pytest.mark.asyncio
+    async def test_root_level_config_py_is_sensitive(self) -> None:
+        """A root-level config.py triggers sensitive path detection."""
+        candidate = _make_candidate(
+            changed_files=("config.py",),
+        )
+        result = await HandlerRiskSensitivePaths().execute(candidate, _default_config())
+        assert result.passed is False
+
+    @pytest.mark.asyncio
+    async def test_root_level_settings_py_is_sensitive(self) -> None:
+        """A root-level settings.py triggers sensitive path detection."""
+        candidate = _make_candidate(
+            changed_files=("settings.py",),
+        )
+        result = await HandlerRiskSensitivePaths().execute(candidate, _default_config())
+        assert result.passed is False
+
+    @pytest.mark.asyncio
+    async def test_root_level_auth_dir_is_sensitive(self) -> None:
+        """A root-level auth/ directory triggers sensitive path detection."""
+        candidate = _make_candidate(
+            changed_files=("auth/login.py",),
+        )
+        result = await HandlerRiskSensitivePaths().execute(candidate, _default_config())
+        assert result.passed is False
+
+    @pytest.mark.asyncio
+    async def test_nested_env_variant_is_sensitive(self) -> None:
+        """A deeply nested .env.prod file triggers sensitive path detection."""
+        candidate = _make_candidate(
+            changed_files=("deploy/staging/.env.prod",),
+        )
+        result = await HandlerRiskSensitivePaths().execute(candidate, _default_config())
+        assert result.passed is False
+
     def test_sensitive_patterns_are_precompiled(self) -> None:
         """All sensitive path patterns are pre-compiled re.Pattern objects."""
         for pattern in SENSITIVE_PATH_PATTERNS:
@@ -533,12 +596,15 @@ class TestHandlerArtifactCompleteness:
         assert check.severity == EnumCheckSeverity.REQUIRED
 
     @pytest.mark.asyncio
-    async def test_no_artifact_dir_raises_value_error(self) -> None:
-        """Executing without artifact_dir raises ValueError."""
+    async def test_no_artifact_dir_returns_skipped(self) -> None:
+        """Executing without artifact_dir returns a skipped result."""
         candidate = _make_candidate()
         check = HandlerArtifactCompleteness()
-        with pytest.raises(ValueError, match="requires an explicit artifact_dir"):
-            await check.execute(candidate, _default_config())
+        result = await check.execute(candidate, _default_config())
+        assert result.passed is True
+        assert result.skipped is True
+        assert "not configured" in result.message
+        assert not result.is_blocking_failure()
 
     @pytest.mark.asyncio
     async def test_missing_artifact_dir_fails(self) -> None:

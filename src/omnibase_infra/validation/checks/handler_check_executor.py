@@ -148,7 +148,10 @@ class HandlerCheckExecutor(ABC):
             if process is not None:
                 try:
                     process.kill()
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                    # Use communicate() instead of wait() to drain
+                    # stdout/stderr pipes and prevent zombie processes
+                    # from blocked I/O on full pipe buffers.
+                    await asyncio.wait_for(process.communicate(), timeout=5.0)
                 except TimeoutError:
                     logger.warning(
                         "Check %s: process did not exit within 5 s after "

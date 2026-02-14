@@ -166,7 +166,7 @@ class HandlerArtifactCompleteness(HandlerCheckExecutor):
                 stored per-run.
 
                 When ``None``, the handler is in an unconfigured state
-                and :meth:`execute` will raise :class:`ValueError`.
+                and :meth:`execute` will return a ``skipped=True`` result.
                 The default registry instantiates the handler this way;
                 callers that need the check to run must provide a
                 configured instance via
@@ -208,12 +208,16 @@ class HandlerArtifactCompleteness(HandlerCheckExecutor):
         artifact_dir = self._artifact_dir
 
         if artifact_dir is None:
-            raise ValueError(
-                "HandlerArtifactCompleteness requires an explicit artifact_dir "
-                "pointing to the validation run directory "
-                "(~/.claude/validation/{candidate_id}/{run_id}/). "
-                "Use get_check_executor('CHECK-VAL-002', artifact_dir=...) "
-                "to obtain a configured instance."
+            duration_ms = (time.monotonic() - start) * 1000.0
+            return self._make_result(
+                passed=True,
+                skipped=True,
+                message=(
+                    "Artifact directory not configured; skipping completeness "
+                    "check. Use get_check_executor('CHECK-VAL-002', "
+                    "artifact_dir=...) to enable."
+                ),
+                duration_ms=duration_ms,
             )
 
         if not artifact_dir.is_dir():

@@ -140,19 +140,68 @@ class ServiceArtifactStore:
                 f"which is outside {resolved_root}"
             )
 
-        # Secondary defence: if the candidate (or any component) already
+        # Secondary defence: use os.path.realpath as an additional check
+        # that follows ALL symlinks (including chains), complementing
+        # Path.resolve which may behave differently on some platforms.
+        real_candidate = Path(os.path.realpath(candidate))
+        real_root = Path(os.path.realpath(resolved_root))
+        if not real_candidate.is_relative_to(real_root):
+            raise ValueError(
+                f"Symlink escape detected: filename {filename!r} "
+                f"resolves through symlinks to {real_candidate}, "
+                f"which is outside {real_root}"
+            )
+
+        # Tertiary defence: if the candidate (or any component) already
         # exists on disk, re-resolve to catch any symlinks created
         # between the first resolve and now (TOCTOU mitigation).
         if candidate.exists() or candidate.is_symlink():
-            real_candidate = candidate.resolve()
-            if not real_candidate.is_relative_to(resolved_root):
+            live_candidate = candidate.resolve()
+            if not live_candidate.is_relative_to(resolved_root):
                 raise ValueError(
                     f"Symlink escape detected: filename {filename!r} "
-                    f"resolves through symlinks to {real_candidate}, "
+                    f"resolves through symlinks to {live_candidate}, "
                     f"which is outside {resolved_root}"
                 )
 
         return candidate
+
+    @staticmethod
+    def _revalidate_path_within(resolved_path: Path, allowed_root: Path) -> None:
+        """Re-validate a resolved path after directory creation.
+
+        This is a post-mkdir TOCTOU mitigation: after parent directories
+        have been created (which may trigger symlink resolution changes),
+        re-resolve the full path and verify it is still within bounds.
+
+        Args:
+            resolved_path: The previously validated and resolved path.
+            allowed_root: The directory that the path must reside within.
+
+        Raises:
+            ValueError: If the path now escapes *allowed_root* (e.g.
+                because a symlink was swapped between initial validation
+                and directory creation).
+        """
+        resolved_root = allowed_root.resolve()
+
+        # Re-resolve using both Path.resolve and os.path.realpath
+        post_resolve = resolved_path.resolve(strict=False)
+        if not post_resolve.is_relative_to(resolved_root):
+            raise ValueError(
+                f"Post-mkdir symlink escape detected: path {resolved_path} "
+                f"now resolves to {post_resolve}, "
+                f"which is outside {resolved_root}"
+            )
+
+        real_path = Path(os.path.realpath(resolved_path))
+        real_root = Path(os.path.realpath(resolved_root))
+        if not real_path.is_relative_to(real_root):
+            raise ValueError(
+                f"Post-mkdir symlink escape detected: path {resolved_path} "
+                f"resolves through symlinks to {real_path}, "
+                f"which is outside {real_root}"
+            )
 
     # ------------------------------------------------------------------
     # Directory structure helpers
@@ -368,10 +417,23 @@ class ServiceArtifactStore:
         artifact_path = self._validate_path_within(filename, artifacts)
 
         # Ensure parent dir exists for nested filenames (e.g., "logs/check.log").
-        # Respect _create_dirs: if disabled, let the subsequent write fail
-        # naturally when the parent directory does not exist.
+        # Respect _create_dirs: if disabled, raise a clear error when the
+        # parent directory does not exist rather than letting the write
+        # produce an opaque FileNotFoundError.
         if self._create_dirs:
             artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        elif not artifact_path.parent.is_dir():
+            raise FileNotFoundError(
+                f"Parent directory does not exist for artifact "
+                f"{artifact_path.name!r} and create_dirs is disabled: "
+                f"{artifact_path.parent}"
+            )
+
+        # Post-mkdir TOCTOU mitigation: re-validate that the path is
+        # still within the artifacts directory after parent directories
+        # have been created.  This catches symlink swaps that could have
+        # occurred between the initial validation and directory creation.
+        self._revalidate_path_within(artifact_path, artifacts)
 
         if isinstance(content, bytes):
             artifact_path.write_bytes(content)
@@ -393,7 +455,11 @@ class ServiceArtifactStore:
             candidate_id: Unique candidate identifier.
 
         Returns:
-            Plan data as a dict, or None if not found.
+            Plan data as a dict, or ``None`` if the file does not exist
+            **or** if the file is empty.  ``yaml.safe_load`` returns
+            ``None`` for empty content, so callers cannot distinguish
+            between a missing file and an empty one -- both yield
+            ``None``.
         """
         plan_path = self.candidate_dir(candidate_id) / "plan.yaml"
         if not plan_path.is_file():
@@ -401,9 +467,6 @@ class ServiceArtifactStore:
         content = plan_path.read_text(encoding="utf-8")
         # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict
         result: dict[str, Any] | None = yaml.safe_load(content)
-        # Return None for empty files (yaml.safe_load returns None for empty
-        # content), preserving the distinction: None = file missing or empty,
-        # dict = file has content.
         return result
 
     # ONEX_EXCLUDE: any_type - YAML verdict data is heterogeneous dict from yaml.safe_load
@@ -415,7 +478,11 @@ class ServiceArtifactStore:
             run_id: Unique validation run identifier.
 
         Returns:
-            Verdict data as a dict, or None if not found.
+            Verdict data as a dict, or ``None`` if the file does not
+            exist **or** if the file is empty.  ``yaml.safe_load``
+            returns ``None`` for empty content, so callers cannot
+            distinguish between a missing file and an empty one -- both
+            yield ``None``.
         """
         verdict_path = self.run_dir(candidate_id, run_id) / "verdict.yaml"
         if not verdict_path.is_file():
@@ -423,9 +490,6 @@ class ServiceArtifactStore:
         content = verdict_path.read_text(encoding="utf-8")
         # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict
         result: dict[str, Any] | None = yaml.safe_load(content)
-        # Return None for empty files (yaml.safe_load returns None for empty
-        # content), preserving the distinction: None = file missing or empty,
-        # dict = file has content.
         return result
 
     # ------------------------------------------------------------------
@@ -482,15 +546,35 @@ class ServiceArtifactStore:
             # on the same filesystem.  It replaces any existing entry
             # at symlink_path in a single operation.
             tmp_path.rename(symlink_path)
+        except PermissionError:
+            # Windows-specific: symlink creation requires either Developer
+            # Mode or the SeCreateSymbolicLinkPrivilege.  Provide a clear
+            # message so users know how to resolve the issue.
+            logger.warning(
+                "Permission denied creating symlink %s -> %s. "
+                "On Windows, enable Developer Mode or grant the "
+                "SeCreateSymbolicLinkPrivilege to create symlinks. "
+                "Falling back to target path.",
+                symlink_path,
+                relative_target,
+                exc_info=True,
+            )
+            # Clean up the temp symlink if it was created but rename failed.
+            try:
+                if tmp_path.is_symlink() or tmp_path.exists():
+                    tmp_path.unlink()
+            except (OSError, UnboundLocalError):
+                pass
+            return self.run_dir(candidate_id, run_id)
         except OSError:
-            # Graceful degradation: symlink creation may fail on Windows
-            # without developer mode / SeCreateSymbolicLinkPrivilege, or
-            # on filesystems that do not support symlinks.  Log a warning
-            # with exception info and return the target path so callers
-            # can still locate the run directory.
+            # Graceful degradation: symlink creation may fail on
+            # filesystems that do not support symlinks (e.g. FAT32,
+            # certain network mounts).  Log a warning with exception
+            # info and return the target path so callers can still
+            # locate the run directory.
             logger.warning(
                 "Failed to create symlink %s -> %s (symlinks may not be "
-                "supported on this platform); falling back to target path.",
+                "supported on this filesystem); falling back to target path.",
                 symlink_path,
                 relative_target,
                 exc_info=True,

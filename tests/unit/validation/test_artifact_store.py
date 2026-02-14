@@ -416,6 +416,32 @@ class TestPathTraversalProtection:
         with pytest.raises(ValueError, match="Path traversal detected"):
             ServiceArtifactStore._validate_path_within("escape_link/secret.txt", root)
 
+    def test_validate_path_symlink_escape_resolves_outside(
+        self, tmp_path: Path
+    ) -> None:
+        """Symlink escape check verifies the resolved path is truly outside."""
+        root = tmp_path / "safe"
+        root.mkdir()
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret.txt").write_text("sensitive data")
+
+        # Create a symlink inside root pointing to outside directory
+        escape_link = root / "escape_link"
+        escape_link.symlink_to(outside)
+
+        # The resolved path should point outside root, not inside
+        with pytest.raises(ValueError, match=r"(Path traversal|Symlink escape)"):
+            ServiceArtifactStore._validate_path_within("escape_link/secret.txt", root)
+
+        # Verify that the symlink target's resolved content is indeed
+        # outside the root -- the file exists at the outside location
+        resolved_target = (root / "escape_link" / "secret.txt").resolve()
+        assert not resolved_target.is_relative_to(root.resolve())
+        assert resolved_target == outside / "secret.txt"
+        assert resolved_target.read_text() == "sensitive data"
+
     def test_write_artifact_rejects_symlink_escape(
         self, store: ServiceArtifactStore, tmp_path: Path
     ) -> None:
@@ -433,8 +459,155 @@ class TestPathTraversalProtection:
         escape_link = artifacts / "evil_link"
         escape_link.symlink_to(outside)
 
-        with pytest.raises(ValueError, match="Path traversal detected"):
+        with pytest.raises(ValueError, match=r"(Path traversal|Symlink escape)"):
             store.write_artifact(cid, rid, "evil_link/payload.txt", "malicious")
+
+        # Verify no file was written at the escape target
+        assert not (outside / "payload.txt").exists()
+
+    def test_revalidate_path_within_catches_post_mkdir_escape(
+        self, tmp_path: Path
+    ) -> None:
+        """_revalidate_path_within detects symlink swaps after mkdir."""
+        root = tmp_path / "artifacts"
+        root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+
+        # Initially the path looks fine
+        safe_path = root / "subdir" / "file.txt"
+        safe_path.parent.mkdir(parents=True, exist_ok=True)
+        ServiceArtifactStore._revalidate_path_within(safe_path, root)
+
+        # Now simulate a symlink swap: replace subdir with a symlink
+        # pointing outside
+        import shutil
+
+        shutil.rmtree(root / "subdir")
+        (root / "subdir").symlink_to(outside)
+
+        with pytest.raises(ValueError, match="Post-mkdir symlink escape"):
+            ServiceArtifactStore._revalidate_path_within(
+                root / "subdir" / "file.txt", root
+            )
+
+
+# ============================================================================
+# Empty YAML File Handling
+# ============================================================================
+
+
+class TestEmptyYamlHandling:
+    """Tests for handling empty YAML files in read methods."""
+
+    def test_read_plan_empty_file_returns_none(
+        self, store: ServiceArtifactStore
+    ) -> None:
+        """read_plan returns None for an empty plan.yaml file."""
+        cid = uuid4()
+        cand_dir = store.candidate_dir(cid)
+        cand_dir.mkdir(parents=True, exist_ok=True)
+        (cand_dir / "plan.yaml").write_text("", encoding="utf-8")
+
+        result = store.read_plan(cid)
+        assert result is None
+
+    def test_read_verdict_empty_file_returns_none(
+        self, store: ServiceArtifactStore
+    ) -> None:
+        """read_verdict returns None for an empty verdict.yaml file."""
+        cid = uuid4()
+        rid = uuid4()
+        run_path = store.run_dir(cid, rid)
+        run_path.mkdir(parents=True, exist_ok=True)
+        (run_path / "verdict.yaml").write_text("", encoding="utf-8")
+
+        result = store.read_verdict(cid, rid)
+        assert result is None
+
+    def test_read_plan_whitespace_only_returns_none(
+        self, store: ServiceArtifactStore
+    ) -> None:
+        """read_plan returns None for a whitespace-only plan.yaml."""
+        cid = uuid4()
+        cand_dir = store.candidate_dir(cid)
+        cand_dir.mkdir(parents=True, exist_ok=True)
+        (cand_dir / "plan.yaml").write_text("   \n\n  ", encoding="utf-8")
+
+        result = store.read_plan(cid)
+        assert result is None
+
+    def test_read_verdict_whitespace_only_returns_none(
+        self, store: ServiceArtifactStore
+    ) -> None:
+        """read_verdict returns None for a whitespace-only verdict.yaml."""
+        cid = uuid4()
+        rid = uuid4()
+        run_path = store.run_dir(cid, rid)
+        run_path.mkdir(parents=True, exist_ok=True)
+        (run_path / "verdict.yaml").write_text("  \n  ", encoding="utf-8")
+
+        result = store.read_verdict(cid, rid)
+        assert result is None
+
+
+# ============================================================================
+# create_dirs=False Behavior
+# ============================================================================
+
+
+class TestCreateDirsDisabled:
+    """Tests for behavior when create_dirs=False."""
+
+    @pytest.fixture
+    def store_no_create(self, tmp_path: Path) -> ServiceArtifactStore:
+        """Create an artifact store with create_dirs disabled."""
+        config = ModelArtifactStoreConfig(root_dir=str(tmp_path), create_dirs=False)
+        return ServiceArtifactStore(config)
+
+    def test_write_artifact_nested_path_fails_without_parent(
+        self, store_no_create: ServiceArtifactStore
+    ) -> None:
+        """Nested artifact write fails clearly when parent dir missing."""
+        cid = uuid4()
+        rid = uuid4()
+
+        # Manually create only the artifacts dir (not the nested subdir)
+        artifacts = store_no_create.artifacts_dir(cid, rid)
+        artifacts.mkdir(parents=True, exist_ok=True)
+
+        with pytest.raises(FileNotFoundError, match="create_dirs is disabled"):
+            store_no_create.write_artifact(cid, rid, "logs/nested.log", "data")
+
+    def test_write_artifact_flat_path_succeeds_with_existing_dir(
+        self, store_no_create: ServiceArtifactStore
+    ) -> None:
+        """Flat artifact write succeeds when artifacts dir already exists."""
+        cid = uuid4()
+        rid = uuid4()
+
+        # Manually create the artifacts directory
+        artifacts = store_no_create.artifacts_dir(cid, rid)
+        artifacts.mkdir(parents=True, exist_ok=True)
+
+        path = store_no_create.write_artifact(cid, rid, "output.json", '{"ok": true}')
+        assert path.is_file()
+        assert path.read_text() == '{"ok": true}'
+
+    def test_write_artifact_nested_succeeds_when_parent_exists(
+        self, store_no_create: ServiceArtifactStore
+    ) -> None:
+        """Nested artifact write succeeds when parent dir already exists."""
+        cid = uuid4()
+        rid = uuid4()
+
+        # Manually create the full path including the logs subdir
+        artifacts = store_no_create.artifacts_dir(cid, rid)
+        (artifacts / "logs").mkdir(parents=True, exist_ok=True)
+
+        path = store_no_create.write_artifact(cid, rid, "logs/check.log", "log data")
+        assert path.is_file()
+        assert path.read_text() == "log data"
 
 
 # ============================================================================
