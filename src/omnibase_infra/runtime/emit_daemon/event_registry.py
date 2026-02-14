@@ -30,13 +30,13 @@ Example Usage:
             event_type="myapp.submitted",
             topic_template="onex.evt.myapp.submitted.v1",
             partition_key_field="session_id",
-            required_fields=["session_id", "payload"],
+            required_fields=("session_id", "payload"),
         ),
         ModelEventRegistration(
             event_type="myapp.completed",
             topic_template="onex.evt.myapp.completed.v1",
             partition_key_field="session_id",
-            required_fields=["session_id"],
+            required_fields=("session_id",),
         ),
     ])
 
@@ -60,13 +60,27 @@ Note:
 
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
 from collections.abc import Iterable
 from datetime import UTC, datetime
-from uuid import uuid4
+from pathlib import Path
+from typing import TYPE_CHECKING, Final
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ValidationError as _ValidationError
 
 from omnibase_core.errors import OnexError
+from omnibase_infra.utils.util_error_sanitization import sanitize_secret_path
+
+if TYPE_CHECKING:
+    from omnibase_infra.runtime.emit_daemon.model_event_registry_fingerprint import (
+        ModelEventRegistryFingerprint,
+    )
+
+logger = logging.getLogger(__name__)
 
 
 class ModelEventRegistration(BaseModel):
@@ -84,7 +98,7 @@ class ModelEventRegistration(BaseModel):
             enforced via envelope identity, not topic naming.
         partition_key_field: Optional field name in payload to use as partition key.
             When set, ensures events with same key go to same partition for ordering.
-        required_fields: List of field names that must be present in payload.
+        required_fields: Tuple of field names that must be present in payload.
             Validation will fail if any required field is missing.
         schema_version: Semantic version of the event schema (default: "1.0.0").
             Injected into event metadata for schema evolution tracking.
@@ -94,7 +108,7 @@ class ModelEventRegistration(BaseModel):
         ...     event_type="myapp.submitted",
         ...     topic_template="onex.evt.myapp.submitted.v1",
         ...     partition_key_field="session_id",
-        ...     required_fields=["session_id", "payload"],
+        ...     required_fields=("session_id", "payload"),
         ...     schema_version="1.0.0",
         ... )
     """
@@ -103,6 +117,7 @@ class ModelEventRegistration(BaseModel):
         strict=True,
         frozen=True,
         extra="forbid",
+        from_attributes=True,
     )
 
     event_type: str = Field(
@@ -115,9 +130,9 @@ class ModelEventRegistration(BaseModel):
         default=None,
         description="Optional field name in payload to use as partition key",
     )
-    required_fields: list[str] = Field(
-        default_factory=list,
-        description="List of field names that must be present in payload",
+    required_fields: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description="Tuple of field names that must be present in payload",
     )
     schema_version: str = Field(
         default="1.0.0",
@@ -146,7 +161,7 @@ class EventRegistry:
         ...     ModelEventRegistration(
         ...         event_type="myapp.submitted",
         ...         topic_template="onex.evt.myapp.submitted.v1",
-        ...         required_fields=["payload"],
+        ...         required_fields=("payload",),
         ...     )
         ... )
         >>> registry.resolve_topic("myapp.submitted")
@@ -336,7 +351,7 @@ class EventRegistry:
             ...     ModelEventRegistration(
             ...         event_type="myapp.submitted",
             ...         topic_template="onex.evt.myapp.submitted.v1",
-            ...         required_fields=["payload"],
+            ...         required_fields=("payload",),
             ...     )
             ... )
             >>> registry.validate_payload("myapp.submitted", {"payload": "data"})
@@ -473,8 +488,427 @@ class EventRegistry:
         """
         return list(self._registrations.keys())
 
+    def compute_fingerprint(self) -> ModelEventRegistryFingerprint:
+        """Compute deterministic fingerprint from all current registrations.
+
+        Builds a canonical tuple per registration:
+        ``(event_type, topic_template, schema_version, partition_key_field or '',
+        sorted(required_fields))`` and SHA-256 hashes each element.  The overall
+        fingerprint is the SHA-256 of the sorted list of
+        ``(event_type, element_sha256)`` pairs.
+
+        Invariant:
+            ``topic_template`` MUST be a canonical ONEX 5-segment topic suffix
+            (no env prefix, no dynamic expansion).  Fingerprinting a template
+            that varies by environment produces env-dependent hashes, defeating
+            the purpose.
+
+        Returns:
+            ``ModelEventRegistryFingerprint`` with overall hash and per-element
+            details.
+        """
+        from omnibase_infra.runtime.emit_daemon.model_event_registry_fingerprint import (
+            ModelEventRegistryFingerprint,
+        )
+        from omnibase_infra.runtime.emit_daemon.model_event_registry_fingerprint_element import (
+            ModelEventRegistryFingerprintElement,
+        )
+
+        elements: list[ModelEventRegistryFingerprintElement] = []
+
+        for event_type in sorted(self._registrations):
+            reg = self._registrations[event_type]
+            canonical = (
+                reg.event_type,
+                reg.topic_template,
+                reg.schema_version,
+                reg.partition_key_field or "",
+                tuple(sorted(reg.required_fields)),
+            )
+            element_hash = _sha256_json(canonical)
+            elements.append(
+                ModelEventRegistryFingerprintElement(
+                    event_type=reg.event_type,
+                    topic_template=reg.topic_template,
+                    schema_version=reg.schema_version,
+                    partition_key_field=reg.partition_key_field or "",
+                    required_fields=tuple(sorted(reg.required_fields)),
+                    element_sha256=element_hash,
+                )
+            )
+
+        # Overall fingerprint: hash of sorted (event_type, element_sha256) pairs
+        overall_input: list[list[str]] = [
+            [e.event_type, e.element_sha256] for e in elements
+        ]
+        overall_hash = _sha256_json(overall_input)
+
+        return ModelEventRegistryFingerprint(
+            version=1,
+            fingerprint_sha256=overall_hash,
+            elements=tuple(elements),
+        )
+
+    def assert_fingerprint(
+        self,
+        expected: ModelEventRegistryFingerprint,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> None:
+        """Hard gate: compare live fingerprint to expected manifest.
+
+        Computes the live fingerprint from current registrations and compares
+        it to ``expected``.  On mismatch, raises
+        ``EventRegistryFingerprintMismatchError`` with an actionable diff.
+
+        This method is intended to be called immediately after
+        ``register_batch()`` at startup, before any events are emitted.
+
+        Args:
+            expected: Parsed fingerprint manifest (typically loaded from an
+                artifact file via ``ModelEventRegistryFingerprint.from_json_path``).
+            correlation_id: Optional correlation ID propagated to the error
+                for distributed tracing. When ``None``, the error constructor
+                auto-generates one.
+
+        Raises:
+            EventRegistryFingerprintMismatchError: Live fingerprint differs
+                from expected, with a bounded diff summary.
+        """
+        from omnibase_infra.errors.error_event_registry_fingerprint import (
+            EventRegistryFingerprintMismatchError,
+        )
+
+        actual = self.compute_fingerprint()
+
+        if actual.fingerprint_sha256 == expected.fingerprint_sha256:
+            logger.info(
+                "Event registry fingerprint validated: %s (%d registrations)",
+                actual.fingerprint_sha256[:16],
+                len(actual.elements),
+            )
+            return
+
+        diff_summary = _compute_registry_diff(expected, actual)
+        raise EventRegistryFingerprintMismatchError(
+            f"Event registry fingerprint mismatch: "
+            f"expected '{expected.fingerprint_sha256[:16]}...', "
+            f"computed '{actual.fingerprint_sha256[:16]}...'. "
+            "The live event registry does not match the expected manifest. "
+            "Re-run 'stamp' to update the artifact after changing registrations.",
+            expected_fingerprint=expected.fingerprint_sha256,
+            actual_fingerprint=actual.fingerprint_sha256,
+            diff_summary=diff_summary,
+            correlation_id=correlation_id,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers for fingerprint computation
+# ---------------------------------------------------------------------------
+
+
+def _sha256_json(obj: object) -> str:  # obj must be JSON-serializable at runtime
+    """SHA-256 hex digest of a JSON-serialized object.
+
+    Produces a deterministic hash by serializing with sorted keys and
+    compact separators (no whitespace).
+
+    Args:
+        obj: JSON-serializable value (dict, list, tuple, str, int, float,
+            bool, or None) to hash.  The ``object`` annotation is intentionally
+            broad; a ``JsonSerializable`` TypeAlias was rejected by pre-commit
+            (ruff UP040 + ONEX union validator).
+
+    Returns:
+        64-character hexadecimal SHA-256 digest.
+    """
+    raw = json.dumps(obj, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _compute_registry_diff(
+    expected: ModelEventRegistryFingerprint,
+    actual: ModelEventRegistryFingerprint,
+) -> str:
+    """Bounded diff summary (max 10 lines).
+
+    Shows additions, removals, and modifications by event_type.  For
+    modifications, lists which fields changed between expected and actual.
+
+    Args:
+        expected: The expected fingerprint manifest.
+        actual: The live-computed fingerprint.
+
+    Returns:
+        Human-readable diff summary, truncated at 10 lines.
+    """
+    expected_by_type = {e.event_type: e for e in expected.elements}
+    actual_by_type = {e.event_type: e for e in actual.elements}
+
+    expected_types = set(expected_by_type)
+    actual_types = set(actual_by_type)
+
+    lines: list[str] = []
+
+    for event_type in sorted(actual_types - expected_types):
+        lines.append(f"  + added: {event_type}")
+
+    for event_type in sorted(expected_types - actual_types):
+        lines.append(f"  - removed: {event_type}")
+
+    for event_type in sorted(expected_types & actual_types):
+        exp_elem = expected_by_type[event_type]
+        act_elem = actual_by_type[event_type]
+        if exp_elem.element_sha256 != act_elem.element_sha256:
+            changed_fields: list[str] = []
+            if exp_elem.topic_template != act_elem.topic_template:
+                changed_fields.append("topic_template")
+            if exp_elem.schema_version != act_elem.schema_version:
+                changed_fields.append("schema_version")
+            if exp_elem.partition_key_field != act_elem.partition_key_field:
+                changed_fields.append("partition_key_field")
+            if exp_elem.required_fields != act_elem.required_fields:
+                changed_fields.append("required_fields")
+            field_detail = ", ".join(changed_fields) if changed_fields else "hash"
+            lines.append(f"  ~ changed: {event_type} ({field_detail})")
+
+    max_lines = 10
+    if len(lines) > max_lines:
+        overflow = len(lines) - (max_lines - 1)
+        lines = lines[: max_lines - 1]
+        lines.append(f"  ... and {overflow} more")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point -- stamp / verify subcommands (mirrors OMN-2087 pattern)
+# ---------------------------------------------------------------------------
+
+_ARTIFACT_DEFAULT_PATH: Final[str] = str(
+    Path(__file__).parent / "event_registry_fingerprint.json"
+)
+
+
+def _sanitize_artifact_path(path: str) -> str:
+    """Sanitize an artifact file path for safe inclusion in error messages.
+
+    Applies ``sanitize_secret_path`` to remove potentially sensitive directory
+    structure from the path before it appears in logs or error messages.
+
+    Args:
+        path: The raw artifact file path.
+
+    Returns:
+        Sanitized path safe for error messages.
+    """
+    return sanitize_secret_path(path) or path
+
+
+def validate_event_registry_fingerprint(
+    artifact_path: str = "",
+    *,
+    correlation_id: UUID | None = None,
+) -> None:
+    """Hard gate: validate event registry against expected fingerprint artifact.
+
+    Builds a canonical registry from ``ALL_EVENT_REGISTRATIONS``, loads the
+    expected fingerprint from the artifact file, and asserts they match.
+    Raises immediately on mismatch or missing artifact.
+
+    This function is the startup integration point. Call it during service
+    initialization, after all event registrations are known but before any
+    events are emitted.
+
+    Args:
+        artifact_path: Path to the expected fingerprint artifact. If empty,
+            defaults to ``_ARTIFACT_DEFAULT_PATH`` (co-located with module).
+        correlation_id: Optional correlation ID propagated to error context
+            for distributed tracing. When ``None``, the error constructor
+            auto-generates one.
+
+    Raises:
+        EventRegistryFingerprintMismatchError: Live registry != expected.
+        EventRegistryFingerprintMissingError: Artifact file not found or
+            unreadable.
+    """
+    from omnibase_infra.errors.error_event_registry_fingerprint import (
+        EventRegistryFingerprintMissingError,
+    )
+    from omnibase_infra.runtime.emit_daemon.model_event_registry_fingerprint import (
+        ModelEventRegistryFingerprint,
+    )
+    from omnibase_infra.runtime.emit_daemon.topics import ALL_EVENT_REGISTRATIONS
+
+    dest = Path(artifact_path) if artifact_path else Path(_ARTIFACT_DEFAULT_PATH)
+    if not dest.exists() or not dest.is_file():
+        raise EventRegistryFingerprintMissingError(
+            f"Event registry fingerprint artifact not found: {_sanitize_artifact_path(str(dest))}. "
+            "Run 'stamp' to generate the artifact.",
+            artifact_path=str(dest),
+            correlation_id=correlation_id,
+        )
+
+    try:
+        expected = ModelEventRegistryFingerprint.from_json_path(dest)
+    except PermissionError as exc:
+        safe_path = _sanitize_artifact_path(str(dest))
+        raise EventRegistryFingerprintMissingError(
+            f"Event registry fingerprint artifact not readable "
+            f"(permission denied): {safe_path}. "
+            "Check file permissions on the artifact.",
+            artifact_path=str(dest),
+            correlation_id=correlation_id,
+        ) from exc
+    except json.JSONDecodeError as exc:
+        safe_path = _sanitize_artifact_path(str(dest))
+        raise EventRegistryFingerprintMissingError(
+            f"Event registry fingerprint artifact contains invalid JSON: "
+            f"{safe_path}. "
+            "Run 'stamp' to regenerate the artifact.",
+            artifact_path=str(dest),
+            correlation_id=correlation_id,
+        ) from exc
+    except _ValidationError as exc:
+        safe_path = _sanitize_artifact_path(str(dest))
+        raise EventRegistryFingerprintMissingError(
+            f"Event registry fingerprint artifact has invalid schema: "
+            f"{safe_path}. "
+            "Run 'stamp' to regenerate the artifact.",
+            artifact_path=str(dest),
+            correlation_id=correlation_id,
+        ) from exc
+    except Exception as exc:
+        safe_path = _sanitize_artifact_path(str(dest))
+        raise EventRegistryFingerprintMissingError(
+            f"Event registry fingerprint artifact unreadable: {safe_path}. "
+            "Run 'stamp' to regenerate the artifact.",
+            artifact_path=str(dest),
+            correlation_id=correlation_id,
+        ) from exc
+
+    registry = EventRegistry()
+    registry.register_batch(ALL_EVENT_REGISTRATIONS)
+
+    registry.assert_fingerprint(expected, correlation_id=correlation_id)
+
+
+def _cli_stamp(artifact_path: str, *, dry_run: bool = False) -> None:
+    """Compute fingerprint from known registrations and write artifact.
+
+    Populates a registry with all known event registrations, computes the
+    deterministic fingerprint, and writes the JSON artifact to disk.
+
+    Args:
+        artifact_path: Destination path for the JSON artifact.
+        dry_run: If True, compute and print but do not write the file.
+    """
+    from omnibase_infra.runtime.emit_daemon.topics import ALL_EVENT_REGISTRATIONS
+
+    registry = EventRegistry()
+    registry.register_batch(ALL_EVENT_REGISTRATIONS)
+
+    fingerprint = registry.compute_fingerprint()
+
+    print(f"fingerprint: {fingerprint.fingerprint_sha256}")
+    print(f"registrations: {len(fingerprint.elements)}")
+
+    for elem in fingerprint.elements:
+        print(f"  {elem.event_type}: {elem.element_sha256[:16]}...")
+
+    if dry_run:
+        print("\n--dry-run: skipping artifact write")
+        return
+
+    dest = Path(artifact_path)
+    fingerprint.to_json(dest)
+    print(f"\nArtifact written to {dest}")
+
+
+def _cli_verify(artifact_path: str) -> None:
+    """Load artifact, compute live fingerprint, compare.
+
+    Args:
+        artifact_path: Path to the expected fingerprint artifact file.
+
+    Raises:
+        EventRegistryFingerprintMismatchError: On fingerprint mismatch.
+        EventRegistryFingerprintMissingError: If artifact file not found.
+    """
+    validate_event_registry_fingerprint(artifact_path=artifact_path)
+    print("Event registry fingerprint OK")
+
+
+def _main() -> None:
+    """CLI entry point: stamp / verify subcommands."""
+    import argparse
+    import sys
+
+    from omnibase_infra.errors.error_event_registry_fingerprint import (
+        EventRegistryFingerprintMismatchError,
+        EventRegistryFingerprintMissingError,
+    )
+
+    parser = argparse.ArgumentParser(
+        prog="python -m omnibase_infra.runtime.emit_daemon.event_registry",
+        description="Event registry fingerprint CLI for omnibase_infra (OMN-2088).",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    stamp_parser = sub.add_parser(
+        "stamp",
+        help="Compute fingerprint from known registrations and write artifact.",
+    )
+    stamp_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Compute fingerprint but do not write artifact.",
+    )
+    stamp_parser.add_argument(
+        "--artifact",
+        default=_ARTIFACT_DEFAULT_PATH,
+        help=f"Path to fingerprint artifact (default: {_ARTIFACT_DEFAULT_PATH}).",
+    )
+
+    verify_parser = sub.add_parser(
+        "verify",
+        help="Validate live registry matches expected fingerprint artifact.",
+    )
+    verify_parser.add_argument(
+        "--artifact",
+        default=_ARTIFACT_DEFAULT_PATH,
+        help=f"Path to fingerprint artifact (default: {_ARTIFACT_DEFAULT_PATH}).",
+    )
+
+    args = parser.parse_args()
+
+    if args.command is None:
+        parser.print_help()
+        sys.exit(1)
+
+    try:
+        if args.command == "stamp":
+            _cli_stamp(args.artifact, dry_run=args.dry_run)
+        elif args.command == "verify":
+            _cli_verify(args.artifact)
+    except (
+        EventRegistryFingerprintMismatchError,
+        EventRegistryFingerprintMissingError,
+    ) as exc:
+        print(f"FAILED: {exc.message}", file=sys.stderr)
+        sys.exit(2)
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    _main()
+
 
 __all__: list[str] = [
     "EventRegistry",
     "ModelEventRegistration",
+    "validate_event_registry_fingerprint",
 ]

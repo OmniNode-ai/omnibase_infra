@@ -1,0 +1,17 @@
+{
+  "elements": [
+    {
+      "element_sha256": "5f0a1364493205061b169c7318bf8d6086345f4ed07b945f67d14792ca7550e7",
+      "event_type": "phase.metrics",
+      "partition_key_field": "run_id",
+      "required_fields": [
+        "phase",
+        "run_id"
+      ],
+      "schema_version": "1.0.0",
+      "topic_template": "onex.evt.omniclaude.phase-metrics.v1"
+    }
+  ],
+  "fingerprint_sha256": "e636a4b1f255698a34651079f6317a8369569cfae2d0bbd496efb3cfee53175d",
+  "version": 1
+}

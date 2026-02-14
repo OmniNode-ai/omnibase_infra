@@ -35,7 +35,7 @@ Example Usage:
             event_type="myapp.submitted",
             topic_template="onex.evt.myapp.submitted.v1",
             partition_key_field="session_id",
-            required_fields=["session_id"],
+            required_fields=("session_id",),
         )
     )
     topic = registry.resolve_topic("myapp.submitted")

@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 OmniNode Team
-"""Handlers for the LLM Inference Effect node.
+# Copyright (c) 2026 OmniNode Team
+"""Handler implementations for the LLM inference effect node."""
 
-Exports:
-    HandlerLlmOpenaiCompatible: OpenAI wire-format inference handler.
-"""
-
+from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_ollama import (
+    HandlerLlmOllama,
+)
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
 )
 
-__all__: list[str] = ["HandlerLlmOpenaiCompatible"]
+__all__ = ["HandlerLlmOllama", "HandlerLlmOpenaiCompatible"]

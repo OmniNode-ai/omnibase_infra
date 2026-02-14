@@ -89,6 +89,23 @@ skip_directories:
 # These handle method count, parameter count, naming, and style violations
 pattern_exemptions:
   # ==========================================================================
+  # EventRegistry Exemptions (OMN-2088)
+  # ==========================================================================
+  # Event registry with cohesive methods for event type management.
+  # Methods: __init__, register, register_batch, resolve_topic,
+  #          get_partition_key, validate_payload, inject_metadata,
+  #          get_registration, list_event_types, compute_fingerprint,
+  #          assert_fingerprint
+  - file_pattern: 'event_registry\.py'
+    class_pattern: "Class 'EventRegistry'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Event registry requires cohesive methods for registration (register, register_batch), resolution (resolve_topic, get_partition_key), validation (validate_payload), metadata injection (inject_metadata), querying (get_registration, list_event_types), and fingerprint lifecycle (compute_fingerprint, assert_fingerprint). All methods operate on the same _registrations dict. Splitting would break cohesion.
+
+    documentation:
+      - CLAUDE.md (Event Registry pattern)
+    ticket: OMN-2088
+  # ==========================================================================
   # ModelRuntimeContractConfig Exemptions (OMN-1519)
   # ==========================================================================
   # Data model with cohesive accessor properties for querying loaded contracts.
