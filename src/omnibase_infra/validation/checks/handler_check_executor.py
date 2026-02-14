@@ -143,8 +143,12 @@ class HandlerCheckExecutor(ABC):
                 self.check_code,
                 config.timeout_ms,
             )
-            process.kill()
-            await process.wait()
+            try:
+                process.kill()
+                await process.wait()
+            except (OSError, ProcessLookupError):
+                # Process already exited between timeout and kill attempt
+                pass
             return (-1, "", f"Timed out after {config.timeout_ms:.0f}ms")
         except OSError as exc:
             logger.warning("Check %s subprocess error: %s", self.check_code, exc)
@@ -252,10 +256,14 @@ class HandlerSubprocessCheckExecutor(HandlerCheckExecutor):
                 output[:max_output] + f"\n... (truncated, {len(output)} bytes total)"
             )
 
+        # Use only the command basename to avoid leaking full command
+        # strings in check results (information disclosure concern if
+        # commands ever become dynamic).
+        cmd_basename = self._command.split()[0] if self._command else "(empty)"
         message = (
-            f"Command succeeded: {self._command}"
+            f"{self.check_code} succeeded ({cmd_basename})"
             if passed
-            else f"Command failed (exit {returncode}): {self._command}"
+            else f"{self.check_code} failed (exit {returncode}, {cmd_basename})"
         )
 
         return self._make_result(

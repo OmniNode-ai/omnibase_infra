@@ -86,6 +86,8 @@ def _build_registry() -> dict[str, HandlerCheckExecutor]:
         ),
         # --- Analysis checks (no subprocess, inspect candidate) ---
         "CHECK-VAL-001": HandlerReplaySanity(),
+        # artifact_dir=None means this check is skipped by default;
+        # callers must configure artifact_dir per-deployment to enable it.
         "CHECK-VAL-002": HandlerArtifactCompleteness(),
         "CHECK-RISK-001": HandlerRiskSensitivePaths(),
         "CHECK-RISK-002": HandlerRiskDiffSize(),
@@ -96,10 +98,11 @@ def _build_registry() -> dict[str, HandlerCheckExecutor]:
     }
 
 
-# Module-level singleton registry (read-only view)
-_CHECK_REGISTRY: dict[str, HandlerCheckExecutor] = _build_registry()
+# Module-level singleton registry (read-only view).
+# The mutable dict is scoped inside the MappingProxyType call to prevent
+# accidental mutation via module-level access.
 CHECK_REGISTRY: MappingProxyType[str, HandlerCheckExecutor] = MappingProxyType(
-    _CHECK_REGISTRY
+    _build_registry()
 )
 
 # Ordered check codes matching the catalog order

@@ -42,6 +42,11 @@ class FlakeDetector:
     If the rerun result differs from the first run, the check is
     classified as a suspected flake and the candidate enters QUARANTINE.
 
+    Note:
+        Instances accumulate internal state (rerun counts and flake
+        records). Create a fresh instance per validation run rather
+        than reusing across runs.
+
     Usage:
         detector = FlakeDetector()
         first_result = await executor.run(check)

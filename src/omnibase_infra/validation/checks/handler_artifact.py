@@ -103,6 +103,8 @@ class HandlerReplaySanity(HandlerCheckExecutor):
                 continue
 
             try:
+                # errors='replace' prevents crashes on binary files in source
+                # trees; replacement characters are acceptable for pattern scanning.
                 content = full_path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
@@ -190,6 +192,8 @@ class HandlerArtifactCompleteness(HandlerCheckExecutor):
 
         if not artifact_dir.is_dir():
             duration_ms = (time.monotonic() - start) * 1000.0
+            # Full path is intentional for internal diagnostics --
+            # artifact_dir is controlled infrastructure, not user input.
             return self._make_result(
                 passed=False,
                 message=f"Artifact directory does not exist: {artifact_dir}",
@@ -220,6 +224,7 @@ class HandlerArtifactCompleteness(HandlerCheckExecutor):
                         else ""
                     )
                 ),
+                # Artifact dir path intentional for diagnostics (controlled infra path)
                 error_output=f"Artifact dir: {artifact_dir}\nMissing: {', '.join(missing_required)}",
                 duration_ms=duration_ms,
             )
