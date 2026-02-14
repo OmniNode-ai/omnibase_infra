@@ -16,10 +16,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumCheckSeverity, EnumValidationVerdict
 from omnibase_infra.models.validation.model_check_result import ModelCheckResult
-from omnibase_infra.validation.flake_detector import (
+from omnibase_infra.validation.service_flake_detector import (
     FlakeDetector,
     ModelFlakeDetectionResult,
     ModelFlakeRecord,
@@ -89,7 +90,7 @@ class TestModelFlakeRecord:
     def test_frozen(self) -> None:
         """ModelFlakeRecord is frozen (immutable)."""
         record = ModelFlakeRecord(check_code="X", first_passed=True)
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             record.first_passed = False  # type: ignore[misc]
 
 

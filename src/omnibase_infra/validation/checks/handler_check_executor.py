@@ -112,6 +112,7 @@ class HandlerCheckExecutor(ABC):
         Returns:
             Tuple of (return_code, stdout, stderr).
         """
+        # 0 means no timeout (subprocess runs until completion)
         timeout_s = config.timeout_ms / 1000.0 if config.timeout_ms > 0 else None
         working_dir = Path(config.working_dir)
 
@@ -120,6 +121,7 @@ class HandlerCheckExecutor(ABC):
             env_dict = {**os.environ, **dict(config.env_overrides)}
 
         argv = shlex.split(command)
+        process: asyncio.subprocess.Process | None = None
         try:
             process = await asyncio.create_subprocess_exec(
                 *argv,
@@ -143,12 +145,20 @@ class HandlerCheckExecutor(ABC):
                 self.check_code,
                 config.timeout_ms,
             )
-            try:
-                process.kill()
-                await process.wait()
-            except (OSError, ProcessLookupError):
-                # Process already exited between timeout and kill attempt
-                pass
+            if process is not None:
+                try:
+                    process.kill()
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except TimeoutError:
+                    logger.warning(
+                        "Check %s: process did not exit within 5 s after "
+                        "kill; potential zombie (pid=%s)",
+                        self.check_code,
+                        process.pid,
+                    )
+                except (OSError, ProcessLookupError):
+                    # Process already exited between timeout and kill attempt
+                    pass
             return (-1, "", f"Timed out after {config.timeout_ms:.0f}ms")
         except OSError as exc:
             logger.warning("Check %s subprocess error: %s", self.check_code, exc)
@@ -248,28 +258,31 @@ class HandlerSubprocessCheckExecutor(HandlerCheckExecutor):
         duration_ms = (time.monotonic() - start) * 1000.0
 
         passed = returncode == 0
+
+        # Use only the command basename to avoid leaking full command
+        # strings in check results (information disclosure concern if
+        # commands ever become dynamic).
+        cmd_basename = self._command.split()[0] if self._command else "(empty)"
+
+        if passed:
+            return self._make_result(
+                passed=True,
+                message=f"{self.check_code} succeeded ({cmd_basename})",
+                duration_ms=duration_ms,
+            )
+
+        # Failure path: capture and truncate output for diagnostics
         output = stderr if stderr else stdout
-        # Truncate output to avoid oversized results
         max_output = 4096
         if len(output) > max_output:
             output = (
                 output[:max_output] + f"\n... (truncated, {len(output)} bytes total)"
             )
 
-        # Use only the command basename to avoid leaking full command
-        # strings in check results (information disclosure concern if
-        # commands ever become dynamic).
-        cmd_basename = self._command.split()[0] if self._command else "(empty)"
-        message = (
-            f"{self.check_code} succeeded ({cmd_basename})"
-            if passed
-            else f"{self.check_code} failed (exit {returncode}, {cmd_basename})"
-        )
-
         return self._make_result(
-            passed=passed,
-            message=message,
-            error_output=output if not passed else "",
+            passed=False,
+            message=f"{self.check_code} failed (exit {returncode}, {cmd_basename})",
+            error_output=output,
             duration_ms=duration_ms,
         )
 

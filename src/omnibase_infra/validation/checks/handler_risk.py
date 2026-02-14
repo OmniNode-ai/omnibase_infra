@@ -7,8 +7,8 @@ CHECK-RISK-001: Sensitive paths -> stricter bar
     validation requirements when those paths are modified.
 
 CHECK-RISK-002: Diff size threshold
-    Flags candidates with diffs exceeding a configurable threshold
-    (default: 500 changed lines) for additional review.
+    Flags candidates whose number of changed files exceeds a configurable
+    threshold (default: 500 changed files) for additional review.
 
 CHECK-RISK-003: Unsafe operations detector
     Scans changed files for dangerous patterns like eval(), exec(),
@@ -37,27 +37,37 @@ if TYPE_CHECKING:
     )
 
 
-# Paths considered security-sensitive
-SENSITIVE_PATH_PATTERNS: tuple[str, ...] = (
-    r"(?:^|.*/)(?:auth|security|crypto|secrets|vault|credentials)/.*",
-    r"(?:^|.*/)\.env.*",
-    r"(?:^|.*/)(?:password|token|key|cert).*\.py$",
-    r"(?:^|.*/)migrations/.*",
-    r"(?:^|.*/)docker-compose.*\.ya?ml$",
-    r"(?:^|.*/)Dockerfile.*",
-    r"(?:^|.*/)(?:config|settings)\.py$",
+# Paths considered security-sensitive.
+# Patterns use ``(?:.*/)?`` so they match both root-level files (e.g. ".env")
+# and nested paths (e.g. "deploy/.env.production") when used with ``re.match``.
+# Pre-compiled at module level to avoid per-invocation overhead.
+SENSITIVE_PATH_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?:.*/)?(?:auth|security|crypto|secrets|vault|credentials)/.*"),
+    re.compile(r"(?:.*/)?\.env.*"),
+    re.compile(r"(?:.*/)?(?:password|token|key|cert).*\.py$"),
+    re.compile(r"(?:.*/)?migrations/.*"),
+    re.compile(r"(?:.*/)?docker-compose.*\.ya?ml$"),
+    re.compile(r"(?:.*/)?Dockerfile.*"),
+    re.compile(r"(?:.*/)?(?:config|settings)\.py$"),
 )
 
-# Unsafe operation patterns in Python source
-UNSAFE_PATTERNS: tuple[tuple[str, str], ...] = (
-    (r"\beval\s*\(", "eval() call detected"),
-    (r"\bexec\s*\(", "exec() call detected"),
-    (r"subprocess\.\w+\([^)]{0,200}shell\s*=\s*True", "subprocess with shell=True"),
-    (r"\bpickle\.loads?\s*\(", "pickle.load/loads() call detected"),
-    (r"\b__import__\s*\(", "__import__() call detected"),
-    (r"\bos\.system\s*\(", "os.system() call detected"),
-    (r"\bcompile\s*\([^)]{0,200}\bexec\b", "compile() with exec mode"),
-    (r"\byaml\.load\s*\((?![^)]{0,200}Loader)", "yaml.load() without explicit Loader"),
+# Unsafe operation patterns in Python source.
+# Pre-compiled at module level to avoid per-invocation overhead.
+UNSAFE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\beval\s*\("), "eval() call detected"),
+    (re.compile(r"\bexec\s*\("), "exec() call detected"),
+    (
+        re.compile(r"subprocess\.\w+\([^)]{0,200}shell\s*=\s*True"),
+        "subprocess with shell=True",
+    ),
+    (re.compile(r"\bpickle\.loads?\s*\("), "pickle.load/loads() call detected"),
+    (re.compile(r"\b__import__\s*\("), "__import__() call detected"),
+    (re.compile(r"\bos\.system\s*\("), "os.system() call detected"),
+    (re.compile(r"\bcompile\s*\([^)]{0,200}\bexec\b"), "compile() with exec mode"),
+    (
+        re.compile(r"\byaml\.load\s*\((?![^)]{0,200}Loader)"),
+        "yaml.load() without explicit Loader",
+    ),
 )
 
 # Default diff size threshold (number of changed files)
@@ -107,11 +117,10 @@ class HandlerRiskSensitivePaths(HandlerCheckExecutor):
         """
         start = time.monotonic()
 
-        compiled_patterns = [re.compile(p) for p in SENSITIVE_PATH_PATTERNS]
         sensitive_hits: list[str] = []
 
         for file_path in candidate.changed_files:
-            for pattern in compiled_patterns:
+            for pattern in SENSITIVE_PATH_PATTERNS:
                 if pattern.match(file_path):
                     sensitive_hits.append(file_path)
                     break
@@ -261,7 +270,6 @@ class HandlerRiskUnsafeOperations(HandlerCheckExecutor):
         """
         start = time.monotonic()
 
-        compiled_patterns = [(re.compile(p), desc) for p, desc in UNSAFE_PATTERNS]
         violations: list[str] = []
 
         python_files = [f for f in candidate.changed_files if f.endswith(".py")]
@@ -275,7 +283,7 @@ class HandlerRiskUnsafeOperations(HandlerCheckExecutor):
             except OSError:
                 continue
 
-            for pattern, description in compiled_patterns:
+            for pattern, description in UNSAFE_PATTERNS:
                 matches = pattern.findall(content)
                 if matches:
                     violations.append(

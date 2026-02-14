@@ -55,7 +55,7 @@ from omnibase_infra.validation.checks.handler_risk import (
     HandlerRiskSensitivePaths,
     HandlerRiskUnsafeOperations,
 )
-from omnibase_infra.validation.checks.registry_check import (
+from omnibase_infra.validation.checks.registry_infra_check import (
     CHECK_CATALOG_ORDER,
     CHECK_REGISTRY,
     get_check_executor,
@@ -257,11 +257,10 @@ class TestHandlerRiskSensitivePaths:
         result = await HandlerRiskSensitivePaths().execute(candidate, _default_config())
         assert result.passed is False
 
-    def test_sensitive_patterns_are_valid_regex(self) -> None:
-        """All sensitive path patterns compile as valid regexes."""
+    def test_sensitive_patterns_are_precompiled(self) -> None:
+        """All sensitive path patterns are pre-compiled re.Pattern objects."""
         for pattern in SENSITIVE_PATH_PATTERNS:
-            compiled = re.compile(pattern)
-            assert compiled is not None
+            assert isinstance(pattern, re.Pattern)
 
 
 class TestHandlerRiskDiffSize:
@@ -371,11 +370,10 @@ class TestHandlerRiskUnsafeOperations:
         # No crash, passes because nothing to scan
         assert result.passed is True
 
-    def test_unsafe_patterns_are_valid_regex(self) -> None:
-        """All unsafe patterns compile as valid regexes."""
+    def test_unsafe_patterns_are_precompiled(self) -> None:
+        """All unsafe patterns are pre-compiled re.Pattern objects."""
         for pattern, _desc in UNSAFE_PATTERNS:
-            compiled = re.compile(pattern)
-            assert compiled is not None
+            assert isinstance(pattern, re.Pattern)
 
 
 # ============================================================================
@@ -468,8 +466,8 @@ class TestHandlerReplaySanity:
         assert result.passed is True
 
     @pytest.mark.asyncio
-    async def test_nondeterministic_pattern_still_passes(self, tmp_path: Path) -> None:
-        """File with random module usage passes (RECOMMENDED, flags but does not block)."""
+    async def test_nondeterministic_pattern_detected(self, tmp_path: Path) -> None:
+        """File with random module usage is flagged (passed=False, but RECOMMENDED so non-blocking)."""
         rand_file = tmp_path / "rand_use.py"
         rand_file.write_text("import random\nval = random.randint(1, 10)\n")
 
@@ -478,8 +476,10 @@ class TestHandlerReplaySanity:
             changed_files=("rand_use.py",),
         )
         result = await HandlerReplaySanity().execute(candidate, _default_config())
-        # RECOMMENDED check -- passes but flags
-        assert result.passed is True
+        # Handler reports failure, but RECOMMENDED severity means it does
+        # not block the verdict (is_blocking_failure() returns False).
+        assert result.passed is False
+        assert not result.is_blocking_failure()
         assert "non-deterministic" in result.message.lower()
 
 

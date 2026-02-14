@@ -7,8 +7,17 @@ CHECK-VAL-001: Deterministic replay sanity
     results, guarding against non-deterministic test behavior.
 
 CHECK-VAL-002: Artifact completeness
-    Validates that required artifacts (result.yaml, verdict.yaml)
-    are present in the artifact storage directory.
+    Validates that required and expected artifacts are present in the
+    artifact storage directory.
+
+    Required artifacts (must exist, check fails if missing):
+        - result.yaml
+        - verdict.yaml
+
+    Expected artifacts (optional, reported but non-blocking):
+        - attribution.yaml
+        - artifacts/junit.xml
+        - artifacts/coverage.json
 
 Ticket: OMN-2151
 """
@@ -32,6 +41,11 @@ if TYPE_CHECKING:
         ModelPatternCandidate,
     )
 
+
+# Non-deterministic code patterns for CHECK-VAL-001 (replay sanity).
+# Pre-compiled at module level for consistency with handler_risk.py approach.
+_PATTERN_RANDOM_MODULE: re.Pattern[str] = re.compile(r"\brandom\.\w+\(")
+_PATTERN_TIME_TIME: re.Pattern[str] = re.compile(r"\btime\.time\s*\(\s*\)")
 
 # Required artifact filenames for CHECK-VAL-002
 REQUIRED_ARTIFACTS: tuple[str, ...] = (
@@ -110,9 +124,9 @@ class HandlerReplaySanity(HandlerCheckExecutor):
                 continue
 
             # Check for random/time-dependent patterns
-            if re.search(r"\brandom\.\w+\(", content):
+            if _PATTERN_RANDOM_MODULE.search(content):
                 nondeterministic_indicators.append(f"{file_path}: uses random module")
-            if re.search(r"\btime\.time\s*\(\s*\)", content):
+            if _PATTERN_TIME_TIME.search(content):
                 nondeterministic_indicators.append(f"{file_path}: uses time.time()")
 
         duration_ms = (time.monotonic() - start) * 1000.0
@@ -125,7 +139,7 @@ class HandlerReplaySanity(HandlerCheckExecutor):
             )
 
         return self._make_result(
-            passed=True,  # RECOMMENDED -> does not block but flags
+            passed=False,
             message=(
                 f"Non-deterministic patterns found ({len(nondeterministic_indicators)}): "
                 + "; ".join(nondeterministic_indicators[:3])
@@ -145,8 +159,10 @@ class HandlerArtifactCompleteness(HandlerCheckExecutor):
         """Initialize with an artifact directory.
 
         Args:
-            artifact_dir: Path to the artifact storage directory.
-                When None, the check is skipped at execution time.
+            artifact_dir: Path to the artifact storage directory.  When
+                ``None``, :meth:`execute` returns a ``skipped`` result.
+                This allows the default registry to instantiate the
+                handler without knowing the deployment-specific path.
         """
         self._artifact_dir = artifact_dir
 
@@ -182,12 +198,14 @@ class HandlerArtifactCompleteness(HandlerCheckExecutor):
         start = time.monotonic()
 
         artifact_dir = self._artifact_dir
+
         if artifact_dir is None:
+            duration_ms = (time.monotonic() - start) * 1000.0
             return self._make_result(
-                passed=False,
+                passed=True,
+                message="Skipped: no artifact_dir configured.",
                 skipped=True,
-                message="artifact_dir not provided; cannot locate artifacts without explicit path",
-                duration_ms=0.0,
+                duration_ms=duration_ms,
             )
 
         if not artifact_dir.is_dir():

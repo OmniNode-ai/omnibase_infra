@@ -51,6 +51,14 @@ def _build_registry() -> dict[str, HandlerCheckExecutor]:
 
     Returns:
         Mapping from check code to executor instance.
+
+    Note:
+        CHECK-VAL-002 (artifact completeness) is instantiated without an
+        ``artifact_dir``, which means it will return ``skipped=True`` at
+        runtime.  This is intentional: the default registry cannot know
+        the deployment-specific artifact directory.  Callers that need
+        CHECK-VAL-002 to run must replace the registry entry with an
+        instance configured via ``HandlerArtifactCompleteness(artifact_dir=...)``.
     """
     return {
         # --- Subprocess checks (mypy, ruff, pytest, CI) ---
@@ -86,8 +94,10 @@ def _build_registry() -> dict[str, HandlerCheckExecutor]:
         ),
         # --- Analysis checks (no subprocess, inspect candidate) ---
         "CHECK-VAL-001": HandlerReplaySanity(),
-        # artifact_dir=None means this check is skipped by default;
-        # callers must configure artifact_dir per-deployment to enable it.
+        # CHECK-VAL-002 requires artifact_dir to be provided by the caller.
+        # The default instance (artifact_dir=None) returns skipped=True.
+        # To enable this check, callers must supply a deployment-specific
+        # artifact directory when constructing HandlerArtifactCompleteness.
         "CHECK-VAL-002": HandlerArtifactCompleteness(),
         "CHECK-RISK-001": HandlerRiskSensitivePaths(),
         "CHECK-RISK-002": HandlerRiskDiffSize(),

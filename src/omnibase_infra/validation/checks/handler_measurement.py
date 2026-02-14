@@ -28,6 +28,10 @@ from omnibase_infra.validation.checks.handler_check_executor import (
     ModelCheckExecutorConfig,
 )
 
+# Average estimated tokens per changed file. Used as a rough heuristic
+# until real LLM token tracking is integrated (CHECK-COST-001).
+_ESTIMATED_TOKENS_PER_FILE = 150
+
 if TYPE_CHECKING:
     from omnibase_infra.nodes.node_validation_orchestrator.models.model_pattern_candidate import (
         ModelPatternCandidate,
@@ -87,7 +91,7 @@ class HandlerCostTokenDelta(HandlerCheckExecutor):
         start = time.monotonic()
 
         # Estimate token cost from file count (placeholder heuristic)
-        estimated_tokens = len(candidate.changed_files) * 150  # rough avg
+        estimated_tokens = len(candidate.changed_files) * _ESTIMATED_TOKENS_PER_FILE
 
         if self._baseline_tokens > 0:
             delta = estimated_tokens - self._baseline_tokens
@@ -160,9 +164,13 @@ class HandlerTimeWallClockDelta(HandlerCheckExecutor):
         """
         start = time.monotonic()
 
-        # This is a measurement check -- the real delta comes from
-        # the executor's total_duration_ms after all checks complete.
-        # Here we record a placeholder until post-run injection.
+        # TODO(OMN-2151): This is a placeholder -- elapsed_ms will be
+        # near-zero because no real work happens here. The actual
+        # validation start time needs to be injected (e.g. via
+        # constructor or candidate metadata) so that this check can
+        # report the true wall-clock delta. Currently the real delta
+        # comes from the executor's total_duration_ms after all checks
+        # complete and is recorded separately.
         elapsed_ms = (time.monotonic() - start) * 1000.0
 
         if self._baseline_ms > 0:

@@ -25,7 +25,7 @@ from omnibase_infra.validation.checks.handler_check_executor import (
     HandlerCheckExecutor,
     ModelCheckExecutorConfig,
 )
-from omnibase_infra.validation.checks.registry_check import (
+from omnibase_infra.validation.checks.registry_infra_check import (
     CHECK_REGISTRY,
     get_check_executor,
 )

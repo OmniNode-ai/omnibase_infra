@@ -18,6 +18,18 @@ Flake Detection Protocol:
 The detector tracks rerun history per check code to prevent
 infinite rerun loops. Each check gets at most one rerun opportunity.
 
+Usage:
+    detector = FlakeDetector()
+    first_result = await executor.run(check)
+    detector.record_first_run(first_result)
+    if not first_result.passed:
+        should_rerun = detector.should_rerun(first_result)
+        if should_rerun:
+            rerun_result = await executor.run(check)
+            detector.record_rerun(first_result, rerun_result)
+
+    detection_result = detector.get_result()
+
 Ticket: OMN-2151
 """
 
@@ -50,6 +62,7 @@ class FlakeDetector:
     Usage:
         detector = FlakeDetector()
         first_result = await executor.run(check)
+        detector.record_first_run(first_result)
         if not first_result.passed:
             should_rerun = detector.should_rerun(first_result)
             if should_rerun:
@@ -212,8 +225,6 @@ def is_promotion_blocked(verdict: EnumValidationVerdict) -> bool:
 
 __all__: list[str] = [
     "FlakeDetector",
-    "ModelFlakeDetectionResult",
-    "ModelFlakeRecord",
     "is_promotion_blocked",
     "should_quarantine_verdict",
 ]

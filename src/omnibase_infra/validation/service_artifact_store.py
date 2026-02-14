@@ -39,8 +39,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
-# Default root for artifact storage
-DEFAULT_ARTIFACT_ROOT = Path.home() / ".claude" / "validation"
+
+def _default_artifact_root() -> Path:
+    """Lazily resolve the default artifact root directory.
+
+    Avoids calling ``Path.home()`` at module import time, which can
+    fail in containers or environments where ``HOME`` is unset.
+
+    Returns:
+        Default artifact root path (``~/.claude/validation``).
+    """
+    return Path.home() / ".claude" / "validation"
 
 
 class ModelArtifactStoreConfig(BaseModel):
@@ -54,8 +63,9 @@ class ModelArtifactStoreConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     root_dir: str = Field(
-        default=str(DEFAULT_ARTIFACT_ROOT),
-        description="Root directory for artifact storage.",
+        default_factory=lambda: str(_default_artifact_root()),
+        description="Root directory for artifact storage. "
+        "Defaults to ~/.claude/validation when not specified.",
     )
     create_dirs: bool = Field(
         default=True,
@@ -124,6 +134,21 @@ class ServiceArtifactStore:
                 f"resolves to {candidate}, "
                 f"which is outside {resolved_root}"
             )
+
+        # Secondary defence: if the candidate (or any component) already
+        # exists on disk and involves a symlink, resolve through the
+        # filesystem and re-check.  A symlink *within* allowed_root could
+        # point to an arbitrary location outside it.  For paths that do
+        # not yet exist (pre-creation validation), normpath is sufficient.
+        if candidate.exists() or candidate.is_symlink():
+            real_candidate = candidate.resolve()
+            if not real_candidate.is_relative_to(resolved_root):
+                raise ValueError(
+                    f"Symlink escape detected: filename {filename!r} "
+                    f"resolves through symlinks to {real_candidate}, "
+                    f"which is outside {resolved_root}"
+                )
+
         return candidate
 
     # ------------------------------------------------------------------
@@ -339,8 +364,11 @@ class ServiceArtifactStore:
         # artifacts tree.
         artifact_path = self._validate_path_within(filename, artifacts)
 
-        # Ensure parent dir exists for nested filenames (e.g., "logs/check.log")
-        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        # Ensure parent dir exists for nested filenames (e.g., "logs/check.log").
+        # Respect _create_dirs: if disabled, let the subsequent write fail
+        # naturally when the parent directory does not exist.
+        if self._create_dirs:
+            artifact_path.parent.mkdir(parents=True, exist_ok=True)
 
         if isinstance(content, bytes):
             artifact_path.write_bytes(content)
@@ -438,14 +466,16 @@ class ServiceArtifactStore:
             symlink_path.symlink_to(relative_target)
         except OSError:
             # Graceful degradation: symlink creation may fail on Windows
-            # without developer mode enabled, or on filesystems that do
-            # not support symlinks.  Log a warning and return the target
-            # path so callers can still locate the run directory.
+            # without developer mode / SeCreateSymbolicLinkPrivilege, or
+            # on filesystems that do not support symlinks.  Log a warning
+            # with exception info and return the target path so callers
+            # can still locate the run directory.
             logger.warning(
                 "Failed to create symlink %s -> %s (symlinks may not be "
                 "supported on this platform); falling back to target path.",
                 symlink_path,
                 relative_target,
+                exc_info=True,
             )
             return self.run_dir(candidate_id, run_id)
 
@@ -507,5 +537,4 @@ class ServiceArtifactStore:
 __all__: list[str] = [
     "ServiceArtifactStore",
     "ModelArtifactStoreConfig",
-    "DEFAULT_ARTIFACT_ROOT",
 ]
