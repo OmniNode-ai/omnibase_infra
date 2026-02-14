@@ -106,6 +106,12 @@ class ServiceFlakeDetector:
     def record_first_run(self, result: ModelCheckResult) -> None:
         """Record the first run result for a check.
 
+        If called twice for the same ``check_code``, the previous record
+        is silently overwritten (with a warning log).  This can happen
+        when a caller retries check execution from scratch.  The rerun
+        count tracked in ``_rerun_counts`` is **not** reset by this
+        method, so the rerun-once budget is still enforced.
+
         Args:
             result: The check result from the first run.
         """

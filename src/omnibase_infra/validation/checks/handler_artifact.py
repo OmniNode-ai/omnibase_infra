@@ -172,7 +172,11 @@ class HandlerArtifactCompleteness(HandlerCheckExecutor):
                 configured instance via
                 ``get_check_executor("CHECK-VAL-002", artifact_dir=...)``.
         """
-        self._artifact_dir = artifact_dir
+        # Resolve to an absolute path so that later is_dir() and path
+        # joining behave consistently regardless of working directory changes.
+        self._artifact_dir = (
+            artifact_dir.resolve() if artifact_dir is not None else None
+        )
 
     @property
     def check_code(self) -> str:

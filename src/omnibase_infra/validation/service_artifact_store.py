@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 import os
-import tempfile
+import uuid as _uuid_mod
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -296,6 +296,12 @@ class ServiceArtifactStore:
         The plan is stored at ``{candidate_dir}/plan.yaml`` and is
         shared across all runs for the same candidate.
 
+        Note:
+            The ``candidate_id`` parameter is a :class:`~uuid.UUID` whose
+            ``__str__()`` output is guaranteed to contain only hex digits
+            and hyphens -- never path separators -- so it is inherently
+            safe for path construction without additional validation.
+
         Args:
             candidate_id: Unique candidate identifier.
             plan_data: Plan data to serialize as YAML.
@@ -321,6 +327,13 @@ class ServiceArtifactStore:
     ) -> Path:
         """Write the executor result to disk.
 
+        Note:
+            The ``candidate_id`` and ``run_id`` parameters are
+            :class:`~uuid.UUID` instances whose ``__str__()`` output
+            contains only hex digits and hyphens -- never path
+            separators -- so they are inherently safe for path
+            construction without additional validation.
+
         Args:
             candidate_id: Unique candidate identifier.
             run_id: Unique validation run identifier.
@@ -343,6 +356,13 @@ class ServiceArtifactStore:
         self, candidate_id: UUID, run_id: UUID, verdict_data: dict[str, Any]
     ) -> Path:
         """Write the verdict to disk.
+
+        Note:
+            The ``candidate_id`` and ``run_id`` parameters are
+            :class:`~uuid.UUID` instances whose ``__str__()`` output
+            contains only hex digits and hyphens -- never path
+            separators -- so they are inherently safe for path
+            construction without additional validation.
 
         Args:
             candidate_id: Unique candidate identifier.
@@ -369,6 +389,13 @@ class ServiceArtifactStore:
 
         Attribution tracks which agent/tool produced the validation
         results and the correlation chain for traceability.
+
+        Note:
+            The ``candidate_id`` and ``run_id`` parameters are
+            :class:`~uuid.UUID` instances whose ``__str__()`` output
+            contains only hex digits and hyphens -- never path
+            separators -- so they are inherently safe for path
+            construction without additional validation.
 
         Args:
             candidate_id: Unique candidate identifier.
@@ -525,21 +552,17 @@ class ServiceArtifactStore:
         # Use relative target for portability
         relative_target = Path("..") / str(candidate_id) / str(run_id)
 
-        # Atomic symlink update: create at a temporary name, then rename.
-        # This avoids the TOCTOU race of check-unlink-create where two
-        # concurrent processes could interfere with each other.
+        # Atomic symlink update: create a symlink at a unique temporary
+        # name, then atomically rename it over the target.  Using a
+        # UUID-suffixed name and os.symlink directly avoids the TOCTOU
+        # race inherent in the mkstemp-unlink-symlink sequence where
+        # another process could claim the temp path between unlink and
+        # symlink creation.
         try:
-            # Create a temp file name in the same directory so rename is
-            # guaranteed to be on the same filesystem (required for
-            # atomic os.rename / os.replace on POSIX).
-            fd, tmp_path_str = tempfile.mkstemp(
-                dir=str(symlink_dir), prefix=".symlink_tmp_"
-            )
-            os.close(fd)
-            tmp_path = Path(tmp_path_str)
-            # mkstemp creates a regular file; remove it so we can
-            # create a symlink at the same path.
-            tmp_path.unlink()
+            # Build a unique temp name in the same directory so rename
+            # is guaranteed to be on the same filesystem (required for
+            # atomic os.rename on POSIX).
+            tmp_path = symlink_dir / f".symlink_tmp_{_uuid_mod.uuid4().hex}"
 
             tmp_path.symlink_to(relative_target)
             # Path.rename is atomic on POSIX when source and target are

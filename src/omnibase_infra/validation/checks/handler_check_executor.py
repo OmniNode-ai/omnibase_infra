@@ -116,6 +116,9 @@ class HandlerCheckExecutor(ABC):
         timeout_s = config.timeout_ms / 1000.0 if config.timeout_ms > 0 else None
         working_dir = Path(config.working_dir)
 
+        # When env_overrides is empty (the default), env_dict stays None
+        # and asyncio.create_subprocess_exec inherits the parent process's
+        # environment unchanged (the default behaviour of subprocess.Popen).
         env_dict: dict[str, str] | None = None
         if config.env_overrides:
             env_dict = {**os.environ, **dict(config.env_overrides)}

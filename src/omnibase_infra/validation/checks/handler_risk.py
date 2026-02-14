@@ -56,6 +56,9 @@ SENSITIVE_PATH_PATTERNS: tuple[re.Pattern[str], ...] = (
 UNSAFE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\beval\s*\("), "eval() call detected"),
     (re.compile(r"\bexec\s*\("), "exec() call detected"),
+    # The {0,200} bound is a heuristic to keep regex backtracking bounded.
+    # It may miss shell=True when the argument list exceeds 200 characters
+    # or uses nested parentheses that cause the [^)] class to stop early.
     (
         re.compile(r"subprocess\.\w+\([^)]{0,200}shell\s*=\s*True"),
         "subprocess with shell=True",
