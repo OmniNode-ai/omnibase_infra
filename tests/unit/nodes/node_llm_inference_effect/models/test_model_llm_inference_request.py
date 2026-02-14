@@ -339,6 +339,41 @@ class TestEmbeddingValidation:
         ):
             ModelLlmInferenceRequest(**_embedding_kwargs(tools=(_tool_def(),)))
 
+    def test_top_p_with_embedding_raises(self) -> None:
+        """EMBEDDING with top_p raises ValueError."""
+        with pytest.raises(
+            ValidationError,
+            match="top_p must be None when operation_type is EMBEDDING",
+        ):
+            ModelLlmInferenceRequest(**_embedding_kwargs(top_p=0.9))
+
+    def test_stop_with_embedding_raises(self) -> None:
+        """EMBEDDING with stop sequences raises ValueError."""
+        with pytest.raises(
+            ValidationError,
+            match="stop must be empty when operation_type is EMBEDDING",
+        ):
+            ModelLlmInferenceRequest(**_embedding_kwargs(stop=("###",)))
+
+    def test_system_prompt_with_embedding_raises(self) -> None:
+        """EMBEDDING with system_prompt raises ValueError."""
+        with pytest.raises(
+            ValidationError,
+            match="system_prompt must be None when operation_type is EMBEDDING",
+        ):
+            ModelLlmInferenceRequest(
+                **_embedding_kwargs(system_prompt="Be helpful"),
+            )
+
+    def test_tool_choice_with_embedding_raises(self) -> None:
+        """EMBEDDING with tool_choice raises ValueError."""
+        choice = ModelLlmToolChoice(mode="auto")
+        with pytest.raises(
+            ValidationError,
+            match="tool_choice must be None when operation_type is EMBEDDING",
+        ):
+            ModelLlmInferenceRequest(**_embedding_kwargs(tool_choice=choice))
+
 
 # =============================================================================
 # max_tokens Boundary Tests
@@ -661,3 +696,95 @@ class TestToolChoiceValidation:
         """Empty string function_name is rejected (min_length=1)."""
         with pytest.raises(ValidationError):
             ModelLlmToolChoice(mode="function", function_name="")
+
+
+# =============================================================================
+# Unrecognized Operation Type Tests
+# =============================================================================
+
+
+class TestUnrecognizedOperationType:
+    """Tests for the defensive guard against unrecognized operation types."""
+
+    def test_unrecognized_operation_type_raises(self) -> None:
+        """Unrecognized operation_type triggers the else-branch ValueError.
+
+        This tests the defensive guard at the end of the model validator
+        that catches any operation type not handled by the existing
+        if/elif branches. Since EnumLlmOperationType is a str enum,
+        we can bypass enum validation by injecting a fake value via
+        model_construct (which skips validation), then calling the
+        validator directly.
+        """
+        # Build a valid request, then replace the operation_type with a
+        # synthetic value that passes enum membership but has no branch.
+        # We use object.__setattr__ because the model is frozen.
+        req = ModelLlmInferenceRequest.model_construct(
+            base_url="http://localhost:8000",
+            model="test-model",
+            operation_type="unknown_op_type",
+            messages=(),
+            prompt="test",
+            system_prompt=None,
+            tools=(),
+            tool_choice=None,
+            max_tokens=None,
+            temperature=None,
+            top_p=None,
+            stop=(),
+            stream=False,
+            timeout_seconds=30.0,
+            max_retries=3,
+            correlation_id=uuid4(),
+            execution_id=uuid4(),
+            metadata={},
+            provider_label="",
+        )
+        with pytest.raises(ValueError, match="Unrecognized operation_type"):
+            req._validate_request_invariants()
+
+
+# =============================================================================
+# Serialization Round-Trip Tests
+# =============================================================================
+
+
+class TestSerialization:
+    """Tests for JSON serialization round-trip correctness."""
+
+    def test_json_round_trip_chat_completion(self) -> None:
+        """Chat completion request serializes and deserializes correctly."""
+        original = ModelLlmInferenceRequest(**_chat_kwargs(max_tokens=100))
+        data = original.model_dump(mode="json")
+        restored = ModelLlmInferenceRequest.model_validate(data)
+        assert restored.base_url == original.base_url
+        assert restored.model == original.model
+        assert restored.operation_type == original.operation_type
+        assert len(restored.messages) == len(original.messages)
+        assert restored.max_tokens == original.max_tokens
+        assert restored.correlation_id == original.correlation_id
+        assert restored.execution_id == original.execution_id
+
+    def test_json_round_trip_completion(self) -> None:
+        """Completion request serializes and deserializes correctly."""
+        original = ModelLlmInferenceRequest(
+            **_completion_kwargs(temperature=0.7, stop=("###",)),
+        )
+        data = original.model_dump(mode="json")
+        restored = ModelLlmInferenceRequest.model_validate(data)
+        assert restored.operation_type == EnumLlmOperationType.COMPLETION
+        assert restored.prompt == original.prompt
+        assert restored.temperature == original.temperature
+        assert restored.stop == original.stop
+        assert restored.correlation_id == original.correlation_id
+
+    def test_json_round_trip_embedding(self) -> None:
+        """Embedding request serializes and deserializes correctly."""
+        original = ModelLlmInferenceRequest(**_embedding_kwargs())
+        data = original.model_dump(mode="json")
+        restored = ModelLlmInferenceRequest.model_validate(data)
+        assert restored.operation_type == EnumLlmOperationType.EMBEDDING
+        assert restored.prompt == original.prompt
+        assert restored.max_tokens is None
+        assert restored.temperature is None
+        assert restored.correlation_id == original.correlation_id

@@ -499,3 +499,13 @@ class TestUsageModel:
         """All-zero token counts are valid."""
         usage = ModelLlmUsage(tokens_input=0, tokens_output=0)
         assert usage.tokens_total == 0
+
+    def test_usage_negative_tokens_input_rejected(self) -> None:
+        """Negative tokens_input is rejected (ge=0)."""
+        with pytest.raises(ValidationError):
+            ModelLlmUsage(tokens_input=-1, tokens_output=5)
+
+    def test_usage_negative_tokens_output_rejected(self) -> None:
+        """Negative tokens_output is rejected (ge=0)."""
+        with pytest.raises(ValidationError):
+            ModelLlmUsage(tokens_input=10, tokens_output=-1)
