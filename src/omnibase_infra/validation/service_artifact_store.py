@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -398,9 +399,9 @@ class ServiceArtifactStore:
         content = plan_path.read_text(encoding="utf-8")
         # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict
         result: dict[str, Any] | None = yaml.safe_load(content)
-        # Distinguish "file exists but empty" ({}) from "file not found" (None)
-        if result is None:
-            return {}
+        # Return None for empty files (yaml.safe_load returns None for empty
+        # content), preserving the distinction: None = file missing or empty,
+        # dict = file has content.
         return result
 
     # ONEX_EXCLUDE: any_type - YAML verdict data is heterogeneous dict from yaml.safe_load
@@ -420,9 +421,9 @@ class ServiceArtifactStore:
         content = verdict_path.read_text(encoding="utf-8")
         # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict
         result: dict[str, Any] | None = yaml.safe_load(content)
-        # Distinguish "file exists but empty" ({}) from "file not found" (None)
-        if result is None:
-            return {}
+        # Return None for empty files (yaml.safe_load returns None for empty
+        # content), preserving the distinction: None = file missing or empty,
+        # dict = file has content.
         return result
 
     # ------------------------------------------------------------------
@@ -458,12 +459,27 @@ class ServiceArtifactStore:
         # Use relative target for portability
         relative_target = Path("..") / str(candidate_id) / str(run_id)
 
-        # Remove existing symlink if present
-        if symlink_path.is_symlink() or symlink_path.exists():
-            symlink_path.unlink()
-
+        # Atomic symlink update: create at a temporary name, then rename.
+        # This avoids the TOCTOU race of check-unlink-create where two
+        # concurrent processes could interfere with each other.
         try:
-            symlink_path.symlink_to(relative_target)
+            # Create a temp file name in the same directory so rename is
+            # guaranteed to be on the same filesystem (required for
+            # atomic os.rename / os.replace on POSIX).
+            fd, tmp_path_str = tempfile.mkstemp(
+                dir=str(symlink_dir), prefix=".symlink_tmp_"
+            )
+            os.close(fd)
+            tmp_path = Path(tmp_path_str)
+            # mkstemp creates a regular file; remove it so we can
+            # create a symlink at the same path.
+            tmp_path.unlink()
+
+            tmp_path.symlink_to(relative_target)
+            # Path.rename is atomic on POSIX when source and target are
+            # on the same filesystem.  It replaces any existing entry
+            # at symlink_path in a single operation.
+            tmp_path.rename(symlink_path)
         except OSError:
             # Graceful degradation: symlink creation may fail on Windows
             # without developer mode / SeCreateSymbolicLinkPrivilege, or
@@ -477,6 +493,12 @@ class ServiceArtifactStore:
                 relative_target,
                 exc_info=True,
             )
+            # Clean up the temp symlink if it was created but rename failed.
+            try:
+                if tmp_path.is_symlink() or tmp_path.exists():
+                    tmp_path.unlink()
+            except (OSError, UnboundLocalError):
+                pass
             return self.run_dir(candidate_id, run_id)
 
         logger.debug(

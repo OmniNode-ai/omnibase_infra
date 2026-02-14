@@ -201,6 +201,8 @@ class HandlerArtifactCompleteness(HandlerCheckExecutor):
 
         if artifact_dir is None:
             duration_ms = (time.monotonic() - start) * 1000.0
+            # Skipped checks are non-blocking: passed=True because the check
+            # was not applicable (no artifact_dir configured).
             return self._make_result(
                 passed=True,
                 message="Skipped: no artifact_dir configured.",

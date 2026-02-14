@@ -111,6 +111,12 @@ class FlakeDetector:
         Args:
             result: The check result from the first run.
         """
+        if result.check_code in self._records:
+            logger.warning(
+                "Duplicate record_first_run call for check %s; "
+                "overwriting previous record.",
+                result.check_code,
+            )
         self._records[result.check_code] = ModelFlakeRecord(
             check_code=result.check_code,
             first_passed=result.passed,
@@ -138,6 +144,12 @@ class FlakeDetector:
             Updated ModelFlakeRecord with flake detection status.
         """
         check_code = first_result.check_code
+        if check_code not in self._records:
+            logger.warning(
+                "record_rerun called for check %s without a prior "
+                "record_first_run call; results may be unreliable.",
+                check_code,
+            )
         rerun_count = self._rerun_counts.get(check_code, 0) + 1
         self._rerun_counts[check_code] = rerun_count
 
