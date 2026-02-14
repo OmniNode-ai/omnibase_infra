@@ -63,7 +63,7 @@ class ModelArtifactStoreConfig(BaseModel):
     )
 
 
-class ArtifactStore:
+class ServiceArtifactStore:
     """Manages validation artifacts on disk.
 
     Provides methods to store and retrieve validation plans, results,
@@ -391,7 +391,10 @@ class ArtifactStore:
             return None
         content = verdict_path.read_text(encoding="utf-8")
         # ONEX_EXCLUDE: any_type - yaml.safe_load returns heterogeneous dict
-        result: dict[str, Any] = yaml.safe_load(content)
+        result: dict[str, Any] | None = yaml.safe_load(content)
+        # Distinguish "file exists but empty" ({}) from "file not found" (None)
+        if result is None:
+            return {}
         return result
 
     # ------------------------------------------------------------------
@@ -431,7 +434,21 @@ class ArtifactStore:
         if symlink_path.is_symlink() or symlink_path.exists():
             symlink_path.unlink()
 
-        symlink_path.symlink_to(relative_target)
+        try:
+            symlink_path.symlink_to(relative_target)
+        except OSError:
+            # Graceful degradation: symlink creation may fail on Windows
+            # without developer mode enabled, or on filesystems that do
+            # not support symlinks.  Log a warning and return the target
+            # path so callers can still locate the run directory.
+            logger.warning(
+                "Failed to create symlink %s -> %s (symlinks may not be "
+                "supported on this platform); falling back to target path.",
+                symlink_path,
+                relative_target,
+            )
+            return self.run_dir(candidate_id, run_id)
+
         logger.debug(
             "Updated latest symlink %s -> %s",
             symlink_path,
@@ -488,7 +505,7 @@ class ArtifactStore:
 
 
 __all__: list[str] = [
-    "ArtifactStore",
+    "ServiceArtifactStore",
     "ModelArtifactStoreConfig",
     "DEFAULT_ARTIFACT_ROOT",
 ]

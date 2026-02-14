@@ -7,7 +7,7 @@ CHECK-VAL-001: Deterministic replay sanity
     results, guarding against non-deterministic test behavior.
 
 CHECK-VAL-002: Artifact completeness
-    Validates that required artifacts (junit.xml, coverage.json, logs)
+    Validates that required artifacts (result.yaml, verdict.yaml)
     are present in the artifact storage directory.
 
 Ticket: OMN-2151
@@ -22,9 +22,8 @@ from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumCheckSeverity
 from omnibase_infra.models.validation.model_check_result import ModelCheckResult
-from omnibase_infra.validation.artifact_store import DEFAULT_ARTIFACT_ROOT
-from omnibase_infra.validation.checks.check_executor import (
-    CheckExecutor,
+from omnibase_infra.validation.checks.handler_check_executor import (
+    HandlerCheckExecutor,
     ModelCheckExecutorConfig,
 )
 
@@ -48,7 +47,7 @@ EXPECTED_ARTIFACTS: tuple[str, ...] = (
 )
 
 
-class CheckReplaySanity(CheckExecutor):
+class HandlerReplaySanity(HandlerCheckExecutor):
     """CHECK-VAL-001: Deterministic replay sanity.
 
     Verifies that the validation results are deterministic by checking
@@ -133,7 +132,7 @@ class CheckReplaySanity(CheckExecutor):
         )
 
 
-class CheckArtifactCompleteness(CheckExecutor):
+class HandlerArtifactCompleteness(HandlerCheckExecutor):
     """CHECK-VAL-002: Artifact completeness validation.
 
     Validates that the artifact storage directory contains the
@@ -145,7 +144,7 @@ class CheckArtifactCompleteness(CheckExecutor):
 
         Args:
             artifact_dir: Path to the artifact storage directory.
-                When None, a default path based on candidate_id will be used.
+                When None, the check is skipped at execution time.
         """
         self._artifact_dir = artifact_dir
 
@@ -182,8 +181,12 @@ class CheckArtifactCompleteness(CheckExecutor):
 
         artifact_dir = self._artifact_dir
         if artifact_dir is None:
-            # Default location based on candidate_id
-            artifact_dir = DEFAULT_ARTIFACT_ROOT / str(candidate.candidate_id)
+            return self._make_result(
+                passed=False,
+                skipped=True,
+                message="artifact_dir not provided; cannot locate artifacts without explicit path",
+                duration_ms=0.0,
+            )
 
         if not artifact_dir.is_dir():
             duration_ms = (time.monotonic() - start) * 1000.0
@@ -239,8 +242,8 @@ class CheckArtifactCompleteness(CheckExecutor):
 
 
 __all__: list[str] = [
-    "CheckArtifactCompleteness",
-    "CheckReplaySanity",
+    "HandlerArtifactCompleteness",
+    "HandlerReplaySanity",
     "EXPECTED_ARTIFACTS",
     "REQUIRED_ARTIFACTS",
 ]

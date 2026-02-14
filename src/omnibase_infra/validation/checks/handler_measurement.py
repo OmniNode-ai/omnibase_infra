@@ -23,8 +23,8 @@ from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumCheckSeverity
 from omnibase_infra.models.validation.model_check_result import ModelCheckResult
-from omnibase_infra.validation.checks.check_executor import (
-    CheckExecutor,
+from omnibase_infra.validation.checks.handler_check_executor import (
+    HandlerCheckExecutor,
     ModelCheckExecutorConfig,
 )
 
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     )
 
 
-class CheckCostTokenDelta(CheckExecutor):
+class HandlerCostTokenDelta(HandlerCheckExecutor):
     """CHECK-COST-001: Token delta vs baseline.
 
     Measures token consumption and compares against a stored baseline.
@@ -109,7 +109,7 @@ class CheckCostTokenDelta(CheckExecutor):
         )
 
 
-class CheckTimeWallClockDelta(CheckExecutor):
+class HandlerTimeWallClockDelta(HandlerCheckExecutor):
     """CHECK-TIME-001: Wall-clock delta vs baseline.
 
     Measures the total validation wall-clock time and compares against
@@ -181,6 +181,6 @@ class CheckTimeWallClockDelta(CheckExecutor):
 
 
 __all__: list[str] = [
-    "CheckCostTokenDelta",
-    "CheckTimeWallClockDelta",
+    "HandlerCostTokenDelta",
+    "HandlerTimeWallClockDelta",
 ]

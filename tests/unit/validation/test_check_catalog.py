@@ -4,55 +4,61 @@
 
 Tests:
 - Check registry completeness (all 12 checks registered)
-- SubprocessCheckExecutor (mypy, ruff, pytest, CI)
-- Risk check executors (RISK-001, RISK-002, RISK-003)
-- Measurement check executors (COST-001, TIME-001)
-- Artifact/replay check executors (VAL-001, VAL-002)
+- HandlerSubprocessCheckExecutor (mypy, ruff, pytest, CI)
+- Risk check handlers (RISK-001, RISK-002, RISK-003)
+- Measurement check handlers (COST-001, TIME-001)
+- Artifact/replay check handlers (VAL-001, VAL-002)
 - Check executor config and base class
 
 Note: Some test data intentionally contains references to unsafe
 pattern strings because the tests verify the unsafe operations
 detector identifies them correctly. These are test fixture data
 written to temporary files, not actual code execution.
+
+Note: Test files use ``test_`` prefix and ``Test`` class prefix per pytest
+convention, which is a documented exception to the project's ``handler_``/
+``Handler`` naming conventions for check implementations.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums import EnumCheckSeverity
 from omnibase_infra.nodes.node_validation_orchestrator.models.model_pattern_candidate import (
     ModelPatternCandidate,
 )
-from omnibase_infra.validation.checks.check_artifact import (
+from omnibase_infra.validation.checks.handler_artifact import (
     EXPECTED_ARTIFACTS,
     REQUIRED_ARTIFACTS,
-    CheckArtifactCompleteness,
-    CheckReplaySanity,
+    HandlerArtifactCompleteness,
+    HandlerReplaySanity,
 )
-from omnibase_infra.validation.checks.check_executor import (
+from omnibase_infra.validation.checks.handler_check_executor import (
+    HandlerSubprocessCheckExecutor,
     ModelCheckExecutorConfig,
-    SubprocessCheckExecutor,
 )
-from omnibase_infra.validation.checks.check_measurement import (
-    CheckCostTokenDelta,
-    CheckTimeWallClockDelta,
+from omnibase_infra.validation.checks.handler_measurement import (
+    HandlerCostTokenDelta,
+    HandlerTimeWallClockDelta,
 )
-from omnibase_infra.validation.checks.check_registry import (
-    CHECK_CATALOG_ORDER,
-    CHECK_REGISTRY,
-    get_check_executor,
-)
-from omnibase_infra.validation.checks.check_risk import (
+from omnibase_infra.validation.checks.handler_risk import (
     DEFAULT_DIFF_SIZE_THRESHOLD,
     SENSITIVE_PATH_PATTERNS,
     UNSAFE_PATTERNS,
-    CheckRiskDiffSize,
-    CheckRiskSensitivePaths,
-    CheckRiskUnsafeOperations,
+    HandlerRiskDiffSize,
+    HandlerRiskSensitivePaths,
+    HandlerRiskUnsafeOperations,
+)
+from omnibase_infra.validation.checks.registry_check import (
+    CHECK_CATALOG_ORDER,
+    CHECK_REGISTRY,
+    get_check_executor,
 )
 
 pytestmark = pytest.mark.unit
@@ -142,16 +148,16 @@ class TestCheckRegistryCompleteness:
 
 
 # ============================================================================
-# SubprocessCheckExecutor
+# HandlerSubprocessCheckExecutor
 # ============================================================================
 
 
-class TestSubprocessCheckExecutor:
-    """Tests for SubprocessCheckExecutor."""
+class TestHandlerSubprocessCheckExecutor:
+    """Tests for HandlerSubprocessCheckExecutor."""
 
     def test_properties(self) -> None:
         """Properties return constructor values."""
-        executor = SubprocessCheckExecutor(
+        executor = HandlerSubprocessCheckExecutor(
             check_code="CHECK-TEST",
             label="Test Label",
             severity=EnumCheckSeverity.REQUIRED,
@@ -164,7 +170,7 @@ class TestSubprocessCheckExecutor:
     @pytest.mark.asyncio
     async def test_execute_passing_command(self) -> None:
         """A passing command (exit 0) produces a passed result."""
-        executor = SubprocessCheckExecutor(
+        executor = HandlerSubprocessCheckExecutor(
             check_code="CHECK-ECHO",
             label="Echo test",
             severity=EnumCheckSeverity.REQUIRED,
@@ -183,7 +189,7 @@ class TestSubprocessCheckExecutor:
     @pytest.mark.asyncio
     async def test_execute_failing_command(self) -> None:
         """A failing command (non-zero exit) produces a failed result."""
-        executor = SubprocessCheckExecutor(
+        executor = HandlerSubprocessCheckExecutor(
             check_code="CHECK-FAIL",
             label="Fail test",
             severity=EnumCheckSeverity.REQUIRED,
@@ -203,12 +209,12 @@ class TestSubprocessCheckExecutor:
 # ============================================================================
 
 
-class TestCheckRiskSensitivePaths:
+class TestHandlerRiskSensitivePaths:
     """Tests for CHECK-RISK-001: Sensitive paths detection."""
 
     def test_check_properties(self) -> None:
         """Properties match the catalog definition."""
-        check = CheckRiskSensitivePaths()
+        check = HandlerRiskSensitivePaths()
         assert check.check_code == "CHECK-RISK-001"
         assert check.severity == EnumCheckSeverity.REQUIRED
 
@@ -218,7 +224,7 @@ class TestCheckRiskSensitivePaths:
         candidate = _make_candidate(
             changed_files=("src/utils/helper.py", "src/models/user.py")
         )
-        result = await CheckRiskSensitivePaths().execute(candidate, _default_config())
+        result = await HandlerRiskSensitivePaths().execute(candidate, _default_config())
         assert result.passed is True
 
     @pytest.mark.asyncio
@@ -228,7 +234,7 @@ class TestCheckRiskSensitivePaths:
             changed_files=("src/auth/login.py", "src/models/user.py"),
             risk_tags=(),
         )
-        result = await CheckRiskSensitivePaths().execute(candidate, _default_config())
+        result = await HandlerRiskSensitivePaths().execute(candidate, _default_config())
         assert result.passed is False
         assert "sensitive" in result.message.lower()
 
@@ -239,7 +245,7 @@ class TestCheckRiskSensitivePaths:
             changed_files=("src/auth/login.py",),
             risk_tags=("security",),
         )
-        result = await CheckRiskSensitivePaths().execute(candidate, _default_config())
+        result = await HandlerRiskSensitivePaths().execute(candidate, _default_config())
         assert result.passed is True
 
     @pytest.mark.asyncio
@@ -248,24 +254,22 @@ class TestCheckRiskSensitivePaths:
         candidate = _make_candidate(
             changed_files=("config/.env.production",),
         )
-        result = await CheckRiskSensitivePaths().execute(candidate, _default_config())
+        result = await HandlerRiskSensitivePaths().execute(candidate, _default_config())
         assert result.passed is False
 
     def test_sensitive_patterns_are_valid_regex(self) -> None:
         """All sensitive path patterns compile as valid regexes."""
-        import re
-
         for pattern in SENSITIVE_PATH_PATTERNS:
             compiled = re.compile(pattern)
             assert compiled is not None
 
 
-class TestCheckRiskDiffSize:
+class TestHandlerRiskDiffSize:
     """Tests for CHECK-RISK-002: Diff size threshold."""
 
     def test_check_properties(self) -> None:
         """Properties match the catalog definition."""
-        check = CheckRiskDiffSize()
+        check = HandlerRiskDiffSize()
         assert check.check_code == "CHECK-RISK-002"
         assert check.severity == EnumCheckSeverity.RECOMMENDED
 
@@ -275,7 +279,7 @@ class TestCheckRiskDiffSize:
         candidate = _make_candidate(
             changed_files=tuple(f"file_{i}.py" for i in range(10))
         )
-        result = await CheckRiskDiffSize().execute(candidate, _default_config())
+        result = await HandlerRiskDiffSize().execute(candidate, _default_config())
         assert result.passed is True
 
     @pytest.mark.asyncio
@@ -284,7 +288,7 @@ class TestCheckRiskDiffSize:
         candidate = _make_candidate(
             changed_files=tuple(f"file_{i}.py" for i in range(600))
         )
-        result = await CheckRiskDiffSize().execute(candidate, _default_config())
+        result = await HandlerRiskDiffSize().execute(candidate, _default_config())
         assert result.passed is False
         assert "exceeds" in result.message
 
@@ -294,7 +298,7 @@ class TestCheckRiskDiffSize:
         candidate = _make_candidate(
             changed_files=tuple(f"file_{i}.py" for i in range(5))
         )
-        result = await CheckRiskDiffSize(threshold=3).execute(
+        result = await HandlerRiskDiffSize(threshold=3).execute(
             candidate, _default_config()
         )
         assert result.passed is False
@@ -304,12 +308,12 @@ class TestCheckRiskDiffSize:
         assert DEFAULT_DIFF_SIZE_THRESHOLD == 500
 
 
-class TestCheckRiskUnsafeOperations:
+class TestHandlerRiskUnsafeOperations:
     """Tests for CHECK-RISK-003: Unsafe operations detector."""
 
     def test_check_properties(self) -> None:
         """Properties match the catalog definition."""
-        check = CheckRiskUnsafeOperations()
+        check = HandlerRiskUnsafeOperations()
         assert check.check_code == "CHECK-RISK-003"
         assert check.severity == EnumCheckSeverity.REQUIRED
 
@@ -317,7 +321,9 @@ class TestCheckRiskUnsafeOperations:
     async def test_no_python_files_passes(self) -> None:
         """No Python files means nothing to scan, passes."""
         candidate = _make_candidate(changed_files=("readme.md", "config.yaml"))
-        result = await CheckRiskUnsafeOperations().execute(candidate, _default_config())
+        result = await HandlerRiskUnsafeOperations().execute(
+            candidate, _default_config()
+        )
         assert result.passed is True
 
     @pytest.mark.asyncio
@@ -330,7 +336,9 @@ class TestCheckRiskUnsafeOperations:
             source_path=str(tmp_path),
             changed_files=("safe.py",),
         )
-        result = await CheckRiskUnsafeOperations().execute(candidate, _default_config())
+        result = await HandlerRiskUnsafeOperations().execute(
+            candidate, _default_config()
+        )
         assert result.passed is True
 
     @pytest.mark.asyncio
@@ -344,7 +352,9 @@ class TestCheckRiskUnsafeOperations:
             source_path=str(tmp_path),
             changed_files=("unsafe.py",),
         )
-        result = await CheckRiskUnsafeOperations().execute(candidate, _default_config())
+        result = await HandlerRiskUnsafeOperations().execute(
+            candidate, _default_config()
+        )
         assert result.passed is False
         assert "__import__" in result.message
 
@@ -355,14 +365,14 @@ class TestCheckRiskUnsafeOperations:
             source_path="/nonexistent/path",
             changed_files=("missing.py",),
         )
-        result = await CheckRiskUnsafeOperations().execute(candidate, _default_config())
+        result = await HandlerRiskUnsafeOperations().execute(
+            candidate, _default_config()
+        )
         # No crash, passes because nothing to scan
         assert result.passed is True
 
     def test_unsafe_patterns_are_valid_regex(self) -> None:
         """All unsafe patterns compile as valid regexes."""
-        import re
-
         for pattern, _desc in UNSAFE_PATTERNS:
             compiled = re.compile(pattern)
             assert compiled is not None
@@ -373,12 +383,12 @@ class TestCheckRiskUnsafeOperations:
 # ============================================================================
 
 
-class TestCheckCostTokenDelta:
+class TestHandlerCostTokenDelta:
     """Tests for CHECK-COST-001: Token delta vs baseline."""
 
     def test_check_properties(self) -> None:
         """Properties match the catalog definition."""
-        check = CheckCostTokenDelta()
+        check = HandlerCostTokenDelta()
         assert check.check_code == "CHECK-COST-001"
         assert check.severity == EnumCheckSeverity.INFORMATIONAL
 
@@ -386,7 +396,7 @@ class TestCheckCostTokenDelta:
     async def test_always_passes(self) -> None:
         """Informational check always passes."""
         candidate = _make_candidate(changed_files=("a.py", "b.py"))
-        result = await CheckCostTokenDelta().execute(candidate, _default_config())
+        result = await HandlerCostTokenDelta().execute(candidate, _default_config())
         assert result.passed is True
         assert "tokens" in result.message.lower()
 
@@ -394,7 +404,7 @@ class TestCheckCostTokenDelta:
     async def test_with_baseline(self) -> None:
         """With a baseline, message includes delta."""
         candidate = _make_candidate(changed_files=("a.py",))
-        result = await CheckCostTokenDelta(baseline_tokens=100).execute(
+        result = await HandlerCostTokenDelta(baseline_tokens=100).execute(
             candidate, _default_config()
         )
         assert result.passed is True
@@ -404,17 +414,17 @@ class TestCheckCostTokenDelta:
     async def test_without_baseline(self) -> None:
         """Without a baseline, message indicates no baseline."""
         candidate = _make_candidate()
-        result = await CheckCostTokenDelta().execute(candidate, _default_config())
+        result = await HandlerCostTokenDelta().execute(candidate, _default_config())
         assert result.passed is True
         assert "no baseline" in result.message.lower()
 
 
-class TestCheckTimeWallClockDelta:
+class TestHandlerTimeWallClockDelta:
     """Tests for CHECK-TIME-001: Wall-clock delta vs baseline."""
 
     def test_check_properties(self) -> None:
         """Properties match the catalog definition."""
-        check = CheckTimeWallClockDelta()
+        check = HandlerTimeWallClockDelta()
         assert check.check_code == "CHECK-TIME-001"
         assert check.severity == EnumCheckSeverity.INFORMATIONAL
 
@@ -422,14 +432,14 @@ class TestCheckTimeWallClockDelta:
     async def test_always_passes(self) -> None:
         """Informational check always passes."""
         candidate = _make_candidate()
-        result = await CheckTimeWallClockDelta().execute(candidate, _default_config())
+        result = await HandlerTimeWallClockDelta().execute(candidate, _default_config())
         assert result.passed is True
 
     @pytest.mark.asyncio
     async def test_with_baseline(self) -> None:
         """With a baseline, message includes baseline reference."""
         candidate = _make_candidate()
-        result = await CheckTimeWallClockDelta(baseline_ms=5000.0).execute(
+        result = await HandlerTimeWallClockDelta(baseline_ms=5000.0).execute(
             candidate, _default_config()
         )
         assert result.passed is True
@@ -441,12 +451,12 @@ class TestCheckTimeWallClockDelta:
 # ============================================================================
 
 
-class TestCheckReplaySanity:
+class TestHandlerReplaySanity:
     """Tests for CHECK-VAL-001: Deterministic replay sanity."""
 
     def test_check_properties(self) -> None:
         """Properties match the catalog definition."""
-        check = CheckReplaySanity()
+        check = HandlerReplaySanity()
         assert check.check_code == "CHECK-VAL-001"
         assert check.severity == EnumCheckSeverity.RECOMMENDED
 
@@ -454,7 +464,7 @@ class TestCheckReplaySanity:
     async def test_no_files_passes(self) -> None:
         """No changed files passes."""
         candidate = _make_candidate()
-        result = await CheckReplaySanity().execute(candidate, _default_config())
+        result = await HandlerReplaySanity().execute(candidate, _default_config())
         assert result.passed is True
 
     @pytest.mark.asyncio
@@ -467,18 +477,18 @@ class TestCheckReplaySanity:
             source_path=str(tmp_path),
             changed_files=("rand_use.py",),
         )
-        result = await CheckReplaySanity().execute(candidate, _default_config())
+        result = await HandlerReplaySanity().execute(candidate, _default_config())
         # RECOMMENDED check -- passes but flags
         assert result.passed is True
         assert "non-deterministic" in result.message.lower()
 
 
-class TestCheckArtifactCompleteness:
+class TestHandlerArtifactCompleteness:
     """Tests for CHECK-VAL-002: Artifact completeness."""
 
     def test_check_properties(self) -> None:
         """Properties match the catalog definition."""
-        check = CheckArtifactCompleteness()
+        check = HandlerArtifactCompleteness()
         assert check.check_code == "CHECK-VAL-002"
         assert check.severity == EnumCheckSeverity.REQUIRED
 
@@ -486,7 +496,7 @@ class TestCheckArtifactCompleteness:
     async def test_missing_artifact_dir_fails(self) -> None:
         """Missing artifact directory causes FAIL."""
         candidate = _make_candidate()
-        check = CheckArtifactCompleteness(artifact_dir=Path("/nonexistent/artifacts"))
+        check = HandlerArtifactCompleteness(artifact_dir=Path("/nonexistent/artifacts"))
         result = await check.execute(candidate, _default_config())
         assert result.passed is False
         assert "does not exist" in result.message
@@ -505,7 +515,7 @@ class TestCheckArtifactCompleteness:
             artifact_path.write_text("test")
 
         candidate = _make_candidate()
-        check = CheckArtifactCompleteness(artifact_dir=tmp_path)
+        check = HandlerArtifactCompleteness(artifact_dir=tmp_path)
         result = await check.execute(candidate, _default_config())
         assert result.passed is True
         assert "all required" in result.message.lower()
@@ -517,7 +527,7 @@ class TestCheckArtifactCompleteness:
         (tmp_path / REQUIRED_ARTIFACTS[0]).write_text("test")
 
         candidate = _make_candidate()
-        check = CheckArtifactCompleteness(artifact_dir=tmp_path)
+        check = HandlerArtifactCompleteness(artifact_dir=tmp_path)
         result = await check.execute(candidate, _default_config())
         assert result.passed is False
         assert "missing required" in result.message.lower()
@@ -529,7 +539,7 @@ class TestCheckArtifactCompleteness:
             (tmp_path / name).write_text("test")
 
         candidate = _make_candidate()
-        check = CheckArtifactCompleteness(artifact_dir=tmp_path)
+        check = HandlerArtifactCompleteness(artifact_dir=tmp_path)
         result = await check.execute(candidate, _default_config())
         assert result.passed is True
         assert "missing optional" in result.message.lower()
@@ -553,10 +563,10 @@ class TestModelCheckExecutorConfig:
     def test_frozen(self) -> None:
         """Config is frozen (immutable)."""
         config = ModelCheckExecutorConfig()
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             config.working_dir = "/other"  # type: ignore[misc]
 
     def test_extra_forbid(self) -> None:
         """Extra fields are forbidden."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelCheckExecutorConfig(unknown_field="x")  # type: ignore[call-arg]

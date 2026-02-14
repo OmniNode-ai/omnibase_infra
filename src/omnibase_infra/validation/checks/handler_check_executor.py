@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Check executor protocol and configuration for validation checks.
+"""Handler check executor protocol and configuration for validation checks.
 
 Defines the interface and configuration for individual check executors
 that can run subprocess commands, analyze diffs, or perform static
@@ -57,7 +57,7 @@ class ModelCheckExecutorConfig(BaseModel):
     )
 
 
-class CheckExecutor(ABC):
+class HandlerCheckExecutor(ABC):
     """Abstract base for individual check executors.
 
     Each check in the catalog has a corresponding executor that knows
@@ -183,7 +183,7 @@ class CheckExecutor(ABC):
         )
 
 
-class SubprocessCheckExecutor(CheckExecutor):
+class HandlerSubprocessCheckExecutor(HandlerCheckExecutor):
     """Check executor that runs a command and checks the exit code.
 
     Used for simple checks like mypy, ruff, and pytest where
@@ -267,7 +267,7 @@ class SubprocessCheckExecutor(CheckExecutor):
 
 
 __all__: list[str] = [
-    "CheckExecutor",
+    "HandlerCheckExecutor",
+    "HandlerSubprocessCheckExecutor",
     "ModelCheckExecutorConfig",
-    "SubprocessCheckExecutor",
 ]

@@ -6,18 +6,18 @@ Provides a centralized registry of all check executors in the catalog
 and a factory function to retrieve executors by check code.
 
 Check Catalog (12 checks):
-    CHECK-PY-001    Typecheck (mypy)                     SubprocessCheckExecutor
-    CHECK-PY-002    Lint/format (ruff)                   SubprocessCheckExecutor
-    CHECK-TEST-001  Unit tests (fast)                    SubprocessCheckExecutor
-    CHECK-TEST-002  Targeted integration tests           SubprocessCheckExecutor
-    CHECK-VAL-001   Deterministic replay sanity          CheckReplaySanity
-    CHECK-VAL-002   Artifact completeness                CheckArtifactCompleteness
-    CHECK-RISK-001  Sensitive paths -> stricter bar      CheckRiskSensitivePaths
-    CHECK-RISK-002  Diff size threshold                  CheckRiskDiffSize
-    CHECK-RISK-003  Unsafe operations detector           CheckRiskUnsafeOperations
-    CHECK-OUT-001   CI equivalent pass rate              SubprocessCheckExecutor
-    CHECK-COST-001  Token delta vs baseline              CheckCostTokenDelta
-    CHECK-TIME-001  Wall-clock delta vs baseline         CheckTimeWallClockDelta
+    CHECK-PY-001    Typecheck (mypy)                     HandlerSubprocessCheckExecutor
+    CHECK-PY-002    Lint/format (ruff)                   HandlerSubprocessCheckExecutor
+    CHECK-TEST-001  Unit tests (fast)                    HandlerSubprocessCheckExecutor
+    CHECK-TEST-002  Targeted integration tests           HandlerSubprocessCheckExecutor
+    CHECK-VAL-001   Deterministic replay sanity          HandlerReplaySanity
+    CHECK-VAL-002   Artifact completeness                HandlerArtifactCompleteness
+    CHECK-RISK-001  Sensitive paths -> stricter bar      HandlerRiskSensitivePaths
+    CHECK-RISK-002  Diff size threshold                  HandlerRiskDiffSize
+    CHECK-RISK-003  Unsafe operations detector           HandlerRiskUnsafeOperations
+    CHECK-OUT-001   CI equivalent pass rate              HandlerSubprocessCheckExecutor
+    CHECK-COST-001  Token delta vs baseline              HandlerCostTokenDelta
+    CHECK-TIME-001  Wall-clock delta vs baseline         HandlerTimeWallClockDelta
 
 Ticket: OMN-2151
 """
@@ -27,26 +27,26 @@ from __future__ import annotations
 from types import MappingProxyType
 
 from omnibase_infra.enums import EnumCheckSeverity
-from omnibase_infra.validation.checks.check_artifact import (
-    CheckArtifactCompleteness,
-    CheckReplaySanity,
+from omnibase_infra.validation.checks.handler_artifact import (
+    HandlerArtifactCompleteness,
+    HandlerReplaySanity,
 )
-from omnibase_infra.validation.checks.check_executor import (
-    CheckExecutor,
-    SubprocessCheckExecutor,
+from omnibase_infra.validation.checks.handler_check_executor import (
+    HandlerCheckExecutor,
+    HandlerSubprocessCheckExecutor,
 )
-from omnibase_infra.validation.checks.check_measurement import (
-    CheckCostTokenDelta,
-    CheckTimeWallClockDelta,
+from omnibase_infra.validation.checks.handler_measurement import (
+    HandlerCostTokenDelta,
+    HandlerTimeWallClockDelta,
 )
-from omnibase_infra.validation.checks.check_risk import (
-    CheckRiskDiffSize,
-    CheckRiskSensitivePaths,
-    CheckRiskUnsafeOperations,
+from omnibase_infra.validation.checks.handler_risk import (
+    HandlerRiskDiffSize,
+    HandlerRiskSensitivePaths,
+    HandlerRiskUnsafeOperations,
 )
 
 
-def _build_registry() -> dict[str, CheckExecutor]:
+def _build_registry() -> dict[str, HandlerCheckExecutor]:
     """Build the default check executor registry.
 
     Returns:
@@ -54,51 +54,53 @@ def _build_registry() -> dict[str, CheckExecutor]:
     """
     return {
         # --- Subprocess checks (mypy, ruff, pytest, CI) ---
-        "CHECK-PY-001": SubprocessCheckExecutor(
+        "CHECK-PY-001": HandlerSubprocessCheckExecutor(
             check_code="CHECK-PY-001",
             label="Typecheck (mypy)",
             severity=EnumCheckSeverity.REQUIRED,
             command="poetry run mypy src/",
         ),
-        "CHECK-PY-002": SubprocessCheckExecutor(
+        "CHECK-PY-002": HandlerSubprocessCheckExecutor(
             check_code="CHECK-PY-002",
             label="Lint/format (ruff)",
             severity=EnumCheckSeverity.REQUIRED,
             command="poetry run ruff check src/ tests/",
         ),
-        "CHECK-TEST-001": SubprocessCheckExecutor(
+        "CHECK-TEST-001": HandlerSubprocessCheckExecutor(
             check_code="CHECK-TEST-001",
             label="Unit tests (fast)",
             severity=EnumCheckSeverity.REQUIRED,
             command="poetry run pytest tests/ -m unit --timeout=60",
         ),
-        "CHECK-TEST-002": SubprocessCheckExecutor(
+        "CHECK-TEST-002": HandlerSubprocessCheckExecutor(
             check_code="CHECK-TEST-002",
             label="Targeted integration tests",
             severity=EnumCheckSeverity.RECOMMENDED,
             command="poetry run pytest tests/ -m integration --timeout=120",
         ),
-        "CHECK-OUT-001": SubprocessCheckExecutor(
+        "CHECK-OUT-001": HandlerSubprocessCheckExecutor(
             check_code="CHECK-OUT-001",
             label="CI equivalent pass rate",
             severity=EnumCheckSeverity.REQUIRED,
             command="poetry run pytest tests/ --timeout=180",
         ),
         # --- Analysis checks (no subprocess, inspect candidate) ---
-        "CHECK-VAL-001": CheckReplaySanity(),
-        "CHECK-VAL-002": CheckArtifactCompleteness(),
-        "CHECK-RISK-001": CheckRiskSensitivePaths(),
-        "CHECK-RISK-002": CheckRiskDiffSize(),
-        "CHECK-RISK-003": CheckRiskUnsafeOperations(),
+        "CHECK-VAL-001": HandlerReplaySanity(),
+        "CHECK-VAL-002": HandlerArtifactCompleteness(),
+        "CHECK-RISK-001": HandlerRiskSensitivePaths(),
+        "CHECK-RISK-002": HandlerRiskDiffSize(),
+        "CHECK-RISK-003": HandlerRiskUnsafeOperations(),
         # --- Measurement checks (informational) ---
-        "CHECK-COST-001": CheckCostTokenDelta(),
-        "CHECK-TIME-001": CheckTimeWallClockDelta(),
+        "CHECK-COST-001": HandlerCostTokenDelta(),
+        "CHECK-TIME-001": HandlerTimeWallClockDelta(),
     }
 
 
 # Module-level singleton registry (read-only view)
-_CHECK_REGISTRY: dict[str, CheckExecutor] = _build_registry()
-CHECK_REGISTRY: MappingProxyType[str, CheckExecutor] = MappingProxyType(_CHECK_REGISTRY)
+_CHECK_REGISTRY: dict[str, HandlerCheckExecutor] = _build_registry()
+CHECK_REGISTRY: MappingProxyType[str, HandlerCheckExecutor] = MappingProxyType(
+    _CHECK_REGISTRY
+)
 
 # Ordered check codes matching the catalog order
 CHECK_CATALOG_ORDER: tuple[str, ...] = (
@@ -117,7 +119,7 @@ CHECK_CATALOG_ORDER: tuple[str, ...] = (
 )
 
 
-def get_check_executor(check_code: str) -> CheckExecutor | None:
+def get_check_executor(check_code: str) -> HandlerCheckExecutor | None:
     """Retrieve a check executor by its code.
 
     Args:

@@ -26,8 +26,8 @@ from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumCheckSeverity
 from omnibase_infra.models.validation.model_check_result import ModelCheckResult
-from omnibase_infra.validation.checks.check_executor import (
-    CheckExecutor,
+from omnibase_infra.validation.checks.handler_check_executor import (
+    HandlerCheckExecutor,
     ModelCheckExecutorConfig,
 )
 
@@ -39,13 +39,13 @@ if TYPE_CHECKING:
 
 # Paths considered security-sensitive
 SENSITIVE_PATH_PATTERNS: tuple[str, ...] = (
-    r".*/(auth|security|crypto|secrets|vault|credentials)/.*",
-    r".*/\.env.*",
-    r".*/(password|token|key|cert).*\.py$",
-    r".*/migrations/.*",
-    r".*/docker-compose.*\.ya?ml$",
-    r".*/Dockerfile.*",
-    r".*/(config|settings)\.py$",
+    r"(?:^|.*/)(?:auth|security|crypto|secrets|vault|credentials)/.*",
+    r"(?:^|.*/)\.env.*",
+    r"(?:^|.*/)(?:password|token|key|cert).*\.py$",
+    r"(?:^|.*/)migrations/.*",
+    r"(?:^|.*/)docker-compose.*\.ya?ml$",
+    r"(?:^|.*/)Dockerfile.*",
+    r"(?:^|.*/)(?:config|settings)\.py$",
 )
 
 # Unsafe operation patterns in Python source
@@ -64,7 +64,7 @@ UNSAFE_PATTERNS: tuple[tuple[str, str], ...] = (
 DEFAULT_DIFF_SIZE_THRESHOLD: int = 500
 
 
-class CheckRiskSensitivePaths(CheckExecutor):
+class HandlerRiskSensitivePaths(HandlerCheckExecutor):
     """CHECK-RISK-001: Detect changes to security-sensitive paths.
 
     When sensitive paths are modified, this check flags them so that
@@ -157,7 +157,7 @@ class CheckRiskSensitivePaths(CheckExecutor):
         )
 
 
-class CheckRiskDiffSize(CheckExecutor):
+class HandlerRiskDiffSize(HandlerCheckExecutor):
     """CHECK-RISK-002: Diff size threshold check.
 
     Flags candidates with an excessive number of changed files,
@@ -223,7 +223,7 @@ class CheckRiskDiffSize(CheckExecutor):
         )
 
 
-class CheckRiskUnsafeOperations(CheckExecutor):
+class HandlerRiskUnsafeOperations(HandlerCheckExecutor):
     """CHECK-RISK-003: Unsafe operations detector.
 
     Scans changed Python files for dangerous patterns like eval(),
@@ -304,9 +304,9 @@ class CheckRiskUnsafeOperations(CheckExecutor):
 
 
 __all__: list[str] = [
-    "CheckRiskDiffSize",
-    "CheckRiskSensitivePaths",
-    "CheckRiskUnsafeOperations",
+    "HandlerRiskDiffSize",
+    "HandlerRiskSensitivePaths",
+    "HandlerRiskUnsafeOperations",
     "DEFAULT_DIFF_SIZE_THRESHOLD",
     "SENSITIVE_PATH_PATTERNS",
     "UNSAFE_PATTERNS",

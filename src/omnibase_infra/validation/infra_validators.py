@@ -462,7 +462,7 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 # - 125 (2026-02-13): reducer-authoritative registration followups
 #                     ModelPayloadPostgresUpdateRegistration.updates: AckUpdate | HeartbeatUpdate
 # - 126 (2026-02-13): OMN-2151 validation checks, artifacts, flake detection
-#                     ArtifactStore.write_artifact(): content: str | bytes parameter
+#                     ServiceArtifactStore.write_artifact(): content: str | bytes parameter
 INFRA_MAX_UNIONS = 126
 
 # Maximum allowed architecture violations in infrastructure code.

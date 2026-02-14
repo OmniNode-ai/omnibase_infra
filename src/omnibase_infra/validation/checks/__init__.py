@@ -21,18 +21,18 @@ Check Catalog:
     CHECK-TIME-001  Wall-clock delta vs baseline         informational
 """
 
-from omnibase_infra.validation.checks.check_executor import (
-    CheckExecutor,
+from omnibase_infra.validation.checks.handler_check_executor import (
+    HandlerCheckExecutor,
     ModelCheckExecutorConfig,
 )
-from omnibase_infra.validation.checks.check_registry import (
+from omnibase_infra.validation.checks.registry_check import (
     CHECK_REGISTRY,
     get_check_executor,
 )
 
 __all__: list[str] = [
     "CHECK_REGISTRY",
-    "CheckExecutor",
+    "HandlerCheckExecutor",
     "ModelCheckExecutorConfig",
     "get_check_executor",
 ]
