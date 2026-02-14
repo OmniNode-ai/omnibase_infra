@@ -20,6 +20,10 @@ required_checks:
     workflow: test.yml
     job_id: migration-freeze
     rationale: "Blocks new migrations during DB-SPLIT freeze (OMN-2055)"
+  - name: "Fingerprint Check"
+    workflow: test.yml
+    job_id: fingerprint-check
+    rationale: "CI twins for runtime assertions B2 (schema) and B3 (event registry) -- prevents stale fingerprint artifacts (OMN-2149)"
   - name: "CI Tests Gate"
     workflow: test.yml
     job_id: tests-gate
