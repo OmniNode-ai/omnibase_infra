@@ -236,6 +236,8 @@ class DispatchResultApplier:
                     # Deterministic envelope_id: uuid5(correlation_id, "type:index")
                     # ensures redeliveries produce identical IDs, enabling
                     # downstream consumers to deduplicate at-least-once events.
+                    # NOTE: If correlation_id is a uuid4 fallback (see above),
+                    # each retry generates a new namespace, defeating deduplication.
                     deterministic_id = uuid5(
                         effective_correlation_id,
                         f"{type(output_event).__name__}:{idx}",

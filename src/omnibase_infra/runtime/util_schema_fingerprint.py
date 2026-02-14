@@ -14,6 +14,19 @@ Algorithm:
     4. SHA-256 the sorted list of per-table hashes to produce the overall
        fingerprint.
 
+CLI usage::
+
+    # Stamp the expected fingerprint into db_metadata:
+    poetry run python -m omnibase_infra.runtime.util_schema_fingerprint stamp
+
+    # Dry-run (compute without writing):
+    poetry run python -m omnibase_infra.runtime.util_schema_fingerprint stamp --dry-run
+
+    # Verify live schema matches expected fingerprint:
+    poetry run python -m omnibase_infra.runtime.util_schema_fingerprint verify
+
+Requires ``OMNIBASE_INFRA_DB_URL`` environment variable.
+
 Related:
     - OMN-2087: Handshake hardening -- Schema fingerprint manifest + startup assertion
     - OMN-2085: Handshake hardening -- DB ownership marker + startup assertion
@@ -213,6 +226,19 @@ def _sort_key_for_constraint(c: _CanonicalRecord) -> tuple[str, ...]:
     return (con_type, str(c.get("expression", "")))
 
 
+def _pg_json_default(obj: object) -> str:
+    """Handle asyncpg types that are not natively JSON-serializable.
+
+    PostgreSQL ``"char"`` (the internal single-byte type used for
+    ``pg_constraint.contype``, ``confupdtype``, ``confdeltype``) is
+    returned by asyncpg as ``bytes``.  Decode to UTF-8 so that
+    ``json.dumps`` can serialize it.
+    """
+    if isinstance(obj, (bytes, bytearray)):
+        return obj.decode("utf-8", errors="replace")
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 def _sha256_json(obj: object) -> str:
     """SHA-256 hex digest of a JSON-serialized object.
 
@@ -226,7 +252,9 @@ def _sha256_json(obj: object) -> str:
     Returns:
         64-character hexadecimal SHA-256 digest.
     """
-    raw = json.dumps(obj, sort_keys=True, separators=(",", ":"))
+    raw = json.dumps(
+        obj, sort_keys=True, separators=(",", ":"), default=_pg_json_default
+    )
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -523,3 +551,134 @@ __all__ = [
     "compute_schema_fingerprint",
     "validate_schema_fingerprint",
 ]
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+_STAMP_QUERY = (
+    "UPDATE public.db_metadata "
+    "SET expected_schema_fingerprint = $1, "
+    "    expected_schema_fingerprint_generated_at = NOW() "
+    "WHERE id = TRUE"
+)
+
+
+async def _cli_stamp(db_url: str, *, dry_run: bool = False) -> None:
+    """Compute live fingerprint and stamp it into db_metadata."""
+    from omnibase_infra.runtime.model_schema_manifest import (
+        OMNIBASE_INFRA_SCHEMA_MANIFEST,
+    )
+
+    pool = await asyncpg.create_pool(db_url)
+    if pool is None:
+        print(
+            "ERROR: asyncpg.create_pool() returned None — cannot connect to database."
+        )
+        raise SystemExit(1)
+    try:
+        result = await compute_schema_fingerprint(pool, OMNIBASE_INFRA_SCHEMA_MANIFEST)
+        print(f"fingerprint: {result.fingerprint}")
+        print(f"table_count: {result.table_count}")
+        print(f"column_count: {result.column_count}")
+        print(f"constraint_count: {result.constraint_count}")
+
+        if dry_run:
+            print("\n--dry-run: skipping db_metadata update")
+            return
+
+        async with pool.acquire() as conn:
+            status = await conn.execute(_STAMP_QUERY, result.fingerprint)
+
+        rows_affected = int(status.split()[-1])
+        if rows_affected == 0:
+            print(
+                "\nERROR: No rows updated in db_metadata. Table may not be initialized."
+            )
+            print("Ensure db_metadata table has a row with id = TRUE before stamping.")
+            raise SystemExit(1)
+
+        print("\ndb_metadata.expected_schema_fingerprint updated")
+    finally:
+        await pool.close()
+
+
+async def _cli_verify(db_url: str) -> None:
+    """Run validation only -- exits non-zero on mismatch."""
+    from omnibase_infra.runtime.model_schema_manifest import (
+        OMNIBASE_INFRA_SCHEMA_MANIFEST,
+    )
+
+    pool = await asyncpg.create_pool(db_url)
+    if pool is None:
+        print(
+            "ERROR: asyncpg.create_pool() returned None — cannot connect to database."
+        )
+        raise SystemExit(1)
+    try:
+        await validate_schema_fingerprint(pool, OMNIBASE_INFRA_SCHEMA_MANIFEST)
+        print("Schema fingerprint OK")
+    finally:
+        await pool.close()
+
+
+def _main() -> None:
+    import argparse
+    import asyncio
+    import os
+    import sys
+
+    parser = argparse.ArgumentParser(
+        prog="python -m omnibase_infra.runtime.util_schema_fingerprint",
+        description="Schema fingerprint CLI for omnibase_infra.",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    stamp_parser = sub.add_parser(
+        "stamp",
+        help="Compute live fingerprint and write it to db_metadata.",
+    )
+    stamp_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Compute fingerprint but do not write to db_metadata.",
+    )
+
+    sub.add_parser(
+        "verify",
+        help="Validate live schema matches expected fingerprint in db_metadata.",
+    )
+
+    args = parser.parse_args()
+
+    if args.command is None:
+        parser.print_help()
+        sys.exit(1)
+
+    db_url = os.environ.get("OMNIBASE_INFRA_DB_URL")
+    if not db_url:
+        print(
+            "ERROR: OMNIBASE_INFRA_DB_URL environment variable is required.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    try:
+        if args.command == "stamp":
+            asyncio.run(_cli_stamp(db_url, dry_run=args.dry_run))
+        elif args.command == "verify":
+            asyncio.run(_cli_verify(db_url))
+    except (
+        SchemaFingerprintMismatchError,
+        SchemaFingerprintMissingError,
+    ) as exc:
+        print(f"FAILED: {exc}", file=sys.stderr)
+        sys.exit(2)
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    _main()

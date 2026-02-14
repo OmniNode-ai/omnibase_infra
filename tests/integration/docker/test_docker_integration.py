@@ -754,7 +754,11 @@ class TestDockerHealthCheck:
                     ) as response:
                         assert response.status == 200
                         return  # Success
-                except urllib.error.URLError:
+                except (
+                    urllib.error.URLError,
+                    ConnectionResetError,
+                    ConnectionRefusedError,
+                ):
                     if attempt < max_retries - 1:
                         time.sleep(3)
                         continue

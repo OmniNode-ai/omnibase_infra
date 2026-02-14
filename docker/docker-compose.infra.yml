@@ -125,6 +125,9 @@ x-runtime-env: &runtime-env
   OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omninode-runtime}
   OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-otlp}
   OTEL_METRICS_EXPORTER: ${OTEL_METRICS_EXPORTER:-otlp}
+  # OmniIntelligence domain plugin
+  # Falls back to constructing DSN from POSTGRES_PASSWORD (same caveats as OMNIBASE_INFRA_DB_URL above).
+  OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for intelligence DB URL fallback}@postgres:5432/omniintelligence}
 # ==========================================================================
 # Services
 # ==========================================================================
