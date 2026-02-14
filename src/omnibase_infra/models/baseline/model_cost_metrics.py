@@ -17,8 +17,16 @@ class ModelCostMetrics(BaseModel):
     All counters default to zero so that partially-populated metrics
     are valid.
 
+    Note:
+        ``total_tokens``, ``prompt_tokens``, and ``completion_tokens`` are
+        intentionally independent fields with no consistency validation.
+        Some LLM providers return only ``total_tokens`` without a
+        prompt/completion breakdown, so enforcing
+        ``total == prompt + completion`` would reject valid data.
+
     Attributes:
-        total_tokens: Total tokens consumed (prompt + completion).
+        total_tokens: Total tokens consumed. Not enforced as prompt +
+            completion sum; some providers report only the total.
         prompt_tokens: Prompt/input tokens consumed.
         completion_tokens: Completion/output tokens consumed.
         wall_time_ms: Wall-clock execution time in milliseconds.
@@ -30,7 +38,7 @@ class ModelCostMetrics(BaseModel):
     total_tokens: int = Field(
         default=0,
         ge=0,
-        description="Total tokens consumed (prompt + completion).",
+        description="Total tokens consumed. Not enforced as prompt + completion sum; some providers report only the total.",
     )
     prompt_tokens: int = Field(
         default=0,

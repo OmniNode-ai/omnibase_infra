@@ -14,9 +14,16 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelOutcomeMetrics(BaseModel):
     """Outcome metrics for a single run (baseline or candidate).
 
+    Note:
+        ``total_checks``, ``passed_checks``, and ``failed_checks`` are
+        independent counters with no consistency validation. Some test
+        frameworks don't report a per-check breakdown, so enforcing
+        ``total == passed + failed`` would reject valid partial data.
+
     Attributes:
         passed: Whether the run passed validation.
-        total_checks: Total number of checks executed.
+        total_checks: Total number of checks executed. Not enforced as
+            passed + failed sum; partial reporting is supported.
         passed_checks: Number of checks that passed.
         failed_checks: Number of checks that failed.
         flake_rate: Flake rate as a fraction in [0.0, 1.0].
@@ -32,7 +39,7 @@ class ModelOutcomeMetrics(BaseModel):
     total_checks: int = Field(
         default=0,
         ge=0,
-        description="Total number of checks executed.",
+        description="Total number of checks executed. Not enforced as passed + failed sum; partial reporting is supported.",
     )
     passed_checks: int = Field(
         default=0,

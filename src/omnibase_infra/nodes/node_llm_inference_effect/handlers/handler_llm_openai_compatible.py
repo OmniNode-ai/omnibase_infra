@@ -397,6 +397,8 @@ class HandlerLlmOpenaiCompatible:
             # e.g. ``async with transport.auth_scope(api_key) as scoped:``.
             # Until that API exists, we reach into private attributes here.
             # See: OMN-2104 (MixinLlmHttpTransport) for the transport layer.
+            # Lock scope: auth_lock serializes auth-client swaps within this
+            # handler.  No other codepath accesses _http_client concurrently.
             original_client = self._transport._http_client
             original_owns = self._transport._owns_http_client
             self._transport._http_client = auth_client
