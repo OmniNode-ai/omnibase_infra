@@ -2374,6 +2374,95 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Node Architecture - EFFECT nodes)
     ticket: OMN-2143
+  # ==========================================================================
+  # ServiceArtifactStore Method Count Exemption (OMN-2151)
+  # ==========================================================================
+  # ServiceArtifactStore manages on-disk validation artifacts with cohesive file I/O
+  # methods: directory helpers (5), write methods (5), read methods (2),
+  # symlink management (2), listing (2), and ensure_run_dirs (1).
+  # All methods operate on the same root directory and serve a unified purpose.
+  - file_pattern: 'service_artifact_store\.py'
+    class_pattern: "Class 'ServiceArtifactStore'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      Cohesive file I/O class managing validation artifacts on disk. Methods cover directory structure, write/read operations, symlink management, and listing. All operate on the same root directory. Breaking into smaller classes would reduce cohesion without meaningful benefit.
+
+    documentation:
+      - CLAUDE.md (Validation Pipeline - Artifact Storage)
+    ticket: OMN-2151
+  # ==========================================================================
+  # HandlerCheckExecutor._make_result Parameter Count Exemption (OMN-2151)
+  # ==========================================================================
+  # _make_result is a convenience factory for ModelCheckResult that takes
+  # the essential fields (passed, message, error_output, duration_ms, skipped).
+  # All parameters map directly to ModelCheckResult fields.
+  - file_pattern: 'handler_check_executor\.py'
+    method_pattern: "Function '_make_result'"
+    violation_pattern: 'has \d+ parameters'
+    reason: >
+      Convenience factory for ModelCheckResult. All 6 parameters map directly to the model fields (self + 5 result fields). Using a builder pattern or config object would add indirection without benefit for this internal helper.
+
+    documentation:
+      - CLAUDE.md (Validation Pipeline - Check Executors)
+    ticket: OMN-2151
+  # ==========================================================================
+  # Validation Check Handler Naming Exemptions (OMN-2151)
+  # ==========================================================================
+  # Validation check classes use Handler prefix per PR #330 review feedback.
+  # These are check executors in the validation pipeline that follow the
+  # handler_<name>.py / Handler<Name> naming convention from CLAUDE.md.
+  - file_pattern: 'handler_check_executor\.py'
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      Follows CLAUDE.md Handler<Name> naming convention per PR #330 review. Check executors are handler-like components in the validation pipeline.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Handler convention)
+    ticket: OMN-2151
+  - file_pattern: 'handler_artifact\.py'
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      Follows CLAUDE.md Handler<Name> naming convention per PR #330 review. Artifact checks are handler-like components in the validation pipeline.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Handler convention)
+    ticket: OMN-2151
+  - file_pattern: 'handler_measurement\.py'
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      Follows CLAUDE.md Handler<Name> naming convention per PR #330 review. Measurement checks are handler-like components in the validation pipeline.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Handler convention)
+    ticket: OMN-2151
+  - file_pattern: 'handler_risk\.py'
+    violation_pattern: "contains anti-pattern 'Handler'"
+    reason: >
+      Follows CLAUDE.md Handler<Name> naming convention per PR #330 review. Risk checks are handler-like components in the validation pipeline.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Handler convention)
+    ticket: OMN-2151
+  # ServiceArtifactStore naming exemption
+  - file_pattern: 'service_artifact_store\.py'
+    class_pattern: "Class name 'ServiceArtifactStore'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention per PR #330 review. Service files use service_<name>.py with Service<Name> class names.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-2151
+  # ServiceFlakeDetector naming exemption
+  - file_pattern: 'service_flake_detector\.py'
+    class_pattern: "Class name 'ServiceFlakeDetector'"
+    violation_pattern: "contains anti-pattern 'Service'"
+    reason: >
+      Follows CLAUDE.md Service<Name> naming convention per PR #330 review. Service files use service_<name>.py with Service<Name> class names.
+
+    documentation:
+      - CLAUDE.md (File & Class Naming - Service convention)
+    ticket: OMN-2151
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:

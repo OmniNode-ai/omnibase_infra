@@ -114,11 +114,13 @@ class TestInfraValidatorConstants:
           - register_handler(): Write | Read | List handler type param
         - 125 (2026-02-13): reducer-authoritative registration followups (+1 union)
           - ModelPayloadPostgresUpdateRegistration.updates: AckUpdate | HeartbeatUpdate
+        - 126 (2026-02-13): OMN-2151 validation checks, artifacts, flake detection (+1 union)
+          - ServiceArtifactStore.write_artifact(): content: str | bytes parameter
 
-        Current: 125 (as of reducer-authoritative followups). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
+        Current: 126 (as of OMN-2151). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 125, (
-            "INFRA_MAX_UNIONS should be 125 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 126, (
+            "INFRA_MAX_UNIONS should be 126 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

@@ -61,7 +61,7 @@ import importlib
 import logging
 import re
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import yaml
@@ -538,10 +538,11 @@ class ContractLinter:
             files_with_errors=files_with_errors,
         )
 
+    # ONEX_EXCLUDE: any_type - YAML contract content is heterogeneous dict from yaml.safe_load
     def _validate_required_fields(
         self,
         file_path: str,
-        content: dict,
+        content: dict[str, Any],
     ) -> list[ModelContractViolation]:
         """Validate that all required top-level fields are present."""
         violations: list[ModelContractViolation] = []
@@ -567,10 +568,11 @@ class ContractLinter:
 
         return violations
 
+    # ONEX_EXCLUDE: any_type - YAML contract content is heterogeneous dict from yaml.safe_load
     def _validate_node_type(
         self,
         file_path: str,
-        content: dict,
+        content: dict[str, Any],
     ) -> list[ModelContractViolation]:
         """Validate node_type is one of the valid ONEX 4-node types."""
         violations: list[ModelContractViolation] = []
@@ -603,10 +605,11 @@ class ContractLinter:
 
         return violations
 
+    # ONEX_EXCLUDE: any_type - YAML contract content is heterogeneous dict from yaml.safe_load
     def _validate_contract_version(
         self,
         file_path: str,
-        content: dict,
+        content: dict[str, Any],
     ) -> list[ModelContractViolation]:
         """Validate contract_version has proper semver structure."""
         violations: list[ModelContractViolation] = []
@@ -658,10 +661,11 @@ class ContractLinter:
 
         return violations
 
+    # ONEX_EXCLUDE: any_type - YAML contract content is heterogeneous dict from yaml.safe_load
     def _validate_model_reference(
         self,
         file_path: str,
-        content: dict,
+        content: dict[str, Any],
         field_name: Literal["input_model", "output_model"],
     ) -> list[ModelContractViolation]:
         """Validate input_model or output_model reference structure and importability."""
@@ -725,11 +729,12 @@ class ContractLinter:
 
         return violations
 
+    # ONEX_EXCLUDE: any_type - YAML model reference is heterogeneous dict from yaml.safe_load
     def _check_module_importable(
         self,
         file_path: str,
         field_name: str,
-        model_ref: dict,
+        model_ref: dict[str, Any],
     ) -> list[ModelContractViolation]:
         """Check if the model's module is importable."""
         violations: list[ModelContractViolation] = []
@@ -769,10 +774,11 @@ class ContractLinter:
 
         return violations
 
+    # ONEX_EXCLUDE: any_type - YAML contract content is heterogeneous dict from yaml.safe_load
     def _validate_name_convention(
         self,
         file_path: str,
-        content: dict,
+        content: dict[str, Any],
     ) -> list[ModelContractViolation]:
         """Validate name follows snake_case convention."""
         violations: list[ModelContractViolation] = []
@@ -795,10 +801,11 @@ class ContractLinter:
 
         return violations
 
+    # ONEX_EXCLUDE: any_type - YAML contract content is heterogeneous dict from yaml.safe_load
     def _check_recommended_fields(
         self,
         file_path: str,
-        content: dict,
+        content: dict[str, Any],
     ) -> list[ModelContractViolation]:
         """Check for recommended but optional fields."""
         violations: list[ModelContractViolation] = []
