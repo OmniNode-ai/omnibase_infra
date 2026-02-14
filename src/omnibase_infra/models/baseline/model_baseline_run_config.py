@@ -71,17 +71,23 @@ class ModelBaselineRunConfig(BaseModel):
     def requires_baseline(self) -> bool:
         """Return True if this promotion decision requires a baseline run.
 
-        Baseline runs are only required for **upward** promotions from
-        Tier 1+ (SUGGESTED and above).  Returns ``False`` for:
+        Baseline runs are only required for **upward** promotions where
+        ``current_tier`` is SUGGESTED, SHADOW_APPLY, or PROMOTED **and**
+        ``target_tier`` is strictly above ``current_tier`` in the
+        promotion ladder.
+
+        Returns ``False`` for:
 
         - Tier 0->1 (OBSERVED->SUGGESTED) promotions
         - No-op transitions (target == current)
         - Demotions (target tier is lower than current)
-        - Tiers outside the promotion ladder (SUPPRESSED)
+        - DEFAULT as current tier (already at top, cannot promote further)
+        - SUPPRESSED tier (excluded from promotion ladder)
 
         Returns:
-            True only when ``current_tier`` is SUGGESTED or higher
-            **and** ``target_tier`` is strictly above ``current_tier``.
+            True only when ``current_tier`` is in {SUGGESTED, SHADOW_APPLY,
+            PROMOTED} **and** ``target_tier`` is strictly above
+            ``current_tier`` in the promotion rank ordering.
         """
         tiers_requiring_baseline = {
             EnumLifecycleTier.SUGGESTED,

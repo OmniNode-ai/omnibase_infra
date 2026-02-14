@@ -165,13 +165,16 @@ class HandlerBaselineComparison:
         1. **No cost regression** -- ``token_delta >= 0`` (candidate
            uses the same or fewer tokens than baseline).
         2. **Candidate passed** -- ``candidate_passed`` is ``True``.
-        3. **No quality regression** -- either ``quality_improved`` is
-           ``True``, or all three outcome dimensions are non-negative:
+        3. **No quality regression** -- all three outcome dimensions
+           are non-negative, regardless of ``quality_improved``:
 
            - ``check_delta >= 0`` (no fewer passed checks),
            - ``flake_rate_delta >= 0`` (flake rate did not increase),
            - ``review_iteration_delta >= 0`` (review iterations did
              not increase).
+
+        ``quality_improved`` is **not** considered here; it must not
+        short-circuit flake-rate or review-iteration regressions.
 
         The quality gate uses the "positive is good" sign convention
         from :meth:`ModelOutcomeDelta.from_metrics`, so a non-negative
@@ -191,8 +194,10 @@ class HandlerBaselineComparison:
         # Candidate must pass
         candidate_passed = outcome_delta.candidate_passed
 
-        # Quality must not regress across all outcome dimensions
-        no_quality_regression = outcome_delta.quality_improved or (
+        # Quality must not regress across ANY outcome dimension.
+        # quality_improved must NOT short-circuit this check — a flake-rate
+        # or review-iteration regression is always disqualifying.
+        no_quality_regression = (
             outcome_delta.check_delta >= 0
             and outcome_delta.flake_rate_delta >= 0
             and outcome_delta.review_iteration_delta >= 0

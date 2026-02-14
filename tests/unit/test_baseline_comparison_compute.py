@@ -18,7 +18,7 @@ Tests:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -97,13 +97,14 @@ def _make_run_result(
     cost: ModelCostMetrics | None = None,
     outcome: ModelOutcomeMetrics | None = None,
     error: str = "",
+    correlation_id: UUID | None = None,
 ) -> ModelBaselineRunResult:
     """Create a run result for testing."""
     now = datetime.now(tz=UTC)
     return ModelBaselineRunResult(
         run_id=uuid4(),
         variant=variant,
-        correlation_id=uuid4(),
+        correlation_id=correlation_id or uuid4(),
         cost_metrics=cost or _make_cost(),
         outcome_metrics=outcome or _make_outcome(),
         started_at=now,
@@ -131,12 +132,25 @@ def _make_comparison_input(
     baseline: ModelBaselineRunResult | None = None,
     candidate: ModelBaselineRunResult | None = None,
 ) -> ModelBaselineComparisonInput:
-    """Create a comparison input for testing."""
+    """Create a comparison input for testing.
+
+    When baseline or candidate results are not provided, auto-generated
+    results share the same ``correlation_id`` so the correlation-match
+    validator passes.  Explicitly supplied results are used as-is.
+    """
+    shared_correlation_id = uuid4()
     return ModelBaselineComparisonInput(
         config=config or _make_config(),
-        baseline_result=baseline or _make_run_result(variant=EnumRunVariant.BASELINE),
+        baseline_result=baseline
+        or _make_run_result(
+            variant=EnumRunVariant.BASELINE,
+            correlation_id=shared_correlation_id,
+        ),
         candidate_result=candidate
-        or _make_run_result(variant=EnumRunVariant.CANDIDATE),
+        or _make_run_result(
+            variant=EnumRunVariant.CANDIDATE,
+            correlation_id=shared_correlation_id,
+        ),
     )
 
 
@@ -383,6 +397,46 @@ class TestBaselineRunConfig:
             target_tier=EnumLifecycleTier.SUPPRESSED,
         )
         assert config.requires_baseline() is False
+
+    def test_requires_baseline_default_to_observed(self) -> None:
+        """Demotion DEFAULT -> OBSERVED does NOT require baseline."""
+        config = _make_config(
+            current_tier=EnumLifecycleTier.DEFAULT,
+            target_tier=EnumLifecycleTier.OBSERVED,
+        )
+        assert config.requires_baseline() is False
+
+    def test_requires_baseline_default_to_promoted(self) -> None:
+        """Demotion DEFAULT -> PROMOTED does NOT require baseline."""
+        config = _make_config(
+            current_tier=EnumLifecycleTier.DEFAULT,
+            target_tier=EnumLifecycleTier.PROMOTED,
+        )
+        assert config.requires_baseline() is False
+
+    def test_requires_baseline_skip_suggested_to_promoted(self) -> None:
+        """Skip-promotion SUGGESTED -> PROMOTED DOES require baseline."""
+        config = _make_config(
+            current_tier=EnumLifecycleTier.SUGGESTED,
+            target_tier=EnumLifecycleTier.PROMOTED,
+        )
+        assert config.requires_baseline() is True
+
+    def test_requires_baseline_skip_suggested_to_default(self) -> None:
+        """Skip-promotion SUGGESTED -> DEFAULT DOES require baseline."""
+        config = _make_config(
+            current_tier=EnumLifecycleTier.SUGGESTED,
+            target_tier=EnumLifecycleTier.DEFAULT,
+        )
+        assert config.requires_baseline() is True
+
+    def test_requires_baseline_skip_shadow_to_default(self) -> None:
+        """Skip-promotion SHADOW_APPLY -> DEFAULT DOES require baseline."""
+        config = _make_config(
+            current_tier=EnumLifecycleTier.SHADOW_APPLY,
+            target_tier=EnumLifecycleTier.DEFAULT,
+        )
+        assert config.requires_baseline() is True
 
     def test_frozen_immutability(self) -> None:
         """Frozen model rejects attribute mutation."""
@@ -636,6 +690,67 @@ class TestBaselineComparisonInputVariantValidation:
 
 
 # ============================================================================
+# ModelBaselineComparisonInput -- Correlation ID Validation
+# ============================================================================
+
+
+class TestBaselineComparisonInputCorrelationValidation:
+    """Tests for ModelBaselineComparisonInput correlation_id match validator."""
+
+    def test_rejects_mismatched_correlation_ids(self) -> None:
+        """Rejects when baseline and candidate have different correlation_ids."""
+        with pytest.raises(
+            ValidationError,
+            match=r"results from different comparison runs cannot be paired",
+        ):
+            ModelBaselineComparisonInput(
+                config=_make_config(),
+                baseline_result=_make_run_result(
+                    variant=EnumRunVariant.BASELINE,
+                    correlation_id=uuid4(),
+                ),
+                candidate_result=_make_run_result(
+                    variant=EnumRunVariant.CANDIDATE,
+                    correlation_id=uuid4(),
+                ),
+            )
+
+    def test_accepts_matching_correlation_ids(self) -> None:
+        """Accepts when baseline and candidate share the same correlation_id."""
+        cid = uuid4()
+        comp_input = ModelBaselineComparisonInput(
+            config=_make_config(),
+            baseline_result=_make_run_result(
+                variant=EnumRunVariant.BASELINE,
+                correlation_id=cid,
+            ),
+            candidate_result=_make_run_result(
+                variant=EnumRunVariant.CANDIDATE,
+                correlation_id=cid,
+            ),
+        )
+        assert comp_input.baseline_result.correlation_id == cid
+        assert comp_input.candidate_result.correlation_id == cid
+
+    def test_error_message_includes_both_ids(self) -> None:
+        """Error message includes both mismatched correlation_ids for debugging."""
+        baseline_cid = uuid4()
+        candidate_cid = uuid4()
+        with pytest.raises(ValidationError, match=str(baseline_cid)):
+            ModelBaselineComparisonInput(
+                config=_make_config(),
+                baseline_result=_make_run_result(
+                    variant=EnumRunVariant.BASELINE,
+                    correlation_id=baseline_cid,
+                ),
+                candidate_result=_make_run_result(
+                    variant=EnumRunVariant.CANDIDATE,
+                    correlation_id=candidate_cid,
+                ),
+            )
+
+
+# ============================================================================
 # HandlerBaselineComparison -- Properties
 # ============================================================================
 
@@ -677,17 +792,20 @@ class TestHandlerBaselineComparisonHandle:
         candidate_cost = _make_cost(total_tokens=700, wall_time_ms=3500.0)
         baseline_outcome = _make_outcome(passed=True, passed_checks=8)
         candidate_outcome = _make_outcome(passed=True, passed_checks=9)
+        cid = uuid4()
 
         comp_input = _make_comparison_input(
             baseline=_make_run_result(
                 variant=EnumRunVariant.BASELINE,
                 cost=baseline_cost,
                 outcome=baseline_outcome,
+                correlation_id=cid,
             ),
             candidate=_make_run_result(
                 variant=EnumRunVariant.CANDIDATE,
                 cost=candidate_cost,
                 outcome=candidate_outcome,
+                correlation_id=cid,
             ),
         )
 
@@ -705,15 +823,18 @@ class TestHandlerBaselineComparisonHandle:
         handler = HandlerBaselineComparison()
         baseline_cost = _make_cost(total_tokens=500)
         candidate_cost = _make_cost(total_tokens=1000)
+        cid = uuid4()
 
         comp_input = _make_comparison_input(
             baseline=_make_run_result(
                 variant=EnumRunVariant.BASELINE,
                 cost=baseline_cost,
+                correlation_id=cid,
             ),
             candidate=_make_run_result(
                 variant=EnumRunVariant.CANDIDATE,
                 cost=candidate_cost,
+                correlation_id=cid,
             ),
         )
 
@@ -728,15 +849,18 @@ class TestHandlerBaselineComparisonHandle:
         handler = HandlerBaselineComparison()
         baseline_outcome = _make_outcome(passed=True)
         candidate_outcome = _make_outcome(passed=False)
+        cid = uuid4()
 
         comp_input = _make_comparison_input(
             baseline=_make_run_result(
                 variant=EnumRunVariant.BASELINE,
                 outcome=baseline_outcome,
+                correlation_id=cid,
             ),
             candidate=_make_run_result(
                 variant=EnumRunVariant.CANDIDATE,
                 outcome=candidate_outcome,
+                correlation_id=cid,
             ),
         )
 
@@ -793,8 +917,11 @@ class TestHandlerBaselineComparisonHandle:
     async def test_handle_stores_full_run_results(self) -> None:
         """Result stores the full baseline and candidate run results."""
         handler = HandlerBaselineComparison()
-        baseline = _make_run_result(variant=EnumRunVariant.BASELINE)
-        candidate = _make_run_result(variant=EnumRunVariant.CANDIDATE)
+        cid = uuid4()
+        baseline = _make_run_result(variant=EnumRunVariant.BASELINE, correlation_id=cid)
+        candidate = _make_run_result(
+            variant=EnumRunVariant.CANDIDATE, correlation_id=cid
+        )
 
         comp_input = _make_comparison_input(
             baseline=baseline,
@@ -812,17 +939,20 @@ class TestHandlerBaselineComparisonHandle:
         handler = HandlerBaselineComparison()
         cost = _make_cost()
         outcome = _make_outcome(passed=True)
+        cid = uuid4()
 
         comp_input = _make_comparison_input(
             baseline=_make_run_result(
                 variant=EnumRunVariant.BASELINE,
                 cost=cost,
                 outcome=outcome,
+                correlation_id=cid,
             ),
             candidate=_make_run_result(
                 variant=EnumRunVariant.CANDIDATE,
                 cost=cost,
                 outcome=outcome,
+                correlation_id=cid,
             ),
         )
 
@@ -943,8 +1073,8 @@ class TestComputeRoi:
             HandlerBaselineComparison._compute_roi(cost_delta, outcome_delta) is False
         )
 
-    def test_roi_positive_when_quality_improved_despite_flake_regression(self) -> None:
-        """Positive ROI: quality_improved=True short-circuits flake regression."""
+    def test_roi_negative_when_quality_improved_but_flake_regresses(self) -> None:
+        """Negative ROI: quality_improved=True must not mask flake/review regressions."""
         cost_delta = ModelCostDelta(token_delta=100, token_savings_pct=10.0)
         outcome_delta = ModelOutcomeDelta(
             baseline_passed=True,
@@ -952,6 +1082,21 @@ class TestComputeRoi:
             check_delta=2,
             flake_rate_delta=-0.05,
             review_iteration_delta=-1,
+            quality_improved=True,
+        )
+        assert (
+            HandlerBaselineComparison._compute_roi(cost_delta, outcome_delta) is False
+        )
+
+    def test_roi_positive_when_quality_improved_and_no_regressions(self) -> None:
+        """Positive ROI: quality_improved=True with no flake/review regressions."""
+        cost_delta = ModelCostDelta(token_delta=100, token_savings_pct=10.0)
+        outcome_delta = ModelOutcomeDelta(
+            baseline_passed=True,
+            candidate_passed=True,
+            check_delta=2,
+            flake_rate_delta=0.0,
+            review_iteration_delta=0,
             quality_improved=True,
         )
         assert HandlerBaselineComparison._compute_roi(cost_delta, outcome_delta) is True
