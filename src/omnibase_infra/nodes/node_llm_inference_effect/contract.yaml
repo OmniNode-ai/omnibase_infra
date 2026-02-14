@@ -28,8 +28,8 @@ description: >
 # Strongly typed I/O models
 # Note: These models live in the shared omnibase_infra.nodes.effects.models
 # package rather than co-located with this node. They are shared across all
-# LLM inference handlers (Ollama, vLLM, OpenAI-compatible, etc.) to ensure
-# a single canonical request/response contract for the inference effect layer.
+# LLM inference handlers (OpenAI-compatible, Ollama) to ensure a single
+# canonical request/response contract for the inference effect layer.
 input_model:
   name: "ModelLlmInferenceRequest"
   module: "omnibase_infra.nodes.effects.models"

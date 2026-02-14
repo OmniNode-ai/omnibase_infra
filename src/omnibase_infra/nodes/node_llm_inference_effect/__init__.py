@@ -31,11 +31,10 @@ from omnibase_infra.nodes.node_llm_inference_effect.registry import (
     RegistryInfraLlmInferenceEffect,
 )
 
+# Derived from registry (which reads contract.yaml) so there is a single
+# source of truth for supported operations.
 ALLOWED_INFERENCE_OPERATIONS: frozenset[str] = frozenset(
-    {
-        "inference.openai_compatible",
-        "inference.ollama",
-    }
+    RegistryInfraLlmInferenceEffect.get_supported_operations()
 )
 
 __all__: list[str] = [
