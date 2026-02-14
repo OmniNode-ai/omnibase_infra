@@ -1,6 +1,8 @@
 # CLAUDE.md - Omnibase Infrastructure
 
-> **Python**: 3.12+ | **Framework**: ONEX Infrastructure | **Shared Infrastructure**: See **`~/.claude/CLAUDE.md`** for PostgreSQL, Kafka/Redpanda, Docker networking, and environment variables.
+> **Python**: 3.12+ | **Framework**: ONEX Infrastructure
+>
+> **Shared standards**: See **`~/.claude/CLAUDE.md`** for Python/Git/Testing standards, PEP 604 type unions, architecture principles, environment configuration, infrastructure topology, PostgreSQL, Kafka/Redpanda, Docker networking, LLM endpoints, and environment variables. Those rules apply to this repo and are not repeated here.
 
 ---
 
@@ -76,11 +78,11 @@ poetry run ruff check src/ tests/             # Linting
 pre-commit run --all-files                    # All hooks
 ```
 
-### Git Commit Rules
+### Git Commit Rules (repo-specific additions)
 
-- **NEVER use `--no-verify`** when committing
+> `--no-verify` and hook rules: see `~/.claude/CLAUDE.md` Git Standards.
+
 - **NEVER use `--no-gpg-sign`** unless explicitly requested
-- **NEVER skip hooks** - fix issues instead of bypassing
 - **NEVER run git commits in background mode**
 
 ---
@@ -506,17 +508,6 @@ items: list[str] = Field(default_factory=list)
 errors: tuple[ModelError, ...] = Field(default_factory=tuple)
 ```
 
-### Type Annotation Style (PEP 604)
-
-```python
-# CORRECT
-value: UUID | None = Field(default=None)
-result: str | int = Field(...)
-
-# WRONG - Do not use Optional
-value: Optional[UUID] = Field(default=None)  # Forbidden
-```
-
 ### Custom `__bool__` for Result Models
 
 Result models may override `__bool__` for idiomatic conditional checks:
@@ -619,8 +610,6 @@ poetry run pytest tests/ -n 0 -xvs
 
 - **NEVER** use `run_in_background: true` for Task tool
 - Parallel execution: call multiple Task tools in a **single message**
-- Always use `poetry run` for Python commands
-- Never allow direct pip or python execution
 
 ---
 
@@ -646,17 +635,7 @@ poetry run pytest tests/ -n 0 -xvs
    return ModelHandlerOutput.for_orchestrator(result={"status": "done"})  # ValueError!
    ```
 
-4. **Use pip instead of Poetry**
-   ```bash
-   pip install package  # WRONG - use poetry add
-   ```
-
-5. **Add backwards-compatibility hacks**
-   ```python
-   old_name = new_name  # WRONG - no re-exports for "compatibility"
-   ```
-
-6. **Use ModelIntentPayloadBase** (removed in omnibase_core 0.6.2)
+4. **Use ModelIntentPayloadBase** (removed in omnibase_core 0.6.2)
    ```python
    from omnibase_core.models.reducer.payloads import ModelIntentPayloadBase  # WRONG
    # Use: from pydantic import BaseModel
@@ -667,9 +646,8 @@ poetry run pytest tests/ -n 0 -xvs
 1. Always call `super().__init__(container)` in node constructors
 2. Use `ModelONEXContainer` for dependency injection
 3. Use protocol names for DI: `container.get_service("ProtocolEventBus")`
-4. Use `poetry run` for all Python commands
-5. Keep nodes declarative - all logic in handlers
-6. Use `ModelInfraErrorContext.with_correlation()` for error context
+4. Keep nodes declarative - all logic in handlers
+5. Use `ModelInfraErrorContext.with_correlation()` for error context
 
 ---
 
