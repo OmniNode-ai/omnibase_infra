@@ -36,6 +36,11 @@ readonly DEPLOY_ROOT="${HOME}/.omnibase/infra"
 readonly REGISTRY_FILE="${DEPLOY_ROOT}/registry.json"
 readonly LOCK_DIR="${DEPLOY_ROOT}/.deploy.lock"
 
+# Maximum number of deployed versions to retain. Older deployments are pruned
+# after each successful deployment. The currently active deployment (tracked in
+# registry.json) is never removed regardless of age.
+readonly MAX_DEPLOYMENTS="${MAX_DEPLOYMENTS:-5}"
+
 # Runtime services to restart (excludes infrastructure: postgres, redpanda, valkey)
 readonly RUNTIME_SERVICES=(
     omninode-runtime
@@ -48,7 +53,7 @@ readonly RUNTIME_SERVICES=(
 readonly MIN_COMPOSE_VERSION="2.20"
 
 # Health check parameters
-readonly HEALTH_CHECK_URL="http://localhost:8085/health"
+readonly HEALTH_CHECK_URL="${HEALTH_CHECK_URL:-http://localhost:8085/health}"
 readonly HEALTH_CHECK_RETRIES=15
 readonly HEALTH_CHECK_INTERVAL=4
 
@@ -59,6 +64,10 @@ readonly HEALTH_CHECK_INTERVAL=4
 MODE="dry-run"           # dry-run | execute
 FORCE=false
 RESTART=false
+# Set after rsync to enable automatic cleanup of orphaned deployment directories
+# on failure. If this is non-empty and the deployment directory is NOT the active
+# deployment in registry.json, the trap handler will remove it.
+DEPLOY_DIR_TO_CLEANUP=""
 # Default is hardcoded and safe; any changes must comply with ^[a-zA-Z0-9_-]+$ (see parse_args).
 COMPOSE_PROFILE="runtime"
 PRINT_COMPOSE_CMD=false
@@ -447,11 +456,28 @@ acquire_lock() {
                 exit 2
             fi
         else
-            log_error "Another deployment is in progress (locked by ${LOCK_DIR})."
-            log_error "Lock has no PID file -- cannot verify owner."
-            log_error "If the previous deployment crashed, remove the lock manually:"
-            log_error "  rm -rf ${LOCK_DIR}"
-            exit 2
+            # Lock directory exists but has no PID file. This happens when the
+            # script was killed (e.g., SIGKILL) between mkdir and PID write.
+            # Treat as a stale lock and attempt recovery, same as a dead PID.
+            log_warn "Lock directory exists but has no PID file (likely interrupted deployment)."
+            log_warn "Treating as stale lock and cleaning up..."
+            rm -rf "${LOCK_DIR}"
+            local lock_acquired=false
+            local retry
+            for retry in 1 2 3; do
+                if mkdir "${LOCK_DIR}" 2>/dev/null; then
+                    echo $$ > "${pid_file}"
+                    lock_acquired=true
+                    break
+                fi
+                log_warn "Lock contention on retry ${retry}/3, waiting..."
+                sleep 1
+            done
+            if [[ "${lock_acquired}" != true ]]; then
+                log_error "Another process acquired the lock during stale cleanup."
+                log_error "A concurrent deployment is legitimately running. Exiting."
+                exit 2
+            fi
         fi
     fi
 
@@ -464,10 +490,133 @@ acquire_lock() {
     # Dry-run and --print-compose-cmd exit before reaching this code.
     # These traps REPLACE (not chain) any existing EXIT/INT/TERM/HUP traps;
     # this is acceptable because no prior traps are set in this script.
-    trap 'rm -rf "${LOCK_DIR}" 2>/dev/null || true' EXIT
-    trap 'rm -rf "${LOCK_DIR}" 2>/dev/null || true; exit 1' INT TERM HUP
+    trap 'cleanup_on_exit' EXIT
+    trap 'cleanup_on_exit; exit 1' INT TERM HUP
 
     log_info "Acquired deployment lock (PID $$)."
+}
+
+# =============================================================================
+# Cleanup -- partial deployment rollback + lock release
+# =============================================================================
+
+cleanup_on_exit() {
+    # Remove orphaned deployment directory on failure. If DEPLOY_DIR_TO_CLEANUP
+    # is set and registry.json does NOT point to it, the deployment was partial
+    # and should be removed.
+    if [[ -n "${DEPLOY_DIR_TO_CLEANUP}" && -d "${DEPLOY_DIR_TO_CLEANUP}" ]]; then
+        local active_path=""
+        if [[ -f "${REGISTRY_FILE}" ]]; then
+            active_path="$(jq -r '.deploy_path // empty' "${REGISTRY_FILE}" 2>/dev/null || true)"
+        fi
+        if [[ "${active_path}" != "${DEPLOY_DIR_TO_CLEANUP}" ]]; then
+            log_warn "Cleaning up partial deployment: ${DEPLOY_DIR_TO_CLEANUP}"
+            rm -rf "${DEPLOY_DIR_TO_CLEANUP}" 2>/dev/null || true
+            # Remove empty parent version directory if this was the only SHA
+            local parent_dir
+            parent_dir="$(dirname "${DEPLOY_DIR_TO_CLEANUP}")"
+            if [[ -d "${parent_dir}" ]] && [[ -z "$(ls -A "${parent_dir}" 2>/dev/null)" ]]; then
+                rmdir "${parent_dir}" 2>/dev/null || true
+            fi
+        fi
+    fi
+
+    # Release concurrency lock
+    rm -rf "${LOCK_DIR}" 2>/dev/null || true
+}
+
+# =============================================================================
+# Prune -- remove old deployments beyond retention limit
+# =============================================================================
+
+prune_old_deployments() {
+    local deployed_root="${DEPLOY_ROOT}/deployed"
+
+    if [[ ! -d "${deployed_root}" ]]; then
+        return 0
+    fi
+
+    log_step "Prune Old Deployments"
+
+    # Determine active deployment path from registry
+    local active_path=""
+    if [[ -f "${REGISTRY_FILE}" ]]; then
+        active_path="$(jq -r '.deploy_path // empty' "${REGISTRY_FILE}" 2>/dev/null || true)"
+    fi
+
+    # Collect all deployment directories (version/sha pairs) sorted by
+    # modification time, newest first. Each entry is a full path like
+    # ~/.omnibase/infra/deployed/1.2.3/abc123def456/
+    local all_deployments=()
+    local version_dir
+    for version_dir in "${deployed_root}"/*/; do
+        [[ -d "${version_dir}" ]] || continue
+        local sha_dir
+        for sha_dir in "${version_dir}"*/; do
+            [[ -d "${sha_dir}" ]] || continue
+            all_deployments+=("${sha_dir%/}")
+        done
+    done
+
+    # Sort by modification time (newest first) using stat.
+    # macOS stat uses -f '%m' for epoch; GNU stat uses -c '%Y'.
+    local sorted_deployments=()
+    if stat -f '%m' / >/dev/null 2>&1; then
+        # macOS (BSD stat)
+        while IFS= read -r line; do
+            sorted_deployments+=("${line}")
+        done < <(
+            for d in "${all_deployments[@]}"; do
+                printf '%s %s\n' "$(stat -f '%m' "${d}")" "${d}"
+            done | sort -rn | awk '{print $2}'
+        )
+    else
+        # Linux (GNU stat)
+        while IFS= read -r line; do
+            sorted_deployments+=("${line}")
+        done < <(
+            for d in "${all_deployments[@]}"; do
+                printf '%s %s\n' "$(stat -c '%Y' "${d}")" "${d}"
+            done | sort -rn | awk '{print $2}'
+        )
+    fi
+
+    local total="${#sorted_deployments[@]}"
+    if (( total <= MAX_DEPLOYMENTS )); then
+        log_info "Deployment count (${total}) within retention limit (${MAX_DEPLOYMENTS}). No pruning needed."
+        return 0
+    fi
+
+    log_info "Found ${total} deployments, retention limit is ${MAX_DEPLOYMENTS}. Pruning..."
+
+    local kept=0
+    local pruned=0
+    for deploy_dir in "${sorted_deployments[@]}"; do
+        if (( kept < MAX_DEPLOYMENTS )); then
+            kept=$((kept + 1))
+            continue
+        fi
+
+        # Never remove the currently active deployment
+        if [[ "${deploy_dir}" == "${active_path}" ]]; then
+            log_info "  Skipping active deployment: ${deploy_dir}"
+            continue
+        fi
+
+        log_info "  Removing old deployment: ${deploy_dir}"
+        rm -rf "${deploy_dir}"
+        pruned=$((pruned + 1))
+
+        # Remove empty parent version directory
+        local parent_dir
+        parent_dir="$(dirname "${deploy_dir}")"
+        if [[ -d "${parent_dir}" ]] && [[ -z "$(ls -A "${parent_dir}" 2>/dev/null)" ]]; then
+            log_info "  Removing empty version directory: ${parent_dir}"
+            rmdir "${parent_dir}" 2>/dev/null || true
+        fi
+    done
+
+    log_info "Pruned ${pruned} old deployment(s). Kept ${kept}."
 }
 
 # =============================================================================
@@ -502,9 +651,10 @@ guard_existing_deployment() {
 count_files() {
     local dir="$1"
     if [[ -d "${dir}" ]]; then
-        # -maxdepth 5: prevent infinite traversal in deeply nested trees
-        # -not -type l: skip symlinks to avoid following links outside the tree
-        find "${dir}" -maxdepth 5 -type f -not -type l | wc -l | tr -d ' '
+        # -maxdepth 5: prevent runaway traversal in deeply nested trees
+        # -type f: matches only regular files (symlinks are excluded by default
+        #   since find does not follow them without -L)
+        find "${dir}" -maxdepth 5 -type f | wc -l | tr -d ' '
     else
         echo "0"
     fi
@@ -587,17 +737,18 @@ sync_files() {
 
     # 4. Docker files -- with preserve allowlist
     #    .env, .env.local, certs/, overrides/ survive --delete
-    #    Excludes are relative to docker/ (the rsync source root). Only top-level
-    #    .env and .env.local are excluded; nested .env files in subdirectories are NOT.
+    #    Excludes use a leading '/' to anchor them to the transfer root (docker/),
+    #    so only top-level .env and .env.local are excluded; nested .env files in
+    #    subdirectories are synced normally.
     log_info "Syncing docker/ (preserving .env, .env.local, certs/, overrides/)..."
-    log_cmd "rsync -a --delete --exclude='.env' --exclude='.env.local' --exclude='certs/' --exclude='overrides/' docker/ -> deployed"
+    log_cmd "rsync -a --delete --exclude='/.env' --exclude='/.env.local' --exclude='/certs/' --exclude='/overrides/' docker/ -> deployed"
     # Note: -a preserves source permissions, but the .env file is excluded from
     # rsync and instead copied via install -m 600 in setup_env() for restricted perms.
     rsync -a --delete \
-        --exclude='.env' \
-        --exclude='.env.local' \
-        --exclude='certs/' \
-        --exclude='overrides/' \
+        --exclude='/.env' \
+        --exclude='/.env.local' \
+        --exclude='/certs/' \
+        --exclude='/overrides/' \
         "${repo_root}/docker/" "${deploy_target}/docker/"
 
     log_info "Sync complete."
@@ -1040,6 +1191,9 @@ main() {
 
     # Validate version format before using it in path construction.
     # A malformed version could create unexpected directory structures.
+    # Policy: only stable release versions (MAJOR.MINOR.PATCH) are allowed for
+    # deployment. Pre-release suffixes (e.g., 1.2.3-rc.1, 1.2.3-beta) are
+    # intentionally rejected to ensure only tested releases reach production.
     if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         log_error "Invalid version format: '${version}'"
         log_error "Expected semantic version (e.g., 1.2.3). Check pyproject.toml [tool.poetry] version."
@@ -1093,6 +1247,11 @@ main() {
     # Phase 6: Sync
     sync_files "${repo_root}" "${deploy_target}"
 
+    # Mark deployment directory for cleanup on failure. If registry write or
+    # build fails after rsync, cleanup_on_exit() will remove this orphaned
+    # directory (unless registry.json already points to it).
+    DEPLOY_DIR_TO_CLEANUP="${deploy_target}"
+
     # Phase 7: Env setup
     setup_env "${repo_root}" "${deploy_target}"
 
@@ -1101,6 +1260,9 @@ main() {
 
     # Phase 9: Registry
     write_registry "${version}" "${git_sha}" "${deploy_target}" "${repo_root}" "${compose_project}"
+
+    # Registry now points to this deployment -- disable partial cleanup
+    DEPLOY_DIR_TO_CLEANUP=""
 
     # Phase 10: Build
     build_images "${deploy_target}" "${compose_project}" "${git_sha}"
@@ -1117,6 +1279,9 @@ main() {
 
     # Phase 13: Summary
     show_summary "${deploy_target}" "${version}" "${git_sha}" "${compose_project}"
+
+    # Phase 14: Prune old deployments
+    prune_old_deployments
 }
 
 main "$@"
