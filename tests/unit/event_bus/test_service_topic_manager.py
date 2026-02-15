@@ -21,7 +21,7 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
-from omnibase_infra.topics import ALL_PLATFORM_SUFFIXES
+from omnibase_infra.topics import ALL_PROVISIONED_SUFFIXES
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
 
@@ -73,7 +73,7 @@ class TestTopicProvisioner:
             result = await manager.ensure_platform_topics_exist()
 
         assert result["status"] == "success"
-        assert len(result["created"]) == len(ALL_PLATFORM_SUFFIXES)
+        assert len(result["created"]) == len(ALL_PROVISIONED_SUFFIXES)
         assert len(result["failed"]) == 0
 
     async def test_ensure_platform_topics_connection_failure(self) -> None:
@@ -107,7 +107,7 @@ class TestTopicProvisioner:
             result = await manager.ensure_platform_topics_exist()
 
         assert result["status"] == "unavailable"
-        assert len(result["failed"]) == len(ALL_PLATFORM_SUFFIXES)
+        assert len(result["failed"]) == len(ALL_PROVISIONED_SUFFIXES)
 
     async def test_ensure_platform_topics_import_error(self) -> None:
         """Graceful degradation when aiokafka is not installed."""
@@ -131,7 +131,7 @@ class TestTopicProvisioner:
         importlib.reload(mod)
 
         assert result["status"] == "unavailable"
-        assert len(result["failed"]) == len(ALL_PLATFORM_SUFFIXES)
+        assert len(result["failed"]) == len(ALL_PROVISIONED_SUFFIXES)
         assert len(result["created"]) == 0
         assert len(result["existing"]) == 0
 
@@ -166,7 +166,7 @@ class TestTopicProvisioner:
             result = await manager.ensure_platform_topics_exist()
 
         assert result["status"] == "success"
-        assert len(result["existing"]) == len(ALL_PLATFORM_SUFFIXES)
+        assert len(result["existing"]) == len(ALL_PROVISIONED_SUFFIXES)
         assert len(result["created"]) == 0
         assert len(result["failed"]) == 0
 

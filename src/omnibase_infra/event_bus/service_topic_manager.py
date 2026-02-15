@@ -2,10 +2,10 @@
 # Copyright (c) 2025 OmniNode Team
 """Kafka Topic Provisioner for automatic topic creation on startup.
 
-Ensures that all ONEX platform topics exist before the runtime begins
-consuming or producing events. Uses AIOKafkaAdminClient to create topics
-that are missing, with best-effort semantics (warnings on failure, never
-blocks startup).
+Ensures that all ONEX topics (platform + domain plugins) exist before the
+runtime begins consuming or producing events. Uses AIOKafkaAdminClient to
+create topics that are missing, with best-effort semantics (warnings on
+failure, never blocks startup).
 
 Design:
     - Best-effort: Logs warnings but never blocks startup on failure
@@ -24,7 +24,7 @@ import os
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from omnibase_infra.topics import ALL_PLATFORM_SUFFIXES, ALL_PLATFORM_TOPIC_SPECS
+from omnibase_infra.topics import ALL_PROVISIONED_SUFFIXES, ALL_PROVISIONED_TOPIC_SPECS
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
@@ -84,10 +84,11 @@ class TopicProvisioner:
         self,
         correlation_id: UUID | None = None,
     ) -> dict[str, list[str] | str]:
-        """Ensure all ONEX platform topics exist.
+        """Ensure all ONEX provisioned topics exist.
 
-        Creates any missing topics from ALL_PLATFORM_SUFFIXES. The snapshot
-        topic gets special compaction configuration via ModelSnapshotTopicConfig.
+        Creates any missing topics from ALL_PROVISIONED_TOPIC_SPECS (platform
+        + domain plugin topics). The snapshot topic gets special compaction
+        configuration via ModelSnapshotTopicConfig.
 
         This method is best-effort: individual topic creation failures are
         logged as warnings but do not prevent other topics from being created.
@@ -123,7 +124,7 @@ class TopicProvisioner:
             return {
                 "created": created,
                 "existing": existing,
-                "failed": list(ALL_PLATFORM_SUFFIXES),
+                "failed": list(ALL_PROVISIONED_SUFFIXES),
                 "status": "unavailable",
             }
 
@@ -138,7 +139,7 @@ class TopicProvisioner:
             )
             await admin.start()
 
-            for spec in ALL_PLATFORM_TOPIC_SPECS:
+            for spec in ALL_PROVISIONED_TOPIC_SPECS:
                 try:
                     new_topic = NewTopic(
                         name=spec.suffix,
@@ -192,7 +193,7 @@ class TopicProvisioner:
             # Separate individually-failed topics from those never attempted
             already_resolved = set(created) | set(existing) | set(failed)
             not_attempted = [
-                s for s in ALL_PLATFORM_SUFFIXES if s not in already_resolved
+                s for s in ALL_PROVISIONED_SUFFIXES if s not in already_resolved
             ]
             if not_attempted:
                 logger.warning(

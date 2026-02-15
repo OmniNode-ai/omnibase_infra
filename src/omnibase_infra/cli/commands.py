@@ -427,14 +427,14 @@ async def _run_get_node(node_id_str: str) -> None:
 
 def _run_list_topics() -> None:
     """Implementation for list-topics command."""
-    from omnibase_infra.topics import ALL_PLATFORM_SUFFIXES
+    from omnibase_infra.topics import ALL_PROVISIONED_SUFFIXES
 
-    table = Table(title="ONEX Platform Topics")
+    table = Table(title="ONEX Provisioned Topics")
     table.add_column("Topic Suffix", style="cyan")
     table.add_column("Kind", style="bold")
     table.add_column("Description", style="dim")
 
-    for suffix in ALL_PLATFORM_SUFFIXES:
+    for suffix in ALL_PROVISIONED_SUFFIXES:
         # Parse kind from suffix: onex.<kind>.<producer>.<event-name>.v<version>
         parts = suffix.split(".")
         kind = parts[1] if len(parts) > 1 else "unknown"

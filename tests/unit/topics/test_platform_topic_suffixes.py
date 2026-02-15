@@ -1,13 +1,25 @@
-"""Tests for platform topic suffix constants."""
+"""Tests for platform and intelligence topic suffix constants."""
 
 import pytest
 
 from omnibase_core.validation import validate_topic_suffix
 from omnibase_infra.topics import (
+    ALL_INTELLIGENCE_TOPIC_SPECS,
     ALL_PLATFORM_SUFFIXES,
+    ALL_PROVISIONED_SUFFIXES,
+    ALL_PROVISIONED_TOPIC_SPECS,
     SUFFIX_CONTRACT_DEREGISTERED,
     SUFFIX_CONTRACT_REGISTERED,
     SUFFIX_FSM_STATE_TRANSITIONS,
+    SUFFIX_INTELLIGENCE_CLAUDE_HOOK_EVENT,
+    SUFFIX_INTELLIGENCE_INTENT_CLASSIFIED,
+    SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED,
+    SUFFIX_INTELLIGENCE_PATTERN_LEARNED,
+    SUFFIX_INTELLIGENCE_PATTERN_LIFECYCLE_TRANSITION,
+    SUFFIX_INTELLIGENCE_PATTERN_LIFECYCLE_TRANSITIONED,
+    SUFFIX_INTELLIGENCE_PATTERN_PROMOTED,
+    SUFFIX_INTELLIGENCE_PATTERN_STORED,
+    SUFFIX_INTELLIGENCE_SESSION_OUTCOME,
     SUFFIX_NODE_HEARTBEAT,
     SUFFIX_NODE_INTROSPECTION,
     SUFFIX_NODE_REGISTRATION,
@@ -29,7 +41,7 @@ class TestPlatformTopicSuffixes:
             assert result.is_valid, f"Invalid suffix: {suffix} - {result.error}"
 
     def test_all_platform_suffixes_list_is_complete(self) -> None:
-        """ALL_PLATFORM_SUFFIXES should contain all defined constants."""
+        """ALL_PLATFORM_SUFFIXES should contain all defined platform constants."""
         expected_suffixes = {
             SUFFIX_NODE_REGISTRATION,
             SUFFIX_NODE_INTROSPECTION,
@@ -147,3 +159,123 @@ class TestPlatformTopicSuffixes:
                 f"SUFFIX constant '{name}' not exported from omnibase_infra.topics. "
                 f"Add it to __all__ in topics/__init__.py"
             )
+
+
+class TestIntelligenceTopicSuffixes:
+    """Tests for intelligence domain topic suffix constants."""
+
+    def test_all_intelligence_suffixes_are_valid(self) -> None:
+        """Every intelligence suffix must pass ONEX topic validation."""
+        for spec in ALL_INTELLIGENCE_TOPIC_SPECS:
+            result = validate_topic_suffix(spec.suffix)
+            assert result.is_valid, (
+                f"Invalid intelligence suffix: {spec.suffix} - {result.error}"
+            )
+
+    def test_intelligence_suffixes_use_correct_producers(self) -> None:
+        """Intelligence suffixes should use 'omniintelligence' or 'pattern' as producer."""
+        valid_producers = {"omniintelligence", "pattern"}
+        for spec in ALL_INTELLIGENCE_TOPIC_SPECS:
+            parts = spec.suffix.split(".")
+            producer = parts[2]
+            assert producer in valid_producers, (
+                f"Expected 'omniintelligence' or 'pattern' producer in: {spec.suffix}"
+            )
+
+    def test_intelligence_topic_count(self) -> None:
+        """Intelligence spec registry should have 9 topics."""
+        assert len(ALL_INTELLIGENCE_TOPIC_SPECS) == 9
+
+    def test_intelligence_command_topics(self) -> None:
+        """Intelligence command topics should be defined."""
+        assert (
+            SUFFIX_INTELLIGENCE_CLAUDE_HOOK_EVENT
+            == "onex.cmd.omniintelligence.claude-hook-event.v1"
+        )
+        assert (
+            SUFFIX_INTELLIGENCE_SESSION_OUTCOME
+            == "onex.cmd.omniintelligence.session-outcome.v1"
+        )
+        assert (
+            SUFFIX_INTELLIGENCE_PATTERN_LIFECYCLE_TRANSITION
+            == "onex.cmd.omniintelligence.pattern-lifecycle-transition.v1"
+        )
+
+    def test_intelligence_event_topics(self) -> None:
+        """Intelligence event topics should be defined."""
+        assert (
+            SUFFIX_INTELLIGENCE_INTENT_CLASSIFIED
+            == "onex.evt.omniintelligence.intent-classified.v1"
+        )
+        assert (
+            SUFFIX_INTELLIGENCE_PATTERN_LEARNED
+            == "onex.evt.omniintelligence.pattern-learned.v1"
+        )
+        assert (
+            SUFFIX_INTELLIGENCE_PATTERN_STORED
+            == "onex.evt.omniintelligence.pattern-stored.v1"
+        )
+        assert (
+            SUFFIX_INTELLIGENCE_PATTERN_PROMOTED
+            == "onex.evt.omniintelligence.pattern-promoted.v1"
+        )
+        assert (
+            SUFFIX_INTELLIGENCE_PATTERN_LIFECYCLE_TRANSITIONED
+            == "onex.evt.omniintelligence.pattern-lifecycle-transitioned.v1"
+        )
+        assert (
+            SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED == "onex.evt.pattern.discovered.v1"
+        )
+
+    def test_intelligence_topics_use_3_partitions(self) -> None:
+        """All intelligence topics should use 3 partitions."""
+        for spec in ALL_INTELLIGENCE_TOPIC_SPECS:
+            assert spec.partitions == 3, (
+                f"Expected 3 partitions for {spec.suffix}, got {spec.partitions}"
+            )
+
+    def test_no_duplicate_intelligence_suffixes(self) -> None:
+        """Intelligence topic specs should not contain duplicates."""
+        suffixes = [spec.suffix for spec in ALL_INTELLIGENCE_TOPIC_SPECS]
+        assert len(suffixes) == len(set(suffixes))
+
+
+class TestProvisionedTopicSpecs:
+    """Tests for the combined provisioned topic spec registry."""
+
+    def test_provisioned_contains_all_platform(self) -> None:
+        """ALL_PROVISIONED_SUFFIXES must include all platform suffixes."""
+        for suffix in ALL_PLATFORM_SUFFIXES:
+            assert suffix in ALL_PROVISIONED_SUFFIXES, (
+                f"Platform suffix missing from provisioned: {suffix}"
+            )
+
+    def test_provisioned_contains_all_intelligence(self) -> None:
+        """ALL_PROVISIONED_SUFFIXES must include all intelligence suffixes."""
+        intelligence_suffixes = {spec.suffix for spec in ALL_INTELLIGENCE_TOPIC_SPECS}
+        for suffix in intelligence_suffixes:
+            assert suffix in ALL_PROVISIONED_SUFFIXES, (
+                f"Intelligence suffix missing from provisioned: {suffix}"
+            )
+
+    def test_provisioned_count(self) -> None:
+        """Combined provisioned specs should equal platform + intelligence."""
+        from omnibase_infra.topics import ALL_PLATFORM_TOPIC_SPECS
+
+        expected = len(ALL_PLATFORM_TOPIC_SPECS) + len(ALL_INTELLIGENCE_TOPIC_SPECS)
+        assert len(ALL_PROVISIONED_TOPIC_SPECS) == expected
+
+    def test_no_duplicate_provisioned_suffixes(self) -> None:
+        """Combined provisioned specs should not contain duplicates."""
+        assert len(ALL_PROVISIONED_SUFFIXES) == len(set(ALL_PROVISIONED_SUFFIXES))
+
+    def test_all_provisioned_suffixes_are_valid(self) -> None:
+        """Every provisioned suffix must pass ONEX topic validation."""
+        for suffix in ALL_PROVISIONED_SUFFIXES:
+            result = validate_topic_suffix(suffix)
+            assert result.is_valid, f"Invalid suffix: {suffix} - {result.error}"
+
+    def test_provisioned_is_tuple(self) -> None:
+        """ALL_PROVISIONED_TOPIC_SPECS and ALL_PROVISIONED_SUFFIXES should be tuples."""
+        assert isinstance(ALL_PROVISIONED_TOPIC_SPECS, tuple)
+        assert isinstance(ALL_PROVISIONED_SUFFIXES, tuple)
