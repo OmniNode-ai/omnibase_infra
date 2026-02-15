@@ -1380,9 +1380,7 @@ class TestKafkaEventBusConsumerGroupId:
 
             # group_id already ends with ".__t.events" — should NOT become
             # "my-group.__t.events.__t.events"
-            await event_bus._start_consumer_for_topic(
-                "events", "my-group.__t.events"
-            )
+            await event_bus._start_consumer_for_topic("events", "my-group.__t.events")
 
             # Verify the consumer was created with the un-doubled group_id
             consumer_cls.assert_called_once()
