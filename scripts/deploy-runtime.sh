@@ -34,7 +34,7 @@ readonly SCRIPT_VERSION="1.0.0"
 # Deployment root -- all versioned deployments live under this tree
 readonly DEPLOY_ROOT="${HOME}/.omnibase/infra"
 readonly REGISTRY_FILE="${DEPLOY_ROOT}/registry.json"
-readonly LOCK_FILE="${DEPLOY_ROOT}/.deploy.lock"
+readonly LOCK_DIR="${DEPLOY_ROOT}/.deploy.lock"
 
 # Runtime services to restart (excludes infrastructure: postgres, redpanda, valkey)
 readonly RUNTIME_SERVICES=(
@@ -111,7 +111,7 @@ OPTIONS
 
 DEPLOYMENT ROOT
     ~/.omnibase/infra/
-    +-- .deploy.lock                        flock concurrency guard
+    +-- .deploy.lock/                       mkdir-based concurrency guard
     +-- registry.json                       tracks active deployment
     +-- deployed/
         +-- {version}/
@@ -351,15 +351,18 @@ check_git_dirty() {
 acquire_lock() {
     mkdir -p "${DEPLOY_ROOT}"
 
-    # Open lock file on fd 200
-    exec 200>"${LOCK_FILE}"
-
-    if ! flock -n 200; then
-        log_error "Another deployment is in progress (locked by ${LOCK_FILE})."
+    # Use mkdir for atomic, cross-platform locking (works on macOS + Linux).
+    # mkdir is atomic on all POSIX systems -- it either creates the directory
+    # or fails if it already exists, with no race window.
+    if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
+        log_error "Another deployment is in progress (locked by ${LOCK_DIR})."
         log_error "If the previous deployment crashed, remove the lock manually:"
-        log_error "  rm ${LOCK_FILE}"
+        log_error "  rmdir ${LOCK_DIR}"
         exit 2
     fi
+
+    # Ensure lock is released on exit (normal, error, or signal)
+    trap 'rmdir "${LOCK_DIR}" 2>/dev/null || true' EXIT INT TERM HUP
 
     log_info "Acquired deployment lock."
 }
