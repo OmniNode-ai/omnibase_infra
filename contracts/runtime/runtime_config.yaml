@@ -7,23 +7,29 @@
 # during bootstrap to configure the RuntimeHostProcess.
 #
 # =============================================================================
-# CONFIGURATION PRIORITY (highest to lowest):
+# CONFIGURATION PRIORITY:
 # =============================================================================
-#   1. Environment variables (ONEX_* prefixed) - always take precedence
-#   2. Contract values (this file)
-#   3. Model defaults (in ModelRuntimeConfig)
+# When this file exists, contract values are loaded and used directly.
+# Only ONEX_ENVIRONMENT and ONEX_EVENT_BUS_TYPE override contract values
+# at runtime (applied by bootstrap after config loading).
+#
+# When this file does NOT exist, the kernel falls back to env vars and
+# model defaults: ONEX_INPUT_TOPIC, ONEX_OUTPUT_TOPIC, ONEX_GROUP_ID.
 #
 # =============================================================================
-# ENVIRONMENT VARIABLE OVERRIDES:
+# ENVIRONMENT VARIABLES:
 # =============================================================================
-#   ONEX_INPUT_TOPIC    - Override input_topic
-#   ONEX_OUTPUT_TOPIC   - Override output_topic
-#   ONEX_GROUP_ID       - Override group_id
+# Runtime overrides (always applied, even when this file is present):
 #   ONEX_ENVIRONMENT    - Override event_bus.environment
 #   ONEX_EVENT_BUS_TYPE - Override event_bus.type ("inmemory" or "kafka")
-#                         Use "inmemory" for CI/testing without Kafka infrastructure
-#   ONEX_LOG_LEVEL      - Override logging level (used directly by kernel,
-#                         not through this contract)
+#                         Use "inmemory" for CI/testing without Kafka
+#   ONEX_LOG_LEVEL      - Logging level (used directly by kernel, not
+#                         through this contract)
+#
+# Fallback defaults (only when this file is absent):
+#   ONEX_INPUT_TOPIC    - Default input_topic
+#   ONEX_OUTPUT_TOPIC   - Default output_topic
+#   ONEX_GROUP_ID       - Default group_id
 #
 # =============================================================================
 # FIELD STATUS LEGEND:
@@ -37,8 +43,9 @@ contract_version: "1.0.0"
 name: "runtime_config"
 description: "Configuration for ONEX runtime kernel"
 # Topic configuration [ACTIVE - used by RuntimeHostProcess]
-# IMPORTANT: These values are overridden by ONEX_INPUT_TOPIC, ONEX_OUTPUT_TOPIC,
-# ONEX_GROUP_ID environment variables in E2E testing (docker-compose.e2e.yml)
+# These values take precedence when this file is loaded. ONEX_INPUT_TOPIC,
+# ONEX_OUTPUT_TOPIC, ONEX_GROUP_ID are only used as fallback defaults when
+# this config file is absent (see load_runtime_config in service_kernel.py).
 input_topic: "onex.evt.platform.node-introspection.v1"
 output_topic: "onex.evt.platform.registration-completed.v1"
 group_id: "onex-runtime-e2e"

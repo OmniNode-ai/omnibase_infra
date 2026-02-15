@@ -69,6 +69,8 @@ from omnibase_infra.enums import EnumConsumerGroupPurpose, EnumInfraTransportTyp
 from omnibase_infra.errors import (
     DbOwnershipMismatchError,
     DbOwnershipMissingError,
+    EventRegistryFingerprintMismatchError,
+    EventRegistryFingerprintMissingError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
@@ -980,10 +982,13 @@ async def bootstrap() -> int:
                 DbOwnershipMissingError,
                 SchemaFingerprintMismatchError,
                 SchemaFingerprintMissingError,
+                EventRegistryFingerprintMismatchError,
+                EventRegistryFingerprintMissingError,
             ):
                 # Hard gates -- propagate to kill the kernel.
                 # DB ownership errors (OMN-2085): wrong database.
                 # Schema fingerprint errors (OMN-2087): schema drift.
+                # Event registry fingerprint errors (OMN-2088): event registration drift.
                 raise
             except Exception:
                 logger.warning(
