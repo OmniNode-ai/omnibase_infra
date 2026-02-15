@@ -50,6 +50,9 @@ from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProce
 from omnibase_infra.testing import is_ci_environment
 
 # Evaluated at import time intentionally; CI env vars are set before pytest runs.
+# is_ci_environment() checks two environment variables:
+#   - CI: generic flag used by most CI systems (true/1/yes)
+#   - GITHUB_ACTIONS: GitHub Actions specific (true/1/yes)
 IS_CI = is_ci_environment()
 
 # =============================================================================

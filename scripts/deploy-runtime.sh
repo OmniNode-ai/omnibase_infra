@@ -347,9 +347,9 @@ read_git_sha() {
     local repo_root="$1"
     local sha
 
-    # 7-char SHA prefixes may collide in very large repos, but are sufficient
-    # for deployment directory naming in this context.
-    sha="$(git -C "${repo_root}" rev-parse --short=7 HEAD 2>/dev/null || true)"
+    # 12-char SHA prefix for deployment directory naming. 7-char prefixes risk
+    # collisions even in moderately sized repos; 12 chars is effectively unique.
+    sha="$(git -C "${repo_root}" rev-parse --short=12 HEAD 2>/dev/null || true)"
 
     if [[ -z "${sha}" ]]; then
         log_error "Could not determine git SHA. Is this a git repository?"
@@ -379,7 +379,13 @@ acquire_lock() {
     # Use mkdir for atomic, cross-platform locking (works on macOS + Linux).
     # mkdir is atomic on all POSIX systems -- it either creates the directory
     # or fails if it already exists, with no race window.
-    if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
+    if mkdir "${LOCK_DIR}" 2>/dev/null; then
+        # Lock acquired -- write PID immediately to avoid a window where the
+        # lock directory exists but has no PID file (Issue: if the script is
+        # killed between mkdir and PID write, subsequent runs cannot verify
+        # the lock owner and refuse to proceed).
+        echo $$ > "${pid_file}"
+    else
         # Lock directory exists -- check for stale lock by verifying the
         # owning PID is still alive.
         if [[ -f "${pid_file}" ]]; then
@@ -397,6 +403,18 @@ acquire_lock() {
                     log_warn "Stale lock detected (PID ${lock_pid} is no longer running)."
                 fi
                 log_warn "Cleaning up stale lock and re-acquiring..."
+                # Re-read the PID file before removing the lock directory.
+                # Between the initial stale check and this point, another
+                # process may have legitimately acquired the lock. If the
+                # PID file now contains a live process, abort cleanup.
+                local recheck_pid
+                recheck_pid="$(cat "${pid_file}" 2>/dev/null || true)"
+                if [[ -n "${recheck_pid}" ]] && [[ "${recheck_pid}" =~ ^[0-9]+$ ]] \
+                        && kill -0 "${recheck_pid}" 2>/dev/null; then
+                    log_error "Lock was re-acquired by PID ${recheck_pid} during stale cleanup."
+                    log_error "A concurrent deployment is legitimately running. Exiting."
+                    exit 2
+                fi
                 rm -rf "${LOCK_DIR}"
                 # Retry mkdir in a short loop to handle the race between rm
                 # and mkdir where another process could acquire the lock.
@@ -404,6 +422,10 @@ acquire_lock() {
                 local retry
                 for retry in 1 2 3; do
                     if mkdir "${LOCK_DIR}" 2>/dev/null; then
+                        # Write PID immediately after acquiring the lock to
+                        # eliminate the window where the lock exists without
+                        # a PID file.
+                        echo $$ > "${pid_file}"
                         lock_acquired=true
                         break
                     fi
@@ -417,7 +439,7 @@ acquire_lock() {
                     log_error "A concurrent deployment is legitimately running. Exiting."
                     exit 2
                 fi
-                # Fall through to write new PID file and continue
+                # Fall through to set up traps and continue
             else
                 log_error "Another deployment is in progress (locked by PID ${lock_pid})."
                 log_error "If the previous deployment crashed, remove the lock manually:"
@@ -433,13 +455,15 @@ acquire_lock() {
         fi
     fi
 
-    # Write our PID into the lock directory for stale detection
-    echo $$ > "${pid_file}"
-
     # Ensure lock is released on exit (normal, error, or signal).
     # EXIT handles cleanup for normal/error exits.
     # INT/TERM/HUP must explicitly exit after cleanup so the script
     # does not continue executing after receiving a termination signal.
+    #
+    # ASSUMPTION: acquire_lock() is only called during execute mode (see main()).
+    # Dry-run and --print-compose-cmd exit before reaching this code.
+    # These traps REPLACE (not chain) any existing EXIT/INT/TERM/HUP traps;
+    # this is acceptable because no prior traps are set in this script.
     trap 'rm -rf "${LOCK_DIR}" 2>/dev/null || true' EXIT
     trap 'rm -rf "${LOCK_DIR}" 2>/dev/null || true; exit 1' INT TERM HUP
 
@@ -478,7 +502,9 @@ guard_existing_deployment() {
 count_files() {
     local dir="$1"
     if [[ -d "${dir}" ]]; then
-        find "${dir}" -type f | wc -l | tr -d ' '
+        # -maxdepth 5: prevent infinite traversal in deeply nested trees
+        # -not -type l: skip symlinks to avoid following links outside the tree
+        find "${dir}" -maxdepth 5 -type f -not -type l | wc -l | tr -d ' '
     else
         echo "0"
     fi
@@ -672,6 +698,12 @@ write_registry() {
 
     local tmp_file="${REGISTRY_FILE}.tmp"
 
+    # Restrict temp file permissions to 600 (owner-only read/write) to prevent
+    # other users from reading deployment metadata while the file is being written.
+    local old_umask
+    old_umask="$(umask)"
+    umask 077
+
     jq -n \
         --arg active_version "${version}" \
         --arg git_sha "${git_sha}" \
@@ -689,6 +721,9 @@ write_registry() {
             compose_project: $compose_project,
             profile: $profile
         }' > "${tmp_file}"
+
+    # Restore original umask before continuing
+    umask "${old_umask}"
 
     # Atomic rename
     mv "${tmp_file}" "${REGISTRY_FILE}"
@@ -1002,6 +1037,24 @@ main() {
     local version git_sha
     version="$(read_version "${repo_root}")"
     git_sha="$(read_git_sha "${repo_root}")"
+
+    # Validate version format before using it in path construction.
+    # A malformed version could create unexpected directory structures.
+    if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        log_error "Invalid version format: '${version}'"
+        log_error "Expected semantic version (e.g., 1.2.3). Check pyproject.toml [tool.poetry] version."
+        exit 1
+    fi
+
+    # Validate git SHA format before using it in directory path construction.
+    # A malformed SHA could create unexpected directory structures or indicate
+    # a corrupted git state.
+    if [[ ! "${git_sha}" =~ ^[0-9a-f]+$ ]]; then
+        log_error "Invalid git SHA format: '${git_sha}'"
+        log_error "Expected lowercase hex string. Is the git repository corrupted?"
+        exit 1
+    fi
+
     log_info "Version: ${version}"
     log_info "Git SHA: ${git_sha}"
     check_git_dirty "${repo_root}"
