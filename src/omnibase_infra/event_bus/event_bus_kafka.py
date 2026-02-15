@@ -1111,8 +1111,8 @@ class EventBusKafka(
         #
         # Appending the topic name ensures each per-topic consumer gets its own
         # consumer group, which is the correct Kafka semantics for this pattern.
-        effective_group_id = f"{group_id.strip()}.{topic}"
-        if not effective_group_id:
+        stripped_group_id = group_id.strip()
+        if not stripped_group_id:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.KAFKA,
@@ -1126,6 +1126,7 @@ class EventBusKafka(
                 parameter="group_id",
                 value=group_id,
             )
+        effective_group_id = f"{stripped_group_id}.{topic}"
 
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(

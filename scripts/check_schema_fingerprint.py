@@ -57,7 +57,20 @@ def compute_migration_fingerprint(migrations_dir: Path) -> tuple[str, int]:
 
     Returns:
         Tuple of (fingerprint_hex, file_count).
+
+    Raises:
+        FileNotFoundError: If migrations_dir does not exist or is not a
+            directory.
     """
+    if not migrations_dir.exists():
+        raise FileNotFoundError(
+            f"Migrations directory does not exist: {migrations_dir}"
+        )
+    if not migrations_dir.is_dir():
+        raise FileNotFoundError(
+            f"Migrations path is not a directory: {migrations_dir}"
+        )
+
     sql_files = sorted(migrations_dir.glob("*.sql"))
 
     if not sql_files:
