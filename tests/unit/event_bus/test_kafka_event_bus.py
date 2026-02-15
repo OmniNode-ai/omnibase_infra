@@ -1363,7 +1363,7 @@ class TestKafkaEventBusConsumerGroupId:
     async def test_group_id_not_double_suffixed(
         self, mock_producer: AsyncMock, mock_consumer: AsyncMock
     ) -> None:
-        """Test group_id already ending with topic is not double-suffixed."""
+        """Test group_id already ending with .__t.{topic} is not double-suffixed."""
         consumer_cls = MagicMock(return_value=mock_consumer)
         with (
             patch(
@@ -1378,20 +1378,22 @@ class TestKafkaEventBusConsumerGroupId:
             config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
             event_bus = EventBusKafka(config=config)
 
-            # group_id already ends with ".events" — should NOT become
-            # "my-group.events.events"
-            await event_bus._start_consumer_for_topic("events", "my-group.events")
+            # group_id already ends with ".__t.events" — should NOT become
+            # "my-group.__t.events.__t.events"
+            await event_bus._start_consumer_for_topic(
+                "events", "my-group.__t.events"
+            )
 
             # Verify the consumer was created with the un-doubled group_id
             consumer_cls.assert_called_once()
             call_kwargs = consumer_cls.call_args
-            assert call_kwargs.kwargs["group_id"] == "my-group.events"
+            assert call_kwargs.kwargs["group_id"] == "my-group.__t.events"
 
     @pytest.mark.asyncio
     async def test_group_id_gets_topic_suffix_when_missing(
         self, mock_producer: AsyncMock, mock_consumer: AsyncMock
     ) -> None:
-        """Test normal group_id gets .{topic} appended."""
+        """Test normal group_id gets .__t.{topic} appended."""
         consumer_cls = MagicMock(return_value=mock_consumer)
         with (
             patch(
@@ -1410,7 +1412,7 @@ class TestKafkaEventBusConsumerGroupId:
 
             consumer_cls.assert_called_once()
             call_kwargs = consumer_cls.call_args
-            assert call_kwargs.kwargs["group_id"] == "my-group.my-topic"
+            assert call_kwargs.kwargs["group_id"] == "my-group.__t.my-topic"
 
     @pytest.mark.asyncio
     async def test_group_id_partial_match_still_suffixed(
@@ -1419,7 +1421,7 @@ class TestKafkaEventBusConsumerGroupId:
         """Test group_id with partial topic match still gets suffix appended.
 
         For example, group_id="my-group.event" with topic="events" should
-        become "my-group.event.events" (not treated as already-suffixed).
+        become "my-group.event.__t.events" (not treated as already-suffixed).
         """
         consumer_cls = MagicMock(return_value=mock_consumer)
         with (
@@ -1439,7 +1441,40 @@ class TestKafkaEventBusConsumerGroupId:
 
             consumer_cls.assert_called_once()
             call_kwargs = consumer_cls.call_args
-            assert call_kwargs.kwargs["group_id"] == "my-group.event.events"
+            assert call_kwargs.kwargs["group_id"] == "my-group.event.__t.events"
+
+    @pytest.mark.asyncio
+    async def test_group_id_coincidental_suffix_not_false_positive(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that coincidental endswith match does not skip suffix.
+
+        This is the core false-positive scenario: group_id="foo.bar" with
+        topic="bar" would previously match ".bar" via endswith and incorrectly
+        skip suffixing.  With the .__t. delimiter, the suffix is always applied
+        because "foo.bar" does not end with ".__t.bar".
+        """
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
+            event_bus = EventBusKafka(config=config)
+
+            await event_bus._start_consumer_for_topic("bar", "foo.bar")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            # Previously this would incorrectly remain "foo.bar" due to
+            # endswith(".bar") matching.  Now it correctly gets the topic suffix.
+            assert call_kwargs.kwargs["group_id"] == "foo.bar.__t.bar"
 
 
 class TestKafkaEventBusStartConsuming:

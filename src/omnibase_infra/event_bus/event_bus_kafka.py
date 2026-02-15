@@ -1087,13 +1087,14 @@ class EventBusKafka(
             topic: Topic to consume from
             group_id: Base consumer group ID. This should be derived
                 from ``compute_consumer_group_id()`` or an explicit override.
-                The topic name is appended as a ``.{topic}`` suffix to create
-                per-topic consumer groups and prevent rebalance storms.
+                The topic name is appended as a ``.__t.{topic}`` suffix to
+                create per-topic consumer groups and prevent rebalance storms.
 
                 The suffix is **idempotent**: if ``group_id`` already ends with
-                ``.{topic}``, the suffix is not appended again.  This prevents
-                double-suffixing when callers pass a pre-scoped group ID
-                (e.g. ``"my-group.events"`` with ``topic="events"``).
+                ``.__t.{topic}``, the suffix is not appended again.  This
+                prevents double-suffixing when callers pass a pre-scoped
+                group ID (e.g. ``"my-group.__t.events"`` with
+                ``topic="events"``).
 
         Raises:
             ProtocolConfigurationError: If group_id is empty or contains only
@@ -1137,9 +1138,18 @@ class EventBusKafka(
         # Appending the topic name ensures each per-topic consumer gets its own
         # consumer group, which is the correct Kafka semantics for this pattern.
         #
-        # The suffix is idempotent: if the group_id already ends with ".{topic}",
-        # we skip appending to avoid double-suffixing (e.g. "my-group.events.events").
-        topic_suffix = f".{topic}"
+        # The suffix uses a distinctive delimiter (".__t.") to prevent false
+        # positives from coincidental name collisions.  A plain ".{topic}" suffix
+        # could match an unrelated segment of a structured group_id — for example,
+        # group_id="foo.bar" with topic="bar" would incorrectly match ".bar" even
+        # though the ".bar" in the group_id is an unrelated segment, not a
+        # previously-applied topic suffix.
+        #
+        # The ".__t." infix is chosen because:
+        #   - It is unlikely to appear in organic group IDs
+        #   - It is short enough to stay within Kafka's 255-char group_id limit
+        #   - It makes the idempotency check unambiguous
+        topic_suffix = f".__t.{topic}"
         effective_group_id = (
             stripped_group_id
             if stripped_group_id.endswith(topic_suffix)
