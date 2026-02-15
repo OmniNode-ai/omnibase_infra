@@ -59,6 +59,7 @@ readonly HEALTH_CHECK_INTERVAL=4
 MODE="dry-run"           # dry-run | execute
 FORCE=false
 RESTART=false
+# Default is hardcoded and safe; any changes must comply with ^[a-zA-Z0-9_-]+$ (see parse_args).
 COMPOSE_PROFILE="runtime"
 PRINT_COMPOSE_CMD=false
 
@@ -346,6 +347,8 @@ read_git_sha() {
     local repo_root="$1"
     local sha
 
+    # 7-char SHA prefixes may collide in very large repos, but are sufficient
+    # for deployment directory naming in this context.
     sha="$(git -C "${repo_root}" rev-parse --short=7 HEAD 2>/dev/null || true)"
 
     if [[ -z "${sha}" ]]; then
@@ -382,12 +385,36 @@ acquire_lock() {
         if [[ -f "${pid_file}" ]]; then
             local lock_pid
             lock_pid="$(cat "${pid_file}" 2>/dev/null || true)"
-            if [[ -n "${lock_pid}" ]] && ! kill -0 "${lock_pid}" 2>/dev/null; then
-                log_warn "Stale lock detected (PID ${lock_pid} is no longer running)."
+            # Validate PID is numeric before using it in kill -0.
+            # A corrupted or empty PID file is treated as a stale lock.
+            if [[ -n "${lock_pid}" ]] && ! [[ "${lock_pid}" =~ ^[0-9]+$ ]]; then
+                log_warn "Stale lock detected (PID file contains non-numeric value: '${lock_pid}')."
+                log_warn "Treating as corrupted lock and cleaning up..."
+                lock_pid=""
+            fi
+            if [[ -z "${lock_pid}" ]] || ! kill -0 "${lock_pid}" 2>/dev/null; then
+                if [[ -n "${lock_pid}" ]]; then
+                    log_warn "Stale lock detected (PID ${lock_pid} is no longer running)."
+                fi
                 log_warn "Cleaning up stale lock and re-acquiring..."
                 rm -rf "${LOCK_DIR}"
-                if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
-                    log_error "Failed to re-acquire lock after stale cleanup."
+                # Retry mkdir in a short loop to handle the race between rm
+                # and mkdir where another process could acquire the lock.
+                local lock_acquired=false
+                local retry
+                for retry in 1 2 3; do
+                    if mkdir "${LOCK_DIR}" 2>/dev/null; then
+                        lock_acquired=true
+                        break
+                    fi
+                    # Another process grabbed the lock between our rm and mkdir.
+                    # Brief sleep before retrying to avoid tight spin.
+                    log_warn "Lock contention on retry ${retry}/3, waiting..."
+                    sleep 1
+                done
+                if [[ "${lock_acquired}" != true ]]; then
+                    log_error "Another process acquired the lock during stale cleanup."
+                    log_error "A concurrent deployment is legitimately running. Exiting."
                     exit 2
                 fi
                 # Fall through to write new PID file and continue
@@ -534,8 +561,12 @@ sync_files() {
 
     # 4. Docker files -- with preserve allowlist
     #    .env, .env.local, certs/, overrides/ survive --delete
+    #    Excludes are relative to docker/ (the rsync source root). Only top-level
+    #    .env and .env.local are excluded; nested .env files in subdirectories are NOT.
     log_info "Syncing docker/ (preserving .env, .env.local, certs/, overrides/)..."
     log_cmd "rsync -a --delete --exclude='.env' --exclude='.env.local' --exclude='certs/' --exclude='overrides/' docker/ -> deployed"
+    # Note: -a preserves source permissions, but the .env file is excluded from
+    # rsync and instead copied via install -m 600 in setup_env() for restricted perms.
     rsync -a --delete \
         --exclude='.env' \
         --exclude='.env.local' \
@@ -602,12 +633,19 @@ sanity_check() {
         env_file_args=(--env-file "${deploy_target}/docker/.env")
     fi
 
-    if ! docker compose \
+    local config_output
+    if ! config_output="$(docker compose \
         -p "${compose_project}" \
         -f "${compose_file}" \
         ${env_file_args[@]+"${env_file_args[@]}"} \
-        config --quiet 2>&1; then
+        config --quiet 2>&1)"; then
         log_error "Compose configuration validation failed."
+        if [[ -n "${config_output}" ]]; then
+            log_error "Compose output:"
+            while IFS= read -r line; do
+                log_error "  ${line}"
+            done <<< "${config_output}"
+        fi
         log_error "The deployed directory structure may be incomplete."
         log_error "Check that src/, contracts/, and docker/ are properly synced."
         exit 1

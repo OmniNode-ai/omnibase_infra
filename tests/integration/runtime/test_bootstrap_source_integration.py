@@ -49,6 +49,7 @@ from omnibase_infra.runtime.handler_registry import (
 from omnibase_infra.runtime.service_runtime_host_process import RuntimeHostProcess
 from omnibase_infra.testing import is_ci_environment
 
+# Evaluated at import time intentionally; CI env vars are set before pytest runs.
 IS_CI = is_ci_environment()
 
 # =============================================================================
