@@ -70,7 +70,7 @@ class TestTopicProvisioner:
                 ),
             },
         ):
-            result = await manager.ensure_platform_topics_exist()
+            result = await manager.ensure_provisioned_topics_exist()
 
         assert result["status"] == "success"
         assert len(result["created"]) == len(ALL_PROVISIONED_SUFFIXES)
@@ -104,7 +104,7 @@ class TestTopicProvisioner:
                 ),
             },
         ):
-            result = await manager.ensure_platform_topics_exist()
+            result = await manager.ensure_provisioned_topics_exist()
 
         assert result["status"] == "unavailable"
         assert len(result["failed"]) == len(ALL_PROVISIONED_SUFFIXES)
@@ -125,7 +125,7 @@ class TestTopicProvisioner:
             # Reload so the function-level import sees the patched modules
             importlib.reload(mod)
             reloaded_manager = mod.TopicProvisioner(bootstrap_servers="localhost:9092")
-            result = await reloaded_manager.ensure_platform_topics_exist()
+            result = await reloaded_manager.ensure_provisioned_topics_exist()
 
         # Restore module for other tests
         importlib.reload(mod)
@@ -163,7 +163,7 @@ class TestTopicProvisioner:
                 ),
             },
         ):
-            result = await manager.ensure_platform_topics_exist()
+            result = await manager.ensure_provisioned_topics_exist()
 
         assert result["status"] == "success"
         assert len(result["existing"]) == len(ALL_PROVISIONED_SUFFIXES)

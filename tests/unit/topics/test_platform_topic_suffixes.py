@@ -30,6 +30,8 @@ from omnibase_infra.topics import (
     SUFFIX_RUNTIME_TICK,
 )
 
+pytestmark = [pytest.mark.unit]
+
 
 class TestPlatformTopicSuffixes:
     """Tests for platform-reserved topic suffix constants."""

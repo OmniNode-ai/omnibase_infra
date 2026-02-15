@@ -60,7 +60,7 @@ class TopicProvisioner:
 
     Example:
         >>> provisioner = TopicProvisioner()
-        >>> await provisioner.ensure_platform_topics_exist()
+        >>> await provisioner.ensure_provisioned_topics_exist()
     """
 
     def __init__(
@@ -80,7 +80,7 @@ class TopicProvisioner:
         )
         self._request_timeout_ms = request_timeout_ms
 
-    async def ensure_platform_topics_exist(
+    async def ensure_provisioned_topics_exist(
         self,
         correlation_id: UUID | None = None,
     ) -> dict[str, list[str] | str]:
@@ -254,7 +254,7 @@ class TopicProvisioner:
         """Ensure a single topic exists with optional custom config.
 
         Creates a new AIOKafkaAdminClient connection per call. For creating
-        multiple topics, prefer :meth:`ensure_platform_topics_exist` which
+        multiple topics, prefer :meth:`ensure_provisioned_topics_exist` which
         reuses a single admin connection for all topics.
 
         Args:
@@ -356,7 +356,7 @@ def _cli_main() -> None:
 
     async def _run() -> None:
         provisioner = TopicProvisioner()
-        result = await provisioner.ensure_platform_topics_exist()
+        result = await provisioner.ensure_provisioned_topics_exist()
         print(json.dumps(result, indent=2))
 
     asyncio.run(_run())

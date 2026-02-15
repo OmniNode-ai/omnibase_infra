@@ -491,7 +491,7 @@ def registry_get_node(node_id: str) -> None:
 
 @registry.command("list-topics")
 def registry_list_topics() -> None:
-    """List all ONEX platform topics."""
+    """List all ONEX provisioned topics."""
     try:
         _run_list_topics()
     except SystemExit:
