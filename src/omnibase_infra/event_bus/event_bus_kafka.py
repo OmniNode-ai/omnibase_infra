@@ -1085,13 +1085,21 @@ class EventBusKafka(
 
         Args:
             topic: Topic to consume from
-            group_id: Fully qualified consumer group ID. This should be derived
+            group_id: Base consumer group ID. This should be derived
                 from ``compute_consumer_group_id()`` or an explicit override.
-                The ID is used directly without any prefix modification.
+                The topic name is appended as a ``.__t.{topic}`` suffix to
+                create per-topic consumer groups and prevent rebalance storms.
+
+                The suffix is **idempotent**: if ``group_id`` already ends with
+                ``.__t.{topic}``, the suffix is not appended again.  This
+                prevents double-suffixing when callers pass a pre-scoped
+                group ID (e.g. ``"my-group.__t.events"`` with
+                ``topic="events"``).
 
         Raises:
-            ProtocolConfigurationError: If group_id is empty (must be derived from
-                compute_consumer_group_id or provided as explicit override)
+            ProtocolConfigurationError: If group_id is empty or contains only
+                whitespace (must be derived from compute_consumer_group_id or
+                provided as explicit override)
             InfraTimeoutError: If consumer startup times out after timeout_seconds
             InfraConnectionError: If consumer fails to connect to Kafka brokers
         """
@@ -1101,10 +1109,10 @@ class EventBusKafka(
         correlation_id = uuid4()
         sanitized_servers = self._sanitize_bootstrap_servers(self._bootstrap_servers)
 
-        # Use group_id directly - it's already fully qualified from compute_consumer_group_id()
-        # or an explicit override. Empty group_id indicates a bug in the caller.
-        effective_group_id = group_id.strip()
-        if not effective_group_id:
+        # Validate group_id before any processing — reject whitespace-only IDs
+        # immediately so callers get a clear error.
+        stripped_group_id = group_id.strip()
+        if not stripped_group_id:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.KAFKA,
@@ -1118,6 +1126,35 @@ class EventBusKafka(
                 parameter="group_id",
                 value=group_id,
             )
+
+        # Scope group_id per topic to prevent rebalance storms.
+        #
+        # Each subscribe() call creates a separate AIOKafkaConsumer for one topic.
+        # If multiple consumers share the same group_id, Kafka treats them as
+        # competing members and constantly rebalances partitions between them —
+        # but since each consumer is subscribed to only its own topic, the
+        # partition assignments thrash without any messages being processed.
+        #
+        # Appending the topic name ensures each per-topic consumer gets its own
+        # consumer group, which is the correct Kafka semantics for this pattern.
+        #
+        # The suffix uses a distinctive delimiter (".__t.") to prevent false
+        # positives from coincidental name collisions.  A plain ".{topic}" suffix
+        # could match an unrelated segment of a structured group_id — for example,
+        # group_id="foo.bar" with topic="bar" would incorrectly match ".bar" even
+        # though the ".bar" in the group_id is an unrelated segment, not a
+        # previously-applied topic suffix.
+        #
+        # The ".__t." infix is chosen because:
+        #   - It is unlikely to appear in organic group IDs
+        #   - It is short enough to stay within Kafka's 255-char group_id limit
+        #   - It makes the idempotency check unambiguous
+        topic_suffix = f".__t.{topic}"
+        effective_group_id = (
+            stripped_group_id
+            if stripped_group_id.endswith(topic_suffix)
+            else f"{stripped_group_id}{topic_suffix}"
+        )
 
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(

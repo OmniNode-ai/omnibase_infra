@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
 
+@pytest.mark.unit
 class TestLoadRuntimeConfig:
     """Tests for load_runtime_config function."""
 
@@ -242,6 +243,216 @@ class TestLoadRuntimeConfig:
         # error_count matches full count
         assert "error_count" in error_context
         assert error_context["error_count"] == 4
+
+    def test_load_config_yaml_with_env_override_group_id(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that ONEX_GROUP_ID env var overrides group_id from YAML while other fields are preserved."""
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        config_path = runtime_dir / "runtime_config.yaml"
+        test_config = {
+            "input_topic": "yaml-input",
+            "output_topic": "yaml-output",
+            "group_id": "from-yaml",
+        }
+        with open(config_path, "w") as f:
+            yaml.dump(test_config, f)
+
+        monkeypatch.setenv("ONEX_GROUP_ID", "from-env")
+        monkeypatch.delenv("ONEX_INPUT_TOPIC", raising=False)
+        monkeypatch.delenv("ONEX_OUTPUT_TOPIC", raising=False)
+
+        config = load_runtime_config(contracts_dir=tmp_path)
+
+        assert config.consumer_group == "from-env"
+        assert config.input_topic == "yaml-input"
+        assert config.output_topic == "yaml-output"
+
+    def test_load_config_yaml_with_env_override_all_three(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that all three env vars override their corresponding YAML values."""
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        config_path = runtime_dir / "runtime_config.yaml"
+        test_config = {
+            "input_topic": "yaml-input",
+            "output_topic": "yaml-output",
+            "group_id": "yaml-group",
+        }
+        with open(config_path, "w") as f:
+            yaml.dump(test_config, f)
+
+        monkeypatch.setenv("ONEX_GROUP_ID", "env-group")
+        monkeypatch.setenv("ONEX_INPUT_TOPIC", "env-input")
+        monkeypatch.setenv("ONEX_OUTPUT_TOPIC", "env-output")
+
+        config = load_runtime_config(contracts_dir=tmp_path)
+
+        assert config.consumer_group == "env-group"
+        assert config.input_topic == "env-input"
+        assert config.output_topic == "env-output"
+
+    def test_load_config_yaml_env_vars_not_set_uses_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that YAML values are used when no env vars are set."""
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        config_path = runtime_dir / "runtime_config.yaml"
+        test_config = {
+            "input_topic": "yaml-input",
+            "output_topic": "yaml-output",
+            "group_id": "yaml-group",
+        }
+        with open(config_path, "w") as f:
+            yaml.dump(test_config, f)
+
+        monkeypatch.delenv("ONEX_GROUP_ID", raising=False)
+        monkeypatch.delenv("ONEX_INPUT_TOPIC", raising=False)
+        monkeypatch.delenv("ONEX_OUTPUT_TOPIC", raising=False)
+
+        config = load_runtime_config(contracts_dir=tmp_path)
+
+        assert config.consumer_group == "yaml-group"
+        assert config.input_topic == "yaml-input"
+        assert config.output_topic == "yaml-output"
+
+    def test_load_config_yaml_with_env_override_input_topic_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that only ONEX_INPUT_TOPIC overrides YAML while other fields are preserved."""
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        config_path = runtime_dir / "runtime_config.yaml"
+        test_config = {
+            "input_topic": "yaml-input",
+            "output_topic": "yaml-output",
+            "group_id": "yaml-group",
+        }
+        with open(config_path, "w") as f:
+            yaml.dump(test_config, f)
+
+        monkeypatch.setenv("ONEX_INPUT_TOPIC", "env-input")
+        monkeypatch.delenv("ONEX_GROUP_ID", raising=False)
+        monkeypatch.delenv("ONEX_OUTPUT_TOPIC", raising=False)
+
+        config = load_runtime_config(contracts_dir=tmp_path)
+
+        assert config.input_topic == "env-input"
+        assert config.consumer_group == "yaml-group"
+        assert config.output_topic == "yaml-output"
+
+    def test_load_config_env_override_invalid_topic_raises_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that invalid env-var override (e.g., topic with spaces) raises ProtocolConfigurationError."""
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        config_path = runtime_dir / "runtime_config.yaml"
+        test_config = {
+            "input_topic": "yaml-input",
+            "output_topic": "yaml-output",
+            "group_id": "yaml-group",
+        }
+        with open(config_path, "w") as f:
+            yaml.dump(test_config, f)
+
+        # Set an invalid env-var override (spaces not allowed in topic names)
+        monkeypatch.setenv("ONEX_INPUT_TOPIC", "invalid topic with spaces")
+        monkeypatch.delenv("ONEX_GROUP_ID", raising=False)
+        monkeypatch.delenv("ONEX_OUTPUT_TOPIC", raising=False)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_runtime_config(contracts_dir=tmp_path)
+
+        error = exc_info.value
+        assert "Environment variable override validation failed" in str(error)
+        assert "input_topic" in str(error)
+
+    def test_load_config_env_override_invalid_group_id_raises_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that invalid ONEX_GROUP_ID env-var override raises ProtocolConfigurationError."""
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        config_path = runtime_dir / "runtime_config.yaml"
+        test_config = {
+            "input_topic": "yaml-input",
+            "output_topic": "yaml-output",
+            "group_id": "yaml-group",
+        }
+        with open(config_path, "w") as f:
+            yaml.dump(test_config, f)
+
+        # Set an invalid consumer group (spaces not allowed)
+        monkeypatch.setenv("ONEX_GROUP_ID", "bad group name")
+        monkeypatch.delenv("ONEX_INPUT_TOPIC", raising=False)
+        monkeypatch.delenv("ONEX_OUTPUT_TOPIC", raising=False)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_runtime_config(contracts_dir=tmp_path)
+
+        error = exc_info.value
+        assert "Environment variable override validation failed" in str(error)
+        assert "consumer_group" in str(error)
+
+    def test_load_config_env_override_empty_string_raises_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that empty-string env var override raises ProtocolConfigurationError.
+
+        When ONEX_GROUP_ID (or other override env vars) is set to an empty
+        string, load_runtime_config should reject it with a clear diagnostic
+        rather than letting it produce a confusing Pydantic validation error.
+        """
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        config_path = runtime_dir / "runtime_config.yaml"
+        test_config = {
+            "input_topic": "yaml-input",
+            "output_topic": "yaml-output",
+            "group_id": "yaml-group",
+        }
+        with open(config_path, "w") as f:
+            yaml.dump(test_config, f)
+
+        monkeypatch.setenv("ONEX_GROUP_ID", "")
+        monkeypatch.delenv("ONEX_INPUT_TOPIC", raising=False)
+        monkeypatch.delenv("ONEX_OUTPUT_TOPIC", raising=False)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_runtime_config(contracts_dir=tmp_path)
+
+        error = exc_info.value
+        assert "set but empty" in str(error)
+        assert "ONEX_GROUP_ID" in str(error)
+
+    def test_load_config_env_override_valid_values_still_work(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that valid env-var overrides still work after adding validation."""
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        config_path = runtime_dir / "runtime_config.yaml"
+        test_config = {
+            "input_topic": "yaml-input",
+            "output_topic": "yaml-output",
+            "group_id": "yaml-group",
+        }
+        with open(config_path, "w") as f:
+            yaml.dump(test_config, f)
+
+        monkeypatch.setenv("ONEX_INPUT_TOPIC", "valid-env-input")
+        monkeypatch.setenv("ONEX_OUTPUT_TOPIC", "valid-env-output")
+        monkeypatch.setenv("ONEX_GROUP_ID", "valid-env-group")
+
+        config = load_runtime_config(contracts_dir=tmp_path)
+
+        assert config.input_topic == "valid-env-input"
+        assert config.output_topic == "valid-env-output"
+        assert config.consumer_group == "valid-env-group"
 
 
 @pytest.mark.skipif(not _SERVICE_REGISTRY_AVAILABLE, reason=_SKIP_REASON)
