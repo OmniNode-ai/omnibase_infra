@@ -161,7 +161,7 @@ RUN uv pip freeze | grep -v '^\(-e\|@\)' > /tmp/constraints.txt
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --constraint /tmp/constraints.txt \
-    omniintelligence==0.1.1
+    omniintelligence==0.2.0
 
 # ============================================================================
 # Runtime Stage - Minimal production image

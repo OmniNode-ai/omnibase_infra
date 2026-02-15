@@ -1,15 +1,23 @@
-"""Platform-reserved topic suffixes for ONEX infrastructure.
+"""Platform and domain topic suffixes for ONEX infrastructure.
 
-WARNING: These are platform-reserved suffixes. Domain services must NOT
-import from this module. Domain topics should be defined in domain contracts.
+This module defines topic suffixes for:
+  1. Platform-reserved topics (producer: ``platform``) -- infrastructure internals
+  2. Domain plugin topics (producer: ``omniintelligence``, ``pattern``, etc.) --
+     provisioned by the runtime so domain plugins find their topics ready.
+
+Domain services should NOT import individual suffix constants from this module.
+They should subscribe to topics by name from their own contracts. The combined
+``ALL_PROVISIONED_TOPIC_SPECS`` registry is consumed by ``TopicProvisioner`` at
+startup to create all required topics.
 
 Topic Suffix Format:
-    onex.<kind>.<domain>.<event-name>.v<version>
+    onex.<kind>.<producer>.<event-name>.v<version>
 
     Structure:
         - onex: Required prefix for all ONEX topics
         - kind: Message category (evt, cmd, intent, snapshot, dlq)
-        - domain: Routing domain -- ``platform`` for infrastructure
+        - producer: Routing domain -- ``platform`` for infrastructure,
+          domain name for plugins (e.g., ``omniintelligence``)
         - event-name: Descriptive name using kebab-case
         - version: Semantic version (v1, v2, etc.)
 
@@ -24,6 +32,7 @@ Topic Suffix Format:
         onex.evt.platform.node-registration.v1
         onex.cmd.platform.request-introspection.v1
         onex.intent.platform.runtime-tick.v1
+        onex.cmd.omniintelligence.claude-hook-event.v1
 
 Usage:
     from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
@@ -133,6 +142,55 @@ confirming that the node acknowledges successful registration.
 """
 
 # =============================================================================
+# INTELLIGENCE DOMAIN TOPIC SUFFIXES (omniintelligence plugin)
+# =============================================================================
+# These topics are consumed/produced by PluginIntelligence. They are provisioned
+# alongside platform topics so the plugin finds them ready at startup.
+
+# Command topics (inbound to intelligence pipeline)
+SUFFIX_INTELLIGENCE_CLAUDE_HOOK_EVENT: str = (
+    "onex.cmd.omniintelligence.claude-hook-event.v1"
+)
+"""Topic for Claude hook events dispatched to the intelligence pipeline."""
+
+SUFFIX_INTELLIGENCE_SESSION_OUTCOME: str = (
+    "onex.cmd.omniintelligence.session-outcome.v1"
+)
+"""Topic for session outcome commands (success/failure attribution)."""
+
+SUFFIX_INTELLIGENCE_PATTERN_LIFECYCLE_TRANSITION: str = (
+    "onex.cmd.omniintelligence.pattern-lifecycle-transition.v1"
+)
+"""Topic for pattern lifecycle transition commands."""
+
+# Event topics (outbound from intelligence pipeline)
+SUFFIX_INTELLIGENCE_INTENT_CLASSIFIED: str = (
+    "onex.evt.omniintelligence.intent-classified.v1"
+)
+"""Topic for intent classification events."""
+
+SUFFIX_INTELLIGENCE_PATTERN_LEARNED: str = (
+    "onex.evt.omniintelligence.pattern-learned.v1"
+)
+"""Topic for pattern learning events (new pattern discovered)."""
+
+SUFFIX_INTELLIGENCE_PATTERN_STORED: str = "onex.evt.omniintelligence.pattern-stored.v1"
+"""Topic for pattern storage events (pattern persisted to DB)."""
+
+SUFFIX_INTELLIGENCE_PATTERN_PROMOTED: str = (
+    "onex.evt.omniintelligence.pattern-promoted.v1"
+)
+"""Topic for pattern promotion events (candidate -> validated)."""
+
+SUFFIX_INTELLIGENCE_PATTERN_LIFECYCLE_TRANSITIONED: str = (
+    "onex.evt.omniintelligence.pattern-lifecycle-transitioned.v1"
+)
+"""Topic for pattern lifecycle transition completion events."""
+
+SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED: str = "onex.evt.pattern.discovered.v1"
+"""Topic for generic pattern discovery events."""
+
+# =============================================================================
 # PLATFORM TOPIC SPEC REGISTRY
 # =============================================================================
 
@@ -174,7 +232,44 @@ to create topics on startup.
 """
 
 # =============================================================================
-# AGGREGATE SUFFIX TUPLE (derived from specs for backwards compat)
+# INTELLIGENCE DOMAIN TOPIC SPEC REGISTRY
+# =============================================================================
+
+ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
+    # Command topics (3 partitions each — matches e2e compose)
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_CLAUDE_HOOK_EVENT, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_SESSION_OUTCOME, partitions=3),
+    ModelTopicSpec(
+        suffix=SUFFIX_INTELLIGENCE_PATTERN_LIFECYCLE_TRANSITION, partitions=3
+    ),
+    # Event topics (3 partitions each)
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_INTENT_CLASSIFIED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_PATTERN_LEARNED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_PATTERN_STORED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_PATTERN_PROMOTED, partitions=3),
+    ModelTopicSpec(
+        suffix=SUFFIX_INTELLIGENCE_PATTERN_LIFECYCLE_TRANSITIONED, partitions=3
+    ),
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED, partitions=3),
+)
+"""Intelligence domain topic specs provisioned for PluginIntelligence."""
+
+# =============================================================================
+# COMBINED PROVISIONED TOPIC SPECS
+# =============================================================================
+
+ALL_PROVISIONED_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
+    ALL_PLATFORM_TOPIC_SPECS + ALL_INTELLIGENCE_TOPIC_SPECS
+)
+"""All topic specs to be provisioned by TopicProvisioner at startup.
+
+Combines platform-reserved and domain plugin topic specs into a single
+registry consumed by service_topic_manager.py. This is the single source
+of truth for topic creation.
+"""
+
+# =============================================================================
+# AGGREGATE SUFFIX TUPLES
 # =============================================================================
 
 ALL_PLATFORM_SUFFIXES: tuple[str, ...] = tuple(
@@ -184,6 +279,15 @@ ALL_PLATFORM_SUFFIXES: tuple[str, ...] = tuple(
 
 Derived from ALL_PLATFORM_TOPIC_SPECS for backwards compatibility with
 validation code that iterates suffix strings.
+"""
+
+ALL_PROVISIONED_SUFFIXES: tuple[str, ...] = tuple(
+    spec.suffix for spec in ALL_PROVISIONED_TOPIC_SPECS
+)
+"""Complete tuple of all provisioned topic suffixes (platform + domain).
+
+Derived from ALL_PROVISIONED_TOPIC_SPECS. Includes both platform-reserved
+and domain plugin topics.
 """
 
 # =============================================================================
@@ -198,10 +302,10 @@ def _validate_all_suffixes() -> None:
         OnexError: If any suffix fails validation with details about which
             suffix failed and why.
     """
-    for suffix in ALL_PLATFORM_SUFFIXES:
+    for suffix in ALL_PROVISIONED_SUFFIXES:
         result = validate_topic_suffix(suffix)
         if not result.is_valid:
-            raise OnexError(f"Invalid platform topic suffix '{suffix}': {result.error}")
+            raise OnexError(f"Invalid topic suffix '{suffix}': {result.error}")
 
 
 # Run validation at import time
