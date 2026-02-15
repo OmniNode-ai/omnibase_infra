@@ -132,7 +132,7 @@ find . -name "handler_contract.yaml" -type f
 **Step 3**: Verify all contracts load successfully
 ```bash
 # Run validation
-poetry run python -c "
+uv run python -c "
 from pathlib import Path
 from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
 loader = HandlerPluginLoader()
@@ -143,7 +143,7 @@ print(f'Loaded {len(results)} handlers')
 
 **Step 4**: Run tests to verify handler discovery
 ```bash
-poetry run pytest tests/integration/handlers/ -v
+uv run pytest tests/integration/handlers/ -v
 ```
 
 ### Example Schema Changes
@@ -278,7 +278,7 @@ Add schema validation to CI pipeline:
 # .github/workflows/ci.yml
 - name: Validate Handler Contracts
   run: |
-    poetry run python -c "
+    uv run python -c "
     from pathlib import Path
     from omnibase_infra.runtime.handler_plugin_loader import HandlerPluginLoader
     loader = HandlerPluginLoader()

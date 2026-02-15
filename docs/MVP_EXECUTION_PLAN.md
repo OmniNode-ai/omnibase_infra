@@ -170,53 +170,60 @@ omnibase_infra/
 ### 1.2 pyproject.toml
 
 ```toml
-[tool.poetry]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
 name = "omnibase-infra"
 version = "0.1.0"
 description = "ONEX Infrastructure Services"
-authors = ["OmniNode AI"]
+authors = [{name = "OmniNode AI"}]
 readme = "README.md"
-packages = [{include = "omnibase_infra", from = "src"}]
+requires-python = ">=3.12"
+dependencies = [
+    # ONEX dependencies - PyPI releases
+    "omnibase-core>=0.3.5,<0.4.0",
+    "omnibase-spi>=0.2.0,<0.3.0",
 
-[tool.poetry.dependencies]
-python = "^3.12"
+    # Core
+    "pydantic>=2.11.7,<3.0.0",
+    "fastapi>=0.115.0,<0.116.0",
+    "uvicorn>=0.32.0,<0.33.0",
 
-# ONEX dependencies - PyPI releases
-omnibase-core = "^0.3.5"
-omnibase-spi = "^0.2.0"
+    # Database
+    "asyncpg>=0.29.0,<0.30.0",
+    "psycopg2-binary>=2.9.10,<3.0.0",
 
-# Core
-pydantic = "^2.11.7"
-fastapi = "^0.115.0"
-uvicorn = "^0.32.0"
+    # Service integration
+    "python-consul>=1.1.0,<2.0.0",
+    "hvac>=2.1.0,<3.0.0",
 
-# Database
-asyncpg = "^0.29.0"
-psycopg2-binary = "^2.9.10"
+    # Cryptography (for stamping)
+    "blake3>=0.4.1,<0.5.0",
 
-# Service integration
-python-consul = "^1.1.0"
-hvac = "^2.1.0"
+    # Observability
+    "structlog>=23.2.0,<24.0.0",
+    "prometheus-client>=0.19.0,<0.20.0",
+    "opentelemetry-api>=1.27.0,<2.0.0",
+    "opentelemetry-sdk>=1.27.0,<2.0.0",
 
-# Cryptography (for stamping)
-blake3 = "^0.4.1"
+    # Resilience
+    "tenacity>=9.0.0,<10.0.0",
+    "circuitbreaker>=2.0.0,<3.0.0",
+]
 
-# Observability
-structlog = "^23.2.0"
-prometheus-client = "^0.19.0"
-opentelemetry-api = "^1.27.0"
-opentelemetry-sdk = "^1.27.0"
+[tool.hatch.build.targets.wheel]
+packages = ["src/omnibase_infra"]
 
-# Resilience
-tenacity = "^9.0.0"
-circuitbreaker = "^2.0.0"
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.0.0"
-pytest-asyncio = "^0.23.0"
-pytest-cov = "^4.1.0"
-mypy = "^1.8.0"
-ruff = "^0.2.0"
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0,<9.0.0",
+    "pytest-asyncio>=0.23.0,<0.24.0",
+    "pytest-cov>=4.1.0,<5.0.0",
+    "mypy>=1.8.0,<2.0.0",
+    "ruff>=0.2.0,<0.3.0",
+]
 
 [tool.mypy]
 python_version = "3.12"
@@ -230,10 +237,6 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "ANN", "B", "C4", "SIM"]
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
 ```
 
 ### 1.3 Core Import Patterns
@@ -322,7 +325,7 @@ from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 ### Success Criteria
 - [ ] Directory structure created
 - [ ] pyproject.toml with correct dependencies
-- [ ] `poetry install` succeeds
+- [ ] `uv sync` succeeds
 - [ ] `python -c "import omnibase_infra"` works
 - [ ] Centralized enums in place
 - [ ] PostgresConnectionManager migrated
@@ -890,7 +893,7 @@ ruff format src/omnibase_infra --check
 pytest tests/ -v --cov=omnibase_infra --cov-report=term-missing --cov-fail-under=80
 
 # Full validation
-make validate  # Or: poetry run validate
+make validate  # Or: uv run validate
 ```
 
 ### 6.4 Validation Checklist
@@ -955,18 +958,18 @@ touch src/omnibase_infra/__init__.py
 touch src/omnibase_infra/{handlers,resilience,clients,enums,models,nodes,infrastructure,shared,utils}/__init__.py
 ```
 
-### Initialize Poetry
+### Initialize uv Project
 ```bash
-poetry init --name omnibase-infra --python "^3.12"
-poetry add omnibase-core@^0.3.5 omnibase-spi@^0.2.0
-poetry add pydantic@^2.11.7 fastapi@^0.115.0 asyncpg@^0.29.0 blake3@^0.4.1
-poetry add --group dev pytest@^8.0.0 pytest-asyncio@^0.23.0 mypy@^1.8.0 ruff@^0.2.0
+uv init --name omnibase-infra
+uv add omnibase-core omnibase-spi
+uv add pydantic fastapi asyncpg blake3
+uv add --group dev pytest pytest-asyncio mypy ruff
 ```
 
 ### Validate Installation
 ```bash
-poetry install
-poetry run python -c "from omnibase_core.nodes import NodeEffect; print('Ready')"
+uv sync
+uv run python -c "from omnibase_core.nodes import NodeEffect; print('Ready')"
 ```
 
 ---

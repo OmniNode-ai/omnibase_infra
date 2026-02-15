@@ -1232,12 +1232,13 @@ def register_custom_handlers():
 In `pyproject.toml`:
 
 ```toml
-[tool.poetry.dependencies]
-# Pin to specific minor version for stability
-omnibase-core = ">=0.4.0,<0.5.0"
-
-# Allow patch updates
-omnibase-spi = "^0.2.0"
+[project]
+dependencies = [
+    # Pin to specific minor version for stability
+    "omnibase-core>=0.4.0,<0.5.0",
+    # Allow patch updates within 0.2.x
+    "omnibase-spi>=0.2.0,<0.3.0",
+]
 ```
 
 **Upgrade Policy**:

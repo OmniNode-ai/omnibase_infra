@@ -1385,7 +1385,7 @@ Create basic Dockerfile for BaseRuntimeHostProcess.
 **Version Pinning Requirements**:
 - Base image MUST use specific tag (e.g., `python:3.12.1-slim`), never `latest`
 - All apt/apk packages MUST pin versions where possible
-- All pip dependencies MUST be locked via requirements.txt or poetry.lock
+- All pip dependencies MUST be locked via requirements.txt or uv.lock
 
 **Resource Targets**:
 - Minimum container memory: 128MB RAM

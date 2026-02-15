@@ -13,7 +13,7 @@ verify end-to-end plugin discovery works with the actual package metadata.
 
 Prerequisites:
     - ``uv sync`` must have been run so that the entry_point declared
-      in ``pyproject.toml`` under ``[tool.poetry.plugins."onex.domain_plugins"]``
+      in ``pyproject.toml`` under ``[project.entry-points."onex.domain_plugins"]``
       is registered in the installed package metadata.
 
 Dependencies:

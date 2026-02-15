@@ -18,6 +18,7 @@
 #     --build-arg RUNTIME_VERSION=1.0.0 \
 #     --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
 #     --build-arg VCS_REF=$(git rev-parse --short HEAD) \
+#     --build-arg UV_VERSION=0.6.14 \
 #     -f docker/Dockerfile.runtime -t omnibase-infra-runtime .
 #
 # Run:
@@ -71,6 +72,8 @@
 # =============================================================================
 
 ARG PYTHON_VERSION=3.12
+# Pin uv version for reproducible builds (must match CI: .github/workflows/*.yml)
+ARG UV_VERSION=0.6.14
 
 # ============================================================================
 # Builder Stage - Install dependencies with uv
@@ -103,7 +106,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv from official image (recommended Docker approach)
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+# Version pinned via UV_VERSION build arg for reproducible builds
+COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 

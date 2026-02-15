@@ -80,7 +80,7 @@ dependencies = [
     # System utilities
     # cryptography: Transitive dependency (via omnibase_core -> paramiko/pyopenssl).
     # Explicitly declared here to enforce minimum version for security compliance.
-    # Constraint: >=46.0.3,<47.0.0 (equivalent to Poetry caret ^46.0.3).
+    # Constraint: >=46.0.3,<47.0.0 (compatible release within the 46.x series).
     # Security: CVE-2024-26130 (42.0.4), CVE-2024-12797 (44.0.1) - both addressed by 46.x.
     # See docs/decisions/adr-cryptography-upgrade-46.md for full rationale.
     "cryptography>=46.0.3,<47.0.0",

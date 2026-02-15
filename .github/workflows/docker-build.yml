@@ -113,6 +113,7 @@ jobs:
             RUNTIME_VERSION=${{ github.ref_name }}
             BUILD_DATE=${{ steps.timestamp.outputs.build_date }}
             VCS_REF=${{ github.sha }}
+            UV_VERSION=${{ env.UV_VERSION }}
 
       # Validate built image with quick import test
       - name: Test image import
