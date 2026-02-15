@@ -908,12 +908,21 @@ show_summary() {
     log_info ""
     log_info "Next steps:"
 
+    # Only include --env-file in printed commands when the .env file exists,
+    # matching the conditional behavior used by build_images, restart_services,
+    # and print_compose_commands.
+    local env_file="${deploy_target}/docker/.env"
+    local env_file_line=""
+    if [[ -f "${env_file}" ]]; then
+        env_file_line="      --env-file ${env_file} \\"
+    fi
+
     if [[ "${RESTART}" == false ]]; then
         log_info "  To start containers, run:"
         log_info "    docker compose \\"
         log_info "      -p ${compose_project} \\"
         log_info "      -f ${deploy_target}/docker/docker-compose.infra.yml \\"
-        log_info "      --env-file ${deploy_target}/docker/.env \\"
+        [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
         log_info "      --profile ${COMPOSE_PROFILE} \\"
         log_info "      up -d"
     else
@@ -921,7 +930,7 @@ show_summary() {
         log_info "    docker compose \\"
         log_info "      -p ${compose_project} \\"
         log_info "      -f ${deploy_target}/docker/docker-compose.infra.yml \\"
-        log_info "      --env-file ${deploy_target}/docker/.env \\"
+        [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
         log_info "      --profile ${COMPOSE_PROFILE} \\"
         log_info "      ps"
     fi
