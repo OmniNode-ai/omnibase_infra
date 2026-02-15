@@ -44,8 +44,8 @@ class TestTopicProvisioner:
         assert manager._bootstrap_servers == "kafka1:9092,kafka2:9092"
         assert manager._request_timeout_ms == 5000
 
-    async def test_ensure_platform_topics_all_created(self) -> None:
-        """All platform topics are created when none exist."""
+    async def test_ensure_provisioned_topics_all_created(self) -> None:
+        """All provisioned topics are created when none exist."""
         manager = TopicProvisioner(bootstrap_servers="localhost:9092")
 
         mock_admin_cls = MagicMock()
@@ -76,7 +76,7 @@ class TestTopicProvisioner:
         assert len(result["created"]) == len(ALL_PROVISIONED_SUFFIXES)
         assert len(result["failed"]) == 0
 
-    async def test_ensure_platform_topics_connection_failure(self) -> None:
+    async def test_ensure_provisioned_topics_connection_failure(self) -> None:
         """Connection failure returns unavailable status gracefully."""
         manager = TopicProvisioner(bootstrap_servers="nonexistent:9999")
 
@@ -109,7 +109,7 @@ class TestTopicProvisioner:
         assert result["status"] == "unavailable"
         assert len(result["failed"]) == len(ALL_PROVISIONED_SUFFIXES)
 
-    async def test_ensure_platform_topics_import_error(self) -> None:
+    async def test_ensure_provisioned_topics_import_error(self) -> None:
         """Graceful degradation when aiokafka is not installed."""
         manager = TopicProvisioner(bootstrap_servers="localhost:9092")
 
@@ -135,7 +135,7 @@ class TestTopicProvisioner:
         assert len(result["created"]) == 0
         assert len(result["existing"]) == 0
 
-    async def test_ensure_platform_topics_already_exist(self) -> None:
+    async def test_ensure_provisioned_topics_already_exist(self) -> None:
         """Topics that already exist are counted as 'existing', not 'created'."""
         manager = TopicProvisioner(bootstrap_servers="localhost:9092")
 
