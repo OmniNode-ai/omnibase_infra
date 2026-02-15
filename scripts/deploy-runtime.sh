@@ -179,6 +179,13 @@ parse_args() {
                     log_error "--profile requires a value"
                     exit 1
                 fi
+                # Validate profile name: only alphanumeric, hyphens, and underscores
+                # are allowed to prevent invalid compose project names.
+                if [[ ! "$2" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+                    log_error "--profile value must contain only alphanumeric characters, hyphens, and underscores."
+                    log_error "  Got: '$2'"
+                    exit 1
+                fi
                 COMPOSE_PROFILE="$2"
                 shift 2
                 ;;
@@ -311,12 +318,24 @@ read_version() {
     local repo_root="$1"
     local version
 
-    # Extract version from pyproject.toml using grep + sed (no Python dependency)
-    # Use -E for extended regex; [[:space:]] for BSD sed compatibility (\s not supported)
-    version="$(grep -m1 -E '^version[[:space:]]*=' "${repo_root}/pyproject.toml" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
+    # Extract version from the [tool.poetry] section of pyproject.toml.
+    # A naive grep -m1 '^version' could match a version key in any TOML
+    # section (e.g. a dependency table).  This awk approach activates only
+    # inside [tool.poetry] and deactivates when the next section header
+    # is reached, ensuring we read the project version.
+    version="$(awk '
+        /^\[tool\.poetry\]/ { in_section=1; next }
+        /^\[/               { in_section=0 }
+        in_section && /^version[[:space:]]*=/ {
+            gsub(/.*=[[:space:]]*"/, "");
+            gsub(/".*/, "");
+            print;
+            exit
+        }
+    ' "${repo_root}/pyproject.toml")"
 
     if [[ -z "${version}" ]]; then
-        log_error "Could not read version from pyproject.toml"
+        log_error "Could not read version from pyproject.toml [tool.poetry] section"
         exit 1
     fi
 
@@ -352,20 +371,52 @@ check_git_dirty() {
 acquire_lock() {
     mkdir -p "${DEPLOY_ROOT}"
 
+    local pid_file="${LOCK_DIR}/pid"
+
     # Use mkdir for atomic, cross-platform locking (works on macOS + Linux).
     # mkdir is atomic on all POSIX systems -- it either creates the directory
     # or fails if it already exists, with no race window.
     if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
-        log_error "Another deployment is in progress (locked by ${LOCK_DIR})."
-        log_error "If the previous deployment crashed, remove the lock manually:"
-        log_error "  rm -rf ${LOCK_DIR}"
-        exit 2
+        # Lock directory exists -- check for stale lock by verifying the
+        # owning PID is still alive.
+        if [[ -f "${pid_file}" ]]; then
+            local lock_pid
+            lock_pid="$(cat "${pid_file}" 2>/dev/null || true)"
+            if [[ -n "${lock_pid}" ]] && ! kill -0 "${lock_pid}" 2>/dev/null; then
+                log_warn "Stale lock detected (PID ${lock_pid} is no longer running)."
+                log_warn "Cleaning up stale lock and re-acquiring..."
+                rm -rf "${LOCK_DIR}"
+                if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
+                    log_error "Failed to re-acquire lock after stale cleanup."
+                    exit 2
+                fi
+                # Fall through to write new PID file and continue
+            else
+                log_error "Another deployment is in progress (locked by PID ${lock_pid})."
+                log_error "If the previous deployment crashed, remove the lock manually:"
+                log_error "  rm -rf ${LOCK_DIR}"
+                exit 2
+            fi
+        else
+            log_error "Another deployment is in progress (locked by ${LOCK_DIR})."
+            log_error "Lock has no PID file -- cannot verify owner."
+            log_error "If the previous deployment crashed, remove the lock manually:"
+            log_error "  rm -rf ${LOCK_DIR}"
+            exit 2
+        fi
     fi
 
-    # Ensure lock is released on exit (normal, error, or signal)
-    trap 'rm -rf "${LOCK_DIR}" 2>/dev/null || true' EXIT INT TERM HUP
+    # Write our PID into the lock directory for stale detection
+    echo $$ > "${pid_file}"
 
-    log_info "Acquired deployment lock."
+    # Ensure lock is released on exit (normal, error, or signal).
+    # EXIT handles cleanup for normal/error exits.
+    # INT/TERM/HUP must explicitly exit after cleanup so the script
+    # does not continue executing after receiving a termination signal.
+    trap 'rm -rf "${LOCK_DIR}" 2>/dev/null || true' EXIT
+    trap 'rm -rf "${LOCK_DIR}" 2>/dev/null || true; exit 1' INT TERM HUP
+
+    log_info "Acquired deployment lock (PID $$)."
 }
 
 # =============================================================================
@@ -512,10 +563,11 @@ setup_env() {
     fi
 
     # Try to copy from repo's docker/.env
+    # Use install -m 600 to atomically create the file with correct permissions,
+    # avoiding a race window where the file briefly has default (world-readable) perms.
     if [[ -f "${repo_root}/docker/.env" ]]; then
         log_info "Copying .env from source repo docker/.env"
-        cp "${repo_root}/docker/.env" "${docker_dir}/.env"
-        chmod 600 "${docker_dir}/.env"
+        install -m 600 "${repo_root}/docker/.env" "${docker_dir}/.env"
         return 0
     fi
 
@@ -524,8 +576,7 @@ setup_env() {
         log_warn "No .env found. Copying .env.example as .env."
         log_warn "You MUST edit ${docker_dir}/.env before running containers."
         log_warn "At minimum, set POSTGRES_PASSWORD to a secure value."
-        cp "${repo_root}/docker/.env.example" "${docker_dir}/.env"
-        chmod 600 "${docker_dir}/.env"
+        install -m 600 "${repo_root}/docker/.env.example" "${docker_dir}/.env"
         return 0
     fi
 
@@ -554,7 +605,7 @@ sanity_check() {
     if ! docker compose \
         -p "${compose_project}" \
         -f "${compose_file}" \
-        "${env_file_args[@]}" \
+        ${env_file_args[@]+"${env_file_args[@]}"} \
         config --quiet 2>&1; then
         log_error "Compose configuration validation failed."
         log_error "The deployed directory structure may be incomplete."
@@ -635,7 +686,7 @@ build_images() {
         docker compose
         -p "${compose_project}"
         -f "${compose_file}"
-        "${env_file_args[@]}"
+        ${env_file_args[@]+"${env_file_args[@]}"}
         --profile "${COMPOSE_PROFILE}"
         build
         --build-arg "VCS_REF=${git_sha}"
@@ -670,7 +721,7 @@ restart_services() {
         docker compose
         -p "${compose_project}"
         -f "${compose_file}"
-        "${env_file_args[@]}"
+        ${env_file_args[@]+"${env_file_args[@]}"}
         --profile "${COMPOSE_PROFILE}"
         up -d --no-deps --force-recreate
         "${RUNTIME_SERVICES[@]}"
@@ -770,15 +821,25 @@ print_compose_commands() {
     local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
     local env_file="${deploy_target}/docker/.env"
 
+    # Only include --env-file in printed commands when the .env file exists,
+    # matching the conditional behavior used by build_images and restart_services.
+    local env_file_line=""
+    if [[ -f "${env_file}" ]]; then
+        env_file_line="    --env-file ${env_file} \\"
+    fi
+
     log_step "Compose Commands"
 
     log_info "These are the exact commands this script would run from the deployed directory."
+    if [[ -z "${env_file_line}" ]]; then
+        log_warn "No .env file found at ${env_file} -- --env-file omitted from commands."
+    fi
     log_info ""
     log_info "Build:"
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
     log_info "    -f ${compose_file} \\"
-    log_info "    --env-file ${env_file} \\"
+    [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    build \\"
     log_info "    --build-arg VCS_REF=${git_sha} \\"
@@ -788,7 +849,7 @@ print_compose_commands() {
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
     log_info "    -f ${compose_file} \\"
-    log_info "    --env-file ${env_file} \\"
+    [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    up -d --no-deps --force-recreate \\"
     log_info "    ${RUNTIME_SERVICES[*]}"
@@ -797,7 +858,7 @@ print_compose_commands() {
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
     log_info "    -f ${compose_file} \\"
-    log_info "    --env-file ${env_file} \\"
+    [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    up -d"
     log_info ""
@@ -805,7 +866,7 @@ print_compose_commands() {
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
     log_info "    -f ${compose_file} \\"
-    log_info "    --env-file ${env_file} \\"
+    [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    down"
     log_info ""
@@ -813,7 +874,7 @@ print_compose_commands() {
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
     log_info "    -f ${compose_file} \\"
-    log_info "    --env-file ${env_file} \\"
+    [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    logs -f"
     log_info ""
@@ -821,7 +882,7 @@ print_compose_commands() {
     log_info "  docker compose \\"
     log_info "    -p ${compose_project} \\"
     log_info "    -f ${compose_file} \\"
-    log_info "    --env-file ${env_file} \\"
+    [[ -n "${env_file_line}" ]] && log_info "${env_file_line}"
     log_info "    --profile ${COMPOSE_PROFILE} \\"
     log_info "    ps"
 }
