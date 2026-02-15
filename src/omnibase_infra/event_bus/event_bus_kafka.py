@@ -1085,9 +1085,10 @@ class EventBusKafka(
 
         Args:
             topic: Topic to consume from
-            group_id: Fully qualified consumer group ID. This should be derived
+            group_id: Base consumer group ID. This should be derived
                 from ``compute_consumer_group_id()`` or an explicit override.
-                The ID is used directly without any prefix modification.
+                The topic name is appended as a ``.{topic}`` suffix to create
+                per-topic consumer groups and prevent rebalance storms.
 
         Raises:
             ProtocolConfigurationError: If group_id is empty (must be derived from
