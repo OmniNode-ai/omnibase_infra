@@ -1301,6 +1301,147 @@ class TestKafkaEventBusConsumerManagement:
             mock_consumer.stop.assert_called_once()
 
 
+class TestKafkaEventBusConsumerGroupId:
+    """Test suite for _start_consumer_for_topic group_id handling."""
+
+    @pytest.fixture
+    def mock_producer(self) -> AsyncMock:
+        """Create mock Kafka producer."""
+        producer = AsyncMock()
+        producer.start = AsyncMock()
+        producer.stop = AsyncMock()
+        producer._closed = False
+        return producer
+
+    @pytest.fixture
+    def mock_consumer(self) -> AsyncMock:
+        """Create mock Kafka consumer."""
+        consumer = AsyncMock()
+        consumer.start = AsyncMock()
+        consumer.stop = AsyncMock()
+        return consumer
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_group_id_raises_error(
+        self, mock_producer: AsyncMock
+    ) -> None:
+        """Test whitespace-only group_id raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
+            event_bus = EventBusKafka(config=config)
+
+            with pytest.raises(
+                ProtocolConfigurationError,
+                match="Consumer group ID is required",
+            ):
+                await event_bus._start_consumer_for_topic("test-topic", "   ")
+
+    @pytest.mark.asyncio
+    async def test_empty_group_id_raises_error(self, mock_producer: AsyncMock) -> None:
+        """Test empty group_id raises ProtocolConfigurationError."""
+        from omnibase_infra.errors import ProtocolConfigurationError
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            return_value=mock_producer,
+        ):
+            config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
+            event_bus = EventBusKafka(config=config)
+
+            with pytest.raises(
+                ProtocolConfigurationError,
+                match="Consumer group ID is required",
+            ):
+                await event_bus._start_consumer_for_topic("test-topic", "")
+
+    @pytest.mark.asyncio
+    async def test_group_id_not_double_suffixed(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test group_id already ending with topic is not double-suffixed."""
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
+            event_bus = EventBusKafka(config=config)
+
+            # group_id already ends with ".events" — should NOT become
+            # "my-group.events.events"
+            await event_bus._start_consumer_for_topic("events", "my-group.events")
+
+            # Verify the consumer was created with the un-doubled group_id
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            assert call_kwargs.kwargs["group_id"] == "my-group.events"
+
+    @pytest.mark.asyncio
+    async def test_group_id_gets_topic_suffix_when_missing(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test normal group_id gets .{topic} appended."""
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
+            event_bus = EventBusKafka(config=config)
+
+            await event_bus._start_consumer_for_topic("my-topic", "my-group")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            assert call_kwargs.kwargs["group_id"] == "my-group.my-topic"
+
+    @pytest.mark.asyncio
+    async def test_group_id_partial_match_still_suffixed(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test group_id with partial topic match still gets suffix appended.
+
+        For example, group_id="my-group.event" with topic="events" should
+        become "my-group.event.events" (not treated as already-suffixed).
+        """
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(bootstrap_servers=TEST_BOOTSTRAP_SERVERS)
+            event_bus = EventBusKafka(config=config)
+
+            await event_bus._start_consumer_for_topic("events", "my-group.event")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            assert call_kwargs.kwargs["group_id"] == "my-group.event.events"
+
+
 class TestKafkaEventBusStartConsuming:
     """Test suite for start_consuming operation."""
 

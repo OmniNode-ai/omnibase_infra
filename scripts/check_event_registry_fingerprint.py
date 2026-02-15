@@ -57,7 +57,7 @@ def cmd_verify(artifact_path: str) -> int:
             ``event_registry_fingerprint.json`` artifact file.
 
     Returns:
-        Exit code: 0 if matching, 2 if stale, missing, or on unexpected
+        Exit code: 0 if matching, 2 if stale or missing, 1 on unexpected
         error.
 
     Raises:
@@ -96,7 +96,7 @@ def cmd_verify(artifact_path: str) -> int:
         return 2
     except Exception as exc:
         print(f"FAILED: unexpected error during verification: {exc}", file=sys.stderr)
-        return 2
+        return 1
 
 
 def cmd_stamp(artifact_path: str, *, dry_run: bool = False) -> int:
