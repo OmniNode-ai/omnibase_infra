@@ -76,6 +76,15 @@ ARG PYTHON_VERSION=3.12
 ARG UV_VERSION=0.6.14
 
 # ============================================================================
+# uv Binary Stage - Named stage so COPY --from can reference it
+# ============================================================================
+# NOTE: Docker's COPY --from does NOT interpolate ARG variables when
+# referencing external images directly. Using a named stage works around
+# this limitation. The ARG declarations above are visible here because
+# they appear before any FROM directive.
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv-bin
+
+# ============================================================================
 # Builder Stage - Install dependencies with uv
 # ============================================================================
 FROM python:${PYTHON_VERSION}-slim AS builder
@@ -107,7 +116,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 # Install uv from official image (recommended Docker approach)
 # Version pinned via UV_VERSION build arg for reproducible builds
-COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /usr/local/bin/
+COPY --from=uv-bin /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 
