@@ -101,25 +101,25 @@ src/omnibase_infra/
 
 ```bash
 # Install dependencies
-poetry install
+uv sync
 
 # Run tests
-poetry run pytest
+uv run pytest
 
 # Type checking
-poetry run mypy src/omnibase_infra/
+uv run mypy src/omnibase_infra/
 
 # Format code
-poetry run ruff format .
-poetry run ruff check --fix .
+uv run ruff format .
+uv run ruff check --fix .
 ```
 
 ### Pre-commit Hooks Setup
 
 Run once after cloning:
 ```bash
-poetry run pre-commit install
-poetry run pre-commit install --hook-type pre-push
+uv run pre-commit install
+uv run pre-commit install --hook-type pre-push
 ```
 
 ## Contributing

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S poetry run python
+#!/usr/bin/env -S uv run python
 """Demo: ONEX Runtime Contract Routing Verification (OMN-2081).
 
 Demonstrates the full runtime lifecycle for investor-facing verification:

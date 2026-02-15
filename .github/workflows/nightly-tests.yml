@@ -26,7 +26,7 @@ on:
         default: 'slow or chaos'
 
 env:
-  POETRY_VERSION: "2.2.1"
+  UV_VERSION: "0.6.14"
   PYTHON_VERSION: "3.12"
   CACHE_VERSION: "0.4.0"
   # Force inmemory event bus for CI tests (no Kafka infrastructure available)
@@ -52,42 +52,28 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install Poetry
-        run: |
-          pipx install poetry==${{ env.POETRY_VERSION }}
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
 
-      - name: Load cached venv
-        id: cached-poetry-dependencies
+      - name: Load cached uv
         uses: actions/cache@v4
         with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/poetry.lock') }}-${{ env.CACHE_VERSION }}
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/uv.lock') }}-${{ env.CACHE_VERSION }}
           restore-keys: |
-            venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
+            uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
 
       - name: Install dependencies
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: |
-          poetry install --no-interaction --no-root || {
-            echo "Dependency install failed"
-            exit 1
-          }
-
-      - name: Install project
-        run: |
-          poetry install --no-interaction || {
-            echo "Project install failed"
-            exit 1
-          }
+        run: uv sync
 
       # Run slow and chaos tests with extended timeout
       # These tests validate resilience and performance characteristics
       - name: Run slow and chaos tests
         run: |
           FILTER="${{ github.event.inputs.test_filter || 'slow or chaos' }}"
-          poetry run pytest tests/ \
+          uv run pytest tests/ \
             --ignore=tests/integration/docker \
             -m "$FILTER" \
             -n auto \

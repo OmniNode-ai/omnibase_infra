@@ -141,19 +141,19 @@ For each, change `async def publish_envelope(self, envelope: object, topic: str)
 
 ```bash
 # Type check
-poetry run mypy src/omnibase_infra/
+uv run mypy src/omnibase_infra/
 
 # Lint
-poetry run ruff check src/ tests/
+uv run ruff check src/ tests/
 
 # Unit tests (verify no regressions)
-poetry run pytest tests/unit/ -n auto
+uv run pytest tests/unit/ -n auto
 
 # Specifically test dispatch result applier
-poetry run pytest tests/unit/runtime/test_service_dispatch_result_applier.py -xvs
+uv run pytest tests/unit/runtime/test_service_dispatch_result_applier.py -xvs
 
 # Integration tests for event bus
-poetry run pytest tests/integration/ -k "event_bus or introspection" -n auto
+uv run pytest tests/integration/ -k "event_bus or introspection" -n auto
 ```
 
 ---
@@ -551,16 +551,16 @@ Verify the SQL string and parameters passed to `conn.execute` using `call_args`.
 
 ```bash
 # Run the new tests
-poetry run pytest tests/unit/runtime/test_intent_effect_postgres_update.py -xvs
+uv run pytest tests/unit/runtime/test_intent_effect_postgres_update.py -xvs
 
 # Full unit suite
-poetry run pytest tests/unit/ -n auto
+uv run pytest tests/unit/ -n auto
 
 # Type check
-poetry run mypy src/omnibase_infra/
+uv run mypy src/omnibase_infra/
 
 # Lint
-poetry run ruff check src/ tests/
+uv run ruff check src/ tests/
 ```
 
 ---
@@ -712,25 +712,25 @@ known intent types.
 
 ```bash
 # Test the intent routing loader
-poetry run pytest tests/unit/runtime/test_intent_routing_loader.py -xvs
+uv run pytest tests/unit/runtime/test_intent_routing_loader.py -xvs
 
 # Test the full registration orchestrator integration
-poetry run pytest tests/integration/nodes/test_registration_orchestrator_integration.py -xvs
+uv run pytest tests/integration/nodes/test_registration_orchestrator_integration.py -xvs
 
 # Test the dispatch result applier (exercises IntentExecutor)
-poetry run pytest tests/unit/runtime/test_service_dispatch_result_applier.py -xvs
+uv run pytest tests/unit/runtime/test_service_dispatch_result_applier.py -xvs
 
 # Full unit suite
-poetry run pytest tests/unit/ -n auto
+uv run pytest tests/unit/ -n auto
 
 # Full integration suite
-poetry run pytest tests/integration/ -n auto
+uv run pytest tests/integration/ -n auto
 
 # Type check
-poetry run mypy src/omnibase_infra/
+uv run mypy src/omnibase_infra/
 
 # Lint
-poetry run ruff check src/ tests/
+uv run ruff check src/ tests/
 ```
 
 ### Integration Smoke Test
@@ -739,10 +739,10 @@ After all three follow-ups are implemented, run the E2E registration loop:
 
 ```bash
 # E2E registration tests (requires PostgreSQL)
-poetry run pytest tests/integration/registration/ -xvs -m "not slow"
+uv run pytest tests/integration/registration/ -xvs -m "not slow"
 
 # Specifically test heartbeat -> UPDATE path
-poetry run pytest tests/integration/registration/handlers/test_handler_node_heartbeat_integration.py -xvs
+uv run pytest tests/integration/registration/handlers/test_handler_node_heartbeat_integration.py -xvs
 ```
 
 ---

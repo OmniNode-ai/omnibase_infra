@@ -33,10 +33,10 @@ CI Behavior:
 
 Usage:
     Run latency tests locally:
-        poetry run pytest tests/performance/event_bus/test_event_bus_latency.py -v
+        uv run pytest tests/performance/event_bus/test_event_bus_latency.py -v
 
     Force-skip performance tests (marker-based):
-        poetry run pytest -m "not performance" tests/
+        uv run pytest -m "not performance" tests/
 
 Related:
     - OMN-57: Event bus performance testing (Phase 9)

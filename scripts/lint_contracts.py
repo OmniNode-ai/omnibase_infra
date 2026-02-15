@@ -6,10 +6,10 @@ Validates contract.yaml files against ONEX infrastructure requirements.
 Designed for CI integration with proper exit codes.
 
 Usage:
-    poetry run python scripts/lint_contracts.py
-    poetry run python scripts/lint_contracts.py --directory src/omnibase_infra/nodes/
-    poetry run python scripts/lint_contracts.py --strict --verbose
-    poetry run python scripts/lint_contracts.py --no-import-check  # Skip import validation
+    uv run python scripts/lint_contracts.py
+    uv run python scripts/lint_contracts.py --directory src/omnibase_infra/nodes/
+    uv run python scripts/lint_contracts.py --strict --verbose
+    uv run python scripts/lint_contracts.py --no-import-check  # Skip import validation
 
 Exit Codes:
     0: All contracts valid
@@ -165,7 +165,7 @@ def main() -> int:
 
     except ImportError as e:
         print(f"ERROR: Failed to import contract linter: {e}", file=sys.stderr)
-        print("Make sure omnibase_infra is installed: poetry install", file=sys.stderr)
+        print("Make sure omnibase_infra is installed: uv sync", file=sys.stderr)
         return 2
     except Exception as e:
         print(f"ERROR: Unexpected error: {e}", file=sys.stderr)

@@ -266,7 +266,7 @@ Total:           200-1000ms
 Skip MEDIUM priority validators for faster validation:
 
 ```bash
-poetry run python scripts/validate.py all --quick
+uv run python scripts/validate.py all --quick
 ```
 
 **Performance**: ~250-600ms (50% faster)
@@ -285,7 +285,7 @@ poetry run python scripts/validate.py all --quick
 Run all validators:
 
 ```bash
-poetry run python scripts/validate.py all
+uv run python scripts/validate.py all
 ```
 
 **Performance**: ~450-1900ms
@@ -300,7 +300,7 @@ poetry run python scripts/validate.py all
 Show detailed validation output:
 
 ```bash
-poetry run python scripts/validate.py all --verbose
+uv run python scripts/validate.py all --verbose
 ```
 
 **Performance**: +50-100ms overhead for detailed logging
@@ -318,7 +318,7 @@ Typical CI runtime breakdown:
 
 ```
 Setup Python:           15-30s
-Install Poetry:         10-20s
+Install uv:             5-10s
 Load cached venv:        2-5s
 Install dependencies:    0s (cached) or 60-120s (cold)
 Install project:         5-10s
@@ -328,13 +328,13 @@ Total:                  33-187s
 
 **Optimization Strategies**:
 
-1. **Dependency Caching**: Cache Poetry venv
+1. **Dependency Caching**: Cache uv venv
    ```yaml
    - name: Load cached venv
      uses: actions/cache@v4
      with:
        path: .venv
-       key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+       key: venv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
    ```
 
 2. **Parallel Jobs**: Run validators in parallel with other checks
@@ -351,7 +351,7 @@ Total:                  33-187s
 3. **Quick Mode**: Use quick mode for PR checks
    ```yaml
    - name: Run ONEX validators (quick)
-     run: poetry run python scripts/validate.py all --quick
+     run: uv run python scripts/validate.py all --quick
    ```
 
 4. **Incremental Validation**: Validate only changed files
@@ -360,7 +360,7 @@ Total:                  33-187s
    git diff --name-only origin/main...HEAD | grep '\.py$' > changed.txt
 
    # Validate only changed files
-   poetry run python scripts/validate.py --changed-files changed.txt
+   uv run python scripts/validate.py --changed-files changed.txt
    ```
 
 ## Performance Monitoring

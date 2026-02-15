@@ -1,4 +1,4 @@
-#!/usr/bin/env -S poetry run python
+#!/usr/bin/env -S uv run python
 """Demo script for Registry-Based Contract Discovery (OMN-1100).
 
 This script demonstrates contract materialization from Consul KV:
@@ -7,11 +7,11 @@ This script demonstrates contract materialization from Consul KV:
 3. Shows the materialized contracts
 
 Usage:
-    # Direct execution (uses shebang with poetry run - preferred)
+    # Direct execution (uses shebang with uv run - preferred)
     ./scripts/demo_registry_contracts.py
 
-    # Explicit poetry run (equivalent, works without executable bit)
-    poetry run python scripts/demo_registry_contracts.py
+    # Explicit uv run (equivalent, works without executable bit)
+    uv run python scripts/demo_registry_contracts.py
 
     # List existing contracts only
     ./scripts/demo_registry_contracts.py --list-only

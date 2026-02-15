@@ -165,7 +165,7 @@ temp/
 *.seed
 *.pid.lock
 *.lock
-!poetry.lock
+!uv.lock
 *.out
 
 # =============================================================================
@@ -274,7 +274,7 @@ profiling/
 .gitlint
 
 # =============================================================================
-# Dependency Management (exclude lock files except poetry.lock)
+# Dependency Management (exclude lock files except uv.lock)
 # =============================================================================
 Pipfile
 Pipfile.lock
@@ -285,6 +285,6 @@ setup.cfg
 MANIFEST.in
 
 # =============================================================================
-# Poetry Lock (include in build)
-# Note: poetry.lock is NOT ignored - it ensures reproducible builds
+# UV Lock (include in build)
+# Note: uv.lock is NOT ignored - it ensures reproducible builds
 # =============================================================================

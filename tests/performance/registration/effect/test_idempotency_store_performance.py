@@ -14,7 +14,7 @@ Test Categories:
     5. Mixed Workload: Combined read/write patterns
 
 Usage:
-    poetry run pytest tests/performance/registration/effect/test_idempotency_store_performance.py -v
+    uv run pytest tests/performance/registration/effect/test_idempotency_store_performance.py -v
 
 Related:
     - OMN-954: Effect node testing requirements

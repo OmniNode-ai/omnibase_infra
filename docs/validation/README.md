@@ -10,20 +10,20 @@ Comprehensive validation system for omnibase_infra, ensuring code quality, archi
 
 ```bash
 # Run all validators with verbose output
-poetry run python scripts/validate.py all --verbose
+uv run python scripts/validate.py all --verbose
 
 # Run specific validators
-poetry run python scripts/validate.py architecture        # One-model-per-file
-poetry run python scripts/validate.py architecture_layers # Core/Infra layer separation
-poetry run python scripts/validate.py contracts
-poetry run python scripts/validate.py patterns
-poetry run python scripts/validate.py unions
-poetry run python scripts/validate.py imports
-poetry run python scripts/validate.py any_types
-poetry run python scripts/validate.py markdown_links
+uv run python scripts/validate.py architecture        # One-model-per-file
+uv run python scripts/validate.py architecture_layers # Core/Infra layer separation
+uv run python scripts/validate.py contracts
+uv run python scripts/validate.py patterns
+uv run python scripts/validate.py unions
+uv run python scripts/validate.py imports
+uv run python scripts/validate.py any_types
+uv run python scripts/validate.py markdown_links
 
 # Quick mode (skip medium priority validators)
-poetry run python scripts/validate.py all --quick
+uv run python scripts/validate.py all --quick
 ```
 
 ## Available Validators
@@ -134,7 +134,7 @@ Validators run automatically in GitHub Actions:
 ```yaml
 # .github/workflows/test.yml
 - name: Run ONEX validators
-  run: poetry run python scripts/validate.py all --verbose
+  run: uv run python scripts/validate.py all --verbose
 ```
 
 **CI Validation Jobs**:
@@ -153,7 +153,7 @@ All jobs must pass for PR merge approval.
 Use exit codes in CI/CD pipelines:
 
 ```bash
-poetry run python scripts/validate.py all || exit 1
+uv run python scripts/validate.py all || exit 1
 ```
 
 ## Configuration
@@ -236,7 +236,7 @@ repos:
     hooks:
       - id: onex-validators
         name: ONEX Infrastructure Validators
-        entry: poetry run python scripts/validate.py all --quick
+        entry: uv run python scripts/validate.py all --quick
         language: system
         pass_filenames: false
 ```

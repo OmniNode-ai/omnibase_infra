@@ -345,7 +345,7 @@ def _cli_main() -> None:
     """CLI entrypoint for manual topic provisioning without runtime.
 
     Usage:
-        poetry run python -m omnibase_infra.event_bus.service_topic_manager
+        uv run python -m omnibase_infra.event_bus.service_topic_manager
 
     Useful for provisioning topics when running just Redpanda for development
     without the full runtime stack.

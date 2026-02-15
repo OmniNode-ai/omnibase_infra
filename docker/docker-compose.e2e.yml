@@ -13,7 +13,7 @@
 #   docker compose -f docker/docker-compose.e2e.yml --profile runtime up -d
 #
 #   # Run E2E tests against the stack
-#   poetry run pytest tests/integration/registration/e2e/ -v
+#   uv run pytest tests/integration/registration/e2e/ -v
 #
 #   # Tear down
 #   docker compose -f docker/docker-compose.e2e.yml down -v

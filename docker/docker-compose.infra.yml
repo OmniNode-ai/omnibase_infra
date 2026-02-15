@@ -218,7 +218,7 @@ services:
   # in src/omnibase_infra/topics/platform_topic_suffixes.py.
   #
   # For manual provisioning without the runtime (e.g., development with just Redpanda):
-  #   poetry run python -m omnibase_infra.event_bus.service_topic_manager
+  #   uv run python -m omnibase_infra.event_bus.service_topic_manager
   # ==========================================================================
   # Valkey - Redis-Compatible Cache and Pub/Sub
   # ==========================================================================

@@ -42,7 +42,7 @@ def _make_planned_check(
     label: str = "Test check",
     severity: EnumCheckSeverity = EnumCheckSeverity.REQUIRED,
     enabled: bool = True,
-    command: str = "poetry run pytest",
+    command: str = "uv run pytest",
 ) -> ModelPlannedCheck:
     """Create a planned check for testing."""
     return ModelPlannedCheck(

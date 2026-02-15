@@ -20,16 +20,16 @@ Sub-packages:
 
 Usage:
     Run all performance tests:
-        poetry run pytest tests/performance/ -v
+        uv run pytest tests/performance/ -v
 
     Run with performance marker only:
-        poetry run pytest -m performance -v
+        uv run pytest -m performance -v
 
     Run database query performance tests:
-        poetry run pytest tests/performance/database/ -v
+        uv run pytest tests/performance/database/ -v
 
     Skip performance tests in CI:
-        poetry run pytest --ignore=tests/performance/
+        uv run pytest --ignore=tests/performance/
 
 Related:
     - OMN-954: Effect node testing requirements

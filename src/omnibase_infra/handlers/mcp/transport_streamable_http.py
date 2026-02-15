@@ -125,9 +125,7 @@ class TransportMCPStreamableHttp:
         try:
             from mcp.server.fastmcp import FastMCP
         except ImportError as e:
-            raise ImportError(
-                "MCP SDK not installed. Install via: poetry add mcp"
-            ) from e
+            raise ImportError("MCP SDK not installed. Install via: uv add mcp") from e
 
         from starlette.applications import Starlette
         from starlette.routing import Mount

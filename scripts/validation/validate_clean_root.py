@@ -52,7 +52,6 @@ ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
         ".gitmodules",
         # Python packaging (required)
         "pyproject.toml",
-        "poetry.lock",
         "uv.lock",
         "setup.py",
         "setup.cfg",
