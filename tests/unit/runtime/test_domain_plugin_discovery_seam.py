@@ -41,6 +41,9 @@ from omnibase_infra.runtime.models import (
     ModelDomainPluginConfig,
     ModelDomainPluginResult,
 )
+from omnibase_infra.runtime.models.model_handshake_result import (
+    ModelHandshakeResult,
+)
 from omnibase_infra.runtime.protocol_domain_plugin import (
     ProtocolDomainPlugin,
     RegistryDomainPlugin,
@@ -87,6 +90,13 @@ class PluginSmoke:
     ) -> ModelDomainPluginResult:
         """No-op initialization."""
         return ModelDomainPluginResult.succeeded(plugin_id=self.plugin_id)
+
+    async def validate_handshake(
+        self,
+        config: ModelDomainPluginConfig,
+    ) -> ModelHandshakeResult:
+        """No-op handshake validation -- default pass."""
+        return ModelHandshakeResult.default_pass(self.plugin_id)
 
     async def wire_handlers(
         self,

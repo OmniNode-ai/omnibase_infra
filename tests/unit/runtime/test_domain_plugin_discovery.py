@@ -31,6 +31,9 @@ from omnibase_infra.runtime.constants_security import (
     DOMAIN_PLUGIN_ENTRY_POINT_GROUP,
     TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
 )
+from omnibase_infra.runtime.models.model_handshake_result import (
+    ModelHandshakeResult,
+)
 from omnibase_infra.runtime.models.model_plugin_discovery_report import (
     ModelPluginDiscoveryReport,
 )
@@ -79,6 +82,12 @@ class MockPlugin:
     ) -> ModelDomainPluginResult:
         """Initialize plugin resources (no-op for testing)."""
         return ModelDomainPluginResult.succeeded(plugin_id=self.plugin_id)
+
+    async def validate_handshake(
+        self, config: ModelDomainPluginConfig
+    ) -> ModelHandshakeResult:
+        """Validate handshake (default pass for testing)."""
+        return ModelHandshakeResult.default_pass(self.plugin_id)
 
     async def wire_handlers(
         self, config: ModelDomainPluginConfig

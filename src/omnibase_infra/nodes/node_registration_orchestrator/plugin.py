@@ -103,6 +103,12 @@ from omnibase_infra.runtime.emit_daemon.event_registry import (
 from omnibase_infra.runtime.model_schema_manifest import (
     OMNIBASE_INFRA_SCHEMA_MANIFEST,
 )
+from omnibase_infra.runtime.models.model_handshake_check_result import (
+    ModelHandshakeCheckResult,
+)
+from omnibase_infra.runtime.models.model_handshake_result import (
+    ModelHandshakeResult,
+)
 from omnibase_infra.runtime.protocol_domain_plugin import (
     ModelDomainPluginConfig,
     ModelDomainPluginResult,
@@ -331,29 +337,9 @@ class PluginRegistration:
                 extra={"dsn_var": "OMNIBASE_INFRA_DB_URL"},
             )
 
-            # 1.5 Validate DB ownership (OMN-2085)
-            # Hard gate: prevents operating on a database owned by another
-            # service after the DB-per-repo split.
-            await validate_db_ownership(
-                pool=self._pool,
-                expected_owner="omnibase_infra",
-                correlation_id=correlation_id,
-            )
-
-            # 1.6 Validate schema fingerprint (OMN-2087)
-            # Hard gate: prevents operating on a database whose schema has
-            # drifted from what code expects (missing columns, wrong types,
-            # etc.).
-            await validate_schema_fingerprint(
-                pool=self._pool,
-                manifest=OMNIBASE_INFRA_SCHEMA_MANIFEST,
-                correlation_id=correlation_id,
-            )
-
-            # 1.7 Validate event registry fingerprint (OMN-2088)
-            # Hard gate: prevents operating with drifted event registrations
-            # (wrong topics, missing events, changed schemas).
-            validate_event_registry_fingerprint(correlation_id=correlation_id)
+            # B1-B3 checks moved to validate_handshake() (OMN-2089).
+            # The kernel calls validate_handshake() between initialize() and
+            # wire_handlers(), ensuring nothing starts before attestation passes.
 
             # 2. Load projectors from contracts via ProjectorPluginLoader
             await self._load_projector(config)
@@ -384,23 +370,6 @@ class PluginRegistration:
                 duration_seconds=duration,
             )
 
-        except (
-            DbOwnershipMismatchError,
-            DbOwnershipMissingError,
-            SchemaFingerprintMismatchError,
-            SchemaFingerprintMissingError,
-            EventRegistryFingerprintMismatchError,
-            EventRegistryFingerprintMissingError,
-        ):
-            # Hard gates: must propagate to kill the kernel.
-            # DB ownership errors (OMN-2085) indicate wrong database.
-            # Schema fingerprint errors (OMN-2087) indicate schema drift.
-            # Event registry fingerprint errors (OMN-2088) indicate
-            # drifted event registrations.
-            # Swallowing these would defeat the entire safety mechanism.
-            await self._cleanup_on_failure(config)
-            raise
-
         except Exception as e:
             duration = time.time() - start_time
             logger.exception(
@@ -415,6 +384,140 @@ class PluginRegistration:
                 error_message=sanitize_error_message(e),
                 duration_seconds=duration,
             )
+
+    async def validate_handshake(
+        self,
+        config: ModelDomainPluginConfig,
+    ) -> ModelHandshakeResult:
+        """Run B1-B3 prerequisite checks before handler wiring.
+
+        Validates:
+            B1: Database ownership (OMN-2085) -- prevents operating on a
+                database owned by another service.
+            B2: Schema fingerprint (OMN-2087) -- prevents operating on a
+                database whose schema has drifted from what code expects.
+            B3: Event registry fingerprint (OMN-2088) -- prevents operating
+                with drifted event registrations.
+
+        Args:
+            config: Plugin configuration with container and correlation_id.
+
+        Returns:
+            ModelHandshakeResult indicating whether all checks passed.
+            On failure, the kernel aborts before wiring handlers.
+
+        Raises:
+            DbOwnershipMismatchError: B1 failure -- wrong database owner.
+            DbOwnershipMissingError: B1 failure -- no ownership record.
+            SchemaFingerprintMismatchError: B2 failure -- schema drift.
+            SchemaFingerprintMissingError: B2 failure -- no fingerprint.
+            EventRegistryFingerprintMismatchError: B3 failure -- event drift.
+            EventRegistryFingerprintMissingError: B3 failure -- no fingerprint.
+        """
+        correlation_id = config.correlation_id
+        checks: list[ModelHandshakeCheckResult] = []
+
+        if self._pool is None:
+            return ModelHandshakeResult.failed(
+                plugin_id=self.plugin_id,
+                error_message="Cannot validate handshake: PostgreSQL pool not initialized",
+            )
+
+        # B1: Validate DB ownership (OMN-2085)
+        # Hard gate: prevents operating on a database owned by another
+        # service after the DB-per-repo split.
+        try:
+            await validate_db_ownership(
+                pool=self._pool,
+                expected_owner="omnibase_infra",
+                correlation_id=correlation_id,
+            )
+            checks.append(
+                ModelHandshakeCheckResult(
+                    check_name="db_ownership",
+                    passed=True,
+                    message="Database owned by omnibase_infra",
+                )
+            )
+        except (DbOwnershipMismatchError, DbOwnershipMissingError) as e:
+            checks.append(
+                ModelHandshakeCheckResult(
+                    check_name="db_ownership",
+                    passed=False,
+                    message=str(e),
+                )
+            )
+            # Hard gate: propagate to kill the kernel
+            raise
+
+        # B2: Validate schema fingerprint (OMN-2087)
+        # Hard gate: prevents operating on a database whose schema has
+        # drifted from what code expects (missing columns, wrong types).
+        try:
+            await validate_schema_fingerprint(
+                pool=self._pool,
+                manifest=OMNIBASE_INFRA_SCHEMA_MANIFEST,
+                correlation_id=correlation_id,
+            )
+            checks.append(
+                ModelHandshakeCheckResult(
+                    check_name="schema_fingerprint",
+                    passed=True,
+                    message="Schema fingerprint matches manifest",
+                )
+            )
+        except (SchemaFingerprintMismatchError, SchemaFingerprintMissingError) as e:
+            checks.append(
+                ModelHandshakeCheckResult(
+                    check_name="schema_fingerprint",
+                    passed=False,
+                    message=str(e),
+                )
+            )
+            # Hard gate: propagate to kill the kernel
+            raise
+
+        # B3: Validate event registry fingerprint (OMN-2088)
+        # Hard gate: prevents operating with drifted event registrations
+        # (wrong topics, missing events, changed schemas).
+        try:
+            validate_event_registry_fingerprint(correlation_id=correlation_id)
+            checks.append(
+                ModelHandshakeCheckResult(
+                    check_name="event_registry_fingerprint",
+                    passed=True,
+                    message="Event registry fingerprint matches",
+                )
+            )
+        except (
+            EventRegistryFingerprintMismatchError,
+            EventRegistryFingerprintMissingError,
+        ) as e:
+            checks.append(
+                ModelHandshakeCheckResult(
+                    check_name="event_registry_fingerprint",
+                    passed=False,
+                    message=str(e),
+                )
+            )
+            # Hard gate: propagate to kill the kernel
+            raise
+
+        logger.info(
+            "Handshake validation passed: %d/%d checks (correlation_id=%s)",
+            len([c for c in checks if c.passed]),
+            len(checks),
+            correlation_id,
+            extra={
+                "check_names": [c.check_name for c in checks],
+                "all_passed": all(c.passed for c in checks),
+            },
+        )
+
+        return ModelHandshakeResult.all_passed(
+            plugin_id=self.plugin_id,
+            checks=checks,
+        )
 
     async def _load_projector(self, config: ModelDomainPluginConfig) -> None:
         """Load projector from contracts via ProjectorPluginLoader."""

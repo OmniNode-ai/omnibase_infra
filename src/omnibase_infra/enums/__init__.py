@@ -47,6 +47,7 @@ Exports:
     EnumRegistrationStatus: Registration workflow status (IDLE, PENDING, PARTIAL, COMPLETE, FAILED)
     EnumRegistryResponseStatus: Registry operation response status (SUCCESS, PARTIAL, FAILED)
     EnumRetryErrorCategory: Error categories for retry decision making
+    EnumRunVariant: A/B run variant (BASELINE, CANDIDATE) for baseline comparison
     EnumSecurityRuleId: Security validation rule identifiers for OMN-1098
     EnumSelectionStrategy: Selection strategies for capability-based discovery (FIRST, RANDOM, ROUND_ROBIN, LEAST_LOADED)
     EnumTopicStandard: Topic standards (ONEX_KAFKA, ENVIRONMENT_AWARE)
@@ -109,6 +110,7 @@ from omnibase_infra.enums.enum_registry_response_status import (
 )
 from omnibase_infra.enums.enum_response_status import EnumResponseStatus
 from omnibase_infra.enums.enum_retry_error_category import EnumRetryErrorCategory
+from omnibase_infra.enums.enum_run_variant import EnumRunVariant
 from omnibase_infra.enums.enum_security_rule_id import EnumSecurityRuleId
 from omnibase_infra.enums.enum_selection_strategy import EnumSelectionStrategy
 from omnibase_infra.enums.enum_session_lifecycle_state import (
@@ -163,6 +165,7 @@ __all__: list[str] = [
     "EnumRegistryResponseStatus",
     "EnumResponseStatus",
     "EnumRetryErrorCategory",
+    "EnumRunVariant",
     "EnumSecurityRuleId",
     "EnumSelectionStrategy",
     "EnumSessionLifecycleState",

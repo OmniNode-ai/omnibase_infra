@@ -195,9 +195,12 @@ def load_runtime_config(
         4. Return fully validated configuration model
 
     Configuration Precedence:
-        - File-based config is returned as-is when present (no environment overrides)
-        - Environment variables are only used when no config file exists
-        - Defaults are used when neither file nor environment variables are set
+        - File-based config is loaded and contract-validated first
+        - Environment variables (ONEX_GROUP_ID, ONEX_INPUT_TOPIC, ONEX_OUTPUT_TOPIC)
+          override corresponding YAML fields when a config file is present
+        - Environment overrides are re-validated against the same contract rules
+          as the YAML file, preventing invalid env-var values from bypassing checks
+        - When no config file exists, environment variables and defaults are used
         - Note: Environment overrides (e.g., ONEX_ENVIRONMENT) are applied by the
           caller (bootstrap), not by this function
 
@@ -299,6 +302,71 @@ def load_runtime_config(
                     "event_bus_type": config.event_bus.type,
                 },
             )
+
+            # Environment variable overrides (highest priority per contract header).
+            # Env-var values are merged into raw_config and re-validated against
+            # the same contract rules that the YAML file was validated against.
+            # This prevents invalid env-var values from bypassing contract checks.
+            env_overrides: dict[str, str] = {}
+            env_group_id = os.getenv("ONEX_GROUP_ID")
+            env_input_topic = os.getenv("ONEX_INPUT_TOPIC")
+            env_output_topic = os.getenv("ONEX_OUTPUT_TOPIC")
+
+            # Reject empty-string env var overrides with a clear diagnostic.
+            # An empty string passes the ``is not None`` check but would
+            # produce a confusing Pydantic validation error downstream.
+            _env_override_names = {
+                "ONEX_GROUP_ID": env_group_id,
+                "ONEX_INPUT_TOPIC": env_input_topic,
+                "ONEX_OUTPUT_TOPIC": env_output_topic,
+            }
+            for var_name, var_value in _env_override_names.items():
+                if var_value is not None and var_value.strip() == "":
+                    raise ProtocolConfigurationError(
+                        f"Environment variable {var_name} is set but empty. "
+                        f"Either unset it to use the YAML default or provide "
+                        f"a non-empty value.",
+                        context=context,
+                        config_path=str(config_path),
+                    )
+
+            if env_group_id is not None:
+                env_overrides["consumer_group"] = env_group_id
+            if env_input_topic is not None:
+                env_overrides["input_topic"] = env_input_topic
+            if env_output_topic is not None:
+                env_overrides["output_topic"] = env_output_topic
+            if env_overrides:
+                merged = {**raw_config, **env_overrides}
+                # Remove the group_id alias key if consumer_group is being overridden,
+                # because Pydantic gives alias keys precedence over field names when
+                # both are present (populate_by_name=True). Without this, the YAML
+                # group_id value would shadow the env-var consumer_group override.
+                if "consumer_group" in env_overrides and "group_id" in merged:
+                    del merged["group_id"]
+                # Re-validate merged config to catch invalid env-var values
+                override_errors = validate_runtime_config(merged)
+                if override_errors:
+                    error_count = len(override_errors)
+                    error_summary = "; ".join(override_errors[:3])
+                    if error_count > 3:
+                        error_summary += f" (and {error_count - 3} more...)"
+                    raise ProtocolConfigurationError(
+                        f"Environment variable override validation failed: "
+                        f"{error_count} error(s). "
+                        f"First errors: {error_summary}",
+                        context=context,
+                        config_path=str(config_path),
+                        validation_errors=override_errors,
+                        error_count=error_count,
+                        overridden_fields=list(env_overrides.keys()),
+                    )
+                config = ModelRuntimeConfig.model_validate(merged)
+                logger.info(
+                    "Applied environment variable overrides to runtime config",
+                    extra={"overridden_fields": list(env_overrides.keys())},
+                )
+
             return config
         except yaml.YAMLError as e:
             raise ProtocolConfigurationError(
@@ -899,9 +967,17 @@ async def bootstrap() -> int:
             kafka_bootstrap_servers=kafka_bootstrap_servers,
         )
 
-        # Activate plugins using two-pass lifecycle (OMN-2050)
+        # Activate plugins using two-pass lifecycle (OMN-2050, OMN-2089)
         #
-        # Pass 1: should_activate -> initialize -> wire_handlers -> wire_dispatchers
+        # Pass 1: should_activate -> initialize -> validate_handshake ->
+        #         wire_handlers -> wire_dispatchers
+        #   The handshake gate (OMN-2089) runs between initialize() and
+        #   wire_handlers(). If validate_handshake() fails, the kernel
+        #   aborts before wiring handlers/dispatchers/consumers.
+        #
+        #   Phase state machine:
+        #   INITIALIZING -> HANDSHAKE_VALIDATE -> HANDSHAKE_ATTEST -> WIRING -> READY
+        #
         #   All plugins register their dispatchers with the engine before it is frozen.
         #
         # Freeze: dispatch_engine.freeze() after all wire_dispatchers() complete
@@ -914,7 +990,7 @@ async def bootstrap() -> int:
         # dispatching messages through it.
         plugin_activation_start = time.time()
 
-        # --- Pass 1: Initialize, wire handlers, wire dispatchers ---
+        # --- Pass 1: Initialize, validate handshake, wire handlers, wire dispatchers ---
         for plugin in plugin_registry.get_all():
             plugin_id = plugin.plugin_id
 
@@ -944,7 +1020,50 @@ async def bootstrap() -> int:
                 # cleaned up even if later lifecycle steps fail.
                 activated_plugins.append(plugin)
 
-                # 3. Wire handlers
+                # 3. HANDSHAKE_VALIDATE: Run prerequisite checks (OMN-2089)
+                # The handshake gate ensures all B1-B3 checks pass before
+                # any consumers, dispatchers, or handlers are wired.
+                # Plugins that don't implement validate_handshake() pass
+                # by default (optional method).
+                if hasattr(plugin, "validate_handshake") and callable(
+                    getattr(plugin, "validate_handshake", None)
+                ):
+                    handshake_result = await plugin.validate_handshake(plugin_config)
+                    if not handshake_result:
+                        logger.error(
+                            "Plugin '%s' handshake validation FAILED: %s — "
+                            "aborting before wiring handlers (correlation_id=%s)",
+                            plugin_id,
+                            handshake_result.error_message or "unknown",
+                            correlation_id,
+                            extra={
+                                "checks": [
+                                    {
+                                        "name": c.check_name,
+                                        "passed": c.passed,
+                                        "message": c.message,
+                                    }
+                                    for c in handshake_result.checks
+                                ],
+                            },
+                        )
+                        continue
+                    logger.info(
+                        "Plugin '%s' handshake ATTESTED (%d checks passed) "
+                        "(correlation_id=%s)",
+                        plugin_id,
+                        len(handshake_result.checks),
+                        correlation_id,
+                    )
+                else:
+                    logger.debug(
+                        "Plugin '%s' has no validate_handshake() — default pass "
+                        "(correlation_id=%s)",
+                        plugin_id,
+                        correlation_id,
+                    )
+
+                # 4. Wire handlers (WIRING phase)
                 wire_result = await plugin.wire_handlers(plugin_config)
                 if not wire_result:
                     logger.warning(
@@ -956,7 +1075,7 @@ async def bootstrap() -> int:
                     )
                     continue
 
-                # 4. Wire dispatchers (non-fatal if skipped)
+                # 5. Wire dispatchers (non-fatal if skipped)
                 dispatch_result = await plugin.wire_dispatchers(plugin_config)
                 if not dispatch_result:
                     logger.warning(
@@ -988,7 +1107,9 @@ async def bootstrap() -> int:
                 # Hard gates -- propagate to kill the kernel.
                 # DB ownership errors (OMN-2085): wrong database.
                 # Schema fingerprint errors (OMN-2087): schema drift.
-                # Event registry fingerprint errors (OMN-2088): event registration drift.
+                # Event registry fingerprint errors (OMN-2088): event drift.
+                # These are raised by validate_handshake() and must not be
+                # swallowed.
                 raise
             except Exception:
                 logger.warning(

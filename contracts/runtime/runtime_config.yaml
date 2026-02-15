@@ -48,7 +48,7 @@ description: "Configuration for ONEX runtime kernel"
 # this config file is absent (see load_runtime_config in service_kernel.py).
 input_topic: "onex.evt.platform.node-introspection.v1"
 output_topic: "onex.evt.platform.registration-completed.v1"
-group_id: "onex-runtime-e2e"
+group_id: "onex-runtime"
 # Event bus configuration [ACTIVE - used by ServiceKernel]
 # The kernel uses this configuration to wire the event bus via the registry.
 event_bus:

@@ -35,6 +35,8 @@ Exports:
     ModelBatchLifecycleResult: Result of batch handler lifecycle operations
     ModelFailedComponent: Represents a component that failed during shutdown
     ModelShutdownBatchResult: Result of batch shutdown operation
+    ModelHandshakeCheckResult: Result of a single handshake validation check
+    ModelHandshakeResult: Aggregated result of plugin handshake validation
     ModelHealthCheckResult: Result of component health check operation
     ModelHealthCheckResponse: HTTP response model for health check endpoints
     ModelProjectorPluginLoaderConfig: Projector plugin loader configuration model
@@ -102,6 +104,12 @@ from omnibase_infra.runtime.models.model_enabled_protocols_config import (
 )
 from omnibase_infra.runtime.models.model_event_bus_config import ModelEventBusConfig
 from omnibase_infra.runtime.models.model_failed_component import ModelFailedComponent
+from omnibase_infra.runtime.models.model_handshake_check_result import (
+    ModelHandshakeCheckResult,
+)
+from omnibase_infra.runtime.models.model_handshake_result import (
+    ModelHandshakeResult,
+)
 from omnibase_infra.runtime.models.model_health_check_response import (
     ModelHealthCheckResponse,
 )
@@ -218,6 +226,8 @@ __all__: list[str] = [
     "ModelEnabledProtocolsConfig",
     "ModelEventBusConfig",
     "ModelFailedComponent",
+    "ModelHandshakeCheckResult",
+    "ModelHandshakeResult",
     "ModelHealthCheckResponse",
     "ModelHealthCheckResult",
     # NOTE: ModelIntentExecutionSummary excluded - import directly from module
