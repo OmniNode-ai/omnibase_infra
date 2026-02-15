@@ -15,10 +15,10 @@ Performance Thresholds:
 
 Usage:
     Run load tests:
-        poetry run pytest tests/performance/event_bus/test_event_bus_load.py -v
+        uv run pytest tests/performance/event_bus/test_event_bus_load.py -v
 
     Skip in normal CI (use marker):
-        poetry run pytest -m "not performance" tests/
+        uv run pytest -m "not performance" tests/
 
 Related:
     - OMN-57: Event bus performance testing (Phase 9)

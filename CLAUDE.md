@@ -63,18 +63,18 @@ We explicitly do **NOT** optimize for:
 
 ```bash
 # Setup
-poetry install && pre-commit install
+uv sync && pre-commit install
 
 # Testing
-poetry run pytest tests/                      # All tests
-poetry run pytest tests/ -n auto              # Parallel execution
-poetry run pytest tests/ -m unit              # Unit tests only
-poetry run pytest tests/ -m integration       # Integration tests only
-poetry run pytest tests/ --cov                # With coverage (60% minimum)
+uv run pytest tests/                      # All tests
+uv run pytest tests/ -n auto              # Parallel execution
+uv run pytest tests/ -m unit              # Unit tests only
+uv run pytest tests/ -m integration       # Integration tests only
+uv run pytest tests/ --cov                # With coverage (60% minimum)
 
 # Code Quality
-poetry run mypy src/omnibase_infra/           # Type checking
-poetry run ruff check src/ tests/             # Linting
+uv run mypy src/omnibase_infra/           # Type checking
+uv run ruff check src/ tests/             # Linting
 pre-commit run --all-files                    # All hooks
 ```
 
@@ -561,21 +561,21 @@ tests/
 
 ```bash
 # All tests
-poetry run pytest tests/
+uv run pytest tests/
 
 # With coverage (60% minimum required)
-poetry run pytest tests/ --cov=omnibase_infra --cov-report=html
+uv run pytest tests/ --cov=omnibase_infra --cov-report=html
 
 # By category
-poetry run pytest -m unit                    # Unit tests only
-poetry run pytest -m integration             # Integration tests only
-poetry run pytest -m "not slow"              # Exclude slow tests
+uv run pytest -m unit                    # Unit tests only
+uv run pytest -m integration             # Integration tests only
+uv run pytest -m "not slow"              # Exclude slow tests
 
 # Parallel execution
-poetry run pytest tests/ -n auto
+uv run pytest tests/ -n auto
 
 # Debug mode (no parallelism)
-poetry run pytest tests/ -n 0 -xvs
+uv run pytest tests/ -n 0 -xvs
 ```
 
 ### Coverage Requirement

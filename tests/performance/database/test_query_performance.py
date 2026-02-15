@@ -22,10 +22,10 @@ Performance Thresholds:
 
 Usage:
     Run query performance tests:
-        poetry run pytest tests/performance/database/test_query_performance.py -v
+        uv run pytest tests/performance/database/test_query_performance.py -v
 
     With output:
-        poetry run pytest tests/performance/database/ -v -s
+        uv run pytest tests/performance/database/ -v -s
 
 Related:
     - PR #101: Add updated_at index for audit queries

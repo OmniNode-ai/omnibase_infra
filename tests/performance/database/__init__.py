@@ -18,7 +18,7 @@ Requirements:
 
 Usage:
     Run database performance tests:
-        poetry run pytest tests/performance/database/ -v
+        uv run pytest tests/performance/database/ -v
 
     Skip if PostgreSQL unavailable:
         Tests auto-skip with clear message if database is unreachable

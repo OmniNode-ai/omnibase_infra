@@ -18,6 +18,7 @@
 #     --build-arg RUNTIME_VERSION=1.0.0 \
 #     --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
 #     --build-arg VCS_REF=$(git rev-parse --short HEAD) \
+#     --build-arg UV_VERSION=0.6.14 \
 #     -f docker/Dockerfile.runtime -t omnibase-infra-runtime .
 #
 # Run:
@@ -38,13 +39,13 @@
 #
 # This Dockerfile is optimized for fast builds and minimal image size:
 #
-# 1. BUILDKIT CACHE MOUNTS: Uses --mount=type=cache for apt, pip, and poetry
+# 1. BUILDKIT CACHE MOUNTS: Uses --mount=type=cache for apt and uv
 #    - Persistent caches across builds reduce download times
 #    - Enable with: DOCKER_BUILDKIT=1 docker build ...
 #
 # 2. LAYER ORDERING: Dependencies installed before source code
 #    - Dependency layer cached even when source code changes
-#    - poetry install --no-root separates deps from package install
+#    - uv sync --no-install-project separates deps from package install
 #
 # 3. MULTI-STAGE BUILD: Separate builder and runtime stages
 #    - Builder stage includes build tools (gcc, etc.)
@@ -71,9 +72,20 @@
 # =============================================================================
 
 ARG PYTHON_VERSION=3.12
+# Pin uv version for reproducible builds (must match CI: .github/workflows/*.yml)
+ARG UV_VERSION=0.6.14
 
 # ============================================================================
-# Builder Stage - Install dependencies with Poetry
+# uv Binary Stage - Named stage so COPY --from can reference it
+# ============================================================================
+# NOTE: Docker's COPY --from does NOT interpolate ARG variables when
+# referencing external images directly. Using a named stage works around
+# this limitation. The ARG declarations above are visible here because
+# they appear before any FROM directive.
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv-bin
+
+# ============================================================================
+# Builder Stage - Install dependencies with uv
 # ============================================================================
 FROM python:${PYTHON_VERSION}-slim AS builder
 
@@ -82,12 +94,8 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    # Poetry configuration
-    POETRY_VERSION=2.2.1 \
-    POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=true \
-    POETRY_VIRTUALENVS_CREATE=true \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
+    # uv configuration: create venv inside project directory
+    UV_PROJECT_ENVIRONMENT=/app/.venv
 
 # Install system dependencies required for building Python packages
 # Cache apt packages for faster rebuilds
@@ -106,10 +114,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Poetry with BuildKit cache mount for pip
-# Cache mount speeds up repeated builds by reusing downloaded packages
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir poetry==${POETRY_VERSION}
+# Install uv from official image (recommended Docker approach)
+# Version pinned via UV_VERSION build arg for reproducible builds
+COPY --from=uv-bin /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 
@@ -121,27 +128,25 @@ WORKDIR /app
 # ============================================================================
 
 # Copy dependency manifests for layer caching
-# pyproject.toml and poetry.lock define all dependencies
+# pyproject.toml and uv.lock define all dependencies
 COPY pyproject.toml README.md ./
-COPY poetry.lock ./poetry.lock* ./
+COPY uv.lock ./
 
-# Install dependencies with Poetry (BEFORE copying source code)
-# - Uses BuildKit cache mount for Poetry cache directory (shared across builds)
-# - Uses BuildKit cache mount for pip cache (faster package downloads)
+# Install dependencies with uv (BEFORE copying source code)
+# - Uses BuildKit cache mount for uv cache directory (shared across builds)
 # - Installs only main dependencies (no dev dependencies)
-# - --no-root flag installs dependencies without installing the package itself
-RUN --mount=type=cache,target=/tmp/poetry_cache \
-    --mount=type=cache,target=/root/.cache/pip \
-    poetry install --only=main --no-root
+# - --no-install-project flag installs dependencies without installing the package itself
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --no-dev --no-install-project
 
-# Copy source code (required for local package install with poetry)
+# Copy source code (required for local package install with uv)
 # This layer invalidates when source code changes, but dependency layer remains cached
 COPY src/ ./src/
 
 # Install the root package itself (now that source code is available)
 # This is a separate step to maximize cache reuse
-RUN --mount=type=cache,target=/tmp/poetry_cache \
-    poetry install --only=main
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --no-dev
 
 # Install omniintelligence as a composition-layer dependency.
 # This is NOT declared in pyproject.toml because it is a runtime plugin,
@@ -150,12 +155,12 @@ RUN --mount=type=cache,target=/tmp/poetry_cache \
 #
 # We freeze the venv's installed packages into a constraints file so that
 # pip cannot mutate any transitive dependency version already locked by
-# Poetry (e.g. python-dotenv). This ensures the runtime image is fully
+# uv (e.g. python-dotenv). This ensures the runtime image is fully
 # reproducible.
-RUN /app/.venv/bin/pip freeze | grep -v '^\(-e\|@\)' > /tmp/constraints.txt
+RUN uv pip freeze | grep -v '^\(-e\|@\)' > /tmp/constraints.txt
 
-RUN --mount=type=cache,target=/root/.cache/pip \
-    /app/.venv/bin/pip install --constraint /tmp/constraints.txt \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --constraint /tmp/constraints.txt \
     omniintelligence==0.2.0
 
 # ============================================================================
@@ -270,6 +275,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # tini runs as PID 1, spawns the entrypoint script, which exec's into the CMD.
 ENTRYPOINT ["/usr/bin/tini", "--", "/app/entrypoint-runtime.sh"]
 
-# Default command runs the ONEX kernel via Poetry-installed script
+# Default command runs the ONEX kernel via uv-installed script
 # The kernel loads configuration from ONEX_CONTRACTS_DIR and starts the runtime
 CMD ["onex-runtime"]

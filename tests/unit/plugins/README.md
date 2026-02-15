@@ -76,16 +76,16 @@ Tests are now active and can be run directly:
 
 1. **Run all plugin tests**:
    ```bash
-   poetry run pytest tests/unit/plugins/ -v
+   uv run pytest tests/unit/plugins/ -v
    ```
 
 2. **Run specific test suites**:
    ```bash
    # Protocol conformance and base functionality
-   poetry run pytest tests/unit/plugins/test_plugin_compute_base.py -v
+   uv run pytest tests/unit/plugins/test_plugin_compute_base.py -v
 
    # ONEX architecture compliance verification
-   poetry run pytest tests/unit/plugins/test_onex_architecture_compliance.py -v
+   uv run pytest tests/unit/plugins/test_onex_architecture_compliance.py -v
    ```
 
 3. **Expected result**: All 35+ tests should pass with >90% coverage

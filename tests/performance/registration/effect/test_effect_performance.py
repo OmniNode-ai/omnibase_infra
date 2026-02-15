@@ -24,10 +24,10 @@ Performance Thresholds:
 
 Usage:
     Run all performance tests:
-        poetry run pytest tests/performance/registration/effect/ -v
+        uv run pytest tests/performance/registration/effect/ -v
 
     Skip in normal CI (use marker):
-        poetry run pytest -m "not performance" tests/
+        uv run pytest -m "not performance" tests/
 
 Related:
     - OMN-954: Registry Effect Node testing requirements

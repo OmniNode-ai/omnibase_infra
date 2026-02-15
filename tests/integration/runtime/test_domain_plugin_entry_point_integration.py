@@ -12,8 +12,8 @@ Unlike the unit tests in ``test_discover_from_entry_points.py`` which mock
 verify end-to-end plugin discovery works with the actual package metadata.
 
 Prerequisites:
-    - ``poetry install`` must have been run so that the entry_point declared
-      in ``pyproject.toml`` under ``[tool.poetry.plugins."onex.domain_plugins"]``
+    - ``uv sync`` must have been run so that the entry_point declared
+      in ``pyproject.toml`` under ``[project.entry-points."onex.domain_plugins"]``
       is registered in the installed package metadata.
 
 Dependencies:
@@ -83,7 +83,7 @@ class TestEntryPointDiscoverability:
         assert ep is not None, (
             "Entry point 'registration' not found in group "
             f"'{DOMAIN_PLUGIN_ENTRY_POINT_GROUP}'. "
-            "Has 'poetry install' been run?"
+            "Has 'uv sync' been run?"
         )
 
     def test_entry_point_value_matches_plugin_module(self) -> None:

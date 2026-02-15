@@ -348,11 +348,11 @@ Run effect tests:
 
 ```bash
 # Unit tests
-poetry run pytest tests/unit/registration/effect/ -v
+uv run pytest tests/unit/registration/effect/ -v
 
 # Performance tests
-poetry run pytest tests/performance/registration/effect/ -v -m performance
+uv run pytest tests/performance/registration/effect/ -v -m performance
 
 # Skip performance tests in CI
-poetry run pytest tests/ -m "not performance"
+uv run pytest tests/ -m "not performance"
 ```

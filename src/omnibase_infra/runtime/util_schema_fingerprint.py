@@ -17,13 +17,13 @@ Algorithm:
 CLI usage::
 
     # Stamp the expected fingerprint into db_metadata:
-    poetry run python -m omnibase_infra.runtime.util_schema_fingerprint stamp
+    uv run python -m omnibase_infra.runtime.util_schema_fingerprint stamp
 
     # Dry-run (compute without writing):
-    poetry run python -m omnibase_infra.runtime.util_schema_fingerprint stamp --dry-run
+    uv run python -m omnibase_infra.runtime.util_schema_fingerprint stamp --dry-run
 
     # Verify live schema matches expected fingerprint:
-    poetry run python -m omnibase_infra.runtime.util_schema_fingerprint verify
+    uv run python -m omnibase_infra.runtime.util_schema_fingerprint verify
 
 Requires ``OMNIBASE_INFRA_DB_URL`` environment variable.
 

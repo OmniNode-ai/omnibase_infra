@@ -6,7 +6,7 @@
 -- At startup, compute live fingerprint and compare to expected.
 -- Mismatch = immediate failure (prevents schema drift).
 --
--- Post-migration: Run `poetry run python -m omnibase_infra.runtime.util_schema_fingerprint stamp`
+-- Post-migration: Run `uv run python -m omnibase_infra.runtime.util_schema_fingerprint stamp`
 -- Rollback: See rollback/rollback_030_add_schema_fingerprint.sql
 
 ALTER TABLE public.db_metadata

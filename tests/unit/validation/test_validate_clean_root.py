@@ -703,7 +703,7 @@ class TestIntegrationScenarios:
         # Files
         (tmp_path / "README.md").touch()
         (tmp_path / "pyproject.toml").touch()
-        (tmp_path / "poetry.lock").touch()
+        (tmp_path / "uv.lock").touch()
         (tmp_path / ".gitignore").touch()
         (tmp_path / "LICENSE").touch()
         (tmp_path / "CONTRIBUTING.md").touch()

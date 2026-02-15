@@ -23,7 +23,7 @@ Example CI/CD Output::
 
 Run with infrastructure::
 
-    $ QDRANT_URL=http://localhost:6333 poetry run pytest tests/integration/handlers/test_handler_qdrant_integration.py -v
+    $ QDRANT_URL=http://localhost:6333 uv run pytest tests/integration/handlers/test_handler_qdrant_integration.py -v
 
 Test Categories
 ===============

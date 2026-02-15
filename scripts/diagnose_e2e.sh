@@ -248,7 +248,7 @@ cd "$PROJECT_ROOT"
 log_info "Starting test execution (this may take 30-45 seconds)..."
 
 # Run test with verbose output
-if poetry run pytest \
+if uv run pytest \
     "${TEST_FILE}::${TEST_NAME}" \
     -v -s --log-cli-level=DEBUG \
     2>&1 | tee "$TEST_LOG"; then

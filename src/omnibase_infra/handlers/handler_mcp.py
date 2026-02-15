@@ -17,7 +17,7 @@ Key Features:
 
 Note:
     This handler requires the `mcp` package (anthropic-ai/mcp-python-sdk).
-    Install via: poetry add mcp
+    Install via: uv add mcp
 """
 
 from __future__ import annotations

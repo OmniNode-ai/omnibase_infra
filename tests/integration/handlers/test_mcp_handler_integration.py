@@ -13,7 +13,7 @@ ONEX MCP server implementation and verify:
 - Server lifecycle management
 
 Requirements:
-    mcp SDK must be installed: poetry add mcp
+    mcp SDK must be installed: uv add mcp
 
 Test Coverage:
     - MCP tool listing via list_tools
@@ -58,7 +58,7 @@ MCP_AVAILABLE = importlib.util.find_spec("mcp") is not None
 
 requires_mcp = pytest.mark.skipif(
     not MCP_AVAILABLE,
-    reason="MCP SDK not installed. Install via: poetry add mcp",
+    reason="MCP SDK not installed. Install via: uv add mcp",
 )
 
 

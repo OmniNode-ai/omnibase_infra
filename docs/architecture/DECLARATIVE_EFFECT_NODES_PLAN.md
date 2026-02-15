@@ -1232,12 +1232,13 @@ def register_custom_handlers():
 In `pyproject.toml`:
 
 ```toml
-[tool.poetry.dependencies]
-# Pin to specific minor version for stability
-omnibase-core = ">=0.4.0,<0.5.0"
-
-# Allow patch updates
-omnibase-spi = "^0.2.0"
+[project]
+dependencies = [
+    # Pin to specific minor version for stability
+    "omnibase-core>=0.4.0,<0.5.0",
+    # Allow patch updates within 0.2.x
+    "omnibase-spi>=0.2.0,<0.3.0",
+]
 ```
 
 **Upgrade Policy**:
@@ -1593,22 +1594,22 @@ def validate_all_contracts(contracts_dir: Path) -> dict[str, list[str]]:
 
 ```bash
 # Validate all contracts
-poetry run python -m omnibase_infra.contracts.validate
+uv run python -m omnibase_infra.contracts.validate
 
 # Run with contract-driven effects (DEFAULT in v0.4.0+)
-USE_CONTRACT_DRIVEN_EFFECTS=contract poetry run pytest
+USE_CONTRACT_DRIVEN_EFFECTS=contract uv run pytest
 
 # Run with Legacy effects (deprecated)
-USE_CONTRACT_DRIVEN_EFFECTS=legacy poetry run pytest
+USE_CONTRACT_DRIVEN_EFFECTS=legacy uv run pytest
 
 # Run shadow mode comparison
-USE_CONTRACT_DRIVEN_EFFECTS=shadow poetry run pytest tests/integration/
+USE_CONTRACT_DRIVEN_EFFECTS=shadow uv run pytest tests/integration/
 
 # Enable specific node for contract-driven
-USE_CONTRACT_DRIVEN_POSTGRES_WORKFLOW=true poetry run pytest
+USE_CONTRACT_DRIVEN_POSTGRES_WORKFLOW=true uv run pytest
 
 # Force Legacy for specific node (deprecated)
-USE_CONTRACT_DRIVEN_POSTGRES_WORKFLOW=false poetry run pytest
+USE_CONTRACT_DRIVEN_POSTGRES_WORKFLOW=false uv run pytest
 ```
 
 ### Class Names Quick Reference

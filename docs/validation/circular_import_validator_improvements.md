@@ -78,7 +78,7 @@ Imports: ERROR (Configuration error: [ONEX_CORE_006_VALIDATION_ERROR] Source pat
 **Scenario**: omnibase_core not installed
 ```
 Imports: SKIP (CircularImportValidator not available: No module named 'omnibase_core')
-  Fix: Install omnibase_core with: poetry add omnibase-core
+  Fix: Install omnibase_core with: uv add omnibase-core
 ```
 **Result**: Skips validation (returns True) - doesn't fail build
 
@@ -87,7 +87,7 @@ Imports: SKIP (CircularImportValidator not available: No module named 'omnibase_
 ```
 Imports: ERROR (Validator API incompatible: 'ModelValidationResult' object has no attribute 'total_files')
   Fix: Update omnibase_core to compatible version
-    poetry update omnibase-core
+    uv add --upgrade omnibase-core
     or check omnibase_core version requirements
 ```
 **Result**: Fails validation (returns False) - integration bug must be fixed
@@ -113,22 +113,22 @@ Imports: ERROR (Unexpected RuntimeError: unexpected error message)
 
 ### Check for circular imports (quiet mode)
 ```bash
-poetry run python scripts/validate.py imports
+uv run python scripts/validate.py imports
 ```
 
 ### Check with full error details
 ```bash
-poetry run python scripts/validate.py imports --verbose
+uv run python scripts/validate.py imports --verbose
 ```
 
 ### Run all validators including imports
 ```bash
-poetry run python scripts/validate.py all --verbose
+uv run python scripts/validate.py all --verbose
 ```
 
 ### Quick validation (skip imports)
 ```bash
-poetry run python scripts/validate.py all --quick
+uv run python scripts/validate.py all --quick
 ```
 
 ## Benefits

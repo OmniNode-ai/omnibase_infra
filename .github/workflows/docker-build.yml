@@ -33,7 +33,7 @@ on:
         type: boolean
 
 env:
-  POETRY_VERSION: "2.2.1"
+  UV_VERSION: "0.6.14"
   PYTHON_VERSION: "3.12"
   REGISTRY: ghcr.io
   IMAGE_NAME: omnibase-infra-runtime
@@ -113,6 +113,7 @@ jobs:
             RUNTIME_VERSION=${{ github.ref_name }}
             BUILD_DATE=${{ steps.timestamp.outputs.build_date }}
             VCS_REF=${{ github.sha }}
+            UV_VERSION=${{ env.UV_VERSION }}
 
       # Validate built image with quick import test
       - name: Test image import
@@ -155,27 +156,21 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install Poetry
-        run: |
-          pipx install poetry==${{ env.POETRY_VERSION }}
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
 
-      - name: Load cached venv
-        id: cached-poetry-dependencies
+      - name: Load cached uv
         uses: actions/cache@v4
         with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/poetry.lock') }}-docker
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/uv.lock') }}-docker
           restore-keys: |
-            venv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
+            uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
 
       - name: Install dependencies
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: poetry install --no-interaction --no-root
-
-      - name: Install project
-        run: poetry install --no-interaction
+        run: uv sync
 
       # Run Docker integration tests WITHOUT pytest-xdist (no -n auto)
       # This prevents worker crashes during Docker builds
@@ -184,7 +179,7 @@ jobs:
           DOCKER_BUILDKIT: "1"
           ONEX_EVENT_BUS_TYPE: inmemory
         run: |
-          poetry run pytest tests/integration/docker/ \
+          uv run pytest tests/integration/docker/ \
             --timeout=600 \
             --timeout-method=thread \
             --tb=short \

@@ -867,7 +867,7 @@ docker compose -f docker-compose.e2e.yml ps
 
 # 5. Run E2E tests from host
 cd ..
-poetry run pytest tests/integration/registration/e2e/ -v
+uv run pytest tests/integration/registration/e2e/ -v
 
 # 6. Tear down when done
 docker compose -f docker/docker-compose.e2e.yml down -v
@@ -883,10 +883,10 @@ docker compose -f docker-compose.e2e.yml --profile runtime up -d
 curl http://localhost:8085/health
 
 # Run ALL E2E tests (component tests + runtime tests)
-poetry run pytest tests/integration/registration/e2e/ -v
+uv run pytest tests/integration/registration/e2e/ -v
 
 # Run ONLY true runtime E2E tests (requires runtime container)
-poetry run pytest tests/integration/registration/e2e/test_runtime_e2e.py -v
+uv run pytest tests/integration/registration/e2e/test_runtime_e2e.py -v
 
 # View runtime logs
 docker compose -f docker-compose.e2e.yml logs -f runtime

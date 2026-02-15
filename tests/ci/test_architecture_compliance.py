@@ -16,11 +16,11 @@ These tests run as part of the CI pipeline in two ways:
 1. **Pre-push hook** (`.pre-commit-config.yaml`):
    - Hook ID: `onex-validate-architecture-layers`
    - Stage: `pre-push` (not pre-commit for performance)
-   - Runs: `poetry run python scripts/validate.py architecture_layers`
+   - Runs: `uv run python scripts/validate.py architecture_layers`
 
 2. **GitHub Actions** (`.github/workflows/test.yml`):
    - Job: `onex-validation` ("ONEX Validators")
-   - Runs: `poetry run python scripts/validate.py all --verbose`
+   - Runs: `uv run python scripts/validate.py all --verbose`
    - Includes architecture_layers as part of the full validation suite
 
 Detection Capabilities

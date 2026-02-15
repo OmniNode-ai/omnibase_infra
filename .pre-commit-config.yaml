@@ -46,14 +46,14 @@ repos:
     hooks:
       - id: ruff-format
         name: ruff format (auto-format)
-        entry: poetry run ruff format
+        entry: uv run ruff format
         language: system
         types: [python]
         exclude: ^(archived/|tests/fixtures/|\.github/workflows/).*$
         stages: [pre-commit]
       - id: ruff-fix
         name: ruff check (auto-fix linting + import sorting)
-        entry: poetry run ruff check --fix --exit-non-zero-on-fix
+        entry: uv run ruff check --fix --exit-non-zero-on-fix
         language: system
         types: [python]
         exclude: ^(archived/|tests/fixtures/|\.github/workflows/).*$
@@ -62,7 +62,7 @@ repos:
         # forcing you to re-stage the changes. This keeps pre-commit and CI in sync.
       - id: mypy-type-check
         name: mypy (type checking)
-        entry: bash -c 'poetry run mypy "$@" --show-error-codes --no-error-summary' --
+        entry: bash -c 'uv run mypy "$@" --show-error-codes --no-error-summary' --
         language: system
         types: [python]
         files: ^src/omnibase_infra/.*\.py$
@@ -83,7 +83,7 @@ repos:
       # Migration freeze enforcement - block new migrations during DB-per-repo refactor
       - id: onex-validate-migration-freeze
         name: ONEX Migration Freeze Enforcement
-        entry: poetry run python scripts/validate.py migration_freeze
+        entry: uv run python scripts/validate.py migration_freeze
         language: system
         pass_filenames: false
         always_run: true
@@ -91,7 +91,7 @@ repos:
       # Root directory cleanliness - no ephemeral files in root
       - id: onex-validate-clean-root
         name: ONEX Root Directory Cleanliness
-        entry: poetry run python scripts/validate.py clean_root
+        entry: uv run python scripts/validate.py clean_root
         language: system
         pass_filenames: false
         always_run: true
@@ -99,7 +99,7 @@ repos:
       # Architecture validation - one model per file
       - id: onex-validate-architecture
         name: ONEX Architecture Validation
-        entry: poetry run python scripts/validate.py architecture
+        entry: uv run python scripts/validate.py architecture
         language: system
         types: [python]
         pass_filenames: false
@@ -116,10 +116,10 @@ repos:
       # These cause expected failures until the tickets are resolved.
       #
       # Manual run: pre-commit run onex-validate-architecture-layers --hook-stage pre-push
-      # Or: poetry run python scripts/validate.py architecture_layers --verbose
+      # Or: uv run python scripts/validate.py architecture_layers --verbose
       - id: onex-validate-architecture-layers
         name: ONEX Architecture Layer Validation
-        entry: poetry run python scripts/validate.py architecture_layers
+        entry: uv run python scripts/validate.py architecture_layers
         language: system
         types: [python]
         pass_filenames: false
@@ -127,7 +127,7 @@ repos:
       # Contract validation - YAML contracts
       - id: onex-validate-contracts
         name: ONEX Contract Validation
-        entry: poetry run python scripts/validate.py contracts
+        entry: uv run python scripts/validate.py contracts
         language: system
         files: '\.yaml$'
         pass_filenames: false
@@ -135,7 +135,7 @@ repos:
       # Pattern validation - naming conventions
       - id: onex-validate-patterns
         name: ONEX Pattern Validation
-        entry: poetry run python scripts/validate.py patterns
+        entry: uv run python scripts/validate.py patterns
         language: system
         types: [python]
         pass_filenames: false
@@ -145,7 +145,7 @@ repos:
       # Runtime: <3s (single pass with caching)
       - id: onex-validate-naming
         name: ONEX Naming Convention Validation
-        entry: poetry run python scripts/validation/validate_naming.py src/omnibase_infra --errors-only
+        entry: uv run python scripts/validation/validate_naming.py src/omnibase_infra --errors-only
         language: system
         types: [python]
         pass_filenames: false
@@ -155,7 +155,7 @@ repos:
       # Target: Reduce to 30 incrementally after PR #37 merges
       - id: onex-validate-unions
         name: ONEX Union Usage Validation
-        entry: poetry run python scripts/validate.py unions
+        entry: uv run python scripts/validate.py unions
         language: system
         types: [python]
         pass_filenames: false
@@ -163,7 +163,7 @@ repos:
       # Circular import check
       - id: onex-validate-imports
         name: ONEX Circular Import Check
-        entry: poetry run python scripts/validate.py imports
+        entry: uv run python scripts/validate.py imports
         language: system
         types: [python]
         pass_filenames: false
@@ -172,7 +172,7 @@ repos:
       # Ensures no `Any` types are used in the codebase
       - id: onex-validate-any-types
         name: ONEX Any Type Validation
-        entry: poetry run python scripts/validate.py any_types
+        entry: uv run python scripts/validate.py any_types
         language: system
         types: [python]
         pass_filenames: false
@@ -185,7 +185,7 @@ repos:
       # Exempt nodes via: # ONEX_EXCLUDE: declarative_node
       - id: onex-validate-declarative-nodes
         name: ONEX Declarative Node Validation
-        entry: poetry run python scripts/validate.py declarative_nodes
+        entry: uv run python scripts/validate.py declarative_nodes
         language: system
         files: nodes/.*/node\.py$
         pass_filenames: true
@@ -195,7 +195,7 @@ repos:
       # Timeout: 60s prevents hanging if tests get stuck (normal runtime: <5s)
       - id: reducer-purity-check
         name: Reducer Purity Enforcement
-        entry: poetry run pytest tests/unit/nodes/reducers/test_reducer_purity.py -v --tb=short --timeout=60 --timeout-method=thread
+        entry: uv run pytest tests/unit/nodes/reducers/test_reducer_purity.py -v --tb=short --timeout=60 --timeout-method=thread
         language: system
         types: [python]
         files: ^src/omnibase_infra/nodes/reducers/
@@ -206,7 +206,7 @@ repos:
       # External links are skipped by default (configurable in .markdown-link-check.json)
       - id: onex-validate-markdown-links
         name: ONEX Markdown Link Validation
-        entry: poetry run python scripts/validate.py markdown_links
+        entry: uv run python scripts/validate.py markdown_links
         language: system
         types: [markdown]
         pass_filenames: true
@@ -227,5 +227,5 @@ ci:
   # Skip ONEX validation hooks in CI that require omnibase_core imports
   # Note: onex-validate-clean-root is NOT skipped (standalone script, no omnibase_core dependency)
   # Also skip migration freeze (checks staged files via git diff --cached, which is empty in CI;
-  # CI should run: poetry run python scripts/validation/validate_migration_freeze.py --check-committed)
+  # CI should run: uv run python scripts/validation/validate_migration_freeze.py --check-committed)
   skip: [onex-validate-architecture, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze]

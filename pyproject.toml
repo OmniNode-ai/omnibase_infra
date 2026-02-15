@@ -1,151 +1,155 @@
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.poetry]
+[project]
 name = "omnibase_infra"
 version = "0.7.0"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
-authors = ["OmniNode Team <team@omninode.ai>"]
-license = "MIT"
+authors = [{name = "OmniNode Team", email = "team@omninode.ai"}]
+license = {text = "MIT"}
 readme = "README.md"
-packages = [{include = "omnibase_infra", from = "src"}]
+requires-python = ">=3.12"
+dependencies = [
+    # ============================================================================
+    # ONEX Internal Dependencies (omnibase-core, omnibase-spi)
+    # ============================================================================
+    # Semantic versioning is appropriate for these packages because:
+    # - We control the release process and CI/CD validates compatibility
+    # - Breaking changes are communicated through semver major versions
+    # - Internal packages are co-developed with this codebase
+    #
+    # RELEASE STATUS: These packages are published to PyPI and version-pinned.
+    # - omnibase-core: https://pypi.org/project/omnibase-core/
+    # - omnibase-spi: https://pypi.org/project/omnibase-spi/
+    #
+    # PRE-RELEASE NOTE: If you need features from unreleased versions during
+    # development, use git dependencies via [tool.uv.sources]:
+    #   [tool.uv.sources]
+    #   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
+    # Remember to switch back to PyPI versions before merging to main.
+    #
+    # omnibase-core v0.17.0: Version bump
+    "omnibase-core>=0.17.0,<0.18.0",
+    # omnibase-spi v0.8.0: Version bump
+    "omnibase-spi>=0.8.0,<0.9.0",
 
-[tool.poetry.scripts]
+    # ============================================================================
+    # External Dependency Security Guidance
+    # ============================================================================
+    # CURRENT STATE: All dependencies below are PyPI-sourced (no git dependencies).
+    #
+    # PyPI Dependencies (current - all deps below):
+    # - Version pinning is acceptable for trusted packages when:
+    #   1. Package is from established maintainers (PyPA, major OSS projects)
+    #   2. uv.lock captures exact resolved versions for reproducibility
+    # - To update: 1) Review changelog for security fixes, 2) Update version, 3) Run tests
+    # - See docs/decisions/adr-cryptography-upgrade-46.md for upgrade rationale examples
+    #
+    # Git Dependencies (FUTURE guidance - not currently used):
+    # - If git-sourced external deps are added in the future, prefer commit SHAs over tags:
+    #   - SHAs are immutable; tags can be force-pushed
+    #   - SHAs provide audit trail and tamper-evidence
+
+    # Core dependencies
+    "pydantic>=2.11.7,<3.0.0",
+    "fastapi>=0.120.1,<0.121.0",
+    "uvicorn>=0.32.0,<0.33.0",
+    "pyyaml>=6.0.2,<7.0.0",
+    "aiohttp>=3.9.0,<4.0.0",
+
+    # Database dependencies (for PostgreSQL connection manager)
+    "asyncpg>=0.29.0,<0.30.0",
+    "psycopg2-binary>=2.9.10,<3.0.0",
+
+    # Service integration dependencies (for the actual tools we're migrating)
+    "python-consul2>=0.1.5,<0.2.0",  # For Consul adapter tools (fork with meta/metadata support)
+    "redis>=6.0.0,<7.0.0",  # For Redis/Valkey integration (redis-py 6.x required by omnibase_core)
+    "aiokafka>=0.11.0,<0.12.0",  # For Kafka tools (async Python client)
+    "confluent-kafka>=2.12.0,<3.0.0",  # For Kafka integration (C-based high-performance client)
+    "hvac>=2.1.0,<3.0.0",  # For Vault adapter tools
+
+    # Vector and graph database dependencies (for Qdrant and Memgraph handlers)
+    "qdrant-client>=1.12.0,<2.0.0",  # Vector database client for semantic search
+    "neo4j>=5.15.0,<6.0.0",  # Bolt/Cypher client for Memgraph graph database
+
+    # CLI Dependencies
+    "click>=8.1.0,<9.0.0",
+    "rich>=13.7.0,<14.0.0",
+
+    # System utilities
+    # cryptography: Transitive dependency (via omnibase_core -> paramiko/pyopenssl).
+    # Explicitly declared here to enforce minimum version for security compliance.
+    # Constraint: >=46.0.3,<47.0.0 (compatible release within the 46.x series).
+    # Security: CVE-2024-26130 (42.0.4), CVE-2024-12797 (44.0.1) - both addressed by 46.x.
+    # See docs/decisions/adr-cryptography-upgrade-46.md for full rationale.
+    "cryptography>=46.0.3,<47.0.0",
+    "jinja2>=3.1.6,<4.0.0",
+    "aiofiles>=23.2.1,<24.0.0",
+    "dependency-injector>=4.48.1,<5.0.0",  # Enhanced dependency injection
+
+    # Tracing and observability dependencies
+    "sqlparse>=0.4.4,<0.6.0",  # For secure SQL query sanitization in tracing
+    "structlog>=23.2.0,<24.0.0",  # Structured logging
+    "prometheus-client>=0.19.0,<0.20.0",  # Metrics collection
+    "opentelemetry-api>=1.27.0,<2.0.0",  # OpenTelemetry API
+    "opentelemetry-sdk>=1.27.0,<2.0.0",  # OpenTelemetry SDK
+    "opentelemetry-exporter-otlp>=1.27.0,<2.0.0",  # OTLP exporter
+    "opentelemetry-instrumentation>=0.48b0,<0.49",  # Base instrumentation
+    "opentelemetry-instrumentation-fastapi>=0.48b0,<0.49",  # FastAPI tracing
+    "opentelemetry-instrumentation-asyncpg>=0.48b0,<0.49",  # AsyncPG tracing
+    "opentelemetry-instrumentation-aiohttp-client>=0.48b0,<0.49",  # AIOHTTP tracing
+    "opentelemetry-instrumentation-kafka-python>=0.48b0,<0.49",  # Kafka tracing
+    "opentelemetry-instrumentation-redis>=0.48b0,<0.49",  # Redis tracing
+
+    # MCP (Model Context Protocol) integration
+    "mcp>=1.25.0,<2.0.0",  # Anthropic MCP SDK for streamable HTTP transport
+
+    # Additional infrastructure dependencies
+    "httpx>=0.28.1,<0.29.0",  # Modern HTTP client (>=0.27.1 required by MCP SDK)
+    "tenacity>=9.0.0,<10.0.0",  # Retry and resilience patterns
+    "circuitbreaker>=2.0.0,<3.0.0",  # Circuit breaker pattern
+    "slowapi>=0.1.9,<0.2.0",  # Rate limiting
+    "pydantic-settings>=2.2.1,<3.0.0",  # Settings management
+    "jsonschema>=4.20.0,<5.0.0",  # JSON schema validation
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/omnibase_infra"]
+
+[project.scripts]
 omni-infra = "omnibase_infra.cli.commands:cli"
 onex-runtime = "omnibase_infra.runtime.kernel:main"
 onex-infra-test = "omnibase_infra.cli.infra_test.cli:cli"
 
-[tool.poetry.plugins."onex.domain_plugins"]
+[project.entry-points."onex.domain_plugins"]
 registration = "omnibase_infra.nodes.node_registration_orchestrator.plugin:PluginRegistration"
 
-[tool.poetry.dependencies]
-python = "^3.12"
+[dependency-groups]
+dev = [
+    "pytest>=8.4.0,<9.0.0",
+    "pytest-asyncio>=0.25.0,<0.26.0",
+    "pytest-mock>=3.11.0,<4.0.0",
+    "pytest-cov>=6.0.0,<7.0.0",
+    "pytest-xdist>=3.5.0,<4.0.0",  # Parallel test execution
+    "pytest-timeout>=2.3.0,<3.0.0",  # Test timeout support
+    "mypy>=1.13.0,<2.0.0",
+    "ruff>=0.14.7,<0.15.0",  # Ruff handles both formatting and linting (replaces black + isort)
+    "types-pyyaml>=6.0.12.20250822,<7.0.0",
+    "pre-commit>=4.3.0,<5.0.0",
 
-# ============================================================================
-# ONEX Internal Dependencies (omnibase-core, omnibase-spi)
-# ============================================================================
-# Semantic versioning (^X.Y.Z) is appropriate for these packages because:
-# - We control the release process and CI/CD validates compatibility
-# - Breaking changes are communicated through semver major versions
-# - Internal packages are co-developed with this codebase
-#
-# RELEASE STATUS: These packages are published to PyPI and version-pinned.
-# - omnibase-core: https://pypi.org/project/omnibase-core/
-# - omnibase-spi: https://pypi.org/project/omnibase-spi/
-#
-# PRE-RELEASE NOTE: If you need features from unreleased versions during
-# development, use git dependencies (comment out PyPI version):
-#   omnibase-core = { git = "https://github.com/org/omnibase_core.git", rev = "SHA" }
-# Remember to switch back to PyPI versions before merging to main.
-#
-# omnibase-core v0.17.0: Version bump
-omnibase-core = "^0.17.0"
-# omnibase-spi v0.8.0: Version bump
-omnibase-spi = "^0.8.0"
+    # Test infrastructure dependencies
+    "locust>=2.31.8,<3.0.0",  # Load testing framework for postgres adapter tests
+    "testcontainers>=4.9.0,<5.0.0",  # Integration testing with real database containers
+    "kafka-python>=2.0.2,<3.0.0",  # Kafka client for integration testing
+    "pytest-httpserver>=1.1.0,<2.0.0",  # Local mock HTTP server for integration tests
 
-# ============================================================================
-# External Dependency Security Guidance
-# ============================================================================
-# CURRENT STATE: All dependencies below are PyPI-sourced (no git dependencies).
-#
-# PyPI Dependencies (current - all deps below):
-# - Version pinning (^X.Y.Z) is acceptable for trusted packages when:
-#   1. Package is from established maintainers (PyPA, major OSS projects)
-#   2. poetry.lock captures exact resolved versions for reproducibility
-# - To update: 1) Review changelog for security fixes, 2) Update version, 3) Run tests
-# - See docs/decisions/adr-cryptography-upgrade-46.md for upgrade rationale examples
-#
-# Git Dependencies (FUTURE guidance - not currently used):
-# - If git-sourced external deps are added in the future, prefer commit SHAs over tags:
-#   - SHAs are immutable; tags can be force-pushed
-#   - SHAs provide audit trail and tamper-evidence
-
-# Core dependencies
-pydantic = "^2.11.7"
-fastapi = "^0.120.1"
-uvicorn = "^0.32.0"
-pyyaml = "^6.0.2"
-aiohttp = "^3.9.0"
-
-# Database dependencies (for PostgreSQL connection manager)
-asyncpg = "^0.29.0"
-psycopg2-binary = "^2.9.10"
-
-# Service integration dependencies (for the actual tools we're migrating)
-python-consul2 = "^0.1.5"  # For Consul adapter tools (fork with meta/metadata support)
-redis = "^6.0.0"  # For Redis/Valkey integration (redis-py 6.x required by omnibase_core)
-aiokafka = "^0.11.0"  # For Kafka tools (async Python client)
-confluent-kafka = "^2.12.0"  # For Kafka integration (C-based high-performance client)
-hvac = "^2.1.0"  # For Vault adapter tools
-
-# Vector and graph database dependencies (for Qdrant and Memgraph handlers)
-qdrant-client = "^1.12.0"  # Vector database client for semantic search
-neo4j = "^5.15.0"  # Bolt/Cypher client for Memgraph graph database
-
-# CLI Dependencies
-click = "^8.1.0"
-rich = "^13.7.0"
-
-# System utilities
-# cryptography: Transitive dependency (via omnibase_core -> paramiko/pyopenssl).
-# Explicitly declared here to enforce minimum version for security compliance.
-# Constraint: ^46.0.3 means >=46.0.3, <47.0.0 (Poetry caret notation).
-# Security: CVE-2024-26130 (42.0.4), CVE-2024-12797 (44.0.1) - both addressed by 46.x.
-# See docs/decisions/adr-cryptography-upgrade-46.md for full rationale.
-cryptography = "^46.0.3"
-jinja2 = "^3.1.6"
-aiofiles = "^23.2.1"
-dependency-injector = "^4.48.1"  # Enhanced dependency injection
-
-# Tracing and observability dependencies
-sqlparse = ">=0.4.4,<0.6.0"  # For secure SQL query sanitization in tracing
-structlog = "^23.2.0"  # Structured logging
-prometheus-client = "^0.19.0"  # Metrics collection
-opentelemetry-api = "^1.27.0"  # OpenTelemetry API
-opentelemetry-sdk = "^1.27.0"  # OpenTelemetry SDK
-opentelemetry-exporter-otlp = "^1.27.0"  # OTLP exporter
-opentelemetry-instrumentation = "^0.48b0"  # Base instrumentation
-opentelemetry-instrumentation-fastapi = "^0.48b0"  # FastAPI tracing
-opentelemetry-instrumentation-asyncpg = "^0.48b0"  # AsyncPG tracing
-opentelemetry-instrumentation-aiohttp-client = "^0.48b0"  # AIOHTTP tracing
-opentelemetry-instrumentation-kafka-python = "^0.48b0"  # Kafka tracing
-opentelemetry-instrumentation-redis = "^0.48b0"  # Redis tracing
-
-# MCP (Model Context Protocol) integration
-mcp = "^1.25.0"  # Anthropic MCP SDK for streamable HTTP transport
-
-# Additional infrastructure dependencies
-httpx = "^0.28.1"  # Modern HTTP client (>=0.27.1 required by MCP SDK)
-tenacity = "^9.0.0"  # Retry and resilience patterns
-circuitbreaker = "^2.0.0"  # Circuit breaker pattern
-slowapi = "^0.1.9"  # Rate limiting
-pydantic-settings = "^2.2.1"  # Settings management
-jsonschema = "^4.20.0"  # JSON schema validation
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.4.0"
-pytest-asyncio = "^0.25.0"
-pytest-mock = "^3.11.0"
-pytest-cov = "^6.0.0"
-pytest-xdist = "^3.5.0"  # Parallel test execution
-pytest-timeout = "^2.3.0"  # Test timeout support
-mypy = "^1.13.0"
-ruff = "^0.14.7"  # Ruff handles both formatting and linting (replaces black + isort)
-types-pyyaml = "^6.0.12.20250822"
-pre-commit = "^4.3.0"
-
-# Test infrastructure dependencies
-locust = "^2.31.8"  # Load testing framework for postgres adapter tests
-testcontainers = "^4.9.0"  # Integration testing with real database containers
-kafka-python = "^2.0.2"  # Kafka client for integration testing
-pytest-httpserver = "^1.1.0"  # Local mock HTTP server for integration tests
-
-# Additional type stubs for better mypy coverage
-types-aiofiles = "^23.2.0.20240403"
-types-requests = "^2.32.0.20250914"
-hypothesis = "^6.148.7"
-pytest-split = "^0.10.0"
+    # Additional type stubs for better mypy coverage
+    "types-aiofiles>=23.2.0.20240403,<24.0.0",
+    "types-requests>=2.32.0.20250914,<3.0.0",
+    "hypothesis>=6.148.7,<7.0.0",
+    "pytest-split>=0.10.0,<0.11.0",
+]
 
 [tool.ruff]
 target-version = "py312"

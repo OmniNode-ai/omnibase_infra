@@ -727,7 +727,7 @@ def run_imports(verbose: bool = False) -> bool:
     except ImportError as e:
         # CircularImportValidator not available (omnibase_core not installed)
         print(f"Imports: SKIP (CircularImportValidator not available: {e})")
-        print("  Fix: Install omnibase_core with: poetry add omnibase-core")
+        print("  Fix: Install omnibase_core with: uv add omnibase-core")
         return True
     except ModelOnexError as e:
         # Path validation or configuration errors from validator initialization
@@ -740,7 +740,7 @@ def run_imports(verbose: bool = False) -> bool:
         # This indicates integration bug between omnibase_infra and omnibase_core
         print(f"Imports: ERROR (Validator API incompatible: {e})")
         print("  Fix: Update omnibase_core to compatible version")
-        print("    poetry update omnibase-core")
+        print("    uv add --upgrade omnibase-core")
         print("    or check omnibase_core version requirements")
         # Fail validation on API incompatibility - this is a real integration bug
         return False

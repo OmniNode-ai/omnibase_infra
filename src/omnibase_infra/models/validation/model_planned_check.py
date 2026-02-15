@@ -20,7 +20,7 @@ class ModelPlannedCheck(BaseModel):
     Attributes:
         check_code: Unique check identifier (e.g., CHECK-PY-001).
         label: Human-readable check label (e.g., "mypy typecheck").
-        command: Shell command to execute (e.g., "poetry run mypy src/").
+        command: Shell command to execute (e.g., "uv run mypy src/").
         severity: Whether this check is required, recommended, or informational.
         enabled: Whether the check should be executed.
         timeout_ms: Maximum execution time in milliseconds (0 = no limit).

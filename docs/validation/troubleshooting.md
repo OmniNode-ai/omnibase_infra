@@ -20,7 +20,7 @@ Common issues and solutions for ONEX infrastructure validation.
 
 **Symptom**:
 ```bash
-poetry run python scripts/validate.py all
+uv run python scripts/validate.py all
 ImportError: No module named 'omnibase_core'
 ```
 
@@ -29,15 +29,15 @@ ImportError: No module named 'omnibase_core'
 **Solution**:
 ```bash
 # Install dependencies
-poetry install
+uv sync
 
 # Verify omnibase_core version
-poetry show omnibase-core
+uv pip show omnibase-core
 
 # Expected: omnibase-core 0.3.5 or later
 ```
 
-**Prevention**: Always use `poetry run` to execute scripts in Poetry environment.
+**Prevention**: Always use `uv run` to execute scripts in the project environment.
 
 ---
 
@@ -53,17 +53,19 @@ Imports: SKIP (CircularImportValidator not available: ...)
 **Solution**:
 ```bash
 # Update omnibase_core
-poetry update omnibase-core
+uv add --upgrade omnibase-core
 
 # Verify version
-poetry show omnibase-core
+uv pip show omnibase-core
 # Should be >= 0.3.0
 ```
 
 **Prevention**: Lock omnibase_core version in pyproject.toml:
 ```toml
-[tool.poetry.dependencies]
-omnibase-core = ">=0.3.5"
+[project]
+dependencies = [
+    "omnibase-core>=0.3.5",
+]
 ```
 
 ---
@@ -80,7 +82,7 @@ Imports: ERROR (Validator API incompatible: 'ModelValidationResult' object has n
 **Solution**:
 ```bash
 # Update omnibase_core to compatible version
-poetry update omnibase-core
+uv add --upgrade omnibase-core
 
 # If issue persists, check omnibase_core changelog
 # Update infra_validators.py to match new API
@@ -167,7 +169,7 @@ Contracts: FAIL
 
 3. **Re-validate**:
    ```bash
-   poetry run python scripts/validate.py contracts
+   uv run python scripts/validate.py contracts
    ```
 
 **Prevention**: Use contract templates from omnibase_core when creating new nodes.
@@ -350,7 +352,7 @@ class ProtocolConsulHandler(Protocol):
 
 **Symptom**:
 ```bash
-poetry run python scripts/validate.py all
+uv run python scripts/validate.py all
 # Takes 8+ seconds
 ```
 
@@ -360,7 +362,7 @@ poetry run python scripts/validate.py all
 
 1. **Use quick mode for local development**:
    ```bash
-   poetry run python scripts/validate.py all --quick
+   uv run python scripts/validate.py all --quick
    # Skips medium priority validators (union, imports)
    ```
 
@@ -391,7 +393,7 @@ poetry run python scripts/validate.py all
 4. **Enable caching** (if available):
    ```bash
    export ONEX_VALIDATION_CACHE=.onex_cache/validation
-   poetry run python scripts/validate.py all
+   uv run python scripts/validate.py all
    ```
 
 **Prevention**: See [Performance Notes](performance_notes.md) for optimization strategies.
@@ -418,22 +420,22 @@ onex-validation:
      uses: actions/cache@v4
      with:
        path: .venv
-       key: venv-${{ hashFiles('poetry.lock') }}
+       key: venv-${{ hashFiles('uv.lock') }}
    ```
 
 2. **Use quick mode in CI**:
    ```yaml
    - name: Run ONEX validators
-     run: poetry run python scripts/validate.py all --quick
+     run: uv run python scripts/validate.py all --quick
    ```
 
 3. **Parallelize validation jobs**:
    ```yaml
    jobs:
      validate-architecture:
-       run: poetry run python scripts/validate.py architecture
+       run: uv run python scripts/validate.py architecture
      validate-contracts:
-       run: poetry run python scripts/validate.py contracts
+       run: uv run python scripts/validate.py contracts
    ```
 
 4. **Increase timeout if necessary**:
@@ -475,7 +477,7 @@ CI:    Architecture FAIL
 2. **Check dependency versions**:
    ```bash
    # Local
-   poetry show omnibase-core
+   uv pip show omnibase-core
    # omnibase-core 0.3.5
 
    # CI logs should show same version
@@ -483,24 +485,23 @@ CI:    Architecture FAIL
 
 3. **Reproduce CI environment locally**:
    ```bash
-   # Use same Poetry version
-   poetry --version
-   # 2.2.1 (match CI)
+   # Use same uv version
+   uv --version
 
    # Fresh install
    rm -rf .venv
-   poetry install
-   poetry run python scripts/validate.py all
+   uv sync
+   uv run python scripts/validate.py all
    ```
 
 4. **Check file paths**:
    ```bash
    # CI runs from repo root
    cd /path/to/repo
-   poetry run python scripts/validate.py all
+   uv run python scripts/validate.py all
    ```
 
-**Prevention**: Use same Python/Poetry versions locally and in CI.
+**Prevention**: Use same Python/uv versions locally and in CI.
 
 ---
 
@@ -591,7 +592,7 @@ ImportError: cannot import name 'validate_infra_all'
 
 **Symptom**:
 ```bash
-poetry run mypy src/
+uv run mypy src/
 error: Name 'ValidationResult' is not defined
 ```
 
@@ -639,12 +640,12 @@ If issues persist after trying these solutions:
 
 1. **Enable verbose output**:
    ```bash
-   poetry run python scripts/validate.py all --verbose
+   uv run python scripts/validate.py all --verbose
    ```
 
 2. **Check validator versions**:
    ```bash
-   poetry show omnibase-core omnibase-infra
+   uv pip show omnibase-core omnibase-infra
    ```
 
 3. **Review recent changes**:

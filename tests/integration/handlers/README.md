@@ -24,9 +24,9 @@ infrastructure services. The tests ensure that handlers correctly:
 ## Prerequisites
 
 - **Python 3.12+**
-- **Poetry** for dependency management
+- **[uv](https://docs.astral.sh/uv/)** for dependency management
 - **Access to remote infrastructure** (for DB, Consul, Vault tests) - see `tests/infrastructure_config.py`
-- **pytest-httpserver** (installed via poetry, for HTTP tests only)
+- **pytest-httpserver** (installed via uv, for HTTP tests only)
 
 ### Infrastructure Services
 
@@ -105,33 +105,33 @@ VAULT_NAMESPACE=  # For Vault Enterprise
 ### Run All Handler Integration Tests
 
 ```bash
-poetry run pytest tests/integration/handlers/ -v
+uv run pytest tests/integration/handlers/ -v
 ```
 
 ### Run Specific Handler Tests
 
 ```bash
 # Database handler tests
-poetry run pytest tests/integration/handlers/test_db_handler_integration.py -v
+uv run pytest tests/integration/handlers/test_db_handler_integration.py -v
 
 # Consul handler tests
-poetry run pytest tests/integration/handlers/test_consul_handler_integration.py -v
+uv run pytest tests/integration/handlers/test_consul_handler_integration.py -v
 
 # Vault handler tests
-poetry run pytest tests/integration/handlers/test_vault_handler_integration.py -v
+uv run pytest tests/integration/handlers/test_vault_handler_integration.py -v
 
 # HTTP handler tests (no external infrastructure needed)
-poetry run pytest tests/integration/handlers/test_http_handler_integration.py -v
+uv run pytest tests/integration/handlers/test_http_handler_integration.py -v
 ```
 
 ### Run with Markers
 
 ```bash
 # Run only integration tests
-poetry run pytest -m integration tests/integration/handlers/ -v
+uv run pytest -m integration tests/integration/handlers/ -v
 
 # Run integration tests with verbose output
-poetry run pytest tests/integration/handlers/ -v --tb=short
+uv run pytest tests/integration/handlers/ -v --tb=short
 ```
 
 ## CI/CD Behavior

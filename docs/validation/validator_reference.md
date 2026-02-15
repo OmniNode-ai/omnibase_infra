@@ -36,7 +36,7 @@ The validation is performed by `scripts/check_architecture.sh`, a bash script th
 
 ```bash
 # Via validate.py (recommended)
-poetry run python scripts/validate.py architecture_layers --verbose
+uv run python scripts/validate.py architecture_layers --verbose
 
 # Direct script execution
 ./scripts/check_architecture.sh [OPTIONS]
@@ -206,7 +206,7 @@ result = validate_infra_architecture(
 ### CI/CD Integration
 
 ```bash
-poetry run python scripts/validate.py architecture
+uv run python scripts/validate.py architecture
 ```
 
 ---
@@ -280,7 +280,7 @@ result = validate_infra_contracts(directory="custom/nodes/")
 ### CI/CD Integration
 
 ```bash
-poetry run python scripts/validate.py contracts
+uv run python scripts/validate.py contracts
 ```
 
 ---
@@ -372,7 +372,7 @@ result = validate_infra_patterns(strict=False)
 ### CI/CD Integration
 
 ```bash
-poetry run python scripts/validate.py patterns
+uv run python scripts/validate.py patterns
 ```
 
 ---
@@ -499,7 +499,7 @@ result = validate_infra_union_usage(strict=True, max_unions=0)
 ### CI/CD Integration
 
 ```bash
-poetry run python scripts/validate.py unions
+uv run python scripts/validate.py unions
 ```
 
 ---
@@ -592,7 +592,7 @@ print(f"\nSuccess rate: {result.success_rate:.1%}")
 ### CI/CD Integration
 
 ```bash
-poetry run python scripts/validate.py imports
+uv run python scripts/validate.py imports
 ```
 
 ---
@@ -659,10 +659,10 @@ if summary['failed'] > 0:
 
 ```bash
 # Run all validators
-poetry run python scripts/validate.py all --verbose
+uv run python scripts/validate.py all --verbose
 
 # Quick mode (skip medium priority)
-poetry run python scripts/validate.py all --quick
+uv run python scripts/validate.py all --quick
 ```
 
 ---

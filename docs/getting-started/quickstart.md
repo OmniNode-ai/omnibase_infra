@@ -6,10 +6,10 @@ Get ONEX Infrastructure running in 5 minutes.
 
 ## 30-Second Quick Win
 
-After installation (`poetry install`), verify ONEX works with this one-liner:
+After installation (`uv sync`), verify ONEX works with this one-liner:
 
 ```bash
-poetry run python -c "
+uv run python -c "
 from omnibase_core.nodes import NodeEffect, NodeCompute, NodeReducer, NodeOrchestrator
 print('ONEX node archetypes available:')
 print('  - NodeEffect (external I/O)')
@@ -41,7 +41,7 @@ Copy-paste this to create your first ONEX node in under 2 minutes:
 ```bash
 # 1. Setup (one-time)
 git clone <repo-url> omnibase_infra && cd omnibase_infra
-poetry install
+uv sync
 
 # 2. Create a minimal node
 mkdir -p src/omnibase_infra/nodes/node_hello_effect/models
@@ -80,7 +80,7 @@ class NodeHelloEffect(NodeEffect):
 
 ```bash
 # 3. Verify it works
-poetry run python -c "from omnibase_infra.nodes.node_hello_effect.node import NodeHelloEffect; print('Node loads!')"
+uv run python -c "from omnibase_infra.nodes.node_hello_effect.node import NodeHelloEffect; print('Node loads!')"
 ```
 
 **That's it!** The node class is intentionally empty - all behavior is contract-driven.
@@ -90,7 +90,7 @@ poetry run python -c "from omnibase_infra.nodes.node_hello_effect.node import No
 ## Prerequisites
 
 - Python 3.12+
-- Poetry
+- [uv](https://docs.astral.sh/uv/) for dependency management
 - Docker (optional, for infrastructure services)
 
 ## Installation
@@ -99,10 +99,10 @@ poetry run python -c "from omnibase_infra.nodes.node_hello_effect.node import No
 # Clone and install
 git clone <repo-url> omnibase_infra
 cd omnibase_infra
-poetry install
+uv sync
 
 # Verify installation
-poetry run python -c "import omnibase_infra; print('Ready!')"
+uv run python -c "import omnibase_infra; print('Ready!')"
 ```
 
 ## Understanding ONEX in 60 Seconds
@@ -243,7 +243,7 @@ __all__ = ["NodeHelloEffect"]
 
 **Verify it works:**
 ```bash
-poetry run python -c "
+uv run python -c "
 from omnibase_infra.nodes.node_hello_effect.node import NodeHelloEffect
 from omnibase_infra.nodes.node_hello_effect.models import ModelHelloRequest, ModelHelloResponse
 print('Node class:', NodeHelloEffect.__name__)
@@ -259,13 +259,13 @@ print('Node loads successfully!')
 
 ```bash
 # Run all tests
-poetry run pytest
+uv run pytest
 
 # Run unit tests only
-poetry run pytest tests/unit/
+uv run pytest tests/unit/
 
 # Run with coverage
-poetry run pytest --cov=omnibase_infra
+uv run pytest --cov=omnibase_infra
 ```
 
 ## Running ONEX Validators
@@ -274,13 +274,13 @@ ONEX enforces coding standards via validators:
 
 ```bash
 # Run all validators
-poetry run python scripts/validate.py all
+uv run python scripts/validate.py all
 
 # Check for forbidden Any types
-poetry run python scripts/validate.py any_types
+uv run python scripts/validate.py any_types
 
 # Validate architecture patterns
-poetry run python scripts/validate.py architecture
+uv run python scripts/validate.py architecture
 ```
 
 ## Docker Deployment (Optional)
@@ -389,14 +389,14 @@ Only ORCHESTRATOR nodes may publish events. Handlers return `ModelHandlerOutput`
 
 ```bash
 # Development
-poetry install                          # Install dependencies
-poetry run pytest                       # Run tests
-poetry run ruff format .               # Format code
-poetry run ruff check --fix .          # Lint and fix
+uv sync                          # Install dependencies
+uv run pytest                       # Run tests
+uv run ruff format .               # Format code
+uv run ruff check --fix .          # Lint and fix
 
 # Validation
-poetry run python scripts/validate.py all      # All validators
-poetry run pre-commit run --all-files          # Pre-commit hooks
+uv run python scripts/validate.py all      # All validators
+uv run pre-commit run --all-files          # Pre-commit hooks
 
 # Docker
 docker compose -f docker-compose.infra.yml up -d

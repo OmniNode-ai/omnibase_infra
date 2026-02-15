@@ -95,7 +95,7 @@ from omnibase_infra.utils import (
 
 3. **Verify no deprecation warnings** by running tests:
    ```bash
-   poetry run pytest -W error::DeprecationWarning
+   uv run pytest -W error::DeprecationWarning
    ```
 
 ### Before/After Examples

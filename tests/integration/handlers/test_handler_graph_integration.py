@@ -23,7 +23,7 @@ Example CI/CD Output::
 
 Run with infrastructure::
 
-    $ MEMGRAPH_BOLT_URL=bolt://localhost:7687 poetry run pytest tests/integration/handlers/test_handler_graph_integration.py -v
+    $ MEMGRAPH_BOLT_URL=bolt://localhost:7687 uv run pytest tests/integration/handlers/test_handler_graph_integration.py -v
 
 Test Categories
 ===============
