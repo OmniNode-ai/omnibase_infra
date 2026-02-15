@@ -253,6 +253,7 @@ validate_prerequisites() {
     check_command docker  "container runtime"
     check_command jq      "JSON processing"
     check_command git     "version control"
+    check_command curl    "deployment verification"
 
     check_compose_version
 }
@@ -312,7 +313,7 @@ read_version() {
 
     # Extract version from pyproject.toml using grep + sed (no Python dependency)
     # Use -E for extended regex; [[:space:]] for BSD sed compatibility (\s not supported)
-    version="$(grep -E '^version[[:space:]]*=' "${repo_root}/pyproject.toml" | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
+    version="$(grep -m1 -E '^version[[:space:]]*=' "${repo_root}/pyproject.toml" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
 
     if [[ -z "${version}" ]]; then
         log_error "Could not read version from pyproject.toml"
@@ -326,7 +327,7 @@ read_git_sha() {
     local repo_root="$1"
     local sha
 
-    sha="$(git -C "${repo_root}" rev-parse --short HEAD 2>/dev/null || true)"
+    sha="$(git -C "${repo_root}" rev-parse --short=7 HEAD 2>/dev/null || true)"
 
     if [[ -z "${sha}" ]]; then
         log_error "Could not determine git SHA. Is this a git repository?"
@@ -362,7 +363,7 @@ acquire_lock() {
     fi
 
     # Ensure lock is released on exit (normal, error, or signal)
-    trap 'rmdir "${LOCK_DIR}" 2>/dev/null || true' EXIT INT TERM HUP
+    trap 'rm -rf "${LOCK_DIR}" 2>/dev/null || true' EXIT INT TERM HUP
 
     log_info "Acquired deployment lock."
 }
@@ -469,7 +470,7 @@ sync_files() {
     done
 
     # 2. Source code
-    log_info "Syncing src/omnibase_infra/..."
+    log_info "Syncing src/ directory..."
     log_cmd "rsync -a --delete src/omnibase_infra/ -> deployed"
     rsync -a --delete \
         "${repo_root}/src/" "${deploy_target}/src/"
@@ -514,6 +515,7 @@ setup_env() {
     if [[ -f "${repo_root}/docker/.env" ]]; then
         log_info "Copying .env from source repo docker/.env"
         cp "${repo_root}/docker/.env" "${docker_dir}/.env"
+        chmod 600 "${docker_dir}/.env"
         return 0
     fi
 
@@ -523,6 +525,7 @@ setup_env() {
         log_warn "You MUST edit ${docker_dir}/.env before running containers."
         log_warn "At minimum, set POSTGRES_PASSWORD to a secure value."
         cp "${repo_root}/docker/.env.example" "${docker_dir}/.env"
+        chmod 600 "${docker_dir}/.env"
         return 0
     fi
 
@@ -543,10 +546,15 @@ sanity_check() {
     log_info "Validating compose configuration from deployed directory..."
     log_cmd "docker compose -p ${compose_project} -f ${compose_file} config --quiet"
 
+    local env_file_args=()
+    if [[ -f "${deploy_target}/docker/.env" ]]; then
+        env_file_args=(--env-file "${deploy_target}/docker/.env")
+    fi
+
     if ! docker compose \
         -p "${compose_project}" \
         -f "${compose_file}" \
-        --env-file "${deploy_target}/docker/.env" \
+        "${env_file_args[@]}" \
         config --quiet 2>&1; then
         log_error "Compose configuration validation failed."
         log_error "The deployed directory structure may be incomplete."
