@@ -358,7 +358,7 @@ acquire_lock() {
     if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
         log_error "Another deployment is in progress (locked by ${LOCK_DIR})."
         log_error "If the previous deployment crashed, remove the lock manually:"
-        log_error "  rmdir ${LOCK_DIR}"
+        log_error "  rm -rf ${LOCK_DIR}"
         exit 2
     fi
 
@@ -471,7 +471,7 @@ sync_files() {
 
     # 2. Source code
     log_info "Syncing src/ directory..."
-    log_cmd "rsync -a --delete src/omnibase_infra/ -> deployed"
+    log_cmd "rsync -a --delete src/ -> deployed"
     rsync -a --delete \
         "${repo_root}/src/" "${deploy_target}/src/"
 
@@ -626,11 +626,16 @@ build_images() {
     local build_date
     build_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
+    local env_file_args=()
+    if [[ -f "${deploy_target}/docker/.env" ]]; then
+        env_file_args=(--env-file "${deploy_target}/docker/.env")
+    fi
+
     local cmd=(
         docker compose
         -p "${compose_project}"
         -f "${compose_file}"
-        --env-file "${deploy_target}/docker/.env"
+        "${env_file_args[@]}"
         --profile "${COMPOSE_PROFILE}"
         build
         --build-arg "VCS_REF=${git_sha}"
@@ -656,11 +661,16 @@ restart_services() {
 
     log_step "Restart Runtime Services"
 
+    local env_file_args=()
+    if [[ -f "${deploy_target}/docker/.env" ]]; then
+        env_file_args=(--env-file "${deploy_target}/docker/.env")
+    fi
+
     local cmd=(
         docker compose
         -p "${compose_project}"
         -f "${compose_file}"
-        --env-file "${deploy_target}/docker/.env"
+        "${env_file_args[@]}"
         --profile "${COMPOSE_PROFILE}"
         up -d --no-deps --force-recreate
         "${RUNTIME_SERVICES[@]}"
