@@ -398,6 +398,37 @@ class TestLoadRuntimeConfig:
         assert "Environment variable override validation failed" in str(error)
         assert "consumer_group" in str(error)
 
+    def test_load_config_env_override_empty_string_raises_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that empty-string env var override raises ProtocolConfigurationError.
+
+        When ONEX_GROUP_ID (or other override env vars) is set to an empty
+        string, load_runtime_config should reject it with a clear diagnostic
+        rather than letting it produce a confusing Pydantic validation error.
+        """
+        runtime_dir = tmp_path / "runtime"
+        runtime_dir.mkdir(parents=True)
+        config_path = runtime_dir / "runtime_config.yaml"
+        test_config = {
+            "input_topic": "yaml-input",
+            "output_topic": "yaml-output",
+            "group_id": "yaml-group",
+        }
+        with open(config_path, "w") as f:
+            yaml.dump(test_config, f)
+
+        monkeypatch.setenv("ONEX_GROUP_ID", "")
+        monkeypatch.delenv("ONEX_INPUT_TOPIC", raising=False)
+        monkeypatch.delenv("ONEX_OUTPUT_TOPIC", raising=False)
+
+        with pytest.raises(ProtocolConfigurationError) as exc_info:
+            load_runtime_config(contracts_dir=tmp_path)
+
+        error = exc_info.value
+        assert "set but empty" in str(error)
+        assert "ONEX_GROUP_ID" in str(error)
+
     def test_load_config_env_override_valid_values_still_work(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

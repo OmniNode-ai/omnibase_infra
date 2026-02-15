@@ -173,7 +173,12 @@ def cmd_verify(
         Exit code: 0 if the artifact matches, 2 if the artifact is missing,
         pending, or stale.
     """
-    fingerprint, file_count = compute_migration_fingerprint(migrations_dir)
+    try:
+        fingerprint, file_count = compute_migration_fingerprint(migrations_dir)
+    except FileNotFoundError as exc:
+        print(f"FAILED: {exc}", file=sys.stderr)
+        return 2
+
     committed = read_artifact(artifact_path)
 
     print(f"Migration files:    {file_count}")
@@ -237,7 +242,11 @@ def cmd_stamp(
     Returns:
         Exit code: 0 on success.
     """
-    fingerprint, file_count = compute_migration_fingerprint(migrations_dir)
+    try:
+        fingerprint, file_count = compute_migration_fingerprint(migrations_dir)
+    except FileNotFoundError as exc:
+        print(f"FAILED: {exc}", file=sys.stderr)
+        return 2
 
     print(f"Migration files: {file_count}")
     print(f"Fingerprint:     {fingerprint}")
