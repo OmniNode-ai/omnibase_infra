@@ -41,6 +41,8 @@ from omnibase_infra.nodes.node_llm_inference_effect.registry.registry_infra_llm_
     _create_transport_adapter,
 )
 
+pytestmark = pytest.mark.unit
+
 # =============================================================================
 # Test Fixtures
 # =============================================================================
