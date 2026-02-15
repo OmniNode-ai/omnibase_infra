@@ -67,6 +67,9 @@ from tests.performance.event_bus.conftest import generate_unique_topic
 
 IS_CI = is_ci_environment()
 
+# Mark all tests in this module as performance tests
+pytestmark = [pytest.mark.performance]
+
 # -----------------------------------------------------------------------------
 # Single Publisher Throughput Tests
 # -----------------------------------------------------------------------------

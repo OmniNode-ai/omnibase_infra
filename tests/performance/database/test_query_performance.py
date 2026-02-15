@@ -40,6 +40,9 @@ import pytest
 
 from tests.performance.database.conftest import QueryAnalyzer
 
+# Mark all tests in this module as performance tests
+pytestmark = [pytest.mark.performance]
+
 # =============================================================================
 # Updated_At Index Tests (PR #101 Requirement)
 # =============================================================================
