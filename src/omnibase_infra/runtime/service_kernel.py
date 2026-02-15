@@ -309,6 +309,25 @@ def load_runtime_config(
             env_group_id = os.getenv("ONEX_GROUP_ID")
             env_input_topic = os.getenv("ONEX_INPUT_TOPIC")
             env_output_topic = os.getenv("ONEX_OUTPUT_TOPIC")
+
+            # Reject empty-string env var overrides with a clear diagnostic.
+            # An empty string passes the ``is not None`` check but would
+            # produce a confusing Pydantic validation error downstream.
+            _env_override_names = {
+                "ONEX_GROUP_ID": env_group_id,
+                "ONEX_INPUT_TOPIC": env_input_topic,
+                "ONEX_OUTPUT_TOPIC": env_output_topic,
+            }
+            for var_name, var_value in _env_override_names.items():
+                if var_value is not None and var_value.strip() == "":
+                    raise ProtocolConfigurationError(
+                        f"Environment variable {var_name} is set but empty. "
+                        f"Either unset it to use the YAML default or provide "
+                        f"a non-empty value.",
+                        context=context,
+                        config_path=str(config_path),
+                    )
+
             if env_group_id is not None:
                 env_overrides["consumer_group"] = env_group_id
             if env_input_topic is not None:

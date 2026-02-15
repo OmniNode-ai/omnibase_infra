@@ -111,6 +111,10 @@ def cmd_stamp(artifact_path: str, *, dry_run: bool = False) -> int:
     Returns:
         Exit code: 0 on success, 1 on failure.
     """
+    # NOTE: _cli_stamp is a private function in the event_registry module.
+    # This intentional coupling avoids duplicating the stamp logic.  If
+    # _cli_stamp is renamed or removed upstream, this import (and this
+    # script) must be updated accordingly.
     from omnibase_infra.runtime.emit_daemon.event_registry import _cli_stamp
 
     try:

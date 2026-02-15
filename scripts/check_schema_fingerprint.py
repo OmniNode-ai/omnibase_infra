@@ -52,6 +52,12 @@ def compute_migration_fingerprint(migrations_dir: Path) -> tuple[str, int]:
         4. Concatenate all ``(filename, file_hash)`` pairs as a canonical
            JSON-like string and SHA-256 the result.
 
+    Note:
+        The glob is intentionally flat (non-recursive). Only ``*.sql``
+        files at the top level of *migrations_dir* are included.
+        Subdirectories are ignored. This matches the convention that
+        forward migrations are a flat, ordered sequence of files.
+
     Args:
         migrations_dir: Path to the forward migrations directory.
 
