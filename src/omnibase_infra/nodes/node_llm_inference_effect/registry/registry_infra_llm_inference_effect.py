@@ -71,11 +71,11 @@ def _create_transport_adapter(
     """
     from omnibase_infra.mixins import MixinLlmHttpTransport
 
-    class _TransportInstance(MixinLlmHttpTransport):
+    class TransportInstance(MixinLlmHttpTransport):
         def __init__(self, name: str) -> None:
             self._init_llm_http_transport(target_name=name)
 
-    return _TransportInstance(target_name)
+    return TransportInstance(target_name)
 
 
 class RegistryInfraLlmInferenceEffect:
@@ -177,6 +177,11 @@ class RegistryInfraLlmInferenceEffect:
         handler = HandlerLlmOpenaiCompatible(transport=transport)
 
         if container.service_registry is None:
+            logger.warning(
+                "service_registry is None; skipping OpenAI-compatible "
+                "handler registration for target '%s'",
+                target_name,
+            )
             return
 
         await container.service_registry.register_instance(
@@ -186,7 +191,7 @@ class RegistryInfraLlmInferenceEffect:
         )
         await container.service_registry.register_instance(
             interface=MixinLlmHttpTransport,
-            instance=handler,
+            instance=transport,
             scope=EnumInjectionScope.GLOBAL,
         )
         logger.info(
@@ -219,6 +224,11 @@ class RegistryInfraLlmInferenceEffect:
         handler = HandlerLlmOllama(target_name=target_name)
 
         if container.service_registry is None:
+            logger.warning(
+                "service_registry is None; skipping Ollama handler "
+                "registration for target '%s'",
+                target_name,
+            )
             return
 
         await container.service_registry.register_instance(
