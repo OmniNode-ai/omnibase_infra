@@ -708,7 +708,7 @@ async def bootstrap() -> int:
                     bootstrap_servers=kafka_bootstrap_servers,
                 )
                 provisioning_result = (
-                    await topic_provisioner.ensure_platform_topics_exist(
+                    await topic_provisioner.ensure_provisioned_topics_exist(
                         correlation_id=correlation_id,
                     )
                 )

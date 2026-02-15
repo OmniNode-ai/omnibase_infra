@@ -21,7 +21,7 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.event_bus.service_topic_manager import TopicProvisioner
-from omnibase_infra.topics import ALL_PLATFORM_SUFFIXES
+from omnibase_infra.topics import ALL_PROVISIONED_SUFFIXES
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
 
@@ -44,8 +44,8 @@ class TestTopicProvisioner:
         assert manager._bootstrap_servers == "kafka1:9092,kafka2:9092"
         assert manager._request_timeout_ms == 5000
 
-    async def test_ensure_platform_topics_all_created(self) -> None:
-        """All platform topics are created when none exist."""
+    async def test_ensure_provisioned_topics_all_created(self) -> None:
+        """All provisioned topics are created when none exist."""
         manager = TopicProvisioner(bootstrap_servers="localhost:9092")
 
         mock_admin_cls = MagicMock()
@@ -70,13 +70,13 @@ class TestTopicProvisioner:
                 ),
             },
         ):
-            result = await manager.ensure_platform_topics_exist()
+            result = await manager.ensure_provisioned_topics_exist()
 
         assert result["status"] == "success"
-        assert len(result["created"]) == len(ALL_PLATFORM_SUFFIXES)
+        assert len(result["created"]) == len(ALL_PROVISIONED_SUFFIXES)
         assert len(result["failed"]) == 0
 
-    async def test_ensure_platform_topics_connection_failure(self) -> None:
+    async def test_ensure_provisioned_topics_connection_failure(self) -> None:
         """Connection failure returns unavailable status gracefully."""
         manager = TopicProvisioner(bootstrap_servers="nonexistent:9999")
 
@@ -104,12 +104,12 @@ class TestTopicProvisioner:
                 ),
             },
         ):
-            result = await manager.ensure_platform_topics_exist()
+            result = await manager.ensure_provisioned_topics_exist()
 
         assert result["status"] == "unavailable"
-        assert len(result["failed"]) == len(ALL_PLATFORM_SUFFIXES)
+        assert len(result["failed"]) == len(ALL_PROVISIONED_SUFFIXES)
 
-    async def test_ensure_platform_topics_import_error(self) -> None:
+    async def test_ensure_provisioned_topics_import_error(self) -> None:
         """Graceful degradation when aiokafka is not installed."""
         manager = TopicProvisioner(bootstrap_servers="localhost:9092")
 
@@ -125,17 +125,17 @@ class TestTopicProvisioner:
             # Reload so the function-level import sees the patched modules
             importlib.reload(mod)
             reloaded_manager = mod.TopicProvisioner(bootstrap_servers="localhost:9092")
-            result = await reloaded_manager.ensure_platform_topics_exist()
+            result = await reloaded_manager.ensure_provisioned_topics_exist()
 
         # Restore module for other tests
         importlib.reload(mod)
 
         assert result["status"] == "unavailable"
-        assert len(result["failed"]) == len(ALL_PLATFORM_SUFFIXES)
+        assert len(result["failed"]) == len(ALL_PROVISIONED_SUFFIXES)
         assert len(result["created"]) == 0
         assert len(result["existing"]) == 0
 
-    async def test_ensure_platform_topics_already_exist(self) -> None:
+    async def test_ensure_provisioned_topics_already_exist(self) -> None:
         """Topics that already exist are counted as 'existing', not 'created'."""
         manager = TopicProvisioner(bootstrap_servers="localhost:9092")
 
@@ -163,10 +163,10 @@ class TestTopicProvisioner:
                 ),
             },
         ):
-            result = await manager.ensure_platform_topics_exist()
+            result = await manager.ensure_provisioned_topics_exist()
 
         assert result["status"] == "success"
-        assert len(result["existing"]) == len(ALL_PLATFORM_SUFFIXES)
+        assert len(result["existing"]) == len(ALL_PROVISIONED_SUFFIXES)
         assert len(result["created"]) == 0
         assert len(result["failed"]) == 0
 
