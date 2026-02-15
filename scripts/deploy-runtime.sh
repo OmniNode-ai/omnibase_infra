@@ -77,22 +77,27 @@ PRINT_COMPOSE_CMD=false
 # =============================================================================
 
 log_info() {
+    # Print an informational log message to stdout.
     printf '[deploy] %s\n' "$*"
 }
 
 log_warn() {
+    # Print a warning message to stderr.
     printf '[deploy] WARNING: %s\n' "$*" >&2
 }
 
 log_error() {
+    # Print an error message to stderr.
     printf '[deploy] ERROR: %s\n' "$*" >&2
 }
 
 log_step() {
+    # Print a section header for a deployment phase.
     printf '\n[deploy] === %s ===\n' "$*"
 }
 
 log_cmd() {
+    # Print a command-echo line showing the command being executed.
     printf '[deploy]   > %s\n' "$*"
 }
 
@@ -101,6 +106,7 @@ log_cmd() {
 # =============================================================================
 
 usage() {
+    # Print usage information and exit.
     cat <<EOF
 ${SCRIPT_NAME} v${SCRIPT_VERSION} -- Stable runtime deployment for omnibase_infra
 
@@ -159,7 +165,8 @@ EXAMPLES
     cat ~/.omnibase/infra/registry.json | jq .
 
     # Verify image labels match deployed SHA
-    docker inspect omninode-runtime \\
+    # Container name follows compose convention: <project>-omninode-runtime-1
+    docker inspect <compose-project>-omninode-runtime-1 \\
         --format='{{index .Config.Labels "org.opencontainers.image.revision"}}'
 EOF
     exit 0
@@ -170,6 +177,7 @@ EOF
 # =============================================================================
 
 parse_args() {
+    # Parse command-line arguments and set global mode/flag variables.
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --execute)
@@ -226,6 +234,7 @@ parse_args() {
 # =============================================================================
 
 check_command() {
+    # Validate that a required command exists in PATH.
     local cmd="$1"
     local purpose="$2"
     if ! command -v "${cmd}" &>/dev/null; then
@@ -235,6 +244,7 @@ check_command() {
 }
 
 check_compose_version() {
+    # Verify Docker Compose meets the minimum version requirement.
     local version_output
     version_output="$(docker compose version --short 2>/dev/null || true)"
 
@@ -254,6 +264,16 @@ check_compose_version() {
     req_major="$(echo "${MIN_COMPOSE_VERSION}" | cut -d. -f1)"
     req_minor="$(echo "${MIN_COMPOSE_VERSION}" | cut -d. -f2)"
 
+    # Validate version components are numeric before arithmetic comparison
+    local component
+    for component in "${major}" "${minor}" "${req_major}" "${req_minor}"; do
+        if [[ ! "${component}" =~ ^[0-9]+$ ]]; then
+            log_error "Non-numeric version component: '${component}' (from version '${version_output}')."
+            log_error "Expected format: MAJOR.MINOR (e.g., 2.20)."
+            exit 1
+        fi
+    done
+
     if (( major < req_major || (major == req_major && minor < req_minor) )); then
         log_error "Docker Compose ${MIN_COMPOSE_VERSION}+ required (found ${version_output})."
         log_error "Nested variable expansion requires Compose >= ${MIN_COMPOSE_VERSION}."
@@ -264,6 +284,7 @@ check_compose_version() {
 }
 
 validate_prerequisites() {
+    # Check that all required external commands and Docker Compose version are available.
     log_step "Validate Prerequisites"
 
     check_command rsync   "file synchronization"
@@ -297,6 +318,7 @@ resolve_repo_root() {
 }
 
 validate_repo_structure() {
+    # Verify that all required files and directories exist in the repository.
     local repo_root="$1"
     local missing=()
 
@@ -325,6 +347,7 @@ validate_repo_structure() {
 # =============================================================================
 
 read_version() {
+    # Extract the project version from pyproject.toml [tool.poetry] section.
     local repo_root="$1"
     local version
 
@@ -353,6 +376,7 @@ read_version() {
 }
 
 read_git_sha() {
+    # Read the 12-character abbreviated git SHA of HEAD.
     local repo_root="$1"
     local sha
 
@@ -369,10 +393,21 @@ read_git_sha() {
 }
 
 check_git_dirty() {
+    # Warn if the working tree has uncommitted or untracked changes.
     local repo_root="$1"
-    if [[ -n "$(git -C "${repo_root}" status --porcelain 2>/dev/null || true)" ]]; then
-        log_warn "Working tree has uncommitted or untracked changes."
+    local status_output
+    status_output="$(git -C "${repo_root}" status --porcelain 2>/dev/null || true)"
+    if [[ -n "${status_output}" ]]; then
+        log_warn "Working tree has uncommitted changes."
         log_warn "The deployed SHA will not match the actual file contents."
+        # Show untracked files separately for visibility
+        local untracked
+        untracked="$(echo "${status_output}" | grep '^??' || true)"
+        if [[ -n "${untracked}" ]]; then
+            local untracked_count
+            untracked_count="$(echo "${untracked}" | wc -l | tr -d ' ')"
+            log_warn "  Includes ${untracked_count} untracked file(s)."
+        fi
     fi
 }
 
@@ -381,6 +416,7 @@ check_git_dirty() {
 # =============================================================================
 
 acquire_lock() {
+    # Acquire a mkdir-based concurrency lock to prevent parallel deployments.
     mkdir -p "${DEPLOY_ROOT}"
 
     local pid_file="${LOCK_DIR}/pid"
@@ -530,6 +566,7 @@ cleanup_on_exit() {
 # =============================================================================
 
 prune_old_deployments() {
+    # Remove old deployment directories that exceed the retention limit.
     local deployed_root="${DEPLOY_ROOT}/deployed"
 
     if [[ ! -d "${deployed_root}" ]]; then
@@ -624,6 +661,7 @@ prune_old_deployments() {
 # =============================================================================
 
 guard_existing_deployment() {
+    # Refuse to overwrite an existing deployment directory unless --force is set.
     local deploy_target="$1"
 
     if [[ -d "${deploy_target}" ]]; then
@@ -649,6 +687,7 @@ guard_existing_deployment() {
 # =============================================================================
 
 count_files() {
+    # Count regular files in a directory (up to 5 levels deep).
     local dir="$1"
     if [[ -d "${dir}" ]]; then
         # -maxdepth 5: prevent runaway traversal in deeply nested trees
@@ -661,6 +700,7 @@ count_files() {
 }
 
 show_preview() {
+    # Display a summary of what would be deployed in dry-run mode.
     local repo_root="$1"
     local version="$2"
     local git_sha="$3"
@@ -701,6 +741,7 @@ show_preview() {
 # =============================================================================
 
 sync_files() {
+    # Rsync repository files to the versioned deployment target directory.
     local repo_root="$1"
     local deploy_target="$2"
 
@@ -759,6 +800,7 @@ sync_files() {
 # =============================================================================
 
 setup_env() {
+    # Ensure a .env file exists in the deployment docker/ directory.
     local repo_root="$1"
     local deploy_target="$2"
     local docker_dir="${deploy_target}/docker"
@@ -796,6 +838,7 @@ setup_env() {
 # =============================================================================
 
 sanity_check() {
+    # Validate that docker compose config resolves cleanly from the deployed directory.
     local deploy_target="$1"
     local compose_project="$2"
     local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
@@ -836,6 +879,7 @@ sanity_check() {
 # =============================================================================
 
 write_registry() {
+    # Atomically write deployment metadata to registry.json.
     local version="$1"
     local git_sha="$2"
     local deploy_target="$3"
@@ -891,6 +935,7 @@ write_registry() {
 # =============================================================================
 
 build_images() {
+    # Build Docker images with VCS_REF and BUILD_DATE labels.
     local deploy_target="$1"
     local compose_project="$2"
     local git_sha="$3"
@@ -930,6 +975,7 @@ build_images() {
 # =============================================================================
 
 restart_services() {
+    # Restart runtime containers via docker compose up --force-recreate.
     local deploy_target="$1"
     local compose_project="$2"
     local compose_file="${deploy_target}/docker/docker-compose.infra.yml"
@@ -964,6 +1010,7 @@ restart_services() {
 # =============================================================================
 
 verify_deployment() {
+    # Run health checks and verify image labels match the deployed SHA.
     local git_sha="$1"
     local compose_project="$2"
 
@@ -1039,6 +1086,7 @@ verify_deployment() {
 # =============================================================================
 
 print_compose_commands() {
+    # Print the exact docker compose commands this script would execute.
     local deploy_target="$1"
     local compose_project="$2"
     local git_sha="$3"
@@ -1116,6 +1164,7 @@ print_compose_commands() {
 # =============================================================================
 
 show_summary() {
+    # Display post-deployment summary with next-step commands.
     local deploy_target="$1"
     local version="$2"
     local git_sha="$3"
@@ -1162,7 +1211,7 @@ show_summary() {
     log_info ""
     log_info "  Verify deployment:"
     log_info "    cat ${REGISTRY_FILE} | jq ."
-    log_info "    docker inspect omninode-runtime --format='{{index .Config.Labels \"org.opencontainers.image.revision\"}}'"
+    log_info "    docker inspect ${compose_project}-omninode-runtime-1 --format='{{index .Config.Labels \"org.opencontainers.image.revision\"}}'"
 }
 
 # =============================================================================
@@ -1170,6 +1219,7 @@ show_summary() {
 # =============================================================================
 
 main() {
+    # Orchestrate the full deployment workflow from validation through verification.
     parse_args "$@"
 
     # Phase 1: Validate prerequisites

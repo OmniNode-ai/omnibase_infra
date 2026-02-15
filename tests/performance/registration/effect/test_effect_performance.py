@@ -58,6 +58,9 @@ from omnibase_infra.nodes.effects.store_effect_idempotency_inmemory import (
 if TYPE_CHECKING:
     from uuid import UUID
 
+# Mark all tests in this module as performance tests
+pytestmark = [pytest.mark.performance]
+
 
 # -----------------------------------------------------------------------------
 # Simulated Effect Executor for Load Testing

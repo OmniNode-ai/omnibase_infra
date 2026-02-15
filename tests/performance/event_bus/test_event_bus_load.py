@@ -40,6 +40,9 @@ from omnibase_infra.event_bus.models import ModelEventMessage
 from tests.conftest import make_test_node_identity
 from tests.performance.event_bus.conftest import generate_unique_topic
 
+# Mark all tests in this module as performance tests
+pytestmark = [pytest.mark.performance]
+
 # -----------------------------------------------------------------------------
 # Sustained Load Tests
 # -----------------------------------------------------------------------------

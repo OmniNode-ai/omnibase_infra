@@ -41,6 +41,9 @@ from omnibase_infra.testing import is_ci_environment
 
 IS_CI = is_ci_environment()
 
+# Mark all tests in this module as performance tests
+pytestmark = [pytest.mark.performance]
+
 # -----------------------------------------------------------------------------
 # LRU Eviction Efficiency Tests
 # -----------------------------------------------------------------------------
