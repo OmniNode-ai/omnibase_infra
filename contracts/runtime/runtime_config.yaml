@@ -41,7 +41,7 @@ description: "Configuration for ONEX runtime kernel"
 # ONEX_GROUP_ID environment variables in E2E testing (docker-compose.e2e.yml)
 input_topic: "onex.evt.platform.node-introspection.v1"
 output_topic: "onex.evt.platform.registration-completed.v1"
-group_id: "onex-runtime-e2e"
+group_id: "onex-runtime"
 # Event bus configuration [ACTIVE - used by ServiceKernel]
 # The kernel uses this configuration to wire the event bus via the registry.
 event_bus:

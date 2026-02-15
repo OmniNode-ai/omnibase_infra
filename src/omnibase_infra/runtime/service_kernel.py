@@ -297,6 +297,25 @@ def load_runtime_config(
                     "event_bus_type": config.event_bus.type,
                 },
             )
+
+            # Environment variable overrides (highest priority per contract header)
+            env_overrides: dict[str, str] = {}
+            env_group_id = os.getenv("ONEX_GROUP_ID")
+            env_input_topic = os.getenv("ONEX_INPUT_TOPIC")
+            env_output_topic = os.getenv("ONEX_OUTPUT_TOPIC")
+            if env_group_id is not None:
+                env_overrides["consumer_group"] = env_group_id
+            if env_input_topic is not None:
+                env_overrides["input_topic"] = env_input_topic
+            if env_output_topic is not None:
+                env_overrides["output_topic"] = env_output_topic
+            if env_overrides:
+                config = config.model_copy(update=env_overrides)
+                logger.info(
+                    "Applied environment variable overrides to runtime config",
+                    extra={"overridden_fields": list(env_overrides.keys())},
+                )
+
             return config
         except yaml.YAMLError as e:
             raise ProtocolConfigurationError(
