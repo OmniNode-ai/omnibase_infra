@@ -175,7 +175,7 @@ parse_args() {
                 shift
                 ;;
             --profile)
-                if [[ -z "${2:-}" ]]; then
+                if [[ -z "${2:-}" || "${2:0:1}" == "-" ]]; then
                     log_error "--profile requires a value"
                     exit 1
                 fi
@@ -338,8 +338,8 @@ read_git_sha() {
 
 check_git_dirty() {
     local repo_root="$1"
-    if ! git -C "${repo_root}" diff --quiet HEAD 2>/dev/null; then
-        log_warn "Working tree has uncommitted changes."
+    if [[ -n "$(git -C "${repo_root}" status --porcelain 2>/dev/null || true)" ]]; then
+        log_warn "Working tree has uncommitted or untracked changes."
         log_warn "The deployed SHA will not match the actual file contents."
     fi
 }
@@ -683,7 +683,7 @@ verify_deployment() {
 
     while (( attempt < HEALTH_CHECK_RETRIES )); do
         attempt=$((attempt + 1))
-        if curl -sf "${HEALTH_CHECK_URL}" >/dev/null 2>&1; then
+        if curl -sf --connect-timeout 2 --max-time 5 "${HEALTH_CHECK_URL}" >/dev/null 2>&1; then
             healthy=true
             break
         fi
@@ -699,10 +699,22 @@ verify_deployment() {
         log_warn "  curl ${HEALTH_CHECK_URL}"
     fi
 
-    # 2. Image label verification
+    # 2. Resolve runtime container ID (supports dynamic compose project names)
     log_info "Checking image labels for VCS_REF..."
+    local container_id
+    container_id="$(docker ps -q --filter "name=${compose_project}-omninode-runtime" | head -1)"
+    if [[ -z "${container_id}" ]]; then
+        container_id="$(docker ps -q --filter "name=omninode-runtime" | head -1)"
+    fi
+
+    if [[ -z "${container_id}" ]]; then
+        log_warn "Could not resolve container ID for omninode-runtime; skipping label/log checks."
+        return 0
+    fi
+
+    # 3. Image label verification
     local label
-    label="$(docker inspect omninode-runtime \
+    label="$(docker inspect "${container_id}" \
         --format='{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true)"
 
     if [[ "${label}" == "${git_sha}" ]]; then
@@ -716,10 +728,10 @@ verify_deployment() {
         log_warn "Could not read image label (container may not exist yet)."
     fi
 
-    # 3. Log sentinel: entrypoint ran
+    # 4. Log sentinel: entrypoint ran
     log_info "Checking log sentinels..."
     local logs
-    logs="$(docker logs omninode-runtime 2>&1 | tail -50 || true)"
+    logs="$(docker logs "${container_id}" 2>&1 | tail -50 || true)"
 
     if echo "${logs}" | grep -q "Schema fingerprint stamped"; then
         log_info "Sentinel found: 'Schema fingerprint stamped' (entrypoint ran)."
