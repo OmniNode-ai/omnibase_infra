@@ -538,6 +538,100 @@ class TestLoadEnvFile:
             # Ensure the raw "export MY_DEMO_VAR" key was NOT set
             assert "export MY_DEMO_VAR" not in os.environ
 
+    def test_strips_double_quotes_from_values(self, tmp_path: object) -> None:
+        """Double-quoted values have their quotes removed."""
+        from pathlib import Path
+
+        from omnibase_infra.validation.demo_loop_gate import _load_env_file
+
+        env_file = Path(str(tmp_path)) / ".env"
+        env_file.write_text('DOUBLE_QUOTED="some value"\n')
+
+        with patch.dict("os.environ", {}, clear=True):
+            _load_env_file(str(env_file))
+
+            import os
+
+            assert os.environ.get("DOUBLE_QUOTED") == "some value"
+
+    def test_strips_single_quotes_from_values(self, tmp_path: object) -> None:
+        """Single-quoted values have their quotes removed."""
+        from pathlib import Path
+
+        from omnibase_infra.validation.demo_loop_gate import _load_env_file
+
+        env_file = Path(str(tmp_path)) / ".env"
+        env_file.write_text("SINGLE_QUOTED='another value'\n")
+
+        with patch.dict("os.environ", {}, clear=True):
+            _load_env_file(str(env_file))
+
+            import os
+
+            assert os.environ.get("SINGLE_QUOTED") == "another value"
+
+    def test_skips_comment_lines(self, tmp_path: object) -> None:
+        """Lines starting with # are ignored."""
+        from pathlib import Path
+
+        from omnibase_infra.validation.demo_loop_gate import _load_env_file
+
+        env_file = Path(str(tmp_path)) / ".env"
+        env_file.write_text(
+            "# This is a comment\nREAL_KEY=real_value\n# Another comment\n"
+        )
+
+        with patch.dict("os.environ", {}, clear=True):
+            _load_env_file(str(env_file))
+
+            import os
+
+            assert os.environ.get("REAL_KEY") == "real_value"
+            # No key should exist from comment lines
+            assert "# This is a comment" not in os.environ
+
+    def test_skips_lines_without_equals(self, tmp_path: object) -> None:
+        """Lines without an = sign are silently skipped."""
+        from pathlib import Path
+
+        from omnibase_infra.validation.demo_loop_gate import _load_env_file
+
+        env_file = Path(str(tmp_path)) / ".env"
+        env_file.write_text("no_equals_here\nVALID_KEY=valid_value\njust_text\n")
+
+        with patch.dict("os.environ", {}, clear=True):
+            _load_env_file(str(env_file))
+
+            import os
+
+            assert os.environ.get("VALID_KEY") == "valid_value"
+
+    def test_nonexistent_file_does_not_crash(self) -> None:
+        """Passing a path to a file that does not exist logs a warning but does not raise."""
+        from omnibase_infra.validation.demo_loop_gate import _load_env_file
+
+        # Should not raise any exception
+        _load_env_file("/nonexistent/path/to/.env")
+
+    def test_does_not_override_existing_env_vars(self, tmp_path: object) -> None:
+        """If a variable is already set in os.environ, _load_env_file does NOT override it."""
+        from pathlib import Path
+
+        from omnibase_infra.validation.demo_loop_gate import _load_env_file
+
+        env_file = Path(str(tmp_path)) / ".env"
+        env_file.write_text("EXISTING_VAR=from_file\nNEW_VAR=from_file\n")
+
+        with patch.dict("os.environ", {"EXISTING_VAR": "already_set"}, clear=True):
+            _load_env_file(str(env_file))
+
+            import os
+
+            # Existing var should retain its original value
+            assert os.environ.get("EXISTING_VAR") == "already_set"
+            # New var should be loaded from file
+            assert os.environ.get("NEW_VAR") == "from_file"
+
 
 # =============================================================================
 # Test: Constants
