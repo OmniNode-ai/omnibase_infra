@@ -85,7 +85,7 @@ class TestContainerRestartResilience:
                 timestamp=datetime.now(UTC),
             ),
         )
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0)
         assert len(received_messages) >= 1
 
         # Simulate restart: unsubscribe, clear state, resubscribe
@@ -105,7 +105,7 @@ class TestContainerRestartResilience:
                 timestamp=datetime.now(UTC),
             ),
         )
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0)
 
         # Should receive messages after restart
         assert len(received_messages) >= 1
@@ -220,7 +220,7 @@ class TestConsumerGroupRebalancing:
                 timestamp=datetime.now(UTC),
             ),
         )
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0)
 
         # In-memory bus broadcasts to all subscribers
         total_received = len(received_1) + len(received_2)
@@ -268,7 +268,7 @@ class TestConsumerGroupRebalancing:
                 timestamp=datetime.now(UTC),
             ),
         )
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0)
 
         assert len(received) >= 1, "Remaining consumer should still receive messages"
 

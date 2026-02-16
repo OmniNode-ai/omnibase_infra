@@ -41,12 +41,15 @@ import time
 from collections import defaultdict
 from uuid import UUID, uuid4
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.event_bus.models import ModelDlqEvent
 from omnibase_infra.handlers.handler_slack_webhook import HandlerSlackWebhook
 from omnibase_infra.handlers.models.model_slack_alert import (
     EnumAlertSeverity,
     ModelSlackAlert,
 )
+from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.observability.wiring_health.model_wiring_health_alert import (
     ModelWiringHealthAlert,
 )
@@ -60,7 +63,7 @@ _DEFAULT_MAX_ALERTS_PER_WINDOW: int = 5
 _DEFAULT_COLD_START_TIMEOUT_SECONDS: float = 300.0  # 5 minutes
 
 
-class AdapterPipelineAlertBridge:
+class AdapterPipelineAlertBridge(MixinAsyncCircuitBreaker):
     """Bridges pipeline failure detection to Slack notifications.
 
     Provides automatic alerting for:
@@ -72,12 +75,20 @@ class AdapterPipelineAlertBridge:
     Rate limiting prevents alert storms: at most ``max_alerts_per_window``
     alerts per ``rate_limit_window_seconds`` per alert category.
 
+    Circuit breaker protection prevents hammering a downed Slack service:
+    after ``circuit_breaker_threshold`` consecutive delivery failures the
+    circuit opens and further deliveries are suppressed until the reset
+    timeout elapses.  Intentional rate-limit suppression (e.g. cold-start
+    alerts that are purposely dropped) does **not** count as a delivery
+    failure.
+
     .. note::
 
         **Threading constraint**: The ``asyncio.Lock`` instances used for rate
-        limiting, health state, and cold-start tracking are bound to a single
-        event loop. This class must be created and used within the same event
-        loop. Do not share instances across threads running separate loops.
+        limiting, health state, cold-start tracking, and the circuit breaker
+        are bound to a single event loop. This class must be created and used
+        within the same event loop. Do not share instances across threads
+        running separate loops.
 
     Attributes:
         _handler: Slack webhook handler for delivery.
@@ -134,6 +145,15 @@ class AdapterPipelineAlertBridge:
         self._cold_start_alerted = False
         self._cold_start_lock = asyncio.Lock()
 
+        # Circuit breaker: protect against hammering a downed Slack service
+        self._init_circuit_breaker(
+            threshold=5,
+            reset_timeout=60.0,
+            service_name="slack-alert-bridge",
+            transport_type=EnumInfraTransportType.HTTP,
+            half_open_successes=1,
+        )
+
         logger.info(
             "AdapterPipelineAlertBridge initialized",
             extra={
@@ -143,6 +163,75 @@ class AdapterPipelineAlertBridge:
                 "cold_start_timeout": cold_start_timeout_seconds,
             },
         )
+
+    async def _deliver_alert(
+        self,
+        alert: ModelSlackAlert,
+        category: str,
+        correlation_id: UUID | None = None,
+    ) -> bool:
+        """Deliver a Slack alert with circuit breaker protection.
+
+        Wraps ``self._handler.handle()`` with the async circuit breaker so that
+        a downed Slack service is not hammered.  When the circuit is open the
+        alert is silently dropped and ``False`` is returned.
+
+        Args:
+            alert: The Slack alert to deliver.
+            category: Alert category for logging (e.g. ``"dlq"``, ``"recovery"``).
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            ``True`` if the alert was delivered successfully, ``False`` otherwise
+            (circuit open, handler error, or non-success result).
+        """
+        # --- circuit breaker: pre-check ---
+        try:
+            async with self._circuit_breaker_lock:
+                await self._check_circuit_breaker(
+                    operation=f"deliver_alert:{category}",
+                    correlation_id=correlation_id,
+                )
+        except InfraUnavailableError:
+            logger.warning(
+                "Alert delivery skipped: circuit breaker open for slack-alert-bridge",
+                extra={
+                    "category": category,
+                    "correlation_id": str(correlation_id) if correlation_id else None,
+                },
+            )
+            return False
+
+        # --- actual delivery ---
+        try:
+            result = await self._handler.handle(alert)
+        except Exception:
+            logger.exception(
+                "Alert delivery failed for category=%s, suppressing to protect caller",
+                category,
+                extra={
+                    "correlation_id": str(correlation_id) if correlation_id else None,
+                },
+            )
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(
+                    operation=f"deliver_alert:{category}",
+                    correlation_id=correlation_id,
+                )
+            return False
+
+        if result.success:
+            async with self._circuit_breaker_lock:
+                await self._reset_circuit_breaker()
+            return True
+
+        # Handler returned a non-success result (e.g. HTTP 500 from Slack).
+        async with self._circuit_breaker_lock:
+            await self._record_circuit_failure(
+                operation=f"deliver_alert:{category}",
+                correlation_id=correlation_id,
+            )
+        return False
 
     async def on_dlq_event(self, event: ModelDlqEvent) -> None:
         """Handle DLQ callback by sending a Slack alert.
@@ -207,16 +296,13 @@ class AdapterPipelineAlertBridge:
             correlation_id=event.correlation_id,
         )
 
-        try:
-            result = await self._handler.handle(alert)
-        except Exception:
-            logger.exception(
-                "Alert delivery failed for category=dlq, suppressing to protect caller",
-                extra={"correlation_id": str(event.correlation_id)},
-            )
-            return
+        delivered = await self._deliver_alert(
+            alert,
+            category="dlq",
+            correlation_id=event.correlation_id,
+        )
 
-        if result.success:
+        if delivered:
             logger.info(
                 "DLQ Slack alert delivered",
                 extra={
@@ -229,8 +315,6 @@ class AdapterPipelineAlertBridge:
                 "DLQ Slack alert delivery failed",
                 extra={
                     "correlation_id": str(event.correlation_id),
-                    "error": result.error,
-                    "error_code": result.error_code,
                 },
             )
 
@@ -277,17 +361,13 @@ class AdapterPipelineAlertBridge:
                 correlation_id=correlation_id,
             )
 
-            try:
-                result = await self._handler.handle(slack_alert)
-            except Exception:
-                logger.exception(
-                    "Alert delivery failed for category=wiring_health, "
-                    "suppressing to protect caller",
-                    extra={"correlation_id": str(correlation_id)},
-                )
-                return
+            delivered = await self._deliver_alert(
+                slack_alert,
+                category="wiring_health",
+                correlation_id=correlation_id,
+            )
 
-            if result.success:
+            if delivered:
                 logger.info(
                     "Wiring health degradation alert delivered",
                     extra={"correlation_id": str(correlation_id)},
@@ -295,10 +375,7 @@ class AdapterPipelineAlertBridge:
             else:
                 logger.warning(
                     "Wiring health alert delivery failed",
-                    extra={
-                        "correlation_id": str(correlation_id),
-                        "error": result.error,
-                    },
+                    extra={"correlation_id": str(correlation_id)},
                 )
 
         # Case 2: Recovery (was unhealthy, now healthy)
@@ -366,17 +443,13 @@ class AdapterPipelineAlertBridge:
                 correlation_id=correlation_id,
             )
 
-            try:
-                result = await self._handler.handle(alert)
-            except Exception:
-                logger.exception(
-                    "Alert delivery failed for category=cold_start, "
-                    "suppressing to protect caller",
-                    extra={"correlation_id": str(correlation_id)},
-                )
-                return
+            delivered = await self._deliver_alert(
+                alert,
+                category="cold_start",
+                correlation_id=correlation_id,
+            )
 
-            if result.success:
+            if delivered:
                 self._cold_start_alerted = True
                 logger.info(
                     "Cold-start blocked alert delivered",
@@ -389,10 +462,7 @@ class AdapterPipelineAlertBridge:
             else:
                 logger.warning(
                     "Cold-start blocked alert delivery failed",
-                    extra={
-                        "correlation_id": str(correlation_id),
-                        "error": result.error,
-                    },
+                    extra={"correlation_id": str(correlation_id)},
                 )
 
     async def on_cold_start_resolved(
@@ -458,17 +528,13 @@ class AdapterPipelineAlertBridge:
             correlation_id=correlation_id,
         )
 
-        try:
-            result = await self._handler.handle(alert)
-        except Exception:
-            logger.exception(
-                "Alert delivery failed for category=recovery, "
-                "suppressing to protect caller",
-                extra={"correlation_id": str(correlation_id)},
-            )
-            return
+        delivered = await self._deliver_alert(
+            alert,
+            category="recovery",
+            correlation_id=correlation_id,
+        )
 
-        if result.success:
+        if delivered:
             logger.info(
                 "Recovery alert delivered",
                 extra={
@@ -479,10 +545,7 @@ class AdapterPipelineAlertBridge:
         else:
             logger.warning(
                 "Recovery alert delivery failed",
-                extra={
-                    "correlation_id": str(correlation_id),
-                    "error": result.error,
-                },
+                extra={"correlation_id": str(correlation_id)},
             )
 
     async def _check_rate_limit(self, category: str) -> bool:
