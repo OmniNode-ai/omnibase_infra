@@ -279,6 +279,20 @@ class TestConfigValidation:
             _make_config(startup_grace_period_seconds=601.0)
 
     @pytest.mark.unit
+    def test_pool_min_exceeds_max_raises(self) -> None:
+        """pool_min_size > pool_max_size raises ProtocolConfigurationError."""
+        with pytest.raises(
+            ProtocolConfigurationError, match=r"pool_min_size.*must not exceed"
+        ):
+            _make_config(pool_min_size=20, pool_max_size=5)
+
+    @pytest.mark.unit
+    def test_auto_offset_reset_invalid_raises(self) -> None:
+        """auto_offset_reset outside Literal values raises ValidationError."""
+        with pytest.raises(ValidationError, match="auto_offset_reset"):
+            _make_config(auto_offset_reset="invalid")
+
+    @pytest.mark.unit
     def test_health_check_staleness_bounds(self) -> None:
         """health_check_staleness_seconds bounds are enforced."""
         cfg = _make_config(health_check_staleness_seconds=60)
