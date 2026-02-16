@@ -419,13 +419,10 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
         resolved_output = (
             round(tokens_output) if isinstance(tokens_output, (int, float)) else 0
         )
-        # Determine provenance: Ollama reports eval_count/prompt_eval_count
-        # when the model actually ran; treat as API-reported only when at
-        # least one counter is a positive number.  The raw values default to
-        # 0 via ``.get(..., 0)`` so ``isinstance`` alone is always True —
-        # we must also check ``> 0`` (matches handler_embedding_ollama).
-        has_usage = (isinstance(tokens_input, (int, float)) and tokens_input > 0) or (
-            isinstance(tokens_output, (int, float)) and tokens_output > 0
+        # Determine provenance: treat as API-reported only when at least
+        # one counter is a positive integer.
+        has_usage = (isinstance(tokens_input, int) and tokens_input > 0) or (
+            isinstance(tokens_output, int) and tokens_output > 0
         )
         raw_usage_data: dict[str, object] = {
             "prompt_eval_count": raw_response.get("prompt_eval_count"),
