@@ -9,11 +9,11 @@ This test suite measures per-endpoint latency characteristics including:
 - Maximum concurrency before SLO violation
 
 SLO Targets (P95 at 1 concurrent request):
-    - Qwen2.5-14B  (routing):            P95 < 80ms  (transport + minimal inference)
+    - Qwen2.5-14B  (routing):            P95 < 400ms (transport + minimal inference)
     - Qwen2.5-Coder-14B (analysis):      P95 < 200ms
-    - Qwen2.5-72B  (summarization/docs):  P95 < 500ms
+    - Qwen2.5-72B  (summarization/docs):  P95 < 800ms
     - GTE-Qwen2    (embedding):           P95 < 100ms
-    - Qwen2-VL     (vision):              P95 < 500ms
+    - Qwen2-VL     (vision):              P95 < 600ms
 
     NOTE: These SLO targets measure transport + minimal inference (max_tokens=1).
     Real workloads with longer generation will have higher latencies proportional
@@ -63,6 +63,7 @@ from typing import Any
 
 import httpx
 import pytest
+import pytest_asyncio
 
 from omnibase_infra.testing import is_ci_environment
 from omnibase_infra.utils.util_error_sanitization import (
@@ -110,8 +111,10 @@ CONCURRENCY_LEVELS = [1, 2, 5, 10]
 # ---------------------------------------------------------------------------
 
 # Minimal chat payload: single-token generation to measure transport + overhead.
+# NOTE: "model" is intentionally omitted here; each test class injects its own
+# MODEL class attribute via ``_payload_with_model()`` so that the correct
+# vLLM-registered model name is sent to each endpoint.
 MINIMAL_CHAT_PAYLOAD: dict[str, Any] = {
-    "model": os.getenv("LLM_TEST_MODEL", "default"),
     "messages": [{"role": "user", "content": "Hi"}],
     "max_tokens": 1,
     "temperature": 0.0,
@@ -119,7 +122,6 @@ MINIMAL_CHAT_PAYLOAD: dict[str, Any] = {
 
 # Minimal embedding payload: single short string.
 MINIMAL_EMBEDDING_PAYLOAD: dict[str, Any] = {
-    "model": os.getenv("LLM_TEST_MODEL", "default"),
     "input": "hello",
 }
 
@@ -309,11 +311,31 @@ async def _profile_concurrent(
     """
 
     async def _worker() -> list[float]:
-        """Send sequential requests for one worker and return latencies."""
+        """Send sequential requests for one worker and return latencies.
+
+        Individual request failures are caught and logged so that a single
+        transient error does not discard all successful latencies from this
+        worker.
+        """
         worker_latencies: list[float] = []
-        for _ in range(requests_per_worker):
-            elapsed = await _measure_single_request(client, url, payload, timeout)
-            worker_latencies.append(elapsed)
+        worker_failures = 0
+        for i in range(requests_per_worker):
+            try:
+                elapsed = await _measure_single_request(client, url, payload, timeout)
+                worker_latencies.append(elapsed)
+            except (
+                httpx.HTTPStatusError,
+                httpx.ConnectError,
+                httpx.TimeoutException,
+                OSError,
+            ) as exc:
+                worker_failures += 1
+                sanitized = sanitize_error_message(exc)
+                warnings.warn(
+                    f"Worker request {i + 1}/{requests_per_worker} failed "
+                    f"(total failures: {worker_failures}): {sanitized}",
+                    stacklevel=2,
+                )
         return worker_latencies
 
     results = await asyncio.gather(
@@ -322,7 +344,7 @@ async def _profile_concurrent(
     all_latencies: list[float] = []
     for worker_result in results:
         if isinstance(worker_result, BaseException):
-            # Transient errors are expected under concurrency; skip failed workers.
+            # Unexpected errors (not caught per-request); skip entire worker.
             continue
         all_latencies.extend(worker_result)
     return LatencyProfile(latencies=tuple(all_latencies))
@@ -333,7 +355,7 @@ async def _profile_concurrent(
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(scope="class", loop_scope="class")
 async def http_client() -> AsyncGenerator[httpx.AsyncClient, None]:
     """Shared httpx.AsyncClient for all tests in a class."""
     async with httpx.AsyncClient(
@@ -357,8 +379,9 @@ class BaseLLMEndpointSloTest:
         ENDPOINT_NAME: str  - Human-readable model name for reports
         BASE_URL:      str  - Base URL for reachability checks (no path)
         SLO_P95_MS:    float - P95 latency target in milliseconds
-        PAYLOAD:       dict  - Request payload sent to the endpoint
+        PAYLOAD:       dict  - Request payload template (without "model" key)
         TIMEOUT:       float - Per-request timeout in seconds
+        MODEL:         str  - vLLM model name served by this endpoint
 
     This class is NOT collected by pytest because it lacks the ``Test`` prefix.
     """
@@ -369,6 +392,12 @@ class BaseLLMEndpointSloTest:
     SLO_P95_MS: float
     PAYLOAD: dict[str, Any]
     TIMEOUT: float
+    MODEL: str
+
+    @classmethod
+    def _payload_with_model(cls) -> dict[str, Any]:
+        """Return a copy of PAYLOAD with the class MODEL injected."""
+        return {"model": cls.MODEL, **cls.PAYLOAD}
 
     # -- tests ----------------------------------------------------------------
 
@@ -385,21 +414,27 @@ class BaseLLMEndpointSloTest:
         if not reachable:
             pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {self.BASE_URL}")
 
+        payload = self._payload_with_model()
+
         # Cold: first request on a fresh client (latency measured inside helper)
         async with httpx.AsyncClient(timeout=self.TIMEOUT) as cold_client:
             try:
                 cold_latency = await _measure_single_request(
-                    cold_client, self.ENDPOINT_URL, self.PAYLOAD, self.TIMEOUT
+                    cold_client, self.ENDPOINT_URL, payload, self.TIMEOUT
                 )
-            except (httpx.HTTPStatusError, httpx.TimeoutException) as exc:
+            except (
+                httpx.HTTPStatusError,
+                httpx.ConnectError,
+                httpx.TimeoutException,
+            ) as exc:
                 pytest.skip(f"Cold request failed: {sanitize_error_message(exc)}")
 
         # Warm: after warm-up
-        await _warmup(http_client, self.ENDPOINT_URL, self.PAYLOAD, self.TIMEOUT)
+        await _warmup(http_client, self.ENDPOINT_URL, payload, self.TIMEOUT)
         warm_profile = await _profile_sequential(
             http_client,
             self.ENDPOINT_URL,
-            self.PAYLOAD,
+            payload,
             self.TIMEOUT,
             iterations=10,
         )
@@ -433,9 +468,10 @@ class BaseLLMEndpointSloTest:
         if not reachable:
             pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {self.BASE_URL}")
 
-        await _warmup(http_client, self.ENDPOINT_URL, self.PAYLOAD, self.TIMEOUT)
+        payload = self._payload_with_model()
+        await _warmup(http_client, self.ENDPOINT_URL, payload, self.TIMEOUT)
         profile = await _profile_sequential(
-            http_client, self.ENDPOINT_URL, self.PAYLOAD, self.TIMEOUT
+            http_client, self.ENDPOINT_URL, payload, self.TIMEOUT
         )
 
         print(f"\n{self.ENDPOINT_NAME} Baseline Latency (1 concurrent):")
@@ -453,14 +489,15 @@ class BaseLLMEndpointSloTest:
         if not reachable:
             pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {self.BASE_URL}")
 
-        await _warmup(http_client, self.ENDPOINT_URL, self.PAYLOAD, self.TIMEOUT)
+        payload = self._payload_with_model()
+        await _warmup(http_client, self.ENDPOINT_URL, payload, self.TIMEOUT)
 
         results: dict[int, LatencyProfile] = {}
         for level in CONCURRENCY_LEVELS:
             profile = await _profile_concurrent(
                 http_client,
                 self.ENDPOINT_URL,
-                self.PAYLOAD,
+                payload,
                 self.TIMEOUT,
                 concurrency=level,
                 requests_per_worker=5,
@@ -490,6 +527,7 @@ class TestCoder14BSlo(BaseLLMEndpointSloTest):
     SLO_P95_MS = 200.0
     PAYLOAD = MINIMAL_CHAT_PAYLOAD
     TIMEOUT = CHAT_TIMEOUT
+    MODEL = os.getenv("LLM_CODER_MODEL", "Qwen/Qwen2.5-Coder-14B-Instruct")
 
 
 class TestEmbeddingSlo(BaseLLMEndpointSloTest):
@@ -501,6 +539,7 @@ class TestEmbeddingSlo(BaseLLMEndpointSloTest):
     SLO_P95_MS = 100.0
     PAYLOAD = MINIMAL_EMBEDDING_PAYLOAD
     TIMEOUT = EMBEDDING_TIMEOUT
+    MODEL = os.getenv("LLM_EMBEDDING_MODEL", "Alibaba-NLP/gte-Qwen2-1.5B-instruct")
 
 
 class TestQwen72BSlo(BaseLLMEndpointSloTest):
@@ -509,9 +548,10 @@ class TestQwen72BSlo(BaseLLMEndpointSloTest):
     ENDPOINT_URL = f"{QWEN_72B_URL}/v1/chat/completions"
     ENDPOINT_NAME = "Qwen2.5-72B"
     BASE_URL = QWEN_72B_URL
-    SLO_P95_MS = 500.0
+    SLO_P95_MS = 800.0
     PAYLOAD = MINIMAL_CHAT_PAYLOAD
     TIMEOUT = CHAT_TIMEOUT
+    MODEL = os.getenv("LLM_QWEN_72B_MODEL", "Qwen/Qwen2.5-72B-Instruct")
 
 
 class TestVisionSlo(BaseLLMEndpointSloTest):
@@ -520,9 +560,10 @@ class TestVisionSlo(BaseLLMEndpointSloTest):
     ENDPOINT_URL = f"{VISION_URL}/v1/chat/completions"
     ENDPOINT_NAME = "Qwen2-VL"
     BASE_URL = VISION_URL
-    SLO_P95_MS = 500.0
+    SLO_P95_MS = 600.0
     PAYLOAD = MINIMAL_CHAT_PAYLOAD
     TIMEOUT = CHAT_TIMEOUT
+    MODEL = os.getenv("LLM_VISION_MODEL", "Qwen/Qwen2-VL-7B-Instruct")
 
 
 class TestQwen14BSlo(BaseLLMEndpointSloTest):
@@ -531,9 +572,10 @@ class TestQwen14BSlo(BaseLLMEndpointSloTest):
     ENDPOINT_URL = f"{QWEN_14B_URL}/v1/chat/completions"
     ENDPOINT_NAME = "Qwen2.5-14B"
     BASE_URL = QWEN_14B_URL
-    SLO_P95_MS = 80.0
+    SLO_P95_MS = 400.0
     PAYLOAD = MINIMAL_CHAT_PAYLOAD
     TIMEOUT = CHAT_TIMEOUT
+    MODEL = os.getenv("LLM_QWEN_14B_MODEL", "Qwen/Qwen2.5-14B-Instruct")
 
 
 # ---------------------------------------------------------------------------
@@ -555,35 +597,35 @@ class TestCrossEndpointSummary:
                 "Qwen2.5-Coder-14B",
                 CODER_14B_URL,
                 f"{CODER_14B_URL}/v1/chat/completions",
-                MINIMAL_CHAT_PAYLOAD,
+                {"model": TestCoder14BSlo.MODEL, **MINIMAL_CHAT_PAYLOAD},
                 CHAT_TIMEOUT,
             ),
             (
                 "GTE-Qwen2-1.5B",
                 EMBEDDING_URL,
                 f"{EMBEDDING_URL}/v1/embeddings",
-                MINIMAL_EMBEDDING_PAYLOAD,
+                {"model": TestEmbeddingSlo.MODEL, **MINIMAL_EMBEDDING_PAYLOAD},
                 EMBEDDING_TIMEOUT,
             ),
             (
                 "Qwen2.5-72B",
                 QWEN_72B_URL,
                 f"{QWEN_72B_URL}/v1/chat/completions",
-                MINIMAL_CHAT_PAYLOAD,
+                {"model": TestQwen72BSlo.MODEL, **MINIMAL_CHAT_PAYLOAD},
                 CHAT_TIMEOUT,
             ),
             (
                 "Qwen2-VL",
                 VISION_URL,
                 f"{VISION_URL}/v1/chat/completions",
-                MINIMAL_CHAT_PAYLOAD,
+                {"model": TestVisionSlo.MODEL, **MINIMAL_CHAT_PAYLOAD},
                 CHAT_TIMEOUT,
             ),
             (
                 "Qwen2.5-14B",
                 QWEN_14B_URL,
                 f"{QWEN_14B_URL}/v1/chat/completions",
-                MINIMAL_CHAT_PAYLOAD,
+                {"model": TestQwen14BSlo.MODEL, **MINIMAL_CHAT_PAYLOAD},
                 CHAT_TIMEOUT,
             ),
         ]

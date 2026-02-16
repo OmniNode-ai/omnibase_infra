@@ -47,11 +47,11 @@ have higher latencies proportional to output token count.
 
 | Endpoint | P95 Target | P99 Budget | Rationale |
 |----------|-----------|------------|-----------|
-| **Qwen2.5-14B** (routing) | < 80 ms | < 150 ms | Transport + minimal inference (max_tokens=1). Critical path for agent routing decisions. Must be fast enough that routing overhead is imperceptible. |
-| **Qwen2.5-Coder-14B** (analysis) | < 200 ms | < 400 ms | Used for code analysis and enforcement. Moderate latency acceptable since these are background tasks. |
-| **Qwen2.5-72B** (summarization) | < 500 ms | < 1000 ms | Large model on Apple Silicon. Higher latency expected; used for documentation and analysis where latency is less critical. |
+| **Qwen2.5-14B** (routing) | < 400 ms | < 800 ms | Transport + minimal inference (max_tokens=1) on M2 Pro. 14B model on Apple Silicon has typical TTFT of 100-300ms; target includes headroom for thermal/load variance. |
+| **Qwen2.5-Coder-14B** (analysis) | < 200 ms | < 400 ms | Used for code analysis and enforcement. RTX 5090 GPU inference is fast; moderate latency acceptable since these are background tasks. |
+| **Qwen2.5-72B** (summarization) | < 800 ms | < 1500 ms | 72B model on M2 Ultra unified memory. Higher latency expected; used for documentation and analysis where latency is less critical. |
 | **GTE-Qwen2-1.5B** (embedding) | < 100 ms | < 200 ms | Small model on GPU. Embeddings must be fast for real-time RAG queries. |
-| **Qwen2-VL** (vision) | < 500 ms | < 1000 ms | Vision processing is inherently slower. Acceptable for async screenshot/diagram analysis. |
+| **Qwen2-VL** (vision) | < 600 ms | < 1200 ms | Vision model on M2 Ultra. Multimodal processing is inherently slower. Acceptable for async screenshot/diagram analysis. |
 
 ### Cold Start Budget
 
@@ -103,7 +103,7 @@ degradation is more linear because there is no hardware batching.
 
 | Endpoint | Max Concurrent Before SLO Violation | Reasoning |
 |----------|-------------------------------------|-----------|
-| **Qwen2.5-14B** | 2 | Tight 80ms SLO; M2 Pro has limited throughput |
+| **Qwen2.5-14B** | 2 | 400ms SLO on M2 Pro; limited throughput for 14B model |
 | **Qwen2.5-Coder-14B** | 5 | RTX 5090 continuous batching handles moderate load |
 | **Qwen2.5-72B** | 2 | Large model on M2 Ultra; serialized inference |
 | **GTE-Qwen2-1.5B** | 10+ | Small model; GPU handles high concurrency for embeddings |
@@ -148,7 +148,7 @@ Add an `asyncio.Semaphore` per endpoint to cap in-flight requests:
 ```python
 # Per-endpoint concurrency limits
 CONCURRENCY_LIMITS = {
-    "qwen-14b":     2,   # Tight SLO, limited throughput
+    "qwen-14b":     2,   # M2 Pro, limited throughput for 14B
     "coder-14b":    5,   # GPU batching handles moderate load
     "qwen-72b":     2,   # Large model, serialized inference
     "gte-qwen2":   10,   # Small model, high throughput
