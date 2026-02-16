@@ -974,6 +974,14 @@ def _parse_usage(raw_usage: JsonType) -> ModelLlmUsage:
     tokens_output = _safe_int(raw_usage.get("completion_tokens", 0), 0)
     tokens_total = _safe_int_or_none(raw_usage.get("total_tokens"))
 
+    # If the provider total doesn't match the sum, let ModelLlmUsage
+    # auto-compute it.  Some providers include cached/reasoning tokens
+    # in total_tokens which makes it exceed prompt + completion.
+    # The raw provider data is preserved in raw_provider_usage for auditing.
+    expected = tokens_input + tokens_output
+    if tokens_total is not None and tokens_total != expected:
+        tokens_total = None
+
     # Only mark as API-reported when at least one token counter is positive.
     # A usage dict with all-zero values (e.g. some providers return
     # {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})

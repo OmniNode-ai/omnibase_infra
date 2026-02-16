@@ -27,6 +27,7 @@ from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
     _compute_input_hash,
+    _parse_usage,
 )
 from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
     ModelLlmInferenceRequest,
@@ -463,3 +464,54 @@ class TestBackwardCompatibility:
         assert resp.generated_text == "Hello!"
         assert resp.usage.tokens_input == 100
         assert resp.usage.tokens_output == 50
+
+
+# ---------------------------------------------------------------------------
+# _parse_usage Inconsistent Total Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestParseUsageInconsistentTotal:
+    """Tests for _parse_usage when provider total_tokens != prompt + completion.
+
+    Some LLM providers (e.g. those counting cached/reasoning/system tokens)
+    return a total_tokens value that exceeds prompt_tokens + completion_tokens.
+    The handler must not crash; instead it falls back to auto-computation.
+    """
+
+    def test_inconsistent_total_auto_computes(self) -> None:
+        """When total_tokens != prompt + completion, auto-compute the total."""
+        raw: dict[str, Any] = {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 20,  # Inconsistent: 20 != 10 + 5
+        }
+        usage = _parse_usage(raw)
+
+        assert usage.tokens_input == 10
+        assert usage.tokens_output == 5
+        assert usage.tokens_total == 15  # Auto-computed as 10 + 5
+
+    def test_inconsistent_total_preserves_raw_provider_usage(self) -> None:
+        """Raw provider data is preserved even when total is corrected."""
+        raw: dict[str, Any] = {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 20,
+        }
+        usage = _parse_usage(raw)
+
+        assert usage.raw_provider_usage is not None
+        assert usage.raw_provider_usage["total_tokens"] == 20
+
+    def test_consistent_total_passes_through(self) -> None:
+        """When total_tokens == prompt + completion, it passes through."""
+        raw: dict[str, Any] = {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+        }
+        usage = _parse_usage(raw)
+
+        assert usage.tokens_total == 15
