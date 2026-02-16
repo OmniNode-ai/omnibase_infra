@@ -157,7 +157,7 @@ class HandlerInfisical(
 
         # Phase 1: Parse and validate configuration
         try:
-            self._config = ModelInfisicalHandlerConfig(**config)  # type: ignore[arg-type]
+            self._config = ModelInfisicalHandlerConfig(**config)
         except Exception as e:
             ctx = ModelInfraErrorContext.with_correlation(
                 correlation_id=init_correlation_id,
@@ -362,7 +362,7 @@ class HandlerInfisical(
         self,
         payload: dict[str, object],
         correlation_id: UUID,
-        input_envelope_id: UUID | None,
+        input_envelope_id: UUID,
     ) -> ModelHandlerOutput[dict[str, object]]:
         """Retrieve a single secret with caching."""
         secret_name = payload.get("secret_name")
@@ -413,18 +413,16 @@ class HandlerInfisical(
         self._cache_misses += 1
         self._total_fetches += 1
 
-        # Fetch from Infisical
+        # Fetch from Infisical - extract optional overrides with type narrowing
+        raw_project = payload.get("project_id")
+        raw_env = payload.get("environment_slug")
+        raw_path = payload.get("secret_path")
+
         result = self._adapter.get_secret(
             secret_name=secret_name,
-            project_id=payload.get("project_id")
-            if isinstance(payload.get("project_id"), str)
-            else None,
-            environment_slug=payload.get("environment_slug")
-            if isinstance(payload.get("environment_slug"), str)
-            else None,
-            secret_path=payload.get("secret_path")
-            if isinstance(payload.get("secret_path"), str)
-            else None,
+            project_id=raw_project if isinstance(raw_project, str) else None,
+            environment_slug=raw_env if isinstance(raw_env, str) else None,
+            secret_path=raw_path if isinstance(raw_path, str) else None,
         )
 
         # Cache the result
@@ -460,23 +458,21 @@ class HandlerInfisical(
         self,
         payload: dict[str, object],
         correlation_id: UUID,
-        input_envelope_id: UUID | None,
+        input_envelope_id: UUID,
     ) -> ModelHandlerOutput[dict[str, object]]:
         """List secrets at a given path."""
         assert self._adapter is not None
 
         self._total_fetches += 1
 
+        raw_project = payload.get("project_id")
+        raw_env = payload.get("environment_slug")
+        raw_path = payload.get("secret_path")
+
         results = self._adapter.list_secrets(
-            project_id=payload.get("project_id")
-            if isinstance(payload.get("project_id"), str)
-            else None,
-            environment_slug=payload.get("environment_slug")
-            if isinstance(payload.get("environment_slug"), str)
-            else None,
-            secret_path=payload.get("secret_path")
-            if isinstance(payload.get("secret_path"), str)
-            else None,
+            project_id=raw_project if isinstance(raw_project, str) else None,
+            environment_slug=raw_env if isinstance(raw_env, str) else None,
+            secret_path=raw_path if isinstance(raw_path, str) else None,
         )
 
         secret_keys = [r.key for r in results]
@@ -505,7 +501,7 @@ class HandlerInfisical(
         self,
         payload: dict[str, object],
         correlation_id: UUID,
-        input_envelope_id: UUID | None,
+        input_envelope_id: UUID,
     ) -> ModelHandlerOutput[dict[str, object]]:
         """Retrieve multiple secrets by name with caching."""
         secret_names = payload.get("secret_names")
@@ -552,17 +548,15 @@ class HandlerInfisical(
         # Fetch remaining from Infisical
         if to_fetch:
             self._total_fetches += 1
+            raw_project = payload.get("project_id")
+            raw_env = payload.get("environment_slug")
+            raw_path = payload.get("secret_path")
+
             batch_result = self._adapter.get_secrets_batch(
                 secret_names=to_fetch,
-                project_id=payload.get("project_id")
-                if isinstance(payload.get("project_id"), str)
-                else None,
-                environment_slug=payload.get("environment_slug")
-                if isinstance(payload.get("environment_slug"), str)
-                else None,
-                secret_path=payload.get("secret_path")
-                if isinstance(payload.get("secret_path"), str)
-                else None,
+                project_id=raw_project if isinstance(raw_project, str) else None,
+                environment_slug=raw_env if isinstance(raw_env, str) else None,
+                secret_path=raw_path if isinstance(raw_path, str) else None,
             )
 
             for name, secret_result in batch_result.secrets.items():
@@ -618,7 +612,9 @@ class HandlerInfisical(
         """Build a unique cache key from secret coordinates."""
         assert self._config is not None
         parts = [
-            str(project_id) if isinstance(project_id, str) else self._config.project_id,
+            str(project_id)
+            if isinstance(project_id, str)
+            else str(self._config.project_id),
             str(environment_slug)
             if isinstance(environment_slug, str)
             else self._config.environment_slug,

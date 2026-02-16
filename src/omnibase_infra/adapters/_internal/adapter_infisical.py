@@ -143,7 +143,7 @@ class AdapterInfisical:
             RuntimeError: If SDK initialization or authentication fails.
         """
         try:
-            from infisical_sdk import InfisicalSDKClient  # type: ignore[import-untyped]
+            from infisical_sdk import InfisicalSDKClient
         except ImportError as e:
             raise RuntimeError(
                 "infisical-sdk package is not installed. "
@@ -203,7 +203,7 @@ class AdapterInfisical:
         effective_path = secret_path or self._config.secret_path
 
         try:
-            result = self._client.secrets.get_secret_by_name(  # type: ignore[union-attr]
+            result = self._client.secrets.get_secret_by_name(  # type: ignore[attr-defined]
                 secret_name=secret_name,
                 project_id=effective_project,
                 environment_slug=effective_env,
@@ -262,7 +262,7 @@ class AdapterInfisical:
         effective_path = secret_path or self._config.secret_path
 
         try:
-            result = self._client.secrets.list_secrets(  # type: ignore[union-attr]
+            result = self._client.secrets.list_secrets(  # type: ignore[attr-defined]
                 project_id=effective_project,
                 environment_slug=effective_env,
                 secret_path=effective_path,
