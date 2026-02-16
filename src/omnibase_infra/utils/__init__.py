@@ -90,7 +90,6 @@ from omnibase_infra.utils.util_semver import (
 __all__: list[str] = [
     "CorrelationContext",
     "KAFKA_CONSUMER_GROUP_MAX_LENGTH",
-    "apply_instance_discriminator",
     "MAX_RAW_BLOB_BYTES",
     "OptimisticConflictError",
     # Note: ProtocolCircuitBreakerFailureRecorder and db_operation_error_context are NOT exported
@@ -98,6 +97,7 @@ __all__: list[str] = [
     "SAFE_ERROR_PATTERNS",
     "SEMVER_PATTERN",
     "SENSITIVE_PATTERNS",
+    "apply_instance_discriminator",
     "clear_correlation_id",
     "compute_consumer_group_id",
     "ensure_timezone_aware",
