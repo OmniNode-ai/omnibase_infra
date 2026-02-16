@@ -64,6 +64,7 @@ import httpx
 import pytest
 
 from omnibase_infra.testing import is_ci_environment
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -239,7 +240,8 @@ async def _measure_single_request(
     elapsed = time.perf_counter() - start
     # Accept any 2xx response; raise on server errors to surface issues.
     if response.status_code >= 400:
-        msg = f"HTTP {response.status_code} from {url}: {response.text[:200]}"
+        sanitized = sanitize_error_string(response.text[:200]) if response.text else ""
+        msg = f"HTTP {response.status_code} from {url}: {sanitized}"
         raise httpx.HTTPStatusError(msg, request=response.request, response=response)
     return elapsed
 

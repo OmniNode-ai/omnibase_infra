@@ -121,7 +121,7 @@ requests.
 
 ### Three-Layer Defense
 
-```
+```text
 Layer 1: Circuit Breaker (per-endpoint)
     |
     v
