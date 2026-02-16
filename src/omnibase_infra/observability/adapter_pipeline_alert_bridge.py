@@ -18,7 +18,7 @@ Architecture:
     +-----------------------+
     | DLQ Callback Hook     |---+
     +-----------------------+   |
-    | Wiring Health Checker |---+---> PipelineAlertBridge ---> HandlerSlackWebhook
+    | Wiring Health Checker |---+---> AdapterPipelineAlertBridge ---> HandlerSlackWebhook
     +-----------------------+   |        (rate-limited)                   (Slack)
     | Cold-Start Monitor    |---+
     +-----------------------+   |
@@ -60,7 +60,7 @@ _DEFAULT_MAX_ALERTS_PER_WINDOW: int = 5
 _DEFAULT_COLD_START_TIMEOUT_SECONDS: float = 300.0  # 5 minutes
 
 
-class PipelineAlertBridge:
+class AdapterPipelineAlertBridge:
     """Bridges pipeline failure detection to Slack notifications.
 
     Provides automatic alerting for:
@@ -88,7 +88,7 @@ class PipelineAlertBridge:
         _cold_start_alerted: Whether cold-start alert has been sent.
 
     Example:
-        >>> bridge = PipelineAlertBridge(
+        >>> bridge = AdapterPipelineAlertBridge(
         ...     slack_handler=HandlerSlackWebhook(webhook_url="https://..."),
         ...     environment="prod",
         ... )
@@ -135,7 +135,7 @@ class PipelineAlertBridge:
         self._cold_start_lock = asyncio.Lock()
 
         logger.info(
-            "PipelineAlertBridge initialized",
+            "AdapterPipelineAlertBridge initialized",
             extra={
                 "environment": environment,
                 "rate_limit_window": rate_limit_window_seconds,
@@ -517,4 +517,4 @@ class PipelineAlertBridge:
             return True
 
 
-__all__: list[str] = ["PipelineAlertBridge"]
+__all__: list[str] = ["AdapterPipelineAlertBridge"]

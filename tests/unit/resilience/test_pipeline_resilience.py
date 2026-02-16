@@ -67,6 +67,7 @@ class TestContainerRestartResilience:
         received_messages: list[bytes] = []
 
         async def handler(msg: Any) -> None:
+            """Append message value to received_messages list."""
             value = msg.value if hasattr(msg, "value") else msg
             received_messages.append(value)
 
@@ -122,6 +123,7 @@ class TestContainerRestartResilience:
         write_count = 0
 
         async def idempotent_handler(msg: Any) -> None:
+            """Skip duplicate correlation IDs, increment write_count for new ones."""
             nonlocal write_count
             value = msg.value if hasattr(msg, "value") else msg
             data = json.loads(value)
@@ -193,10 +195,12 @@ class TestConsumerGroupRebalancing:
         received_2: list[bytes] = []
 
         async def handler1(msg: Any) -> None:
+            """Collect messages for consumer 1."""
             value = msg.value if hasattr(msg, "value") else msg
             received_1.append(value)
 
         async def handler2(msg: Any) -> None:
+            """Collect messages for consumer 2."""
             value = msg.value if hasattr(msg, "value") else msg
             received_2.append(value)
 
@@ -237,11 +241,12 @@ class TestConsumerGroupRebalancing:
         received: list[bytes] = []
 
         async def handler(msg: Any) -> None:
+            """Collect messages for the remaining consumer."""
             value = msg.value if hasattr(msg, "value") else msg
             received.append(value)
 
         async def noop_handler(msg: Any) -> None:
-            pass
+            """No-op handler simulating a consumer that will leave the group."""
 
         id1 = make_test_node_identity("consumer-stay")
         id2 = make_test_node_identity("consumer-leave")
@@ -291,6 +296,7 @@ class TestIdempotencyOnReplay:
         seen_ids: set[str] = set()
 
         async def idempotent_processor(correlation_id: str, data: str) -> None:
+            """Write to db_rows only if correlation_id has not been seen before."""
             if correlation_id in seen_ids:
                 return
             seen_ids.add(correlation_id)
@@ -320,6 +326,7 @@ class TestIdempotencyOnReplay:
         emitted_ids: set[str] = set()
 
         async def emit_once(correlation_id: str, event_type: str) -> None:
+            """Emit event only on first occurrence of a given correlation_id."""
             if correlation_id in emitted_ids:
                 return
             emitted_ids.add(correlation_id)
@@ -344,6 +351,7 @@ class TestIdempotencyOnReplay:
         seen: set[str] = set()
 
         async def process(cid: str) -> None:
+            """Process a message, deduplicating by correlation ID."""
             if cid in seen:
                 return
             seen.add(cid)
@@ -381,14 +389,17 @@ class TestColdStartBootstrapOrder:
         bootstrap_log: list[str] = []
 
         async def check_db() -> bool:
+            """Simulate successful DB availability check."""
             bootstrap_log.append("check_db")
             return True
 
         async def check_topics() -> bool:
+            """Simulate successful topic availability check."""
             bootstrap_log.append("check_topics")
             return True
 
         async def check_plugin() -> bool:
+            """Simulate successful plugin availability check."""
             bootstrap_log.append("check_plugin")
             return True
 
@@ -413,10 +424,12 @@ class TestColdStartBootstrapOrder:
         errors: list[str] = []
 
         async def check_db() -> bool:
+            """Simulate DB unavailability (returns False)."""
             bootstrap_log.append("check_db")
             return False  # DB unavailable
 
         async def check_topics() -> bool:
+            """Simulate topic check that should never be reached."""
             bootstrap_log.append("check_topics")
             return True
 
@@ -445,14 +458,16 @@ class TestColdStartBootstrapOrder:
         }
 
         async def init_db() -> bool:
+            """Simulate successful DB initialization."""
             state["db_ready"] = True
             return True
 
         async def init_topics() -> bool:
-            # Simulate topic creation failure
+            """Simulate topic creation failure (raises ConnectionError)."""
             raise ConnectionError("Kafka unavailable")
 
         async def init_plugin() -> bool:
+            """Simulate plugin initialization (should not be reached)."""
             state["plugin_ready"] = True
             return True
 
@@ -490,6 +505,7 @@ class TestDlqBehavior:
         processed_messages: list[dict[str, Any]] = []
 
         async def process_with_dlq(raw_value: bytes) -> None:
+            """Route valid messages to processed_messages, invalid to dlq_messages."""
             try:
                 data = json.loads(raw_value)
                 if not isinstance(data, dict) or "required_field" not in data:
@@ -548,6 +564,7 @@ class TestDlqBehavior:
         processing_order: list[str] = []
 
         async def robust_handler(raw: bytes) -> None:
+            """Parse JSON or record as DLQ malformed, continuing either way."""
             try:
                 data = json.loads(raw)
                 processing_order.append(f"ok:{data.get('id', '?')}")

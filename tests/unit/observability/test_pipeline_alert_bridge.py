@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for PipelineAlertBridge - Scenario 6: Failure notification wiring.
+"""Unit tests for AdapterPipelineAlertBridge - Scenario 6: Failure notification wiring.
 
 These tests validate the automatic alerting pathways that bridge pipeline
 failure detection to Slack notifications:
@@ -32,8 +32,8 @@ from omnibase_infra.handlers.models.model_slack_alert import (
     ModelSlackAlert,
     ModelSlackAlertResult,
 )
-from omnibase_infra.observability.pipeline_alert_bridge import (
-    PipelineAlertBridge,
+from omnibase_infra.observability.adapter_pipeline_alert_bridge import (
+    AdapterPipelineAlertBridge,
 )
 from omnibase_infra.observability.wiring_health.model_wiring_health_alert import (
     ModelWiringHealthAlert,
@@ -60,9 +60,9 @@ def mock_slack_handler() -> HandlerSlackWebhook:
 
 
 @pytest.fixture
-def bridge(mock_slack_handler: HandlerSlackWebhook) -> PipelineAlertBridge:
-    """Create a PipelineAlertBridge with mock handler."""
-    return PipelineAlertBridge(
+def bridge(mock_slack_handler: HandlerSlackWebhook) -> AdapterPipelineAlertBridge:
+    """Create a AdapterPipelineAlertBridge with mock handler."""
+    return AdapterPipelineAlertBridge(
         slack_handler=mock_slack_handler,
         environment="test",
         rate_limit_window_seconds=60.0,
@@ -145,7 +145,7 @@ class TestDlqToSlack:
     @pytest.mark.asyncio
     async def test_dlq_event_triggers_slack_alert(
         self,
-        bridge: PipelineAlertBridge,
+        bridge: AdapterPipelineAlertBridge,
         mock_slack_handler: HandlerSlackWebhook,
         sample_dlq_event: ModelDlqEvent,
     ) -> None:
@@ -161,7 +161,7 @@ class TestDlqToSlack:
     @pytest.mark.asyncio
     async def test_critical_dlq_event_triggers_critical_alert(
         self,
-        bridge: PipelineAlertBridge,
+        bridge: AdapterPipelineAlertBridge,
         mock_slack_handler: HandlerSlackWebhook,
         critical_dlq_event: ModelDlqEvent,
     ) -> None:
@@ -178,7 +178,7 @@ class TestDlqToSlack:
     @pytest.mark.asyncio
     async def test_dlq_alert_includes_correlation_id(
         self,
-        bridge: PipelineAlertBridge,
+        bridge: AdapterPipelineAlertBridge,
         mock_slack_handler: HandlerSlackWebhook,
         sample_dlq_event: ModelDlqEvent,
     ) -> None:
@@ -191,7 +191,7 @@ class TestDlqToSlack:
     @pytest.mark.asyncio
     async def test_dlq_alert_includes_context_details(
         self,
-        bridge: PipelineAlertBridge,
+        bridge: AdapterPipelineAlertBridge,
         mock_slack_handler: HandlerSlackWebhook,
         sample_dlq_event: ModelDlqEvent,
     ) -> None:
@@ -216,7 +216,7 @@ class TestWiringHealthToSlack:
     @pytest.mark.asyncio
     async def test_unhealthy_wiring_triggers_alert(
         self,
-        bridge: PipelineAlertBridge,
+        bridge: AdapterPipelineAlertBridge,
         mock_slack_handler: HandlerSlackWebhook,
         sample_wiring_alert: ModelWiringHealthAlert,
     ) -> None:
@@ -238,7 +238,7 @@ class TestWiringHealthToSlack:
     @pytest.mark.asyncio
     async def test_healthy_wiring_no_alert(
         self,
-        bridge: PipelineAlertBridge,
+        bridge: AdapterPipelineAlertBridge,
         mock_slack_handler: HandlerSlackWebhook,
     ) -> None:
         """Verify healthy wiring does not trigger alerts."""
@@ -252,7 +252,7 @@ class TestWiringHealthToSlack:
     @pytest.mark.asyncio
     async def test_recovery_triggers_info_alert(
         self,
-        bridge: PipelineAlertBridge,
+        bridge: AdapterPipelineAlertBridge,
         mock_slack_handler: HandlerSlackWebhook,
         sample_wiring_alert: ModelWiringHealthAlert,
     ) -> None:
@@ -291,7 +291,7 @@ class TestColdStartToSlack:
         mock_slack_handler: HandlerSlackWebhook,
     ) -> None:
         """Verify cold-start blocked >5 minutes triggers alert."""
-        bridge = PipelineAlertBridge(
+        bridge = AdapterPipelineAlertBridge(
             slack_handler=mock_slack_handler,
             environment="test",
             cold_start_timeout_seconds=300.0,
@@ -316,7 +316,7 @@ class TestColdStartToSlack:
         mock_slack_handler: HandlerSlackWebhook,
     ) -> None:
         """Verify cold-start blocked alert is not repeated."""
-        bridge = PipelineAlertBridge(
+        bridge = AdapterPipelineAlertBridge(
             slack_handler=mock_slack_handler,
             environment="test",
             cold_start_timeout_seconds=10.0,
@@ -335,7 +335,7 @@ class TestColdStartToSlack:
         mock_slack_handler: HandlerSlackWebhook,
     ) -> None:
         """Verify cold-start resolution sends INFO recovery alert."""
-        bridge = PipelineAlertBridge(
+        bridge = AdapterPipelineAlertBridge(
             slack_handler=mock_slack_handler,
             environment="test",
             cold_start_timeout_seconds=10.0,
@@ -358,7 +358,7 @@ class TestColdStartToSlack:
     @pytest.mark.asyncio
     async def test_cold_start_resolved_no_alert_if_not_blocked(
         self,
-        bridge: PipelineAlertBridge,
+        bridge: AdapterPipelineAlertBridge,
         mock_slack_handler: HandlerSlackWebhook,
     ) -> None:
         """Verify no recovery alert if cold-start was never blocked."""
@@ -371,7 +371,7 @@ class TestColdStartToSlack:
         mock_slack_handler: HandlerSlackWebhook,
     ) -> None:
         """Verify cold-start alerts include correlation_id."""
-        bridge = PipelineAlertBridge(
+        bridge = AdapterPipelineAlertBridge(
             slack_handler=mock_slack_handler,
             environment="test",
             cold_start_timeout_seconds=10.0,
@@ -402,7 +402,7 @@ class TestRateLimiting:
         mock_slack_handler: HandlerSlackWebhook,
     ) -> None:
         """Verify rate limiting prevents alert storms."""
-        bridge = PipelineAlertBridge(
+        bridge = AdapterPipelineAlertBridge(
             slack_handler=mock_slack_handler,
             environment="test",
             rate_limit_window_seconds=60.0,
@@ -431,7 +431,7 @@ class TestRateLimiting:
         mock_slack_handler: HandlerSlackWebhook,
     ) -> None:
         """Verify rate limiting is per-category (DLQ and wiring_health independent)."""
-        bridge = PipelineAlertBridge(
+        bridge = AdapterPipelineAlertBridge(
             slack_handler=mock_slack_handler,
             environment="test",
             rate_limit_window_seconds=60.0,
@@ -497,7 +497,7 @@ class TestDeliveryFailureHandling:
             )
         )
 
-        bridge = PipelineAlertBridge(
+        bridge = AdapterPipelineAlertBridge(
             slack_handler=handler,
             environment="test",
         )
@@ -522,7 +522,7 @@ class TestDeliveryFailureHandling:
             side_effect=RuntimeError("Connection refused")
         )
 
-        bridge = PipelineAlertBridge(
+        bridge = AdapterPipelineAlertBridge(
             slack_handler=handler,
             environment="test",
         )
@@ -542,7 +542,7 @@ class TestDlqCallbackRegistration:
     @pytest.mark.asyncio
     async def test_bridge_callback_signature_compatible(
         self,
-        bridge: PipelineAlertBridge,
+        bridge: AdapterPipelineAlertBridge,
     ) -> None:
         """Verify on_dlq_event has the correct signature for register_dlq_callback."""
         import inspect
@@ -557,7 +557,7 @@ class TestDlqCallbackRegistration:
     @pytest.mark.asyncio
     async def test_bridge_works_as_dlq_callback(
         self,
-        bridge: PipelineAlertBridge,
+        bridge: AdapterPipelineAlertBridge,
         mock_slack_handler: HandlerSlackWebhook,
         sample_dlq_event: ModelDlqEvent,
     ) -> None:

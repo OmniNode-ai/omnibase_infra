@@ -97,6 +97,9 @@ See Also:
     - omnibase_core.models.observability: Metrics policy models
 """
 
+from omnibase_infra.observability.adapter_pipeline_alert_bridge import (
+    AdapterPipelineAlertBridge,
+)
 from omnibase_infra.observability.factory_observability_sink import (
     FactoryObservabilitySink,
 )
@@ -113,9 +116,6 @@ from omnibase_infra.observability.hooks import HookObservability
 from omnibase_infra.observability.models import (
     ModelLoggingSinkConfig,
     ModelMetricsSinkConfig,
-)
-from omnibase_infra.observability.pipeline_alert_bridge import (
-    PipelineAlertBridge,
 )
 from omnibase_infra.observability.sinks import (
     SinkLoggingStructured,
@@ -137,7 +137,7 @@ __all__: list[str] = [
     "ModelMetricsHandlerPayload",
     "ModelMetricsHandlerResponse",
     # Pipeline Alert Bridge
-    "PipelineAlertBridge",
+    "AdapterPipelineAlertBridge",
     # Sinks
     "SinkLoggingStructured",
     "SinkMetricsPrometheus",
