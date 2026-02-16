@@ -1138,16 +1138,6 @@ class EventBusKafka(
                 value=group_id,
             )
 
-        # Apply instance discriminator for multi-container dev environments
-        # (OMN-2251). When instance_id is configured, each container gets its
-        # own consumer group membership so Kafka assigns all partitions to each
-        # instance rather than rebalancing between them. When instance_id is
-        # None (default), this is a no-op and single-container behavior is
-        # preserved.
-        instance_discriminated_id = apply_instance_discriminator(
-            stripped_group_id, self._config.instance_id
-        )
-
         # Scope group_id per topic to prevent rebalance storms.
         #
         # Each subscribe() call creates a separate AIOKafkaConsumer for one topic.
@@ -1171,11 +1161,28 @@ class EventBusKafka(
         #   - It is short enough to stay within Kafka's 255-char group_id limit
         #   - It makes the idempotency check unambiguous
         topic_suffix = f".__t.{topic}"
-        effective_group_id = (
-            instance_discriminated_id
-            if instance_discriminated_id.endswith(topic_suffix)
-            else f"{instance_discriminated_id}{topic_suffix}"
+
+        # Strip topic suffix before applying instance discriminator so that
+        # pre-scoped group IDs (already ending with .__t.{topic}) don't end up
+        # with the instance discriminator AFTER the topic suffix and the topic
+        # suffix appended again (OMN-2251 / CodeRabbit review).
+        base_group_id = (
+            stripped_group_id[: -len(topic_suffix)]
+            if stripped_group_id.endswith(topic_suffix)
+            else stripped_group_id
         )
+
+        # Apply instance discriminator for multi-container dev environments
+        # (OMN-2251). When instance_id is configured, each container gets its
+        # own consumer group membership so Kafka assigns all partitions to each
+        # instance rather than rebalancing between them. When instance_id is
+        # None (default), this is a no-op and single-container behavior is
+        # preserved.
+        instance_discriminated_id = apply_instance_discriminator(
+            base_group_id, self._config.instance_id
+        )
+
+        effective_group_id = f"{instance_discriminated_id}{topic_suffix}"
 
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(

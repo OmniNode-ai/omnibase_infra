@@ -1653,6 +1653,46 @@ class TestKafkaEventBusInstanceDiscriminator:
             # No instance discriminator
             assert call_kwargs.kwargs["group_id"] == "my-group.__t.events"
 
+    @pytest.mark.asyncio
+    async def test_pre_scoped_group_id_with_instance_id_no_double_topic_suffix(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test pre-scoped group_id with instance_id does not double topic suffix.
+
+        When a group_id already ends with .__t.{topic} (pre-scoped) and
+        instance_id is set, the instance discriminator must be inserted
+        between the base and the topic suffix, NOT after it.
+
+        Without the fix this would produce:
+            my-group.__t.events.__i.c1.__t.events  (WRONG)
+        Correct result:
+            my-group.__i.c1.__t.events
+        """
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id="c1",
+            )
+            event_bus = EventBusKafka(config=config)
+
+            # group_id already ends with .__t.events (pre-scoped)
+            await event_bus._start_consumer_for_topic("events", "my-group.__t.events")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            # Instance discriminator inserted between base and topic suffix
+            assert call_kwargs.kwargs["group_id"] == "my-group.__i.c1.__t.events"
+
 
 class TestKafkaEventBusStartConsuming:
     """Test suite for start_consuming operation."""
