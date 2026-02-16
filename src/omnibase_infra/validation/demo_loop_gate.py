@@ -352,11 +352,24 @@ class DemoLoopGate:
                     found.extend(str(p.name) for p in projectors_dir.glob(pattern))
 
             if not found:
+                if projectors_dir.exists():
+                    reason = (
+                        f"Directory exists but contains no matching contracts: "
+                        f"{projectors_dir} "
+                        f"(patterns: {', '.join(PROJECTOR_CONTRACT_PATTERNS)})"
+                    )
+                else:
+                    reason = (
+                        f"Contracts directory does not exist: {projectors_dir} "
+                        f"-- expected relative to {Path(__file__).parent.parent}. "
+                        f"If the package layout has changed, this path may need "
+                        f"updating."
+                    )
                 return ModelAssertionResult(
                     name="projector_health",
                     status=EnumAssertionStatus.FAILED,
                     message="Projector health: no projector contracts discovered",
-                    details=(f"Searched: {projectors_dir}",),
+                    details=(reason,),
                 )
 
             return ModelAssertionResult(
@@ -405,6 +418,31 @@ class DemoLoopGate:
                     "Set KAFKA_BOOTSTRAP_SERVERS in .env to point at the "
                     "demo environment Kafka/Redpanda cluster",
                 ),
+            )
+
+        # Minimal format validation: each comma-separated broker must look
+        # like ``host:port`` (non-empty strings on both sides of a colon).
+        invalid_brokers: list[str] = []
+        for broker in kafka_servers.split(","):
+            broker = broker.strip()
+            if ":" not in broker:
+                invalid_brokers.append(f"'{broker}' -- missing ':port' suffix")
+            else:
+                host, _, port = broker.partition(":")
+                if not host or not port:
+                    invalid_brokers.append(
+                        f"'{broker}' -- empty host or port component"
+                    )
+
+        if invalid_brokers:
+            return ModelAssertionResult(
+                name="dashboard_config",
+                status=EnumAssertionStatus.FAILED,
+                message=(
+                    "Dashboard config: KAFKA_BOOTSTRAP_SERVERS has invalid "
+                    "host:port format"
+                ),
+                details=tuple(invalid_brokers),
             )
 
         return ModelAssertionResult(

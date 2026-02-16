@@ -299,6 +299,91 @@ class TestProjectorHealth:
         assert result.status == EnumAssertionStatus.SKIPPED
         assert "ModuleNotFoundError" in result.message
 
+    def test_passed_with_contract_files(self, tmp_path: object) -> None:
+        """Projector health passes when contracts directory has matching files.
+
+        The real ``__file__`` lives at ``<pkg>/validation/demo_loop_gate.py``,
+        so ``Path(__file__).parent.parent`` resolves to ``<pkg>/``, and the
+        contracts dir is ``<pkg>/projectors/contracts/``.  We replicate that
+        directory layout under ``tmp_path``.
+        """
+        from pathlib import Path
+
+        pkg_root = Path(str(tmp_path)) / "fake_pkg"
+        validation_dir = pkg_root / "validation"
+        validation_dir.mkdir(parents=True)
+        contracts_dir = pkg_root / "projectors" / "contracts"
+        contracts_dir.mkdir(parents=True)
+        (contracts_dir / "session_projector.yaml").write_text("name: test")
+
+        gate = DemoLoopGate(
+            projector_check_enabled=True,
+            dashboard_check_enabled=False,
+        )
+
+        fake_file = str(validation_dir / "demo_loop_gate.py")
+        with patch(
+            "omnibase_infra.validation.demo_loop_gate.__file__",
+            fake_file,
+        ):
+            result = gate.assert_projector_health()
+
+        assert result.status == EnumAssertionStatus.PASSED
+        assert "1 contract(s)" in result.message
+
+    def test_failed_no_contracts_in_directory(self, tmp_path: object) -> None:
+        """Projector health fails when contracts directory exists but is empty."""
+        from pathlib import Path
+
+        pkg_root = Path(str(tmp_path)) / "fake_pkg"
+        validation_dir = pkg_root / "validation"
+        validation_dir.mkdir(parents=True)
+        contracts_dir = pkg_root / "projectors" / "contracts"
+        contracts_dir.mkdir(parents=True)
+        # Put a non-matching file so the dir exists but has no contracts
+        (contracts_dir / "unrelated.txt").write_text("not a contract")
+
+        gate = DemoLoopGate(
+            projector_check_enabled=True,
+            dashboard_check_enabled=False,
+        )
+
+        fake_file = str(validation_dir / "demo_loop_gate.py")
+        with patch(
+            "omnibase_infra.validation.demo_loop_gate.__file__",
+            fake_file,
+        ):
+            result = gate.assert_projector_health()
+
+        assert result.status == EnumAssertionStatus.FAILED
+        assert "no projector contracts discovered" in result.message
+        assert any("contains no matching contracts" in d for d in result.details)
+
+    def test_failed_contracts_directory_missing(self, tmp_path: object) -> None:
+        """Projector health fails with descriptive message when directory is absent."""
+        from pathlib import Path
+
+        pkg_root = Path(str(tmp_path)) / "fake_pkg"
+        validation_dir = pkg_root / "validation"
+        validation_dir.mkdir(parents=True)
+        # Do NOT create projectors/contracts -- it should not exist
+
+        gate = DemoLoopGate(
+            projector_check_enabled=True,
+            dashboard_check_enabled=False,
+        )
+
+        fake_file = str(validation_dir / "demo_loop_gate.py")
+        with patch(
+            "omnibase_infra.validation.demo_loop_gate.__file__",
+            fake_file,
+        ):
+            result = gate.assert_projector_health()
+
+        assert result.status == EnumAssertionStatus.FAILED
+        assert "no projector contracts discovered" in result.message
+        assert any("does not exist" in d for d in result.details)
+
 
 # =============================================================================
 # Test: Assertion 5 -- Dashboard Config
@@ -335,6 +420,62 @@ class TestDashboardConfig:
             result = gate.assert_dashboard_config()
         assert result.status == EnumAssertionStatus.FAILED
         assert "KAFKA_BOOTSTRAP_SERVERS" in result.message
+
+    def test_fails_with_missing_port(self) -> None:
+        """KAFKA_BOOTSTRAP_SERVERS without a port suffix should fail validation."""
+        gate = DemoLoopGate(
+            projector_check_enabled=False,
+            dashboard_check_enabled=True,
+        )
+        with patch.dict(
+            "os.environ",
+            {"KAFKA_BOOTSTRAP_SERVERS": "just-a-hostname"},
+        ):
+            result = gate.assert_dashboard_config()
+        assert result.status == EnumAssertionStatus.FAILED
+        assert "host:port" in result.message
+        assert any("missing" in d for d in result.details)
+
+    def test_fails_with_empty_host(self) -> None:
+        """A value like ':9092' (empty host) should fail validation."""
+        gate = DemoLoopGate(
+            projector_check_enabled=False,
+            dashboard_check_enabled=True,
+        )
+        with patch.dict(
+            "os.environ",
+            {"KAFKA_BOOTSTRAP_SERVERS": ":9092"},
+        ):
+            result = gate.assert_dashboard_config()
+        assert result.status == EnumAssertionStatus.FAILED
+        assert "host:port" in result.message
+
+    def test_fails_with_empty_port(self) -> None:
+        """A value like 'localhost:' (empty port) should fail validation."""
+        gate = DemoLoopGate(
+            projector_check_enabled=False,
+            dashboard_check_enabled=True,
+        )
+        with patch.dict(
+            "os.environ",
+            {"KAFKA_BOOTSTRAP_SERVERS": "localhost:"},
+        ):
+            result = gate.assert_dashboard_config()
+        assert result.status == EnumAssertionStatus.FAILED
+        assert "host:port" in result.message
+
+    def test_passes_with_multiple_brokers(self) -> None:
+        """Comma-separated broker list should pass when all are valid."""
+        gate = DemoLoopGate(
+            projector_check_enabled=False,
+            dashboard_check_enabled=True,
+        )
+        with patch.dict(
+            "os.environ",
+            {"KAFKA_BOOTSTRAP_SERVERS": "broker1:9092,broker2:9093"},
+        ):
+            result = gate.assert_dashboard_config()
+        assert result.status == EnumAssertionStatus.PASSED
 
 
 # =============================================================================
@@ -491,14 +632,22 @@ class TestCLIMain:
         assert exit_code == 0
 
     def test_invalid_topics_returns_failed_result(self) -> None:
-        """Call main() with a gate that has invalid topics and verify exit 1."""
-        original_init = DemoLoopGate.__init__
+        """Call main() with a gate that has invalid topics and verify exit 1.
 
-        def patched_init(self: DemoLoopGate, **kwargs: object) -> None:
-            kwargs["canonical_topics"] = ("not-a-valid-topic",)
-            original_init(self, **kwargs)  # type: ignore[arg-type]
+        We wrap the real DemoLoopGate class so that any construction
+        transparently injects invalid topics, without monkey-patching
+        ``__init__`` with a non-standard signature.
+        """
 
-        with patch.object(DemoLoopGate, "__init__", patched_init):
+        class _GateWithBadTopics(DemoLoopGate):
+            def __init__(self, **kwargs: object) -> None:
+                kwargs["canonical_topics"] = ("not-a-valid-topic",)
+                super().__init__(**kwargs)  # type: ignore[arg-type]
+
+        with patch(
+            "omnibase_infra.validation.demo_loop_gate.DemoLoopGate",
+            _GateWithBadTopics,
+        ):
             exit_code = main(["--ci"])
         assert exit_code == 1
 
