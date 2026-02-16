@@ -64,6 +64,10 @@ from omnibase_infra.utils.util_error_sanitization import (
     sanitize_error_string,
     sanitize_secret_path,
 )
+from omnibase_infra.utils.util_llm_response_redaction import (
+    MAX_RAW_BLOB_BYTES,
+    redact_llm_response,
+)
 from omnibase_infra.utils.util_pydantic_validators import (
     validate_contract_type_value,
     validate_endpoint_urls_dict,
@@ -85,6 +89,7 @@ from omnibase_infra.utils.util_semver import (
 __all__: list[str] = [
     "CorrelationContext",
     "KAFKA_CONSUMER_GROUP_MAX_LENGTH",
+    "MAX_RAW_BLOB_BYTES",
     "OptimisticConflictError",
     # Note: ProtocolCircuitBreakerFailureRecorder and db_operation_error_context are NOT exported
     # here to avoid circular imports. Import directly from util_db_error_context.
@@ -100,6 +105,7 @@ __all__: list[str] = [
     "normalize_kafka_identifier",
     "parse_and_validate_dsn",
     "parse_env_float",
+    "redact_llm_response",
     "parse_env_int",
     "retry_on_optimistic_conflict",
     "sanitize_backend_error",

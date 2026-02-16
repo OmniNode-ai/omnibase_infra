@@ -13,6 +13,8 @@ Architecture:
     - Delegates HTTP transport to MixinLlmHttpTransport
     - Parses the response into ModelLlmInferenceResponse
     - Maps provider finish reasons to EnumLlmFinishReason
+    - Extracts and normalizes token usage (OMN-2238)
+    - Emits ContractLlmCallMetrics event to Kafka
 
 Handler Responsibilities:
     - Build URL from base_url + operation_type path
@@ -22,6 +24,9 @@ Handler Responsibilities:
     - Parse response JSON into ModelLlmInferenceResponse
     - Map unknown finish_reason values to UNKNOWN (no crash)
     - Inject Authorization header when api_key is provided
+    - Extract token usage from API response (5 fallback cases)
+    - Redact sensitive data from raw response before storage
+    - Emit per-call metrics event to ``onex.evt.omniintelligence.llm-call-completed.v1``
 
 Auth Strategy:
     When ``api_key`` is provided, the handler temporarily injects a
@@ -41,21 +46,26 @@ Related Tickets:
     - OMN-2107: Phase 7 OpenAI-compatible inference handler
     - OMN-2104: MixinLlmHttpTransport (Phase 4)
     - OMN-2106: ModelLlmInferenceResponse (Phase 6)
+    - OMN-2238: Extract and normalize token usage from LLM API responses
+    - OMN-2235: LLM cost tracking contracts (SPI layer)
 
 See Also:
     - MixinLlmHttpTransport for HTTP call execution
     - ModelLlmInferenceResponse for output model
     - EnumLlmFinishReason for finish reason mapping
+    - service_llm_usage_normalizer for normalization logic
+    - ContractLlmCallMetrics for per-call metrics contract
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import threading
 import time
 from datetime import UTC, datetime
-from typing import cast
+from typing import Protocol, cast
 from uuid import UUID, uuid4
 
 import httpx
@@ -81,8 +91,28 @@ from omnibase_infra.nodes.effects.models.model_llm_usage import ModelLlmUsage
 from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
     ModelLlmInferenceRequest,
 )
+from omnibase_infra.nodes.node_llm_inference_effect.services.service_llm_usage_normalizer import (
+    normalize_llm_usage,
+)
+from omnibase_spi.contracts.measurement.contract_llm_call_metrics import (
+    ContractLlmCallMetrics,
+)
 
 logger = logging.getLogger(__name__)
+
+
+class ProtocolMetricsPublisher(Protocol):
+    """Protocol for publishing LLM call metrics events.
+
+    Any object providing an ``async publish(topic, payload)`` method can
+    serve as a metrics publisher. This keeps the handler decoupled from
+    specific event bus implementations.
+    """
+
+    async def publish(self, topic: str, payload: dict[str, object]) -> None:
+        """Publish a metrics event to the given topic."""
+        ...
+
 
 # Mapping from OpenAI finish_reason strings to canonical enum values.
 # Unknown values fall through to UNKNOWN.
@@ -159,15 +189,23 @@ class HandlerLlmOpenaiCompatible:
         >>> handler = HandlerLlmOpenaiCompatible(transport)
     """
 
-    def __init__(self, transport: MixinLlmHttpTransport) -> None:
-        """Initialize handler with HTTP transport.
+    def __init__(
+        self,
+        transport: MixinLlmHttpTransport,
+        metrics_publisher: ProtocolMetricsPublisher | None = None,
+    ) -> None:
+        """Initialize handler with HTTP transport and optional metrics publisher.
 
         Args:
             transport: An object providing ``_execute_llm_http_call`` for
                 making HTTP POST requests to LLM endpoints. Typically a
                 node or adapter that mixes in MixinLlmHttpTransport.
+            metrics_publisher: Optional event publisher for emitting
+                ContractLlmCallMetrics to the LLM call completed topic.
+                When None, metrics are still computed but not published.
         """
         self._transport = transport
+        self._metrics_publisher = metrics_publisher
 
     async def handle(
         self,
@@ -222,13 +260,146 @@ class HandlerLlmOpenaiCompatible:
         latency_ms = (time.perf_counter() - start_time) * 1000
 
         # 4. Parse response
-        return self._parse_response(
+        response = self._parse_response(
             data=response_data,
             request=request,
             correlation_id=correlation_id,
             execution_id=execution_id,
             latency_ms=latency_ms,
         )
+
+        # 5. Extract, normalize, and emit usage metrics (OMN-2238)
+        await self._emit_usage_metrics(
+            raw_response=response_data,
+            request=request,
+            response=response,
+            correlation_id=correlation_id,
+            latency_ms=latency_ms,
+        )
+
+        return response
+
+    # ── Usage metrics emission ──────────────────────────────────────────
+
+    async def _emit_usage_metrics(
+        self,
+        raw_response: dict[str, JsonType],
+        request: ModelLlmInferenceRequest,
+        response: ModelLlmInferenceResponse,
+        correlation_id: UUID,
+        latency_ms: float,
+    ) -> None:
+        """Extract, normalize, and emit LLM call metrics.
+
+        Performs the following steps:
+        1. Build prompt text for estimation fallback
+        2. Normalize usage via the 5-case normalizer
+        3. Build ContractLlmCallMetrics
+        4. Emit to Kafka topic (if publisher available)
+
+        This method is fire-and-forget: errors in metrics emission are
+        logged but never propagated to the caller. LLM inference must
+        not fail because metrics publishing failed.
+
+        Args:
+            raw_response: The raw JSON response from the provider.
+            request: The original inference request.
+            response: The parsed inference response.
+            correlation_id: Correlation ID for tracing.
+            latency_ms: End-to-end latency in milliseconds.
+        """
+        try:
+            # Build prompt text for estimation fallback.
+            prompt_text = self._build_prompt_text(request)
+
+            # Normalize usage (handles all 5 fallback cases).
+            raw_usage, normalized = normalize_llm_usage(
+                raw_response,
+                provider="openai_compatible",
+                generated_text=response.generated_text,
+                prompt_text=prompt_text,
+            )
+
+            # Compute input hash for reproducibility tracking.
+            input_hash = _compute_input_hash(request)
+
+            # Build the metrics contract.
+            metrics = ContractLlmCallMetrics(
+                model_id=request.model,
+                prompt_tokens=normalized.prompt_tokens,
+                completion_tokens=normalized.completion_tokens,
+                total_tokens=normalized.total_tokens,
+                latency_ms=latency_ms,
+                usage_raw=raw_usage,
+                usage_normalized=normalized,
+                usage_is_estimated=normalized.usage_is_estimated,
+                input_hash=input_hash,
+                timestamp_iso=datetime.now(UTC).isoformat(),
+                reporting_source="handler-llm-openai-compatible",
+            )
+
+            # Emit event if publisher is available.
+            if self._metrics_publisher is not None:
+                from omnibase_infra.event_bus.topic_constants import (
+                    TOPIC_LLM_CALL_COMPLETED,
+                )
+
+                await self._metrics_publisher.publish(
+                    TOPIC_LLM_CALL_COMPLETED,
+                    metrics.model_dump(mode="json"),
+                )
+                logger.debug(
+                    "Emitted LLM call metrics. correlation_id=%s model=%s "
+                    "prompt_tokens=%d completion_tokens=%d source=%s",
+                    correlation_id,
+                    request.model,
+                    normalized.prompt_tokens,
+                    normalized.completion_tokens,
+                    normalized.source.value,
+                )
+            else:
+                logger.debug(
+                    "LLM call metrics computed but no publisher configured. "
+                    "correlation_id=%s model=%s",
+                    correlation_id,
+                    request.model,
+                )
+        except Exception:
+            # Metrics emission must never break inference flow.
+            logger.warning(
+                "Failed to emit LLM call metrics; ignoring. correlation_id=%s model=%s",
+                correlation_id,
+                request.model,
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _build_prompt_text(request: ModelLlmInferenceRequest) -> str | None:
+        """Build a prompt text string for token estimation fallback.
+
+        For CHAT_COMPLETION: concatenates system_prompt and message contents.
+        For COMPLETION: returns the prompt field directly.
+
+        The text is used only for rough token estimation when the provider
+        does not report token counts. It is never stored.
+
+        Args:
+            request: The inference request.
+
+        Returns:
+            Concatenated prompt text, or None if no text available.
+        """
+        if request.operation_type == EnumLlmOperationType.COMPLETION:
+            return request.prompt
+
+        parts: list[str] = []
+        if request.system_prompt:
+            parts.append(request.system_prompt)
+        for msg in request.messages:
+            content = msg.get("content")
+            if isinstance(content, str):
+                parts.append(content)
+        return " ".join(parts) if parts else None
 
     # ── URL building ─────────────────────────────────────────────────────
 
@@ -774,6 +945,41 @@ def _parse_usage(raw_usage: JsonType) -> ModelLlmUsage:
         tokens_output=_safe_int(tokens_output, 0),
         tokens_total=_safe_int_or_none(tokens_total),
     )
+
+
+def _compute_input_hash(request: ModelLlmInferenceRequest) -> str:
+    """Compute a SHA-256 hash of the request input for reproducibility.
+
+    The hash covers model, operation_type, messages/prompt, system_prompt,
+    and generation parameters. It does NOT include api_key or base_url
+    (infrastructure config, not semantic input).
+
+    Args:
+        request: The inference request.
+
+    Returns:
+        SHA-256 hex digest prefixed with ``sha256-``.
+    """
+    import json as _json
+
+    parts: list[str] = [
+        request.model,
+        request.operation_type.value,
+    ]
+    if request.prompt is not None:
+        parts.append(request.prompt)
+    if request.system_prompt is not None:
+        parts.append(request.system_prompt)
+    for msg in request.messages:
+        parts.append(_json.dumps(msg, sort_keys=True, default=str))
+    if request.max_tokens is not None:
+        parts.append(str(request.max_tokens))
+    if request.temperature is not None:
+        parts.append(str(request.temperature))
+
+    combined = "|".join(parts)
+    digest = hashlib.sha256(combined.encode("utf-8")).hexdigest()
+    return f"sha256-{digest}"
 
 
 __all__: list[str] = ["HandlerLlmOpenaiCompatible"]
