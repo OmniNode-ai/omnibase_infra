@@ -15,18 +15,24 @@ This test suite validates:
 - Non-JSON content-type -> InfraProtocolError
 - JSON parse failure -> InfraProtocolError
 - Successful response parsing
+- CIDR allowlist validation (OMN-2250)
+- HMAC request signing (OMN-2250)
+- Fail-closed behavior when secret is missing (OMN-2250)
 
 Test Pattern:
     Uses httpx.MockTransport to simulate HTTP responses. The mixin is tested
     through a thin test harness class (LlmTransportHarness) that extends
     MixinLlmHttpTransport.
 
-Related Ticket: OMN-2114 Phase 14
+Related Tickets: OMN-2114 Phase 14, OMN-2250
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
+import os
 import time
 from typing import Any
 from unittest.mock import patch
@@ -134,8 +140,24 @@ def _text_response(
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
-URL = "http://test-llm:8000/v1/chat/completions"
+#: URL uses an IP within the CIDR allowlist (192.168.86.0/24) so that
+#: the endpoint trust boundary check passes for all standard tests.
+URL = "http://192.168.86.201:8000/v1/chat/completions"
 PAYLOAD: dict[str, Any] = {"messages": [{"role": "user", "content": "hello"}]}
+
+#: Shared secret used in tests. Set via the autouse fixture below.
+TEST_SHARED_SECRET = "test-hmac-secret-for-unit-tests"
+
+
+@pytest.fixture(autouse=True)
+def _set_llm_shared_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set LOCAL_LLM_SHARED_SECRET for all tests in this module.
+
+    This is autouse so that the HMAC fail-closed check passes for standard
+    transport tests. Tests that specifically validate missing-secret behavior
+    override this by unsetting the variable.
+    """
+    monkeypatch.setenv("LOCAL_LLM_SHARED_SECRET", TEST_SHARED_SECRET)
 
 
 @pytest.fixture
@@ -1315,3 +1337,373 @@ class TestTransportMetadata:
         """_get_target_name must return the configured target name."""
         harness = LlmTransportHarness(target_name="my-custom-llm")
         assert harness._get_target_name() == "my-custom-llm"
+
+
+# ── CIDR Allowlist Validation (OMN-2250) ──────────────────────────────
+
+
+class TestCidrAllowlistValidation:
+    """Validate CIDR allowlist enforcement on LLM endpoint URLs."""
+
+    def test_ip_within_allowlist_passes(self, correlation_id: UUID) -> None:
+        """An IP within 192.168.86.0/24 must pass the allowlist check."""
+        harness = LlmTransportHarness()
+        # Should not raise
+        harness._validate_endpoint_allowlist(
+            "http://192.168.86.201:8000/v1/completions", correlation_id
+        )
+
+    def test_ip_outside_allowlist_rejected(self, correlation_id: UUID) -> None:
+        """An IP outside 192.168.86.0/24 must raise InfraAuthenticationError."""
+        harness = LlmTransportHarness()
+        with pytest.raises(
+            InfraAuthenticationError, match="outside the local LLM allowlist"
+        ):
+            harness._validate_endpoint_allowlist(
+                "http://10.0.0.1:8000/v1/completions", correlation_id
+            )
+
+    def test_public_ip_rejected(self, correlation_id: UUID) -> None:
+        """A public IP must raise InfraAuthenticationError."""
+        harness = LlmTransportHarness()
+        with pytest.raises(
+            InfraAuthenticationError, match="outside the local LLM allowlist"
+        ):
+            harness._validate_endpoint_allowlist(
+                "http://8.8.8.8:8000/v1/completions", correlation_id
+            )
+
+    def test_localhost_rejected(self, correlation_id: UUID) -> None:
+        """127.0.0.1 (localhost) must raise InfraAuthenticationError."""
+        harness = LlmTransportHarness()
+        with pytest.raises(
+            InfraAuthenticationError, match="outside the local LLM allowlist"
+        ):
+            harness._validate_endpoint_allowlist(
+                "http://127.0.0.1:8000/v1/completions", correlation_id
+            )
+
+    def test_different_subnet_rejected(self, correlation_id: UUID) -> None:
+        """192.168.87.1 (adjacent subnet) must raise InfraAuthenticationError."""
+        harness = LlmTransportHarness()
+        with pytest.raises(
+            InfraAuthenticationError, match="outside the local LLM allowlist"
+        ):
+            harness._validate_endpoint_allowlist(
+                "http://192.168.87.1:8000/v1/completions", correlation_id
+            )
+
+    def test_all_ips_in_subnet_accepted(self, correlation_id: UUID) -> None:
+        """All IPs from .0 to .255 in the 192.168.86.0/24 range must pass."""
+        harness = LlmTransportHarness()
+        for octet in (0, 1, 100, 200, 201, 254, 255):
+            harness._validate_endpoint_allowlist(
+                f"http://192.168.86.{octet}:8000/v1/completions", correlation_id
+            )
+
+    def test_hostname_resolving_to_allowed_ip_passes(
+        self, correlation_id: UUID
+    ) -> None:
+        """A hostname that resolves to an IP within the allowlist must pass."""
+        harness = LlmTransportHarness()
+        with patch(
+            "omnibase_infra.mixins.mixin_llm_http_transport.socket.getaddrinfo",
+            return_value=[
+                (2, 1, 6, "", ("192.168.86.201", 0)),
+            ],
+        ):
+            harness._validate_endpoint_allowlist(
+                "http://my-local-llm:8000/v1/completions", correlation_id
+            )
+
+    def test_hostname_resolving_to_disallowed_ip_rejected(
+        self, correlation_id: UUID
+    ) -> None:
+        """A hostname resolving to an IP outside the allowlist must be rejected."""
+        harness = LlmTransportHarness()
+        with patch(
+            "omnibase_infra.mixins.mixin_llm_http_transport.socket.getaddrinfo",
+            return_value=[
+                (2, 1, 6, "", ("10.0.0.5", 0)),
+            ],
+        ):
+            with pytest.raises(
+                InfraAuthenticationError, match="outside the local LLM allowlist"
+            ):
+                harness._validate_endpoint_allowlist(
+                    "http://external-llm:8000/v1/completions", correlation_id
+                )
+
+    def test_unresolvable_hostname_rejected(self, correlation_id: UUID) -> None:
+        """A hostname that cannot be resolved must raise InfraAuthenticationError."""
+        import socket as _socket
+
+        harness = LlmTransportHarness()
+        with patch(
+            "omnibase_infra.mixins.mixin_llm_http_transport.socket.getaddrinfo",
+            side_effect=_socket.gaierror("Name resolution failed"),
+        ):
+            with pytest.raises(
+                InfraAuthenticationError, match="Cannot resolve hostname"
+            ):
+                harness._validate_endpoint_allowlist(
+                    "http://nonexistent-host:8000/v1/completions", correlation_id
+                )
+
+    def test_empty_url_hostname_rejected(self, correlation_id: UUID) -> None:
+        """A URL with no extractable hostname must raise InfraAuthenticationError."""
+        harness = LlmTransportHarness()
+        with pytest.raises(InfraAuthenticationError, match="Cannot extract hostname"):
+            harness._validate_endpoint_allowlist("not-a-valid-url", correlation_id)
+
+    async def test_allowlist_checked_before_http_call(
+        self, correlation_id: UUID
+    ) -> None:
+        """Allowlist validation must run before any HTTP call is made.
+
+        When the allowlist check fails, the HTTP handler must never be invoked.
+        """
+        call_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            return _json_response({"result": "ok"})
+
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client)
+
+        with pytest.raises(InfraAuthenticationError):
+            await harness._execute_llm_http_call(
+                url="http://10.0.0.1:8000/v1/completions",
+                payload=PAYLOAD,
+                correlation_id=correlation_id,
+                max_retries=0,
+            )
+
+        # HTTP handler must NOT have been called
+        assert call_count == 0
+
+
+# ── HMAC Signing (OMN-2250) ───────────────────────────────────────────
+
+
+class TestHmacSigning:
+    """Validate HMAC-SHA256 request signing for LLM endpoints."""
+
+    def test_hmac_signature_computed_correctly(self, correlation_id: UUID) -> None:
+        """HMAC-SHA256 signature must match manual computation."""
+        harness = LlmTransportHarness()
+        payload: dict[str, Any] = {"messages": [{"role": "user", "content": "hello"}]}
+
+        signature = harness._compute_hmac_signature(payload, correlation_id)
+
+        # Manually compute expected signature
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        expected = hmac.new(
+            TEST_SHARED_SECRET.encode("utf-8"),
+            canonical,
+            hashlib.sha256,
+        ).hexdigest()
+
+        assert signature == expected
+
+    def test_hmac_signature_deterministic(self, correlation_id: UUID) -> None:
+        """Same payload must produce identical signatures across calls."""
+        harness = LlmTransportHarness()
+        payload: dict[str, Any] = {"model": "test", "prompt": "hello"}
+
+        sig1 = harness._compute_hmac_signature(payload, correlation_id)
+        sig2 = harness._compute_hmac_signature(payload, correlation_id)
+
+        assert sig1 == sig2
+
+    def test_hmac_signature_changes_with_payload(self, correlation_id: UUID) -> None:
+        """Different payloads must produce different signatures."""
+        harness = LlmTransportHarness()
+
+        sig1 = harness._compute_hmac_signature({"a": 1}, correlation_id)
+        sig2 = harness._compute_hmac_signature({"a": 2}, correlation_id)
+
+        assert sig1 != sig2
+
+    def test_hmac_signature_changes_with_secret(
+        self, correlation_id: UUID, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Different secrets must produce different signatures for the same payload."""
+        harness = LlmTransportHarness()
+        payload: dict[str, Any] = {"test": "data"}
+
+        monkeypatch.setenv("LOCAL_LLM_SHARED_SECRET", "secret-a")
+        sig_a = harness._compute_hmac_signature(payload, correlation_id)
+
+        monkeypatch.setenv("LOCAL_LLM_SHARED_SECRET", "secret-b")
+        sig_b = harness._compute_hmac_signature(payload, correlation_id)
+
+        assert sig_a != sig_b
+
+    def test_hmac_uses_canonical_json_sorted_keys(self, correlation_id: UUID) -> None:
+        """Signature must be based on sorted-key canonical JSON.
+
+        Two dicts with the same content but different insertion order
+        must produce the same signature.
+        """
+        harness = LlmTransportHarness()
+
+        payload_a: dict[str, Any] = {"z": 1, "a": 2}
+        payload_b: dict[str, Any] = {"a": 2, "z": 1}
+
+        sig_a = harness._compute_hmac_signature(payload_a, correlation_id)
+        sig_b = harness._compute_hmac_signature(payload_b, correlation_id)
+
+        assert sig_a == sig_b
+
+    async def test_hmac_header_sent_in_request(self, correlation_id: UUID) -> None:
+        """The x-omn-node-signature header must be present in outbound HTTP requests."""
+        captured_headers: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            for key, value in request.headers.items():
+                captured_headers[key.lower()] = value
+            return _json_response({"result": "ok"})
+
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client)
+
+        await harness._execute_llm_http_call(
+            url=URL,
+            payload=PAYLOAD,
+            correlation_id=correlation_id,
+        )
+
+        assert "x-omn-node-signature" in captured_headers
+        # Verify the header value matches computed signature
+        expected_sig = harness._compute_hmac_signature(PAYLOAD, correlation_id)
+        assert captured_headers["x-omn-node-signature"] == expected_sig
+
+    def test_hmac_signature_is_hex_string(self, correlation_id: UUID) -> None:
+        """HMAC signature must be a valid hex string of length 64 (SHA-256)."""
+        harness = LlmTransportHarness()
+        signature = harness._compute_hmac_signature(PAYLOAD, correlation_id)
+
+        assert len(signature) == 64
+        assert all(c in "0123456789abcdef" for c in signature)
+
+
+# ── Fail-Closed Behavior (OMN-2250) ──────────────────────────────────
+
+
+class TestFailClosedBehavior:
+    """Validate fail-closed behavior: missing secret or invalid config rejects requests."""
+
+    async def test_missing_secret_rejects_request(
+        self, correlation_id: UUID, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When LOCAL_LLM_SHARED_SECRET is not set, requests must be rejected."""
+        monkeypatch.delenv("LOCAL_LLM_SHARED_SECRET", raising=False)
+
+        call_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            return _json_response({"result": "ok"})
+
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client)
+
+        with pytest.raises(ProtocolConfigurationError, match="LOCAL_LLM_SHARED_SECRET"):
+            await harness._execute_llm_http_call(
+                url=URL,
+                payload=PAYLOAD,
+                correlation_id=correlation_id,
+            )
+
+        # HTTP handler must NOT have been called
+        assert call_count == 0
+
+    async def test_empty_secret_rejects_request(
+        self, correlation_id: UUID, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When LOCAL_LLM_SHARED_SECRET is set to empty string, requests must be rejected."""
+        monkeypatch.setenv("LOCAL_LLM_SHARED_SECRET", "")
+
+        call_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            return _json_response({"result": "ok"})
+
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client)
+
+        with pytest.raises(ProtocolConfigurationError, match="LOCAL_LLM_SHARED_SECRET"):
+            await harness._execute_llm_http_call(
+                url=URL,
+                payload=PAYLOAD,
+                correlation_id=correlation_id,
+            )
+
+        # HTTP handler must NOT have been called
+        assert call_count == 0
+
+    def test_compute_hmac_fails_closed_on_missing_secret(
+        self, correlation_id: UUID, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_compute_hmac_signature must raise ProtocolConfigurationError when secret is missing."""
+        monkeypatch.delenv("LOCAL_LLM_SHARED_SECRET", raising=False)
+        harness = LlmTransportHarness()
+
+        with pytest.raises(
+            ProtocolConfigurationError, match="HMAC signing requires a shared secret"
+        ):
+            harness._compute_hmac_signature(PAYLOAD, correlation_id)
+
+    async def test_allowlist_failure_prevents_hmac_computation(
+        self, correlation_id: UUID
+    ) -> None:
+        """If allowlist check fails, HMAC computation must not be attempted.
+
+        This validates the ordering: allowlist check runs first, and if it
+        fails, the HMAC signing path is never reached.
+        """
+        harness = LlmTransportHarness()
+
+        hmac_called = False
+        original_compute = harness._compute_hmac_signature
+
+        def tracking_compute(payload: dict[str, Any], cid: UUID) -> str:
+            nonlocal hmac_called
+            hmac_called = True
+            return original_compute(payload, cid)
+
+        harness._compute_hmac_signature = tracking_compute  # type: ignore[assignment]
+
+        with pytest.raises(InfraAuthenticationError):
+            await harness._execute_llm_http_call(
+                url="http://10.0.0.1:8000/v1/completions",
+                payload=PAYLOAD,
+                correlation_id=correlation_id,
+            )
+
+        assert hmac_called is False
+
+    async def test_both_checks_pass_allows_request(self, correlation_id: UUID) -> None:
+        """When both CIDR allowlist and HMAC signing pass, the HTTP call proceeds."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _json_response({"result": "ok"})
+
+        client = _make_mock_client(handler)
+        harness = LlmTransportHarness(http_client=client)
+
+        result = await harness._execute_llm_http_call(
+            url=URL,
+            payload=PAYLOAD,
+            correlation_id=correlation_id,
+        )
+
+        assert result == {"result": "ok"}
