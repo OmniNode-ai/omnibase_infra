@@ -110,6 +110,13 @@ from omnibase_core.validation import (
     validate_union_usage,
 )
 
+# Demo loop assertion gate for canonical event loop (OMN-2297)
+from omnibase_infra.validation.demo_loop_gate import (
+    DemoLoopGate,
+    format_result,
+)
+from omnibase_infra.validation.enums.enum_assertion_status import EnumAssertionStatus
+
 # Contract linting for CI gate (PR #57)
 from omnibase_infra.validation.enums.enum_contract_violation_severity import (
     EnumContractViolationSeverity,
@@ -133,11 +140,17 @@ from omnibase_infra.validation.linter_contract import (
     lint_contracts_ci,
     lint_contracts_in_directory,
 )
+from omnibase_infra.validation.models.model_assertion_result import (
+    ModelAssertionResult,
+)
 from omnibase_infra.validation.models.model_contract_lint_result import (
     ModelContractLintResult,
 )
 from omnibase_infra.validation.models.model_contract_violation import (
     ModelContractViolation,
+)
+from omnibase_infra.validation.models.model_demo_loop_result import (
+    ModelDemoLoopResult,
 )
 
 # Validation error aggregation and reporting for startup (OMN-1091)
@@ -251,11 +264,14 @@ __all__: list[str] = [
     "ExecutionShapeViolationError",  # Execution shape violation
     "RoutingCoverageError",  # Routing coverage error (OMN-958)
     # Enums
+    "EnumAssertionStatus",  # Assertion status enum (OMN-2297)
     "EnumContractViolationSeverity",  # Contract violation severity
     # Models
+    "ModelAssertionResult",  # Assertion result model (OMN-2297)
     "ModelAnyTypeValidationResult",  # Any type validation result (OMN-1276)
     "ModelContractLintResult",  # Contract lint result
     "ModelContractViolation",  # Contract violation model
+    "ModelDemoLoopResult",  # Demo loop aggregate result (OMN-2297)
     "ModelDetectedNodeInfo",  # Detected node info
     "ModelExecutionShapeValidationResult",  # Execution shape result
     "ModelLocalHandlerValidationResult",  # LocalHandler validation result (OMN-743)
@@ -263,6 +279,7 @@ __all__: list[str] = [
     "ModelModuleImportResult",  # Module import result (from omnibase_core)
     # Validators
     "AnyTypeDetector",  # Any type AST detector (OMN-1276)
+    "DemoLoopGate",  # Demo loop assertion gate (OMN-2297)
     "ValidatorDeclarativeNode",  # Declarative node validator (OMN-1725)
     "ChainPropagationValidator",  # Chain propagation validator (OMN-951)
     "CircularImportValidator",  # Circular import validator
@@ -277,6 +294,7 @@ __all__: list[str] = [
     "ValidatorSecurity",  # Contract-driven security validator (OMN-1277)
     # Functions
     "check_routing_coverage_ci",  # CI routing coverage check
+    "format_result",  # Demo loop result formatter (OMN-2297)
     "detect_message_category",  # Message category detection
     "discover_message_types",  # Message type discovery
     "discover_registered_routes",  # Route discovery
