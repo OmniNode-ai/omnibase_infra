@@ -163,6 +163,7 @@ from omnibase_infra.utils.correlation import generate_correlation_id
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
+    from omnibase_infra.handlers.handler_infisical import HandlerInfisical
     from omnibase_infra.handlers.handler_vault import HandlerVault
 
 
@@ -405,7 +406,7 @@ class SecretResolver:
         self,
         config: ModelSecretResolverConfig,
         vault_handler: HandlerVault | None = None,
-        infisical_handler: object | None = None,
+        infisical_handler: HandlerInfisical | None = None,
         metrics_collector: ProtocolSecretResolverMetrics | None = None,
     ) -> None:
         """Initialize SecretResolver.
@@ -578,6 +579,7 @@ class SecretResolver:
 
         # Try to resolve optional dependencies from container
         vault_handler: HandlerVault | None = None
+        infisical_handler: HandlerInfisical | None = None
         metrics_collector: ProtocolSecretResolverMetrics | None = None
 
         # Attempt to resolve HandlerVault (optional)
@@ -597,11 +599,32 @@ class SecretResolver:
                 extra={"correlation_id": str(correlation_id)},
             )
 
+        # Attempt to resolve HandlerInfisical (optional)
+        try:
+            from omnibase_infra.handlers.handler_infisical import (
+                HandlerInfisical as HandlerInfisicalCls,
+            )
+
+            infisical_handler = await container.service_registry.resolve_service(
+                HandlerInfisicalCls
+            )
+            logger.debug(
+                "Resolved HandlerInfisical from container",
+                extra={"correlation_id": str(correlation_id)},
+            )
+        except Exception as e:
+            # HandlerInfisical not registered - this is acceptable
+            logger.debug(
+                "HandlerInfisical not available in container, Infisical secrets disabled: %s",
+                type(e).__name__,
+                extra={"correlation_id": str(correlation_id)},
+            )
+
         # Attempt to resolve metrics collector (optional)
         # Note: We use a broad try/except since the protocol may not be registered
         try:
             metrics_collector = await container.service_registry.resolve_service(
-                ProtocolSecretResolverMetrics  # type: ignore[type-abstract]
+                ProtocolSecretResolverMetrics
             )
             logger.debug(
                 "Resolved ProtocolSecretResolverMetrics from container",
@@ -618,6 +641,7 @@ class SecretResolver:
         return cls(
             config=config,
             vault_handler=vault_handler,
+            infisical_handler=infisical_handler,
             metrics_collector=metrics_collector,
         )
 
@@ -2110,7 +2134,7 @@ class SecretResolver:
 
         try:
             result = adapter.get_secret(secret_name=secret_path)
-            value = result.value.get_secret_value()
+            value: str = str(result.value.get_secret_value())
             if field:
                 # If field is specified, try to parse value as JSON and extract field
                 try:
