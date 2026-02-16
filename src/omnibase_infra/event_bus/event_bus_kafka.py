@@ -100,6 +100,17 @@ Environment Variables:
             - Correlation ID for tracking
             - Retry count and error type
 
+    Instance Discriminator (OMN-2251):
+        KAFKA_INSTANCE_ID: Instance discriminator for consumer group IDs
+            Default: None (no discrimination, single-container behavior)
+            Example: "container-1", "pod-abc123"
+
+            When set, appended as '.__i.{instance_id}' to consumer group IDs
+            so each container instance gets its own consumer group and receives
+            all partitions for its subscribed topics. This prevents the Kafka
+            rebalance problem where multiple containers sharing a consumer group
+            ID cause some consumers to get zero partition assignments.
+
 Dual Retry Configuration:
     ONEX uses TWO distinct retry mechanisms that serve different purposes:
 
@@ -208,7 +219,7 @@ from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.observability.wiring_health import MixinEmissionCounter
-from omnibase_infra.utils import compute_consumer_group_id
+from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
 
 logger = logging.getLogger(__name__)
 
@@ -1127,6 +1138,16 @@ class EventBusKafka(
                 value=group_id,
             )
 
+        # Apply instance discriminator for multi-container dev environments
+        # (OMN-2251). When instance_id is configured, each container gets its
+        # own consumer group membership so Kafka assigns all partitions to each
+        # instance rather than rebalancing between them. When instance_id is
+        # None (default), this is a no-op and single-container behavior is
+        # preserved.
+        instance_discriminated_id = apply_instance_discriminator(
+            stripped_group_id, self._config.instance_id
+        )
+
         # Scope group_id per topic to prevent rebalance storms.
         #
         # Each subscribe() call creates a separate AIOKafkaConsumer for one topic.
@@ -1151,9 +1172,9 @@ class EventBusKafka(
         #   - It makes the idempotency check unambiguous
         topic_suffix = f".__t.{topic}"
         effective_group_id = (
-            stripped_group_id
-            if stripped_group_id.endswith(topic_suffix)
-            else f"{stripped_group_id}{topic_suffix}"
+            instance_discriminated_id
+            if instance_discriminated_id.endswith(topic_suffix)
+            else f"{instance_discriminated_id}{topic_suffix}"
         )
 
         # Apply consumer configuration from config model

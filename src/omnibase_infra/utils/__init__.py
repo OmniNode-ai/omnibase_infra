@@ -30,6 +30,7 @@ from omnibase_infra.utils.util_atomic_file import (
 )
 from omnibase_infra.utils.util_consumer_group import (
     KAFKA_CONSUMER_GROUP_MAX_LENGTH,
+    apply_instance_discriminator,
     compute_consumer_group_id,
     normalize_kafka_identifier,
 )
@@ -89,6 +90,7 @@ from omnibase_infra.utils.util_semver import (
 __all__: list[str] = [
     "CorrelationContext",
     "KAFKA_CONSUMER_GROUP_MAX_LENGTH",
+    "apply_instance_discriminator",
     "MAX_RAW_BLOB_BYTES",
     "OptimisticConflictError",
     # Note: ProtocolCircuitBreakerFailureRecorder and db_operation_error_context are NOT exported

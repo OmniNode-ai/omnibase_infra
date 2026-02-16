@@ -1475,6 +1475,185 @@ class TestKafkaEventBusConsumerGroupId:
             assert call_kwargs.kwargs["group_id"] == "foo.bar.__t.bar"
 
 
+class TestKafkaEventBusInstanceDiscriminator:
+    """Test suite for instance-discriminated consumer group IDs (OMN-2251).
+
+    Verifies that:
+    - When instance_id is None, consumer group IDs are unchanged
+    - When instance_id is set, .__i.{instance_id} is inserted before .__t.{topic}
+    - Multi-container dev environments get unique consumer group IDs
+    """
+
+    @pytest.fixture
+    def mock_producer(self) -> AsyncMock:
+        """Create mock Kafka producer."""
+        producer = AsyncMock()
+        producer.start = AsyncMock()
+        producer.stop = AsyncMock()
+        producer._closed = False
+        return producer
+
+    @pytest.fixture
+    def mock_consumer(self) -> AsyncMock:
+        """Create mock Kafka consumer."""
+        consumer = AsyncMock()
+        consumer.start = AsyncMock()
+        consumer.stop = AsyncMock()
+        return consumer
+
+    @pytest.mark.asyncio
+    async def test_no_instance_id_unchanged_behavior(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that consumer group ID is unchanged when instance_id is None."""
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id=None,
+            )
+            event_bus = EventBusKafka(config=config)
+
+            await event_bus._start_consumer_for_topic("events", "my-group")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            # No instance discriminator, just topic suffix
+            assert call_kwargs.kwargs["group_id"] == "my-group.__t.events"
+
+    @pytest.mark.asyncio
+    async def test_instance_id_appended_before_topic_suffix(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that instance_id is inserted as .__i.{id} before .__t.{topic}."""
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id="container-1",
+            )
+            event_bus = EventBusKafka(config=config)
+
+            await event_bus._start_consumer_for_topic("events", "my-group")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            assert (
+                call_kwargs.kwargs["group_id"] == "my-group.__i.container-1.__t.events"
+            )
+
+    @pytest.mark.asyncio
+    async def test_different_instance_ids_produce_different_groups(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that different instance_ids produce different consumer group IDs."""
+        consumer_cls = MagicMock(return_value=mock_consumer)
+
+        group_ids: list[str] = []
+        for instance_id in ["container-1", "container-2"]:
+            consumer_cls.reset_mock()
+            mock_consumer.reset_mock()
+            with (
+                patch(
+                    "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                    return_value=mock_producer,
+                ),
+                patch(
+                    "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                    consumer_cls,
+                ),
+            ):
+                config = ModelKafkaEventBusConfig(
+                    bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                    instance_id=instance_id,
+                )
+                event_bus = EventBusKafka(config=config)
+
+                await event_bus._start_consumer_for_topic("events", "my-group")
+
+                call_kwargs = consumer_cls.call_args
+                group_ids.append(call_kwargs.kwargs["group_id"])
+
+        # Different instance IDs must produce different group IDs
+        assert group_ids[0] != group_ids[1]
+        assert "container-1" in group_ids[0]
+        assert "container-2" in group_ids[1]
+
+    @pytest.mark.asyncio
+    async def test_instance_id_from_env_var(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that KAFKA_INSTANCE_ID environment variable is picked up."""
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+            patch.dict("os.environ", {"KAFKA_INSTANCE_ID": "pod-xyz"}),
+        ):
+            config = ModelKafkaEventBusConfig.default()
+            event_bus = EventBusKafka(config=config)
+
+            await event_bus._start_consumer_for_topic("events", "my-group")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            assert ".__i.pod-xyz" in call_kwargs.kwargs["group_id"]
+
+    @pytest.mark.asyncio
+    async def test_empty_instance_id_preserves_original_behavior(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that empty string instance_id preserves single-container behavior."""
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            # Empty string should behave same as None
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id="",
+            )
+            event_bus = EventBusKafka(config=config)
+
+            await event_bus._start_consumer_for_topic("events", "my-group")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            # No instance discriminator
+            assert call_kwargs.kwargs["group_id"] == "my-group.__t.events"
+
+
 class TestKafkaEventBusStartConsuming:
     """Test suite for start_consuming operation."""
 

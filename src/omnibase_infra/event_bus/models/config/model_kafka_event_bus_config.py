@@ -86,6 +86,14 @@ Environment Variables:
             Default: None (DLQ disabled)
             Example: "dlq-events"
 
+    Instance Discriminator (OMN-2251):
+        KAFKA_INSTANCE_ID: Instance discriminator for consumer group IDs (optional)
+            Default: None (no discrimination, single-container behavior)
+            Example: "container-1", "pod-abc123"
+            When set, appended as '.__i.{instance_id}' to consumer group IDs
+            so each container gets unique consumer group membership and
+            proper Kafka partition assignment in multi-container dev environments.
+
 Parsing Behavior:
     - Integer/Float fields: Logs warning and uses default if parsing fails
     - Boolean fields: Logs warning if value not in expected set, treats as False
@@ -234,6 +242,18 @@ class ModelKafkaEventBusConfig(BaseModel):
             "If not set, use get_dlq_topic() to build a topic name following "
             "ONEX conventions: <env>.dlq.<category>.v1 "
             "(e.g., 'dev.dlq.intents.v1', 'prod.dlq.events.v1')"
+        ),
+    )
+
+    # Instance discriminator for multi-container dev environments (OMN-2251)
+    instance_id: str | None = Field(
+        default=None,
+        description=(
+            "Instance discriminator for consumer group IDs. When set, appended "
+            "as '.__i.{instance_id}' to consumer group IDs so that each container "
+            "in a multi-container dev environment gets unique consumer group "
+            "membership and proper partition assignment. When None (default), "
+            "consumer group IDs are unchanged (single-container behavior)."
         ),
     )
 
@@ -427,6 +447,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             "KAFKA_AUTO_OFFSET_RESET": "auto_offset_reset",
             "KAFKA_ENABLE_AUTO_COMMIT": "enable_auto_commit",
             "KAFKA_DEAD_LETTER_TOPIC": "dead_letter_topic",
+            "KAFKA_INSTANCE_ID": "instance_id",
         }
 
         # Integer fields for type conversion
@@ -557,6 +578,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             auto_offset_reset="latest",
             enable_auto_commit=True,
             dead_letter_topic=None,
+            instance_id=None,
         )
         return base_config.apply_environment_overrides()
 
