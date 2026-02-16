@@ -367,8 +367,8 @@ class TestBuildPromptText:
         assert "Hello" in text
         assert "World" in text
 
-    def test_chat_no_messages_returns_none(self) -> None:
-        """CHAT_COMPLETION with only system_prompt returns system_prompt."""
+    def test_chat_with_system_prompt_includes_system_prompt(self) -> None:
+        """CHAT_COMPLETION with system_prompt includes it in returned text."""
         req = _make_chat_request(
             system_prompt="System",
             messages=({"role": "user", "content": "Hi"},),
@@ -377,12 +377,11 @@ class TestBuildPromptText:
         assert text is not None
         assert "System" in text
 
-    def test_chat_no_content_returns_none(self) -> None:
-        """CHAT_COMPLETION with no text content returns None."""
+    def test_chat_with_content_returns_text(self) -> None:
+        """CHAT_COMPLETION with message content returns concatenated text."""
         req = _make_chat_request(
             messages=({"role": "user", "content": "test"},),
         )
-        # Messages have content, so should not be None.
         text = HandlerLlmOpenaiCompatible._build_prompt_text(req)
         assert text is not None
 
