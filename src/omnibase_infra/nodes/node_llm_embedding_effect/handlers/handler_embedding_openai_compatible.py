@@ -40,6 +40,7 @@ from omnibase_infra.nodes.node_llm_embedding_effect.models.model_llm_embedding_r
 from omnibase_infra.nodes.node_llm_embedding_effect.models.model_llm_embedding_response import (
     ModelLlmEmbeddingResponse,
 )
+from omnibase_spi.contracts.measurement import ContractEnumUsageSource
 
 logger = logging.getLogger(__name__)
 
@@ -205,15 +206,21 @@ def _parse_openai_embeddings(data: dict[str, JsonType]) -> list[ModelEmbedding]:
 def _parse_openai_usage(data: dict[str, JsonType]) -> ModelLlmUsage:
     """Parse usage metadata from an OpenAI-compatible response.
 
+    When the provider returns a valid usage dict, ``usage_source`` is set
+    to ``API`` and the raw dict is preserved.  When absent, ``MISSING``.
+
     Args:
         data: Parsed JSON response body.
 
     Returns:
-        ModelLlmUsage with token counts. Zeros if usage block is absent.
+        ModelLlmUsage with token counts and provenance. Zeros if usage
+        block is absent.
     """
     usage_raw = data.get("usage")
     if not isinstance(usage_raw, dict):
-        return ModelLlmUsage()
+        return ModelLlmUsage(
+            usage_source=ContractEnumUsageSource.MISSING,
+        )
 
     prompt_tokens = usage_raw.get("prompt_tokens", 0)
     if not isinstance(prompt_tokens, int):
@@ -222,6 +229,8 @@ def _parse_openai_usage(data: dict[str, JsonType]) -> ModelLlmUsage:
     return ModelLlmUsage(
         tokens_input=prompt_tokens,
         tokens_output=0,
+        usage_source=ContractEnumUsageSource.API,
+        raw_provider_usage=dict(usage_raw),
     )
 
 

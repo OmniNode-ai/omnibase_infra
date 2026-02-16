@@ -5,13 +5,17 @@ Tests for the effects models __init__.py public exports.
 
 Tests cover:
 - Individual importability of each new LLM model class
-- __all__ completeness for the six new model names
-- All __all__ entries resolve to classes (types)
+- Individual importability of converter functions (OMN-2318)
+- __all__ completeness for model names and converter functions
+- All __all__ entries resolve to classes or callables
 
 OMN-2103: Phase 3 shared LLM models - export verification
+OMN-2318: Integrate SPI 0.9.0 LLM cost tracking contracts
 """
 
 from __future__ import annotations
+
+import types
 
 import pytest
 
@@ -60,13 +64,35 @@ class TestIndividualImports:
         assert ModelLlmUsage is not None
 
 
+class TestConverterImports:
+    """Verify converter functions are importable from effects models package."""
+
+    def test_to_call_metrics_importable(self) -> None:
+        """to_call_metrics is importable from effects models package."""
+        from omnibase_infra.nodes.effects.models import to_call_metrics
+
+        assert callable(to_call_metrics)
+
+    def test_to_usage_normalized_importable(self) -> None:
+        """to_usage_normalized is importable from effects models package."""
+        from omnibase_infra.nodes.effects.models import to_usage_normalized
+
+        assert callable(to_usage_normalized)
+
+    def test_to_usage_raw_importable(self) -> None:
+        """to_usage_raw is importable from effects models package."""
+        from omnibase_infra.nodes.effects.models import to_usage_raw
+
+        assert callable(to_usage_raw)
+
+
 # ============================================================================
 # __all__ Completeness Tests
 # ============================================================================
 
 
 class TestAllExports:
-    """Verify __all__ contains all new model names and all entries are classes."""
+    """Verify __all__ contains all expected names and entries resolve correctly."""
 
     _EXPECTED_NEW_MODELS: tuple[str, ...] = (
         "ModelLlmFunctionCall",
@@ -75,6 +101,12 @@ class TestAllExports:
         "ModelLlmToolChoice",
         "ModelLlmToolDefinition",
         "ModelLlmUsage",
+    )
+
+    _EXPECTED_CONVERTER_FUNCTIONS: tuple[str, ...] = (
+        "to_call_metrics",
+        "to_usage_normalized",
+        "to_usage_raw",
     )
 
     def test_all_contains_all_new_models(self) -> None:
@@ -86,12 +118,22 @@ class TestAllExports:
         for name in self._EXPECTED_NEW_MODELS:
             assert name in all_exports, f"{name} missing from __all__"
 
-    def test_all_exports_are_classes(self) -> None:
-        """Every name in __all__ resolves to a class (type)."""
+    def test_all_contains_converter_functions(self) -> None:
+        """__all__ includes converter function names (OMN-2318)."""
+        import omnibase_infra.nodes.effects.models as effects_models
+
+        all_exports = set(effects_models.__all__)
+
+        for name in self._EXPECTED_CONVERTER_FUNCTIONS:
+            assert name in all_exports, f"{name} missing from __all__"
+
+    def test_all_exports_are_classes_or_callables(self) -> None:
+        """Every name in __all__ resolves to a class or callable."""
         import omnibase_infra.nodes.effects.models as effects_models
 
         for name in effects_models.__all__:
             obj = getattr(effects_models, name)
-            assert isinstance(obj, type), (
-                f"__all__ entry {name!r} is {type(obj).__name__}, expected a class"
+            assert isinstance(obj, (type, types.FunctionType)), (
+                f"__all__ entry {name!r} is {type(obj).__name__}, "
+                f"expected a class or function"
             )

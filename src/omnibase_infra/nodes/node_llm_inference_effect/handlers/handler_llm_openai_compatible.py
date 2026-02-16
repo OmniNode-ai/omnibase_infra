@@ -95,6 +95,7 @@ from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_r
 from omnibase_infra.nodes.node_llm_inference_effect.services.service_llm_usage_normalizer import (
     normalize_llm_usage,
 )
+from omnibase_spi.contracts.measurement import ContractEnumUsageSource
 from omnibase_spi.contracts.measurement.contract_llm_call_metrics import (
     ContractLlmCallMetrics,
 )
@@ -923,14 +924,20 @@ def _parse_usage(raw_usage: JsonType) -> ModelLlmUsage:
     Non-numeric string values (e.g. ``"abc"``) are treated as zero
     (or ``None`` for ``tokens_total``) rather than raising ``ValueError``.
 
+    When the provider returns a valid usage dict, ``usage_source`` is set
+    to ``API`` and the raw dict is preserved in ``raw_provider_usage``.
+    When usage data is absent or malformed, ``usage_source`` is ``MISSING``.
+
     Args:
         raw_usage: The ``usage`` field from the response JSON, or None.
 
     Returns:
-        ModelLlmUsage with parsed or default token counts.
+        ModelLlmUsage with parsed or default token counts and provenance.
     """
     if not isinstance(raw_usage, dict):
-        return ModelLlmUsage()
+        return ModelLlmUsage(
+            usage_source=ContractEnumUsageSource.MISSING,
+        )
 
     tokens_input = raw_usage.get("prompt_tokens", 0)
     tokens_output = raw_usage.get("completion_tokens", 0)
@@ -940,6 +947,8 @@ def _parse_usage(raw_usage: JsonType) -> ModelLlmUsage:
         tokens_input=_safe_int(tokens_input, 0),
         tokens_output=_safe_int(tokens_output, 0),
         tokens_total=_safe_int_or_none(tokens_total),
+        usage_source=ContractEnumUsageSource.API,
+        raw_provider_usage=dict(raw_usage),
     )
 
 
