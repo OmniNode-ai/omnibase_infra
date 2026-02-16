@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS llm_call_metrics (
     estimated_cost_usd NUMERIC(12, 6),
 
     -- Performance
-    latency_ms INTEGER NOT NULL,
+    latency_ms NUMERIC(10, 2) NOT NULL,
 
     -- Usage provenance
     usage_source usage_source_type NOT NULL DEFAULT 'MISSING',
@@ -267,7 +267,7 @@ COMMENT ON COLUMN llm_call_metrics.total_tokens IS
 COMMENT ON COLUMN llm_call_metrics.estimated_cost_usd IS
     'Estimated cost in USD (NULL for unknown models, NOT 0)';
 COMMENT ON COLUMN llm_call_metrics.latency_ms IS
-    'LLM call latency in milliseconds';
+    'LLM call latency in milliseconds (sub-millisecond precision, 2 decimal places)';
 COMMENT ON COLUMN llm_call_metrics.usage_source IS
     'Token usage data provenance: API (provider-reported), ESTIMATED (calculated), MISSING (unavailable)';
 COMMENT ON COLUMN llm_call_metrics.usage_is_estimated IS

@@ -159,6 +159,17 @@ class HandlerEmbeddingOllama(MixinLlmHttpTransport):
                 context=ctx,
             ) from exc
         usage = _parse_ollama_usage(data)
+        if not embeddings:
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=request.correlation_id,
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="parse_ollama_embeddings",
+                target_name=self._llm_target_name,
+            )
+            raise InfraProtocolError(
+                "Ollama embedding response returned no embeddings",
+                context=ctx,
+            )
         dimensions = len(embeddings[0].vector)
 
         return ModelLlmEmbeddingResponse(
