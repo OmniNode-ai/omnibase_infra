@@ -53,7 +53,10 @@ from omnibase_infra.errors import (
     InfraUnavailableError,
     ProtocolConfigurationError,
 )
-from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
+from omnibase_infra.mixins.mixin_llm_http_transport import (
+    MixinLlmHttpTransport,
+    _parse_cidr_allowlist,
+)
 
 # ── Test Harness ─────────────────────────────────────────────────────────
 
@@ -1553,19 +1556,19 @@ class TestCidrAllowlistValidation:
 
 @pytest.mark.unit
 class TestParseCidrAllowlist:
-    """Validate _parse_cidr_allowlist() static method with various env var inputs."""
+    """Validate _parse_cidr_allowlist() with various env var inputs."""
 
     def test_parse_cidr_default(self) -> None:
         """Without setting env var, returns the default (192.168.86.0/24)."""
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("LLM_ENDPOINT_CIDR_ALLOWLIST", None)
-            result = MixinLlmHttpTransport._parse_cidr_allowlist()
+            result = _parse_cidr_allowlist()
         assert result == (IPv4Network("192.168.86.0/24"),)
 
     def test_parse_cidr_custom_single(self) -> None:
         """A single custom CIDR parses correctly."""
         with patch.dict(os.environ, {"LLM_ENDPOINT_CIDR_ALLOWLIST": "10.0.0.0/8"}):
-            result = MixinLlmHttpTransport._parse_cidr_allowlist()
+            result = _parse_cidr_allowlist()
         assert result == (IPv4Network("10.0.0.0/8"),)
 
     def test_parse_cidr_multiple_comma_separated(self) -> None:
@@ -1574,7 +1577,7 @@ class TestParseCidrAllowlist:
             os.environ,
             {"LLM_ENDPOINT_CIDR_ALLOWLIST": "10.0.0.0/8, 172.16.0.0/12"},
         ):
-            result = MixinLlmHttpTransport._parse_cidr_allowlist()
+            result = _parse_cidr_allowlist()
         assert result == (IPv4Network("10.0.0.0/8"), IPv4Network("172.16.0.0/12"))
 
     def test_parse_cidr_malformed_skipped(self) -> None:
@@ -1583,7 +1586,7 @@ class TestParseCidrAllowlist:
             os.environ,
             {"LLM_ENDPOINT_CIDR_ALLOWLIST": "10.0.0.0/8, not-a-cidr, 172.16.0.0/12"},
         ):
-            result = MixinLlmHttpTransport._parse_cidr_allowlist()
+            result = _parse_cidr_allowlist()
         assert result == (IPv4Network("10.0.0.0/8"), IPv4Network("172.16.0.0/12"))
 
     def test_parse_cidr_all_malformed_falls_back(self) -> None:
@@ -1592,7 +1595,7 @@ class TestParseCidrAllowlist:
             os.environ,
             {"LLM_ENDPOINT_CIDR_ALLOWLIST": "garbage, also-garbage"},
         ):
-            result = MixinLlmHttpTransport._parse_cidr_allowlist()
+            result = _parse_cidr_allowlist()
         assert result == (IPv4Network("192.168.86.0/24"),)
 
     def test_parse_cidr_host_bits_accepted(self) -> None:
@@ -1601,13 +1604,13 @@ class TestParseCidrAllowlist:
             os.environ,
             {"LLM_ENDPOINT_CIDR_ALLOWLIST": "192.168.86.100/24"},
         ):
-            result = MixinLlmHttpTransport._parse_cidr_allowlist()
+            result = _parse_cidr_allowlist()
         assert result == (IPv4Network("192.168.86.0/24"),)
 
     def test_parse_cidr_empty_string_falls_back(self) -> None:
         """An empty string env var falls back to default."""
         with patch.dict(os.environ, {"LLM_ENDPOINT_CIDR_ALLOWLIST": ""}):
-            result = MixinLlmHttpTransport._parse_cidr_allowlist()
+            result = _parse_cidr_allowlist()
         assert result == (IPv4Network("192.168.86.0/24"),)
 
 
