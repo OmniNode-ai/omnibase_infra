@@ -238,6 +238,13 @@ class DemoLoopGate:
             ModelAssertionResult indicating whether all required event types
             are present and valid.
         """
+        if not self._canonical_topics:
+            return ModelAssertionResult(
+                name="required_event_types",
+                status=EnumAssertionStatus.FAILED,
+                message=("No canonical topics configured - gate provides no coverage"),
+            )
+
         from omnibase_core.validation import validate_topic_suffix
 
         total = len(self._canonical_topics)
@@ -357,7 +364,7 @@ class DemoLoopGate:
                 status=EnumAssertionStatus.PASSED,
                 message=(f"Projector: healthy, {len(found)} contract(s) discovered"),
             )
-        except Exception as exc:
+        except (ImportError, ModuleNotFoundError) as exc:
             logger.debug("Projector health check failed: %s", exc)
             return ModelAssertionResult(
                 name="projector_health",
@@ -582,6 +589,8 @@ def _load_env_file(path: str) -> None:
             continue
         key, _, value = line.partition("=")
         key = key.strip()
+        if key.startswith("export "):
+            key = key[len("export ") :].strip()
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
             value = value[1:-1]
@@ -589,6 +598,9 @@ def _load_env_file(path: str) -> None:
             os.environ[key] = value
 
 
+# Intentional re-exports: EnumAssertionStatus, ModelAssertionResult, and
+# ModelDemoLoopResult are defined in sub-modules but re-exported here for
+# convenience so consumers can import everything from this single module.
 __all__: list[str] = [
     "CANONICAL_EVENT_TOPICS",
     "DemoLoopGate",
@@ -598,6 +610,7 @@ __all__: list[str] = [
     "ModelDemoLoopResult",
     "format_result",
     "main",
+    "_load_env_file",
 ]
 
 

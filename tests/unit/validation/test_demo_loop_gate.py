@@ -44,15 +44,6 @@ def gate_ci_mode() -> DemoLoopGate:
     )
 
 
-@pytest.fixture
-def gate_full() -> DemoLoopGate:
-    """Gate with all checks enabled."""
-    return DemoLoopGate(
-        projector_check_enabled=True,
-        dashboard_check_enabled=True,
-    )
-
-
 # =============================================================================
 # Test: ModelAssertionResult
 # =============================================================================
@@ -228,15 +219,15 @@ class TestRequiredEventTypes:
         assert result.status == EnumAssertionStatus.FAILED
         assert "3 of 3" in result.message
 
-    def test_passes_with_empty_topics(self) -> None:
+    def test_fails_with_empty_topics(self) -> None:
         gate = DemoLoopGate(
             canonical_topics=(),
             projector_check_enabled=False,
             dashboard_check_enabled=False,
         )
         result = gate.assert_required_event_types()
-        assert result.status == EnumAssertionStatus.PASSED
-        assert "0/0" in result.message
+        assert result.status == EnumAssertionStatus.FAILED
+        assert "no coverage" in result.message.lower()
 
 
 # =============================================================================
@@ -500,18 +491,52 @@ class TestCLIMain:
         assert exit_code == 0
 
     def test_invalid_topics_returns_failed_result(self) -> None:
-        gate = DemoLoopGate(
-            canonical_topics=("bad-topic",),
-            projector_check_enabled=False,
-            dashboard_check_enabled=False,
-        )
-        result = gate.run_all()
-        assert not result.is_ready
+        """Call main() with a gate that has invalid topics and verify exit 1."""
+        original_init = DemoLoopGate.__init__
+
+        def patched_init(self: DemoLoopGate, **kwargs: object) -> None:
+            kwargs["canonical_topics"] = ("not-a-valid-topic",)
+            original_init(self, **kwargs)  # type: ignore[arg-type]
+
+        with patch.object(DemoLoopGate, "__init__", patched_init):
+            exit_code = main(["--ci"])
+        assert exit_code == 1
 
     def test_help_flag(self) -> None:
         with pytest.raises(SystemExit) as exc_info:
             main(["--help"])
         assert exc_info.value.code == 0
+
+
+# =============================================================================
+# Test: _load_env_file
+# =============================================================================
+
+
+class TestLoadEnvFile:
+    """Tests for the _load_env_file helper."""
+
+    def test_handles_export_prefix(self, tmp_path: object) -> None:
+        """_load_env_file strips the 'export' prefix from keys."""
+        from pathlib import Path
+
+        from omnibase_infra.validation.demo_loop_gate import _load_env_file
+
+        env_file = Path(str(tmp_path)) / ".env"
+        env_file.write_text(
+            "export MY_DEMO_VAR=hello\nexport ANOTHER_VAR=world\nPLAIN_VAR=plain\n"
+        )
+
+        with patch.dict("os.environ", {}, clear=True):
+            _load_env_file(str(env_file))
+
+            import os
+
+            assert os.environ.get("MY_DEMO_VAR") == "hello"
+            assert os.environ.get("ANOTHER_VAR") == "world"
+            assert os.environ.get("PLAIN_VAR") == "plain"
+            # Ensure the raw "export MY_DEMO_VAR" key was NOT set
+            assert "export MY_DEMO_VAR" not in os.environ
 
 
 # =============================================================================
