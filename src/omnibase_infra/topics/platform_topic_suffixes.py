@@ -187,6 +187,15 @@ SUFFIX_INTELLIGENCE_PATTERN_LIFECYCLE_TRANSITIONED: str = (
 )
 """Topic for pattern lifecycle transition completion events."""
 
+SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED: str = (
+    "onex.evt.omniintelligence.llm-call-completed.v1"
+)
+"""Topic for LLM call completed metrics events.
+
+Published by LLM inference handlers after each call. Contains per-call
+token counts, cost, and latency for the cost aggregation pipeline.
+"""
+
 SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED: str = "onex.evt.pattern.discovered.v1"
 """Topic for generic pattern discovery events."""
 
@@ -251,6 +260,7 @@ ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
         suffix=SUFFIX_INTELLIGENCE_PATTERN_LIFECYCLE_TRANSITIONED, partitions=3
     ),
     ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED, partitions=3),
 )
 """Intelligence domain topic specs provisioned for PluginIntelligence."""
 

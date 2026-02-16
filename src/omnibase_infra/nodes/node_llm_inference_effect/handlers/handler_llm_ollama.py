@@ -62,6 +62,7 @@ from omnibase_infra.nodes.effects.models import (
     ModelLlmToolDefinition,
     ModelLlmUsage,
 )
+from omnibase_spi.contracts.measurement import ContractEnumUsageSource
 
 logger = logging.getLogger(__name__)
 
@@ -412,13 +413,31 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
                 "Non-numeric usage value for eval_count, defaulting to 0: type=%s",
                 type(tokens_output).__name__,
             )
+        resolved_input = (
+            round(tokens_input) if isinstance(tokens_input, (int, float)) else 0
+        )
+        resolved_output = (
+            round(tokens_output) if isinstance(tokens_output, (int, float)) else 0
+        )
+        # Determine provenance: treat as API-reported only when at least
+        # one resolved counter is positive.
+        has_usage = resolved_input > 0 or resolved_output > 0
+        raw_usage_data: dict[str, object] = {
+            "prompt_eval_count": raw_response.get("prompt_eval_count"),
+            "eval_count": raw_response.get("eval_count"),
+            "total_duration": raw_response.get("total_duration"),
+            "load_duration": raw_response.get("load_duration"),
+            "eval_duration": raw_response.get("eval_duration"),
+        }
         usage = ModelLlmUsage(
-            tokens_input=round(tokens_input)
-            if isinstance(tokens_input, (int, float))
-            else 0,
-            tokens_output=round(tokens_output)
-            if isinstance(tokens_output, (int, float))
-            else 0,
+            tokens_input=resolved_input,
+            tokens_output=resolved_output,
+            usage_source=(
+                ContractEnumUsageSource.API
+                if has_usage
+                else ContractEnumUsageSource.MISSING
+            ),
+            raw_provider_usage=raw_usage_data,
         )
 
         # Enforce text XOR tool_calls BEFORE constructing response

@@ -40,6 +40,7 @@ from omnibase_infra.nodes.node_llm_embedding_effect.models.model_llm_embedding_r
 from omnibase_infra.nodes.node_llm_embedding_effect.models.model_llm_embedding_response import (
     ModelLlmEmbeddingResponse,
 )
+from omnibase_spi.contracts.measurement import ContractEnumUsageSource
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,17 @@ class HandlerEmbeddingOpenaiCompatible(MixinLlmHttpTransport):
                 context=ctx,
             ) from exc
         usage = _parse_openai_usage(data)
+        if not embeddings:
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=request.correlation_id,
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="parse_openai_embeddings",
+                target_name=self._llm_target_name,
+            )
+            raise InfraProtocolError(
+                "OpenAI embedding response returned no embeddings",
+                context=ctx,
+            )
         dimensions = len(embeddings[0].vector)
 
         return ModelLlmEmbeddingResponse(
@@ -205,23 +217,50 @@ def _parse_openai_embeddings(data: dict[str, JsonType]) -> list[ModelEmbedding]:
 def _parse_openai_usage(data: dict[str, JsonType]) -> ModelLlmUsage:
     """Parse usage metadata from an OpenAI-compatible response.
 
+    When the provider returns a valid usage dict, ``usage_source`` is set
+    to ``API`` and the raw dict is preserved.  When absent, ``MISSING``.
+
     Args:
         data: Parsed JSON response body.
 
     Returns:
-        ModelLlmUsage with token counts. Zeros if usage block is absent.
+        ModelLlmUsage with token counts and provenance. Zeros if usage
+        block is absent.
     """
     usage_raw = data.get("usage")
     if not isinstance(usage_raw, dict):
-        return ModelLlmUsage()
+        return ModelLlmUsage(
+            usage_source=ContractEnumUsageSource.MISSING,
+        )
 
     prompt_tokens = usage_raw.get("prompt_tokens", 0)
     if not isinstance(prompt_tokens, int):
         prompt_tokens = 0
 
+    total_tokens = usage_raw.get("total_tokens", 0)
+    if not isinstance(total_tokens, int):
+        total_tokens = 0
+
+    # Fallback: for embeddings, if prompt_tokens is 0 but total_tokens is
+    # valid, use total_tokens.  Embedding endpoints typically report only
+    # total_tokens (== prompt_tokens); dropping it would under-report usage.
+    if prompt_tokens == 0 and total_tokens > 0:
+        prompt_tokens = total_tokens
+
+    # Only mark as API-reported when at least one token counter is positive.
+    # A usage dict with all-zero values is semantically equivalent to missing
+    # usage data (matches handler_embedding_ollama pattern).
+    has_usage = prompt_tokens > 0 or total_tokens > 0
+
     return ModelLlmUsage(
         tokens_input=prompt_tokens,
         tokens_output=0,
+        usage_source=(
+            ContractEnumUsageSource.API
+            if has_usage
+            else ContractEnumUsageSource.MISSING
+        ),
+        raw_provider_usage=dict(usage_raw),
     )
 
 

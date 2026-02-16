@@ -72,7 +72,12 @@ from uuid import UUID, uuid4
 import httpx
 
 from omnibase_core.types import JsonType
-from omnibase_infra.enums import EnumLlmFinishReason, EnumLlmOperationType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumLlmFinishReason,
+    EnumLlmOperationType,
+)
 from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
 from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.nodes.effects.models.model_llm_function_call import (
@@ -95,6 +100,7 @@ from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_r
 from omnibase_infra.nodes.node_llm_inference_effect.services.service_llm_usage_normalizer import (
     normalize_llm_usage,
 )
+from omnibase_spi.contracts.measurement import ContractEnumUsageSource
 from omnibase_spi.contracts.measurement.contract_llm_call_metrics import (
     ContractLlmCallMetrics,
 )
@@ -153,9 +159,10 @@ class HandlerLlmOpenaiCompatible:
         This handler operates at the infrastructure layer with a typed
         request model (``ModelLlmInferenceRequest``) and returns a typed
         response model (``ModelLlmInferenceResponse``), bypassing
-        envelope-based dispatch entirely. This is a documented deviation
-        from the standard ONEX handler pattern because LLM inference
-        calls are direct infrastructure effects, not routed events.
+        envelope-based dispatch entirely. LLM inference calls are direct
+        infrastructure effects, not routed events. The ``handler_type``
+        and ``handler_category`` properties are still provided for
+        introspection and classification consistency.
 
     Auth Strategy:
         When a request includes ``api_key``, the handler creates a
@@ -204,6 +211,27 @@ class HandlerLlmOpenaiCompatible:
         self._transport = transport
         self.last_call_metrics: ContractLlmCallMetrics | None = None
 
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role classification.
+
+        Returns:
+            ``EnumHandlerType.INFRA_HANDLER`` indicating this handler
+            provides infrastructure-level LLM transport, not domain
+            business logic.
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification.
+
+        Returns:
+            ``EnumHandlerTypeCategory.EFFECT`` indicating this handler
+            performs external I/O (HTTP calls to OpenAI-compatible APIs).
+        """
+        return EnumHandlerTypeCategory.EFFECT
+
     async def handle(
         self,
         request: ModelLlmInferenceRequest,
@@ -233,6 +261,10 @@ class HandlerLlmOpenaiCompatible:
             InfraUnavailableError: On 5xx or circuit breaker open.
             ValueError: If operation_type has no known URL path.
         """
+        # Reset metrics from any previous call so that a failure in
+        # _build_usage_metrics does not leave stale metrics visible.
+        self.last_call_metrics = None
+
         if correlation_id is None:
             correlation_id = uuid4()
 
@@ -923,23 +955,53 @@ def _parse_usage(raw_usage: JsonType) -> ModelLlmUsage:
     Non-numeric string values (e.g. ``"abc"``) are treated as zero
     (or ``None`` for ``tokens_total``) rather than raising ``ValueError``.
 
+    When the provider returns a valid usage dict, ``usage_source`` is set
+    to ``API`` and the raw dict is preserved in ``raw_provider_usage``.
+    When usage data is absent or malformed, ``usage_source`` is ``MISSING``.
+
     Args:
         raw_usage: The ``usage`` field from the response JSON, or None.
 
     Returns:
-        ModelLlmUsage with parsed or default token counts.
+        ModelLlmUsage with parsed or default token counts and provenance.
     """
     if not isinstance(raw_usage, dict):
-        return ModelLlmUsage()
+        return ModelLlmUsage(
+            usage_source=ContractEnumUsageSource.MISSING,
+        )
 
-    tokens_input = raw_usage.get("prompt_tokens", 0)
-    tokens_output = raw_usage.get("completion_tokens", 0)
-    tokens_total = raw_usage.get("total_tokens")
+    tokens_input = _safe_int(raw_usage.get("prompt_tokens", 0), 0)
+    tokens_output = _safe_int(raw_usage.get("completion_tokens", 0), 0)
+    tokens_total = _safe_int_or_none(raw_usage.get("total_tokens"))
+
+    # If the provider total doesn't match the sum, let ModelLlmUsage
+    # auto-compute it.  Some providers include cached/reasoning tokens
+    # in total_tokens which makes it exceed prompt + completion.
+    # The raw provider data is preserved in raw_provider_usage for auditing.
+    expected = tokens_input + tokens_output
+    if tokens_total is not None and tokens_total != expected:
+        tokens_total = None
+
+    # Only mark as API-reported when at least one token counter is positive.
+    # A usage dict with all-zero values (e.g. some providers return
+    # {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
+    # is semantically equivalent to missing usage data.
+    has_usage = (
+        tokens_input > 0
+        or tokens_output > 0
+        or (tokens_total is not None and tokens_total > 0)
+    )
 
     return ModelLlmUsage(
-        tokens_input=_safe_int(tokens_input, 0),
-        tokens_output=_safe_int(tokens_output, 0),
-        tokens_total=_safe_int_or_none(tokens_total),
+        tokens_input=tokens_input,
+        tokens_output=tokens_output,
+        tokens_total=tokens_total,
+        usage_source=(
+            ContractEnumUsageSource.API
+            if has_usage
+            else ContractEnumUsageSource.MISSING
+        ),
+        raw_provider_usage=dict(raw_usage),
     )
 
 

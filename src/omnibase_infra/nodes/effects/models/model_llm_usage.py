@@ -11,16 +11,22 @@ Architecture:
     only the information that every major provider returns in its
     ``usage`` block: input tokens, output tokens, and a pre-computed total.
 
-    Cost tracking is deliberately left as ``None`` in v1 because unit
-    pricing varies across providers and is subject to change.
+    Since OMN-2318, ModelLlmUsage also carries usage provenance tracking
+    via ``usage_source`` (API, ESTIMATED, or MISSING) and preserves the
+    raw provider usage payload in ``raw_provider_usage`` for auditing.
 
 Related:
     - OMN-2103: Phase 3 shared LLM models
+    - OMN-2318: Integrate SPI 0.9.0 LLM cost tracking contracts
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from omnibase_spi.contracts.measurement import ContractEnumUsageSource
 
 
 class ModelLlmUsage(BaseModel):
@@ -41,8 +47,15 @@ class ModelLlmUsage(BaseModel):
         tokens_total: Total tokens consumed (input + output).  Defaults to
             ``None`` which triggers auto-computation from
             ``tokens_input + tokens_output``.
-        cost_usd: Estimated cost in US dollars.  Always ``None`` in v1;
-            reserved for future provider-specific billing integration.
+        cost_usd: Estimated cost in US dollars.  ``None`` when cost has
+            not been computed.
+        usage_source: Provenance of the usage data.  ``API`` when the
+            provider reported token counts directly, ``ESTIMATED`` when
+            counts were derived locally (e.g. via a tokenizer),
+            ``MISSING`` when no usage data was available.
+        raw_provider_usage: Verbatim provider response ``usage`` block
+            preserved for auditing.  ``None`` when the provider did not
+            return a usage block or when the handler chose not to capture it.
 
     Example:
         >>> usage = ModelLlmUsage(tokens_input=120, tokens_output=45)
@@ -71,7 +84,24 @@ class ModelLlmUsage(BaseModel):
     cost_usd: float | None = Field(
         default=None,
         ge=0.0,
-        description="Cost in USD. Always None in v1.",
+        description="Estimated cost in USD. None when not computed.",
+    )
+    usage_source: ContractEnumUsageSource = Field(
+        default=ContractEnumUsageSource.MISSING,
+        description=(
+            "Provenance of the usage data: API (provider-reported), "
+            "ESTIMATED (locally computed), or MISSING (no data)."
+        ),
+    )
+    # ONEX_EXCLUDE: any_type - Raw provider usage payload is an untyped dict
+    # because each LLM provider (OpenAI, Ollama, vLLM) returns a different
+    # wire format. The verbatim data is preserved for auditing, not processed.
+    raw_provider_usage: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Verbatim provider response usage block for auditing. "
+            "None when not captured."
+        ),
     )
 
     @model_validator(mode="before")

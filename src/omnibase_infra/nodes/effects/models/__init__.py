@@ -19,12 +19,22 @@ Available Models:
     - ModelRegistryRequest: Registry effect input request
     - ModelRegistryResponse: Dual-backend registry operation response
 
+Adapters:
+    - to_call_metrics: ModelLlmUsage -> ContractLlmCallMetrics
+    - to_usage_normalized: ModelLlmUsage -> ContractLlmUsageNormalized
+    - to_usage_raw: ModelLlmUsage -> ContractLlmUsageRaw
+
 Note:
     ModelBackendResult canonical location is omnibase_infra.models.model_backend_result.
     Re-exported here for ergonomic access.
 """
 
 from omnibase_infra.models.model_backend_result import ModelBackendResult
+from omnibase_infra.nodes.effects.models.adapter_llm_usage_to_contract import (
+    to_call_metrics,
+    to_usage_normalized,
+    to_usage_raw,
+)
 from omnibase_infra.nodes.effects.models.model_effect_idempotency_config import (
     ModelEffectIdempotencyConfig,
 )
@@ -70,4 +80,7 @@ __all__ = [
     "ModelLlmUsage",
     "ModelRegistryRequest",
     "ModelRegistryResponse",
+    "to_call_metrics",
+    "to_usage_normalized",
+    "to_usage_raw",
 ]

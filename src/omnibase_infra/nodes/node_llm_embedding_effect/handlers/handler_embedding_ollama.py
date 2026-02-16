@@ -53,6 +53,7 @@ from omnibase_infra.nodes.node_llm_embedding_effect.models.model_llm_embedding_r
 from omnibase_infra.nodes.node_llm_embedding_effect.models.model_llm_embedding_response import (
     ModelLlmEmbeddingResponse,
 )
+from omnibase_spi.contracts.measurement import ContractEnumUsageSource
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,17 @@ class HandlerEmbeddingOllama(MixinLlmHttpTransport):
                 context=ctx,
             ) from exc
         usage = _parse_ollama_usage(data)
+        if not embeddings:
+            ctx = ModelInfraErrorContext.with_correlation(
+                correlation_id=request.correlation_id,
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="parse_ollama_embeddings",
+                target_name=self._llm_target_name,
+            )
+            raise InfraProtocolError(
+                "Ollama embedding response returned no embeddings",
+                context=ctx,
+            )
         dimensions = len(embeddings[0].vector)
 
         return ModelLlmEmbeddingResponse(
@@ -217,19 +229,36 @@ def _parse_ollama_usage(data: dict[str, JsonType]) -> ModelLlmUsage:
     Ollama reports ``prompt_eval_count`` as the token count for input.
     Output tokens are not applicable for embeddings.
 
+    When ``prompt_eval_count`` is present and numeric, ``usage_source``
+    is set to ``API``.  Otherwise ``MISSING``.
+
     Args:
         data: Parsed JSON response body.
 
     Returns:
-        ModelLlmUsage with token counts. Zeros if fields are absent.
+        ModelLlmUsage with token counts and provenance. Zeros if fields
+        are absent.
     """
     prompt_eval_count = data.get("prompt_eval_count", 0)
+    has_usage = isinstance(prompt_eval_count, int) and prompt_eval_count > 0
     if not isinstance(prompt_eval_count, int):
         prompt_eval_count = 0
+
+    raw_usage_data: dict[str, object] = {
+        "prompt_eval_count": data.get("prompt_eval_count"),
+        "total_duration": data.get("total_duration"),
+        "load_duration": data.get("load_duration"),
+    }
 
     return ModelLlmUsage(
         tokens_input=prompt_eval_count,
         tokens_output=0,
+        usage_source=(
+            ContractEnumUsageSource.API
+            if has_usage
+            else ContractEnumUsageSource.MISSING
+        ),
+        raw_provider_usage=raw_usage_data,
     )
 
 
