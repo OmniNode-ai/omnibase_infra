@@ -121,6 +121,9 @@ def normalize_llm_usage(
     )
 
     # Extract usage block from response.
+    # Guard: despite the Mapping type annotation, callers may pass incorrect
+    # types at runtime (e.g. None, list). The isinstance check prevents
+    # AttributeError on .get() in those cases.
     usage_block = (
         raw_response.get("usage") if isinstance(raw_response, Mapping) else None
     )

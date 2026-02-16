@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import threading
 import time
@@ -171,8 +172,17 @@ class HandlerLlmOpenaiCompatible:
             instances sharing the same transport serialize their client swaps.
         last_call_metrics: The ``ContractLlmCallMetrics`` from the most recent
             ``handle()`` call, or ``None`` if metrics computation failed or
-            ``handle()`` has not been called. The caller (node/dispatcher layer)
-            should read this after each call and publish it to the event bus.
+            ``handle()`` has not been called.
+
+            .. warning:: **Not safe for concurrent access.**
+                This attribute is mutable shared state on the handler instance.
+                If two concurrent ``handle()`` calls interleave, the caller of
+                the first call may read metrics from the second call. When
+                sharing a handler instance across concurrent asyncio tasks,
+                callers MUST use the metrics returned in the event output
+                (``response.usage``) rather than relying on this attribute.
+                This attribute exists as a convenience for single-caller
+                sequential usage patterns only.
 
     Example:
         >>> from unittest.mock import AsyncMock, MagicMock
@@ -256,10 +266,13 @@ class HandlerLlmOpenaiCompatible:
         )
 
         # 5. Extract and normalize usage metrics (OMN-2238)
-        # Metrics are stored on self.last_call_metrics for the caller
-        # (node/dispatcher layer) to publish. Handlers MUST NOT publish
-        # events directly per ONEX handler constraints.
-        self._build_usage_metrics(
+        # _build_usage_metrics returns the metrics directly so that
+        # handle() uses the local return value. self.last_call_metrics
+        # is also set as a convenience for sequential callers, but is
+        # NOT safe for concurrent access (see class docstring).
+        # Handlers MUST NOT publish events directly per ONEX handler
+        # constraints.
+        self.last_call_metrics = self._build_usage_metrics(
             raw_response=response_data,
             request=request,
             response=response,
@@ -276,13 +289,18 @@ class HandlerLlmOpenaiCompatible:
         request: ModelLlmInferenceRequest,
         response: ModelLlmInferenceResponse,
         latency_ms: float,
-    ) -> None:
-        """Extract, normalize, and store LLM call metrics.
+    ) -> ContractLlmCallMetrics | None:
+        """Extract, normalize, and return LLM call metrics.
 
         Performs the following steps:
         1. Build prompt text for estimation fallback
         2. Normalize usage via the 5-case normalizer
-        3. Build ContractLlmCallMetrics and store on ``self.last_call_metrics``
+        3. Build and return ContractLlmCallMetrics
+
+        The caller (``handle()``) assigns the return value to
+        ``self.last_call_metrics`` and may also use the returned value
+        directly, avoiding the concurrency hazard of reading mutable
+        instance state after an ``await`` boundary.
 
         The caller (node/dispatcher layer) is responsible for publishing the
         metrics event to the event bus. Handlers MUST NOT publish events
@@ -297,8 +315,11 @@ class HandlerLlmOpenaiCompatible:
             request: The original inference request.
             response: The parsed inference response.
             latency_ms: End-to-end latency in milliseconds.
+
+        Returns:
+            The built metrics contract, or ``None`` if metrics computation
+            failed.
         """
-        self.last_call_metrics = None
         try:
             # Build prompt text for estimation fallback.
             prompt_text = self._build_prompt_text(request)
@@ -314,8 +335,8 @@ class HandlerLlmOpenaiCompatible:
             # Compute input hash for reproducibility tracking.
             input_hash = _compute_input_hash(request)
 
-            # Build the metrics contract and store for caller retrieval.
-            self.last_call_metrics = ContractLlmCallMetrics(
+            # Build the metrics contract.
+            metrics = ContractLlmCallMetrics(
                 model_id=request.model,
                 prompt_tokens=normalized.prompt_tokens,
                 completion_tokens=normalized.completion_tokens,
@@ -338,6 +359,7 @@ class HandlerLlmOpenaiCompatible:
                 normalized.completion_tokens,
                 normalized.source.value,
             )
+            return metrics
         except Exception:
             # Metrics building must never break inference flow.
             logger.warning(
@@ -345,6 +367,7 @@ class HandlerLlmOpenaiCompatible:
                 request.model,
                 exc_info=True,
             )
+            return None
 
     @staticmethod
     def _build_prompt_text(request: ModelLlmInferenceRequest) -> str | None:
@@ -933,8 +956,6 @@ def _compute_input_hash(request: ModelLlmInferenceRequest) -> str:
     Returns:
         SHA-256 hex digest prefixed with ``sha256-``.
     """
-    import json as _json
-
     parts: list[str] = [
         request.model,
         request.operation_type.value,
@@ -944,7 +965,7 @@ def _compute_input_hash(request: ModelLlmInferenceRequest) -> str:
     if request.system_prompt is not None:
         parts.append(request.system_prompt)
     for msg in request.messages:
-        parts.append(_json.dumps(msg, sort_keys=True, default=str))
+        parts.append(json.dumps(msg, sort_keys=True, default=str))
     if request.max_tokens is not None:
         parts.append(str(request.max_tokens))
     if request.temperature is not None:
@@ -952,10 +973,10 @@ def _compute_input_hash(request: ModelLlmInferenceRequest) -> str:
     if request.top_p is not None:
         parts.append(str(request.top_p))
     if request.stop:
-        parts.append(_json.dumps(list(request.stop), sort_keys=True, default=str))
+        parts.append(json.dumps(list(request.stop), sort_keys=True, default=str))
     if request.tools:
         parts.append(
-            _json.dumps(
+            json.dumps(
                 [_serialize_tool_definition(t) for t in request.tools],
                 sort_keys=True,
                 default=str,
@@ -963,7 +984,7 @@ def _compute_input_hash(request: ModelLlmInferenceRequest) -> str:
         )
     if request.tool_choice is not None:
         parts.append(
-            _json.dumps(
+            json.dumps(
                 _serialize_tool_choice(request.tool_choice),
                 sort_keys=True,
                 default=str,

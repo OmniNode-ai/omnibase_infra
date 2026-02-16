@@ -17,7 +17,7 @@ Related:
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
@@ -302,6 +302,43 @@ class TestMetricsBuilding:
         assert second_metrics is not None
         assert first_metrics.prompt_tokens == 10
         assert second_metrics.prompt_tokens == 200
+
+
+# ---------------------------------------------------------------------------
+# Fire-and-Forget Behavior Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestMetricsFireAndForget:
+    """Tests that metrics errors never break inference flow."""
+
+    @pytest.mark.asyncio
+    async def test_handle_succeeds_when_normalize_llm_usage_raises(self) -> None:
+        """When normalize_llm_usage raises, handle() still returns a valid response."""
+        transport = _make_transport()
+        handler = _make_handler(transport)
+        transport._execute_llm_http_call.return_value = _make_response_with_usage(
+            prompt_tokens=10, completion_tokens=5
+        )
+
+        with patch(
+            "omnibase_infra.nodes.node_llm_inference_effect.handlers"
+            ".handler_llm_openai_compatible.normalize_llm_usage",
+            side_effect=ValueError("normalizer exploded"),
+        ):
+            resp = await handler.handle(
+                _make_chat_request(), correlation_id=_CORRELATION_ID
+            )
+
+        # Response should still be valid despite metrics failure.
+        assert resp is not None
+        assert resp.generated_text == "Hello!"
+        assert resp.model_used == _MODEL
+        assert resp.correlation_id == _CORRELATION_ID
+
+        # Metrics should be None because building failed.
+        assert handler.last_call_metrics is None
 
 
 # ---------------------------------------------------------------------------
