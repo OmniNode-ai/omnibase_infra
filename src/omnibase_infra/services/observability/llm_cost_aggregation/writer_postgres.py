@@ -26,6 +26,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections import OrderedDict
 from decimal import Decimal
@@ -162,10 +163,15 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("write_call_metrics", correlation_id)
 
-        # Filter duplicates
+        # Filter duplicates using stable dedup keys. Both write_call_metrics
+        # and write_cost_aggregates call _is_duplicate() independently with
+        # different key prefixes ("" vs "agg:") so that each write path tracks
+        # its own dedup state. This intentionally doubles the cache entries per
+        # event but keeps the two write paths decoupled -- a failure in one
+        # does not affect dedup tracking in the other.
         unique_events: list[dict[str, object]] = []
         for event in events:
-            event_id = str(event.get("input_hash", "")) or str(uuid4())
+            event_id = _derive_stable_dedup_key(event)
             if not self._is_duplicate(event_id):
                 unique_events.append(event)
 
@@ -183,44 +189,52 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
+                    # Safe f-string: self._query_timeout is always a float
+                    # (validated at __init__), so int(float * 1000) is guaranteed
+                    # to produce a plain integer -- no user-controlled input.
                     await conn.execute(
                         f"SET LOCAL statement_timeout = '{int(self._query_timeout * 1000)}'"
                     )
 
                     for event in unique_events:
                         try:
-                            await conn.execute(
-                                """
-                                INSERT INTO llm_call_metrics (
-                                    correlation_id, session_id, run_id, model_id,
-                                    prompt_tokens, completion_tokens, total_tokens,
-                                    estimated_cost_usd, latency_ms,
-                                    usage_source, usage_is_estimated,
-                                    usage_raw, input_hash,
-                                    code_version, contract_version, source
-                                ) VALUES (
-                                    $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                                    $10, $11, $12, $13, $14, $15, $16
+                            # Use a SAVEPOINT so a per-row error does not
+                            # abort the entire transaction.  asyncpg's nested
+                            # conn.transaction() emits SAVEPOINT / RELEASE.
+                            async with conn.transaction():
+                                await conn.execute(
+                                    """
+                                    INSERT INTO llm_call_metrics (
+                                        correlation_id, session_id, run_id, model_id,
+                                        prompt_tokens, completion_tokens, total_tokens,
+                                        estimated_cost_usd, latency_ms,
+                                        usage_source, usage_is_estimated,
+                                        usage_raw, input_hash,
+                                        code_version, contract_version, source
+                                    ) VALUES (
+                                        $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                                        $10, $11, $12, $13, $14, $15, $16
+                                    )
+                                    ON CONFLICT (id) DO NOTHING
+                                    """,
+                                    _safe_uuid(event.get("correlation_id")),
+                                    str(event.get("session_id", "unknown")),
+                                    event.get("run_id"),
+                                    str(event.get("model_id", "unknown")),
+                                    _safe_int(event.get("prompt_tokens")),
+                                    _safe_int(event.get("completion_tokens")),
+                                    _safe_int(event.get("total_tokens")),
+                                    _safe_decimal(event.get("estimated_cost_usd")),
+                                    _safe_int(event.get("latency_ms")) or 0,
+                                    _resolve_usage_source(event),
+                                    bool(event.get("usage_is_estimated", False)),
+                                    _safe_jsonb(event.get("usage_raw")),
+                                    str(event.get("input_hash", ""))[:64] or None,
+                                    str(event.get("code_version", ""))[:64] or None,
+                                    str(event.get("contract_version", ""))[:64] or None,
+                                    str(event.get("reporting_source", ""))[:255]
+                                    or None,
                                 )
-                                ON CONFLICT (id) DO NOTHING
-                                """,
-                                _safe_uuid(event.get("correlation_id")),
-                                str(event.get("session_id", "unknown")),
-                                event.get("run_id"),
-                                str(event.get("model_id", "unknown")),
-                                _safe_int(event.get("prompt_tokens")),
-                                _safe_int(event.get("completion_tokens")),
-                                _safe_int(event.get("total_tokens")),
-                                _safe_decimal(event.get("estimated_cost_usd")),
-                                _safe_int(event.get("latency_ms")) or 0,
-                                _resolve_usage_source(event),
-                                bool(event.get("usage_is_estimated", False)),
-                                _safe_jsonb(event.get("usage_raw")),
-                                str(event.get("input_hash", ""))[:64] or None,
-                                str(event.get("code_version", ""))[:64] or None,
-                                str(event.get("contract_version", ""))[:64] or None,
-                                str(event.get("reporting_source", ""))[:255] or None,
-                            )
                             written += 1
                         except Exception:
                             logger.warning(
@@ -294,10 +308,15 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker("write_cost_aggregates", correlation_id)
 
-        # Filter duplicates
+        # Filter duplicates. The "agg:" prefix ensures the aggregation dedup
+        # cache entries are distinct from the call-metrics entries (see the
+        # parallel comment in write_call_metrics). This means each event
+        # consumes two cache slots (_MAX_DEDUP_CACHE_SIZE bounds total entries,
+        # not per-event count), which is an acceptable trade-off to keep the
+        # two write paths independently idempotent.
         unique_events: list[dict[str, object]] = []
         for event in events:
-            event_id = str(event.get("input_hash", "")) or str(uuid4())
+            event_id = _derive_stable_dedup_key(event)
             dedup_key = f"agg:{event_id}"
             if not self._is_duplicate(dedup_key):
                 unique_events.append(event)
@@ -315,37 +334,44 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
+                    # Safe f-string: self._query_timeout is always a float
+                    # (validated at __init__), so int(float * 1000) is guaranteed
+                    # to produce a plain integer -- no user-controlled input.
                     await conn.execute(
                         f"SET LOCAL statement_timeout = '{int(self._query_timeout * 1000)}'"
                     )
 
                     for row in agg_rows:
                         try:
-                            await conn.execute(
-                                """
-                                INSERT INTO llm_cost_aggregates (
-                                    aggregation_key, window,
-                                    total_cost_usd, total_tokens, call_count,
-                                    estimated_coverage_pct
-                                ) VALUES ($1, $2::cost_aggregation_window, $3, $4, $5, $6)
-                                ON CONFLICT (aggregation_key, window)
-                                DO UPDATE SET
-                                    total_cost_usd = llm_cost_aggregates.total_cost_usd + EXCLUDED.total_cost_usd,
-                                    total_tokens = llm_cost_aggregates.total_tokens + EXCLUDED.total_tokens,
-                                    call_count = llm_cost_aggregates.call_count + EXCLUDED.call_count,
-                                    estimated_coverage_pct = (
-                                        (llm_cost_aggregates.estimated_coverage_pct * llm_cost_aggregates.call_count
-                                         + EXCLUDED.estimated_coverage_pct * EXCLUDED.call_count)
-                                        / NULLIF(llm_cost_aggregates.call_count + EXCLUDED.call_count, 0)
-                                    )
-                                """,
-                                row["aggregation_key"],
-                                row["window"],
-                                row["total_cost_usd"],
-                                row["total_tokens"],
-                                row["call_count"],
-                                row["estimated_coverage_pct"],
-                            )
+                            # Use a SAVEPOINT so a per-row error does not
+                            # abort the entire transaction.  asyncpg's nested
+                            # conn.transaction() emits SAVEPOINT / RELEASE.
+                            async with conn.transaction():
+                                await conn.execute(
+                                    """
+                                    INSERT INTO llm_cost_aggregates (
+                                        aggregation_key, window,
+                                        total_cost_usd, total_tokens, call_count,
+                                        estimated_coverage_pct
+                                    ) VALUES ($1, $2::cost_aggregation_window, $3, $4, $5, $6)
+                                    ON CONFLICT (aggregation_key, window)
+                                    DO UPDATE SET
+                                        total_cost_usd = llm_cost_aggregates.total_cost_usd + EXCLUDED.total_cost_usd,
+                                        total_tokens = llm_cost_aggregates.total_tokens + EXCLUDED.total_tokens,
+                                        call_count = llm_cost_aggregates.call_count + EXCLUDED.call_count,
+                                        estimated_coverage_pct = (
+                                            (llm_cost_aggregates.estimated_coverage_pct * llm_cost_aggregates.call_count
+                                             + EXCLUDED.estimated_coverage_pct * EXCLUDED.call_count)
+                                            / NULLIF(llm_cost_aggregates.call_count + EXCLUDED.call_count, 0)
+                                        )
+                                    """,
+                                    row["aggregation_key"],
+                                    row["window"],
+                                    row["total_cost_usd"],
+                                    row["total_tokens"],
+                                    row["call_count"],
+                                    row["estimated_coverage_pct"],
+                                )
                             upserted += 1
                         except Exception:
                             logger.warning(
@@ -392,6 +418,36 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
 # =============================================================================
 # Module-level helper functions
 # =============================================================================
+
+
+def _derive_stable_dedup_key(event: dict[str, object]) -> str:
+    """Derive a stable deduplication key from event fields.
+
+    When ``input_hash`` is present, it is used directly. Otherwise, a composite
+    key is built from ``correlation_id``, ``model_id``, and ``created_at``
+    (falling back to ``session_id``) and hashed with SHA-256 to produce a
+    deterministic, replay-safe dedup key. This ensures events without
+    ``input_hash`` can still be deduplicated on consumer replay.
+
+    Args:
+        event: Event dictionary from ContractLlmCallMetrics.
+
+    Returns:
+        A stable string suitable for dedup cache lookup.
+    """
+    input_hash = str(event.get("input_hash", "")).strip()
+    if input_hash:
+        return input_hash
+
+    # Build a composite key from stable event fields
+    parts = [
+        str(event.get("correlation_id", "")),
+        str(event.get("model_id", "")),
+        str(event.get("created_at", "")),
+        str(event.get("session_id", "")),
+    ]
+    composite = "|".join(parts)
+    return hashlib.sha256(composite.encode("utf-8")).hexdigest()
 
 
 def _build_aggregation_rows(

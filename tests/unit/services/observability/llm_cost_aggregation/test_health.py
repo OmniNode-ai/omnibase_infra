@@ -48,6 +48,7 @@ def config() -> ConfigLlmCostAggregation:
         health_check_staleness_seconds=300,
         health_check_poll_staleness_seconds=60,
         startup_grace_period_seconds=60.0,
+        _env_file=None,
     )
 
 

@@ -63,6 +63,7 @@ import asyncpg
 from aiohttp import web
 from aiokafka import AIOKafkaConsumer, TopicPartition
 from aiokafka.errors import KafkaError
+from aiokafka.structs import OffsetAndMetadata
 
 from omnibase_core.errors import OnexError
 from omnibase_core.types import JsonType
@@ -97,10 +98,11 @@ def mask_dsn_password(dsn: str) -> str:
         parsed = urlparse(dsn)
         if not parsed.password:
             return dsn
-        if parsed.port:
-            masked_netloc = f"{parsed.username}:***@{parsed.hostname}:{parsed.port}"
-        else:
-            masked_netloc = f"{parsed.username}:***@{parsed.hostname}"
+        user_part = parsed.username or ""
+        host_part = (
+            f"{parsed.hostname}:{parsed.port}" if parsed.port else str(parsed.hostname)
+        )
+        masked_netloc = f"{user_part}:***@{host_part}"
         return urlunparse(
             (
                 parsed.scheme,
@@ -742,12 +744,12 @@ class ServiceLlmCostAggregator:
         if not offsets or self._consumer is None:
             return
 
-        commit_offsets: dict[TopicPartition, int] = {
-            tp: offset + 1 for tp, offset in offsets.items()
+        commit_map: dict[TopicPartition, OffsetAndMetadata] = {
+            tp: OffsetAndMetadata(offset + 1, "") for tp, offset in offsets.items()
         }
 
         try:
-            await self._consumer.commit(commit_offsets)
+            await self._consumer.commit(commit_map)
             await self.metrics.reset_commit_failures()
 
         except KafkaError:
@@ -959,11 +961,24 @@ async def _main() -> None:
     loop = asyncio.get_running_loop()
     shutdown_task: asyncio.Task[None] | None = None
 
+    def _shutdown_task_done(task: asyncio.Task[None]) -> None:
+        """Log errors from the shutdown task so they are not silently swallowed."""
+        if task.cancelled():
+            logger.warning("Shutdown task was cancelled")
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error(
+                "Shutdown task raised an exception",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+
     def signal_handler() -> None:
         nonlocal shutdown_task
         logger.info("Received shutdown signal")
         if shutdown_task is None:
             shutdown_task = asyncio.create_task(consumer.stop())
+            shutdown_task.add_done_callback(_shutdown_task_done)
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, signal_handler)

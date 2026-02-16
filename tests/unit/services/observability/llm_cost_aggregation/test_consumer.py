@@ -46,6 +46,7 @@ def config() -> ConfigLlmCostAggregation:
         postgres_dsn="postgresql://testuser:testpass@localhost:5432/testdb",
         batch_size=10,
         batch_timeout_ms=500,
+        _env_file=None,
     )
 
 

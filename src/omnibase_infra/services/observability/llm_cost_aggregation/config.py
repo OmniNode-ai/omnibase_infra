@@ -11,7 +11,7 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -59,9 +59,12 @@ class ConfigLlmCostAggregation(BaseSettings):
     )
 
     # Consumer behavior
-    auto_offset_reset: str = Field(
+    auto_offset_reset: Literal["earliest", "latest", "none"] = Field(
         default="earliest",
-        description="Where to start consuming if no offset exists",
+        description=(
+            "Where to start consuming if no offset exists. "
+            "Valid values: 'earliest', 'latest', 'none'."
+        ),
     )
 
     # PostgreSQL connection
@@ -187,6 +190,29 @@ class ConfigLlmCostAggregation(BaseSettings):
             raise ProtocolConfigurationError(
                 "No topics configured for LLM cost aggregation consumer. "
                 "Provide explicit 'topics' via configuration or environment variable."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_pool_size_relationship(self) -> Self:
+        """Ensure pool_min_size does not exceed pool_max_size.
+
+        asyncpg.create_pool() raises ValueError at runtime when min_size > max_size.
+        This validator catches the misconfiguration eagerly at config load time.
+
+        Returns:
+            Self if validation passes.
+
+        Raises:
+            ProtocolConfigurationError: If pool_min_size > pool_max_size.
+        """
+        if self.pool_min_size > self.pool_max_size:
+            from omnibase_infra.errors import ProtocolConfigurationError
+
+            raise ProtocolConfigurationError(
+                f"pool_min_size ({self.pool_min_size}) must not exceed "
+                f"pool_max_size ({self.pool_max_size}). "
+                "Adjust pool_min_size or pool_max_size so that min <= max."
             )
         return self
 
