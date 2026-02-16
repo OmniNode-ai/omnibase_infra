@@ -121,7 +121,9 @@ def normalize_llm_usage(
     )
 
     # Extract usage block from response.
-    usage_block = raw_response.get("usage") if isinstance(raw_response, dict) else None
+    usage_block = (
+        raw_response.get("usage") if isinstance(raw_response, Mapping) else None
+    )
 
     if not isinstance(usage_block, dict):
         # Case 3 (Absent) or Case 5 (Missing): No usage block at all.

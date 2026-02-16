@@ -14,7 +14,7 @@ Architecture:
     - Parses the response into ModelLlmInferenceResponse
     - Maps provider finish reasons to EnumLlmFinishReason
     - Extracts and normalizes token usage (OMN-2238)
-    - Emits ContractLlmCallMetrics event to Kafka
+    - Builds ContractLlmCallMetrics for caller to publish
 
 Handler Responsibilities:
     - Build URL from base_url + operation_type path
@@ -26,7 +26,7 @@ Handler Responsibilities:
     - Inject Authorization header when api_key is provided
     - Extract token usage from API response (5 fallback cases)
     - Redact sensitive data from raw response before storage
-    - Emit per-call metrics event to ``onex.evt.omniintelligence.llm-call-completed.v1``
+    - Build per-call metrics (ContractLlmCallMetrics) for ``onex.evt.omniintelligence.llm-call-completed.v1``
 
 Auth Strategy:
     When ``api_key`` is provided, the handler temporarily injects a
@@ -65,7 +65,7 @@ import logging
 import threading
 import time
 from datetime import UTC, datetime
-from typing import Protocol, cast
+from typing import cast
 from uuid import UUID, uuid4
 
 import httpx
@@ -99,19 +99,6 @@ from omnibase_spi.contracts.measurement.contract_llm_call_metrics import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class ProtocolMetricsPublisher(Protocol):
-    """Protocol for publishing LLM call metrics events.
-
-    Any object providing an ``async publish(topic, payload)`` method can
-    serve as a metrics publisher. This keeps the handler decoupled from
-    specific event bus implementations.
-    """
-
-    async def publish(self, topic: str, payload: dict[str, object]) -> None:
-        """Publish a metrics event to the given topic."""
-        ...
 
 
 # Mapping from OpenAI finish_reason strings to canonical enum values.
@@ -182,6 +169,10 @@ class HandlerLlmOpenaiCompatible:
             An ``asyncio.Lock`` (``_auth_lock``) is lazily attached to the
             transport on first auth-injected call so that all handler
             instances sharing the same transport serialize their client swaps.
+        last_call_metrics: The ``ContractLlmCallMetrics`` from the most recent
+            ``handle()`` call, or ``None`` if metrics computation failed or
+            ``handle()`` has not been called. The caller (node/dispatcher layer)
+            should read this after each call and publish it to the event bus.
 
     Example:
         >>> from unittest.mock import AsyncMock, MagicMock
@@ -192,20 +183,16 @@ class HandlerLlmOpenaiCompatible:
     def __init__(
         self,
         transport: MixinLlmHttpTransport,
-        metrics_publisher: ProtocolMetricsPublisher | None = None,
     ) -> None:
-        """Initialize handler with HTTP transport and optional metrics publisher.
+        """Initialize handler with HTTP transport.
 
         Args:
             transport: An object providing ``_execute_llm_http_call`` for
                 making HTTP POST requests to LLM endpoints. Typically a
                 node or adapter that mixes in MixinLlmHttpTransport.
-            metrics_publisher: Optional event publisher for emitting
-                ContractLlmCallMetrics to the LLM call completed topic.
-                When None, metrics are still computed but not published.
         """
         self._transport = transport
-        self._metrics_publisher = metrics_publisher
+        self.last_call_metrics: ContractLlmCallMetrics | None = None
 
     async def handle(
         self,
@@ -268,46 +255,50 @@ class HandlerLlmOpenaiCompatible:
             latency_ms=latency_ms,
         )
 
-        # 5. Extract, normalize, and emit usage metrics (OMN-2238)
-        await self._emit_usage_metrics(
+        # 5. Extract and normalize usage metrics (OMN-2238)
+        # Metrics are stored on self.last_call_metrics for the caller
+        # (node/dispatcher layer) to publish. Handlers MUST NOT publish
+        # events directly per ONEX handler constraints.
+        self._build_usage_metrics(
             raw_response=response_data,
             request=request,
             response=response,
-            correlation_id=correlation_id,
             latency_ms=latency_ms,
         )
 
         return response
 
-    # ── Usage metrics emission ──────────────────────────────────────────
+    # ── Usage metrics building ─────────────────────────────────────────
 
-    async def _emit_usage_metrics(
+    def _build_usage_metrics(
         self,
         raw_response: dict[str, JsonType],
         request: ModelLlmInferenceRequest,
         response: ModelLlmInferenceResponse,
-        correlation_id: UUID,
         latency_ms: float,
     ) -> None:
-        """Extract, normalize, and emit LLM call metrics.
+        """Extract, normalize, and store LLM call metrics.
 
         Performs the following steps:
         1. Build prompt text for estimation fallback
         2. Normalize usage via the 5-case normalizer
-        3. Build ContractLlmCallMetrics
-        4. Emit to Kafka topic (if publisher available)
+        3. Build ContractLlmCallMetrics and store on ``self.last_call_metrics``
 
-        This method is fire-and-forget: errors in metrics emission are
+        The caller (node/dispatcher layer) is responsible for publishing the
+        metrics event to the event bus. Handlers MUST NOT publish events
+        directly per ONEX handler constraints.
+
+        This method is fire-and-forget: errors in metrics building are
         logged but never propagated to the caller. LLM inference must
-        not fail because metrics publishing failed.
+        not fail because metrics computation failed.
 
         Args:
             raw_response: The raw JSON response from the provider.
             request: The original inference request.
             response: The parsed inference response.
-            correlation_id: Correlation ID for tracing.
             latency_ms: End-to-end latency in milliseconds.
         """
+        self.last_call_metrics = None
         try:
             # Build prompt text for estimation fallback.
             prompt_text = self._build_prompt_text(request)
@@ -323,8 +314,8 @@ class HandlerLlmOpenaiCompatible:
             # Compute input hash for reproducibility tracking.
             input_hash = _compute_input_hash(request)
 
-            # Build the metrics contract.
-            metrics = ContractLlmCallMetrics(
+            # Build the metrics contract and store for caller retrieval.
+            self.last_call_metrics = ContractLlmCallMetrics(
                 model_id=request.model,
                 prompt_tokens=normalized.prompt_tokens,
                 completion_tokens=normalized.completion_tokens,
@@ -338,37 +329,19 @@ class HandlerLlmOpenaiCompatible:
                 reporting_source="handler-llm-openai-compatible",
             )
 
-            # Emit event if publisher is available.
-            if self._metrics_publisher is not None:
-                from omnibase_infra.event_bus.topic_constants import (
-                    TOPIC_LLM_CALL_COMPLETED,
-                )
-
-                await self._metrics_publisher.publish(
-                    TOPIC_LLM_CALL_COMPLETED,
-                    metrics.model_dump(mode="json"),
-                )
-                logger.debug(
-                    "Emitted LLM call metrics. correlation_id=%s model=%s "
-                    "prompt_tokens=%d completion_tokens=%d source=%s",
-                    correlation_id,
-                    request.model,
-                    normalized.prompt_tokens,
-                    normalized.completion_tokens,
-                    normalized.source.value,
-                )
-            else:
-                logger.debug(
-                    "LLM call metrics computed but no publisher configured. "
-                    "correlation_id=%s model=%s",
-                    correlation_id,
-                    request.model,
-                )
+            logger.debug(
+                "Built LLM call metrics. correlation_id=%s model=%s "
+                "prompt_tokens=%d completion_tokens=%d source=%s",
+                response.correlation_id,
+                request.model,
+                normalized.prompt_tokens,
+                normalized.completion_tokens,
+                normalized.source.value,
+            )
         except Exception:
-            # Metrics emission must never break inference flow.
+            # Metrics building must never break inference flow.
             logger.warning(
-                "Failed to emit LLM call metrics; ignoring. correlation_id=%s model=%s",
-                correlation_id,
+                "Failed to build LLM call metrics; ignoring. model=%s",
                 request.model,
                 exc_info=True,
             )
@@ -976,6 +949,26 @@ def _compute_input_hash(request: ModelLlmInferenceRequest) -> str:
         parts.append(str(request.max_tokens))
     if request.temperature is not None:
         parts.append(str(request.temperature))
+    if request.top_p is not None:
+        parts.append(str(request.top_p))
+    if request.stop:
+        parts.append(_json.dumps(list(request.stop), sort_keys=True, default=str))
+    if request.tools:
+        parts.append(
+            _json.dumps(
+                [_serialize_tool_definition(t) for t in request.tools],
+                sort_keys=True,
+                default=str,
+            )
+        )
+    if request.tool_choice is not None:
+        parts.append(
+            _json.dumps(
+                _serialize_tool_choice(request.tool_choice),
+                sort_keys=True,
+                default=str,
+            )
+        )
 
     combined = "|".join(parts)
     digest = hashlib.sha256(combined.encode("utf-8")).hexdigest()

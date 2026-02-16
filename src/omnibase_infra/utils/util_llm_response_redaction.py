@@ -155,10 +155,10 @@ def redact_llm_response(
         >>> "secret" not in str(redacted)
         True
     """
-    if not isinstance(raw_response, dict):
+    if not isinstance(raw_response, Mapping):
         return {}
 
-    redacted = deepcopy(raw_response)
+    redacted = deepcopy(dict(raw_response))
 
     # Redact top-level messages if present (request echo).
     if "messages" in redacted and isinstance(redacted["messages"], list):

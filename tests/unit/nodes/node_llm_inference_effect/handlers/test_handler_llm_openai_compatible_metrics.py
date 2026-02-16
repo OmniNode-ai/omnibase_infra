@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Unit tests for HandlerLlmOpenaiCompatible usage extraction and metrics emission.
+"""Unit tests for HandlerLlmOpenaiCompatible usage extraction and metrics building.
 
 Tests cover:
     - Usage extraction from responses with all 5 fallback cases
-    - ContractLlmCallMetrics population
-    - Kafka event emission via metrics publisher
+    - ContractLlmCallMetrics population via last_call_metrics
     - Fire-and-forget behavior (metrics errors don't break inference)
     - Input hash computation
     - Prompt text building for estimation fallback
@@ -23,8 +22,7 @@ from uuid import UUID
 
 import pytest
 
-from omnibase_infra.enums import EnumLlmFinishReason, EnumLlmOperationType
-from omnibase_infra.event_bus.topic_constants import TOPIC_LLM_CALL_COMPLETED
+from omnibase_infra.enums import EnumLlmOperationType
 from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
@@ -57,21 +55,13 @@ def _make_transport() -> MagicMock:
     return transport
 
 
-def _make_publisher() -> AsyncMock:
-    """Create a mock metrics publisher."""
-    publisher = AsyncMock()
-    publisher.publish = AsyncMock()
-    return publisher
-
-
 def _make_handler(
     transport: MagicMock | None = None,
-    publisher: AsyncMock | None = None,
 ) -> HandlerLlmOpenaiCompatible:
-    """Create a handler with mock transport and optional publisher."""
+    """Create a handler with mock transport."""
     if transport is None:
         transport = _make_transport()
-    return HandlerLlmOpenaiCompatible(transport, metrics_publisher=publisher)
+    return HandlerLlmOpenaiCompatible(transport)
 
 
 def _make_chat_request(**overrides: Any) -> ModelLlmInferenceRequest:
@@ -149,205 +139,169 @@ def _make_response_partial_usage() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Metrics Emission Tests
+# Metrics Building Tests
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-class TestMetricsEmission:
-    """Tests for metrics event emission from the handler."""
+class TestMetricsBuilding:
+    """Tests for metrics building via handler.last_call_metrics."""
 
     @pytest.mark.asyncio
-    async def test_metrics_emitted_with_complete_usage(self) -> None:
-        """Complete usage response emits metrics to Kafka topic."""
+    async def test_metrics_built_with_complete_usage(self) -> None:
+        """Complete usage response populates last_call_metrics correctly."""
         transport = _make_transport()
-        publisher = _make_publisher()
-        handler = _make_handler(transport, publisher)
+        handler = _make_handler(transport)
         transport._execute_llm_http_call.return_value = _make_response_with_usage(
             prompt_tokens=100, completion_tokens=50
         )
 
         await handler.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
 
-        publisher.publish.assert_awaited_once()
-        call_args = publisher.publish.call_args
-        topic = call_args.args[0] if call_args.args else call_args.kwargs.get("topic")
-        payload = (
-            call_args.args[1]
-            if len(call_args.args) > 1
-            else call_args.kwargs.get("payload")
-        )
-
-        assert topic == TOPIC_LLM_CALL_COMPLETED
-        assert payload["model_id"] == _MODEL
-        assert payload["prompt_tokens"] == 100
-        assert payload["completion_tokens"] == 50
-        assert payload["total_tokens"] == 150
-        assert payload["usage_is_estimated"] is False
+        metrics = handler.last_call_metrics
+        assert metrics is not None
+        assert metrics.model_id == _MODEL
+        assert metrics.prompt_tokens == 100
+        assert metrics.completion_tokens == 50
+        assert metrics.total_tokens == 150
+        assert metrics.usage_is_estimated is False
 
     @pytest.mark.asyncio
-    async def test_metrics_emitted_with_partial_usage(self) -> None:
-        """Partial usage response emits estimated metrics."""
+    async def test_metrics_built_with_partial_usage(self) -> None:
+        """Partial usage response builds estimated metrics."""
         transport = _make_transport()
-        publisher = _make_publisher()
-        handler = _make_handler(transport, publisher)
+        handler = _make_handler(transport)
         transport._execute_llm_http_call.return_value = _make_response_partial_usage()
 
         await handler.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
 
-        publisher.publish.assert_awaited_once()
-        call_args = publisher.publish.call_args
-        payload = (
-            call_args.args[1]
-            if len(call_args.args) > 1
-            else call_args.kwargs.get("payload")
-        )
-
-        assert payload["prompt_tokens"] == 20
-        assert payload["usage_is_estimated"] is True
+        metrics = handler.last_call_metrics
+        assert metrics is not None
+        assert metrics.prompt_tokens == 20
+        assert metrics.usage_is_estimated is True
 
     @pytest.mark.asyncio
-    async def test_metrics_emitted_with_absent_usage(self) -> None:
-        """Absent usage response emits estimated metrics."""
+    async def test_metrics_built_with_absent_usage(self) -> None:
+        """Absent usage response builds estimated metrics."""
         transport = _make_transport()
-        publisher = _make_publisher()
-        handler = _make_handler(transport, publisher)
+        handler = _make_handler(transport)
         transport._execute_llm_http_call.return_value = _make_response_without_usage()
 
         await handler.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
 
-        publisher.publish.assert_awaited_once()
-        call_args = publisher.publish.call_args
-        payload = (
-            call_args.args[1]
-            if len(call_args.args) > 1
-            else call_args.kwargs.get("payload")
-        )
-
+        metrics = handler.last_call_metrics
+        assert metrics is not None
         # Should be estimated from the text.
-        assert payload["usage_is_estimated"] is True
+        assert metrics.usage_is_estimated is True
 
     @pytest.mark.asyncio
-    async def test_no_publisher_no_error(self) -> None:
-        """Handler without publisher computes metrics without error."""
+    async def test_metrics_available_after_handle(self) -> None:
+        """Handler stores metrics for caller retrieval after handle()."""
         transport = _make_transport()
-        handler = _make_handler(transport, publisher=None)
+        handler = _make_handler(transport)
         transport._execute_llm_http_call.return_value = _make_response_with_usage()
 
-        # Should not raise.
+        # Before handle, metrics should be None.
+        assert handler.last_call_metrics is None
+
         resp = await handler.handle(
             _make_chat_request(), correlation_id=_CORRELATION_ID
         )
         assert resp.status == "success"
 
-    @pytest.mark.asyncio
-    async def test_publisher_error_does_not_break_inference(self) -> None:
-        """Metrics publisher error is swallowed; inference still succeeds."""
-        transport = _make_transport()
-        publisher = _make_publisher()
-        publisher.publish.side_effect = RuntimeError("Kafka unavailable")
-        handler = _make_handler(transport, publisher)
-        transport._execute_llm_http_call.return_value = _make_response_with_usage()
-
-        # Should not raise despite publisher failure.
-        resp = await handler.handle(
-            _make_chat_request(), correlation_id=_CORRELATION_ID
-        )
-        assert resp.status == "success"
-        assert resp.generated_text == "Hello!"
+        # After handle, metrics should be populated.
+        assert handler.last_call_metrics is not None
 
     @pytest.mark.asyncio
     async def test_metrics_include_latency(self) -> None:
-        """Metrics payload includes latency_ms."""
+        """Metrics include latency_ms."""
         transport = _make_transport()
-        publisher = _make_publisher()
-        handler = _make_handler(transport, publisher)
+        handler = _make_handler(transport)
         transport._execute_llm_http_call.return_value = _make_response_with_usage()
 
         await handler.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
 
-        call_args = publisher.publish.call_args
-        payload = (
-            call_args.args[1]
-            if len(call_args.args) > 1
-            else call_args.kwargs.get("payload")
-        )
-        assert "latency_ms" in payload
-        assert payload["latency_ms"] >= 0
+        metrics = handler.last_call_metrics
+        assert metrics is not None
+        assert metrics.latency_ms >= 0
 
     @pytest.mark.asyncio
     async def test_metrics_include_input_hash(self) -> None:
-        """Metrics payload includes input_hash."""
+        """Metrics include input_hash."""
         transport = _make_transport()
-        publisher = _make_publisher()
-        handler = _make_handler(transport, publisher)
+        handler = _make_handler(transport)
         transport._execute_llm_http_call.return_value = _make_response_with_usage()
 
         await handler.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
 
-        call_args = publisher.publish.call_args
-        payload = (
-            call_args.args[1]
-            if len(call_args.args) > 1
-            else call_args.kwargs.get("payload")
-        )
-        assert payload["input_hash"].startswith("sha256-")
+        metrics = handler.last_call_metrics
+        assert metrics is not None
+        assert metrics.input_hash.startswith("sha256-")
 
     @pytest.mark.asyncio
     async def test_metrics_include_timestamp(self) -> None:
-        """Metrics payload includes ISO timestamp."""
+        """Metrics include ISO timestamp."""
         transport = _make_transport()
-        publisher = _make_publisher()
-        handler = _make_handler(transport, publisher)
+        handler = _make_handler(transport)
         transport._execute_llm_http_call.return_value = _make_response_with_usage()
 
         await handler.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
 
-        call_args = publisher.publish.call_args
-        payload = (
-            call_args.args[1]
-            if len(call_args.args) > 1
-            else call_args.kwargs.get("payload")
-        )
-        assert payload["timestamp_iso"] != ""
+        metrics = handler.last_call_metrics
+        assert metrics is not None
+        assert metrics.timestamp_iso != ""
 
     @pytest.mark.asyncio
     async def test_metrics_include_reporting_source(self) -> None:
-        """Metrics payload includes reporting_source."""
+        """Metrics include reporting_source."""
         transport = _make_transport()
-        publisher = _make_publisher()
-        handler = _make_handler(transport, publisher)
+        handler = _make_handler(transport)
         transport._execute_llm_http_call.return_value = _make_response_with_usage()
 
         await handler.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
 
-        call_args = publisher.publish.call_args
-        payload = (
-            call_args.args[1]
-            if len(call_args.args) > 1
-            else call_args.kwargs.get("payload")
-        )
-        assert payload["reporting_source"] == "handler-llm-openai-compatible"
+        metrics = handler.last_call_metrics
+        assert metrics is not None
+        assert metrics.reporting_source == "handler-llm-openai-compatible"
 
     @pytest.mark.asyncio
     async def test_metrics_include_raw_and_normalized_usage(self) -> None:
-        """Metrics payload includes both raw and normalized usage."""
+        """Metrics include both raw and normalized usage."""
         transport = _make_transport()
-        publisher = _make_publisher()
-        handler = _make_handler(transport, publisher)
+        handler = _make_handler(transport)
         transport._execute_llm_http_call.return_value = _make_response_with_usage()
 
         await handler.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
 
-        call_args = publisher.publish.call_args
-        payload = (
-            call_args.args[1]
-            if len(call_args.args) > 1
-            else call_args.kwargs.get("payload")
+        metrics = handler.last_call_metrics
+        assert metrics is not None
+        assert metrics.usage_raw is not None
+        assert metrics.usage_normalized is not None
+        assert metrics.usage_raw.provider == "openai_compatible"
+
+    @pytest.mark.asyncio
+    async def test_metrics_reset_between_calls(self) -> None:
+        """last_call_metrics is reset at the start of each handle() call."""
+        transport = _make_transport()
+        handler = _make_handler(transport)
+        transport._execute_llm_http_call.return_value = _make_response_with_usage(
+            prompt_tokens=10, completion_tokens=5
         )
-        assert payload["usage_raw"] is not None
-        assert payload["usage_normalized"] is not None
-        assert payload["usage_raw"]["provider"] == "openai_compatible"
+
+        await handler.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        first_metrics = handler.last_call_metrics
+
+        transport._execute_llm_http_call.return_value = _make_response_with_usage(
+            prompt_tokens=200, completion_tokens=100
+        )
+
+        await handler.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        second_metrics = handler.last_call_metrics
+
+        assert first_metrics is not None
+        assert second_metrics is not None
+        assert first_metrics.prompt_tokens == 10
+        assert second_metrics.prompt_tokens == 200
 
 
 # ---------------------------------------------------------------------------
@@ -443,10 +397,10 @@ class TestBackwardCompatibility:
     """Ensure existing handler behavior is preserved after metrics addition."""
 
     @pytest.mark.asyncio
-    async def test_handler_without_publisher_works(self) -> None:
-        """Handler constructed without publisher (old API) still works."""
+    async def test_handler_works(self) -> None:
+        """Handler constructs and operates correctly."""
         transport = _make_transport()
-        handler = HandlerLlmOpenaiCompatible(transport)  # No publisher arg
+        handler = HandlerLlmOpenaiCompatible(transport)
         transport._execute_llm_http_call.return_value = _make_response_with_usage()
 
         resp = await handler.handle(
@@ -458,28 +412,18 @@ class TestBackwardCompatibility:
         assert resp.usage.tokens_output == 5
 
     @pytest.mark.asyncio
-    async def test_response_unchanged_with_publisher(self) -> None:
-        """Adding a publisher does not change the response content."""
+    async def test_response_content_unchanged(self) -> None:
+        """Metrics building does not change the response content."""
         transport = _make_transport()
-        publisher = _make_publisher()
         transport._execute_llm_http_call.return_value = _make_response_with_usage(
             prompt_tokens=100, completion_tokens=50
         )
 
-        handler_no_pub = HandlerLlmOpenaiCompatible(transport)
-        resp_no_pub = await handler_no_pub.handle(
+        handler = HandlerLlmOpenaiCompatible(transport)
+        resp = await handler.handle(
             _make_chat_request(), correlation_id=_CORRELATION_ID
         )
 
-        transport._execute_llm_http_call.return_value = _make_response_with_usage(
-            prompt_tokens=100, completion_tokens=50
-        )
-        handler_with_pub = HandlerLlmOpenaiCompatible(transport, publisher)
-        resp_with_pub = await handler_with_pub.handle(
-            _make_chat_request(), correlation_id=_CORRELATION_ID
-        )
-
-        assert resp_no_pub.generated_text == resp_with_pub.generated_text
-        assert resp_no_pub.usage.tokens_input == resp_with_pub.usage.tokens_input
-        assert resp_no_pub.usage.tokens_output == resp_with_pub.usage.tokens_output
-        assert resp_no_pub.finish_reason == resp_with_pub.finish_reason
+        assert resp.generated_text == "Hello!"
+        assert resp.usage.tokens_input == 100
+        assert resp.usage.tokens_output == 50
