@@ -506,11 +506,17 @@ class TestDeliveryFailureHandling:
         await bridge.on_dlq_event(sample_dlq_event)
 
     @pytest.mark.asyncio
-    async def test_slack_handler_exception_does_not_crash(
+    async def test_slack_handler_exception_suppressed_to_protect_caller(
         self,
         sample_dlq_event: ModelDlqEvent,
     ) -> None:
-        """Verify handler exceptions are handled gracefully."""
+        """Verify handler exceptions are caught and suppressed.
+
+        The alert bridge wraps all handler.handle() calls in try/except to
+        ensure that a Slack outage (or any unexpected handler exception) never
+        crashes the caller (DLQ processing, health checks, etc.). The exception
+        is logged but not re-raised.
+        """
         handler = HandlerSlackWebhook(webhook_url="https://test.slack.com/webhook")
         handler.handle = AsyncMock(  # type: ignore[method-assign]
             side_effect=RuntimeError("Connection refused")
@@ -521,12 +527,8 @@ class TestDeliveryFailureHandling:
             environment="test",
         )
 
-        # Should not raise -- the bridge method does not catch handler exceptions
-        # because HandlerSlackWebhook is documented to never raise during normal
-        # operation. If the mock raises, that's unexpected. Let's verify it propagates
-        # (which is the correct behavior for truly unexpected errors).
-        with pytest.raises(RuntimeError, match="Connection refused"):
-            await bridge.on_dlq_event(sample_dlq_event)
+        # Should NOT raise -- the bridge catches and logs the exception
+        await bridge.on_dlq_event(sample_dlq_event)
 
 
 # =============================================================================

@@ -72,6 +72,13 @@ class PipelineAlertBridge:
     Rate limiting prevents alert storms: at most ``max_alerts_per_window``
     alerts per ``rate_limit_window_seconds`` per alert category.
 
+    .. note::
+
+        **Threading constraint**: The ``asyncio.Lock`` instances used for rate
+        limiting, health state, and cold-start tracking are bound to a single
+        event loop. This class must be created and used within the same event
+        loop. Do not share instances across threads running separate loops.
+
     Attributes:
         _handler: Slack webhook handler for delivery.
         _rate_limit_window: Window duration for rate limiting.
@@ -192,7 +199,15 @@ class PipelineAlertBridge:
             correlation_id=event.correlation_id,
         )
 
-        result = await self._handler.handle(alert)
+        try:
+            result = await self._handler.handle(alert)
+        except Exception:
+            logger.exception(
+                "Alert delivery failed for category=dlq, suppressing to protect caller",
+                extra={"correlation_id": str(event.correlation_id)},
+            )
+            return
+
         if result.success:
             logger.info(
                 "DLQ Slack alert delivered",
@@ -254,7 +269,16 @@ class PipelineAlertBridge:
                 correlation_id=correlation_id,
             )
 
-            result = await self._handler.handle(slack_alert)
+            try:
+                result = await self._handler.handle(slack_alert)
+            except Exception:
+                logger.exception(
+                    "Alert delivery failed for category=wiring_health, "
+                    "suppressing to protect caller",
+                    extra={"correlation_id": str(correlation_id)},
+                )
+                return
+
             if result.success:
                 logger.info(
                     "Wiring health degradation alert delivered",
@@ -306,49 +330,58 @@ class PipelineAlertBridge:
         async with self._cold_start_lock:
             if self._cold_start_alerted:
                 return
-            self._cold_start_alerted = True
 
-        if not await self._check_rate_limit("cold_start"):
-            return
+            if not await self._check_rate_limit("cold_start"):
+                return
 
-        alert = ModelSlackAlert(
-            severity=EnumAlertSeverity.WARNING,
-            message=(
-                f"Pipeline cold-start has been blocked for "
-                f"*{elapsed_seconds:.0f} seconds* waiting for "
-                f"`{dependency_name}` in *{self._environment}*.\n\n"
-                f"The pipeline cannot start until this dependency "
-                f"becomes available. Check service health and network "
-                f"connectivity."
-            ),
-            title=f"Pipeline Cold-Start Blocked - {self._environment}",
-            details={
-                "Environment": self._environment,
-                "Blocked Dependency": dependency_name,
-                "Elapsed Seconds": f"{elapsed_seconds:.0f}",
-                "Threshold Seconds": f"{self._cold_start_timeout:.0f}",
-            },
-            correlation_id=correlation_id,
-        )
-
-        result = await self._handler.handle(alert)
-        if result.success:
-            logger.info(
-                "Cold-start blocked alert delivered",
-                extra={
-                    "correlation_id": str(correlation_id),
-                    "dependency": dependency_name,
-                    "elapsed_seconds": elapsed_seconds,
+            alert = ModelSlackAlert(
+                severity=EnumAlertSeverity.WARNING,
+                message=(
+                    f"Pipeline cold-start has been blocked for "
+                    f"*{elapsed_seconds:.0f} seconds* waiting for "
+                    f"`{dependency_name}` in *{self._environment}*.\n\n"
+                    f"The pipeline cannot start until this dependency "
+                    f"becomes available. Check service health and network "
+                    f"connectivity."
+                ),
+                title=f"Pipeline Cold-Start Blocked - {self._environment}",
+                details={
+                    "Environment": self._environment,
+                    "Blocked Dependency": dependency_name,
+                    "Elapsed Seconds": f"{elapsed_seconds:.0f}",
+                    "Threshold Seconds": f"{self._cold_start_timeout:.0f}",
                 },
+                correlation_id=correlation_id,
             )
-        else:
-            logger.warning(
-                "Cold-start blocked alert delivery failed",
-                extra={
-                    "correlation_id": str(correlation_id),
-                    "error": result.error,
-                },
-            )
+
+            try:
+                result = await self._handler.handle(alert)
+            except Exception:
+                logger.exception(
+                    "Alert delivery failed for category=cold_start, "
+                    "suppressing to protect caller",
+                    extra={"correlation_id": str(correlation_id)},
+                )
+                return
+
+            if result.success:
+                self._cold_start_alerted = True
+                logger.info(
+                    "Cold-start blocked alert delivered",
+                    extra={
+                        "correlation_id": str(correlation_id),
+                        "dependency": dependency_name,
+                        "elapsed_seconds": elapsed_seconds,
+                    },
+                )
+            else:
+                logger.warning(
+                    "Cold-start blocked alert delivery failed",
+                    extra={
+                        "correlation_id": str(correlation_id),
+                        "error": result.error,
+                    },
+                )
 
     async def on_cold_start_resolved(
         self,
@@ -409,7 +442,16 @@ class PipelineAlertBridge:
             correlation_id=correlation_id,
         )
 
-        result = await self._handler.handle(alert)
+        try:
+            result = await self._handler.handle(alert)
+        except Exception:
+            logger.exception(
+                "Alert delivery failed for category=recovery, "
+                "suppressing to protect caller",
+                extra={"correlation_id": str(correlation_id)},
+            )
+            return
+
         if result.success:
             logger.info(
                 "Recovery alert delivered",

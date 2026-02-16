@@ -6,6 +6,14 @@ These tests validate pipeline behavior under failure conditions using
 mock infrastructure. They validate the behavioral contracts that
 integration tests will verify against real infrastructure.
 
+**Note on Scenarios 1-4**: These are *behavioral specification tests* that
+document the intended resilience contracts (idempotency, bootstrap ordering,
+consumer rebalancing) using locally-defined mock closures. They do not
+exercise production code directly; instead they codify the expected behavior
+so that integration tests against real Kafka/PostgreSQL/Consul infrastructure
+can be validated against the same contracts. Scenario 5 (DLQ) additionally
+exercises real ``ModelDlqEvent`` and ``MixinKafkaDlq`` production types.
+
 Scenarios:
     1. Container Restart Mid-Processing: No duplicates, no lost messages
     2. Consumer Group Rebalancing: Partition reassignment, no loss
