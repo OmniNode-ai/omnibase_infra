@@ -781,6 +781,62 @@ class TestLoadEnvFile:
             # New var should be loaded from file
             assert os.environ.get("NEW_VAR") == "from_file"
 
+    def test_strips_inline_comments_from_unquoted_values(
+        self, tmp_path: object
+    ) -> None:
+        """Inline comments (space + #) are stripped from unquoted values."""
+        from pathlib import Path
+
+        from omnibase_infra.validation.demo_loop_gate import _load_env_file
+
+        env_file = Path(str(tmp_path)) / ".env"
+        env_file.write_text("HOST=localhost # the host\nPORT=5432 # postgres port\n")
+
+        with patch.dict("os.environ", {}, clear=True):
+            _load_env_file(str(env_file))
+
+            import os
+
+            assert os.environ.get("HOST") == "localhost"
+            assert os.environ.get("PORT") == "5432"
+
+    def test_preserves_hash_in_quoted_values(self, tmp_path: object) -> None:
+        """A '#' inside quotes is literal and must NOT be stripped."""
+        from pathlib import Path
+
+        from omnibase_infra.validation.demo_loop_gate import _load_env_file
+
+        env_file = Path(str(tmp_path)) / ".env"
+        env_file.write_text(
+            "DOUBLE=\"value # with hash\"\nSINGLE='value # with hash'\n"
+        )
+
+        with patch.dict("os.environ", {}, clear=True):
+            _load_env_file(str(env_file))
+
+            import os
+
+            assert os.environ.get("DOUBLE") == "value # with hash"
+            assert os.environ.get("SINGLE") == "value # with hash"
+
+    def test_hash_without_leading_space_is_not_a_comment(
+        self, tmp_path: object
+    ) -> None:
+        """A '#' not preceded by a space is part of the value, not a comment."""
+        from pathlib import Path
+
+        from omnibase_infra.validation.demo_loop_gate import _load_env_file
+
+        env_file = Path(str(tmp_path)) / ".env"
+        env_file.write_text("COLOR=#ff0000\n")
+
+        with patch.dict("os.environ", {}, clear=True):
+            _load_env_file(str(env_file))
+
+            import os
+
+            assert os.environ.get("COLOR") == "#ff0000"
+
 
 # =============================================================================
 # Test: Constants

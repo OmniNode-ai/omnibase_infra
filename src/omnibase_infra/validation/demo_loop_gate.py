@@ -632,6 +632,12 @@ def _load_env_file(path: str) -> None:
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
             value = value[1:-1]
+        else:
+            # Strip inline comments from unquoted values.
+            # A '#' preceded by a space is treated as a comment delimiter.
+            comment_idx = value.find(" #")
+            if comment_idx != -1:
+                value = value[:comment_idx].rstrip()
         if key and key not in os.environ:
             os.environ[key] = value
 

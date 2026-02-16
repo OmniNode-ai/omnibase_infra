@@ -114,7 +114,6 @@ from omnibase_core.validation import (
 from omnibase_infra.validation.demo_loop_gate import (
     DemoLoopGate,
     format_result,
-    main,
 )
 from omnibase_infra.validation.enums.enum_assertion_status import EnumAssertionStatus
 
@@ -307,7 +306,6 @@ __all__: list[str] = [
     "lint_contract_file",  # Lint single contract file
     "lint_contracts_ci",  # CI contract linting
     "lint_contracts_in_directory",  # Directory contract linting
-    "main",  # Demo loop gate CLI entry point (OMN-2297)
     "validate_all",  # Re-export from omnibase_core
     "validate_any_types",  # Any type validation (OMN-1276)
     "validate_any_types_ci",  # Any type CI validation (OMN-1276)
