@@ -27,6 +27,7 @@ Related:
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 
 from omnibase_infra.utils.util_llm_response_redaction import redact_llm_response
 from omnibase_spi.contracts.measurement.contract_llm_call_metrics import (
@@ -88,7 +89,7 @@ def _estimate_tokens_from_text(text: str | None) -> int:
 
 
 def normalize_llm_usage(
-    raw_response: dict[str, object],
+    raw_response: Mapping[str, object],
     *,
     provider: str = "openai_compatible",
     generated_text: str | None = None,

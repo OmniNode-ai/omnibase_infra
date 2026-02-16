@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Mapping
 from copy import deepcopy
 
 logger = logging.getLogger(__name__)
@@ -124,7 +125,7 @@ def _redact_tool_calls(
 
 
 def redact_llm_response(
-    raw_response: dict[str, object],
+    raw_response: Mapping[str, object],
 ) -> dict[str, object]:
     """Redact sensitive data from a raw LLM API response.
 
