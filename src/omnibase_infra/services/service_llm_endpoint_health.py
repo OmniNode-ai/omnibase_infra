@@ -1,0 +1,438 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2025 OmniNode Team
+"""LLM Endpoint Health Checker Service.
+
+Probes configured local LLM endpoints at a configurable interval and maintains
+an in-memory status map with availability, latency, and last-check timestamps.
+Each probe cycle optionally emits a health event to Kafka for downstream
+consumers (dashboards, alerting, orchestrators).
+
+The service applies the ``MixinAsyncCircuitBreaker`` pattern per endpoint so
+that a persistently-down endpoint is quickly circuit-broken rather than
+consuming probe resources on every tick.
+
+Architecture:
+    - One circuit breaker **per endpoint** (independent failure tracking)
+    - Probes hit ``GET /health`` first; if that returns non-200, falls back
+      to ``GET /v1/models`` (vLLM-style discovery)
+    - Results are stored in a dict keyed by endpoint URL
+    - An optional ``ProtocolEventBusLike`` dependency enables Kafka emission
+
+Topic:
+    ``onex.evt.omnibase-infra.llm-endpoint-health.v1``
+
+Related:
+    - OMN-2249: SLO profiling baselines that inform health thresholds
+    - OMN-2250: CIDR allowlist and HMAC signing for LLM HTTP transport
+    - MixinAsyncCircuitBreaker: Circuit breaker pattern
+
+.. versionadded:: 0.9.0
+    Part of OMN-2255 LLM endpoint health checker.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+from uuid import UUID
+
+import httpx
+
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.mixins.mixin_async_circuit_breaker import MixinAsyncCircuitBreaker
+from omnibase_infra.models.health.model_llm_endpoint_health_config import (
+    ModelLlmEndpointHealthConfig,
+)
+from omnibase_infra.models.health.model_llm_endpoint_health_event import (
+    ModelLlmEndpointHealthEvent,
+)
+from omnibase_infra.models.health.model_llm_endpoint_status import (
+    ModelLlmEndpointStatus,
+)
+from omnibase_infra.utils.correlation import generate_correlation_id
+
+if TYPE_CHECKING:
+    from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Topic constant
+# ---------------------------------------------------------------------------
+TOPIC_LLM_ENDPOINT_HEALTH: str = "onex.evt.omnibase-infra.llm-endpoint-health.v1"
+"""Canonical topic for LLM endpoint health events."""
+
+
+# ---------------------------------------------------------------------------
+# Per-endpoint circuit breaker wrapper
+# ---------------------------------------------------------------------------
+class EndpointCircuitBreaker(MixinAsyncCircuitBreaker):
+    """Thin wrapper that gives each endpoint its own circuit breaker state.
+
+    ``MixinAsyncCircuitBreaker`` stores state on ``self``, so we need one
+    instance per endpoint to isolate failure counts.
+    """
+
+    def __init__(
+        self,
+        endpoint_name: str,
+        threshold: int,
+        reset_timeout: float,
+    ) -> None:
+        self._init_circuit_breaker(
+            threshold=threshold,
+            reset_timeout=reset_timeout,
+            service_name=f"llm-endpoint.{endpoint_name}",
+            transport_type=EnumInfraTransportType.HTTP,
+            half_open_successes=1,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Service
+# ---------------------------------------------------------------------------
+class ServiceLlmEndpointHealth:
+    """Probes local LLM endpoints and tracks availability.
+
+    Usage::
+
+        config = ModelLlmEndpointHealthConfig(
+            endpoints={
+                "coder-14b": "http://192.168.86.201:8000",
+                "qwen-72b":  "http://192.168.86.200:8100",
+            },
+            probe_interval_seconds=30.0,
+        )
+        svc = ServiceLlmEndpointHealth(config=config, event_bus=bus)
+        await svc.start()       # launches background probe loop
+        ...
+        statuses = svc.get_status()  # read current status map
+        await svc.stop()        # cancels background loop
+
+    The service can also be used without ``start``/``stop`` by calling
+    ``probe_all`` directly for one-shot health checks.
+    """
+
+    def __init__(
+        self,
+        config: ModelLlmEndpointHealthConfig,
+        event_bus: ProtocolEventBusLike | None = None,
+    ) -> None:
+        """Initialize the health checker.
+
+        Args:
+            config: Endpoint configuration and probe settings.
+            event_bus: Optional event bus for emitting health events.
+                If ``None``, events are not emitted (probe-only mode).
+        """
+        self._config = config
+        self._event_bus = event_bus
+
+        # In-memory status map: name -> latest status
+        self._status_map: dict[str, ModelLlmEndpointStatus] = {}
+
+        # Per-endpoint circuit breakers
+        self._circuit_breakers: dict[str, EndpointCircuitBreaker] = {}
+        for name in config.endpoints:
+            self._circuit_breakers[name] = EndpointCircuitBreaker(
+                endpoint_name=name,
+                threshold=config.circuit_breaker_threshold,
+                reset_timeout=config.circuit_breaker_reset_timeout,
+            )
+
+        # Background task handle
+        self._probe_task: asyncio.Task[None] | None = None
+        self._running = False
+
+    # -- Public API ---------------------------------------------------------
+
+    @property
+    def is_running(self) -> bool:
+        """Return ``True`` if the background probe loop is active."""
+        return self._running
+
+    def get_status(self) -> dict[str, ModelLlmEndpointStatus]:
+        """Return the current in-memory status map (name -> status).
+
+        Returns:
+            Shallow copy of the status map so callers cannot mutate
+            internal state.
+        """
+        return dict(self._status_map)
+
+    def get_endpoint_status(self, name: str) -> ModelLlmEndpointStatus | None:
+        """Return the status for a single endpoint by logical name.
+
+        Args:
+            name: Logical endpoint name (e.g. ``"coder-14b"``).
+
+        Returns:
+            The latest status, or ``None`` if not yet probed.
+        """
+        return self._status_map.get(name)
+
+    async def start(self) -> None:
+        """Start the background probe loop.
+
+        Idempotent -- calling ``start`` on a running service is a no-op.
+        """
+        if self._running:
+            logger.debug("ServiceLlmEndpointHealth already running, skipping start")
+            return
+
+        self._running = True
+        self._probe_task = asyncio.create_task(
+            self._probe_loop(), name="llm-endpoint-health-probe"
+        )
+        logger.info(
+            "ServiceLlmEndpointHealth started",
+            extra={
+                "endpoint_count": len(self._config.endpoints),
+                "probe_interval_seconds": self._config.probe_interval_seconds,
+            },
+        )
+
+    async def stop(self) -> None:
+        """Stop the background probe loop gracefully.
+
+        Idempotent -- calling ``stop`` on a stopped service is a no-op.
+        """
+        if not self._running:
+            logger.debug("ServiceLlmEndpointHealth already stopped, skipping stop")
+            return
+
+        self._running = False
+        if self._probe_task is not None:
+            self._probe_task.cancel()
+            try:
+                await self._probe_task
+            except asyncio.CancelledError:
+                pass
+            self._probe_task = None
+
+        logger.info("ServiceLlmEndpointHealth stopped")
+
+    async def probe_all(self) -> dict[str, ModelLlmEndpointStatus]:
+        """Run a single probe cycle across all configured endpoints.
+
+        This is the core probe method. It can be called directly for
+        one-shot health checks or is invoked repeatedly by the background
+        loop.
+
+        Returns:
+            Updated status map after probing all endpoints.
+        """
+        correlation_id = generate_correlation_id()
+        results: list[ModelLlmEndpointStatus] = []
+
+        for name, url in self._config.endpoints.items():
+            status = await self._probe_endpoint(name, url, correlation_id)
+            self._status_map[name] = status
+            results.append(status)
+
+        # Emit health event if event bus is available
+        if self._event_bus is not None and results:
+            await self._emit_health_event(
+                results=tuple(results),
+                correlation_id=correlation_id,
+            )
+
+        return dict(self._status_map)
+
+    # -- Internal -----------------------------------------------------------
+
+    async def _probe_loop(self) -> None:
+        """Background loop that probes endpoints at the configured interval."""
+        while self._running:
+            try:
+                await self.probe_all()
+            except Exception:
+                logger.exception("Unexpected error in probe loop")
+            try:
+                await asyncio.sleep(self._config.probe_interval_seconds)
+            except asyncio.CancelledError:
+                break
+
+    async def _probe_endpoint(
+        self,
+        name: str,
+        url: str,
+        correlation_id: UUID,
+    ) -> ModelLlmEndpointStatus:
+        """Probe a single endpoint with circuit breaker protection.
+
+        Tries ``GET /health`` first, then falls back to ``GET /v1/models``.
+
+        Args:
+            name: Logical endpoint name.
+            url: Base URL (e.g. ``http://192.168.86.201:8000``).
+            correlation_id: Correlation ID for tracing.
+
+        Returns:
+            A ``ModelLlmEndpointStatus`` snapshot.
+        """
+        cb = self._circuit_breakers[name]
+        now = datetime.now(UTC)
+
+        # Check circuit breaker
+        try:
+            async with cb._circuit_breaker_lock:
+                await cb._check_circuit_breaker(
+                    operation="probe_health",
+                    correlation_id=correlation_id,
+                )
+        except InfraUnavailableError:
+            cb_state = cb._get_circuit_breaker_state()
+            return ModelLlmEndpointStatus(
+                url=url,
+                name=name,
+                available=False,
+                last_check=now,
+                latency_ms=-1.0,
+                error="Circuit breaker open",
+                circuit_state=str(cb_state.get("state", "open")),
+            )
+
+        # Probe the endpoint
+        start_ns = time.perf_counter_ns()
+        try:
+            available, error = await self._http_probe(url)
+            elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
+
+            if available:
+                # Record success with circuit breaker
+                async with cb._circuit_breaker_lock:
+                    await cb._reset_circuit_breaker()
+            else:
+                # Record failure with circuit breaker
+                async with cb._circuit_breaker_lock:
+                    await cb._record_circuit_failure(
+                        operation="probe_health",
+                        correlation_id=correlation_id,
+                    )
+
+            cb_state = cb._get_circuit_breaker_state()
+            return ModelLlmEndpointStatus(
+                url=url,
+                name=name,
+                available=available,
+                last_check=datetime.now(UTC),
+                latency_ms=round(elapsed_ms, 2) if available else -1.0,
+                error=error,
+                circuit_state=str(cb_state.get("state", "closed")),
+            )
+
+        except Exception as exc:
+            # Record failure with circuit breaker
+            async with cb._circuit_breaker_lock:
+                await cb._record_circuit_failure(
+                    operation="probe_health",
+                    correlation_id=correlation_id,
+                )
+
+            cb_state = cb._get_circuit_breaker_state()
+            error_msg = f"{type(exc).__name__}: {exc}"
+            logger.warning(
+                "Probe failed for %s (%s): %s",
+                name,
+                url,
+                error_msg,
+                extra={"correlation_id": str(correlation_id)},
+            )
+            return ModelLlmEndpointStatus(
+                url=url,
+                name=name,
+                available=False,
+                last_check=datetime.now(UTC),
+                latency_ms=-1.0,
+                error=error_msg,
+                circuit_state=str(cb_state.get("state", "closed")),
+            )
+
+    async def _http_probe(self, base_url: str) -> tuple[bool, str]:
+        """Perform the HTTP probe against an endpoint.
+
+        Tries ``GET /health`` first.  If that returns a non-2xx status,
+        falls back to ``GET /v1/models`` (vLLM model listing).
+
+        Args:
+            base_url: The endpoint base URL (no trailing slash).
+
+        Returns:
+            ``(available, error)`` where *available* is ``True`` on
+            success and *error* is an empty string, or ``False`` with
+            a human-readable error description.
+        """
+        timeout = httpx.Timeout(self._config.probe_timeout_seconds)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            # Primary probe: /health
+            try:
+                resp = await client.get(f"{base_url.rstrip('/')}/health")
+                if resp.status_code < 400:
+                    return True, ""
+            except httpx.HTTPError:
+                pass  # Fall through to fallback probe
+
+            # Fallback probe: /v1/models (vLLM-style)
+            try:
+                resp = await client.get(f"{base_url.rstrip('/')}/v1/models")
+                if resp.status_code < 400:
+                    return True, ""
+                return False, f"HTTP {resp.status_code} from /v1/models"
+            except httpx.HTTPError as exc:
+                return False, f"Connection failed: {type(exc).__name__}"
+
+    async def _emit_health_event(
+        self,
+        results: tuple[ModelLlmEndpointStatus, ...],
+        correlation_id: UUID,
+    ) -> None:
+        """Emit an LLM endpoint health event to the event bus.
+
+        Args:
+            results: Tuple of endpoint status snapshots.
+            correlation_id: Correlation ID for tracing.
+        """
+        if self._event_bus is None:
+            return
+
+        event = ModelLlmEndpointHealthEvent(
+            timestamp=datetime.now(UTC),
+            endpoints=results,
+            correlation_id=correlation_id,
+        )
+
+        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+            payload=event,
+            correlation_id=correlation_id,
+            event_type="llm-endpoint-health",
+            source_tool="ServiceLlmEndpointHealth",
+        )
+
+        try:
+            await self._event_bus.publish_envelope(
+                envelope=envelope,  # type: ignore[arg-type]
+                topic=TOPIC_LLM_ENDPOINT_HEALTH,
+            )
+        except Exception:
+            # Health event emission failure should not crash the probe loop.
+            # Log and continue -- the in-memory status map is still updated.
+            logger.exception(
+                "Failed to emit LLM endpoint health event",
+                extra={"correlation_id": str(correlation_id)},
+            )
+
+
+__all__: list[str] = [
+    "EndpointCircuitBreaker",
+    "ModelLlmEndpointHealthConfig",
+    "ModelLlmEndpointHealthEvent",
+    "ModelLlmEndpointStatus",
+    "ServiceLlmEndpointHealth",
+    "TOPIC_LLM_ENDPOINT_HEALTH",
+]
