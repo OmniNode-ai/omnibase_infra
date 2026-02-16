@@ -416,7 +416,7 @@ class ServiceLlmEndpointHealth:
 
         try:
             await self._event_bus.publish_envelope(
-                envelope=envelope,  # type: ignore[arg-type]
+                envelope=envelope,
                 topic=TOPIC_LLM_ENDPOINT_HEALTH,
             )
         except Exception:
