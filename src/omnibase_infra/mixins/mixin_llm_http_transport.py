@@ -183,6 +183,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
     #: module import require a process restart to take effect. This differs
     #: from ``LOCAL_LLM_SHARED_SECRET`` which is read per-call to support
     #: runtime secret rotation.
+    # Frozen at import time; env var changes require process restart.
     LOCAL_LLM_CIDRS: ClassVar[tuple[IPv4Network, ...]] = _parse_cidr_allowlist()
 
     #: Environment variable name for the HMAC shared secret.
@@ -602,6 +603,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         # ── Pre-flight security checks (fail-closed) ────────────────
         # These run BEFORE any HTTP call to enforce the local trust boundary.
         await self._validate_endpoint_allowlist(url, correlation_id)
+        # Intentionally computed once before the retry loop; see Known Limitations in _compute_hmac_signature.
         hmac_signature = self._compute_hmac_signature(payload, correlation_id)
 
         operation = f"llm_http_call:{url}"
@@ -617,6 +619,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                 await self._check_circuit_if_enabled(operation, correlation_id)
 
                 # Make HTTP POST with HMAC signature header
+                # headers dict intentionally overrides any default HMAC_HEADER key on the client.
                 response = await client.post(
                     url,
                     json=payload,
