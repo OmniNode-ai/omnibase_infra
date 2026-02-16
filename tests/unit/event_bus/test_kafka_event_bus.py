@@ -24,10 +24,12 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    ProtocolConfigurationError,
 )
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.utils.util_consumer_group import KAFKA_CONSUMER_GROUP_MAX_LENGTH
 from tests.conftest import make_test_node_identity
 
 # Test constants - use these for assertions to avoid hardcoded values
@@ -1692,6 +1694,72 @@ class TestKafkaEventBusInstanceDiscriminator:
             call_kwargs = consumer_cls.call_args
             # Instance discriminator inserted between base and topic suffix
             assert call_kwargs.kwargs["group_id"] == "my-group.__i.c1.__t.events"
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_instance_id_raises_protocol_configuration_error(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that whitespace-only instance_id raises ProtocolConfigurationError.
+
+        apply_instance_discriminator() raises ValueError for whitespace-only
+        IDs, but EventBusKafka should normalize this into a
+        ProtocolConfigurationError with proper error context.
+        """
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id="   ",
+            )
+            event_bus = EventBusKafka(config=config)
+
+            with pytest.raises(ProtocolConfigurationError, match="KAFKA_INSTANCE_ID"):
+                await event_bus._start_consumer_for_topic("events", "my-group")
+
+    @pytest.mark.asyncio
+    async def test_effective_group_id_enforces_max_length(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that effective_group_id does not exceed Kafka's 255-char limit.
+
+        When base_group_id + instance discriminator + topic suffix exceed
+        255 characters, the final ID must be truncated with a hash suffix.
+        """
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id="b" * 20,
+            )
+            event_bus = EventBusKafka(config=config)
+
+            # Long group_id + instance_id + topic suffix should exceed 255
+            long_group_id = "a" * 230
+            await event_bus._start_consumer_for_topic("events", long_group_id)
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            assert (
+                len(call_kwargs.kwargs["group_id"]) <= KAFKA_CONSUMER_GROUP_MAX_LENGTH
+            )
 
 
 class TestKafkaEventBusStartConsuming:

@@ -187,6 +187,7 @@ Protocol Compatibility:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import random
 import re
@@ -220,6 +221,7 @@ from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.observability.wiring_health import MixinEmissionCounter
 from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
+from omnibase_infra.utils.util_consumer_group import KAFKA_CONSUMER_GROUP_MAX_LENGTH
 
 logger = logging.getLogger(__name__)
 
@@ -1178,11 +1180,37 @@ class EventBusKafka(
         # instance rather than rebalancing between them. When instance_id is
         # None (default), this is a no-op and single-container behavior is
         # preserved.
-        instance_discriminated_id = apply_instance_discriminator(
-            base_group_id, self._config.instance_id
-        )
+        try:
+            instance_discriminated_id = apply_instance_discriminator(
+                base_group_id, self._config.instance_id
+            )
+        except ValueError as e:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="start_consumer",
+                target_name=f"kafka.{topic}",
+            )
+            raise ProtocolConfigurationError(
+                f"Invalid KAFKA_INSTANCE_ID: {self._config.instance_id!r}",
+                context=context,
+                parameter="instance_id",
+                value=self._config.instance_id,
+            ) from e
 
         effective_group_id = f"{instance_discriminated_id}{topic_suffix}"
+
+        # Enforce Kafka's 255-char group_id limit on the *final* ID (after
+        # both instance discriminator and topic suffix have been applied).
+        # apply_instance_discriminator() enforces the limit on its own output,
+        # but the topic suffix added above can push the total over the max.
+        if len(effective_group_id) > KAFKA_CONSUMER_GROUP_MAX_LENGTH:
+            hash_input = f"{base_group_id}|{self._config.instance_id or ''}|{topic}"
+            hash_suffix = hashlib.sha256(hash_input.encode()).hexdigest()[:8]
+            max_prefix_length = KAFKA_CONSUMER_GROUP_MAX_LENGTH - 9
+            effective_group_id = (
+                f"{effective_group_id[:max_prefix_length]}_{hash_suffix}"
+            )
 
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(
