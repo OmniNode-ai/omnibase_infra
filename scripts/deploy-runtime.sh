@@ -5,11 +5,11 @@
 # deploy-runtime.sh -- Stable runtime deployment for omnibase_infra
 #
 # Rsyncs the current repository to a versioned deployment root
-# (~/.omnibase/infra/deployed/{version}/{git-sha}/), then runs
-# docker compose from that stable location. This eliminates the
-# directory-derived compose project name collision that occurs when
-# multiple repo copies (omnibase_infra2, omnibase_infra4, etc.) all
-# share the same compose project name.
+# (~/.omnibase/infra/deployed/{version}/), then runs docker compose
+# from that stable location. This eliminates the directory-derived
+# compose project name collision that occurs when multiple repo
+# copies (omnibase_infra2, omnibase_infra4, etc.) all share the
+# same compose project name.
 #
 # Pattern: real rsync copies (not symlinks), versioned directories,
 # dry-run by default.
@@ -110,7 +110,7 @@ usage() {
     cat <<EOF
 ${SCRIPT_NAME} v${SCRIPT_VERSION} -- Stable runtime deployment for omnibase_infra
 
-Rsyncs the current repo to ~/.omnibase/infra/deployed/{version}/{git-sha}/,
+Rsyncs the current repo to ~/.omnibase/infra/deployed/{version}/,
 then runs docker compose from that stable location.
 
 USAGE
@@ -119,7 +119,7 @@ USAGE
 OPTIONS
     (none)              Dry-run mode (default). Preview what would be deployed.
     --execute           Actually deploy: rsync, write registry, build images.
-    --force             Required to overwrite an existing version+sha directory.
+    --force             Required to overwrite an existing version directory.
     --restart           Restart runtime containers after build (requires --execute).
     --profile <name>    Docker compose profile (default: runtime).
     --print-compose-cmd Print exact compose commands without executing, then exit.
@@ -130,20 +130,19 @@ DEPLOYMENT ROOT
     +-- .deploy.lock/                       mkdir-based concurrency guard
     +-- registry.json                       tracks active deployment
     +-- deployed/
-        +-- {version}/
-            +-- {git-sha}/                  immutable build directory
-                +-- pyproject.toml
-                +-- poetry.lock
-                +-- src/omnibase_infra/
-                +-- contracts/
-                +-- docker/
-                    +-- docker-compose.infra.yml
-                    +-- Dockerfile.runtime
-                    +-- entrypoint-runtime.sh
-                    +-- .env                preserved across deploys
-                    +-- .env.local          preserved (user overrides)
-                    +-- certs/              preserved (TLS certs)
-                    +-- migrations/forward/
+        +-- {version}/                      build directory
+            +-- pyproject.toml
+            +-- uv.lock
+            +-- src/omnibase_infra/
+            +-- contracts/
+            +-- docker/
+                +-- docker-compose.infra.yml
+                +-- Dockerfile.runtime
+                +-- entrypoint-runtime.sh
+                +-- .env                    preserved across deploys
+                +-- .env.local              preserved (user overrides)
+                +-- certs/                  preserved (TLS certs)
+                +-- migrations/forward/
 
 EXAMPLES
     # Preview what would be deployed
@@ -155,7 +154,7 @@ EXAMPLES
     # Deploy, build, and restart containers
     ${SCRIPT_NAME} --execute --restart
 
-    # Redeploy same version+sha (overwrite)
+    # Redeploy same version (overwrite)
     ${SCRIPT_NAME} --execute --force
 
     # Print compose commands for manual use
@@ -323,7 +322,7 @@ validate_repo_structure() {
     local missing=()
 
     [[ -f "${repo_root}/pyproject.toml" ]]                          || missing+=("pyproject.toml")
-    [[ -f "${repo_root}/poetry.lock" ]]                             || missing+=("poetry.lock")
+    [[ -f "${repo_root}/uv.lock" ]]                                 || missing+=("uv.lock")
     [[ -d "${repo_root}/src/omnibase_infra" ]]                      || missing+=("src/omnibase_infra/")
     [[ -d "${repo_root}/contracts" ]]                                || missing+=("contracts/")
     [[ -d "${repo_root}/docker" ]]                                   || missing+=("docker/")
@@ -347,18 +346,18 @@ validate_repo_structure() {
 # =============================================================================
 
 read_version() {
-    # Extract the project version from pyproject.toml [tool.poetry] section.
+    # Extract the project version from pyproject.toml [project] section (PEP 621).
     local repo_root="$1"
     local version
 
-    # Extract version from the [tool.poetry] section of pyproject.toml.
+    # Extract version from the [project] section of pyproject.toml.
     # A naive grep -m1 '^version' could match a version key in any TOML
     # section (e.g. a dependency table).  This awk approach activates only
-    # inside [tool.poetry] and deactivates when the next section header
+    # inside [project] and deactivates when the next section header
     # is reached, ensuring we read the project version.
     version="$(awk '
-        /^\[tool\.poetry\]/ { in_section=1; next }
-        /^\[/               { in_section=0 }
+        /^\[project\]/ { in_section=1; next }
+        /^\[/          { in_section=0 }
         in_section && /^version[[:space:]]*=/ {
             gsub(/.*=[[:space:]]*"/, "");
             gsub(/".*/, "");
@@ -368,7 +367,7 @@ read_version() {
     ' "${repo_root}/pyproject.toml")"
 
     if [[ -z "${version}" ]]; then
-        log_error "Could not read version from pyproject.toml [tool.poetry] section"
+        log_error "Could not read version from pyproject.toml [project] section"
         exit 1
     fi
 
@@ -376,12 +375,10 @@ read_version() {
 }
 
 read_git_sha() {
-    # Read the 12-character abbreviated git SHA of HEAD.
+    # Read the 12-character abbreviated git SHA of HEAD for VCS_REF labeling.
     local repo_root="$1"
     local sha
 
-    # 12-char SHA prefix for deployment directory naming. 7-char prefixes risk
-    # collisions even in moderately sized repos; 12 chars is effectively unique.
     sha="$(git -C "${repo_root}" rev-parse --short=12 HEAD 2>/dev/null || true)"
 
     if [[ -z "${sha}" ]]; then
@@ -548,12 +545,6 @@ cleanup_on_exit() {
         if [[ "${active_path}" != "${DEPLOY_DIR_TO_CLEANUP}" ]]; then
             log_warn "Cleaning up partial deployment: ${DEPLOY_DIR_TO_CLEANUP}"
             rm -rf "${DEPLOY_DIR_TO_CLEANUP}" 2>/dev/null || true
-            # Remove empty parent version directory if this was the only SHA
-            local parent_dir
-            parent_dir="$(dirname "${DEPLOY_DIR_TO_CLEANUP}")"
-            if [[ -d "${parent_dir}" ]] && [[ -z "$(ls -A "${parent_dir}" 2>/dev/null)" ]]; then
-                rmdir "${parent_dir}" 2>/dev/null || true
-            fi
         fi
     fi
 
@@ -581,18 +572,14 @@ prune_old_deployments() {
         active_path="$(jq -r '.deploy_path // empty' "${REGISTRY_FILE}" 2>/dev/null || true)"
     fi
 
-    # Collect all deployment directories (version/sha pairs) sorted by
-    # modification time, newest first. Each entry is a full path like
-    # ~/.omnibase/infra/deployed/1.2.3/abc123def456/
+    # Collect all deployment directories sorted by modification time,
+    # newest first. Each entry is a full path like
+    # ~/.omnibase/infra/deployed/1.2.3/
     local all_deployments=()
     local version_dir
     for version_dir in "${deployed_root}"/*/; do
         [[ -d "${version_dir}" ]] || continue
-        local sha_dir
-        for sha_dir in "${version_dir}"*/; do
-            [[ -d "${sha_dir}" ]] || continue
-            all_deployments+=("${sha_dir%/}")
-        done
+        all_deployments+=("${version_dir%/}")
     done
 
     # Sort by modification time (newest first) using stat.
@@ -643,14 +630,6 @@ prune_old_deployments() {
         log_info "  Removing old deployment: ${deploy_dir}"
         rm -rf "${deploy_dir}"
         pruned=$((pruned + 1))
-
-        # Remove empty parent version directory
-        local parent_dir
-        parent_dir="$(dirname "${deploy_dir}")"
-        if [[ -d "${parent_dir}" ]] && [[ -z "$(ls -A "${parent_dir}" 2>/dev/null)" ]]; then
-            log_info "  Removing empty version directory: ${parent_dir}"
-            rmdir "${parent_dir}" 2>/dev/null || true
-        fi
     done
 
     log_info "Pruned ${pruned} old deployment(s). Kept ${kept}."
@@ -674,7 +653,7 @@ guard_existing_deployment() {
             log_error "Deployment directory already exists:"
             log_error "  ${deploy_target}"
             log_error ""
-            log_error "This version+sha has already been deployed."
+            log_error "This version has already been deployed."
             log_error "To overwrite, re-run with --force:"
             log_error "  ${SCRIPT_NAME} --execute --force"
             exit 1
@@ -749,12 +728,12 @@ sync_files() {
 
     mkdir -p "${deploy_target}/docker"
 
-    # 1. Root files (pyproject.toml, poetry.lock, README.md, LICENSE)
+    # 1. Root files (pyproject.toml, uv.lock, README.md, LICENSE)
     log_info "Syncing root files..."
-    log_cmd "rsync pyproject.toml, poetry.lock, README.md, LICENSE"
+    log_cmd "rsync pyproject.toml, uv.lock, README.md, LICENSE"
     rsync -a \
         "${repo_root}/pyproject.toml" \
-        "${repo_root}/poetry.lock" \
+        "${repo_root}/uv.lock" \
         "${deploy_target}/"
 
     # Copy README.md and LICENSE if they exist (optional files)
@@ -1246,13 +1225,11 @@ main() {
     # intentionally rejected to ensure only tested releases reach production.
     if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         log_error "Invalid version format: '${version}'"
-        log_error "Expected semantic version (e.g., 1.2.3). Check pyproject.toml [tool.poetry] version."
+        log_error "Expected semantic version (e.g., 1.2.3). Check pyproject.toml [project] version."
         exit 1
     fi
 
-    # Validate git SHA format before using it in directory path construction.
-    # A malformed SHA could create unexpected directory structures or indicate
-    # a corrupted git state.
+    # Validate git SHA format for VCS_REF image labeling.
     if [[ ! "${git_sha}" =~ ^[0-9a-f]+$ ]]; then
         log_error "Invalid git SHA format: '${git_sha}'"
         log_error "Expected lowercase hex string. Is the git repository corrupted?"
@@ -1264,7 +1241,7 @@ main() {
     check_git_dirty "${repo_root}"
 
     # Compute paths
-    local deploy_target="${DEPLOY_ROOT}/deployed/${version}/${git_sha}"
+    local deploy_target="${DEPLOY_ROOT}/deployed/${version}"
     local compose_project="omnibase-infra-${COMPOSE_PROFILE}"
 
     # --print-compose-cmd: show commands and exit
