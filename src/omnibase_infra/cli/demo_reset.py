@@ -640,7 +640,6 @@ class DemoResetEngine:
                     for tp, future in futures.items():
                         try:
                             future.result(timeout=10)
-                            topic_str = f"{tp.topic}[{tp.partition}]"
                             if tp.topic not in purged:
                                 purged.append(tp.topic)
                         except Exception as exc:
