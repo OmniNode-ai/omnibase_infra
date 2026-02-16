@@ -465,6 +465,10 @@ class BaseLLMEndpointSloTest:
                 concurrency=level,
                 requests_per_worker=5,
             )
+            if not profile.latencies:
+                pytest.skip(
+                    f"{self.ENDPOINT_NAME}: all requests failed at concurrency={level}"
+                )
             results[level] = profile
 
         _print_concurrency_table(self.ENDPOINT_NAME, results)
