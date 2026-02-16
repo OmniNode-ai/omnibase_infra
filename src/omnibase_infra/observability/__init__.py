@@ -114,7 +114,9 @@ from omnibase_infra.observability.models import (
     ModelLoggingSinkConfig,
     ModelMetricsSinkConfig,
 )
-from omnibase_infra.observability.pipeline_alert_bridge import PipelineAlertBridge
+from omnibase_infra.observability.pipeline_alert_bridge import (
+    PipelineAlertBridge,
+)
 from omnibase_infra.observability.sinks import (
     SinkLoggingStructured,
     SinkMetricsPrometheus,

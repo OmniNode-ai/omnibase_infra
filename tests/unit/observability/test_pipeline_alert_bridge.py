@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
-from uuid import UUID, uuid4
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -32,7 +32,9 @@ from omnibase_infra.handlers.models.model_slack_alert import (
     ModelSlackAlert,
     ModelSlackAlertResult,
 )
-from omnibase_infra.observability.pipeline_alert_bridge import PipelineAlertBridge
+from omnibase_infra.observability.pipeline_alert_bridge import (
+    PipelineAlertBridge,
+)
 from omnibase_infra.observability.wiring_health.model_wiring_health_alert import (
     ModelWiringHealthAlert,
 )

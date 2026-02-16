@@ -19,7 +19,7 @@ Architecture:
     | DLQ Callback Hook     |---+
     +-----------------------+   |
     | Wiring Health Checker |---+---> PipelineAlertBridge ---> HandlerSlackWebhook
-    +-----------------------+   |        (rate-limited)           (Slack)
+    +-----------------------+   |        (rate-limited)                   (Slack)
     | Cold-Start Monitor    |---+
     +-----------------------+   |
     | Recovery Detector     |---+
@@ -50,6 +50,7 @@ from omnibase_infra.handlers.models.model_slack_alert import (
 from omnibase_infra.observability.wiring_health.model_wiring_health_alert import (
     ModelWiringHealthAlert,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,7 @@ class PipelineAlertBridge:
 
         # Cold-start tracking
         self._cold_start_alerted = False
+        self._cold_start_lock = asyncio.Lock()
 
         logger.info(
             "PipelineAlertBridge initialized",
@@ -136,10 +138,10 @@ class PipelineAlertBridge:
         )
 
     async def on_dlq_event(self, event: ModelDlqEvent) -> None:
-        """DLQ callback: sends Slack alert when messages are routed to DLQ.
+        """Handle DLQ callback by sending a Slack alert.
 
-        This method is designed to be registered via
-        ``event_bus.register_dlq_callback(bridge.on_dlq_event)``.
+        Designed for use with ``event_bus.register_dlq_callback(bridge.on_dlq_event)``.
+        Sends CRITICAL severity when the DLQ publish itself failed, WARNING otherwise.
 
         Args:
             event: The DLQ event containing failure context.
@@ -158,19 +160,21 @@ class PipelineAlertBridge:
         )
 
         if event.is_critical:
+            safe_dlq_error = sanitize_error_string(event.dlq_error_message or "")
             title = "DLQ Publish Failed - Message May Be Lost"
             message = (
                 f"*DLQ publish failed* for topic `{event.original_topic}`.\n"
                 f"The original message could not be preserved in the DLQ "
                 f"and may be permanently lost.\n\n"
-                f"*Error*: {event.dlq_error_type}: {event.dlq_error_message}"
+                f"*Error*: {event.dlq_error_type}: {safe_dlq_error}"
             )
         else:
+            safe_error = sanitize_error_string(event.error_message or "")
             title = "Message Routed to DLQ"
             message = (
                 f"A message from topic `{event.original_topic}` failed "
                 f"processing and was routed to DLQ `{event.dlq_topic}`.\n\n"
-                f"*Error*: {event.error_type}: {event.error_message}\n"
+                f"*Error*: {event.error_type}: {safe_error}\n"
                 f"*Retries exhausted*: {event.retry_count}"
             )
 
@@ -299,13 +303,13 @@ class PipelineAlertBridge:
         if elapsed_seconds < self._cold_start_timeout:
             return
 
-        if self._cold_start_alerted:
-            return
+        async with self._cold_start_lock:
+            if self._cold_start_alerted:
+                return
+            self._cold_start_alerted = True
 
         if not await self._check_rate_limit("cold_start"):
             return
-
-        self._cold_start_alerted = True
 
         alert = ModelSlackAlert(
             severity=EnumAlertSeverity.WARNING,
@@ -353,14 +357,17 @@ class PipelineAlertBridge:
     ) -> None:
         """Alert when a previously blocked cold-start dependency becomes available.
 
+        Only sends a recovery alert if a cold-start blocked alert was previously
+        sent. Resets the cold-start alerted flag so future blocks can be detected.
+
         Args:
             dependency_name: Name of the now-available dependency.
             correlation_id: Optional correlation ID for tracing.
         """
-        if not self._cold_start_alerted:
-            return
-
-        self._cold_start_alerted = False
+        async with self._cold_start_lock:
+            if not self._cold_start_alerted:
+                return
+            self._cold_start_alerted = False
 
         await self._send_recovery_alert(
             title=f"Cold-Start Dependency Resolved - {self._environment}",
@@ -422,6 +429,10 @@ class PipelineAlertBridge:
 
     async def _check_rate_limit(self, category: str) -> bool:
         """Check if an alert for the given category is allowed by rate limiting.
+
+        Uses a sliding window approach: timestamps older than the window are
+        pruned, and a new alert is allowed only if the count within the window
+        is below the configured maximum.
 
         Args:
             category: Alert category (e.g., "dlq", "wiring_health", "cold_start").
