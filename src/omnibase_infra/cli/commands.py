@@ -502,6 +502,118 @@ def registry_list_topics() -> None:
 
 
 # =============================================================================
+# Demo Commands (OMN-2299)
+# =============================================================================
+
+
+@cli.group()
+def demo() -> None:
+    """Demo environment management commands."""
+
+
+@demo.command("reset")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Show what would be reset without making changes.",
+)
+@click.option(
+    "--purge-topics",
+    is_flag=True,
+    default=False,
+    help="Also purge messages from demo Kafka topics.",
+)
+@click.option(
+    "--env-file",
+    default="",
+    help="Path to .env file to source before running.",
+)
+def demo_reset(dry_run: bool, purge_topics: bool, env_file: str) -> None:
+    """Reset demo environment to a clean state.
+
+    Safely resets demo-scoped resources:
+
+    \b
+    1. Clears projector state (registration_projections rows)
+    2. Deletes demo consumer groups (projector starts fresh)
+    3. Optionally purges demo topic messages (--purge-topics)
+
+    Shared infrastructure is explicitly preserved.
+    Running twice produces the same result (idempotent).
+    """
+    if env_file:
+        _load_env_for_demo(env_file)
+
+    try:
+        asyncio.run(_run_demo_reset(dry_run=dry_run, purge_topics=purge_topics))
+    except SystemExit:
+        raise
+    except Exception as e:
+        console.print(f"[red]Error: {type(e).__name__}: {e}[/red]")
+        raise SystemExit(1)
+
+
+async def _run_demo_reset(*, dry_run: bool, purge_topics: bool) -> None:
+    """Async implementation for demo reset command."""
+    from omnibase_infra.cli.demo_reset import DemoResetConfig, DemoResetEngine
+
+    config = DemoResetConfig.from_env(purge_topics=purge_topics)
+
+    if dry_run:
+        console.print("[bold yellow]DRY RUN -- no changes will be made[/bold yellow]\n")
+    else:
+        console.print("[bold red]EXECUTING demo reset...[/bold red]\n")
+
+    engine = DemoResetEngine(config)
+    report = await engine.execute(dry_run=dry_run)
+
+    # Print the formatted report
+    console.print(report.format_summary())
+
+    # Exit with error code if any actions failed
+    if report.error_count > 0:
+        raise SystemExit(1)
+
+
+def _load_env_for_demo(path: str) -> None:
+    """Load environment variables from a file for demo commands.
+
+    Simple .env parser that handles KEY=VALUE lines, ignoring comments
+    and blank lines. Does NOT override existing environment variables.
+
+    Args:
+        path: Path to the .env file.
+    """
+    from pathlib import Path
+
+    env_path = Path(path)
+    if not env_path.exists():
+        console.print(f"[yellow]Warning: env file not found: {path}[/yellow]")
+        return
+
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key.startswith("export "):
+            key = key[len("export ") :].strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        else:
+            comment_idx = value.find(" #")
+            if comment_idx != -1:
+                value = value[:comment_idx].rstrip()
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+# =============================================================================
 # Utility Functions
 # =============================================================================
 
