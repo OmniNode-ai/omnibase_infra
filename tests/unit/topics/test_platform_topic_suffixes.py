@@ -185,8 +185,8 @@ class TestIntelligenceTopicSuffixes:
             )
 
     def test_intelligence_topic_count(self) -> None:
-        """Intelligence spec registry should have 9 topics."""
-        assert len(ALL_INTELLIGENCE_TOPIC_SPECS) == 9
+        """Intelligence spec registry should have 10 topics."""
+        assert len(ALL_INTELLIGENCE_TOPIC_SPECS) == 10
 
     def test_intelligence_command_topics(self) -> None:
         """Intelligence command topics should be defined."""

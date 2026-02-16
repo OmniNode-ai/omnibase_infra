@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS llm_call_metrics (
     usage_raw JSONB,
 
     -- Provenance columns
-    input_hash VARCHAR(64),
+    input_hash VARCHAR(71),
     code_version VARCHAR(64),
     contract_version VARCHAR(64),
     source VARCHAR(255),
@@ -279,7 +279,7 @@ COMMENT ON COLUMN llm_call_metrics.usage_is_estimated IS
 COMMENT ON COLUMN llm_call_metrics.usage_raw IS
     'Redacted provider response payload as JSONB (max 64KB)';
 COMMENT ON COLUMN llm_call_metrics.input_hash IS
-    'SHA-256 hash of input for deduplication (first 64 hex chars)';
+    'SHA-256 hash of input for deduplication (sha256- prefix + 64 hex chars = 71 chars)';
 COMMENT ON COLUMN llm_call_metrics.code_version IS
     'Application code version that produced this record';
 COMMENT ON COLUMN llm_call_metrics.contract_version IS

@@ -261,6 +261,10 @@ class HandlerLlmOpenaiCompatible:
             InfraUnavailableError: On 5xx or circuit breaker open.
             ValueError: If operation_type has no known URL path.
         """
+        # Reset metrics from any previous call so that a failure in
+        # _build_usage_metrics does not leave stale metrics visible.
+        self.last_call_metrics = None
+
         if correlation_id is None:
             correlation_id = uuid4()
 
