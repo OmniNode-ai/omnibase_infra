@@ -179,11 +179,27 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
     #: Configurable via the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` environment variable
     #: (comma-separated CIDR ranges). Defaults to ``192.168.86.0/24``.
     #:
-    #: Read once at import time. Changes to the environment variable after
-    #: module import require a process restart to take effect. This differs
-    #: from ``LOCAL_LLM_SHARED_SECRET`` which is read per-call to support
-    #: runtime secret rotation.
-    # Frozen at import time; env var changes require process restart.
+    #: .. important:: Configuration reload asymmetry
+    #:
+    #:    This value is **parsed once at module import time** by
+    #:    ``_parse_cidr_allowlist()`` and stored as an immutable class variable.
+    #:    Changes to the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` environment variable
+    #:    after the module has been imported have **no effect** until the
+    #:    process is restarted.
+    #:
+    #:    This differs intentionally from ``LOCAL_LLM_SHARED_SECRET``, which
+    #:    is read from ``os.environ`` on **every call** to
+    #:    ``_compute_hmac_signature()`` so that the secret can be rotated at
+    #:    runtime (e.g., by a sidecar, operator, or orchestrator updating the
+    #:    environment) without requiring a process restart.
+    #:
+    #:    **Rationale**: CIDR allowlist changes are rare infrastructure-level
+    #:    modifications (adding or removing a network segment) that typically
+    #:    accompany a deployment or topology change -- situations where a
+    #:    process restart is already expected. In contrast, secret rotation
+    #:    is a routine security operation that should complete without service
+    #:    interruption; requiring a restart for secret rotation would create
+    #:    unnecessary downtime and discourage frequent rotation.
     LOCAL_LLM_CIDRS: ClassVar[tuple[IPv4Network, ...]] = _parse_cidr_allowlist()
 
     #: Environment variable name for the HMAC shared secret.

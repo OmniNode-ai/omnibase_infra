@@ -26,8 +26,11 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
+import math
+import re
 from collections import OrderedDict
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -36,6 +39,7 @@ import asyncpg
 
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 
 logger = logging.getLogger(__name__)
@@ -94,9 +98,23 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker_half_open_successes: Successes to close from half-open.
             query_timeout: Statement timeout for database queries in seconds.
         """
+        # Validate query_timeout before storing
+        if not math.isfinite(query_timeout) or query_timeout <= 0:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="__init__",
+            )
+            raise ProtocolConfigurationError(
+                f"query_timeout must be a finite positive number, got {query_timeout!r}",
+                context=context,
+                parameter="query_timeout",
+                value=str(query_timeout),
+            )
+
         self._pool = pool
         self._query_timeout = query_timeout
         self._dedup_cache: OrderedDict[str, bool] = OrderedDict()
+        self._dedup_lock = asyncio.Lock()
 
         # Initialize circuit breaker
         self._init_circuit_breaker(
@@ -170,10 +188,11 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         # event but keeps the two write paths decoupled -- a failure in one
         # does not affect dedup tracking in the other.
         unique_events: list[dict[str, object]] = []
-        for event in events:
-            event_id = _derive_stable_dedup_key(event)
-            if not self._is_duplicate(event_id):
-                unique_events.append(event)
+        async with self._dedup_lock:
+            for event in events:
+                event_id = _derive_stable_dedup_key(event)
+                if not self._is_duplicate(event_id):
+                    unique_events.append(event)
 
         if not unique_events:
             logger.debug(
@@ -225,7 +244,7 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                     _safe_int(event.get("completion_tokens")),
                                     _safe_int(event.get("total_tokens")),
                                     _safe_decimal(event.get("estimated_cost_usd")),
-                                    _safe_int(event.get("latency_ms")) or 0,
+                                    _safe_int_or_zero(event.get("latency_ms")),
                                     _resolve_usage_source(event),
                                     bool(event.get("usage_is_estimated", False)),
                                     _safe_jsonb(event.get("usage_raw")),
@@ -315,11 +334,12 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         # not per-event count), which is an acceptable trade-off to keep the
         # two write paths independently idempotent.
         unique_events: list[dict[str, object]] = []
-        for event in events:
-            event_id = _derive_stable_dedup_key(event)
-            dedup_key = f"agg:{event_id}"
-            if not self._is_duplicate(dedup_key):
-                unique_events.append(event)
+        async with self._dedup_lock:
+            for event in events:
+                event_id = _derive_stable_dedup_key(event)
+                dedup_key = f"agg:{event_id}"
+                if not self._is_duplicate(dedup_key):
+                    unique_events.append(event)
 
         if not unique_events:
             return 0
@@ -450,6 +470,30 @@ def _derive_stable_dedup_key(event: dict[str, object]) -> str:
     return hashlib.sha256(composite.encode("utf-8")).hexdigest()
 
 
+# Pre-compiled regex for control characters (C0 + C1 control codes).
+_CONTROL_CHAR_RE: re.Pattern[str] = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _sanitize_dimension_value(value: str) -> str:
+    """Sanitize a dimension value for use in aggregation keys.
+
+    Strips control characters and replaces colons with underscores so that
+    the ``<prefix>:<value>`` aggregation key format remains unambiguous.
+
+    Args:
+        value: Raw dimension value (e.g., model_id, session_id).
+
+    Returns:
+        Sanitized string safe for use as the value portion of an
+        aggregation key.
+    """
+    # Replace colons to avoid ambiguity with the prefix:value separator
+    sanitized = str(value).replace(":", "_")
+    # Remove control characters
+    sanitized = _CONTROL_CHAR_RE.sub("", sanitized)
+    return sanitized.strip()
+
+
 def _build_aggregation_rows(
     events: list[dict[str, object]],
 ) -> list[dict[str, object]]:
@@ -468,7 +512,7 @@ def _build_aggregation_rows(
 
     for event in events:
         cost = _safe_decimal(event.get("estimated_cost_usd")) or Decimal("0")
-        tokens = _safe_int(event.get("total_tokens")) or 0
+        tokens = _safe_int_or_zero(event.get("total_tokens"))
         is_estimated = bool(event.get("usage_is_estimated", False))
         estimated_pct = Decimal("100.00") if is_estimated else Decimal("0.00")
 
@@ -478,24 +522,32 @@ def _build_aggregation_rows(
         # Session dimension
         session_id = event.get("session_id")
         if session_id:
-            keys.append(f"{_KEY_PREFIX_SESSION}:{session_id}")
+            keys.append(
+                f"{_KEY_PREFIX_SESSION}:{_sanitize_dimension_value(str(session_id))}"
+            )
 
         # Model dimension (always present in ContractLlmCallMetrics)
         model_id = event.get("model_id")
         if model_id:
-            keys.append(f"{_KEY_PREFIX_MODEL}:{model_id}")
+            keys.append(
+                f"{_KEY_PREFIX_MODEL}:{_sanitize_dimension_value(str(model_id))}"
+            )
 
         # Repo dimension (from extensions if available)
         extensions = event.get("extensions")
         if isinstance(extensions, dict):
             repo = extensions.get("repo")
             if repo:
-                keys.append(f"{_KEY_PREFIX_REPO}:{repo}")
+                keys.append(
+                    f"{_KEY_PREFIX_REPO}:{_sanitize_dimension_value(str(repo))}"
+                )
 
             # Pattern dimension
             pattern_id = extensions.get("pattern_id")
             if pattern_id:
-                keys.append(f"{_KEY_PREFIX_PATTERN}:{pattern_id}")
+                keys.append(
+                    f"{_KEY_PREFIX_PATTERN}:{_sanitize_dimension_value(str(pattern_id))}"
+                )
 
         # Generate one row per key per window
         for key in keys:
@@ -540,6 +592,17 @@ def _safe_int(value: object) -> int | None:
         return int(str(value))
     except (ValueError, TypeError):
         return None
+
+
+def _safe_int_or_zero(value: object) -> int:
+    """Safely convert a value to int, returning 0 if None or unconvertible.
+
+    Unlike ``_safe_int(x) or 0``, this correctly preserves a legitimate
+    zero value returned by ``_safe_int`` instead of coalescing it to 0
+    via the falsy ``or`` branch.
+    """
+    result = _safe_int(value)
+    return result if result is not None else 0
 
 
 def _safe_decimal(value: object) -> Decimal | None:

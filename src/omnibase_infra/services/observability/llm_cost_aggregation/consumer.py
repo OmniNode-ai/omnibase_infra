@@ -113,8 +113,13 @@ def mask_dsn_password(dsn: str) -> str:
                 parsed.fragment,
             )
         )
-    except Exception:
+    except (ValueError, AttributeError):
         return dsn
+    except Exception:
+        logger.warning(
+            "Unexpected error masking DSN password; returning placeholder to prevent credential leak",
+        )
+        return "***DSN_MASKING_FAILED***"
 
 
 # =============================================================================
@@ -138,7 +143,7 @@ class EnumHealthStatus(StrEnum):
 class ConsumerMetrics:
     """Metrics tracking for the LLM cost aggregation consumer.
 
-    Thread-safe via asyncio lock protection.
+    Coroutine-safe via asyncio.Lock protection (single event loop only).
     """
 
     def __init__(self) -> None:

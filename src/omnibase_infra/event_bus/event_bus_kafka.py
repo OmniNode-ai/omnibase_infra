@@ -1204,13 +1204,44 @@ class EventBusKafka(
         # both instance discriminator and topic suffix have been applied).
         # apply_instance_discriminator() enforces the limit on its own output,
         # but the topic suffix added above can push the total over the max.
+        #
+        # Truncation strategy: preserve the topic suffix for debuggability.
+        #
+        # The group ID has the structure: {prefix}{topic_suffix} where the
+        # prefix is the instance-discriminated base ID and topic_suffix is
+        # ".__t.{topic}".  Naive truncation from the right destroys the
+        # topic suffix, making it impossible to tell which topic a consumer
+        # group belongs to when inspecting Kafka admin tools.
+        #
+        # Instead, we:
+        #   1. Extract the topic suffix (.__t.{topic})
+        #   2. Compute available space for the prefix: max - len(suffix) - 1 - 8
+        #      (1 for underscore separator, 8 for hash)
+        #   3. Truncate the prefix, append _<hash>, then re-append the suffix
+        #   4. If even the suffix + hash alone exceed max length, fall back to
+        #      a full hash truncation without suffix preservation
         if len(effective_group_id) > KAFKA_CONSUMER_GROUP_MAX_LENGTH:
             hash_input = f"{base_group_id}|{self._config.instance_id or ''}|{topic}"
             hash_suffix = hashlib.sha256(hash_input.encode()).hexdigest()[:8]
-            max_prefix_length = KAFKA_CONSUMER_GROUP_MAX_LENGTH - 9
-            effective_group_id = (
-                f"{effective_group_id[:max_prefix_length]}_{hash_suffix}"
+
+            # Try to preserve topic suffix for debuggability
+            # hash_overhead = 1 (underscore) + 8 (hash hex chars) = 9
+            hash_overhead = 9
+            available_for_prefix = (
+                KAFKA_CONSUMER_GROUP_MAX_LENGTH - len(topic_suffix) - hash_overhead
             )
+
+            if available_for_prefix > 0:
+                # Suffix-preserving truncation: {truncated_prefix}_{hash}{topic_suffix}
+                truncated_prefix = instance_discriminated_id[:available_for_prefix]
+                effective_group_id = f"{truncated_prefix}_{hash_suffix}{topic_suffix}"
+            else:
+                # Topic suffix + hash alone exceed max length; fall back to
+                # plain prefix truncation without suffix preservation.
+                max_prefix_length = KAFKA_CONSUMER_GROUP_MAX_LENGTH - hash_overhead
+                effective_group_id = (
+                    f"{effective_group_id[:max_prefix_length]}_{hash_suffix}"
+                )
 
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(

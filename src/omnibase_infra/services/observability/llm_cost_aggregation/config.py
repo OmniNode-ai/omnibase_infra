@@ -11,7 +11,8 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-from typing import Literal, Self
+import os
+from typing import Any, Literal, Self
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -173,6 +174,43 @@ class ConfigLlmCostAggregation(BaseSettings):
             "is considered healthy even without writes."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    # ONEX_EXCLUDE: any_type - dict[str, Any] required for pydantic mode="before" validator
+    def warn_unrecognized_env_vars(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Log warnings for environment variables matching the prefix but not a known field.
+
+        Pydantic-settings silently drops env vars that match the prefix but
+        don't correspond to a declared field (regardless of the ``extra``
+        setting).  This validator scans the process environment at startup and
+        warns about potential typos so operators can fix them before they cause
+        silent misconfiguration.
+
+        Args:
+            data: Raw input data from pydantic-settings.
+
+        Returns:
+            Unmodified data dict.
+        """
+        prefix = "OMNIBASE_INFRA_LLM_COST_"
+        known_fields = set(cls.model_fields.keys())
+
+        for env_key in os.environ:
+            if not env_key.upper().startswith(prefix):
+                continue
+            # Strip prefix and lowercase to match pydantic field naming
+            field_name = env_key[len(prefix) :].lower()
+            if field_name not in known_fields:
+                logger.warning(
+                    "Unrecognized environment variable '%s' has prefix '%s' "
+                    "but does not match any configuration field. "
+                    "Known fields: %s. Check for typos.",
+                    env_key,
+                    prefix,
+                    ", ".join(sorted(known_fields)),
+                )
+        return data
 
     @model_validator(mode="after")
     def validate_topic_configuration(self) -> Self:
