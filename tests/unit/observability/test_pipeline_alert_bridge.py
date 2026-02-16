@@ -150,8 +150,8 @@ class TestDlqToSlack:
         """Verify DLQ events trigger Slack alerts automatically."""
         await bridge.on_dlq_event(sample_dlq_event)
 
-        mock_slack_handler.handle.assert_called_once()  # type: ignore[union-attr]
-        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[union-attr]
+        mock_slack_handler.handle.assert_called_once()  # type: ignore[attr-defined]
+        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[attr-defined]
         assert alert.severity == EnumAlertSeverity.WARNING
         assert "dev.intelligence.code-analysis.v1" in alert.message
         assert alert.correlation_id == sample_dlq_event.correlation_id
@@ -166,9 +166,10 @@ class TestDlqToSlack:
         """Verify critical DLQ events (publish failure) send CRITICAL severity."""
         await bridge.on_dlq_event(critical_dlq_event)
 
-        mock_slack_handler.handle.assert_called_once()  # type: ignore[union-attr]
-        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[union-attr]
+        mock_slack_handler.handle.assert_called_once()  # type: ignore[attr-defined]
+        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[attr-defined]
         assert alert.severity == EnumAlertSeverity.CRITICAL
+        assert alert.title is not None
         assert "DLQ Publish Failed" in alert.title
         assert "lost" in alert.message.lower()
 
@@ -182,7 +183,7 @@ class TestDlqToSlack:
         """Verify all DLQ alerts include correlation_id for traceability."""
         await bridge.on_dlq_event(sample_dlq_event)
 
-        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[union-attr]
+        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[attr-defined]
         assert alert.correlation_id == sample_dlq_event.correlation_id
 
     @pytest.mark.asyncio
@@ -195,7 +196,7 @@ class TestDlqToSlack:
         """Verify DLQ alerts include essential context in details."""
         await bridge.on_dlq_event(sample_dlq_event)
 
-        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[union-attr]
+        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[attr-defined]
         assert "Environment" in alert.details
         assert "Original Topic" in alert.details
         assert "Error Type" in alert.details
@@ -225,9 +226,10 @@ class TestWiringHealthToSlack:
             correlation_id=correlation_id,
         )
 
-        mock_slack_handler.handle.assert_called_once()  # type: ignore[union-attr]
-        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[union-attr]
+        mock_slack_handler.handle.assert_called_once()  # type: ignore[attr-defined]
+        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[attr-defined]
         assert alert.severity == EnumAlertSeverity.WARNING
+        assert alert.title is not None
         assert "Wiring Health Degraded" in alert.title
         assert alert.correlation_id == correlation_id
 
@@ -243,7 +245,7 @@ class TestWiringHealthToSlack:
             alert=None,
         )
 
-        mock_slack_handler.handle.assert_not_called()  # type: ignore[union-attr]
+        mock_slack_handler.handle.assert_not_called()  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_recovery_triggers_info_alert(
@@ -258,7 +260,7 @@ class TestWiringHealthToSlack:
             is_healthy=False,
             alert=sample_wiring_alert,
         )
-        mock_slack_handler.handle.reset_mock()  # type: ignore[union-attr]
+        mock_slack_handler.handle.reset_mock()  # type: ignore[attr-defined]
 
         # Then: mark as recovered
         await bridge.on_wiring_health_check(
@@ -266,10 +268,11 @@ class TestWiringHealthToSlack:
             alert=None,
         )
 
-        mock_slack_handler.handle.assert_called_once()  # type: ignore[union-attr]
-        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[union-attr]
+        mock_slack_handler.handle.assert_called_once()  # type: ignore[attr-defined]
+        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[attr-defined]
         assert alert.severity == EnumAlertSeverity.INFO
-        assert "Recovered" in alert.title or "recovered" in alert.message.lower()
+        title_str = alert.title or ""
+        assert "Recovered" in title_str or "recovered" in alert.message.lower()
 
 
 # =============================================================================
@@ -294,13 +297,14 @@ class TestColdStartToSlack:
 
         # Before timeout: no alert
         await bridge.on_cold_start_blocked("PostgreSQL", elapsed_seconds=60.0)
-        mock_slack_handler.handle.assert_not_called()  # type: ignore[union-attr]
+        mock_slack_handler.handle.assert_not_called()  # type: ignore[attr-defined]
 
         # After timeout: alert sent
         await bridge.on_cold_start_blocked("PostgreSQL", elapsed_seconds=301.0)
-        mock_slack_handler.handle.assert_called_once()  # type: ignore[union-attr]
-        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[union-attr]
+        mock_slack_handler.handle.assert_called_once()  # type: ignore[attr-defined]
+        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[attr-defined]
         assert alert.severity == EnumAlertSeverity.WARNING
+        assert alert.title is not None
         assert "Cold-Start Blocked" in alert.title
         assert "PostgreSQL" in alert.message
 
@@ -321,7 +325,7 @@ class TestColdStartToSlack:
         await bridge.on_cold_start_blocked("PostgreSQL", elapsed_seconds=60.0)
 
         # Only one alert should be sent
-        assert mock_slack_handler.handle.call_count == 1  # type: ignore[union-attr]
+        assert mock_slack_handler.handle.call_count == 1  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_cold_start_resolved_sends_recovery(
@@ -337,14 +341,15 @@ class TestColdStartToSlack:
 
         # Trigger cold-start blocked alert
         await bridge.on_cold_start_blocked("PostgreSQL", elapsed_seconds=15.0)
-        mock_slack_handler.handle.reset_mock()  # type: ignore[union-attr]
+        mock_slack_handler.handle.reset_mock()  # type: ignore[attr-defined]
 
         # Resolve
         await bridge.on_cold_start_resolved("PostgreSQL")
 
-        mock_slack_handler.handle.assert_called_once()  # type: ignore[union-attr]
-        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[union-attr]
+        mock_slack_handler.handle.assert_called_once()  # type: ignore[attr-defined]
+        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[attr-defined]
         assert alert.severity == EnumAlertSeverity.INFO
+        assert alert.title is not None
         assert "Resolved" in alert.title
         assert "PostgreSQL" in alert.message
 
@@ -356,7 +361,7 @@ class TestColdStartToSlack:
     ) -> None:
         """Verify no recovery alert if cold-start was never blocked."""
         await bridge.on_cold_start_resolved("PostgreSQL")
-        mock_slack_handler.handle.assert_not_called()  # type: ignore[union-attr]
+        mock_slack_handler.handle.assert_not_called()  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_cold_start_includes_correlation_id(
@@ -377,7 +382,7 @@ class TestColdStartToSlack:
             correlation_id=correlation_id,
         )
 
-        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[union-attr]
+        alert: ModelSlackAlert = mock_slack_handler.handle.call_args[0][0]  # type: ignore[attr-defined]
         assert alert.correlation_id == correlation_id
 
 
@@ -416,7 +421,7 @@ class TestRateLimiting:
             )
             await bridge.on_dlq_event(event)
 
-        assert mock_slack_handler.handle.call_count == 3  # type: ignore[union-attr]
+        assert mock_slack_handler.handle.call_count == 3  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_rate_limiting_per_category(
@@ -445,7 +450,7 @@ class TestRateLimiting:
             )
             await bridge.on_dlq_event(event)
 
-        dlq_count = mock_slack_handler.handle.call_count  # type: ignore[union-attr]
+        dlq_count = mock_slack_handler.handle.call_count  # type: ignore[attr-defined]
         assert dlq_count == 2
 
         # Send wiring health alert (should be allowed - different category)
@@ -461,7 +466,7 @@ class TestRateLimiting:
         )
 
         # Total should be 2 (DLQ) + 1 (wiring health) = 3
-        assert mock_slack_handler.handle.call_count == 3  # type: ignore[union-attr]
+        assert mock_slack_handler.handle.call_count == 3  # type: ignore[attr-defined]
 
 
 # =============================================================================
@@ -557,7 +562,7 @@ class TestDlqCallbackRegistration:
         callback = bridge.on_dlq_event
         await callback(sample_dlq_event)
 
-        mock_slack_handler.handle.assert_called_once()  # type: ignore[union-attr]
+        mock_slack_handler.handle.assert_called_once()  # type: ignore[attr-defined]
 
 
 __all__: list[str] = []

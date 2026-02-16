@@ -124,7 +124,6 @@ class PipelineAlertBridge:
 
         # Cold-start tracking
         self._cold_start_alerted = False
-        self._cold_start_blocked_since: float | None = None
 
         logger.info(
             "PipelineAlertBridge initialized",
@@ -239,7 +238,6 @@ class PipelineAlertBridge:
                 )
                 return
 
-            slack_message_data = alert.to_slack_message()
             slack_alert = ModelSlackAlert(
                 severity=EnumAlertSeverity.WARNING,
                 message=alert.summary,
