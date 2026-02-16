@@ -72,7 +72,12 @@ from uuid import UUID, uuid4
 import httpx
 
 from omnibase_core.types import JsonType
-from omnibase_infra.enums import EnumLlmFinishReason, EnumLlmOperationType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumLlmFinishReason,
+    EnumLlmOperationType,
+)
 from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
 from omnibase_infra.models.model_backend_result import ModelBackendResult
 from omnibase_infra.nodes.effects.models.model_llm_function_call import (
@@ -154,9 +159,10 @@ class HandlerLlmOpenaiCompatible:
         This handler operates at the infrastructure layer with a typed
         request model (``ModelLlmInferenceRequest``) and returns a typed
         response model (``ModelLlmInferenceResponse``), bypassing
-        envelope-based dispatch entirely. This is a documented deviation
-        from the standard ONEX handler pattern because LLM inference
-        calls are direct infrastructure effects, not routed events.
+        envelope-based dispatch entirely. LLM inference calls are direct
+        infrastructure effects, not routed events. The ``handler_type``
+        and ``handler_category`` properties are still provided for
+        introspection and classification consistency.
 
     Auth Strategy:
         When a request includes ``api_key``, the handler creates a
@@ -204,6 +210,27 @@ class HandlerLlmOpenaiCompatible:
         """
         self._transport = transport
         self.last_call_metrics: ContractLlmCallMetrics | None = None
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role classification.
+
+        Returns:
+            ``EnumHandlerType.INFRA_HANDLER`` indicating this handler
+            provides infrastructure-level LLM transport, not domain
+            business logic.
+        """
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification.
+
+        Returns:
+            ``EnumHandlerTypeCategory.EFFECT`` indicating this handler
+            performs external I/O (HTTP calls to OpenAI-compatible APIs).
+        """
+        return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
         self,

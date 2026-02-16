@@ -25,6 +25,8 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
     EnumLlmFinishReason,
     EnumLlmOperationType,
 )
@@ -144,18 +146,17 @@ class TestHandlerLlmOpenaiCompatibleInit:
 
         assert handler._transport is transport
 
-    def test_no_handler_type_property(self) -> None:
-        """Handler does NOT implement ProtocolHandler/ProtocolMessageHandler.
+    def test_handler_classification_properties(self) -> None:
+        """Handler exposes handler_type and handler_category for classification.
 
-        Unlike HandlerLlmOllama, this handler operates at the infrastructure
-        layer with typed request/response models and does not expose
-        handler_type or handler_category properties.
+        Like HandlerLlmOllama, this handler provides classification properties
+        to support the handler plugin loader and dispatch infrastructure.
         """
         transport = _make_transport()
         handler = HandlerLlmOpenaiCompatible(transport)
 
-        assert not hasattr(handler, "handler_type")
-        assert not hasattr(handler, "handler_category")
+        assert handler.handler_type == EnumHandlerType.INFRA_HANDLER
+        assert handler.handler_category == EnumHandlerTypeCategory.EFFECT
 
 
 # ---------------------------------------------------------------------------

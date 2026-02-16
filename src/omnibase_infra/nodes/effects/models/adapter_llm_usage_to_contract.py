@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Converter bridging ModelLlmUsage to SPI LLM cost tracking contracts.
+"""Adapter bridging ModelLlmUsage to SPI LLM cost tracking contracts.
 
 This module provides pure functions that translate between the infra-layer
 ``ModelLlmUsage`` value object and the SPI measurement contracts:
@@ -114,7 +114,13 @@ def to_call_metrics(
     Returns:
         A frozen ``ContractLlmCallMetrics`` with token counts, cost,
         raw/normalized usage, and metadata.
+
+    Raises:
+        ValueError: If *model_id* is empty.
     """
+    if not model_id:
+        raise ValueError("model_id must be a non-empty string")
+
     total = usage.tokens_total or 0
     is_estimated = usage.usage_source == ContractEnumUsageSource.ESTIMATED
 

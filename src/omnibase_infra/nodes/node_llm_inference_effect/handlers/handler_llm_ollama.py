@@ -420,10 +420,8 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
             round(tokens_output) if isinstance(tokens_output, (int, float)) else 0
         )
         # Determine provenance: treat as API-reported only when at least
-        # one counter is a positive integer.
-        has_usage = (isinstance(tokens_input, int) and tokens_input > 0) or (
-            isinstance(tokens_output, int) and tokens_output > 0
-        )
+        # one resolved counter is positive.
+        has_usage = resolved_input > 0 or resolved_output > 0
         raw_usage_data: dict[str, object] = {
             "prompt_eval_count": raw_response.get("prompt_eval_count"),
             "eval_count": raw_response.get("eval_count"),

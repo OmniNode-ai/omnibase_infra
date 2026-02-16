@@ -19,7 +19,7 @@ Available Models:
     - ModelRegistryRequest: Registry effect input request
     - ModelRegistryResponse: Dual-backend registry operation response
 
-Converters:
+Adapters:
     - to_call_metrics: ModelLlmUsage -> ContractLlmCallMetrics
     - to_usage_normalized: ModelLlmUsage -> ContractLlmUsageNormalized
     - to_usage_raw: ModelLlmUsage -> ContractLlmUsageRaw
@@ -30,7 +30,7 @@ Note:
 """
 
 from omnibase_infra.models.model_backend_result import ModelBackendResult
-from omnibase_infra.nodes.effects.models.converter_llm_usage_to_contract import (
+from omnibase_infra.nodes.effects.models.adapter_llm_usage_to_contract import (
     to_call_metrics,
     to_usage_normalized,
     to_usage_raw,

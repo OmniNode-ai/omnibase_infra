@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Tests for the ModelLlmUsage -> SPI contract converter functions.
+"""Tests for the ModelLlmUsage -> SPI contract adapter functions.
 
 Tests cover:
 - to_usage_raw: ModelLlmUsage -> ContractLlmUsageRaw
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from omnibase_infra.nodes.effects.models.converter_llm_usage_to_contract import (
+from omnibase_infra.nodes.effects.models.adapter_llm_usage_to_contract import (
     to_call_metrics,
     to_usage_normalized,
     to_usage_raw,
@@ -159,6 +159,13 @@ class TestToUsageNormalized:
 
 class TestToCallMetrics:
     """Tests for converting ModelLlmUsage to ContractLlmCallMetrics."""
+
+    def test_to_call_metrics_empty_model_id_raises(self) -> None:
+        """to_call_metrics rejects empty model_id with ValueError."""
+        usage = ModelLlmUsage(tokens_input=10, tokens_output=5)
+
+        with pytest.raises(ValueError, match="model_id must be a non-empty string"):
+            to_call_metrics(usage, model_id="")
 
     def test_basic_conversion(self) -> None:
         """Basic conversion with required fields."""

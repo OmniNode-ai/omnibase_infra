@@ -5,8 +5,8 @@ Tests for the effects models __init__.py public exports.
 
 Tests cover:
 - Individual importability of each new LLM model class
-- Individual importability of converter functions (OMN-2318)
-- __all__ completeness for model names and converter functions
+- Individual importability of adapter functions (OMN-2318)
+- __all__ completeness for model names and adapter functions
 - All __all__ entries resolve to classes or callables
 
 OMN-2103: Phase 3 shared LLM models - export verification
@@ -64,8 +64,8 @@ class TestIndividualImports:
         assert ModelLlmUsage is not None
 
 
-class TestConverterImports:
-    """Verify converter functions are importable from effects models package."""
+class TestAdapterImports:
+    """Verify adapter functions are importable from effects models package."""
 
     def test_to_call_metrics_importable(self) -> None:
         """to_call_metrics is importable from effects models package."""
@@ -103,7 +103,7 @@ class TestAllExports:
         "ModelLlmUsage",
     )
 
-    _EXPECTED_CONVERTER_FUNCTIONS: tuple[str, ...] = (
+    _EXPECTED_ADAPTER_FUNCTIONS: tuple[str, ...] = (
         "to_call_metrics",
         "to_usage_normalized",
         "to_usage_raw",
@@ -118,13 +118,13 @@ class TestAllExports:
         for name in self._EXPECTED_NEW_MODELS:
             assert name in all_exports, f"{name} missing from __all__"
 
-    def test_all_contains_converter_functions(self) -> None:
-        """__all__ includes converter function names (OMN-2318)."""
+    def test_all_contains_adapter_functions(self) -> None:
+        """__all__ includes adapter function names (OMN-2318)."""
         import omnibase_infra.nodes.effects.models as effects_models
 
         all_exports = set(effects_models.__all__)
 
-        for name in self._EXPECTED_CONVERTER_FUNCTIONS:
+        for name in self._EXPECTED_ADAPTER_FUNCTIONS:
             assert name in all_exports, f"{name} missing from __all__"
 
     def test_all_exports_are_classes_or_callables(self) -> None:

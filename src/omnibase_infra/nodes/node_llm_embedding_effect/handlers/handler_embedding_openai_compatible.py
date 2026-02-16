@@ -241,6 +241,12 @@ def _parse_openai_usage(data: dict[str, JsonType]) -> ModelLlmUsage:
     if not isinstance(total_tokens, int):
         total_tokens = 0
 
+    # Fallback: for embeddings, if prompt_tokens is 0 but total_tokens is
+    # valid, use total_tokens.  Embedding endpoints typically report only
+    # total_tokens (== prompt_tokens); dropping it would under-report usage.
+    if prompt_tokens == 0 and total_tokens > 0:
+        prompt_tokens = total_tokens
+
     # Only mark as API-reported when at least one token counter is positive.
     # A usage dict with all-zero values is semantically equivalent to missing
     # usage data (matches handler_embedding_ollama pattern).
