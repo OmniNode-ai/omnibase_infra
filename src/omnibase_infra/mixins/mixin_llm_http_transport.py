@@ -14,11 +14,21 @@ Features:
     - Lazy httpx.AsyncClient management (create or inject)
     - Content-type validation for JSON responses (case-insensitive)
     - Correlation ID propagation on all errors
+    - CIDR allowlist validation for local LLM endpoints
+    - HMAC request signing for trust boundary enforcement
 
 Security:
     - Response bodies are sanitized via ``sanitize_error_string()`` before
       inclusion in error context or exception messages, preventing accidental
       leakage of secrets or PII through error propagation paths.
+    - CIDR allowlist (default: ``192.168.86.0/24``, configurable via
+      ``LLM_ENDPOINT_CIDR_ALLOWLIST``) restricts outbound LLM calls to the
+      local network trust boundary. Requests to IPs outside the configured
+      ranges are rejected before any HTTP call is made (fail-closed).
+    - HMAC-SHA256 request signing using the ``LOCAL_LLM_SHARED_SECRET``
+      environment variable adds an ``x-omn-node-signature`` header to all
+      outbound requests. If the secret is not configured, requests are
+      rejected (fail-closed).
 
 Design Rationale:
     This mixin extracts common HTTP transport patterns from LLM-calling nodes
@@ -42,14 +52,24 @@ See Also:
 
 .. versionadded:: 0.7.0
     Part of OMN-2104 LLM HTTP transport.
+
+.. versionchanged:: 0.8.0
+    Added CIDR allowlist and HMAC signing (OMN-2250).
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import json as json_module
 import logging
+import os
+import socket
+from ipaddress import IPv4Address, IPv4Network, ip_address
 from json import JSONDecodeError
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, ClassVar, cast
+from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
@@ -80,6 +100,42 @@ if TYPE_CHECKING:
     from omnibase_infra.handlers.models.model_retry_state import ModelRetryState
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_CIDR = "192.168.86.0/24"
+
+
+def _parse_cidr_allowlist() -> tuple[IPv4Network, ...]:
+    """Parse CIDR allowlist from the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` env var.
+
+    Parses each comma-separated value as an ``IPv4Network``. Malformed
+    entries are logged at WARNING level and skipped. If **all** entries
+    are malformed (or the env var is empty after parsing), falls back to
+    the default ``192.168.86.0/24`` and logs a warning.
+
+    Returns:
+        Tuple of parsed ``IPv4Network`` objects, never empty.
+    """
+    raw = os.environ.get("LLM_ENDPOINT_CIDR_ALLOWLIST", _DEFAULT_CIDR)
+    parsed: list[IPv4Network] = []
+    for entry in raw.split(","):
+        cidr = entry.strip()
+        if not cidr:
+            continue
+        try:
+            parsed.append(IPv4Network(cidr, strict=False))
+        except ValueError:
+            logger.warning(
+                "Skipping malformed CIDR in LLM_ENDPOINT_CIDR_ALLOWLIST: %r",
+                cidr,
+            )
+    if not parsed:
+        logger.warning(
+            "All entries in LLM_ENDPOINT_CIDR_ALLOWLIST were malformed or "
+            "empty; falling back to default %s",
+            _DEFAULT_CIDR,
+        )
+        parsed.append(IPv4Network(_DEFAULT_CIDR))
+    return tuple(parsed)
 
 
 class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
@@ -115,6 +171,26 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                 return result
         ```
     """
+
+    # ── Class-level constants ────────────────────────────────────────────
+
+    #: CIDR networks defining the local LLM trust boundary.
+    #: Only endpoints within these networks are permitted.
+    #: Configurable via the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` environment variable
+    #: (comma-separated CIDR ranges). Defaults to ``192.168.86.0/24``.
+    #:
+    #: Read once at import time. Changes to the environment variable after
+    #: module import require a process restart to take effect. This differs
+    #: from ``LOCAL_LLM_SHARED_SECRET`` which is read per-call to support
+    #: runtime secret rotation.
+    # Frozen at import time; env var changes require process restart.
+    LOCAL_LLM_CIDRS: ClassVar[tuple[IPv4Network, ...]] = _parse_cidr_allowlist()
+
+    #: Environment variable name for the HMAC shared secret.
+    LOCAL_LLM_SECRET_ENV: ClassVar[str] = "LOCAL_LLM_SHARED_SECRET"
+
+    #: HTTP header name for the HMAC signature.
+    HMAC_HEADER: ClassVar[str] = "x-omn-node-signature"
 
     # Type hints for instance attributes set by _init_llm_http_transport
     _llm_target_name: str
@@ -281,6 +357,192 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         """
         return self._llm_target_name
 
+    # ── Endpoint trust boundary ─────────────────────────────────────────
+
+    async def _validate_endpoint_allowlist(
+        self,
+        url: str,
+        correlation_id: UUID,
+    ) -> None:
+        """Validate that the URL target IP is within the local LLM CIDR allowlist.
+
+        Resolves the hostname to an IPv4 address and checks membership in
+        ``LOCAL_LLM_CIDRS`` (default: ``192.168.86.0/24``, configurable via
+        the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` environment variable). This is a
+        fail-closed check: if the hostname cannot be resolved or the IP is
+        outside all configured allowlist ranges, the request is rejected before
+        any HTTP call is made.
+
+        DNS resolution uses ``asyncio.get_running_loop().getaddrinfo()`` to
+        avoid blocking the event loop on synchronous ``socket.getaddrinfo()``.
+
+        Known Limitations:
+            There is a time-of-check-to-time-of-use (TOCTOU) gap between the
+            DNS resolution performed here and the independent DNS resolution
+            performed by httpx when the actual HTTP request is made. An attacker
+            with control over DNS responses could return a permitted IP during
+            the allowlist check and a different (malicious) IP when httpx
+            resolves the same hostname moments later.
+
+            This is acceptable for the current local-network trust boundary
+            (``192.168.86.0/24``) where DNS is resolved by a trusted local
+            resolver and endpoints are on a private LAN segment not exposed to
+            the public internet. If the trust boundary is extended to untrusted
+            networks, this method should be replaced with an approach that pins
+            the resolved IP and passes it directly to the HTTP client (e.g.,
+            via httpx transport-level address binding).
+
+        Args:
+            url: The full URL of the LLM endpoint.
+            correlation_id: Correlation ID for error context.
+
+        Raises:
+            InfraAuthenticationError: If the resolved IP is outside the
+                allowlist or the hostname cannot be resolved.
+        """
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if hostname is None:
+            ctx = self._build_error_context(f"allowlist_check:{url}", correlation_id)
+            raise InfraAuthenticationError(
+                f"Cannot extract hostname from URL for allowlist validation: {url}",
+                context=ctx,
+            )
+
+        # Resolve hostname to IP address
+        try:
+            resolved_ip = ip_address(hostname)
+        except ValueError:
+            # hostname is not an IP literal - resolve via async DNS
+            try:
+                loop = asyncio.get_running_loop()
+                resolved = await loop.getaddrinfo(
+                    hostname, None, family=socket.AF_INET, type=socket.SOCK_STREAM
+                )
+                if not resolved:
+                    ctx = self._build_error_context(
+                        f"allowlist_check:{url}", correlation_id
+                    )
+                    raise InfraAuthenticationError(
+                        f"DNS resolution returned no results for {hostname}",
+                        context=ctx,
+                    )
+                resolved_ip = ip_address(resolved[0][4][0])
+            except socket.gaierror as exc:
+                ctx = self._build_error_context(
+                    f"allowlist_check:{url}", correlation_id
+                )
+                raise InfraAuthenticationError(
+                    f"Cannot resolve hostname {hostname} for allowlist validation",
+                    context=ctx,
+                ) from exc
+
+        if not isinstance(resolved_ip, IPv4Address):
+            ctx = self._build_error_context(f"allowlist_check:{url}", correlation_id)
+            raise InfraAuthenticationError(
+                f"IPv6 addresses are not supported by the LLM endpoint allowlist: "
+                f"{resolved_ip}",
+                context=ctx,
+            )
+
+        if not any(resolved_ip in cidr for cidr in self.LOCAL_LLM_CIDRS):
+            ctx = self._build_error_context(f"allowlist_check:{url}", correlation_id)
+            allowlist_str = ", ".join(str(c) for c in self.LOCAL_LLM_CIDRS)
+            raise InfraAuthenticationError(
+                f"Endpoint IP {resolved_ip} is outside the local LLM allowlist "
+                f"({allowlist_str})",
+                context=ctx,
+            )
+
+        logger.debug(
+            "Endpoint passed CIDR allowlist check",
+            extra={
+                "resolved_ip": str(resolved_ip),
+                "allowlist": ", ".join(str(c) for c in self.LOCAL_LLM_CIDRS),
+                "hostname": hostname,
+                "correlation_id": str(correlation_id),
+                "target": self._llm_target_name,
+            },
+        )
+
+    def _compute_hmac_signature(
+        self,
+        payload: dict[str, JsonType],
+        correlation_id: UUID,
+    ) -> str:
+        """Compute HMAC-SHA256 signature for the request payload.
+
+        Uses the ``LOCAL_LLM_SHARED_SECRET`` environment variable as the
+        signing key. This is a fail-closed check: if the secret is not
+        configured, the request is rejected.
+
+        The secret is read from ``os.environ`` on every call rather than
+        being cached at init time. This is intentional: it allows the shared
+        secret to be rotated at runtime (e.g., via a sidecar or operator
+        updating the environment) without requiring a process restart.
+
+        The signature is computed over the canonical JSON serialization of
+        the payload (sorted keys, no extra whitespace) to ensure deterministic
+        signing regardless of dict ordering.
+
+        Known Limitations:
+            The HMAC signature does not include a timestamp or nonce, so it
+            provides no replay protection. A captured request can be replayed
+            verbatim as long as the shared secret remains unchanged. Additionally,
+            the signature is computed once before the retry loop in
+            ``_execute_llm_http_call``, meaning all retry attempts for a given
+            call share the same signature value.
+
+            This is acceptable for the current local-network trust boundary
+            (``192.168.86.0/24``) where traffic stays on a private LAN segment
+            not exposed to the public internet. The HMAC serves as a proof-of-
+            origin to prevent accidental cross-service calls, not as a defense
+            against active network attackers. If the trust boundary is extended
+            to untrusted networks, the signing scheme should be upgraded to
+            include a timestamp and/or nonce to mitigate replay attacks.
+
+        Args:
+            payload: JSON-serializable request payload.
+            correlation_id: Correlation ID for error context.
+
+        Returns:
+            Hex-encoded HMAC-SHA256 signature string.
+
+        Raises:
+            ProtocolConfigurationError: If ``LOCAL_LLM_SHARED_SECRET`` is
+                not set or is empty.
+        """
+        secret = os.environ.get(self.LOCAL_LLM_SECRET_ENV, "")
+        if not secret:
+            ctx = self._build_error_context("hmac_signing", correlation_id)
+            raise ProtocolConfigurationError(
+                f"Environment variable {self.LOCAL_LLM_SECRET_ENV} is not set. "
+                "HMAC signing requires a shared secret (fail-closed).",
+                context=ctx,
+            )
+
+        # Canonical JSON: sorted keys, compact encoding
+        canonical = json_module.dumps(
+            payload, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+
+        signature = hmac.new(
+            secret.encode("utf-8"),
+            canonical,
+            hashlib.sha256,
+        ).hexdigest()
+
+        logger.debug(
+            "Computed HMAC signature for LLM request",
+            extra={
+                "correlation_id": str(correlation_id),
+                "target": self._llm_target_name,
+                "payload_bytes": len(canonical),
+            },
+        )
+
+        return signature
+
     # ── Core HTTP execution ──────────────────────────────────────────────
 
     async def _execute_llm_http_call(
@@ -329,11 +591,20 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
             before being attached to error context, ensuring that sensitive
             data from LLM provider responses is never leaked through
             exception messages or logging.
+
+        .. versionchanged:: 0.8.0
+            Added CIDR allowlist and HMAC signing pre-checks (OMN-2250).
         """
         # Runtime import to avoid circular dependency:
         # mixins/__init__ -> mixin_llm_http_transport -> handlers.models -> handlers/__init__
         # -> handler_consul -> mixins/__init__ (cycle)
         from omnibase_infra.handlers.models.model_retry_state import ModelRetryState
+
+        # ── Pre-flight security checks (fail-closed) ────────────────
+        # These run BEFORE any HTTP call to enforce the local trust boundary.
+        await self._validate_endpoint_allowlist(url, correlation_id)
+        # Intentionally computed once before the retry loop; see Known Limitations in _compute_hmac_signature.
+        hmac_signature = self._compute_hmac_signature(payload, correlation_id)
 
         operation = f"llm_http_call:{url}"
         total_attempts = 1 + max_retries
@@ -347,10 +618,12 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                 # Check circuit breaker
                 await self._check_circuit_if_enabled(operation, correlation_id)
 
-                # Make HTTP POST
+                # Make HTTP POST with HMAC signature header
+                # headers dict intentionally overrides any default HMAC_HEADER key on the client.
                 response = await client.post(
                     url,
                     json=payload,
+                    headers={self.HMAC_HEADER: hmac_signature},
                     timeout=effective_timeout,
                 )
 
