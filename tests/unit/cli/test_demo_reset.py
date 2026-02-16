@@ -414,20 +414,18 @@ class TestDemoResetCLI:
 
     def test_demo_reset_dry_run_no_infra(self) -> None:
         """Dry run with no infrastructure configured succeeds."""
+        import os
+
         from omnibase_infra.cli.commands import cli
 
         runner = CliRunner()
-        with patch.dict("os.environ", {}, clear=False):
-            # Ensure no OMNIBASE_INFRA_DB_URL or KAFKA_BOOTSTRAP_SERVERS
-            env = dict(
-                **{
-                    k: v
-                    for k, v in __import__("os").environ.items()
-                    if k not in ("OMNIBASE_INFRA_DB_URL", "KAFKA_BOOTSTRAP_SERVERS")
-                }
-            )
-            with patch.dict("os.environ", env, clear=True):
-                result = runner.invoke(cli, ["demo", "reset", "--dry-run"])
+        clean_env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("OMNIBASE_INFRA_DB_URL", "KAFKA_BOOTSTRAP_SERVERS")
+        }
+        with patch.dict("os.environ", clean_env, clear=True):
+            result = runner.invoke(cli, ["demo", "reset", "--dry-run"])
 
         assert result.exit_code == 0
         assert "DRY RUN" in result.output

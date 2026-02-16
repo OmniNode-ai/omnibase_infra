@@ -550,7 +550,11 @@ def demo_reset(dry_run: bool, purge_topics: bool, env_file: str) -> None:
     except SystemExit:
         raise
     except Exception as e:
-        console.print(f"[red]Error: {type(e).__name__}: {e}[/red]")
+        from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+
+        console.print(
+            f"[red]Error: {type(e).__name__}: {sanitize_error_message(e)}[/red]"
+        )
         raise SystemExit(1)
 
 

@@ -57,6 +57,15 @@ logger = logging.getLogger(__name__)
 # Only the ROWS are deleted, never the table or schema.
 DEMO_PROJECTION_TABLE: Final[str] = "registration_projections"
 
+# Allowlist of table names permitted in SQL interpolation.
+# This prevents SQL injection via the ``projection_table`` config field.
+# Add new table names here as new projection domains are created.
+_ALLOWED_PROJECTION_TABLES: Final[frozenset[str]] = frozenset(
+    {
+        "registration_projections",
+    }
+)
+
 # Consumer group pattern: any group containing "registration" or "projector".
 # These are the groups whose offsets are reset so projectors start fresh.
 DEMO_CONSUMER_GROUP_PATTERN: Final[re.Pattern[str]] = re.compile(
@@ -252,6 +261,25 @@ class DemoResetEngine:
     def __init__(self, config: DemoResetConfig) -> None:
         self._config = config
 
+    @staticmethod
+    def _validate_table_name(table: str) -> None:
+        """Validate that a table name is in the allowlist.
+
+        Prevents SQL injection by ensuring only known-safe table names
+        are interpolated into SQL statements.
+
+        Args:
+            table: Table name to validate.
+
+        Raises:
+            ValueError: If the table name is not in ``_ALLOWED_PROJECTION_TABLES``.
+        """
+        if table not in _ALLOWED_PROJECTION_TABLES:
+            raise ValueError(
+                f"Table name {table!r} is not in the allowed projection tables: "
+                f"{sorted(_ALLOWED_PROJECTION_TABLES)}"
+            )
+
     async def execute(self, *, dry_run: bool = False) -> DemoResetReport:
         """Execute the demo reset sequence.
 
@@ -362,15 +390,21 @@ class DemoResetEngine:
 
     async def _count_projection_rows(self) -> int:
         """Count rows in the projection table."""
+        import asyncio
+
         import asyncpg
 
-        pool = await asyncpg.create_pool(
-            self._config.postgres_dsn, min_size=1, max_size=2
+        table = self._config.projection_table
+        self._validate_table_name(table)
+
+        pool = await asyncio.wait_for(
+            asyncpg.create_pool(self._config.postgres_dsn, min_size=1, max_size=2),
+            timeout=10.0,
         )
         try:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    f"SELECT COUNT(*) as cnt FROM {self._config.projection_table}"  # noqa: S608
+                    f"SELECT COUNT(*) as cnt FROM {table}"  # noqa: S608
                 )
                 return int(row["cnt"]) if row else 0
         finally:
@@ -378,15 +412,21 @@ class DemoResetEngine:
 
     async def _delete_projection_rows(self) -> int:
         """Delete all rows from the projection table. Returns count deleted."""
+        import asyncio
+
         import asyncpg
 
-        pool = await asyncpg.create_pool(
-            self._config.postgres_dsn, min_size=1, max_size=2
+        table = self._config.projection_table
+        self._validate_table_name(table)
+
+        pool = await asyncio.wait_for(
+            asyncpg.create_pool(self._config.postgres_dsn, min_size=1, max_size=2),
+            timeout=10.0,
         )
         try:
             async with pool.acquire() as conn:
                 result = await conn.execute(
-                    f"DELETE FROM {self._config.projection_table}"  # noqa: S608
+                    f"DELETE FROM {table}"  # noqa: S608
                 )
                 # asyncpg returns "DELETE N" where N is the row count
                 match = re.search(r"\d+", result)
