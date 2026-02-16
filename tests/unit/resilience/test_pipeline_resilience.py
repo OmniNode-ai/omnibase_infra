@@ -40,6 +40,7 @@ from omnibase_infra.event_bus.models import (
     ModelDlqEvent,
     ModelEventHeaders,
 )
+from tests.conftest import make_test_node_identity
 
 # =============================================================================
 # Scenario 1: Container Restart Mid-Processing
@@ -68,8 +69,6 @@ class TestContainerRestartResilience:
         async def handler(msg: Any) -> None:
             value = msg.value if hasattr(msg, "value") else msg
             received_messages.append(value)
-
-        from tests.conftest import make_test_node_identity
 
         identity = make_test_node_identity("restart-consumer")
 
@@ -184,7 +183,6 @@ class TestConsumerGroupRebalancing:
     async def test_multiple_consumers_receive_messages(self) -> None:
         """Verify multiple consumers on the same topic all receive messages."""
         from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-        from tests.conftest import make_test_node_identity
 
         bus = EventBusInmemory(
             environment="test", group="rebalance-test", max_history=100
@@ -232,7 +230,6 @@ class TestConsumerGroupRebalancing:
     async def test_remaining_consumer_continues_after_one_leaves(self) -> None:
         """Verify remaining consumer continues processing after one unsubscribes."""
         from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-        from tests.conftest import make_test_node_identity
 
         bus = EventBusInmemory(environment="test", group="rebalance-leave")
         await bus.start()

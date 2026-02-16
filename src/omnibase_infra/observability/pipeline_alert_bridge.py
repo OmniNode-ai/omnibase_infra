@@ -166,22 +166,30 @@ class PipelineAlertBridge:
             else EnumAlertSeverity.WARNING
         )
 
+        # Defense-in-depth: sanitize system-controlled fields interpolated
+        # into Slack mrkdwn to prevent injection if values ever carry
+        # user-influenced data.
+        safe_topic = sanitize_error_string(event.original_topic or "")
+        safe_error_type = sanitize_error_string(event.error_type or "")
+        safe_consumer_group = sanitize_error_string(event.consumer_group or "")
+
         if event.is_critical:
             safe_dlq_error = sanitize_error_string(event.dlq_error_message or "")
             title = "DLQ Publish Failed - Message May Be Lost"
             message = (
-                f"*DLQ publish failed* for topic `{event.original_topic}`.\n"
+                f"*DLQ publish failed* for topic `{safe_topic}`.\n"
                 f"The original message could not be preserved in the DLQ "
                 f"and may be permanently lost.\n\n"
                 f"*Error*: {event.dlq_error_type}: {safe_dlq_error}"
             )
         else:
             safe_error = sanitize_error_string(event.error_message or "")
+            safe_dlq_topic = sanitize_error_string(event.dlq_topic or "")
             title = "Message Routed to DLQ"
             message = (
-                f"A message from topic `{event.original_topic}` failed "
-                f"processing and was routed to DLQ `{event.dlq_topic}`.\n\n"
-                f"*Error*: {event.error_type}: {safe_error}\n"
+                f"A message from topic `{safe_topic}` failed "
+                f"processing and was routed to DLQ `{safe_dlq_topic}`.\n\n"
+                f"*Error*: {safe_error_type}: {safe_error}\n"
                 f"*Retries exhausted*: {event.retry_count}"
             )
 
@@ -191,9 +199,9 @@ class PipelineAlertBridge:
             title=title,
             details={
                 "Environment": self._environment,
-                "Original Topic": event.original_topic,
-                "Error Type": event.error_type,
-                "Consumer Group": event.consumer_group,
+                "Original Topic": safe_topic,
+                "Error Type": safe_error_type,
+                "Consumer Group": safe_consumer_group,
                 "Retry Count": str(event.retry_count),
             },
             correlation_id=event.correlation_id,
@@ -327,6 +335,10 @@ class PipelineAlertBridge:
         if elapsed_seconds < self._cold_start_timeout:
             return
 
+        # Defense-in-depth: sanitize dependency_name before Slack mrkdwn
+        # interpolation, even though it is typically system-controlled.
+        safe_dependency = sanitize_error_string(dependency_name or "")
+
         async with self._cold_start_lock:
             if self._cold_start_alerted:
                 return
@@ -339,7 +351,7 @@ class PipelineAlertBridge:
                 message=(
                     f"Pipeline cold-start has been blocked for "
                     f"*{elapsed_seconds:.0f} seconds* waiting for "
-                    f"`{dependency_name}` in *{self._environment}*.\n\n"
+                    f"`{safe_dependency}` in *{self._environment}*.\n\n"
                     f"The pipeline cannot start until this dependency "
                     f"becomes available. Check service health and network "
                     f"connectivity."
@@ -347,7 +359,7 @@ class PipelineAlertBridge:
                 title=f"Pipeline Cold-Start Blocked - {self._environment}",
                 details={
                     "Environment": self._environment,
-                    "Blocked Dependency": dependency_name,
+                    "Blocked Dependency": safe_dependency,
                     "Elapsed Seconds": f"{elapsed_seconds:.0f}",
                     "Threshold Seconds": f"{self._cold_start_timeout:.0f}",
                 },
@@ -402,10 +414,14 @@ class PipelineAlertBridge:
                 return
             self._cold_start_alerted = False
 
+        # Defense-in-depth: sanitize dependency_name before Slack mrkdwn
+        # interpolation, consistent with on_cold_start_blocked.
+        safe_dependency = sanitize_error_string(dependency_name or "")
+
         await self._send_recovery_alert(
             title=f"Cold-Start Dependency Resolved - {self._environment}",
             message=(
-                f"Dependency `{dependency_name}` is now available in "
+                f"Dependency `{safe_dependency}` is now available in "
                 f"*{self._environment}*. Pipeline bootstrap can proceed."
             ),
             correlation_id=correlation_id or uuid4(),
