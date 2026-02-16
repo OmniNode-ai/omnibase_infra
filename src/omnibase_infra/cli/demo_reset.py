@@ -45,6 +45,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Final
 
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -354,7 +356,7 @@ class DemoResetEngine:
                 ResetActionResult(
                     resource=f"Projector state ({table})",
                     action=EnumResetAction.ERROR,
-                    detail=f"Failed: {type(exc).__name__}: {exc}",
+                    detail=f"Failed: {sanitize_error_message(exc)}",
                 )
             )
 
@@ -536,7 +538,7 @@ class DemoResetEngine:
                 ResetActionResult(
                     resource="Consumer group offsets",
                     action=EnumResetAction.ERROR,
-                    detail=f"Failed: {type(exc).__name__}: {exc}",
+                    detail=f"Failed: {sanitize_error_message(exc)}",
                 )
             )
 
@@ -694,7 +696,7 @@ class DemoResetEngine:
                 ResetActionResult(
                     resource="Demo topic data",
                     action=EnumResetAction.ERROR,
-                    detail=f"Failed: {type(exc).__name__}: {exc}",
+                    detail=f"Failed: {sanitize_error_message(exc)}",
                 )
             )
 
