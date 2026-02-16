@@ -27,7 +27,7 @@ class ModelLlmEndpointHealthEvent(BaseModel):
         correlation_id: Trace correlation ID.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     timestamp: datetime = Field(..., description="Probe cycle completion time")
     endpoints: tuple[ModelLlmEndpointStatus, ...] = Field(

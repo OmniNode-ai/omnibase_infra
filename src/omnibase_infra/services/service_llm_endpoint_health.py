@@ -13,7 +13,7 @@ consuming probe resources on every tick.
 
 Architecture:
     - One circuit breaker **per endpoint** (independent failure tracking)
-    - Probes hit ``GET /health`` first; if that returns non-200, falls back
+    - Probes hit ``GET /health`` first; if that returns non-2xx, falls back
       to ``GET /v1/models`` (vLLM-style discovery)
     - Results are stored in a dict keyed by endpoint URL
     - An optional ``ProtocolEventBusLike`` dependency enables Kafka emission
@@ -42,6 +42,7 @@ from uuid import UUID
 import httpx
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins.mixin_async_circuit_breaker import MixinAsyncCircuitBreaker
@@ -76,6 +77,10 @@ class EndpointCircuitBreaker(MixinAsyncCircuitBreaker):
 
     ``MixinAsyncCircuitBreaker`` stores state on ``self``, so we need one
     instance per endpoint to isolate failure counts.
+
+    This class exposes public wrapper methods around the private
+    ``MixinAsyncCircuitBreaker`` API so that external consumers do not
+    need to reach into private attributes.
     """
 
     def __init__(
@@ -91,6 +96,67 @@ class EndpointCircuitBreaker(MixinAsyncCircuitBreaker):
             transport_type=EnumInfraTransportType.HTTP,
             half_open_successes=1,
         )
+
+    # -- Public facade over MixinAsyncCircuitBreaker internals ---------------
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        """Return the circuit breaker lock for coroutine-safe access."""
+        return self._circuit_breaker_lock
+
+    async def check(self, operation: str, correlation_id: UUID) -> None:
+        """Check whether the circuit breaker allows an operation.
+
+        Must be called while holding :pyattr:`lock`.
+
+        Args:
+            operation: Operation name for error context.
+            correlation_id: Correlation ID for distributed tracing.
+
+        Raises:
+            InfraUnavailableError: If the circuit is open.
+        """
+        await self._check_circuit_breaker(
+            operation=operation,
+            correlation_id=correlation_id,
+        )
+
+    async def record_failure(self, operation: str, correlation_id: UUID) -> None:
+        """Record a failure and potentially open the circuit.
+
+        Must be called while holding :pyattr:`lock`.
+
+        Args:
+            operation: Operation name for logging context.
+            correlation_id: Correlation ID for distributed tracing.
+        """
+        await self._record_circuit_failure(
+            operation=operation,
+            correlation_id=correlation_id,
+        )
+
+    async def record_success(self) -> None:
+        """Record a success and potentially close the circuit.
+
+        Must be called while holding :pyattr:`lock`.
+        """
+        await self._reset_circuit_breaker()
+
+    def get_state(self) -> dict[str, JsonType]:
+        """Return the current circuit breaker state for introspection.
+
+        Does **not** require holding the lock (read-only snapshot).
+
+        Returns:
+            Dict with keys ``initialized``, ``state``, ``failures``,
+            ``threshold``, etc.
+        """
+        return self._get_circuit_breaker_state()
+
+    @property
+    def is_open(self) -> bool:
+        """Return ``True`` if the circuit breaker is currently open."""
+        return self._circuit_breaker_open
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +182,12 @@ class ServiceLlmEndpointHealth:
 
     The service can also be used without ``start``/``stop`` by calling
     ``probe_all`` directly for one-shot health checks.
+
+    For one-shot usage the service supports the async context manager
+    protocol, which ensures the HTTP client is closed on exit::
+
+        async with ServiceLlmEndpointHealth(config=config) as svc:
+            status_map = await svc.probe_all()
     """
 
     def __init__(
@@ -145,9 +217,31 @@ class ServiceLlmEndpointHealth:
                 reset_timeout=config.circuit_breaker_reset_timeout,
             )
 
+        # Shared HTTP client (created lazily, closed on stop)
+        self._http_client: httpx.AsyncClient | None = None
+
         # Background task handle
         self._probe_task: asyncio.Task[None] | None = None
         self._running = False
+
+    # -- Async context manager ----------------------------------------------
+
+    async def __aenter__(self) -> ServiceLlmEndpointHealth:
+        """Enter the async context manager.
+
+        Returns ``self`` without starting the background loop.  Use
+        ``start()`` explicitly if you want the probe loop.
+        """
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        """Exit the async context manager and release resources."""
+        await self.stop()
 
     # -- Public API ---------------------------------------------------------
 
@@ -198,22 +292,30 @@ class ServiceLlmEndpointHealth:
         )
 
     async def stop(self) -> None:
-        """Stop the background probe loop gracefully.
+        """Stop the background probe loop and release resources.
 
-        Idempotent -- calling ``stop`` on a stopped service is a no-op.
+        Safe to call even if ``start()`` was never called.  This ensures
+        that the lazily-created HTTP client is closed in one-shot usage
+        scenarios (i.e. calling ``probe_all`` directly without
+        ``start``/``stop``).
+
+        Idempotent -- calling ``stop`` multiple times is safe.
         """
-        if not self._running:
-            logger.debug("ServiceLlmEndpointHealth already stopped, skipping stop")
-            return
+        if self._running:
+            self._running = False
+            if self._probe_task is not None:
+                self._probe_task.cancel()
+                try:
+                    await self._probe_task
+                except asyncio.CancelledError:
+                    pass
+                self._probe_task = None
 
-        self._running = False
-        if self._probe_task is not None:
-            self._probe_task.cancel()
-            try:
-                await self._probe_task
-            except asyncio.CancelledError:
-                pass
-            self._probe_task = None
+        # Always close the HTTP client if it was created (covers one-shot
+        # usage where probe_all() lazily created the client without start()).
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
 
         logger.info("ServiceLlmEndpointHealth stopped")
 
@@ -252,6 +354,9 @@ class ServiceLlmEndpointHealth:
             try:
                 await self.probe_all()
             except Exception:
+                # CancelledError is not caught here intentionally: in Python
+                # 3.12+ it derives from BaseException, so it propagates out
+                # for clean task cancellation via stop().
                 logger.exception("Unexpected error in probe loop")
             try:
                 await asyncio.sleep(self._config.probe_interval_seconds)
@@ -281,13 +386,13 @@ class ServiceLlmEndpointHealth:
 
         # Check circuit breaker
         try:
-            async with cb._circuit_breaker_lock:
-                await cb._check_circuit_breaker(
+            async with cb.lock:
+                await cb.check(
                     operation="probe_health",
                     correlation_id=correlation_id,
                 )
         except InfraUnavailableError:
-            cb_state = cb._get_circuit_breaker_state()
+            cb_state = cb.get_state()
             return ModelLlmEndpointStatus(
                 url=url,
                 name=name,
@@ -306,17 +411,17 @@ class ServiceLlmEndpointHealth:
 
             if available:
                 # Record success with circuit breaker
-                async with cb._circuit_breaker_lock:
-                    await cb._reset_circuit_breaker()
+                async with cb.lock:
+                    await cb.record_success()
             else:
                 # Record failure with circuit breaker
-                async with cb._circuit_breaker_lock:
-                    await cb._record_circuit_failure(
+                async with cb.lock:
+                    await cb.record_failure(
                         operation="probe_health",
                         correlation_id=correlation_id,
                     )
 
-            cb_state = cb._get_circuit_breaker_state()
+            cb_state = cb.get_state()
             return ModelLlmEndpointStatus(
                 url=url,
                 name=name,
@@ -329,13 +434,13 @@ class ServiceLlmEndpointHealth:
 
         except Exception as exc:
             # Record failure with circuit breaker
-            async with cb._circuit_breaker_lock:
-                await cb._record_circuit_failure(
+            async with cb.lock:
+                await cb.record_failure(
                     operation="probe_health",
                     correlation_id=correlation_id,
                 )
 
-            cb_state = cb._get_circuit_breaker_state()
+            cb_state = cb.get_state()
             error_msg = f"{type(exc).__name__}: {exc}"
             logger.warning(
                 "Probe failed for %s (%s): %s",
@@ -354,6 +459,19 @@ class ServiceLlmEndpointHealth:
                 circuit_state=str(cb_state.get("state", "closed")),
             )
 
+    def _get_http_client(self) -> httpx.AsyncClient:
+        """Return the shared HTTP client, creating it lazily if needed.
+
+        This allows ``probe_all`` to work both in background-loop mode
+        (where ``start``/``stop`` manage the lifecycle) and in one-shot
+        mode (where ``probe_all`` is called directly).
+        """
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(self._config.probe_timeout_seconds),
+            )
+        return self._http_client
+
     async def _http_probe(self, base_url: str) -> tuple[bool, str]:
         """Perform the HTTP probe against an endpoint.
 
@@ -368,24 +486,24 @@ class ServiceLlmEndpointHealth:
             success and *error* is an empty string, or ``False`` with
             a human-readable error description.
         """
-        timeout = httpx.Timeout(self._config.probe_timeout_seconds)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            # Primary probe: /health
-            try:
-                resp = await client.get(f"{base_url.rstrip('/')}/health")
-                if resp.status_code < 400:
-                    return True, ""
-            except httpx.HTTPError:
-                pass  # Fall through to fallback probe
+        client = self._get_http_client()
 
-            # Fallback probe: /v1/models (vLLM-style)
-            try:
-                resp = await client.get(f"{base_url.rstrip('/')}/v1/models")
-                if resp.status_code < 400:
-                    return True, ""
-                return False, f"HTTP {resp.status_code} from /v1/models"
-            except httpx.HTTPError as exc:
-                return False, f"Connection failed: {type(exc).__name__}"
+        # Primary probe: /health
+        try:
+            resp = await client.get(f"{base_url.rstrip('/')}/health")
+            if 200 <= resp.status_code < 300:
+                return True, ""
+        except httpx.HTTPError:
+            pass  # Fall through to fallback probe
+
+        # Fallback probe: /v1/models (vLLM-style)
+        try:
+            resp = await client.get(f"{base_url.rstrip('/')}/v1/models")
+            if 200 <= resp.status_code < 300:
+                return True, ""
+            return False, f"HTTP {resp.status_code} from /v1/models"
+        except httpx.HTTPError as exc:
+            return False, f"Connection failed: {type(exc).__name__}"
 
     async def _emit_health_event(
         self,

@@ -26,7 +26,7 @@ class ModelLlmEndpointHealthConfig(BaseModel):
             transitions to half-open. Default: 60.0.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     endpoints: dict[str, str] = Field(
         default_factory=dict,

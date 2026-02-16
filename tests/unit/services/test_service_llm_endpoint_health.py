@@ -33,6 +33,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.services.service_llm_endpoint_health import (
     TOPIC_LLM_ENDPOINT_HEALTH,
@@ -113,19 +114,19 @@ class TestModelLlmEndpointHealthConfig:
 
     def test_frozen(self, config: ModelLlmEndpointHealthConfig) -> None:
         """Config should be immutable."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             config.probe_interval_seconds = 999  # type: ignore[misc]
 
     def test_probe_interval_minimum(self) -> None:
         """Probe interval must be >= 1."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelLlmEndpointHealthConfig(probe_interval_seconds=0.5)
 
     def test_probe_timeout_range(self) -> None:
         """Probe timeout must be within [0.5, 30.0]."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelLlmEndpointHealthConfig(probe_timeout_seconds=0.1)
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelLlmEndpointHealthConfig(probe_timeout_seconds=60.0)
 
 
@@ -179,7 +180,7 @@ class TestModelLlmEndpointStatus:
             last_check=now,
             latency_ms=10.0,
         )
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             status.available = False  # type: ignore[misc]
 
 
@@ -378,7 +379,7 @@ class TestServiceLlmEndpointHealthCircuitBreaker:
 
         # After 3 failures with threshold=3, circuit should be open
         cb = service._circuit_breakers["coder-14b"]
-        assert cb._circuit_breaker_open is True
+        assert cb.is_open is True
 
     @pytest.mark.asyncio
     async def test_open_circuit_returns_immediately(
@@ -433,8 +434,8 @@ class TestServiceLlmEndpointHealthCircuitBreaker:
                 await svc.probe_all()
 
         # ep-a should be open, ep-b should still be closed
-        assert svc._circuit_breakers["ep-a"]._circuit_breaker_open is True
-        assert svc._circuit_breakers["ep-b"]._circuit_breaker_open is False
+        assert svc._circuit_breakers["ep-a"].is_open is True
+        assert svc._circuit_breakers["ep-b"].is_open is False
 
     @pytest.mark.asyncio
     async def test_endpoint_circuit_breaker_class(self) -> None:
@@ -444,7 +445,7 @@ class TestServiceLlmEndpointHealthCircuitBreaker:
             threshold=5,
             reset_timeout=60.0,
         )
-        state = cb._get_circuit_breaker_state()
+        state = cb.get_state()
         assert state["initialized"] is True
         assert state["state"] == "closed"
         assert state["threshold"] == 5
@@ -566,6 +567,44 @@ class TestServiceLlmEndpointHealthLifecycle:
         assert service.is_running is False
 
     @pytest.mark.asyncio
+    async def test_stop_closes_http_client_without_start(
+        self,
+        service: ServiceLlmEndpointHealth,
+    ) -> None:
+        """stop() should close the HTTP client even if start() was never called.
+
+        This covers the one-shot usage pattern where probe_all() lazily
+        creates an HTTP client but the caller never invokes start()/stop().
+        """
+        mock_response = httpx.Response(200, request=httpx.Request("GET", "http://test"))
+
+        with patch.object(httpx.AsyncClient, "get", return_value=mock_response):
+            await service.probe_all()
+
+        # Client was lazily created
+        assert service._http_client is not None
+
+        # stop() should close it even though start() was never called
+        await service.stop()
+        assert service._http_client is None
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager(
+        self,
+        config: ModelLlmEndpointHealthConfig,
+    ) -> None:
+        """Service should support async context manager for one-shot usage."""
+        mock_response = httpx.Response(200, request=httpx.Request("GET", "http://test"))
+
+        async with ServiceLlmEndpointHealth(config=config) as svc:
+            with patch.object(httpx.AsyncClient, "get", return_value=mock_response):
+                status_map = await svc.probe_all()
+            assert len(status_map) == 2
+
+        # After exiting the context manager, the client should be closed
+        assert svc._http_client is None
+
+    @pytest.mark.asyncio
     async def test_probe_loop_continues_on_error(
         self,
     ) -> None:
@@ -656,7 +695,7 @@ class TestModelLlmEndpointHealthEvent:
             endpoints=(),
             correlation_id=uuid4(),
         )
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             event.timestamp = now  # type: ignore[misc]
 
 
