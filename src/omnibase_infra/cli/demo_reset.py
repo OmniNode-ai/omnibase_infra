@@ -359,14 +359,24 @@ class DemoResetEngine:
             return
 
         if dry_run:
-            row_count = await self._count_projection_rows()
-            report.actions.append(
-                ResetActionResult(
-                    resource=f"Projector state ({table})",
-                    action=EnumResetAction.RESET,
-                    detail=f"Would delete {row_count} row(s) from {table}",
+            try:
+                row_count = await self._count_projection_rows()
+                report.actions.append(
+                    ResetActionResult(
+                        resource=f"Projector state ({table})",
+                        action=EnumResetAction.RESET,
+                        detail=f"Would delete {row_count} row(s) from {table}",
+                    )
                 )
-            )
+            except Exception as exc:
+                logger.exception("Failed to count projector rows (dry run)")
+                report.actions.append(
+                    ResetActionResult(
+                        resource=f"Projector state ({table})",
+                        action=EnumResetAction.ERROR,
+                        detail=f"Failed: {sanitize_error_message(exc)}",
+                    )
+                )
             return
 
         try:
@@ -528,7 +538,7 @@ class DemoResetEngine:
                         future.result(timeout=10)
                         deleted.append(str(group_id))
                     except Exception as exc:
-                        errors.append(f"{group_id}: {exc}")
+                        errors.append(f"{group_id}: {sanitize_error_message(exc)}")
 
                 if deleted:
                     report.actions.append(
@@ -685,7 +695,10 @@ class DemoResetEngine:
                             if tp.topic not in purged:
                                 purged.append(tp.topic)
                         except Exception as exc:
-                            errors.append(f"{tp.topic}[{tp.partition}]: {exc}")
+                            errors.append(
+                                f"{tp.topic}[{tp.partition}]: "
+                                f"{sanitize_error_message(exc)}"
+                            )
 
                     if purged:
                         report.actions.append(
