@@ -18,10 +18,15 @@ Supported Reference Formats:
         env:HANDLER_CONFIG_JSON                # JSON config in env var
         env:DATABASE_CONFIG_YAML               # YAML config in env var
 
-    Vault secret references::
+    Vault secret references (deprecated: use infisical:)::
 
         vault:secret/data/handlers/db#config   # Specific field from secret
         vault:secret/data/handlers/db          # Whole secret as JSON/YAML
+
+    Infisical secret references (OMN-2286)::
+
+        infisical:project/env/path#field       # Specific field from secret
+        infisical:project/env/path             # Whole secret as JSON/YAML
 
 Security:
     File paths are validated to block dangerous path traversal patterns (multiple
@@ -242,6 +247,9 @@ class ModelConfigRef(BaseModel):
         elif scheme == EnumConfigRefScheme.VAULT:
             # vault:path#fragment - handled below
             pass
+        elif scheme == EnumConfigRefScheme.INFISICAL:
+            # infisical:path#fragment - handled below (same as vault)
+            pass
 
         # Handle empty path after scheme
         if not path_part:
@@ -250,9 +258,12 @@ class ModelConfigRef(BaseModel):
                 error_message=f"Missing path after scheme '{scheme_str}:'",
             )
 
-        # Extract fragment for vault references
+        # Extract fragment for vault and infisical references
         fragment: str | None = None
-        if scheme == EnumConfigRefScheme.VAULT and "#" in path_part:
+        if (
+            scheme in (EnumConfigRefScheme.VAULT, EnumConfigRefScheme.INFISICAL)
+            and "#" in path_part
+        ):
             hash_idx = path_part.rfind("#")
             fragment = path_part[hash_idx + 1 :]
             path_part = path_part[:hash_idx]
@@ -260,13 +271,13 @@ class ModelConfigRef(BaseModel):
             if not fragment:
                 return ModelConfigRefParseResult(
                     success=False,
-                    error_message="Empty fragment after '#' in vault reference",
+                    error_message=f"Empty fragment after '#' in {scheme_str} reference",
                 )
 
             if not path_part:
                 return ModelConfigRefParseResult(
                     success=False,
-                    error_message="Missing vault path before '#' fragment",
+                    error_message=f"Missing {scheme_str} path before '#' fragment",
                 )
 
         # Validate path for dangerous traversal patterns

@@ -14,7 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # Canonical type alias for secret source types.
 # Reuse this type across all secret-related models for consistency.
-SecretSourceType = Literal["env", "vault", "file"]
+# NOTE: "vault" is deprecated in favor of "infisical" (OMN-2286).
+SecretSourceType = Literal["env", "vault", "infisical", "file"]
 
 
 class ModelSecretSourceSpec(BaseModel):
@@ -53,7 +54,8 @@ class ModelSecretSourceSpec(BaseModel):
     source_type: SecretSourceType = Field(
         ...,
         description="Type of secret source: 'env' for environment variables, "
-        "'vault' for HashiCorp Vault, 'file' for file-based secrets.",
+        "'vault' for HashiCorp Vault (deprecated), 'infisical' for Infisical, "
+        "'file' for file-based secrets.",
     )
     source_path: str = Field(
         ...,

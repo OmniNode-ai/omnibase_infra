@@ -1047,8 +1047,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             merged_config, handler_type, correlation_id
         )
 
-        # Resolve any vault: references in the config
+        # Resolve any vault: and infisical: references in the config
         merged_config = self._resolve_vault_refs(merged_config, correlation_id)
+        merged_config = self._resolve_infisical_refs(merged_config, correlation_id)
 
         # Validate and construct the final config
         return self._validate_config(merged_config, handler_type, correlation_id)
@@ -1094,8 +1095,11 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             merged_config, handler_type, correlation_id
         )
 
-        # Resolve any vault: references in the config (async)
+        # Resolve any vault: and infisical: references in the config (async)
         merged_config = await self._resolve_vault_refs_async(
+            merged_config, correlation_id
+        )
+        merged_config = await self._resolve_infisical_refs_async(
             merged_config, correlation_id
         )
 
@@ -1174,6 +1178,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             return self._load_from_env(ref.path, correlation_id)
         elif ref.scheme == EnumConfigRefScheme.VAULT:
             return self._load_from_vault(ref.path, ref.fragment, correlation_id)
+        elif ref.scheme == EnumConfigRefScheme.INFISICAL:
+            return self._load_from_infisical(ref.path, ref.fragment, correlation_id)
         else:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
@@ -1261,6 +1267,10 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             return self._load_from_env(ref.path, correlation_id)
         elif ref.scheme == EnumConfigRefScheme.VAULT:
             return await self._load_from_vault_async(
+                ref.path, ref.fragment, correlation_id
+            )
+        elif ref.scheme == EnumConfigRefScheme.INFISICAL:
+            return await self._load_from_infisical_async(
                 ref.path, ref.fragment, correlation_id
             )
         else:
@@ -1872,6 +1882,216 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         with self._lock:
             self._vault_loads += 1
+
+        return data
+
+    def _load_from_infisical(
+        self,
+        infisical_path: str,
+        fragment: str | None,
+        correlation_id: UUID,
+    ) -> dict[str, object]:
+        """Load config from Infisical secret (sync).
+
+        Uses the same SecretResolver interface as Vault, but with source_type
+        ``infisical``. The path format is the same: ``path#field``.
+
+        Args:
+            infisical_path: Infisical secret path.
+            fragment: Optional field within the secret.
+            correlation_id: Correlation ID for error tracking.
+
+        Returns:
+            Loaded configuration dictionary.
+
+        Raises:
+            ProtocolConfigurationError: If Infisical is not configured or
+                secret cannot be read.
+        """
+        secret_resolver = self._get_secret_resolver()
+        if secret_resolver is None:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="load_from_infisical",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Infisical scheme used but no SecretResolver configured",
+                context=context,
+            )
+
+        logical_name = infisical_path
+        if fragment:
+            logical_name = f"{infisical_path}#{fragment}"
+
+        try:
+            secret = secret_resolver.get_secret(logical_name, required=True)
+        except (SecretResolutionError, NotImplementedError) as e:
+            logger.debug(
+                "Infisical configuration retrieval failed (correlation_id=%s): %s",
+                correlation_id,
+                e,
+                extra={"correlation_id": str(correlation_id)},
+            )
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="load_from_infisical",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Failed to retrieve configuration from Infisical. "
+                f"correlation_id={correlation_id}",
+                context=context,
+            )
+
+        if secret is None:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="load_from_infisical",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Infisical secret not found",
+                context=context,
+            )
+
+        secret_value = secret.get_secret_value()
+        data: object = None
+        try:
+            data = json.loads(secret_value)
+        except json.JSONDecodeError:
+            try:
+                data = yaml.safe_load(secret_value)
+            except yaml.YAMLError:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.INFISICAL,
+                    operation="load_from_infisical",
+                    target_name="binding_config_resolver",
+                )
+                raise ProtocolConfigurationError(
+                    "Infisical secret contains invalid JSON/YAML",
+                    context=context,
+                )
+
+        if not isinstance(data, dict):
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="load_from_infisical",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Infisical secret must contain a dictionary",
+                context=context,
+            )
+
+        return data
+
+    async def _load_from_infisical_async(
+        self,
+        infisical_path: str,
+        fragment: str | None,
+        correlation_id: UUID,
+    ) -> dict[str, object]:
+        """Load config from Infisical secret asynchronously.
+
+        Args:
+            infisical_path: Infisical secret path.
+            fragment: Optional field within the secret.
+            correlation_id: Correlation ID for error tracking.
+
+        Returns:
+            Loaded configuration dictionary.
+
+        Raises:
+            ProtocolConfigurationError: If Infisical is not configured or
+                secret cannot be read.
+        """
+        secret_resolver = self._get_secret_resolver()
+        if secret_resolver is None:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="load_from_infisical_async",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Infisical scheme used but no SecretResolver configured",
+                context=context,
+            )
+
+        logical_name = infisical_path
+        if fragment:
+            logical_name = f"{infisical_path}#{fragment}"
+
+        try:
+            secret = await secret_resolver.get_secret_async(logical_name, required=True)
+        except (SecretResolutionError, NotImplementedError) as e:
+            logger.debug(
+                "Infisical configuration retrieval failed async "
+                "(correlation_id=%s): %s",
+                correlation_id,
+                e,
+                extra={"correlation_id": str(correlation_id)},
+            )
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="load_from_infisical_async",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Failed to retrieve configuration from Infisical. "
+                f"correlation_id={correlation_id}",
+                context=context,
+            )
+
+        if secret is None:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="load_from_infisical_async",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Infisical secret not found",
+                context=context,
+            )
+
+        secret_value = secret.get_secret_value()
+        data: object = None
+        try:
+            data = json.loads(secret_value)
+        except json.JSONDecodeError:
+            try:
+                data = yaml.safe_load(secret_value)
+            except yaml.YAMLError:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.INFISICAL,
+                    operation="load_from_infisical_async",
+                    target_name="binding_config_resolver",
+                )
+                raise ProtocolConfigurationError(
+                    "Infisical secret contains invalid JSON/YAML",
+                    context=context,
+                )
+
+        if not isinstance(data, dict):
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="load_from_infisical_async",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Infisical secret must contain a dictionary",
+                context=context,
+            )
 
         return data
 
@@ -2683,6 +2903,203 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 result.append(item)
 
         return result
+
+    def _resolve_infisical_refs(
+        self,
+        config: dict[str, object],
+        correlation_id: UUID,
+        depth: int = 0,
+    ) -> dict[str, object]:
+        """Resolve any infisical: references in config values.
+
+        Mirrors ``_resolve_vault_refs`` but for the ``infisical:`` scheme.
+        Scans all string values for the ``infisical:`` prefix and resolves
+        them through the SecretResolver.
+
+        Args:
+            config: Configuration dict potentially containing infisical: refs.
+            correlation_id: Correlation ID for error tracking.
+            depth: Recursion depth for nested resolution.
+
+        Returns:
+            Configuration with infisical references resolved.
+        """
+        secret_resolver = self._get_secret_resolver()
+        if secret_resolver is None:
+            if self._has_infisical_references(config):
+                if self._config.fail_on_vault_error:
+                    context = ModelInfraErrorContext.with_correlation(
+                        correlation_id=correlation_id,
+                        transport_type=EnumInfraTransportType.INFISICAL,
+                        operation="resolve_infisical_refs",
+                        target_name="binding_config_resolver",
+                    )
+                    raise SecretResolutionError(
+                        "Config contains infisical: references but no "
+                        "SecretResolver is configured",
+                        context=context,
+                    )
+            return config
+
+        result: dict[str, object] = {}
+        for key, value in config.items():
+            if isinstance(value, str) and value.startswith("infisical:"):
+                infisical_path, fragment = self._parse_infisical_reference(value)
+                logical_name = (
+                    f"{infisical_path}#{fragment}" if fragment else infisical_path
+                )
+                try:
+                    secret = secret_resolver.get_secret(logical_name)
+                    if secret is not None:
+                        result[key] = secret.get_secret_value()
+                    elif self._config.fail_on_vault_error:
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.INFISICAL,
+                            operation="resolve_infisical_refs",
+                            target_name="binding_config_resolver",
+                        )
+                        raise SecretResolutionError(
+                            "Infisical secret not found",
+                            context=context,
+                        )
+                    else:
+                        result[key] = value
+                except SecretResolutionError:
+                    raise
+                except Exception:
+                    if self._config.fail_on_vault_error:
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.INFISICAL,
+                            operation="resolve_infisical_refs",
+                            target_name="binding_config_resolver",
+                        )
+                        raise SecretResolutionError(
+                            "Failed to resolve infisical: reference",
+                            context=context,
+                        )
+                    result[key] = value
+            elif isinstance(value, dict):
+                result[key] = self._resolve_infisical_refs(
+                    value, correlation_id, depth + 1
+                )
+            else:
+                result[key] = value
+
+        return result
+
+    async def _resolve_infisical_refs_async(
+        self,
+        config: dict[str, object],
+        correlation_id: UUID,
+        depth: int = 0,
+    ) -> dict[str, object]:
+        """Resolve any infisical: references in config values asynchronously.
+
+        Async counterpart to ``_resolve_infisical_refs``.
+
+        Args:
+            config: Configuration dict potentially containing infisical: refs.
+            correlation_id: Correlation ID for error tracking.
+            depth: Recursion depth for nested resolution.
+
+        Returns:
+            Configuration with infisical references resolved.
+        """
+        secret_resolver = self._get_secret_resolver()
+        if secret_resolver is None:
+            if self._has_infisical_references(config):
+                if self._config.fail_on_vault_error:
+                    context = ModelInfraErrorContext.with_correlation(
+                        correlation_id=correlation_id,
+                        transport_type=EnumInfraTransportType.INFISICAL,
+                        operation="resolve_infisical_refs_async",
+                        target_name="binding_config_resolver",
+                    )
+                    raise SecretResolutionError(
+                        "Config contains infisical: references but no "
+                        "SecretResolver is configured",
+                        context=context,
+                    )
+            return config
+
+        result: dict[str, object] = {}
+        for key, value in config.items():
+            if isinstance(value, str) and value.startswith("infisical:"):
+                infisical_path, fragment = self._parse_infisical_reference(value)
+                logical_name = (
+                    f"{infisical_path}#{fragment}" if fragment else infisical_path
+                )
+                try:
+                    secret = await secret_resolver.get_secret_async(logical_name)
+                    if secret is not None:
+                        result[key] = secret.get_secret_value()
+                    elif self._config.fail_on_vault_error:
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.INFISICAL,
+                            operation="resolve_infisical_refs_async",
+                            target_name="binding_config_resolver",
+                        )
+                        raise SecretResolutionError(
+                            "Infisical secret not found",
+                            context=context,
+                        )
+                    else:
+                        result[key] = value
+                except SecretResolutionError:
+                    raise
+                except Exception:
+                    if self._config.fail_on_vault_error:
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.INFISICAL,
+                            operation="resolve_infisical_refs_async",
+                            target_name="binding_config_resolver",
+                        )
+                        raise SecretResolutionError(
+                            "Failed to resolve infisical: reference",
+                            context=context,
+                        )
+                    result[key] = value
+            elif isinstance(value, dict):
+                result[key] = await self._resolve_infisical_refs_async(
+                    value, correlation_id, depth + 1
+                )
+            else:
+                result[key] = value
+
+        return result
+
+    def _parse_infisical_reference(self, value: str) -> tuple[str, str | None]:
+        """Parse an infisical: reference string into path and optional fragment.
+
+        Args:
+            value: The infisical reference string (e.g., "infisical:path#field").
+
+        Returns:
+            Tuple of (infisical_path, fragment) where fragment may be None.
+        """
+        infisical_path = value[len("infisical:") :]
+        return _split_path_and_fragment(infisical_path)
+
+    def _has_infisical_references(self, config: dict[str, object]) -> bool:
+        """Check if config contains any infisical: references.
+
+        Args:
+            config: Configuration dict to check.
+
+        Returns:
+            True if any infisical: references are found, False otherwise.
+        """
+        for value in config.values():
+            if isinstance(value, str) and value.startswith("infisical:"):
+                return True
+            elif isinstance(value, dict):
+                if self._has_infisical_references(value):
+                    return True
+        return False
 
     def _validate_config(
         self,

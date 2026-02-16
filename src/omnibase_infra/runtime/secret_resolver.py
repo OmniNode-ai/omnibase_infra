@@ -405,6 +405,7 @@ class SecretResolver:
         self,
         config: ModelSecretResolverConfig,
         vault_handler: HandlerVault | None = None,
+        infisical_handler: object | None = None,
         metrics_collector: ProtocolSecretResolverMetrics | None = None,
     ) -> None:
         """Initialize SecretResolver.
@@ -412,6 +413,9 @@ class SecretResolver:
         Args:
             config: Resolver configuration with mappings and TTLs
             vault_handler: Optional Vault handler for Vault-sourced secrets
+                (deprecated: prefer infisical_handler)
+            infisical_handler: Optional HandlerInfisical for Infisical-sourced
+                secrets (OMN-2286). Typed as ``object`` to avoid circular imports.
             metrics_collector: Optional external metrics collector for observability
 
         Note:
@@ -424,6 +428,7 @@ class SecretResolver:
         """
         self._config = config
         self._vault_handler = vault_handler
+        self._infisical_handler = infisical_handler
         self._metrics_collector = metrics_collector
         self._cache: dict[str, ModelCachedSecret] = {}
         # Track mutable stats internally since ModelSecretCacheStats is frozen
@@ -1462,6 +1467,26 @@ class SecretResolver:
             value = self._read_vault_secret_sync(
                 source.source_path, logical_name, effective_correlation_id
             )
+        elif source.source_type == "infisical":
+            if self._infisical_handler is None:
+                logger.warning(
+                    "Infisical handler not configured for secret: %s",
+                    logical_name,
+                    extra={
+                        "logical_name": logical_name,
+                        "correlation_id": str(effective_correlation_id),
+                    },
+                )
+                self._record_resolution_failure(
+                    logical_name,
+                    "infisical",
+                    effective_correlation_id,
+                    "handler_not_configured",
+                )
+                return None
+            value = self._read_infisical_secret_sync(
+                source.source_path, logical_name, effective_correlation_id
+            )
 
         if value is None:
             self._record_resolution_failure(
@@ -1553,6 +1578,26 @@ class SecretResolver:
                 )
                 return None
             value = await self._read_vault_secret_async(
+                source.source_path, logical_name, effective_correlation_id
+            )
+        elif source.source_type == "infisical":
+            if self._infisical_handler is None:
+                logger.warning(
+                    "Infisical handler not configured for secret: %s",
+                    logical_name,
+                    extra={
+                        "logical_name": logical_name,
+                        "correlation_id": str(effective_correlation_id),
+                    },
+                )
+                self._record_resolution_failure(
+                    logical_name,
+                    "infisical",
+                    effective_correlation_id,
+                    "handler_not_configured",
+                )
+                return None
+            value = await self._read_infisical_secret_async(
                 source.source_path, logical_name, effective_correlation_id
             )
 
@@ -2018,6 +2063,157 @@ class SecretResolver:
         vault_path = parts[1]
 
         return mount_point, vault_path, field
+
+    def _read_infisical_secret_sync(
+        self, path: str, logical_name: str = "", correlation_id: UUID | None = None
+    ) -> str | None:
+        """Read secret from Infisical synchronously.
+
+        Path format: ``secret_name`` or ``path/secret_name#field``.
+
+        The Infisical handler is called via its ``execute()`` method with an
+        ``infisical.get_secret`` operation envelope.
+
+        Args:
+            path: Infisical secret path (may include ``#field`` fragment).
+            logical_name: The logical name being resolved (for error context).
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            Secret value as string, or None if not found.
+        """
+        if self._infisical_handler is None:
+            return None
+
+        effective_correlation_id = correlation_id or uuid4()
+
+        # Parse path into secret_name and optional field
+        if "#" in path:
+            secret_path, field = path.rsplit("#", 1)
+        else:
+            secret_path = path
+            field = None
+
+        # For sync access, we call the adapter directly if available
+        # (handler.execute is async, so we use adapter for sync path)
+        handler = self._infisical_handler
+        adapter = getattr(handler, "_adapter", None)
+        if adapter is None:
+            logger.warning(
+                "Infisical handler adapter not available for sync resolution",
+                extra={
+                    "logical_name": logical_name,
+                    "correlation_id": str(effective_correlation_id),
+                },
+            )
+            return None
+
+        try:
+            result = adapter.get_secret(secret_name=secret_path)
+            value = result.value.get_secret_value()
+            if field:
+                # If field is specified, try to parse value as JSON and extract field
+                try:
+                    import json
+
+                    data = json.loads(value)
+                    if isinstance(data, dict):
+                        field_value = data.get(field)
+                        return str(field_value) if field_value is not None else None
+                except (json.JSONDecodeError, TypeError):
+                    return None
+            return value
+        except Exception as e:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=effective_correlation_id,
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="read_secret",
+                target_name="secret_resolver",
+            )
+            raise SecretResolutionError(
+                f"Failed to resolve secret from Infisical: {logical_name}",
+                context=context,
+                logical_name=logical_name,
+            ) from e
+
+    async def _read_infisical_secret_async(
+        self, path: str, logical_name: str = "", correlation_id: UUID | None = None
+    ) -> str | None:
+        """Read secret from Infisical asynchronously.
+
+        Uses the handler's ``execute()`` method which is async-native.
+
+        Args:
+            path: Infisical secret path (may include ``#field`` fragment).
+            logical_name: The logical name being resolved (for error context).
+            correlation_id: Optional correlation ID for tracing.
+
+        Returns:
+            Secret value as string, or None if not found.
+
+        Raises:
+            SecretResolutionError: On Infisical communication failures.
+        """
+        if self._infisical_handler is None:
+            return None
+
+        effective_correlation_id = correlation_id or uuid4()
+
+        # Parse path
+        if "#" in path:
+            secret_name, field = path.rsplit("#", 1)
+        else:
+            secret_name = path
+            field = None
+
+        envelope: dict[str, object] = {
+            "operation": "infisical.get_secret",
+            "payload": {
+                "secret_name": secret_name,
+            },
+            "correlation_id": str(effective_correlation_id),
+        }
+
+        try:
+            result = await self._infisical_handler.execute(envelope)
+
+            result_dict = result.result
+            if not isinstance(result_dict, dict):
+                return None
+
+            value = result_dict.get("value")
+            if value is None:
+                return None
+
+            value_str = str(value)
+
+            if field:
+                try:
+                    import json
+
+                    data = json.loads(value_str)
+                    if isinstance(data, dict):
+                        field_value = data.get(field)
+                        return str(field_value) if field_value is not None else None
+                except (json.JSONDecodeError, TypeError):
+                    return None
+
+            return value_str
+
+        except (InfraAuthenticationError, InfraTimeoutError, InfraUnavailableError):
+            raise
+        except Exception as e:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=effective_correlation_id,
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="read_secret",
+                target_name="secret_resolver",
+            )
+            raise SecretResolutionError(
+                f"Failed to resolve secret from Infisical: {logical_name}",
+                context=context,
+                logical_name=logical_name,
+            ) from e
 
     def _cache_secret(
         self,
