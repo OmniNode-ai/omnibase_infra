@@ -47,7 +47,7 @@ have higher latencies proportional to output token count.
 
 | Endpoint | P95 Target | P99 Budget | Rationale |
 |----------|-----------|------------|-----------|
-| **Qwen2.5-14B** (routing) | < 80 ms | < 150 ms | Critical path for agent routing decisions. Must be fast enough that routing overhead is imperceptible. |
+| **Qwen2.5-14B** (routing) | < 80 ms | < 150 ms | Transport + minimal inference (max_tokens=1). Critical path for agent routing decisions. Must be fast enough that routing overhead is imperceptible. |
 | **Qwen2.5-Coder-14B** (analysis) | < 200 ms | < 400 ms | Used for code analysis and enforcement. Moderate latency acceptable since these are background tasks. |
 | **Qwen2.5-72B** (summarization) | < 500 ms | < 1000 ms | Large model on Apple Silicon. Higher latency expected; used for documentation and analysis where latency is less critical. |
 | **GTE-Qwen2-1.5B** (embedding) | < 100 ms | < 200 ms | Small model on GPU. Embeddings must be fast for real-time RAG queries. |
