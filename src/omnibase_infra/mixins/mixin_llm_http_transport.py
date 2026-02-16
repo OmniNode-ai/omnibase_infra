@@ -21,9 +21,10 @@ Security:
     - Response bodies are sanitized via ``sanitize_error_string()`` before
       inclusion in error context or exception messages, preventing accidental
       leakage of secrets or PII through error propagation paths.
-    - CIDR allowlist (``192.168.86.0/24``) restricts outbound LLM calls to
-      the local network trust boundary. Requests to IPs outside this range
-      are rejected before any HTTP call is made (fail-closed).
+    - CIDR allowlist (default: ``192.168.86.0/24``, configurable via
+      ``LLM_ENDPOINT_CIDR_ALLOWLIST``) restricts outbound LLM calls to the
+      local network trust boundary. Requests to IPs outside the configured
+      ranges are rejected before any HTTP call is made (fail-closed).
     - HMAC-SHA256 request signing using the ``LOCAL_LLM_SHARED_SECRET``
       environment variable adds an ``x-omn-node-signature`` header to all
       outbound requests. If the secret is not configured, requests are
@@ -137,9 +138,17 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
 
     # ── Class-level constants ────────────────────────────────────────────
 
-    #: CIDR network defining the local LLM trust boundary.
-    #: Only endpoints within this network are permitted.
-    LOCAL_LLM_CIDR: ClassVar[IPv4Network] = IPv4Network("192.168.86.0/24")
+    #: CIDR networks defining the local LLM trust boundary.
+    #: Only endpoints within these networks are permitted.
+    #: Configurable via the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` environment variable
+    #: (comma-separated CIDR ranges). Defaults to ``192.168.86.0/24``.
+    LOCAL_LLM_CIDRS: ClassVar[tuple[IPv4Network, ...]] = tuple(
+        IPv4Network(cidr.strip())
+        for cidr in os.environ.get(
+            "LLM_ENDPOINT_CIDR_ALLOWLIST", "192.168.86.0/24"
+        ).split(",")
+        if cidr.strip()
+    )
 
     #: Environment variable name for the HMAC shared secret.
     LOCAL_LLM_SECRET_ENV: ClassVar[str] = "LOCAL_LLM_SHARED_SECRET"
@@ -322,12 +331,30 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         """Validate that the URL target IP is within the local LLM CIDR allowlist.
 
         Resolves the hostname to an IPv4 address and checks membership in
-        ``LOCAL_LLM_CIDR`` (``192.168.86.0/24``). This is a fail-closed check:
-        if the hostname cannot be resolved or the IP is outside the allowlist,
-        the request is rejected before any HTTP call is made.
+        ``LOCAL_LLM_CIDRS`` (default: ``192.168.86.0/24``, configurable via
+        the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` environment variable). This is a
+        fail-closed check: if the hostname cannot be resolved or the IP is
+        outside all configured allowlist ranges, the request is rejected before
+        any HTTP call is made.
 
         DNS resolution uses ``asyncio.get_running_loop().getaddrinfo()`` to
         avoid blocking the event loop on synchronous ``socket.getaddrinfo()``.
+
+        Known Limitations:
+            There is a time-of-check-to-time-of-use (TOCTOU) gap between the
+            DNS resolution performed here and the independent DNS resolution
+            performed by httpx when the actual HTTP request is made. An attacker
+            with control over DNS responses could return a permitted IP during
+            the allowlist check and a different (malicious) IP when httpx
+            resolves the same hostname moments later.
+
+            This is acceptable for the current local-network trust boundary
+            (``192.168.86.0/24``) where DNS is resolved by a trusted local
+            resolver and endpoints are on a private LAN segment not exposed to
+            the public internet. If the trust boundary is extended to untrusted
+            networks, this method should be replaced with an approach that pins
+            the resolved IP and passes it directly to the HTTP client (e.g.,
+            via httpx transport-level address binding).
 
         Args:
             url: The full URL of the LLM endpoint.
@@ -382,11 +409,12 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                 context=ctx,
             )
 
-        if resolved_ip not in self.LOCAL_LLM_CIDR:
+        if not any(resolved_ip in cidr for cidr in self.LOCAL_LLM_CIDRS):
             ctx = self._build_error_context(f"allowlist_check:{url}", correlation_id)
+            allowlist_str = ", ".join(str(c) for c in self.LOCAL_LLM_CIDRS)
             raise InfraAuthenticationError(
                 f"Endpoint IP {resolved_ip} is outside the local LLM allowlist "
-                f"({self.LOCAL_LLM_CIDR})",
+                f"({allowlist_str})",
                 context=ctx,
             )
 
@@ -394,7 +422,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
             "Endpoint passed CIDR allowlist check",
             extra={
                 "resolved_ip": str(resolved_ip),
-                "allowlist": str(self.LOCAL_LLM_CIDR),
+                "allowlist": ", ".join(str(c) for c in self.LOCAL_LLM_CIDRS),
                 "hostname": hostname,
                 "correlation_id": str(correlation_id),
                 "target": self._llm_target_name,
@@ -412,9 +440,30 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         signing key. This is a fail-closed check: if the secret is not
         configured, the request is rejected.
 
+        The secret is read from ``os.environ`` on every call rather than
+        being cached at init time. This is intentional: it allows the shared
+        secret to be rotated at runtime (e.g., via a sidecar or operator
+        updating the environment) without requiring a process restart.
+
         The signature is computed over the canonical JSON serialization of
         the payload (sorted keys, no extra whitespace) to ensure deterministic
         signing regardless of dict ordering.
+
+        Known Limitations:
+            The HMAC signature does not include a timestamp or nonce, so it
+            provides no replay protection. A captured request can be replayed
+            verbatim as long as the shared secret remains unchanged. Additionally,
+            the signature is computed once before the retry loop in
+            ``_execute_llm_http_call``, meaning all retry attempts for a given
+            call share the same signature value.
+
+            This is acceptable for the current local-network trust boundary
+            (``192.168.86.0/24``) where traffic stays on a private LAN segment
+            not exposed to the public internet. The HMAC serves as a proof-of-
+            origin to prevent accidental cross-service calls, not as a defense
+            against active network attackers. If the trust boundary is extended
+            to untrusted networks, the signing scheme should be upgraded to
+            include a timestamp and/or nonce to mitigate replay attacks.
 
         Args:
             payload: JSON-serializable request payload.
