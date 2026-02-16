@@ -22,7 +22,7 @@ class ModelDemoLoopResult(BaseModel):
         is_ready: True only when all non-skipped assertions passed.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     assertions: tuple[ModelAssertionResult, ...] = Field(
         default_factory=tuple,

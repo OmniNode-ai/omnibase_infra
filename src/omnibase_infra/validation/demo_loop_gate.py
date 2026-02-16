@@ -403,7 +403,7 @@ class DemoLoopGate:
         return ModelAssertionResult(
             name="dashboard_config",
             status=EnumAssertionStatus.PASSED,
-            message=f"Dashboard: connected to {kafka_servers}",
+            message="Dashboard: Kafka bootstrap configured",
         )
 
     # -------------------------------------------------------------------------
@@ -582,13 +582,11 @@ def _load_env_file(path: str) -> None:
             continue
         key, _, value = line.partition("=")
         key = key.strip()
-        value = value.strip().strip("\"'")
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
         if key and key not in os.environ:
             os.environ[key] = value
-
-
-if __name__ == "__main__":
-    sys.exit(main())
 
 
 __all__: list[str] = [
@@ -601,3 +599,7 @@ __all__: list[str] = [
     "format_result",
     "main",
 ]
+
+
+if __name__ == "__main__":
+    sys.exit(main())

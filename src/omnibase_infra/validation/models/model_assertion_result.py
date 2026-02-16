@@ -19,7 +19,7 @@ class ModelAssertionResult(BaseModel):
         details: Optional list of detail lines (e.g., missing event types).
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     name: str = Field(..., description="Short assertion identifier")
     status: EnumAssertionStatus = Field(..., description="Assertion outcome")

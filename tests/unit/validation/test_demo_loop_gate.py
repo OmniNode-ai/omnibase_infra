@@ -300,16 +300,13 @@ class TestProjectorHealth:
             projector_check_enabled=True,
             dashboard_check_enabled=False,
         )
-        with patch(
-            "omnibase_infra.validation.demo_loop_gate.DemoLoopGate.assert_projector_health"
-        ) as mock_check:
-            mock_check.return_value = ModelAssertionResult(
-                name="projector_health",
-                status=EnumAssertionStatus.SKIPPED,
-                message="Projector health: skipped (ImportError)",
-            )
+        with patch.dict(
+            "sys.modules",
+            {"omnibase_infra.runtime.projector_plugin_loader": None},
+        ):
             result = gate.assert_projector_health()
         assert result.status == EnumAssertionStatus.SKIPPED
+        assert "ModuleNotFoundError" in result.message
 
 
 # =============================================================================
@@ -336,7 +333,7 @@ class TestDashboardConfig:
         ):
             result = gate.assert_dashboard_config()
         assert result.status == EnumAssertionStatus.PASSED
-        assert "192.168.86.200:29092" in result.message
+        assert "Kafka bootstrap configured" in result.message
 
     def test_fails_with_no_kafka_servers(self) -> None:
         gate = DemoLoopGate(
@@ -502,7 +499,7 @@ class TestCLIMain:
         exit_code = main(["--ci", "--verbose"])
         assert exit_code == 0
 
-    def test_invalid_topics_exits_nonzero(self) -> None:
+    def test_invalid_topics_returns_failed_result(self) -> None:
         gate = DemoLoopGate(
             canonical_topics=("bad-topic",),
             projector_check_enabled=False,
