@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS llm_call_metrics (
     correlation_id UUID,
 
     -- Session/run context (logical references, no FK - async event arrival)
-    session_id VARCHAR(255) NOT NULL,
+    -- session_id is nullable until the write path is fully integrated
+    session_id VARCHAR(255),
     run_id VARCHAR(255),
 
     -- Model identification
@@ -80,8 +81,8 @@ CREATE TABLE IF NOT EXISTS llm_call_metrics (
     -- Cost (NULL for unknown models, NOT 0)
     estimated_cost_usd NUMERIC(12, 6),
 
-    -- Performance
-    latency_ms NUMERIC(10, 2) NOT NULL,
+    -- Performance (nullable: failed LLM calls may not have latency data)
+    latency_ms NUMERIC(10, 2),
 
     -- Usage provenance
     usage_source usage_source_type NOT NULL DEFAULT 'MISSING',
@@ -112,9 +113,9 @@ CREATE TABLE IF NOT EXISTS llm_call_metrics (
     CONSTRAINT non_negative_estimated_cost_usd CHECK (
         estimated_cost_usd IS NULL OR estimated_cost_usd >= 0
     ),
-    CONSTRAINT non_negative_latency_ms CHECK (latency_ms >= 0),
+    CONSTRAINT non_negative_latency_ms CHECK (latency_ms IS NULL OR latency_ms >= 0),
     CONSTRAINT usage_raw_size_limit CHECK (
-        usage_raw IS NULL OR pg_column_size(usage_raw) <= 65536
+        usage_raw IS NULL OR octet_length(usage_raw::text) <= 65536
     )
 );
 
@@ -170,9 +171,10 @@ CREATE TABLE IF NOT EXISTS llm_cost_aggregates (
 -- INDEXES: llm_call_metrics
 -- ============================================================================
 
--- Session lookups (most common query pattern)
+-- Session lookups (most common query pattern, partial: excludes NULLs)
 CREATE INDEX IF NOT EXISTS idx_llm_call_metrics_session_id
-    ON llm_call_metrics (session_id);
+    ON llm_call_metrics (session_id)
+    WHERE session_id IS NOT NULL;
 
 -- Run lookups (within-session drill-down)
 CREATE INDEX IF NOT EXISTS idx_llm_call_metrics_run_id
@@ -253,7 +255,8 @@ COMMENT ON COLUMN llm_call_metrics.id IS
 COMMENT ON COLUMN llm_call_metrics.correlation_id IS
     'Request correlation ID for tracing across services';
 COMMENT ON COLUMN llm_call_metrics.session_id IS
-    'Session identifier (logical reference, no FK - async event arrival)';
+    'Session identifier (logical reference, no FK - async event arrival). '
+    'Nullable until write path is fully integrated.';
 COMMENT ON COLUMN llm_call_metrics.run_id IS
     'Run identifier within a session (logical reference, no FK)';
 COMMENT ON COLUMN llm_call_metrics.model_id IS
@@ -267,7 +270,8 @@ COMMENT ON COLUMN llm_call_metrics.total_tokens IS
 COMMENT ON COLUMN llm_call_metrics.estimated_cost_usd IS
     'Estimated cost in USD (NULL for unknown models, NOT 0)';
 COMMENT ON COLUMN llm_call_metrics.latency_ms IS
-    'LLM call latency in milliseconds (sub-millisecond precision, 2 decimal places)';
+    'LLM call latency in milliseconds (sub-millisecond precision, 2 decimal places). '
+    'NULL for failed calls where latency was not captured.';
 COMMENT ON COLUMN llm_call_metrics.usage_source IS
     'Token usage data provenance: API (provider-reported), ESTIMATED (calculated), MISSING (unavailable)';
 COMMENT ON COLUMN llm_call_metrics.usage_is_estimated IS

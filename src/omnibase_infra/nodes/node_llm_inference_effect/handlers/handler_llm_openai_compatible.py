@@ -939,15 +939,29 @@ def _parse_usage(raw_usage: JsonType) -> ModelLlmUsage:
             usage_source=ContractEnumUsageSource.MISSING,
         )
 
-    tokens_input = raw_usage.get("prompt_tokens", 0)
-    tokens_output = raw_usage.get("completion_tokens", 0)
-    tokens_total = raw_usage.get("total_tokens")
+    tokens_input = _safe_int(raw_usage.get("prompt_tokens", 0), 0)
+    tokens_output = _safe_int(raw_usage.get("completion_tokens", 0), 0)
+    tokens_total = _safe_int_or_none(raw_usage.get("total_tokens"))
+
+    # Only mark as API-reported when at least one token counter is positive.
+    # A usage dict with all-zero values (e.g. some providers return
+    # {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
+    # is semantically equivalent to missing usage data.
+    has_usage = (
+        tokens_input > 0
+        or tokens_output > 0
+        or (tokens_total is not None and tokens_total > 0)
+    )
 
     return ModelLlmUsage(
-        tokens_input=_safe_int(tokens_input, 0),
-        tokens_output=_safe_int(tokens_output, 0),
-        tokens_total=_safe_int_or_none(tokens_total),
-        usage_source=ContractEnumUsageSource.API,
+        tokens_input=tokens_input,
+        tokens_output=tokens_output,
+        tokens_total=tokens_total,
+        usage_source=(
+            ContractEnumUsageSource.API
+            if has_usage
+            else ContractEnumUsageSource.MISSING
+        ),
         raw_provider_usage=dict(raw_usage),
     )
 

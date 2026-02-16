@@ -237,10 +237,23 @@ def _parse_openai_usage(data: dict[str, JsonType]) -> ModelLlmUsage:
     if not isinstance(prompt_tokens, int):
         prompt_tokens = 0
 
+    total_tokens = usage_raw.get("total_tokens", 0)
+    if not isinstance(total_tokens, int):
+        total_tokens = 0
+
+    # Only mark as API-reported when at least one token counter is positive.
+    # A usage dict with all-zero values is semantically equivalent to missing
+    # usage data (matches handler_embedding_ollama pattern).
+    has_usage = prompt_tokens > 0 or total_tokens > 0
+
     return ModelLlmUsage(
         tokens_input=prompt_tokens,
         tokens_output=0,
-        usage_source=ContractEnumUsageSource.API,
+        usage_source=(
+            ContractEnumUsageSource.API
+            if has_usage
+            else ContractEnumUsageSource.MISSING
+        ),
         raw_provider_usage=dict(usage_raw),
     )
 
