@@ -13,6 +13,8 @@ Architecture:
     - Delegates HTTP transport to MixinLlmHttpTransport
     - Parses the response into ModelLlmInferenceResponse
     - Maps provider finish reasons to EnumLlmFinishReason
+    - Extracts and normalizes token usage (OMN-2238)
+    - Builds ContractLlmCallMetrics for caller to publish
 
 Handler Responsibilities:
     - Build URL from base_url + operation_type path
@@ -22,6 +24,9 @@ Handler Responsibilities:
     - Parse response JSON into ModelLlmInferenceResponse
     - Map unknown finish_reason values to UNKNOWN (no crash)
     - Inject Authorization header when api_key is provided
+    - Extract token usage from API response (5 fallback cases)
+    - Redact sensitive data from raw response before storage
+    - Build per-call metrics (ContractLlmCallMetrics) for ``onex.evt.omniintelligence.llm-call-completed.v1``
 
 Auth Strategy:
     When ``api_key`` is provided, the handler temporarily injects a
@@ -41,16 +46,22 @@ Related Tickets:
     - OMN-2107: Phase 7 OpenAI-compatible inference handler
     - OMN-2104: MixinLlmHttpTransport (Phase 4)
     - OMN-2106: ModelLlmInferenceResponse (Phase 6)
+    - OMN-2238: Extract and normalize token usage from LLM API responses
+    - OMN-2235: LLM cost tracking contracts (SPI layer)
 
 See Also:
     - MixinLlmHttpTransport for HTTP call execution
     - ModelLlmInferenceResponse for output model
     - EnumLlmFinishReason for finish reason mapping
+    - service_llm_usage_normalizer for normalization logic
+    - ContractLlmCallMetrics for per-call metrics contract
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import threading
 import time
@@ -81,8 +92,15 @@ from omnibase_infra.nodes.effects.models.model_llm_usage import ModelLlmUsage
 from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
     ModelLlmInferenceRequest,
 )
+from omnibase_infra.nodes.node_llm_inference_effect.services.service_llm_usage_normalizer import (
+    normalize_llm_usage,
+)
+from omnibase_spi.contracts.measurement.contract_llm_call_metrics import (
+    ContractLlmCallMetrics,
+)
 
 logger = logging.getLogger(__name__)
+
 
 # Mapping from OpenAI finish_reason strings to canonical enum values.
 # Unknown values fall through to UNKNOWN.
@@ -152,6 +170,19 @@ class HandlerLlmOpenaiCompatible:
             An ``asyncio.Lock`` (``_auth_lock``) is lazily attached to the
             transport on first auth-injected call so that all handler
             instances sharing the same transport serialize their client swaps.
+        last_call_metrics: The ``ContractLlmCallMetrics`` from the most recent
+            ``handle()`` call, or ``None`` if metrics computation failed or
+            ``handle()`` has not been called.
+
+            .. warning:: **Not safe for concurrent access.**
+                This attribute is mutable shared state on the handler instance.
+                If two concurrent ``handle()`` calls interleave, the caller of
+                the first call may read metrics from the second call. When
+                sharing a handler instance across concurrent asyncio tasks,
+                callers MUST use the metrics returned in the event output
+                (``response.usage``) rather than relying on this attribute.
+                This attribute exists as a convenience for single-caller
+                sequential usage patterns only.
 
     Example:
         >>> from unittest.mock import AsyncMock, MagicMock
@@ -159,7 +190,10 @@ class HandlerLlmOpenaiCompatible:
         >>> handler = HandlerLlmOpenaiCompatible(transport)
     """
 
-    def __init__(self, transport: MixinLlmHttpTransport) -> None:
+    def __init__(
+        self,
+        transport: MixinLlmHttpTransport,
+    ) -> None:
         """Initialize handler with HTTP transport.
 
         Args:
@@ -168,6 +202,7 @@ class HandlerLlmOpenaiCompatible:
                 node or adapter that mixes in MixinLlmHttpTransport.
         """
         self._transport = transport
+        self.last_call_metrics: ContractLlmCallMetrics | None = None
 
     async def handle(
         self,
@@ -222,13 +257,145 @@ class HandlerLlmOpenaiCompatible:
         latency_ms = (time.perf_counter() - start_time) * 1000
 
         # 4. Parse response
-        return self._parse_response(
+        response = self._parse_response(
             data=response_data,
             request=request,
             correlation_id=correlation_id,
             execution_id=execution_id,
             latency_ms=latency_ms,
         )
+
+        # 5. Extract and normalize usage metrics (OMN-2238)
+        # _build_usage_metrics returns the metrics directly so that
+        # handle() uses the local return value. self.last_call_metrics
+        # is also set as a convenience for sequential callers, but is
+        # NOT safe for concurrent access (see class docstring).
+        # Handlers MUST NOT publish events directly per ONEX handler
+        # constraints.
+        self.last_call_metrics = self._build_usage_metrics(
+            raw_response=response_data,
+            request=request,
+            response=response,
+            latency_ms=latency_ms,
+        )
+
+        return response
+
+    # ── Usage metrics building ─────────────────────────────────────────
+
+    def _build_usage_metrics(
+        self,
+        raw_response: dict[str, JsonType],
+        request: ModelLlmInferenceRequest,
+        response: ModelLlmInferenceResponse,
+        latency_ms: float,
+    ) -> ContractLlmCallMetrics | None:
+        """Extract, normalize, and return LLM call metrics.
+
+        Performs the following steps:
+        1. Build prompt text for estimation fallback
+        2. Normalize usage via the 5-case normalizer
+        3. Build and return ContractLlmCallMetrics
+
+        The caller (``handle()``) assigns the return value to
+        ``self.last_call_metrics`` and may also use the returned value
+        directly, avoiding the concurrency hazard of reading mutable
+        instance state after an ``await`` boundary.
+
+        The caller (node/dispatcher layer) is responsible for publishing the
+        metrics event to the event bus. Handlers MUST NOT publish events
+        directly per ONEX handler constraints.
+
+        This method is fire-and-forget: errors in metrics building are
+        logged but never propagated to the caller. LLM inference must
+        not fail because metrics computation failed.
+
+        Args:
+            raw_response: The raw JSON response from the provider.
+            request: The original inference request.
+            response: The parsed inference response.
+            latency_ms: End-to-end latency in milliseconds.
+
+        Returns:
+            The built metrics contract, or ``None`` if metrics computation
+            failed.
+        """
+        try:
+            # Build prompt text for estimation fallback.
+            prompt_text = self._build_prompt_text(request)
+
+            # Normalize usage (handles all 5 fallback cases).
+            raw_usage, normalized = normalize_llm_usage(
+                raw_response,
+                provider="openai_compatible",
+                generated_text=response.generated_text,
+                prompt_text=prompt_text,
+            )
+
+            # Compute input hash for reproducibility tracking.
+            input_hash = _compute_input_hash(request)
+
+            # Build the metrics contract.
+            metrics = ContractLlmCallMetrics(
+                model_id=request.model,
+                prompt_tokens=normalized.prompt_tokens,
+                completion_tokens=normalized.completion_tokens,
+                total_tokens=normalized.total_tokens,
+                latency_ms=latency_ms,
+                usage_raw=raw_usage,
+                usage_normalized=normalized,
+                usage_is_estimated=normalized.usage_is_estimated,
+                input_hash=input_hash,
+                timestamp_iso=datetime.now(UTC).isoformat(),
+                reporting_source="handler-llm-openai-compatible",
+            )
+
+            logger.debug(
+                "Built LLM call metrics. correlation_id=%s model=%s "
+                "prompt_tokens=%d completion_tokens=%d source=%s",
+                response.correlation_id,
+                request.model,
+                normalized.prompt_tokens,
+                normalized.completion_tokens,
+                normalized.source.value,
+            )
+            return metrics
+        except Exception:
+            # Metrics building must never break inference flow.
+            logger.warning(
+                "Failed to build LLM call metrics; ignoring. model=%s",
+                request.model,
+                exc_info=True,
+            )
+            return None
+
+    @staticmethod
+    def _build_prompt_text(request: ModelLlmInferenceRequest) -> str | None:
+        """Build a prompt text string for token estimation fallback.
+
+        For CHAT_COMPLETION: concatenates system_prompt and message contents.
+        For COMPLETION: returns the prompt field directly.
+
+        The text is used only for rough token estimation when the provider
+        does not report token counts. It is never stored.
+
+        Args:
+            request: The inference request.
+
+        Returns:
+            Concatenated prompt text, or None if no text available.
+        """
+        if request.operation_type == EnumLlmOperationType.COMPLETION:
+            return request.prompt
+
+        parts: list[str] = []
+        if request.system_prompt:
+            parts.append(request.system_prompt)
+        for msg in request.messages:
+            content = msg.get("content")
+            if isinstance(content, str):
+                parts.append(content)
+        return " ".join(parts) if parts else None
 
     # ── URL building ─────────────────────────────────────────────────────
 
@@ -774,6 +941,59 @@ def _parse_usage(raw_usage: JsonType) -> ModelLlmUsage:
         tokens_output=_safe_int(tokens_output, 0),
         tokens_total=_safe_int_or_none(tokens_total),
     )
+
+
+def _compute_input_hash(request: ModelLlmInferenceRequest) -> str:
+    """Compute a SHA-256 hash of the request input for reproducibility.
+
+    The hash covers model, operation_type, messages/prompt, system_prompt,
+    and generation parameters. It does NOT include api_key or base_url
+    (infrastructure config, not semantic input).
+
+    Args:
+        request: The inference request.
+
+    Returns:
+        SHA-256 hex digest prefixed with ``sha256-``.
+    """
+    parts: list[str] = [
+        request.model,
+        request.operation_type.value,
+    ]
+    if request.prompt is not None:
+        parts.append(request.prompt)
+    if request.system_prompt is not None:
+        parts.append(request.system_prompt)
+    for msg in request.messages:
+        parts.append(json.dumps(msg, sort_keys=True, default=str))
+    if request.max_tokens is not None:
+        parts.append(str(request.max_tokens))
+    if request.temperature is not None:
+        parts.append(str(request.temperature))
+    if request.top_p is not None:
+        parts.append(str(request.top_p))
+    if request.stop:
+        parts.append(json.dumps(list(request.stop), sort_keys=True, default=str))
+    if request.tools:
+        parts.append(
+            json.dumps(
+                [_serialize_tool_definition(t) for t in request.tools],
+                sort_keys=True,
+                default=str,
+            )
+        )
+    if request.tool_choice is not None:
+        parts.append(
+            json.dumps(
+                _serialize_tool_choice(request.tool_choice),
+                sort_keys=True,
+                default=str,
+            )
+        )
+
+    combined = "|".join(parts)
+    digest = hashlib.sha256(combined.encode("utf-8")).hexdigest()
+    return f"sha256-{digest}"
 
 
 __all__: list[str] = ["HandlerLlmOpenaiCompatible"]

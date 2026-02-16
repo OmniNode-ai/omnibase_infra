@@ -525,6 +525,15 @@ TOPIC_INJECTION_LATENCY_BREAKDOWN: Final[str] = (
 )
 """Latency breakdown metrics from omniclaude injection hooks."""
 
+# LLM call metrics events
+TOPIC_LLM_CALL_COMPLETED: Final[str] = "onex.evt.omniintelligence.llm-call-completed.v1"
+"""LLM call completed metrics event.
+
+Producer: HandlerLlmOpenaiCompatible, HandlerLlmOllama
+Consumer: omniintelligence cost aggregation pipeline
+Payload: ContractLlmCallMetrics (per-call token counts, cost, latency)
+"""
+
 # Agent status events
 TOPIC_AGENT_STATUS: Final[str] = "onex.evt.agent.status.v1"
 """Agent status events for real-time agent visibility.
@@ -555,6 +564,8 @@ __all__ = [
     "ENV_PATTERN",
     # Agent Status Topics
     "TOPIC_AGENT_STATUS",
+    # LLM Call Metrics Topics
+    "TOPIC_LLM_CALL_COMPLETED",
     # Wiring Health Topics
     "TOPIC_INJECTION_AGENT_MATCH",
     "TOPIC_INJECTION_CONTEXT_UTILIZATION",
