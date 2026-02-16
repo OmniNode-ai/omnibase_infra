@@ -76,11 +76,8 @@ def to_usage_normalized(usage: ModelLlmUsage) -> ContractLlmUsageNormalized:
     """
     source = usage.usage_source
     usage_is_estimated = source == ContractEnumUsageSource.ESTIMATED
-    total = (
-        usage.tokens_total
-        if usage.tokens_total is not None
-        else (usage.tokens_input or 0) + (usage.tokens_output or 0)
-    )
+    # ModelLlmUsage.model_validator guarantees tokens_total is always set
+    total = usage.tokens_total
 
     return ContractLlmUsageNormalized(
         prompt_tokens=usage.tokens_input,
@@ -119,11 +116,8 @@ def to_call_metrics(
         A frozen ``ContractLlmCallMetrics`` with token counts, cost,
         raw/normalized usage, and metadata.
     """
-    total = (
-        usage.tokens_total
-        if usage.tokens_total is not None
-        else (usage.tokens_input or 0) + (usage.tokens_output or 0)
-    )
+    # ModelLlmUsage.model_validator guarantees tokens_total is always set
+    total = usage.tokens_total
     is_estimated = usage.usage_source == ContractEnumUsageSource.ESTIMATED
 
     return ContractLlmCallMetrics(
