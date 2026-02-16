@@ -314,7 +314,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
 
     # ── Endpoint trust boundary ─────────────────────────────────────────
 
-    def _validate_endpoint_allowlist(
+    async def _validate_endpoint_allowlist(
         self,
         url: str,
         correlation_id: UUID,
@@ -325,6 +325,9 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         ``LOCAL_LLM_CIDR`` (``192.168.86.0/24``). This is a fail-closed check:
         if the hostname cannot be resolved or the IP is outside the allowlist,
         the request is rejected before any HTTP call is made.
+
+        DNS resolution uses ``asyncio.get_running_loop().getaddrinfo()`` to
+        avoid blocking the event loop on synchronous ``socket.getaddrinfo()``.
 
         Args:
             url: The full URL of the LLM endpoint.
@@ -347,10 +350,11 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         try:
             resolved_ip = ip_address(hostname)
         except ValueError:
-            # hostname is not an IP literal - resolve via DNS
+            # hostname is not an IP literal - resolve via async DNS
             try:
-                resolved = socket.getaddrinfo(
-                    hostname, None, socket.AF_INET, socket.SOCK_STREAM
+                loop = asyncio.get_running_loop()
+                resolved = await loop.getaddrinfo(
+                    hostname, None, family=socket.AF_INET, type=socket.SOCK_STREAM
                 )
                 if not resolved:
                     ctx = self._build_error_context(
@@ -513,7 +517,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
 
         # ── Pre-flight security checks (fail-closed) ────────────────
         # These run BEFORE any HTTP call to enforce the local trust boundary.
-        self._validate_endpoint_allowlist(url, correlation_id)
+        await self._validate_endpoint_allowlist(url, correlation_id)
         hmac_signature = self._compute_hmac_signature(payload, correlation_id)
 
         operation = f"llm_http_call:{url}"

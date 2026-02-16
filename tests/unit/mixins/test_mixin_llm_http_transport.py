@@ -29,10 +29,10 @@ Related Tickets: OMN-2114 Phase 14, OMN-2250
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
-import os
 import time
 from typing import Any
 from unittest.mock import patch
@@ -1345,116 +1345,129 @@ class TestTransportMetadata:
 class TestCidrAllowlistValidation:
     """Validate CIDR allowlist enforcement on LLM endpoint URLs."""
 
-    def test_ip_within_allowlist_passes(self, correlation_id: UUID) -> None:
+    async def test_ip_within_allowlist_passes(self, correlation_id: UUID) -> None:
         """An IP within 192.168.86.0/24 must pass the allowlist check."""
         harness = LlmTransportHarness()
         # Should not raise
-        harness._validate_endpoint_allowlist(
+        await harness._validate_endpoint_allowlist(
             "http://192.168.86.201:8000/v1/completions", correlation_id
         )
 
-    def test_ip_outside_allowlist_rejected(self, correlation_id: UUID) -> None:
+    async def test_ip_outside_allowlist_rejected(self, correlation_id: UUID) -> None:
         """An IP outside 192.168.86.0/24 must raise InfraAuthenticationError."""
         harness = LlmTransportHarness()
         with pytest.raises(
             InfraAuthenticationError, match="outside the local LLM allowlist"
         ):
-            harness._validate_endpoint_allowlist(
+            await harness._validate_endpoint_allowlist(
                 "http://10.0.0.1:8000/v1/completions", correlation_id
             )
 
-    def test_public_ip_rejected(self, correlation_id: UUID) -> None:
+    async def test_public_ip_rejected(self, correlation_id: UUID) -> None:
         """A public IP must raise InfraAuthenticationError."""
         harness = LlmTransportHarness()
         with pytest.raises(
             InfraAuthenticationError, match="outside the local LLM allowlist"
         ):
-            harness._validate_endpoint_allowlist(
+            await harness._validate_endpoint_allowlist(
                 "http://8.8.8.8:8000/v1/completions", correlation_id
             )
 
-    def test_localhost_rejected(self, correlation_id: UUID) -> None:
+    async def test_localhost_rejected(self, correlation_id: UUID) -> None:
         """127.0.0.1 (localhost) must raise InfraAuthenticationError."""
         harness = LlmTransportHarness()
         with pytest.raises(
             InfraAuthenticationError, match="outside the local LLM allowlist"
         ):
-            harness._validate_endpoint_allowlist(
+            await harness._validate_endpoint_allowlist(
                 "http://127.0.0.1:8000/v1/completions", correlation_id
             )
 
-    def test_different_subnet_rejected(self, correlation_id: UUID) -> None:
+    async def test_different_subnet_rejected(self, correlation_id: UUID) -> None:
         """192.168.87.1 (adjacent subnet) must raise InfraAuthenticationError."""
         harness = LlmTransportHarness()
         with pytest.raises(
             InfraAuthenticationError, match="outside the local LLM allowlist"
         ):
-            harness._validate_endpoint_allowlist(
+            await harness._validate_endpoint_allowlist(
                 "http://192.168.87.1:8000/v1/completions", correlation_id
             )
 
-    def test_all_ips_in_subnet_accepted(self, correlation_id: UUID) -> None:
+    async def test_all_ips_in_subnet_accepted(self, correlation_id: UUID) -> None:
         """All IPs from .0 to .255 in the 192.168.86.0/24 range must pass."""
         harness = LlmTransportHarness()
         for octet in (0, 1, 100, 200, 201, 254, 255):
-            harness._validate_endpoint_allowlist(
+            await harness._validate_endpoint_allowlist(
                 f"http://192.168.86.{octet}:8000/v1/completions", correlation_id
             )
 
-    def test_hostname_resolving_to_allowed_ip_passes(
+    async def test_hostname_resolving_to_allowed_ip_passes(
         self, correlation_id: UUID
     ) -> None:
         """A hostname that resolves to an IP within the allowlist must pass."""
         harness = LlmTransportHarness()
-        with patch(
-            "omnibase_infra.mixins.mixin_llm_http_transport.socket.getaddrinfo",
-            return_value=[
-                (2, 1, 6, "", ("192.168.86.201", 0)),
-            ],
+
+        async def mock_getaddrinfo(
+            *args: object, **kwargs: object
+        ) -> list[tuple[int, int, int, str, tuple[str, int]]]:
+            return [(2, 1, 6, "", ("192.168.86.201", 0))]
+
+        with patch.object(
+            asyncio.get_running_loop(), "getaddrinfo", side_effect=mock_getaddrinfo
         ):
-            harness._validate_endpoint_allowlist(
+            await harness._validate_endpoint_allowlist(
                 "http://my-local-llm:8000/v1/completions", correlation_id
             )
 
-    def test_hostname_resolving_to_disallowed_ip_rejected(
+    async def test_hostname_resolving_to_disallowed_ip_rejected(
         self, correlation_id: UUID
     ) -> None:
         """A hostname resolving to an IP outside the allowlist must be rejected."""
         harness = LlmTransportHarness()
-        with patch(
-            "omnibase_infra.mixins.mixin_llm_http_transport.socket.getaddrinfo",
-            return_value=[
-                (2, 1, 6, "", ("10.0.0.5", 0)),
-            ],
+
+        async def mock_getaddrinfo(
+            *args: object, **kwargs: object
+        ) -> list[tuple[int, int, int, str, tuple[str, int]]]:
+            return [(2, 1, 6, "", ("10.0.0.5", 0))]
+
+        with patch.object(
+            asyncio.get_running_loop(), "getaddrinfo", side_effect=mock_getaddrinfo
         ):
             with pytest.raises(
                 InfraAuthenticationError, match="outside the local LLM allowlist"
             ):
-                harness._validate_endpoint_allowlist(
+                await harness._validate_endpoint_allowlist(
                     "http://external-llm:8000/v1/completions", correlation_id
                 )
 
-    def test_unresolvable_hostname_rejected(self, correlation_id: UUID) -> None:
+    async def test_unresolvable_hostname_rejected(self, correlation_id: UUID) -> None:
         """A hostname that cannot be resolved must raise InfraAuthenticationError."""
         import socket as _socket
 
         harness = LlmTransportHarness()
-        with patch(
-            "omnibase_infra.mixins.mixin_llm_http_transport.socket.getaddrinfo",
-            side_effect=_socket.gaierror("Name resolution failed"),
+
+        async def mock_getaddrinfo(
+            *args: object, **kwargs: object
+        ) -> list[tuple[int, int, int, str, tuple[str, int]]]:
+            raise _socket.gaierror("Name resolution failed")
+
+        with patch.object(
+            asyncio.get_running_loop(), "getaddrinfo", side_effect=mock_getaddrinfo
         ):
             with pytest.raises(
                 InfraAuthenticationError, match="Cannot resolve hostname"
             ):
-                harness._validate_endpoint_allowlist(
+                await harness._validate_endpoint_allowlist(
                     "http://nonexistent-host:8000/v1/completions", correlation_id
                 )
 
-    def test_empty_url_hostname_rejected(self, correlation_id: UUID) -> None:
+    async def test_empty_url_hostname_rejected(self, correlation_id: UUID) -> None:
         """A URL with no extractable hostname must raise InfraAuthenticationError."""
         harness = LlmTransportHarness()
         with pytest.raises(InfraAuthenticationError, match="Cannot extract hostname"):
-            harness._validate_endpoint_allowlist("not-a-valid-url", correlation_id)
+            await harness._validate_endpoint_allowlist(
+                "not-a-valid-url", correlation_id
+            )
 
     async def test_allowlist_checked_before_http_call(
         self, correlation_id: UUID
