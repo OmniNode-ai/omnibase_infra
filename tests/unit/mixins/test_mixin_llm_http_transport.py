@@ -34,6 +34,7 @@ import hashlib
 import hmac
 import json
 import time
+from ipaddress import IPv4Network
 from typing import Any
 from unittest.mock import patch
 from uuid import UUID, uuid4
@@ -1496,6 +1497,54 @@ class TestCidrAllowlistValidation:
 
         # HTTP handler must NOT have been called
         assert call_count == 0
+
+    async def test_cidr_allowlist_custom_range(self, correlation_id: UUID) -> None:
+        """Patching LOCAL_LLM_CIDRS to a custom range must accept IPs in that range."""
+        harness = LlmTransportHarness()
+
+        with patch.object(
+            MixinLlmHttpTransport,
+            "LOCAL_LLM_CIDRS",
+            (IPv4Network("10.0.0.0/8"),),
+        ):
+            # 10.0.0.1 is within 10.0.0.0/8 -- should pass
+            await harness._validate_endpoint_allowlist(
+                "http://10.0.0.1:8000/v1/completions", correlation_id
+            )
+
+    async def test_cidr_allowlist_multiple_ranges(self, correlation_id: UUID) -> None:
+        """Patching LOCAL_LLM_CIDRS to multiple ranges must accept IPs in either range."""
+        harness = LlmTransportHarness()
+
+        with patch.object(
+            MixinLlmHttpTransport,
+            "LOCAL_LLM_CIDRS",
+            (IPv4Network("10.0.0.0/8"), IPv4Network("172.16.0.0/12")),
+        ):
+            # 10.0.0.1 is within 10.0.0.0/8
+            await harness._validate_endpoint_allowlist(
+                "http://10.0.0.1:8000/v1/completions", correlation_id
+            )
+            # 172.16.5.10 is within 172.16.0.0/12
+            await harness._validate_endpoint_allowlist(
+                "http://172.16.5.10:8000/v1/completions", correlation_id
+            )
+
+    async def test_cidr_allowlist_empty_rejects_all(self, correlation_id: UUID) -> None:
+        """Patching LOCAL_LLM_CIDRS to an empty tuple must reject all IPs."""
+        harness = LlmTransportHarness()
+
+        with patch.object(
+            MixinLlmHttpTransport,
+            "LOCAL_LLM_CIDRS",
+            (),
+        ):
+            with pytest.raises(
+                InfraAuthenticationError, match="outside the local LLM allowlist"
+            ):
+                await harness._validate_endpoint_allowlist(
+                    "http://192.168.86.201:8000/v1/completions", correlation_id
+                )
 
 
 # ── HMAC Signing (OMN-2250) ───────────────────────────────────────────

@@ -138,16 +138,52 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
 
     # ── Class-level constants ────────────────────────────────────────────
 
+    @staticmethod
+    def _parse_cidr_allowlist() -> tuple[IPv4Network, ...]:
+        """Parse CIDR allowlist from the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` env var.
+
+        Parses each comma-separated value as an ``IPv4Network``. Malformed
+        entries are logged at WARNING level and skipped. If **all** entries
+        are malformed (or the env var is empty after parsing), falls back to
+        the default ``192.168.86.0/24`` and logs a warning.
+
+        Returns:
+            Tuple of parsed ``IPv4Network`` objects, never empty.
+        """
+        _DEFAULT_CIDR = "192.168.86.0/24"
+        raw = os.environ.get("LLM_ENDPOINT_CIDR_ALLOWLIST", _DEFAULT_CIDR)
+        parsed: list[IPv4Network] = []
+        for entry in raw.split(","):
+            cidr = entry.strip()
+            if not cidr:
+                continue
+            try:
+                parsed.append(IPv4Network(cidr))
+            except ValueError:
+                logger.warning(
+                    "Skipping malformed CIDR in LLM_ENDPOINT_CIDR_ALLOWLIST: %r",
+                    cidr,
+                )
+        if not parsed:
+            logger.warning(
+                "All entries in LLM_ENDPOINT_CIDR_ALLOWLIST were malformed or "
+                "empty; falling back to default %s",
+                _DEFAULT_CIDR,
+            )
+            parsed.append(IPv4Network(_DEFAULT_CIDR))
+        return tuple(parsed)
+
     #: CIDR networks defining the local LLM trust boundary.
     #: Only endpoints within these networks are permitted.
     #: Configurable via the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` environment variable
     #: (comma-separated CIDR ranges). Defaults to ``192.168.86.0/24``.
-    LOCAL_LLM_CIDRS: ClassVar[tuple[IPv4Network, ...]] = tuple(
-        IPv4Network(cidr.strip())
-        for cidr in os.environ.get(
-            "LLM_ENDPOINT_CIDR_ALLOWLIST", "192.168.86.0/24"
-        ).split(",")
-        if cidr.strip()
+    #:
+    #: Read once at import time. Changes to the environment variable after
+    #: module import require a process restart to take effect. This differs
+    #: from ``LOCAL_LLM_SHARED_SECRET`` which is read per-call to support
+    #: runtime secret rotation.
+    LOCAL_LLM_CIDRS: ClassVar[tuple[IPv4Network, ...]] = (
+        _parse_cidr_allowlist.__func__()
     )
 
     #: Environment variable name for the HMAC shared secret.
