@@ -314,6 +314,7 @@ markers = [
     "heavy: Heavy integration tests requiring real infrastructure (Kafka, PostgreSQL, HTTP servers). Skipped by default, run with RUN_HEAVY_TESTS=1",
     "real_mcp: Tests using real MCP SDK server and client (requires available port)",
     "mcp_protocol: Mock-based MCP JSON-RPC protocol tests (not real SDK integration)",
+    "llm: Tests requiring real LLM inference endpoints (local GPU/Apple Silicon servers)",
 ]
 addopts = [
     "--strict-markers",
