@@ -33,6 +33,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import os
 import time
 from ipaddress import IPv4Network
 from typing import Any
@@ -1545,6 +1546,69 @@ class TestCidrAllowlistValidation:
                 await harness._validate_endpoint_allowlist(
                     "http://192.168.86.201:8000/v1/completions", correlation_id
                 )
+
+
+# ── CIDR Allowlist Parsing (OMN-2250) ─────────────────────────────────
+
+
+@pytest.mark.unit
+class TestParseCidrAllowlist:
+    """Validate _parse_cidr_allowlist() static method with various env var inputs."""
+
+    def test_parse_cidr_default(self) -> None:
+        """Without setting env var, returns the default (192.168.86.0/24)."""
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LLM_ENDPOINT_CIDR_ALLOWLIST", None)
+            result = MixinLlmHttpTransport._parse_cidr_allowlist()
+        assert result == (IPv4Network("192.168.86.0/24"),)
+
+    def test_parse_cidr_custom_single(self) -> None:
+        """A single custom CIDR parses correctly."""
+        with patch.dict(os.environ, {"LLM_ENDPOINT_CIDR_ALLOWLIST": "10.0.0.0/8"}):
+            result = MixinLlmHttpTransport._parse_cidr_allowlist()
+        assert result == (IPv4Network("10.0.0.0/8"),)
+
+    def test_parse_cidr_multiple_comma_separated(self) -> None:
+        """Multiple comma-separated CIDRs parse correctly."""
+        with patch.dict(
+            os.environ,
+            {"LLM_ENDPOINT_CIDR_ALLOWLIST": "10.0.0.0/8, 172.16.0.0/12"},
+        ):
+            result = MixinLlmHttpTransport._parse_cidr_allowlist()
+        assert result == (IPv4Network("10.0.0.0/8"), IPv4Network("172.16.0.0/12"))
+
+    def test_parse_cidr_malformed_skipped(self) -> None:
+        """Malformed entries are skipped; valid ones are kept."""
+        with patch.dict(
+            os.environ,
+            {"LLM_ENDPOINT_CIDR_ALLOWLIST": "10.0.0.0/8, not-a-cidr, 172.16.0.0/12"},
+        ):
+            result = MixinLlmHttpTransport._parse_cidr_allowlist()
+        assert result == (IPv4Network("10.0.0.0/8"), IPv4Network("172.16.0.0/12"))
+
+    def test_parse_cidr_all_malformed_falls_back(self) -> None:
+        """When all entries are malformed, falls back to default."""
+        with patch.dict(
+            os.environ,
+            {"LLM_ENDPOINT_CIDR_ALLOWLIST": "garbage, also-garbage"},
+        ):
+            result = MixinLlmHttpTransport._parse_cidr_allowlist()
+        assert result == (IPv4Network("192.168.86.0/24"),)
+
+    def test_parse_cidr_host_bits_accepted(self) -> None:
+        """strict=False auto-masks host bits: 192.168.86.100/24 -> 192.168.86.0/24."""
+        with patch.dict(
+            os.environ,
+            {"LLM_ENDPOINT_CIDR_ALLOWLIST": "192.168.86.100/24"},
+        ):
+            result = MixinLlmHttpTransport._parse_cidr_allowlist()
+        assert result == (IPv4Network("192.168.86.0/24"),)
+
+    def test_parse_cidr_empty_string_falls_back(self) -> None:
+        """An empty string env var falls back to default."""
+        with patch.dict(os.environ, {"LLM_ENDPOINT_CIDR_ALLOWLIST": ""}):
+            result = MixinLlmHttpTransport._parse_cidr_allowlist()
+        assert result == (IPv4Network("192.168.86.0/24"),)
 
 
 # ── HMAC Signing (OMN-2250) ───────────────────────────────────────────

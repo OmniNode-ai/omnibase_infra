@@ -158,7 +158,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
             if not cidr:
                 continue
             try:
-                parsed.append(IPv4Network(cidr))
+                parsed.append(IPv4Network(cidr, strict=False))
             except ValueError:
                 logger.warning(
                     "Skipping malformed CIDR in LLM_ENDPOINT_CIDR_ALLOWLIST: %r",
