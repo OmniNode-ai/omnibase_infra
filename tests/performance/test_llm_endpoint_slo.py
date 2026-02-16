@@ -64,7 +64,10 @@ import httpx
 import pytest
 
 from omnibase_infra.testing import is_ci_environment
-from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
+from omnibase_infra.utils.util_error_sanitization import (
+    sanitize_error_message,
+    sanitize_error_string,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -75,7 +78,6 @@ IS_CI = is_ci_environment()
 # Skip ALL tests in this module when running in CI (no real LLM servers).
 pytestmark = [
     pytest.mark.performance,
-    pytest.mark.asyncio,
     pytest.mark.llm,
     pytest.mark.skipif(
         IS_CI, reason="Requires real LLM inference endpoints on local network"
@@ -134,46 +136,58 @@ class LatencyProfile:
 
     @property
     def count(self) -> int:
+        """Return the number of latency samples."""
         return len(self.latencies)
 
     @property
     def p50_ms(self) -> float:
+        """Return the 50th percentile (median) latency in milliseconds."""
         if self.count < 2:
             return self.latencies[0] * 1000.0 if self.count == 1 else 0.0
         return quantiles(self.latencies, n=100)[49] * 1000.0
 
     @property
     def p95_ms(self) -> float:
+        """Return the 95th percentile latency in milliseconds."""
         if self.count < 2:
             return self.latencies[0] * 1000.0 if self.count == 1 else 0.0
         return quantiles(self.latencies, n=100)[94] * 1000.0
 
     @property
     def p99_ms(self) -> float:
+        """Return the 99th percentile latency in milliseconds."""
         if self.count < 2:
             return self.latencies[0] * 1000.0 if self.count == 1 else 0.0
         return quantiles(self.latencies, n=100)[98] * 1000.0
 
     @property
     def mean_ms(self) -> float:
+        """Return the arithmetic mean latency in milliseconds."""
         return mean(self.latencies) * 1000.0 if self.latencies else 0.0
 
     @property
     def median_ms(self) -> float:
+        """Return the median latency in milliseconds."""
         return median(self.latencies) * 1000.0 if self.latencies else 0.0
 
     @property
     def stdev_ms(self) -> float:
+        """Return the sample standard deviation in milliseconds.
+
+        Returns 0.0 when fewer than 2 samples are available.
+        """
         if self.count < 2:
             return 0.0
         return stdev(self.latencies) * 1000.0
 
     @property
     def min_ms(self) -> float:
+        """Return the minimum latency in milliseconds."""
         return min(self.latencies) * 1000.0 if self.latencies else 0.0
 
     @property
     def max_ms(self) -> float:
+        """Return the maximum latency in milliseconds."""
         return max(self.latencies) * 1000.0 if self.latencies else 0.0
 
 
@@ -291,6 +305,7 @@ async def _profile_concurrent(
     """
 
     async def _worker() -> list[float]:
+        """Send sequential requests for one worker and return latencies."""
         worker_latencies: list[float] = []
         for _ in range(requests_per_worker):
             elapsed = await _measure_single_request(client, url, payload, timeout)
@@ -324,47 +339,60 @@ async def http_client() -> AsyncGenerator[httpx.AsyncClient, None]:
 # ---------------------------------------------------------------------------
 
 
-class TestCoder14BSlo:
-    """SLO profiling for Qwen2.5-Coder-14B (RTX 5090, code generation)."""
+class BaseLLMEndpointSloTest:
+    """Parameterized base class for per-endpoint SLO profiling tests.
 
-    ENDPOINT_URL = f"{CODER_14B_URL}/v1/chat/completions"
-    ENDPOINT_NAME = "Qwen2.5-Coder-14B"
-    SLO_P95_MS = 200.0
+    Subclasses MUST define the following class-level attributes:
 
-    @pytest.mark.asyncio
+        ENDPOINT_URL:  str  - Full URL including path (e.g. ".../v1/chat/completions")
+        ENDPOINT_NAME: str  - Human-readable model name for reports
+        BASE_URL:      str  - Base URL for reachability checks (no path)
+        SLO_P95_MS:    float - P95 latency target in milliseconds
+        PAYLOAD:       dict  - Request payload sent to the endpoint
+        TIMEOUT:       float - Per-request timeout in seconds
+
+    This class is NOT collected by pytest because it lacks the ``Test`` prefix.
+    """
+
+    ENDPOINT_URL: str
+    ENDPOINT_NAME: str
+    BASE_URL: str
+    SLO_P95_MS: float
+    PAYLOAD: dict[str, Any]
+    TIMEOUT: float
+
+    # -- tests ----------------------------------------------------------------
+
     async def test_endpoint_reachable(self) -> None:
-        """Verify the Coder-14B endpoint is reachable before profiling."""
-        reachable = await _check_endpoint_reachable(CODER_14B_URL)
+        """Verify the endpoint is reachable before profiling."""
+        reachable = await _check_endpoint_reachable(self.BASE_URL)
         if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {CODER_14B_URL}")
+            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {self.BASE_URL}")
 
-    @pytest.mark.asyncio
     async def test_cold_start_penalty(self, http_client: httpx.AsyncClient) -> None:
-        """Measure cold start latency vs warm steady-state for Coder-14B."""
-        reachable = await _check_endpoint_reachable(CODER_14B_URL)
+        """Measure cold start latency vs warm steady-state."""
+        reachable = await _check_endpoint_reachable(self.BASE_URL)
         if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {CODER_14B_URL}")
+            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {self.BASE_URL}")
 
         # Cold: first request on a fresh client
-        async with httpx.AsyncClient(timeout=CHAT_TIMEOUT) as cold_client:
+        async with httpx.AsyncClient(timeout=self.TIMEOUT) as cold_client:
             cold_start = time.perf_counter()
             try:
                 await _measure_single_request(
-                    cold_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
+                    cold_client, self.ENDPOINT_URL, self.PAYLOAD, self.TIMEOUT
                 )
             except (httpx.HTTPStatusError, httpx.TimeoutException) as exc:
-                pytest.skip(f"Cold request failed: {exc}")
+                pytest.skip(f"Cold request failed: {sanitize_error_message(exc)}")
             cold_latency = time.perf_counter() - cold_start
 
         # Warm: after warm-up
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
+        await _warmup(http_client, self.ENDPOINT_URL, self.PAYLOAD, self.TIMEOUT)
         warm_profile = await _profile_sequential(
             http_client,
             self.ENDPOINT_URL,
-            MINIMAL_CHAT_PAYLOAD,
-            CHAT_TIMEOUT,
+            self.PAYLOAD,
+            self.TIMEOUT,
             iterations=10,
         )
 
@@ -379,21 +407,18 @@ class TestCoder14BSlo:
         print(f"  Warm mean:  {warm_profile.mean_ms:.1f} ms")
         print(f"  Ratio:      {ratio:.1f}x")
 
-    @pytest.mark.asyncio
     async def test_baseline_latency(self, http_client: httpx.AsyncClient) -> None:
-        """Measure P50/P95/P99 latency at 1 concurrent request for Coder-14B.
+        """Measure P50/P95/P99 latency at 1 concurrent request.
 
-        SLO Target: P95 < 200ms (transport + 1-token generation).
+        Asserts P95 < SLO_P95_MS (transport + minimal inference).
         """
-        reachable = await _check_endpoint_reachable(CODER_14B_URL)
+        reachable = await _check_endpoint_reachable(self.BASE_URL)
         if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {CODER_14B_URL}")
+            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {self.BASE_URL}")
 
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
+        await _warmup(http_client, self.ENDPOINT_URL, self.PAYLOAD, self.TIMEOUT)
         profile = await _profile_sequential(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
+            http_client, self.ENDPOINT_URL, self.PAYLOAD, self.TIMEOUT
         )
 
         print(f"\n{self.ENDPOINT_NAME} Baseline Latency (1 concurrent):")
@@ -403,26 +428,23 @@ class TestCoder14BSlo:
             f"{self.ENDPOINT_NAME} P95 {profile.p95_ms:.1f}ms exceeds SLO target {self.SLO_P95_MS}ms"
         )
 
-    @pytest.mark.asyncio
     async def test_concurrency_degradation(
         self, http_client: httpx.AsyncClient
     ) -> None:
-        """Measure latency at 1, 2, 5, 10 concurrent requests for Coder-14B."""
-        reachable = await _check_endpoint_reachable(CODER_14B_URL)
+        """Measure latency at 1, 2, 5, 10 concurrent requests."""
+        reachable = await _check_endpoint_reachable(self.BASE_URL)
         if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {CODER_14B_URL}")
+            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {self.BASE_URL}")
 
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
+        await _warmup(http_client, self.ENDPOINT_URL, self.PAYLOAD, self.TIMEOUT)
 
         results: dict[int, LatencyProfile] = {}
         for level in CONCURRENCY_LEVELS:
             profile = await _profile_concurrent(
                 http_client,
                 self.ENDPOINT_URL,
-                MINIMAL_CHAT_PAYLOAD,
-                CHAT_TIMEOUT,
+                self.PAYLOAD,
+                self.TIMEOUT,
                 concurrency=level,
                 requests_per_worker=5,
             )
@@ -438,453 +460,59 @@ class TestCoder14BSlo:
             )
 
 
-class TestEmbeddingSlo:
+class TestCoder14BSlo(BaseLLMEndpointSloTest):
+    """SLO profiling for Qwen2.5-Coder-14B (RTX 5090, code generation)."""
+
+    ENDPOINT_URL = f"{CODER_14B_URL}/v1/chat/completions"
+    ENDPOINT_NAME = "Qwen2.5-Coder-14B"
+    BASE_URL = CODER_14B_URL
+    SLO_P95_MS = 200.0
+    PAYLOAD = MINIMAL_CHAT_PAYLOAD
+    TIMEOUT = CHAT_TIMEOUT
+
+
+class TestEmbeddingSlo(BaseLLMEndpointSloTest):
     """SLO profiling for GTE-Qwen2-1.5B (RTX 4090, embeddings)."""
 
     ENDPOINT_URL = f"{EMBEDDING_URL}/v1/embeddings"
     ENDPOINT_NAME = "GTE-Qwen2-1.5B"
+    BASE_URL = EMBEDDING_URL
     SLO_P95_MS = 100.0
-
-    @pytest.mark.asyncio
-    async def test_endpoint_reachable(self) -> None:
-        """Verify the embedding endpoint is reachable before profiling."""
-        reachable = await _check_endpoint_reachable(EMBEDDING_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {EMBEDDING_URL}")
-
-    @pytest.mark.asyncio
-    async def test_cold_start_penalty(self, http_client: httpx.AsyncClient) -> None:
-        """Measure cold start latency vs warm steady-state for embedding endpoint."""
-        reachable = await _check_endpoint_reachable(EMBEDDING_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {EMBEDDING_URL}")
-
-        async with httpx.AsyncClient(timeout=EMBEDDING_TIMEOUT) as cold_client:
-            cold_start = time.perf_counter()
-            try:
-                await _measure_single_request(
-                    cold_client,
-                    self.ENDPOINT_URL,
-                    MINIMAL_EMBEDDING_PAYLOAD,
-                    EMBEDDING_TIMEOUT,
-                )
-            except (httpx.HTTPStatusError, httpx.TimeoutException) as exc:
-                pytest.skip(f"Cold request failed: {exc}")
-            cold_latency = time.perf_counter() - cold_start
-
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_EMBEDDING_PAYLOAD, EMBEDDING_TIMEOUT
-        )
-        warm_profile = await _profile_sequential(
-            http_client,
-            self.ENDPOINT_URL,
-            MINIMAL_EMBEDDING_PAYLOAD,
-            EMBEDDING_TIMEOUT,
-            iterations=10,
-        )
-
-        ratio = (
-            cold_latency / (warm_profile.mean_ms / 1000.0)
-            if warm_profile.mean_ms > 0
-            else 1.0
-        )
-
-        print(f"\n{self.ENDPOINT_NAME} Cold Start Analysis:")
-        print(f"  Cold:       {cold_latency * 1000:.1f} ms")
-        print(f"  Warm mean:  {warm_profile.mean_ms:.1f} ms")
-        print(f"  Ratio:      {ratio:.1f}x")
-
-    @pytest.mark.asyncio
-    async def test_baseline_latency(self, http_client: httpx.AsyncClient) -> None:
-        """Measure P50/P95/P99 latency at 1 concurrent request for embedding.
-
-        SLO Target: P95 < 100ms.
-        """
-        reachable = await _check_endpoint_reachable(EMBEDDING_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {EMBEDDING_URL}")
-
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_EMBEDDING_PAYLOAD, EMBEDDING_TIMEOUT
-        )
-        profile = await _profile_sequential(
-            http_client, self.ENDPOINT_URL, MINIMAL_EMBEDDING_PAYLOAD, EMBEDDING_TIMEOUT
-        )
-
-        print(f"\n{self.ENDPOINT_NAME} Baseline Latency (1 concurrent):")
-        _print_profile("Sequential", profile)
-
-        assert profile.p95_ms < self.SLO_P95_MS, (
-            f"{self.ENDPOINT_NAME} P95 {profile.p95_ms:.1f}ms exceeds SLO target {self.SLO_P95_MS}ms"
-        )
-
-    @pytest.mark.asyncio
-    async def test_concurrency_degradation(
-        self, http_client: httpx.AsyncClient
-    ) -> None:
-        """Measure latency at 1, 2, 5, 10 concurrent requests for embedding."""
-        reachable = await _check_endpoint_reachable(EMBEDDING_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {EMBEDDING_URL}")
-
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_EMBEDDING_PAYLOAD, EMBEDDING_TIMEOUT
-        )
-
-        results: dict[int, LatencyProfile] = {}
-        for level in CONCURRENCY_LEVELS:
-            profile = await _profile_concurrent(
-                http_client,
-                self.ENDPOINT_URL,
-                MINIMAL_EMBEDDING_PAYLOAD,
-                EMBEDDING_TIMEOUT,
-                concurrency=level,
-                requests_per_worker=5,
-            )
-            results[level] = profile
-
-        _print_concurrency_table(self.ENDPOINT_NAME, results)
-
-        if 1 in results:
-            assert results[1].p95_ms < self.SLO_P95_MS, (
-                f"{self.ENDPOINT_NAME} P95 at concurrency=1: {results[1].p95_ms:.1f}ms "
-                f"exceeds SLO target {self.SLO_P95_MS}ms"
-            )
+    PAYLOAD = MINIMAL_EMBEDDING_PAYLOAD
+    TIMEOUT = EMBEDDING_TIMEOUT
 
 
-class TestQwen72BSlo:
+class TestQwen72BSlo(BaseLLMEndpointSloTest):
     """SLO profiling for Qwen2.5-72B (Mac Studio M2 Ultra, documentation/analysis)."""
 
     ENDPOINT_URL = f"{QWEN_72B_URL}/v1/chat/completions"
     ENDPOINT_NAME = "Qwen2.5-72B"
+    BASE_URL = QWEN_72B_URL
     SLO_P95_MS = 500.0
-
-    @pytest.mark.asyncio
-    async def test_endpoint_reachable(self) -> None:
-        """Verify the 72B endpoint is reachable before profiling."""
-        reachable = await _check_endpoint_reachable(QWEN_72B_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {QWEN_72B_URL}")
-
-    @pytest.mark.asyncio
-    async def test_cold_start_penalty(self, http_client: httpx.AsyncClient) -> None:
-        """Measure cold start latency vs warm steady-state for 72B."""
-        reachable = await _check_endpoint_reachable(QWEN_72B_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {QWEN_72B_URL}")
-
-        async with httpx.AsyncClient(timeout=CHAT_TIMEOUT) as cold_client:
-            cold_start = time.perf_counter()
-            try:
-                await _measure_single_request(
-                    cold_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-                )
-            except (httpx.HTTPStatusError, httpx.TimeoutException) as exc:
-                pytest.skip(f"Cold request failed: {exc}")
-            cold_latency = time.perf_counter() - cold_start
-
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
-        warm_profile = await _profile_sequential(
-            http_client,
-            self.ENDPOINT_URL,
-            MINIMAL_CHAT_PAYLOAD,
-            CHAT_TIMEOUT,
-            iterations=10,
-        )
-
-        ratio = (
-            cold_latency / (warm_profile.mean_ms / 1000.0)
-            if warm_profile.mean_ms > 0
-            else 1.0
-        )
-
-        print(f"\n{self.ENDPOINT_NAME} Cold Start Analysis:")
-        print(f"  Cold:       {cold_latency * 1000:.1f} ms")
-        print(f"  Warm mean:  {warm_profile.mean_ms:.1f} ms")
-        print(f"  Ratio:      {ratio:.1f}x")
-
-    @pytest.mark.asyncio
-    async def test_baseline_latency(self, http_client: httpx.AsyncClient) -> None:
-        """Measure P50/P95/P99 latency at 1 concurrent request for 72B.
-
-        SLO Target: P95 < 500ms (transport + 1-token generation).
-        """
-        reachable = await _check_endpoint_reachable(QWEN_72B_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {QWEN_72B_URL}")
-
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
-        profile = await _profile_sequential(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
-
-        print(f"\n{self.ENDPOINT_NAME} Baseline Latency (1 concurrent):")
-        _print_profile("Sequential", profile)
-
-        assert profile.p95_ms < self.SLO_P95_MS, (
-            f"{self.ENDPOINT_NAME} P95 {profile.p95_ms:.1f}ms exceeds SLO target {self.SLO_P95_MS}ms"
-        )
-
-    @pytest.mark.asyncio
-    async def test_concurrency_degradation(
-        self, http_client: httpx.AsyncClient
-    ) -> None:
-        """Measure latency at 1, 2, 5, 10 concurrent requests for 72B."""
-        reachable = await _check_endpoint_reachable(QWEN_72B_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {QWEN_72B_URL}")
-
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
-
-        results: dict[int, LatencyProfile] = {}
-        for level in CONCURRENCY_LEVELS:
-            profile = await _profile_concurrent(
-                http_client,
-                self.ENDPOINT_URL,
-                MINIMAL_CHAT_PAYLOAD,
-                CHAT_TIMEOUT,
-                concurrency=level,
-                requests_per_worker=5,
-            )
-            results[level] = profile
-
-        _print_concurrency_table(self.ENDPOINT_NAME, results)
-
-        if 1 in results:
-            assert results[1].p95_ms < self.SLO_P95_MS, (
-                f"{self.ENDPOINT_NAME} P95 at concurrency=1: {results[1].p95_ms:.1f}ms "
-                f"exceeds SLO target {self.SLO_P95_MS}ms"
-            )
+    PAYLOAD = MINIMAL_CHAT_PAYLOAD
+    TIMEOUT = CHAT_TIMEOUT
 
 
-class TestVisionSlo:
+class TestVisionSlo(BaseLLMEndpointSloTest):
     """SLO profiling for Qwen2-VL (Mac Studio M2 Ultra, vision/multimodal)."""
 
     ENDPOINT_URL = f"{VISION_URL}/v1/chat/completions"
     ENDPOINT_NAME = "Qwen2-VL"
+    BASE_URL = VISION_URL
     SLO_P95_MS = 500.0
-
-    @pytest.mark.asyncio
-    async def test_endpoint_reachable(self) -> None:
-        """Verify the vision endpoint is reachable before profiling."""
-        reachable = await _check_endpoint_reachable(VISION_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {VISION_URL}")
-
-    @pytest.mark.asyncio
-    async def test_cold_start_penalty(self, http_client: httpx.AsyncClient) -> None:
-        """Measure cold start latency vs warm steady-state for vision model."""
-        reachable = await _check_endpoint_reachable(VISION_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {VISION_URL}")
-
-        async with httpx.AsyncClient(timeout=CHAT_TIMEOUT) as cold_client:
-            cold_start = time.perf_counter()
-            try:
-                await _measure_single_request(
-                    cold_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-                )
-            except (httpx.HTTPStatusError, httpx.TimeoutException) as exc:
-                pytest.skip(f"Cold request failed: {exc}")
-            cold_latency = time.perf_counter() - cold_start
-
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
-        warm_profile = await _profile_sequential(
-            http_client,
-            self.ENDPOINT_URL,
-            MINIMAL_CHAT_PAYLOAD,
-            CHAT_TIMEOUT,
-            iterations=10,
-        )
-
-        ratio = (
-            cold_latency / (warm_profile.mean_ms / 1000.0)
-            if warm_profile.mean_ms > 0
-            else 1.0
-        )
-
-        print(f"\n{self.ENDPOINT_NAME} Cold Start Analysis:")
-        print(f"  Cold:       {cold_latency * 1000:.1f} ms")
-        print(f"  Warm mean:  {warm_profile.mean_ms:.1f} ms")
-        print(f"  Ratio:      {ratio:.1f}x")
-
-    @pytest.mark.asyncio
-    async def test_baseline_latency(self, http_client: httpx.AsyncClient) -> None:
-        """Measure P50/P95/P99 latency at 1 concurrent request for vision.
-
-        SLO Target: P95 < 500ms (transport + 1-token generation).
-        """
-        reachable = await _check_endpoint_reachable(VISION_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {VISION_URL}")
-
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
-        profile = await _profile_sequential(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
-
-        print(f"\n{self.ENDPOINT_NAME} Baseline Latency (1 concurrent):")
-        _print_profile("Sequential", profile)
-
-        assert profile.p95_ms < self.SLO_P95_MS, (
-            f"{self.ENDPOINT_NAME} P95 {profile.p95_ms:.1f}ms exceeds SLO target {self.SLO_P95_MS}ms"
-        )
-
-    @pytest.mark.asyncio
-    async def test_concurrency_degradation(
-        self, http_client: httpx.AsyncClient
-    ) -> None:
-        """Measure latency at 1, 2, 5, 10 concurrent requests for vision."""
-        reachable = await _check_endpoint_reachable(VISION_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {VISION_URL}")
-
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
-
-        results: dict[int, LatencyProfile] = {}
-        for level in CONCURRENCY_LEVELS:
-            profile = await _profile_concurrent(
-                http_client,
-                self.ENDPOINT_URL,
-                MINIMAL_CHAT_PAYLOAD,
-                CHAT_TIMEOUT,
-                concurrency=level,
-                requests_per_worker=5,
-            )
-            results[level] = profile
-
-        _print_concurrency_table(self.ENDPOINT_NAME, results)
-
-        if 1 in results:
-            assert results[1].p95_ms < self.SLO_P95_MS, (
-                f"{self.ENDPOINT_NAME} P95 at concurrency=1: {results[1].p95_ms:.1f}ms "
-                f"exceeds SLO target {self.SLO_P95_MS}ms"
-            )
+    PAYLOAD = MINIMAL_CHAT_PAYLOAD
+    TIMEOUT = CHAT_TIMEOUT
 
 
-class TestQwen14BSlo:
+class TestQwen14BSlo(BaseLLMEndpointSloTest):
     """SLO profiling for Qwen2.5-14B (Mac Mini M2 Pro, routing/general purpose)."""
 
     ENDPOINT_URL = f"{QWEN_14B_URL}/v1/chat/completions"
     ENDPOINT_NAME = "Qwen2.5-14B"
+    BASE_URL = QWEN_14B_URL
     SLO_P95_MS = 80.0
-
-    @pytest.mark.asyncio
-    async def test_endpoint_reachable(self) -> None:
-        """Verify the 14B endpoint is reachable before profiling."""
-        reachable = await _check_endpoint_reachable(QWEN_14B_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {QWEN_14B_URL}")
-
-    @pytest.mark.asyncio
-    async def test_cold_start_penalty(self, http_client: httpx.AsyncClient) -> None:
-        """Measure cold start latency vs warm steady-state for 14B routing model."""
-        reachable = await _check_endpoint_reachable(QWEN_14B_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {QWEN_14B_URL}")
-
-        async with httpx.AsyncClient(timeout=CHAT_TIMEOUT) as cold_client:
-            cold_start = time.perf_counter()
-            try:
-                await _measure_single_request(
-                    cold_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-                )
-            except (httpx.HTTPStatusError, httpx.TimeoutException) as exc:
-                pytest.skip(f"Cold request failed: {exc}")
-            cold_latency = time.perf_counter() - cold_start
-
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
-        warm_profile = await _profile_sequential(
-            http_client,
-            self.ENDPOINT_URL,
-            MINIMAL_CHAT_PAYLOAD,
-            CHAT_TIMEOUT,
-            iterations=10,
-        )
-
-        ratio = (
-            cold_latency / (warm_profile.mean_ms / 1000.0)
-            if warm_profile.mean_ms > 0
-            else 1.0
-        )
-
-        print(f"\n{self.ENDPOINT_NAME} Cold Start Analysis:")
-        print(f"  Cold:       {cold_latency * 1000:.1f} ms")
-        print(f"  Warm mean:  {warm_profile.mean_ms:.1f} ms")
-        print(f"  Ratio:      {ratio:.1f}x")
-
-    @pytest.mark.asyncio
-    async def test_baseline_latency(self, http_client: httpx.AsyncClient) -> None:
-        """Measure P50/P95/P99 latency at 1 concurrent request for 14B.
-
-        SLO Target: P95 < 80ms (transport + 1-token generation).
-        This is the tightest SLO because the 14B is used for real-time routing
-        decisions that are in the critical path.
-        """
-        reachable = await _check_endpoint_reachable(QWEN_14B_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {QWEN_14B_URL}")
-
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
-        profile = await _profile_sequential(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
-
-        print(f"\n{self.ENDPOINT_NAME} Baseline Latency (1 concurrent):")
-        _print_profile("Sequential", profile)
-
-        assert profile.p95_ms < self.SLO_P95_MS, (
-            f"{self.ENDPOINT_NAME} P95 {profile.p95_ms:.1f}ms exceeds SLO target {self.SLO_P95_MS}ms"
-        )
-
-    @pytest.mark.asyncio
-    async def test_concurrency_degradation(
-        self, http_client: httpx.AsyncClient
-    ) -> None:
-        """Measure latency at 1, 2, 5, 10 concurrent requests for 14B."""
-        reachable = await _check_endpoint_reachable(QWEN_14B_URL)
-        if not reachable:
-            pytest.skip(f"{self.ENDPOINT_NAME} not reachable at {QWEN_14B_URL}")
-
-        await _warmup(
-            http_client, self.ENDPOINT_URL, MINIMAL_CHAT_PAYLOAD, CHAT_TIMEOUT
-        )
-
-        results: dict[int, LatencyProfile] = {}
-        for level in CONCURRENCY_LEVELS:
-            profile = await _profile_concurrent(
-                http_client,
-                self.ENDPOINT_URL,
-                MINIMAL_CHAT_PAYLOAD,
-                CHAT_TIMEOUT,
-                concurrency=level,
-                requests_per_worker=5,
-            )
-            results[level] = profile
-
-        _print_concurrency_table(self.ENDPOINT_NAME, results)
-
-        if 1 in results:
-            assert results[1].p95_ms < self.SLO_P95_MS, (
-                f"{self.ENDPOINT_NAME} P95 at concurrency=1: {results[1].p95_ms:.1f}ms "
-                f"exceeds SLO target {self.SLO_P95_MS}ms"
-            )
+    PAYLOAD = MINIMAL_CHAT_PAYLOAD
+    TIMEOUT = CHAT_TIMEOUT
 
 
 # ---------------------------------------------------------------------------
@@ -895,7 +523,6 @@ class TestQwen14BSlo:
 class TestCrossEndpointSummary:
     """Run a quick baseline across all reachable endpoints and print a summary table."""
 
-    @pytest.mark.asyncio
     async def test_all_endpoints_summary(self, http_client: httpx.AsyncClient) -> None:
         """Collect baseline P50/P95/P99 from all reachable endpoints.
 
@@ -968,7 +595,7 @@ class TestCrossEndpointSummary:
                 )
             except Exception as exc:
                 print(
-                    f"  {name:<22} {'ERROR':<12} {'--':>10} {'--':>10} {'--':>10} {str(exc)[:30]}"
+                    f"  {name:<22} {'ERROR':<12} {'--':>10} {'--':>10} {'--':>10} {sanitize_error_string(str(exc))[:30]}"
                 )
 
         print(f"{'=' * 80}")
