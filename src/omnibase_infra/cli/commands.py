@@ -610,6 +610,14 @@ def _load_env_for_demo(path: str) -> None:
         immediately adjacent to the value (no space) in an unquoted value is
         **not** treated as a comment delimiter.
 
+        Whitespace *before* an opening quote is stripped by ``value.strip()``
+        before quote detection runs, so ``KEY= "quoted"`` (space between
+        ``=`` and the opening ``"``) is parsed identically to ``KEY="quoted"``
+        -- the outer quotes are removed and the result is ``quoted``.  This
+        is usually correct, but if the space-before-quote form is intended
+        to produce a *literal* quoted string (i.e. the value should include
+        the quote characters), this parser cannot distinguish that intent.
+
     Args:
         path: Path to the .env file.
     """

@@ -365,11 +365,15 @@ class DemoResetEngine:
         )
 
         # Step 2: Reset consumer group offsets
-        await self._reset_consumer_groups(report, dry_run=dry_run)
+        await self._reset_consumer_groups(
+            report, dry_run=dry_run, correlation_id=correlation_id
+        )
 
         # Step 3: Optionally purge demo topics
         if self._config.purge_topics:
-            await self._purge_demo_topics(report, dry_run=dry_run)
+            await self._purge_demo_topics(
+                report, dry_run=dry_run, correlation_id=correlation_id
+            )
         else:
             report.actions.append(
                 ResetActionResult(
@@ -521,10 +525,11 @@ class DemoResetEngine:
         # ``_validate_table_name`` restricts ``table`` to the frozen
         # allowlist ``_ALLOWED_PROJECTION_TABLES``.  Any expansion of
         # that allowlist requires coordinated security review.
-        assert table in _ALLOWED_PROJECTION_TABLES, (
-            f"Table {table!r} passed validation but is not in the allowlist "
-            f"(correlation_id={correlation_id})"
-        )
+        if table not in _ALLOWED_PROJECTION_TABLES:
+            raise ValueError(
+                f"Table {table!r} passed validation but is not in the allowlist "
+                f"(correlation_id={correlation_id})"
+            )
 
         async with self._postgres_connection() as conn:
             row = await conn.fetchrow(
@@ -549,10 +554,11 @@ class DemoResetEngine:
         # ``_validate_table_name`` restricts ``table`` to the frozen
         # allowlist ``_ALLOWED_PROJECTION_TABLES``.  Any expansion of
         # that allowlist requires coordinated security review.
-        assert table in _ALLOWED_PROJECTION_TABLES, (
-            f"Table {table!r} passed validation but is not in the allowlist "
-            f"(correlation_id={correlation_id})"
-        )
+        if table not in _ALLOWED_PROJECTION_TABLES:
+            raise ValueError(
+                f"Table {table!r} passed validation but is not in the allowlist "
+                f"(correlation_id={correlation_id})"
+            )
 
         async with self._postgres_connection() as conn:
             result = await conn.execute(
@@ -571,6 +577,7 @@ class DemoResetEngine:
         report: DemoResetReport,
         *,
         dry_run: bool,
+        correlation_id: UUID,
     ) -> None:
         """Delete demo-scoped consumer groups so projectors start fresh.
 
@@ -580,6 +587,7 @@ class DemoResetEngine:
         Args:
             report: Report to append results to.
             dry_run: If True, only report what would happen.
+            correlation_id: Trace identifier for error diagnostics.
         """
         if not self._config.kafka_bootstrap_servers:
             report.actions.append(
@@ -704,7 +712,10 @@ class DemoResetEngine:
                 )
             )
         except Exception as exc:
-            logger.exception("Failed to reset consumer groups")
+            logger.exception(
+                "Failed to reset consumer groups, correlation_id=%s",
+                correlation_id,
+            )
             report.actions.append(
                 ResetActionResult(
                     resource="Consumer group offsets",
@@ -722,6 +733,7 @@ class DemoResetEngine:
         report: DemoResetReport,
         *,
         dry_run: bool,
+        correlation_id: UUID,
     ) -> None:
         """Purge messages from demo-scoped Kafka topics.
 
@@ -732,6 +744,7 @@ class DemoResetEngine:
         Args:
             report: Report to append results to.
             dry_run: If True, only report what would happen.
+            correlation_id: Trace identifier for error diagnostics.
         """
         if not self._config.kafka_bootstrap_servers:
             report.actions.append(
@@ -804,7 +817,7 @@ class DemoResetEngine:
                 consumer = _KafkaConsumer(
                     {
                         "bootstrap.servers": self._config.kafka_bootstrap_servers,
-                        "group.id": f"_demo-reset-watermark-query-{uuid4().hex[:8]}",
+                        "group.id": f"_demo-reset-watermark-query-{uuid4().hex[:16]}",
                         "enable.auto.commit": False,
                     }
                 )
@@ -920,7 +933,10 @@ class DemoResetEngine:
                 )
             )
         except Exception as exc:
-            logger.exception("Failed to purge demo topics")
+            logger.exception(
+                "Failed to purge demo topics, correlation_id=%s",
+                correlation_id,
+            )
             report.actions.append(
                 ResetActionResult(
                     resource="Demo topic data",

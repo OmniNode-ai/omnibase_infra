@@ -20,6 +20,7 @@ Related:
 
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -75,7 +76,14 @@ class TestDemoResetConfig:
 
     def test_from_env_missing_vars(self) -> None:
         """from_env uses empty strings when env vars are missing."""
-        with patch.dict("os.environ", {}, clear=True):
+        # Only remove the two keys that from_env reads, rather than wiping
+        # the entire environment (which can break subprocess/locale state).
+        env_without_keys = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("OMNIBASE_INFRA_DB_URL", "KAFKA_BOOTSTRAP_SERVERS")
+        }
+        with patch.dict("os.environ", env_without_keys, clear=True):
             config = DemoResetConfig.from_env()
             assert config.postgres_dsn == ""
             assert config.kafka_bootstrap_servers == ""
@@ -736,7 +744,9 @@ class TestDemoResetEngineConsumerGroupsLive:
 
         with patch("confluent_kafka.admin.AdminClient", return_value=mock_admin):
             report = DemoResetReport(dry_run=True)
-            await engine._reset_consumer_groups(report, dry_run=True)
+            await engine._reset_consumer_groups(
+                report, dry_run=True, correlation_id=uuid4()
+            )
 
         cg_actions = [a for a in report.actions if "Consumer group" in a.resource]
         assert any(a.action == EnumResetAction.RESET for a in cg_actions)
@@ -770,7 +780,9 @@ class TestDemoResetEngineConsumerGroupsLive:
 
         with patch("confluent_kafka.admin.AdminClient", return_value=mock_admin):
             report = DemoResetReport()
-            await engine._reset_consumer_groups(report, dry_run=False)
+            await engine._reset_consumer_groups(
+                report, dry_run=False, correlation_id=uuid4()
+            )
 
         # Check deletion was reported
         reset_actions = [
@@ -816,7 +828,9 @@ class TestDemoResetEngineConsumerGroupsLive:
 
         with patch("confluent_kafka.admin.AdminClient", return_value=mock_admin):
             report = DemoResetReport()
-            await engine._reset_consumer_groups(report, dry_run=False)
+            await engine._reset_consumer_groups(
+                report, dry_run=False, correlation_id=uuid4()
+            )
 
         # Should have both a RESET and an ERROR action
         assert any(a.action == EnumResetAction.RESET for a in report.actions)
@@ -837,7 +851,9 @@ class TestDemoResetEngineConsumerGroupsLive:
 
         with patch("confluent_kafka.admin.AdminClient", return_value=mock_admin):
             report = DemoResetReport()
-            await engine._reset_consumer_groups(report, dry_run=False)
+            await engine._reset_consumer_groups(
+                report, dry_run=False, correlation_id=uuid4()
+            )
 
         cg_actions = [a for a in report.actions if "Consumer group" in a.resource]
         assert any(a.action == EnumResetAction.SKIPPED for a in cg_actions)
@@ -906,7 +922,9 @@ class TestDemoResetEngineTopicPurgeLive:
 
         with patch("confluent_kafka.admin.AdminClient", return_value=mock_admin):
             report = DemoResetReport(dry_run=True)
-            await engine._purge_demo_topics(report, dry_run=True)
+            await engine._purge_demo_topics(
+                report, dry_run=True, correlation_id=uuid4()
+            )
 
         topic_actions = [a for a in report.actions if "topic" in a.resource.lower()]
         assert any(a.action == EnumResetAction.RESET for a in topic_actions)
@@ -965,7 +983,9 @@ class TestDemoResetEngineTopicPurgeLive:
             ),
         ):
             report = DemoResetReport()
-            await engine._purge_demo_topics(report, dry_run=False)
+            await engine._purge_demo_topics(
+                report, dry_run=False, correlation_id=uuid4()
+            )
 
         # Verify purge reported
         reset_actions = [
@@ -1030,7 +1050,9 @@ class TestDemoResetEngineTopicPurgeLive:
             ),
         ):
             report = DemoResetReport()
-            await engine._purge_demo_topics(report, dry_run=False)
+            await engine._purge_demo_topics(
+                report, dry_run=False, correlation_id=uuid4()
+            )
 
         # Should have both a RESET (partition 0 succeeded) and ERROR (partition 1 failed)
         assert any(a.action == EnumResetAction.RESET for a in report.actions)
@@ -1074,7 +1096,9 @@ class TestDemoResetEngineTopicPurgeLive:
             ),
         ):
             report = DemoResetReport()
-            await engine._purge_demo_topics(report, dry_run=False)
+            await engine._purge_demo_topics(
+                report, dry_run=False, correlation_id=uuid4()
+            )
 
         topic_actions = [a for a in report.actions if "topic" in a.resource.lower()]
         skipped = [a for a in topic_actions if a.action == EnumResetAction.SKIPPED]
@@ -1129,7 +1153,9 @@ class TestDemoResetEngineTopicPurgeLive:
             ),
         ):
             report = DemoResetReport()
-            await engine._purge_demo_topics(report, dry_run=False)
+            await engine._purge_demo_topics(
+                report, dry_run=False, correlation_id=uuid4()
+            )
 
         topic_actions = [a for a in report.actions if "topic" in a.resource.lower()]
 
@@ -1203,7 +1229,9 @@ class TestDemoResetEngineTopicPurgeLive:
             ),
         ):
             report = DemoResetReport()
-            await engine._purge_demo_topics(report, dry_run=False)
+            await engine._purge_demo_topics(
+                report, dry_run=False, correlation_id=uuid4()
+            )
 
         # Should have a RESET action for the successful partition
         reset_actions = [
@@ -1236,7 +1264,9 @@ class TestDemoResetEngineTopicPurgeLive:
 
         with patch("confluent_kafka.admin.AdminClient", return_value=mock_admin):
             report = DemoResetReport()
-            await engine._purge_demo_topics(report, dry_run=False)
+            await engine._purge_demo_topics(
+                report, dry_run=False, correlation_id=uuid4()
+            )
 
         topic_actions = [a for a in report.actions if "topic" in a.resource.lower()]
         assert any(a.action == EnumResetAction.SKIPPED for a in topic_actions)
