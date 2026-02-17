@@ -450,6 +450,48 @@ class TestSanitizeUrl:
         """Empty string should return empty string."""
         assert sanitize_url("") == ""
 
+    # -- hostname-is-None credential leak edge cases (PR #352) --
+
+    def test_no_hostname_userinfo_stripped(self) -> None:
+        """Credentials must be stripped when hostname is None (bare userinfo)."""
+        result = sanitize_url("http://user:pass@")
+        assert "user" not in result
+        assert "pass" not in result
+        assert result == "http://"
+
+    def test_no_hostname_userinfo_with_path_stripped(self) -> None:
+        """Credentials must be stripped when hostname is None but path exists."""
+        result = sanitize_url("http://user:pass@/path")
+        assert "user" not in result
+        assert "pass" not in result
+        assert "/path" in result
+
+    def test_no_hostname_userinfo_with_port_stripped(self) -> None:
+        """Credentials must be stripped when hostname is None but port exists."""
+        result = sanitize_url("http://user:pass@:8080/path")
+        assert "user" not in result
+        assert "pass" not in result
+        assert ":8080" in result
+        assert "/path" in result
+
+    def test_no_hostname_empty_userinfo(self) -> None:
+        """Empty userinfo (bare @) must not leak anything."""
+        result = sanitize_url("http://@/path")
+        assert "@" not in result
+        assert "/path" in result
+
+    def test_no_hostname_empty_userinfo_with_port(self) -> None:
+        """Empty userinfo with port must not leak the @ sign."""
+        result = sanitize_url("http://@:8080/path")
+        assert "@" not in result
+        assert ":8080" in result
+        assert "/path" in result
+
+    def test_non_url_still_passthrough(self) -> None:
+        """Non-URL strings should remain unchanged after the hostname-None fix."""
+        assert sanitize_url("not-a-url") == "not-a-url"
+        assert sanitize_url("plain-hostname:8080") == "plain-hostname:8080"
+
 
 class TestErrorClassSanitization:
     """Tests verifying error classes sanitize paths correctly."""

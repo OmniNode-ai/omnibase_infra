@@ -367,10 +367,15 @@ def sanitize_url(url: str) -> str:
         host_part = f"[{hostname}]" if ":" in hostname else hostname
         netloc = f"{host_part}:{port}" if port else host_part
     else:
-        # No hostname means urlparse couldn't identify a netloc (e.g.
-        # a bare path like "not-a-url").  Fall back to the original
-        # netloc which will be empty in this case.
-        netloc = parsed.netloc
+        # No hostname means urlparse couldn't extract a valid host.
+        # The raw netloc may still contain userinfo (e.g. "user:pass@"
+        # from "http://user:pass@").  Strip everything before and
+        # including the last '@' to avoid leaking credentials.
+        raw_netloc = parsed.netloc
+        if "@" in raw_netloc:
+            netloc = raw_netloc.rsplit("@", 1)[1]
+        else:
+            netloc = raw_netloc
 
     # Reassemble with only scheme, safe netloc, and path
     # (drop params, query, fragment)
