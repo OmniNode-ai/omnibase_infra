@@ -10,7 +10,7 @@ Related Tickets:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -174,7 +174,7 @@ class TestModelTopicCatalogResponseWarnings:
             catalog_version=1,
             node_count=0,
             generated_at=datetime.now(UTC),
-            warnings=["warning1", "warning2"],  # type: ignore[arg-type]
+            warnings=["warning1", "warning2"],
         )
         assert response.warnings == ("warning1", "warning2")
         assert isinstance(response.warnings, tuple)

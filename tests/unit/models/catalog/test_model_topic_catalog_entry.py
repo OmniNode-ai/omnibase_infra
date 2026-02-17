@@ -223,7 +223,7 @@ class TestModelTopicCatalogEntryTags:
             topic_suffix="onex.evt.platform.test.v1",
             topic_name="onex.evt.platform.test.v1",
             partitions=1,
-            tags=["platform", "lifecycle"],  # type: ignore[arg-type]
+            tags=["platform", "lifecycle"],
         )
         assert entry.tags == ("platform", "lifecycle")
         assert isinstance(entry.tags, tuple)
