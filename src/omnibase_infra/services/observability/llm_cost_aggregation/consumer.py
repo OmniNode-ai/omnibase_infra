@@ -52,7 +52,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import signal
+import sys
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -64,9 +66,12 @@ from aiohttp import web
 from aiokafka import AIOKafkaConsumer, TopicPartition
 from aiokafka.errors import KafkaError
 from aiokafka.structs import OffsetAndMetadata
+from pydantic import ValidationError
 
 from omnibase_core.errors import OnexError
 from omnibase_core.types import JsonType
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.services.observability.llm_cost_aggregation.config import (
     ConfigLlmCostAggregation,
 )
@@ -85,8 +90,24 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
+# Pre-compiled patterns for credential masking in DSN query strings and
+# non-standard formats that urlparse may not detect.
+_DSN_PASSWORD_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # password=value, pwd=value, passwd=value in query params (key=value&...)
+    re.compile(r"((?:password|passwd|pwd)\s*=\s*)([^&\s]+)", re.IGNORECASE),
+    # :secret@ pattern in netloc that urlparse missed
+    re.compile(r"(:)([^:@/]+)(@)"),
+)
+
+
 def mask_dsn_password(dsn: str) -> str:
     """Mask password in a PostgreSQL DSN for safe logging.
+
+    First attempts structured masking via ``urlparse``. If ``urlparse``
+    does not detect a password (e.g., password passed as a query parameter
+    or in a non-standard format), falls back to regex-based masking of
+    common credential patterns (``password=``, ``pwd=``, ``passwd=``,
+    ``:secret@``).
 
     Args:
         dsn: PostgreSQL connection string.
@@ -96,25 +117,39 @@ def mask_dsn_password(dsn: str) -> str:
     """
     try:
         parsed = urlparse(dsn)
-        if not parsed.password:
-            return dsn
-        user_part = parsed.username or ""
-        host_part = (
-            f"{parsed.hostname}:{parsed.port}" if parsed.port else str(parsed.hostname)
-        )
-        masked_netloc = f"{user_part}:***@{host_part}"
-        return urlunparse(
-            (
-                parsed.scheme,
-                masked_netloc,
-                parsed.path,
-                parsed.params,
-                parsed.query,
-                parsed.fragment,
+        if parsed.password:
+            user_part = parsed.username or ""
+            host_part = (
+                f"{parsed.hostname}:{parsed.port}"
+                if parsed.port
+                else str(parsed.hostname)
             )
-        )
+            masked_netloc = f"{user_part}:***@{host_part}"
+            return urlunparse(
+                (
+                    parsed.scheme,
+                    masked_netloc,
+                    parsed.path,
+                    parsed.params,
+                    parsed.query,
+                    parsed.fragment,
+                )
+            )
+
+        # urlparse did not detect a password.  Apply regex fallback to
+        # catch password=<value>, pwd=<value>, passwd=<value> in query
+        # strings, and :secret@ patterns in the netloc.
+        masked = dsn
+        for pattern in _DSN_PASSWORD_PATTERNS:
+            masked = pattern.sub(r"\g<1>***", masked)
+        return masked
+
     except (ValueError, AttributeError):
-        return dsn
+        # Even on parse failure, attempt regex masking on the raw string
+        masked = dsn
+        for pattern in _DSN_PASSWORD_PATTERNS:
+            masked = pattern.sub(r"\g<1>***", masked)
+        return masked
     except Exception:
         logger.warning(
             "Unexpected error masking DSN password; returning placeholder to prevent credential leak",
@@ -786,7 +821,12 @@ class ServiceLlmCostAggregator:
     # =========================================================================
 
     async def _start_health_server(self) -> None:
-        """Start minimal HTTP health check server."""
+        """Start minimal HTTP health check server.
+
+        Raises:
+            InfraConnectionError: If the health check port is already in use
+                or otherwise unavailable (wraps ``OSError``).
+        """
         self._health_app = web.Application()
         self._health_app.router.add_get("/health", self._health_handler)
         self._health_app.router.add_get("/health/live", self._liveness_handler)
@@ -800,7 +840,31 @@ class ServiceLlmCostAggregator:
             host=self._config.health_check_host,
             port=self._config.health_check_port,
         )
-        await self._health_site.start()
+
+        try:
+            await self._health_site.start()
+        except OSError as exc:
+            port = self._config.health_check_port
+            host = self._config.health_check_host
+            logger.exception(
+                "Health check port %d already in use (host=%s)",
+                port,
+                host,
+                extra={
+                    "consumer_id": self._consumer_id,
+                    "host": host,
+                    "port": port,
+                    "error": str(exc),
+                },
+            )
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="start_health_server",
+            )
+            raise InfraConnectionError(
+                f"Health check port {port} already in use (host={host})",
+                context=context,
+            ) from exc
 
         logger.info(
             "Health check server started",
@@ -883,7 +947,13 @@ class ServiceLlmCostAggregator:
             "batches_processed": metrics_snapshot.get("batches_processed", 0),
         }
 
-        http_status = 200 if status == EnumHealthStatus.HEALTHY else 503
+        # Return HTTP 200 for HEALTHY and DEGRADED so that Kubernetes
+        # readiness probes continue routing traffic when the service is
+        # functional but experiencing minor staleness. DEGRADED indicates
+        # slightly stale data, not inability to serve. Only UNHEALTHY
+        # returns 503 to stop traffic routing.  The "status" field in the
+        # JSON body allows monitoring to differentiate the actual state.
+        http_status = 200 if status != EnumHealthStatus.UNHEALTHY else 503
         return web.json_response(response_body, status=http_status)
 
     async def _liveness_handler(self, request: web.Request) -> web.Response:
@@ -948,7 +1018,26 @@ class ServiceLlmCostAggregator:
 
 async def _main() -> None:
     """Main entry point for running the consumer as a module."""
-    config = ConfigLlmCostAggregation()
+    try:
+        config = ConfigLlmCostAggregation()
+    except ValidationError as exc:
+        # Translate Pydantic's raw ValidationError into a user-friendly
+        # message that tells the operator which env vars to set.
+        missing = [str(e["loc"][-1]) for e in exc.errors() if e["type"] == "missing"]
+        prefix = "OMNIBASE_INFRA_LLM_COST_"
+        if missing:
+            env_vars = ", ".join(f"{prefix}{f.upper()}" for f in missing)
+            print(
+                f"ERROR: Missing required configuration. "
+                f"Set the following environment variable(s): {env_vars}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"ERROR: Invalid configuration: {exc}",
+                file=sys.stderr,
+            )
+        sys.exit(1)
 
     logger.info(
         "Starting LLM cost aggregation consumer",

@@ -209,6 +209,9 @@ class HandlerLlmOpenaiCompatible:
                 node or adapter that mixes in MixinLlmHttpTransport.
         """
         self._transport = transport
+        # WARNING: Not thread-safe. Concurrent handle() calls may overwrite
+        # this value. Use response.usage instead when sharing a handler
+        # instance across concurrent asyncio tasks. See class docstring.
         self.last_call_metrics: ContractLlmCallMetrics | None = None
 
     @property

@@ -326,10 +326,15 @@ class TestHealthHandler:
         assert body["status"] == "healthy"
         assert body["consumer_running"] is True
 
-    async def test_returns_503_for_degraded(
+    async def test_returns_200_for_degraded(
         self, service: ServiceLlmCostAggregator, mock_request: MagicMock
     ) -> None:
-        """HTTP 503 with degraded status when circuit breaker is open."""
+        """HTTP 200 with degraded status when circuit breaker is open.
+
+        DEGRADED returns 200 (not 503) so that Kubernetes readiness probes
+        continue routing traffic for slightly-stale-but-functional services.
+        The "status" JSON field still reports "degraded" for monitoring.
+        """
         service._running = True
         now = datetime.now(UTC)
         service.metrics.started_at = now - timedelta(minutes=5)
@@ -340,7 +345,7 @@ class TestHealthHandler:
 
         response = await service._health_handler(mock_request)
 
-        assert response.status == 503
+        assert response.status == 200
         body = json.loads(response.body)
         assert body["status"] == "degraded"
 

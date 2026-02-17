@@ -275,6 +275,28 @@ class TestMaskDsnPassword:
         assert "***" in result
         assert "user:***@host" in result
 
+    def test_password_in_query_param(self) -> None:
+        """Password in query string parameter is masked by regex fallback."""
+        dsn = "postgresql://user@host:5432/db?password=s3cret&sslmode=require"
+        result = mask_dsn_password(dsn)
+        assert "s3cret" not in result
+        assert "password=***" in result
+        assert "sslmode=require" in result
+
+    def test_pwd_in_query_param(self) -> None:
+        """pwd= in query string parameter is masked by regex fallback."""
+        dsn = "postgresql://user@host:5432/db?pwd=s3cret"
+        result = mask_dsn_password(dsn)
+        assert "s3cret" not in result
+        assert "pwd=***" in result
+
+    def test_passwd_in_query_param(self) -> None:
+        """passwd= in query string parameter is masked by regex fallback."""
+        dsn = "postgresql://user@host:5432/db?passwd=s3cret"
+        result = mask_dsn_password(dsn)
+        assert "s3cret" not in result
+        assert "passwd=***" in result
+
 
 # =============================================================================
 # Tests: Consumer Lifecycle

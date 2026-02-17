@@ -531,9 +531,8 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
         Returns:
             JSON-serializable payload dictionary.
         """
-        assert request.prompt is not None, (
-            "prompt must be non-None for COMPLETION operation type"
-        )
+        if request.prompt is None:
+            raise ValueError("request.prompt is required for generate mode")
         payload: dict[str, JsonType] = {
             "model": request.model,
             "prompt": request.prompt,

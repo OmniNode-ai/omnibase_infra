@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import math
 import re
@@ -125,11 +126,41 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
             half_open_successes=circuit_breaker_half_open_successes,
         )
 
+    def _statement_timeout_ms(self) -> int:
+        """Compute the statement timeout in milliseconds as a bounded integer.
+
+        PostgreSQL's ``SET LOCAL statement_timeout`` does not support
+        parameterized queries (``$1`` placeholders), so the value must be
+        interpolated into the SQL string. This method converts
+        ``_query_timeout`` (validated as a finite positive float in
+        ``__init__``) to a bounded integer to guarantee the interpolated
+        value is safe.
+
+        Returns:
+            Timeout in milliseconds, clamped to [1, 600_000] (10 minutes max).
+        """
+        timeout_ms = int(self._query_timeout * 1000)
+        # Defensive bounds: even though __init__ validates query_timeout > 0,
+        # clamp to a safe range in case the attribute is mutated post-init.
+        timeout_ms = max(timeout_ms, 1)
+        timeout_ms = min(timeout_ms, 600_000)
+        return timeout_ms
+
     def _is_duplicate(self, event_id: str) -> bool:
         """Check if an event ID has already been processed.
 
         Uses an LRU-style bounded cache. If the cache exceeds
         ``_MAX_DEDUP_CACHE_SIZE``, the oldest entries are evicted.
+
+        Precondition:
+            **Caller must hold** ``_dedup_lock``.  This method reads and
+            writes ``_dedup_cache`` without acquiring the lock internally.
+            This is a deliberate design choice: callers
+            (``write_call_metrics`` and ``write_cost_aggregates``) batch
+            multiple ``_is_duplicate`` calls under a single lock acquisition
+            to avoid per-event lock overhead.  Making this method acquire
+            the lock itself would cause deadlocks with the existing callers
+            that already hold it.
 
         Args:
             event_id: Unique event identifier to check.
@@ -208,12 +239,12 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    # Safe f-string: self._query_timeout is always a float
-                    # (validated at __init__), so int(float * 1000) is guaranteed
-                    # to produce a plain integer -- no user-controlled input.
-                    await conn.execute(
-                        f"SET LOCAL statement_timeout = '{int(self._query_timeout * 1000)}'"
-                    )
+                    # PostgreSQL SET LOCAL does not support $1 parameterized
+                    # queries, so we must interpolate the value directly.
+                    # _statement_timeout_ms() returns a bounds-checked int
+                    # (clamped to [1, 600_000]) to guarantee safety.
+                    timeout_ms = self._statement_timeout_ms()
+                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
 
                     for event in unique_events:
                         try:
@@ -354,12 +385,12 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    # Safe f-string: self._query_timeout is always a float
-                    # (validated at __init__), so int(float * 1000) is guaranteed
-                    # to produce a plain integer -- no user-controlled input.
-                    await conn.execute(
-                        f"SET LOCAL statement_timeout = '{int(self._query_timeout * 1000)}'"
-                    )
+                    # PostgreSQL SET LOCAL does not support $1 parameterized
+                    # queries, so we must interpolate the value directly.
+                    # _statement_timeout_ms() returns a bounds-checked int
+                    # (clamped to [1, 600_000]) to guarantee safety.
+                    timeout_ms = self._statement_timeout_ms()
+                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
 
                     for row in agg_rows:
                         try:
@@ -466,6 +497,16 @@ def _derive_stable_dedup_key(event: dict[str, object]) -> str:
         str(event.get("created_at", "")),
         str(event.get("session_id", "")),
     ]
+
+    # Warn when all fallback fields are empty -- the resulting hash will be
+    # identical for every such event, defeating dedup.
+    if all(p == "" for p in parts):
+        logger.warning(
+            "All dedup fallback fields are empty; deduplication may not work "
+            "correctly for events without identifiers (correlation_id, model_id, "
+            "created_at, session_id are all absent or empty)",
+        )
+
     composite = "|".join(parts)
     return hashlib.sha256(composite.encode("utf-8")).hexdigest()
 
@@ -624,8 +665,6 @@ def _safe_jsonb(value: object) -> str | None:
     if isinstance(value, str):
         return value
     if isinstance(value, dict):
-        import json
-
         try:
             return json.dumps(value, default=str)
         except Exception:

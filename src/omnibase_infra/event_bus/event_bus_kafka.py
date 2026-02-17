@@ -1220,6 +1220,11 @@ class EventBusKafka(
         #   3. Truncate the prefix, append _<hash>, then re-append the suffix
         #   4. If even the suffix + hash alone exceed max length, fall back to
         #      a full hash truncation without suffix preservation
+        # Truncation logic is tested in TestKafkaEventBusInstanceDiscriminator:
+        #   test_effective_group_id_enforces_max_length (basic case)
+        #   test_truncation_with_very_long_topic_name (suffix near limit)
+        #   test_truncation_hash_fallback_path (suffix exceeds limit)
+        #   test_truncation_preserves_topic_suffix_when_possible
         if len(effective_group_id) > KAFKA_CONSUMER_GROUP_MAX_LENGTH:
             hash_input = f"{base_group_id}|{self._config.instance_id or ''}|{topic}"
             hash_suffix = hashlib.sha256(hash_input.encode()).hexdigest()[:8]

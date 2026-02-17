@@ -1761,6 +1761,116 @@ class TestKafkaEventBusInstanceDiscriminator:
                 len(call_kwargs.kwargs["group_id"]) <= KAFKA_CONSUMER_GROUP_MAX_LENGTH
             )
 
+    @pytest.mark.asyncio
+    async def test_truncation_with_very_long_topic_name(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test truncation when topic name approaches 255 chars.
+
+        When the topic suffix (.__t.{topic}) is so long that
+        available_for_prefix <= 0, the code falls back to plain prefix
+        truncation without suffix preservation.
+        """
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id=None,
+            )
+            event_bus = EventBusKafka(config=config)
+
+            # Topic name of 240 chars: .__t. prefix (5 chars) + 240 = 245 suffix
+            # With a group_id of 20 chars: 20 + 245 = 265 > 255
+            # available_for_prefix = 255 - 245 - 9 = 1, still > 0 but very small
+            long_topic = "t" * 240
+            await event_bus._start_consumer_for_topic(long_topic, "a" * 20)
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            effective_gid = call_kwargs.kwargs["group_id"]
+            assert len(effective_gid) <= KAFKA_CONSUMER_GROUP_MAX_LENGTH
+
+    @pytest.mark.asyncio
+    async def test_truncation_hash_fallback_path(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test the hash-only fallback when topic suffix + hash exceed max length.
+
+        When the topic suffix alone is so long that there is no room for the
+        prefix (available_for_prefix <= 0), the code falls back to plain
+        hash truncation without preserving the topic suffix.
+        """
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id=None,
+            )
+            event_bus = EventBusKafka(config=config)
+
+            # Topic suffix = ".__t." + 250 chars = 255 chars
+            # available_for_prefix = 255 - 255 - 9 = -9, triggers fallback
+            very_long_topic = "x" * 250
+            await event_bus._start_consumer_for_topic(very_long_topic, "base-group")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            effective_gid = call_kwargs.kwargs["group_id"]
+            assert len(effective_gid) <= KAFKA_CONSUMER_GROUP_MAX_LENGTH
+
+    @pytest.mark.asyncio
+    async def test_truncation_preserves_topic_suffix_when_possible(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that the topic suffix is preserved during truncation when space allows."""
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id="inst-1",
+            )
+            event_bus = EventBusKafka(config=config)
+
+            # Use a group_id long enough to trigger truncation but with a
+            # short topic so the suffix can be preserved.
+            long_group_id = "g" * 240
+            topic = "events"
+            await event_bus._start_consumer_for_topic(topic, long_group_id)
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            effective_gid = call_kwargs.kwargs["group_id"]
+            assert len(effective_gid) <= KAFKA_CONSUMER_GROUP_MAX_LENGTH
+            # Topic suffix should be preserved at the end
+            assert effective_gid.endswith(f".__t.{topic}")
+
 
 class TestKafkaEventBusStartConsuming:
     """Test suite for start_consuming operation."""

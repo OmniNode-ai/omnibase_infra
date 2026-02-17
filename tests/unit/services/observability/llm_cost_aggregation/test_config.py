@@ -320,6 +320,36 @@ class TestConfigValidation:
         ):
             _make_config(health_check_poll_staleness_seconds=301)
 
+    @pytest.mark.unit
+    def test_postgres_dsn_valid_postgresql_scheme(self) -> None:
+        """DSN with postgresql:// scheme is accepted."""
+        cfg = _make_config(postgres_dsn="postgresql://user:pass@host:5432/db")
+        assert cfg.postgres_dsn == "postgresql://user:pass@host:5432/db"
+
+    @pytest.mark.unit
+    def test_postgres_dsn_valid_postgres_scheme(self) -> None:
+        """DSN with postgres:// scheme is also accepted."""
+        cfg = _make_config(postgres_dsn="postgres://user:pass@host:5432/db")
+        assert cfg.postgres_dsn == "postgres://user:pass@host:5432/db"
+
+    @pytest.mark.unit
+    def test_postgres_dsn_invalid_scheme_raises(self) -> None:
+        """DSN without postgresql:// or postgres:// scheme is rejected."""
+        with pytest.raises(ValidationError, match="postgres_dsn"):
+            _make_config(postgres_dsn="mysql://user:pass@host:3306/db")
+
+    @pytest.mark.unit
+    def test_postgres_dsn_empty_string_raises(self) -> None:
+        """Empty DSN is rejected."""
+        with pytest.raises(ValidationError, match="postgres_dsn"):
+            _make_config(postgres_dsn="")
+
+    @pytest.mark.unit
+    def test_postgres_dsn_plain_string_raises(self) -> None:
+        """Plain string without scheme is rejected."""
+        with pytest.raises(ValidationError, match="postgres_dsn"):
+            _make_config(postgres_dsn="host:5432/db")
+
 
 # =============================================================================
 # Tests: Environment Variable Loading

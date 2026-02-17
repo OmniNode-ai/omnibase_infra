@@ -14,7 +14,7 @@ import logging
 import os
 from typing import Any, Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,32 @@ class ConfigLlmCostAggregation(BaseSettings):
             "OMNIBASE_INFRA_LLM_COST_POSTGRES_DSN env var."
         ),
     )
+
+    @field_validator("postgres_dsn")
+    @classmethod
+    def validate_postgres_dsn_scheme(cls, v: str) -> str:
+        """Validate that postgres_dsn starts with a recognized PostgreSQL scheme.
+
+        asyncpg.create_pool() produces cryptic errors for malformed DSNs.
+        This validator fails eagerly with clear guidance.
+
+        Args:
+            v: The DSN string to validate.
+
+        Returns:
+            The validated DSN string.
+
+        Raises:
+            ValueError: If the DSN does not start with ``postgresql://`` or
+                ``postgres://``.
+        """
+        if not v.startswith(("postgresql://", "postgres://")):
+            raise ValueError(
+                f"postgres_dsn must start with 'postgresql://' or 'postgres://', "
+                f"got: {v[:30]!r}{'...' if len(v) > 30 else ''}. "
+                f"Example: postgresql://user:password@host:5432/dbname"
+            )
+        return v
 
     # Batch processing
     batch_size: int = Field(
