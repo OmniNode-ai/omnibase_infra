@@ -362,7 +362,10 @@ def sanitize_url(url: str) -> str:
     hostname = parsed.hostname
     port = parsed.port
     if hostname:
-        netloc = f"{hostname}:{port}" if port else hostname
+        # IPv6 addresses contain colons and must be wrapped in brackets
+        # within the netloc (e.g. "[::1]:8000" not "::1:8000").
+        host_part = f"[{hostname}]" if ":" in hostname else hostname
+        netloc = f"{host_part}:{port}" if port else host_part
     else:
         # No hostname means urlparse couldn't identify a netloc (e.g.
         # a bare path like "not-a-url").  Fall back to the original

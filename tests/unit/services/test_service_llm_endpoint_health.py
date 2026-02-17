@@ -132,6 +132,31 @@ class TestModelLlmEndpointHealthConfig:
 
     @pytest.mark.unit
     @pytest.mark.parametrize(
+        "empty_netloc_url",
+        [
+            "http://",
+            "https://",
+            "http:///health",
+            "https:///v1/models",
+        ],
+        ids=[
+            "http-empty-netloc",
+            "https-empty-netloc",
+            "http-empty-netloc-with-path",
+            "https-empty-netloc-with-path",
+        ],
+    )
+    def test_empty_netloc_url_rejected(self, empty_netloc_url: str) -> None:
+        """Endpoint URLs with empty netloc (no hostname) must raise ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelLlmEndpointHealthConfig(
+                endpoints={"bad-ep": empty_netloc_url},
+            )
+        error_msg = exc_info.value.errors()[0]["msg"]
+        assert "hostname" in error_msg.lower()
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
         "valid_url",
         [
             "http://example.com",
@@ -168,6 +193,43 @@ class TestModelLlmEndpointHealthConfig:
         """Config should be immutable."""
         with pytest.raises(ValidationError):
             config.probe_interval_seconds = 999  # type: ignore[misc]
+
+    @pytest.mark.unit
+    def test_invalid_url_does_not_leak_query_params(self) -> None:
+        """Validation error messages must NOT expose query-string tokens.
+
+        URLs may carry credentials as query parameters (e.g.
+        ``ftp://host:8000/v1?token=supersecret``).  The sanitized error
+        message must strip the query string so that secrets are never
+        included in user-visible error output.
+
+        Note: Pydantic's ``str(ValidationError)`` also renders the raw
+        ``input_value``, which is outside our control.  We verify the
+        error *message* (``errors()[0]['msg']``) which is the text that
+        handlers and loggers typically extract.
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            ModelLlmEndpointHealthConfig(
+                endpoints={"leaky": "ftp://host:8000/v1?token=supersecret&key=abc123"},
+            )
+        error_msg = exc_info.value.errors()[0]["msg"]
+        assert "supersecret" not in error_msg
+        assert "abc123" not in error_msg
+        assert "token=" not in error_msg
+        assert "key=" not in error_msg
+        # The sanitized URL (scheme + host + path) should still appear
+        assert "ftp://host:8000/v1" in error_msg
+
+    @pytest.mark.unit
+    def test_invalid_url_does_not_leak_fragment(self) -> None:
+        """Fragments should also be stripped from validation error messages."""
+        with pytest.raises(ValidationError) as exc_info:
+            ModelLlmEndpointHealthConfig(
+                endpoints={"frag": "ftp://host:8000/v1#secret-anchor"},
+            )
+        error_msg = exc_info.value.errors()[0]["msg"]
+        assert "secret-anchor" not in error_msg
+        assert "ftp://host:8000/v1" in error_msg
 
     def test_probe_interval_minimum(self) -> None:
         """Probe interval must be >= 1."""
@@ -235,6 +297,46 @@ class TestModelLlmEndpointStatus:
         )
         assert status.url == valid_url
 
+    @pytest.mark.unit
+    def test_invalid_status_url_does_not_leak_query_params(self) -> None:
+        """Status model validation error messages must NOT expose query-string secrets.
+
+        See ``TestModelLlmEndpointHealthConfig.test_invalid_url_does_not_leak_query_params``
+        for a detailed explanation of why we check ``errors()[0]['msg']``
+        rather than ``str(ValidationError)``.
+        """
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelLlmEndpointStatus(
+                url="ftp://host:8000/v1?token=supersecret&key=abc123",
+                name="test",
+                available=True,
+                last_check=now,
+                latency_ms=10.0,
+            )
+        error_msg = exc_info.value.errors()[0]["msg"]
+        assert "supersecret" not in error_msg
+        assert "abc123" not in error_msg
+        assert "token=" not in error_msg
+        assert "key=" not in error_msg
+        assert "ftp://host:8000/v1" in error_msg
+
+    @pytest.mark.unit
+    def test_invalid_status_url_does_not_leak_fragment(self) -> None:
+        """Status model validation error messages must NOT expose URL fragments."""
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError) as exc_info:
+            ModelLlmEndpointStatus(
+                url="ftp://host:8000/v1#secret-anchor",
+                name="test",
+                available=True,
+                last_check=now,
+                latency_ms=10.0,
+            )
+        error_msg = exc_info.value.errors()[0]["msg"]
+        assert "secret-anchor" not in error_msg
+        assert "ftp://host:8000/v1" in error_msg
+
     def test_healthy_status(self) -> None:
         """Healthy status should have available=True."""
         now = datetime.now(UTC)
@@ -294,6 +396,8 @@ class TestServiceLlmEndpointHealthInit:
         service: ServiceLlmEndpointHealth,
     ) -> None:
         """Each configured endpoint should get its own circuit breaker."""
+        # Whitebox: access internal CB map to verify per-endpoint isolation.
+        # No public API enumerates configured circuit breakers by name.
         assert "coder-14b" in service._circuit_breakers
         assert "qwen-72b" in service._circuit_breakers
         assert len(service._circuit_breakers) == 2
@@ -317,6 +421,9 @@ class TestServiceLlmEndpointHealthInit:
         service_no_bus: ServiceLlmEndpointHealth,
     ) -> None:
         """Service should work without an event bus."""
+        # Whitebox: verify the internal event bus reference is None.
+        # There is no public accessor; the observable effect (no events
+        # emitted) is tested in TestServiceLlmEndpointHealthEventEmission.
         assert service_no_bus._event_bus is None
 
     def test_empty_endpoints(self) -> None:
@@ -324,6 +431,7 @@ class TestServiceLlmEndpointHealthInit:
         cfg = ModelLlmEndpointHealthConfig(endpoints={})
         svc = ServiceLlmEndpointHealth(config=cfg)
         assert svc.get_status() == {}
+        # Whitebox: verify no circuit breakers created for empty config.
         assert len(svc._circuit_breakers) == 0
 
 
@@ -416,6 +524,36 @@ class TestServiceLlmEndpointHealthProbe:
             assert "ConnectError" in status.error or "Connection" in status.error
 
     @pytest.mark.asyncio
+    async def test_probe_exception_message_sanitized(
+        self,
+        service: ServiceLlmEndpointHealth,
+    ) -> None:
+        """Catch-all exception handler must sanitize messages to prevent credential leakage.
+
+        When an unexpected exception contains sensitive data (e.g. a connection
+        string with embedded credentials), the error stored in the status model
+        must be redacted while preserving the exception type name for debugging.
+        """
+
+        async def raise_sensitive_error(url: str, **kwargs: object) -> None:
+            raise RuntimeError(
+                "Cannot connect to postgresql://admin:s3cret@db:5432/prod"
+            )
+
+        with patch.object(httpx.AsyncClient, "get", side_effect=raise_sensitive_error):
+            status_map = await service.probe_all()
+
+        for status in status_map.values():
+            assert status.available is False
+            # Exception type name must be preserved for debugging
+            assert "RuntimeError" in status.error
+            # Sensitive data must be redacted
+            assert "s3cret" not in status.error
+            assert "admin" not in status.error
+            assert "postgresql://" not in status.error
+            assert "[REDACTED" in status.error
+
+    @pytest.mark.asyncio
     async def test_get_endpoint_status(
         self,
         service: ServiceLlmEndpointHealth,
@@ -474,7 +612,11 @@ class TestServiceLlmEndpointHealthCircuitBreaker:
             for _ in range(3):
                 await service.probe_all()
 
-        # After 3 failures with threshold=3, circuit should be open
+        # After 3 failures with threshold=3, circuit should be open.
+        # Whitebox: access internal CB map to call the public is_open
+        # property.  The service has no public method to query a single
+        # endpoint's circuit breaker state; the status map only reports
+        # the last probe result, not the live CB state.
         cb = service._circuit_breakers["coder-14b"]
         assert cb.is_open is True
 
@@ -530,7 +672,9 @@ class TestServiceLlmEndpointHealthCircuitBreaker:
             for _ in range(2):
                 await svc.probe_all()
 
-        # ep-a should be open, ep-b should still be closed
+        # Whitebox: verify CB isolation -- ep-a open, ep-b still closed.
+        # See comment in test_circuit_opens_after_threshold_failures for
+        # rationale on accessing _circuit_breakers directly.
         assert svc._circuit_breakers["ep-a"].is_open is True
         assert svc._circuit_breakers["ep-b"].is_open is False
 
@@ -554,8 +698,9 @@ class TestServiceLlmEndpointHealthCircuitBreaker:
         This validates the full CLOSED -> OPEN -> HALF_OPEN -> CLOSED recovery
         transition.  The test:
           1. Trips the circuit with consecutive failures.
-          2. Simulates time advancing past the reset_timeout by manipulating
-             the internal ``_circuit_breaker_open_until`` timestamp.
+          2. Patches ``time.time`` inside the mixin to simulate time advancing
+             past the ``reset_timeout``, causing the CB to transition from
+             OPEN -> HALF_OPEN on the next ``check()`` call.
           3. Issues a successful probe (half-open allows one trial).
           4. Asserts the circuit is closed again and the endpoint is healthy.
         """
@@ -574,6 +719,8 @@ class TestServiceLlmEndpointHealthCircuitBreaker:
             for _ in range(2):
                 await svc.probe_all()
 
+        # Whitebox: access internal CB map to assert the live circuit state.
+        # See comment in test_circuit_opens_after_threshold_failures.
         cb = svc._circuit_breakers["recovery-ep"]
         assert cb.is_open is True, "Circuit should be open after hitting threshold"
 
@@ -582,16 +729,25 @@ class TestServiceLlmEndpointHealthCircuitBreaker:
         assert status_before is not None
         assert status_before.available is False
 
-        # -- Phase 2: Simulate time passing the reset_timeout ------------------
-        # Set open_until to a time in the past so the next check() call
-        # transitions the CB from OPEN -> HALF_OPEN.
-        cb._circuit_breaker_open_until = 0.0
+        # -- Phase 2: Simulate time advancing past reset_timeout ---------------
+        # The mixin's _check_circuit_breaker compares time.time() against the
+        # internal open_until timestamp.  Rather than mutating the private
+        # attribute directly, we patch time.time in the mixin module to
+        # return a value far enough in the future to trigger the
+        # OPEN -> HALF_OPEN transition.
+        far_future = cb._circuit_breaker_open_until + 1.0
 
         # -- Phase 3: Successful probe in half-open state ----------------------
         mock_response = httpx.Response(
             200, request=httpx.Request("GET", "http://localhost:7777/health")
         )
-        with patch.object(httpx.AsyncClient, "get", return_value=mock_response):
+        with (
+            patch(
+                "omnibase_infra.mixins.mixin_async_circuit_breaker.time.time",
+                return_value=far_future,
+            ),
+            patch.object(httpx.AsyncClient, "get", return_value=mock_response),
+        ):
             status_map = await svc.probe_all()
 
         # -- Phase 4: Verify full recovery -------------------------------------
@@ -691,10 +847,14 @@ class TestServiceLlmEndpointHealthLifecycle:
         with patch.object(service, "probe_all", new_callable=AsyncMock):
             await service.start()
             assert service.is_running is True
+            # Whitebox: verify the background task handle exists.
+            # The public is_running property confirms the service is active,
+            # but does not prove an asyncio.Task was actually created.
             assert service._probe_task is not None
 
             await service.stop()
             assert service.is_running is False
+            # Whitebox: verify task handle is cleaned up after stop.
             assert service._probe_task is None
 
     @pytest.mark.asyncio
@@ -705,6 +865,8 @@ class TestServiceLlmEndpointHealthLifecycle:
         """Calling start twice should be safe."""
         with patch.object(service, "probe_all", new_callable=AsyncMock):
             await service.start()
+            # Whitebox: capture the task handle to verify idempotency --
+            # a second start() must reuse the same asyncio.Task object.
             task1 = service._probe_task
             await service.start()  # idempotent
             assert service._probe_task is task1
@@ -734,7 +896,10 @@ class TestServiceLlmEndpointHealthLifecycle:
         with patch.object(httpx.AsyncClient, "get", return_value=mock_response):
             await service.probe_all()
 
-        # Client was lazily created
+        # Whitebox: verify the lazily-created HTTP client exists and is
+        # cleaned up by stop().  There is no public accessor for the HTTP
+        # client; the test validates an important resource-leak invariant
+        # that cannot be observed through the public API alone.
         assert service._http_client is not None
 
         # stop() should close it even though start() was never called
@@ -754,7 +919,8 @@ class TestServiceLlmEndpointHealthLifecycle:
                 status_map = await svc.probe_all()
             assert len(status_map) == 2
 
-        # After exiting the context manager, the client should be closed
+        # Whitebox: verify the context manager closes the internal HTTP
+        # client on exit (resource-leak prevention, no public accessor).
         assert svc._http_client is None
 
     @pytest.mark.asyncio

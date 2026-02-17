@@ -2,13 +2,20 @@
 # Copyright (c) 2025 OmniNode Team
 """Configuration model for the LLM endpoint health checker.
 
+Defines probe intervals, HTTP timeouts, endpoint URLs, and per-endpoint
+circuit breaker thresholds consumed by ``ServiceLlmEndpointHealth``.
+
 .. versionadded:: 0.9.0
     Part of OMN-2255 LLM endpoint health checker.
 """
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from omnibase_infra.utils.util_error_sanitization import sanitize_url
 
 
 class ModelLlmEndpointHealthConfig(BaseModel):
@@ -36,17 +43,32 @@ class ModelLlmEndpointHealthConfig(BaseModel):
     @field_validator("endpoints")
     @classmethod
     def _validate_endpoint_urls(cls, v: dict[str, str]) -> dict[str, str]:
-        """Validate that every endpoint URL uses an HTTP(S) scheme.
+        """Validate that every endpoint URL uses an HTTP(S) scheme and has a hostname.
+
+        Rejects non-HTTP schemes to prevent accidental use of ``file://``,
+        ``ftp://``, or bare hostnames.  Also rejects URLs with empty netloc
+        (e.g. ``http://``) which would produce invalid probe requests.
+        Error messages are sanitized via ``sanitize_url`` to avoid leaking
+        credentials embedded in URLs.
 
         Raises:
             ValueError: If any URL does not start with ``http://`` or
-                ``https://``.
+                ``https://``, or has an empty netloc (no hostname).
         """
         for name, url in v.items():
             if not url.startswith(("http://", "https://")):
+                safe_url = sanitize_url(url)
                 msg = (
-                    f"Endpoint '{name}' has invalid URL '{url}': "
+                    f"Endpoint '{name}' has invalid URL '{safe_url}': "
                     "must start with 'http://' or 'https://'"
+                )
+                raise ValueError(msg)
+            parsed = urlparse(url)
+            if not parsed.netloc:
+                safe_url = sanitize_url(url)
+                msg = (
+                    f"Endpoint '{name}' has invalid URL '{safe_url}': "
+                    "URL must have a hostname"
                 )
                 raise ValueError(msg)
         return v

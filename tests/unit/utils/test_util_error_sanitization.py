@@ -422,6 +422,30 @@ class TestSanitizeUrl:
         assert result == "http://host:9000/health"
         assert "admin" not in result
 
+    def test_ipv6_loopback_with_port_and_query(self) -> None:
+        """IPv6 loopback URL should preserve brackets and strip query params."""
+        result = sanitize_url("http://[::1]:8000/v1?token=x")
+        assert result == "http://[::1]:8000/v1"
+        assert "token" not in result
+
+    def test_ipv6_full_address_with_port(self) -> None:
+        """Full IPv6 address should be reconstructed with brackets."""
+        result = sanitize_url("http://[2001:db8::1]:9090/health")
+        assert result == "http://[2001:db8::1]:9090/health"
+
+    def test_ipv6_loopback_without_port(self) -> None:
+        """IPv6 URL without port should still use brackets."""
+        result = sanitize_url("http://[::1]/path")
+        assert result == "http://[::1]/path"
+
+    def test_ipv6_with_userinfo_stripped(self) -> None:
+        """Userinfo should be stripped from IPv6 URLs."""
+        result = sanitize_url("http://admin:pass@[::1]:8000/v1?key=secret")
+        assert result == "http://[::1]:8000/v1"
+        assert "admin" not in result
+        assert "pass" not in result
+        assert "secret" not in result
+
     def test_empty_string(self) -> None:
         """Empty string should return empty string."""
         assert sanitize_url("") == ""
