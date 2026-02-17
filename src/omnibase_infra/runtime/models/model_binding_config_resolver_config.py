@@ -21,7 +21,7 @@ Example:
             cache_ttl_seconds=600.0,
             env_prefix="ONEX_HANDLER",
             strict_validation=True,
-            fail_on_vault_error=True,  # Fail on vault: resolution errors
+            fail_on_secret_error=True,  # Fail on secret resolution errors
             max_cache_entries=100,  # LRU eviction after 100 entries
         )
 """
@@ -67,8 +67,10 @@ class ModelBindingConfigResolverConfig(BaseModel):
             If False, log warning and skip. Default is False.
         allowed_schemes: Set of allowed config_ref URI schemes for security.
             Only these schemes can be used in config_ref values.
-        fail_on_vault_error: If True, fail when vault: references cannot be resolved.
-            If False, keep placeholder (may be insecure). Default is False.
+        fail_on_secret_error: If True, fail when secret references (vault: or
+            infisical:) cannot be resolved. If False, keep placeholder (may be
+            insecure). Default is False. This flag governs all secret backend
+            resolution errors.
         max_cache_entries: Maximum cache entries before LRU eviction.
             None means unlimited. Default is None. Only applies when
             enable_caching=True. To disable caching, use enable_caching=False.
@@ -98,7 +100,7 @@ class ModelBindingConfigResolverConfig(BaseModel):
                 cache_ttl_seconds=300.0,
                 env_prefix="ONEX_HANDLER",
                 strict_validation=True,
-                fail_on_vault_error=True,  # Fail on vault: resolution errors
+                fail_on_secret_error=True,  # Fail on secret resolution errors
                 max_cache_entries=100,  # LRU eviction after 100 entries
                 allow_symlinks=False,  # Reject symlinks for security
             )
@@ -168,17 +170,18 @@ class ModelBindingConfigResolverConfig(BaseModel):
 
     # Allowed config_ref schemes (for security)
     allowed_schemes: frozenset[str] = Field(
-        default=frozenset({"file", "env", "vault"}),
+        default=frozenset({"file", "env", "vault", "infisical"}),
         description="Set of allowed config_ref URI schemes for security. "
         "Only these schemes can be used in config_ref values.",
     )
 
-    # Vault error handling behavior
-    fail_on_vault_error: bool = Field(
+    # Secret resolution error handling behavior (applies to all secret backends:
+    # vault:, infisical:, and any future secret schemes).
+    fail_on_secret_error: bool = Field(
         default=False,
-        description="If True, raise ProtocolConfigurationError when a vault: "
-        "reference fails to resolve. If False, log an error and keep the original "
-        "placeholder value (which may be insecure). "
+        description="If True, raise ProtocolConfigurationError when a secret "
+        "reference (vault: or infisical:) fails to resolve. If False, log an "
+        "error and keep the original placeholder value (which may be insecure). "
         "Set to True in production to prevent silent security fallbacks.",
     )
 
@@ -313,7 +316,7 @@ class ModelBindingConfigResolverConfig(BaseModel):
             raise ValueError(msg)
 
         # Known valid schemes
-        valid_schemes = {"file", "env", "vault"}
+        valid_schemes = {"file", "env", "vault", "infisical"}
         unknown_schemes = value - valid_schemes
 
         if unknown_schemes:

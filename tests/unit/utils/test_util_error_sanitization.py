@@ -17,6 +17,7 @@ from omnibase_infra.utils import (
     sanitize_consul_key,
     sanitize_error_message,
     sanitize_secret_path,
+    sanitize_url,
 )
 
 
@@ -360,6 +361,136 @@ class TestSanitizeConsulKey:
         assert "production" not in result
         assert "internal" not in result
         assert "primary" not in result
+
+
+class TestSanitizeUrl:
+    """Tests for sanitize_url function."""
+
+    def test_strips_query_params(self) -> None:
+        """Query parameters should be removed."""
+        result = sanitize_url("http://host:8000/v1?token=secret&key=abc")
+        assert result == "http://host:8000/v1"
+        assert "secret" not in result
+        assert "abc" not in result
+
+    def test_strips_fragment(self) -> None:
+        """Fragments should be removed."""
+        result = sanitize_url("https://example.com/health#secret-anchor")
+        assert result == "https://example.com/health"
+        assert "secret-anchor" not in result
+
+    def test_strips_query_and_fragment(self) -> None:
+        """Both query params and fragments should be removed."""
+        result = sanitize_url("http://host:8000/v1?token=x#frag")
+        assert result == "http://host:8000/v1"
+        assert "token" not in result
+        assert "frag" not in result
+
+    def test_preserves_scheme_host_port_path(self) -> None:
+        """Scheme, host, port, and path should be preserved."""
+        result = sanitize_url("https://192.168.86.201:8000/v1/models")
+        assert result == "https://192.168.86.201:8000/v1/models"
+
+    def test_plain_url_unchanged(self) -> None:
+        """URLs without query or fragment should be unchanged."""
+        url = "http://example.com:9999/health"
+        assert sanitize_url(url) == url
+
+    def test_non_url_passthrough(self) -> None:
+        """Non-URL strings should pass through without error."""
+        result = sanitize_url("not-a-url")
+        assert result == "not-a-url"
+
+    def test_strips_userinfo_credentials(self) -> None:
+        """Userinfo (username:password) embedded in the URL must be stripped."""
+        result = sanitize_url("http://admin:s3cret@host:8000/v1?token=x")
+        assert result == "http://host:8000/v1"
+        assert "admin" not in result
+        assert "s3cret" not in result
+        assert "token" not in result
+
+    def test_strips_userinfo_without_port(self) -> None:
+        """Userinfo should be stripped even when port is absent."""
+        result = sanitize_url("https://user:pass@example.com/path")
+        assert result == "https://example.com/path"
+        assert "user" not in result
+        assert "pass" not in result
+
+    def test_strips_username_only_userinfo(self) -> None:
+        """Username-only userinfo (no password) should also be stripped."""
+        result = sanitize_url("http://admin@host:9000/health")
+        assert result == "http://host:9000/health"
+        assert "admin" not in result
+
+    def test_ipv6_loopback_with_port_and_query(self) -> None:
+        """IPv6 loopback URL should preserve brackets and strip query params."""
+        result = sanitize_url("http://[::1]:8000/v1?token=x")
+        assert result == "http://[::1]:8000/v1"
+        assert "token" not in result
+
+    def test_ipv6_full_address_with_port(self) -> None:
+        """Full IPv6 address should be reconstructed with brackets."""
+        result = sanitize_url("http://[2001:db8::1]:9090/health")
+        assert result == "http://[2001:db8::1]:9090/health"
+
+    def test_ipv6_loopback_without_port(self) -> None:
+        """IPv6 URL without port should still use brackets."""
+        result = sanitize_url("http://[::1]/path")
+        assert result == "http://[::1]/path"
+
+    def test_ipv6_with_userinfo_stripped(self) -> None:
+        """Userinfo should be stripped from IPv6 URLs."""
+        result = sanitize_url("http://admin:pass@[::1]:8000/v1?key=secret")
+        assert result == "http://[::1]:8000/v1"
+        assert "admin" not in result
+        assert "pass" not in result
+        assert "secret" not in result
+
+    def test_empty_string(self) -> None:
+        """Empty string should return empty string."""
+        assert sanitize_url("") == ""
+
+    # -- hostname-is-None credential leak edge cases (PR #352) --
+
+    def test_no_hostname_userinfo_stripped(self) -> None:
+        """Credentials must be stripped when hostname is None (bare userinfo)."""
+        result = sanitize_url("http://user:pass@")
+        assert "user" not in result
+        assert "pass" not in result
+        assert result == "http://"
+
+    def test_no_hostname_userinfo_with_path_stripped(self) -> None:
+        """Credentials must be stripped when hostname is None but path exists."""
+        result = sanitize_url("http://user:pass@/path")
+        assert "user" not in result
+        assert "pass" not in result
+        assert "/path" in result
+
+    def test_no_hostname_userinfo_with_port_stripped(self) -> None:
+        """Credentials must be stripped when hostname is None but port exists."""
+        result = sanitize_url("http://user:pass@:8080/path")
+        assert "user" not in result
+        assert "pass" not in result
+        assert ":8080" in result
+        assert "/path" in result
+
+    def test_no_hostname_empty_userinfo(self) -> None:
+        """Empty userinfo (bare @) must not leak anything."""
+        result = sanitize_url("http://@/path")
+        assert "@" not in result
+        assert "/path" in result
+
+    def test_no_hostname_empty_userinfo_with_port(self) -> None:
+        """Empty userinfo with port must not leak the @ sign."""
+        result = sanitize_url("http://@:8080/path")
+        assert "@" not in result
+        assert ":8080" in result
+        assert "/path" in result
+
+    def test_non_url_still_passthrough(self) -> None:
+        """Non-URL strings should remain unchanged after the hostname-None fix."""
+        assert sanitize_url("not-a-url") == "not-a-url"
+        assert sanitize_url("plain-hostname:8080") == "plain-hostname:8080"
 
 
 class TestErrorClassSanitization:

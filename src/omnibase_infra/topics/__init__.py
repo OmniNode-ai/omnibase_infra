@@ -44,6 +44,9 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_REGISTRY_REQUEST_INTROSPECTION,
     SUFFIX_REQUEST_INTROSPECTION,
     SUFFIX_RUNTIME_TICK,
+    SUFFIX_TOPIC_CATALOG_CHANGED,
+    SUFFIX_TOPIC_CATALOG_QUERY,
+    SUFFIX_TOPIC_CATALOG_RESPONSE,
 )
 from omnibase_infra.topics.topic_resolver import TopicResolutionError, TopicResolver
 
@@ -60,6 +63,10 @@ __all__: list[str] = [
     "SUFFIX_CONTRACT_REGISTERED",
     "SUFFIX_CONTRACT_DEREGISTERED",
     "SUFFIX_NODE_REGISTRATION_ACKED",
+    # Topic catalog suffix constants
+    "SUFFIX_TOPIC_CATALOG_QUERY",
+    "SUFFIX_TOPIC_CATALOG_RESPONSE",
+    "SUFFIX_TOPIC_CATALOG_CHANGED",
     # Intelligence domain suffix constants
     "SUFFIX_INTELLIGENCE_CLAUDE_HOOK_EVENT",
     "SUFFIX_INTELLIGENCE_SESSION_OUTCOME",

@@ -18,6 +18,7 @@ Available Handlers:
 - HandlerFileSystem: Filesystem handler with path whitelisting and size limits
 - HandlerManifestPersistence: Execution manifest persistence with filesystem storage
 - HandlerGraph: Graph database handler (Memgraph/Neo4j via Bolt protocol)
+- HandlerInfisical: Infisical secret management handler with caching and circuit breaker (OMN-2286)
 - HandlerIntent: Intent storage and query handler wrapping HandlerGraph (demo wiring)
 - HandlerQdrant: Qdrant vector database handler (MVP: create, upsert, search, delete)
 - HandlerSlackWebhook: Slack webhook handler for infrastructure alerting
@@ -37,6 +38,10 @@ from omnibase_infra.handlers.handler_db import HandlerDb
 from omnibase_infra.handlers.handler_filesystem import HandlerFileSystem
 from omnibase_infra.handlers.handler_graph import HandlerGraph
 from omnibase_infra.handlers.handler_http import HandlerHttpRest
+from omnibase_infra.handlers.handler_infisical import (
+    HANDLER_ID_INFISICAL,
+    HandlerInfisical,
+)
 from omnibase_infra.handlers.handler_intent import (  # DEMO: Temporary intent handler wiring (OMN-1515)
     HANDLER_ID_INTENT,
     HandlerIntent,
@@ -63,12 +68,14 @@ from omnibase_infra.handlers.models.model_qdrant_handler_response import (
 )
 
 __all__: list[str] = [
+    "HANDLER_ID_INFISICAL",
     "HANDLER_ID_INTENT",
     "HandlerConsul",
     "HandlerDb",
     "HandlerFileSystem",
     "HandlerGraph",
     "HandlerHttpRest",
+    "HandlerInfisical",
     "HandlerIntent",
     "HandlerManifestPersistence",
     "HandlerMCP",

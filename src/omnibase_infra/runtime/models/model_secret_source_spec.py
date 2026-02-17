@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # Canonical type alias for secret source types.
 # Reuse this type across all secret-related models for consistency.
-SecretSourceType = Literal["env", "vault", "file"]
+SecretSourceType = Literal["env", "vault", "infisical", "file"]
 
 
 class ModelSecretSourceSpec(BaseModel):
@@ -38,6 +38,20 @@ class ModelSecretSourceSpec(BaseModel):
                 source_path="secret/data/database/postgres#password"
             )
 
+        Infisical secret::
+
+            ModelSecretSourceSpec(
+                source_type="infisical",
+                source_path="DB_PASSWORD"
+            )
+
+        Infisical secret with field::
+
+            ModelSecretSourceSpec(
+                source_type="infisical",
+                source_path="DB_CREDENTIALS#password"
+            )
+
         File-based secret::
 
             ModelSecretSourceSpec(source_type="file", source_path="/run/secrets/db_pass")
@@ -53,13 +67,16 @@ class ModelSecretSourceSpec(BaseModel):
     source_type: SecretSourceType = Field(
         ...,
         description="Type of secret source: 'env' for environment variables, "
-        "'vault' for HashiCorp Vault, 'file' for file-based secrets.",
+        "'vault' for HashiCorp Vault, 'infisical' for Infisical, "
+        "'file' for file-based secrets.",
     )
     source_path: str = Field(
         ...,
         min_length=1,
         description="Path or key to the secret. Format depends on source_type: "
-        "env=VAR_NAME, vault=path/to/secret#key, file=/path/to/file.",
+        "env=VAR_NAME, vault=path/to/secret#key, "
+        "infisical=SECRET_NAME or infisical=SECRET_NAME#field, "
+        "file=/path/to/file.",
     )
 
 

@@ -28,6 +28,9 @@ from omnibase_infra.topics import (
     SUFFIX_REGISTRY_REQUEST_INTROSPECTION,
     SUFFIX_REQUEST_INTROSPECTION,
     SUFFIX_RUNTIME_TICK,
+    SUFFIX_TOPIC_CATALOG_CHANGED,
+    SUFFIX_TOPIC_CATALOG_QUERY,
+    SUFFIX_TOPIC_CATALOG_RESPONSE,
 )
 
 pytestmark = [pytest.mark.unit]
@@ -56,6 +59,9 @@ class TestPlatformTopicSuffixes:
             SUFFIX_CONTRACT_REGISTERED,
             SUFFIX_CONTRACT_DEREGISTERED,
             SUFFIX_NODE_REGISTRATION_ACKED,
+            SUFFIX_TOPIC_CATALOG_QUERY,
+            SUFFIX_TOPIC_CATALOG_RESPONSE,
+            SUFFIX_TOPIC_CATALOG_CHANGED,
         }
         assert set(ALL_PLATFORM_SUFFIXES) == expected_suffixes
 
@@ -71,14 +77,8 @@ class TestPlatformTopicSuffixes:
 
     def test_suffix_constants_are_strings(self) -> None:
         """All suffix constants should be strings."""
-        assert isinstance(SUFFIX_NODE_REGISTRATION, str)
-        assert isinstance(SUFFIX_NODE_INTROSPECTION, str)
-        assert isinstance(SUFFIX_NODE_HEARTBEAT, str)
-        assert isinstance(SUFFIX_REQUEST_INTROSPECTION, str)
-        assert isinstance(SUFFIX_FSM_STATE_TRANSITIONS, str)
-        assert isinstance(SUFFIX_RUNTIME_TICK, str)
-        assert isinstance(SUFFIX_REGISTRATION_SNAPSHOTS, str)
-        assert isinstance(SUFFIX_NODE_REGISTRATION_ACKED, str)
+        for suffix in ALL_PLATFORM_SUFFIXES:
+            assert isinstance(suffix, str), f"Suffix must be a string: {suffix}"
 
     def test_suffix_kinds_are_valid(self) -> None:
         """All suffixes should use valid message kinds."""
