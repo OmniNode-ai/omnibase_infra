@@ -38,6 +38,16 @@ logger = logging.getLogger(__name__)
 # Very short fragments produce too many false positives.
 _MIN_FRAGMENT_LENGTH = 20
 
+# Fragment length threshold above which we use n-gram overlap instead of
+# the sliding-window Levenshtein approach.  Fragments longer than this are
+# matched via n-gram overlap which is O(F + R) instead of O(R * F * min(F,W)).
+_NGRAM_FALLBACK_THRESHOLD = 80
+
+# Maximum number of Levenshtein comparisons allowed in the sliding window
+# path before giving up.  This prevents unbounded computation when the
+# response is very large relative to the fragment.
+_MAX_LEVENSHTEIN_COMPARISONS = 5_000
+
 # Regex to split text into sentence-like fragments
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n(?:\s*\n)+|\n(?=[-*#|>])")
 
@@ -140,6 +150,14 @@ def _find_best_match_in_response(
     For performance, first checks for exact substring containment,
     then falls back to approximate matching via edit distance.
 
+    Fragments longer than 80 characters use n-gram overlap instead of
+    the sliding window to avoid O(R * F * min(F,W)) Levenshtein
+    computations that become prohibitively slow on moderately large inputs.
+
+    The sliding window path is further bounded by a total comparison
+    budget (``_MAX_LEVENSHTEIN_COMPARISONS``) to prevent unbounded
+    computation on large responses.
+
     Args:
         fragment: Normalized text fragment from a section.
         response_normalized: Normalized response text.
@@ -152,9 +170,11 @@ def _find_best_match_in_response(
     if fragment in response_normalized:
         return True
 
-    # For very long fragments, use n-gram overlap instead of full edit distance
-    # to avoid O(n*m) complexity on long strings
-    if len(fragment) > 200:
+    # For fragments >= 80 chars, use n-gram overlap instead of full edit
+    # distance to avoid O(n*m) complexity on long strings.  The previous
+    # threshold of 200 left a wide band of fragments (80-200 chars) in the
+    # expensive sliding-window path.
+    if len(fragment) > _NGRAM_FALLBACK_THRESHOLD:
         return _ngram_overlap(fragment, response_normalized, threshold)
 
     # Sliding window approximate match
@@ -163,10 +183,11 @@ def _find_best_match_in_response(
     min_window = max(1, int(frag_len * 0.7))
     max_window = int(frag_len * 1.3)
 
-    # Step size for sliding window (trade accuracy for speed)
-    step = max(1, frag_len // 4)
+    # Step size: use frag_len // 3 to reduce total comparisons while
+    # keeping sufficient overlap between windows.
+    step = max(1, frag_len // 3)
 
-    best_ratio = 0.0
+    comparisons = 0
     for window_size in (frag_len, min_window, max_window):
         if window_size > len(response_normalized):
             continue
@@ -175,7 +196,9 @@ def _find_best_match_in_response(
             ratio = _levenshtein_ratio(fragment, candidate)
             if ratio >= threshold:
                 return True
-            best_ratio = max(best_ratio, ratio)
+            comparisons += 1
+            if comparisons >= _MAX_LEVENSHTEIN_COMPARISONS:
+                return False
 
     return False
 

@@ -43,15 +43,21 @@ from omnibase_infra.services.observability.static_context_attribution.service_st
 from omnibase_infra.services.observability.static_context_attribution.service_token_counter import (
     ServiceTokenCounter,
 )
+from omnibase_infra.services.observability.static_context_attribution.service_llm_category_augmenter import (
+    LlmInferenceFn,
+    ServiceLlmCategoryAugmenter,
+)
 from omnibase_infra.services.observability.static_context_attribution.service_utilization_scorer import (
     ServiceUtilizationScorer,
 )
 
 __all__ = [
+    "LlmInferenceFn",
     "ModelContextSection",
     "ModelSectionAttribution",
     "ModelStaticContextReport",
     "ServiceAttributionReporter",
+    "ServiceLlmCategoryAugmenter",
     "ServiceStaticContextParser",
     "ServiceTokenCounter",
     "ServiceUtilizationScorer",

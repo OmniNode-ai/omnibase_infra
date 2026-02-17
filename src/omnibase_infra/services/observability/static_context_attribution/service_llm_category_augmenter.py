@@ -146,10 +146,22 @@ class ServiceLlmCategoryAugmenter:
             if raw_category in _CATEGORY_MAP:
                 return _CATEGORY_MAP[raw_category]
 
-            # Try partial match (LLM might return extra text)
+            # Try partial match (LLM might return extra text).
+            # Prefer the longest matching key so that e.g. "error_handling"
+            # wins over "error", and "documentation about architecture"
+            # matches "architecture" (12 chars) over "documentation" only
+            # when both appear.  "uncategorized" is excluded from partial
+            # matching because it is the fallback default.
+            best_match: EnumContextSectionCategory | None = None
+            best_key_len = 0
             for key, member in _CATEGORY_MAP.items():
-                if key in raw_category:
-                    return member
+                if key == "uncategorized":
+                    continue
+                if key in raw_category and len(key) > best_key_len:
+                    best_match = member
+                    best_key_len = len(key)
+            if best_match is not None:
+                return best_match
 
             safe_category = sanitize_error_string(raw_category)
             safe_heading = sanitize_error_string(section.heading or "(preamble)")

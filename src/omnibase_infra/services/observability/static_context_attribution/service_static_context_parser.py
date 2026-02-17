@@ -92,11 +92,7 @@ class ServiceStaticContextParser:
             # Track fenced code blocks to ignore headings inside them
             if _FENCE_PATTERN.match(line.strip()):
                 in_code_fence = not in_code_fence
-                if not in_code_fence:
-                    # Just closed a code fence
-                    has_code_block = True
-                else:
-                    has_code_block = True
+                has_code_block = True
                 current_lines.append(line)
                 continue
 
@@ -105,8 +101,9 @@ class ServiceStaticContextParser:
                 current_lines.append(line)
                 continue
 
-            # Check for heading boundary
-            heading_match = _HEADING_PATTERN.match(line.strip())
+            # Check for heading boundary (match against original line so
+            # indented heading-like content is not misdetected as a boundary)
+            heading_match = _HEADING_PATTERN.match(line)
             if heading_match:
                 # Flush the previous section if it has content
                 if current_lines:

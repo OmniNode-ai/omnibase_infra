@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.services.observability.static_context_attribution.model_section_attribution import (
     ModelSectionAttribution,
@@ -80,6 +80,39 @@ class ModelStaticContextReport(BaseModel):
         default=False,
         description="Whether LLM augmentation pass was applied.",
     )
+
+    @model_validator(mode="after")
+    def _validate_token_consistency(self) -> ModelStaticContextReport:
+        """Validate that token counts are consistent with attributions.
+
+        Checks:
+            1. total_attributed_tokens <= total_tokens
+            2. Sum of attribution tokens does not exceed total_attributed_tokens
+
+        Returns:
+            Self if validation passes.
+
+        Raises:
+            ValueError: If token counts are inconsistent.
+        """
+        if self.total_attributed_tokens > self.total_tokens:
+            raise ValueError(
+                f"total_attributed_tokens ({self.total_attributed_tokens}) "
+                f"must not exceed total_tokens ({self.total_tokens})"
+            )
+
+        if self.attributions:
+            attribution_sum = sum(
+                a.attributed_tokens for a in self.attributions
+            )
+            if attribution_sum > self.total_attributed_tokens:
+                raise ValueError(
+                    f"Sum of attribution tokens ({attribution_sum}) "
+                    f"must not exceed total_attributed_tokens "
+                    f"({self.total_attributed_tokens})"
+                )
+
+        return self
 
     @staticmethod
     def compute_hash(content: str) -> str:
