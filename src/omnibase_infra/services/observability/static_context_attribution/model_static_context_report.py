@@ -102,9 +102,7 @@ class ModelStaticContextReport(BaseModel):
             )
 
         if self.attributions:
-            attribution_sum = sum(
-                a.attributed_tokens for a in self.attributions
-            )
+            attribution_sum = sum(a.attributed_tokens for a in self.attributions)
             if attribution_sum > self.total_attributed_tokens:
                 raise ValueError(
                     f"Sum of attribution tokens ({attribution_sum}) "
