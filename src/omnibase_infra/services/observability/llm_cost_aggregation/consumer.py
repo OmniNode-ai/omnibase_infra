@@ -130,6 +130,15 @@ def mask_dsn_password(dsn: str) -> str:
     Returns:
         DSN with password replaced by '***'.
     """
+    _MASKING_FAILED = "***DSN_MASKING_FAILED***"
+
+    # Extract the original password (if any) up front so we can verify
+    # it was actually removed from the masked result.
+    try:
+        _original_password = urlparse(dsn).password
+    except Exception:
+        _original_password = None
+
     try:
         parsed = urlparse(dsn)
         if parsed.password:
@@ -140,7 +149,7 @@ def mask_dsn_password(dsn: str) -> str:
                 else str(parsed.hostname)
             )
             masked_netloc = f"{user_part}:***@{host_part}"
-            return urlunparse(
+            masked = urlunparse(
                 (
                     parsed.scheme,
                     masked_netloc,
@@ -150,26 +159,32 @@ def mask_dsn_password(dsn: str) -> str:
                     parsed.fragment,
                 )
             )
-
-        # urlparse did not detect a password.  Apply regex fallback to
-        # catch password=<value>, pwd=<value>, passwd=<value> in query
-        # strings, and :secret@ patterns in the netloc.
-        masked = dsn
-        for pattern, replacement in _DSN_PASSWORD_PATTERNS:
-            masked = pattern.sub(replacement, masked)
-        return masked
+        else:
+            # urlparse did not detect a password.  Apply regex fallback to
+            # catch password=<value>, pwd=<value>, passwd=<value> in query
+            # strings, and :secret@ patterns in the netloc.
+            masked = dsn
+            for pattern, replacement in _DSN_PASSWORD_PATTERNS:
+                masked = pattern.sub(replacement, masked)
 
     except (ValueError, AttributeError):
         # Even on parse failure, attempt regex masking on the raw string
         masked = dsn
         for pattern, replacement in _DSN_PASSWORD_PATTERNS:
             masked = pattern.sub(replacement, masked)
-        return masked
     except Exception:
         logger.warning(
             "Unexpected error masking DSN password; returning placeholder to prevent credential leak",
         )
-        return "***DSN_MASKING_FAILED***"
+        return _MASKING_FAILED
+
+    # Defense-in-depth: verify the original password was actually removed.
+    # If masking somehow failed to strip it, fall back to the safe placeholder.
+    if _original_password and _original_password in masked:
+        logger.warning("DSN masking did not fully remove password; using fallback")
+        return _MASKING_FAILED
+
+    return masked
 
 
 # =============================================================================
@@ -576,6 +591,7 @@ class ServiceLlmCostAggregator:
         try:
             while self._running:
                 try:
+                    # Buffer accounts for event loop scheduling latency; increase if TimeoutError is frequent.
                     records = await asyncio.wait_for(
                         self._consumer.getmany(
                             timeout_ms=self._config.batch_timeout_ms,
@@ -807,12 +823,38 @@ class ServiceLlmCostAggregator:
             await self._consumer.commit(commit_map)
             await self.metrics.reset_commit_failures()
 
-        except KafkaError:
+        except KafkaError as exc:
             await self.metrics.record_commit_failure()
+
+            # Classify the error: fatal errors indicate the consumer's
+            # group membership is invalid and it must rejoin.  Retriable
+            # errors (e.g., transient coordinator issues) are expected to
+            # self-resolve.
+            _FATAL_ERROR_NAMES = {
+                "UnknownMemberIdError",
+                "RebalanceInProgressError",
+                "IllegalGenerationError",
+                "FencedInstanceIdError",
+            }
+            error_name = type(exc).__name__
+            is_fatal = error_name in _FATAL_ERROR_NAMES
 
             metrics_snapshot = await self.metrics.snapshot()
             commit_failures = metrics_snapshot.get("commit_failures", 0)
 
+            if is_fatal:
+                # Fatal: consumer group membership is stale.  Log at ERROR
+                # and re-raise so the consume loop can trigger reconnection.
+                logger.exception(
+                    "Fatal commit error (%s) -- consumer must rejoin group",
+                    error_name,
+                    extra={
+                        "consumer_id": self._consumer_id,
+                        "correlation_id": str(correlation_id),
+                        "error_name": error_name,
+                    },
+                )
+                raise
             if isinstance(commit_failures, int) and commit_failures >= 5:
                 logger.exception(
                     "Persistent commit failures detected",
@@ -823,8 +865,10 @@ class ServiceLlmCostAggregator:
                     },
                 )
             else:
-                logger.exception(
-                    "Failed to commit offsets",
+                logger.warning(
+                    "Retriable commit error (%s), will retry on next batch",
+                    error_name,
+                    exc_info=True,
                     extra={
                         "consumer_id": self._consumer_id,
                         "correlation_id": str(correlation_id),
@@ -1089,6 +1133,7 @@ async def _main() -> None:
             shutdown_task = asyncio.create_task(consumer.stop())
             shutdown_task.add_done_callback(_shutdown_task_done)
 
+    # Note: add_signal_handler is Unix-only; this consumer targets Linux/Docker.
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, signal_handler)
 

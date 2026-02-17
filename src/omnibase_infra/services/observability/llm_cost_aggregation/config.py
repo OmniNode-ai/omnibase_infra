@@ -30,6 +30,9 @@ class ConfigLlmCostAggregation(BaseSettings):
     aggregates costs into the llm_cost_aggregates table.
     """
 
+    # Env var prefix is intentionally verbose for namespace isolation.
+    # The most critical env var (required, no default) is:
+    #   OMNIBASE_INFRA_LLM_COST_POSTGRES_DSN=postgresql://user:pass@host:5432/db
     model_config = SettingsConfigDict(
         env_prefix="OMNIBASE_INFRA_LLM_COST_",
         env_file=".env",
@@ -167,10 +170,10 @@ class ConfigLlmCostAggregation(BaseSettings):
         description="Port for HTTP health check endpoint",
     )
     health_check_host: str = Field(
-        default="0.0.0.0",  # noqa: S104 - Configurable, see security note below
+        default="0.0.0.0",  # noqa: S104 - Binds all interfaces for container deployments
         description=(
-            "Host/IP for health check server binding. Default '0.0.0.0' binds to all "
-            "interfaces for container/Kubernetes probe access."
+            "Host/IP for health check server binding. Binds on all interfaces by "
+            "default for container deployments. Use '127.0.0.1' for non-containerized environments."
         ),
     )
     health_check_staleness_seconds: int = Field(

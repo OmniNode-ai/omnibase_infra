@@ -239,12 +239,18 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    # PostgreSQL SET LOCAL does not support $1 parameterized
-                    # queries, so we must interpolate the value directly.
-                    # _statement_timeout_ms() returns a bounds-checked int
-                    # (clamped to [1, 600_000]) to guarantee safety.
+                    # Defense-in-depth: PostgreSQL SET LOCAL does not support
+                    # $1 parameterized queries, so the value must be
+                    # interpolated.  _statement_timeout_ms() returns a
+                    # bounds-checked int clamped to [1, 600_000].  The
+                    # explicit int() cast at the interpolation site is a
+                    # second safety fence ensuring only a numeric literal
+                    # can ever reach the SQL string, even if the return
+                    # type of _statement_timeout_ms() were to change.
                     timeout_ms = self._statement_timeout_ms()
-                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
+                    await conn.execute(
+                        f"SET LOCAL statement_timeout = '{int(timeout_ms)}'"
+                    )
 
                     for event in unique_events:
                         try:
@@ -279,7 +285,8 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                     _resolve_usage_source(event),
                                     bool(event.get("usage_is_estimated", False)),
                                     _safe_jsonb(event.get("usage_raw")),
-                                    str(event.get("input_hash", ""))[:71] or None,
+                                    str(event.get("input_hash", ""))[:71]
+                                    or None,  # Truncate to VARCHAR(71): 'sha256-' (7) + hex (64) = 71 chars
                                     str(event.get("code_version", ""))[:64] or None,
                                     str(event.get("contract_version", ""))[:64] or None,
                                     str(event.get("reporting_source", ""))[:255]
@@ -385,12 +392,18 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    # PostgreSQL SET LOCAL does not support $1 parameterized
-                    # queries, so we must interpolate the value directly.
-                    # _statement_timeout_ms() returns a bounds-checked int
-                    # (clamped to [1, 600_000]) to guarantee safety.
+                    # Defense-in-depth: PostgreSQL SET LOCAL does not support
+                    # $1 parameterized queries, so the value must be
+                    # interpolated.  _statement_timeout_ms() returns a
+                    # bounds-checked int clamped to [1, 600_000].  The
+                    # explicit int() cast at the interpolation site is a
+                    # second safety fence ensuring only a numeric literal
+                    # can ever reach the SQL string, even if the return
+                    # type of _statement_timeout_ms() were to change.
                     timeout_ms = self._statement_timeout_ms()
-                    await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}'")
+                    await conn.execute(
+                        f"SET LOCAL statement_timeout = '{int(timeout_ms)}'"
+                    )
 
                     for row in agg_rows:
                         try:
@@ -479,6 +492,10 @@ def _derive_stable_dedup_key(event: dict[str, object]) -> str:
     (falling back to ``session_id``) and hashed with SHA-256 to produce a
     deterministic, replay-safe dedup key. This ensures events without
     ``input_hash`` can still be deduplicated on consumer replay.
+
+    Note: If multiple events share the same (correlation_id, model_id) pair
+    and lack created_at/session_id, they will produce identical dedup keys.
+    Producers should always include created_at to avoid silent deduplication.
 
     Args:
         event: Event dictionary from ContractLlmCallMetrics.

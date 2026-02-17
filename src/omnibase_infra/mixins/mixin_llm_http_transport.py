@@ -200,6 +200,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
     #:    is a routine security operation that should complete without service
     #:    interruption; requiring a restart for secret rotation would create
     #:    unnecessary downtime and discourage frequent rotation.
+    # Parsed at import time; tests that modify LLM_ENDPOINT_CIDR_ALLOWLIST must reset this ClassVar.
     LOCAL_LLM_CIDRS: ClassVar[tuple[IPv4Network, ...]] = _parse_cidr_allowlist()
 
     #: Environment variable name for the HMAC shared secret.
