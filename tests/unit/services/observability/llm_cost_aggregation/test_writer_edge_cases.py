@@ -591,14 +591,14 @@ class TestDedupKeyEdgeCases:
     @pytest.mark.unit
     def test_input_hash_used_when_long_enough(self) -> None:
         """input_hash >= 8 chars is used directly as dedup key."""
-        event = {"input_hash": "sha256-abcdef0123456789"}
+        event: dict[str, object] = {"input_hash": "sha256-abcdef0123456789"}
         key = _derive_stable_dedup_key(event)
         assert key == "sha256-abcdef0123456789"
 
     @pytest.mark.unit
     def test_short_input_hash_falls_through(self) -> None:
         """input_hash < 8 chars falls through to composite key."""
-        event = {"input_hash": "short", "model_id": "test"}
+        event: dict[str, object] = {"input_hash": "short", "model_id": "test"}
         key = _derive_stable_dedup_key(event)
         # Should be a SHA-256 hash (64 hex chars), not "short"
         assert key != "short"
@@ -620,13 +620,13 @@ class TestDedupKeyEdgeCases:
     @pytest.mark.unit
     def test_has_empty_dedup_fields_false_with_input_hash(self) -> None:
         """Event with long input_hash has reliable dedup."""
-        event = {"input_hash": "sha256-abcdef0123456789"}
+        event: dict[str, object] = {"input_hash": "sha256-abcdef0123456789"}
         assert _has_empty_dedup_fields(event) is False
 
     @pytest.mark.unit
     def test_has_empty_dedup_fields_false_with_model_id(self) -> None:
         """Event with model_id has some dedup data."""
-        event = {"model_id": "gpt-4o"}
+        event: dict[str, object] = {"model_id": "gpt-4o"}
         assert _has_empty_dedup_fields(event) is False
 
 
@@ -718,7 +718,7 @@ class TestWriterBatchEdgeCases:
         mock_pool: MagicMock,
     ) -> None:
         """Event with null cost is written (NULL preserved for the column)."""
-        event = {
+        event: dict[str, object] = {
             "model_id": "unknown-model",
             "estimated_cost_usd": None,
             "total_tokens": 100,
@@ -752,7 +752,7 @@ class TestWriterBatchEdgeCases:
         mock_pool: MagicMock,
     ) -> None:
         """Aggregation of event with null cost uses 0 for the sum."""
-        event = {
+        event: dict[str, object] = {
             "model_id": "test-model",
             "estimated_cost_usd": None,
             "total_tokens": 100,
@@ -771,7 +771,7 @@ class TestWriterBatchEdgeCases:
     ) -> None:
         """Duplicate events within a single batch are deduplicated."""
         hash_val = "sha256-" + "e" * 64
-        events = [
+        events: list[dict[str, object]] = [
             {"model_id": "m1", "input_hash": hash_val},
             {"model_id": "m1", "input_hash": hash_val},
             {"model_id": "m1", "input_hash": hash_val},
@@ -788,7 +788,7 @@ class TestWriterBatchEdgeCases:
     ) -> None:
         """Events already seen in prior calls are deduplicated."""
         hash_val = "sha256-" + "f" * 64
-        events = [{"model_id": "m1", "input_hash": hash_val}]
+        events: list[dict[str, object]] = [{"model_id": "m1", "input_hash": hash_val}]
 
         # First write succeeds
         result1 = await writer.write_call_metrics(events)
