@@ -7,7 +7,7 @@ from multiple sources with proper priority ordering (highest to lowest):
 
     1. Environment variables (HANDLER_{TYPE}_{FIELD}) - **highest priority**, always wins
     2. Inline config (passed directly to resolve()) - overrides config_ref values
-    3. Config reference (file:, env:, vault:) - **base configuration** (lowest priority)
+    3. Config reference (file:, env:, vault:, infisical:) - **base configuration** (lowest priority)
 
 Resolution Process:
     The resolver builds the final configuration by layering sources from lowest to highest
@@ -21,7 +21,7 @@ Resolution Process:
     and environment variables can override both for operational flexibility.
 
 Important: config_ref Schemes are Mutually Exclusive
-    The config_ref schemes (file:, env:, vault:) are **mutually exclusive** - only ONE
+    The config_ref schemes (file:, env:, vault:, infisical:) are **mutually exclusive** - only ONE
     config_ref can be provided per resolution call. The scheme determines WHERE to load
     the base configuration from, not a priority ordering between schemes.
 
@@ -225,10 +225,10 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
     Resolution Order:
         1. Check cache (if enabled and not expired)
-        2. Parse config_ref if present (file:, env:, vault:)
+        2. Parse config_ref if present (file:, env:, vault:, infisical:)
         3. Load base config from ref, then merge inline_config (inline takes precedence)
         4. Apply environment variable overrides (highest priority)
-        5. Resolve any vault: references in config values
+        5. Resolve any vault: and infisical: references in config values
         6. Validate and construct ModelBindingConfig
 
     Thread Safety:
@@ -445,8 +445,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         Args:
             handler_type: Handler type identifier (e.g., "db", "vault", "consul").
             config_ref: Optional reference to external configuration.
-                Supported schemes: file:, env:, vault: (mutually exclusive - use only ONE)
-                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password
+                Supported schemes: file:, env:, vault:, infisical: (mutually exclusive - use only ONE)
+                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password,
+                    infisical:secret/path#field
             inline_config: Optional inline configuration dictionary.
                 Takes precedence over config_ref for overlapping keys.
             correlation_id: Optional correlation ID for error tracking.
@@ -568,7 +569,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         Args:
             handler_type: Handler type identifier (e.g., "db", "vault", "consul").
             config_ref: Optional reference to external configuration.
-                Supported schemes: file:, env:, vault: (mutually exclusive - use only ONE)
+                Supported schemes: file:, env:, vault:, infisical: (mutually exclusive - use only ONE)
             inline_config: Optional inline configuration dictionary.
             correlation_id: Optional correlation ID for error tracking.
 
@@ -1117,8 +1118,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         """Load configuration from a config_ref.
 
         Args:
-            config_ref: Configuration reference using scheme format (file:, env:, vault:).
-                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password
+            config_ref: Configuration reference using scheme format (file:, env:, vault:, infisical:).
+                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password,
+                    infisical:secret/path#field
             correlation_id: Correlation ID for error tracking.
 
         Returns:
@@ -1203,8 +1205,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         """Load configuration from a config_ref asynchronously.
 
         Args:
-            config_ref: Configuration reference using scheme format (file:, env:, vault:).
-                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password
+            config_ref: Configuration reference using scheme format (file:, env:, vault:, infisical:).
+                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password,
+                    infisical:secret/path#field
             correlation_id: Correlation ID for error tracking.
 
         Returns:
@@ -2977,19 +2980,22 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         secret_resolver = self._get_secret_resolver()
         if secret_resolver is None:
-            if self._has_infisical_references(config):
-                if self._config.fail_on_secret_error:
-                    context = ModelInfraErrorContext.with_correlation(
-                        correlation_id=correlation_id,
-                        transport_type=EnumInfraTransportType.INFISICAL,
-                        operation="resolve_infisical_refs",
-                        target_name="binding_config_resolver",
-                    )
-                    raise ProtocolConfigurationError(
-                        "Config contains infisical: references but no "
-                        "SecretResolver is configured",
-                        context=context,
-                    )
+            # Check if there are infisical references that need resolution
+            # If fail_on_secret_error is True and infisical refs exist, this is a security issue
+            if self._config.fail_on_secret_error and self._has_infisical_references(
+                config, depth=depth
+            ):
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="resolve_infisical_refs",
+                    target_name="binding_config_resolver",
+                )
+                raise ProtocolConfigurationError(
+                    "Config contains infisical: references but no "
+                    "SecretResolver is configured",
+                    context=context,
+                )
             return config
 
         result: dict[str, object] = {}
@@ -3120,19 +3126,22 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         secret_resolver = self._get_secret_resolver()
         if secret_resolver is None:
-            if self._has_infisical_references(config):
-                if self._config.fail_on_secret_error:
-                    context = ModelInfraErrorContext.with_correlation(
-                        correlation_id=correlation_id,
-                        transport_type=EnumInfraTransportType.INFISICAL,
-                        operation="resolve_infisical_refs_async",
-                        target_name="binding_config_resolver",
-                    )
-                    raise ProtocolConfigurationError(
-                        "Config contains infisical: references but no "
-                        "SecretResolver is configured",
-                        context=context,
-                    )
+            # Check if there are infisical references that need resolution
+            # If fail_on_secret_error is True and infisical refs exist, this is a security issue
+            if self._config.fail_on_secret_error and self._has_infisical_references(
+                config, depth=depth
+            ):
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="resolve_infisical_refs_async",
+                    target_name="binding_config_resolver",
+                )
+                raise ProtocolConfigurationError(
+                    "Config contains infisical: references but no "
+                    "SecretResolver is configured",
+                    context=context,
+                )
             return config
 
         result: dict[str, object] = {}

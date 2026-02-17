@@ -37,7 +37,7 @@ _INTERNAL_ADAPTER_MODULE = "omnibase_infra.adapters._internal"
 
 
 @dataclass(frozen=True)
-class ModelAdapterViolation:
+class AdapterViolation:
     """A single violation of the no-direct-adapter-usage rule.
 
     Attributes:
@@ -57,7 +57,7 @@ def check_no_direct_adapter_usage(
     source_root: Path,
     *,
     exclude_dirs: frozenset[str] | None = None,
-) -> list[ModelAdapterViolation]:
+) -> list[AdapterViolation]:
     """Scan Python source files for direct _internal adapter imports.
 
     Args:
@@ -65,14 +65,14 @@ def check_no_direct_adapter_usage(
         exclude_dirs: Directory names to skip (default: ``__pycache__``, ``.git``).
 
     Returns:
-        List of ModelAdapterViolation for each offending import found.
+        List of AdapterViolation for each offending import found.
     """
     if exclude_dirs is None:
         exclude_dirs = frozenset(
             {"__pycache__", ".git", ".mypy_cache", ".pytest_cache"}
         )
 
-    violations: list[ModelAdapterViolation] = []
+    violations: list[AdapterViolation] = []
 
     for py_file in source_root.rglob("*.py"):
         # Skip excluded directories
@@ -92,6 +92,8 @@ def check_no_direct_adapter_usage(
                 f"directory like src/omnibase_infra (two levels below the "
                 f"project root)."
             ) from e
+        # .as_posix() above normalises to forward slashes regardless of OS,
+        # so the "/" replacement is safe on Windows as well.
         module_path = rel_path.replace("/", ".").removesuffix(".py")
 
         # Check if this module is in the allowlist
@@ -110,7 +112,7 @@ def check_no_direct_adapter_usage(
                 for alias in node.names:
                     if _INTERNAL_ADAPTER_MODULE in alias.name:
                         violations.append(
-                            ModelAdapterViolation(
+                            AdapterViolation(
                                 file_path=str(py_file),
                                 line_number=node.lineno,
                                 module_imported=alias.name,
@@ -121,7 +123,7 @@ def check_no_direct_adapter_usage(
             elif isinstance(node, ast.ImportFrom):
                 if node.module and _INTERNAL_ADAPTER_MODULE in node.module:
                     violations.append(
-                        ModelAdapterViolation(
+                        AdapterViolation(
                             file_path=str(py_file),
                             line_number=node.lineno,
                             module_imported=node.module,
@@ -139,9 +141,10 @@ def _is_allowed_importer(module_path: str) -> bool:
     A module is allowed if:
     - Its dotted module path matches one of ``_ALLOWED_IMPORT_PATTERNS``
       (e.g., ``omnibase_infra.handlers.`` or ``tests.``).
-    - It resides inside a test directory (any segment of the dotted path is
-      ``tests`` or ``test``, or the final module name starts with ``test_``
-      **and** is inside a recognized test path).
+    - Any segment of its dotted path is exactly ``tests`` or ``test``
+      (e.g., ``omnibase_infra.tests.unit.conftest``).  Note: a ``test_``
+      filename prefix alone does **not** grant an exemption -- the file
+      must reside under a ``tests/`` or ``test/`` directory.
     - It is part of the ``_internal`` package itself.
 
     Args:
@@ -171,6 +174,6 @@ def _is_allowed_importer(module_path: str) -> bool:
 
 
 __all__: list[str] = [
-    "ModelAdapterViolation",
+    "AdapterViolation",
     "check_no_direct_adapter_usage",
 ]

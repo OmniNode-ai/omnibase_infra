@@ -11,6 +11,12 @@ Architecture Rule (OMN-2286):
     by application code. All access goes through ``HandlerInfisical``.
     Only handler code and tests may import this module.
 
+Circuit Breaking:
+    This adapter deliberately omits circuit-breaking logic. Per the
+    handler-owns-cross-cutting-concerns architecture, circuit breaking
+    is owned by ``HandlerInfisical``, not the adapter. See
+    ``docs/patterns/circuit_breaker_implementation.md``.
+
 Security:
     - All secret values are wrapped in ``SecretStr`` before being returned.
     - Client credentials (client_id, client_secret) are accepted as ``SecretStr``
@@ -141,6 +147,26 @@ class AdapterInfisical:
                 f"Failed to initialize Infisical client: {sanitize_error_message(e)}",
                 context=ctx,
             ) from e
+
+    def _extract_secret_key(self, result: object) -> str:
+        """Extract the secret key from an SDK result object.
+
+        The Infisical SDK may return the key under either ``secretKey``
+        (camelCase) or ``secret_key`` (snake_case) depending on the SDK
+        version. This method checks both attribute names with an explicit
+        ``is None`` guard so that an empty string (a valid secret key) is
+        not silently replaced by the fallback attribute.
+
+        Args:
+            result: SDK result object (single secret or list entry).
+
+        Returns:
+            The raw secret key as a string.
+        """
+        raw_key = getattr(result, "secretKey", None)
+        if raw_key is None:
+            raw_key = getattr(result, "secret_key", "")
+        return str(raw_key)
 
     def _extract_secret_value(self, result: object) -> str:
         """Extract the secret value from an SDK result object.
@@ -291,11 +317,7 @@ class AdapterInfisical:
             # The SDK returns an object with a secrets attribute (list)
             raw_secrets = getattr(result, "secrets", []) or []
             for s in raw_secrets:
-                # Use explicit ``is None`` checks so that empty strings (valid
-                # secret keys/values) are not silently replaced by the fallback.
-                key = getattr(s, "secretKey", None)
-                if key is None:
-                    key = getattr(s, "secret_key", "")
+                key = self._extract_secret_key(s)
                 val = self._extract_secret_value(s)
                 version = getattr(s, "version", None)
                 secrets.append(
@@ -365,7 +387,7 @@ class AdapterInfisical:
                 )
                 batch_result.secrets[name] = result
             except Exception as e:
-                batch_result.errors[name] = str(e)
+                batch_result.errors[name] = sanitize_error_message(e)
 
         return batch_result
 
