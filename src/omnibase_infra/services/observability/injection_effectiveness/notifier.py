@@ -45,20 +45,14 @@ from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaProducer
 
+from omnibase_infra.event_bus.topic_constants import (
+    TOPIC_EFFECTIVENESS_INVALIDATION,
+)
 from omnibase_infra.services.observability.injection_effectiveness.models.model_invalidation_event import (
     ModelEffectivenessInvalidationEvent,
 )
 
 logger = logging.getLogger(__name__)
-
-TOPIC_EFFECTIVENESS_INVALIDATION: str = (
-    "onex.evt.omnibase-infra.effectiveness-data-changed.v1"
-)
-"""Kafka topic for effectiveness data invalidation events.
-
-Consumers (dashboard WebSocket servers, API caches) subscribe to this topic
-to know when to refresh effectiveness data.
-"""
 
 
 class EffectivenessInvalidationNotifier:

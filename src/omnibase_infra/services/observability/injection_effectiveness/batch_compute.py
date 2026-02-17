@@ -48,7 +48,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Literal
 from uuid import UUID, uuid4
 
 import asyncpg
