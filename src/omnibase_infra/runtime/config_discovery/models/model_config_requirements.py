@@ -28,6 +28,9 @@ class ModelConfigRequirements(BaseModel):
         errors: Errors encountered during extraction (non-fatal).
     """
 
+    # Not frozen: uses mutable list fields for merge() aggregation during
+    # contract scanning.  Other infra models are frozen for thread safety,
+    # but this model is built up incrementally and never shared across threads.
     model_config = ConfigDict(extra="forbid", from_attributes=True)
 
     requirements: list[ModelConfigRequirement] = Field(

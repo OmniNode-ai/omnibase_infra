@@ -190,8 +190,11 @@ class ConfigPrefetcher:
         # Fetch transport-based keys
         for spec in specs:
             for key in spec.keys:
-                # Skip if already in environment (env overrides Infisical)
-                if os.environ.get(key):
+                # Skip if already in environment (env overrides Infisical).
+                # Use ``key in os.environ`` (not ``os.environ.get(key)``) so
+                # that intentionally empty values are respected and not
+                # overwritten by Infisical.
+                if key in os.environ:
                     logger.debug(
                         "Key %s already in environment, skipping prefetch",
                         key,
@@ -220,7 +223,7 @@ class ConfigPrefetcher:
                 keys=tuple(env_keys),
             )
             for key in env_keys:
-                if os.environ.get(key):
+                if key in os.environ:
                     result.resolved[key] = SecretStr(os.environ[key])
                     continue
 

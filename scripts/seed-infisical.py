@@ -69,8 +69,12 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
     - Comments (lines starting with #)
     - Empty lines
     - KEY=VALUE format
+    - ``export KEY=VALUE`` prefix
     - Quoted values (single and double quotes stripped)
     - Inline comments after values
+
+    Note:
+        Multiline values and escaped quotes are not supported.
     """
     values: dict[str, str] = {}
     if not env_path.is_file():
@@ -81,6 +85,9 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
+        # Handle 'export KEY=VALUE' syntax
+        if stripped.startswith("export "):
+            stripped = stripped[7:]
         if "=" not in stripped:
             continue
         key, _, value = stripped.partition("=")
@@ -225,9 +232,11 @@ def _do_seed(
     """Execute the actual seed operation.
 
     Returns:
-        Tuple of (planned, updated, skipped) counts. The ``planned``
-        count tracks secrets that would be created once the Infisical
-        SDK create_secret method is implemented (currently a no-op).
+        Tuple of (planned, skipped, total) counts. The ``planned``
+        count tracks secrets that would be created or updated once the
+        Infisical SDK create/update methods are implemented (currently
+        a no-op). The third element is the total requirement count for
+        backwards-compatible unpacking.
     """
     # This function requires Infisical connectivity.
     # For now, it uses the AdapterInfisical for operations.
@@ -266,7 +275,6 @@ def _do_seed(
         return 0, 0, len(requirements)
 
     planned = 0
-    updated = 0
     skipped = 0
 
     for req in requirements:
@@ -303,8 +311,15 @@ def _do_seed(
                 planned += 1
 
             elif set_values and has_value:
-                logger.info("Setting %s%s from .env", folder, key)
-                updated += 1
+                # NOTE: Actual write to Infisical is not yet implemented.
+                # The adapter supports get/list but not create/update.
+                # Tracked as planned alongside create_missing.
+                logger.info(
+                    "PLANNED: would set %s%s from .env (not yet implemented)",
+                    folder,
+                    key,
+                )
+                planned += 1
 
             else:
                 skipped += 1
@@ -314,7 +329,7 @@ def _do_seed(
             skipped += 1
 
     adapter.shutdown()
-    return planned, updated, skipped
+    return planned, skipped, len(requirements)
 
 
 def _do_export(*, reveal: bool = False) -> None:
@@ -392,15 +407,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--create-missing-keys",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
         help="Create keys that don't exist in Infisical (default: true)",
-    )
-    parser.add_argument(
-        "--no-create-missing-keys",
-        action="store_false",
-        dest="create_missing_keys",
-        help="Do not create missing keys",
     )
     parser.add_argument(
         "--set-values",
@@ -486,7 +495,7 @@ def main() -> int:
     # Execute or dry-run
     if args.execute:
         logger.info("Executing seed operation...")
-        planned, updated, skipped = _do_seed(
+        planned, skipped, total = _do_seed(
             requirements,
             env_values,
             create_missing=args.create_missing_keys,
@@ -494,11 +503,10 @@ def main() -> int:
             overwrite_existing=args.overwrite_existing,
         )
         logger.info(
-            "Seed complete: %d secrets planned for creation (not yet implemented), "
-            "%d updated, %d skipped",
+            "Seed complete: %d planned (not yet implemented), %d skipped, %d total",
             planned,
-            updated,
             skipped,
+            total,
         )
     else:
         logger.info("Dry run complete. Use --execute to write to Infisical.")

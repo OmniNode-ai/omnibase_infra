@@ -126,6 +126,13 @@ class TransportConfigMap:
         )
     """
 
+    # Transport types whose credentials must come from the environment (e.g.
+    # .env file), NOT from Infisical.  Fetching these from Infisical would
+    # create a circular dependency because Infisical itself needs them to start.
+    _BOOTSTRAP_TRANSPORTS: frozenset[EnumInfraTransportType] = frozenset(
+        {EnumInfraTransportType.INFISICAL}
+    )
+
     @staticmethod
     def _transport_slug(transport: EnumInfraTransportType) -> str:
         """Convert transport type to folder slug.
@@ -228,6 +235,14 @@ class TransportConfigMap:
         """
         specs: list[ModelTransportConfigSpec] = []
         for transport in transports:
+            if transport in self._BOOTSTRAP_TRANSPORTS:
+                logger.debug(
+                    "Skipping bootstrap transport %s (credentials come from env, "
+                    "not Infisical)",
+                    transport.value,
+                )
+                continue
+
             keys = self.keys_for_transport(transport)
             if not keys:
                 logger.debug("Skipping transport %s (no config keys)", transport.value)

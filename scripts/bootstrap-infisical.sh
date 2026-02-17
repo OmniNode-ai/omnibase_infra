@@ -36,6 +36,7 @@ SKIP_SEED=false
 SKIP_IDENTITY=false
 DRY_RUN=false
 COMPOSE_CMD="docker compose"
+POSTGRES_DB="${POSTGRES_DB:-omnibase_infra}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -135,10 +136,10 @@ log_step "1" "Start PostgreSQL (POSTGRES_PASSWORD from .env)"
 run_cmd $COMPOSE_CMD -f "${COMPOSE_FILE}" up -d postgres
 if [[ "${DRY_RUN}" != "true" ]]; then
     log_info "Waiting for PostgreSQL to be healthy..."
-    $COMPOSE_CMD -f "${COMPOSE_FILE}" exec postgres pg_isready -U "${POSTGRES_USER:-postgres}" -d omnibase_infra --timeout=30 || {
+    $COMPOSE_CMD -f "${COMPOSE_FILE}" exec postgres pg_isready -U "${POSTGRES_USER:-postgres}" -d "$POSTGRES_DB" --timeout=30 || {
         # Wait and retry
         sleep 5
-        $COMPOSE_CMD -f "${COMPOSE_FILE}" exec postgres pg_isready -U "${POSTGRES_USER:-postgres}" -d omnibase_infra --timeout=30
+        $COMPOSE_CMD -f "${COMPOSE_FILE}" exec postgres pg_isready -U "${POSTGRES_USER:-postgres}" -d "$POSTGRES_DB" --timeout=30
     }
     log_info "PostgreSQL is healthy"
 fi

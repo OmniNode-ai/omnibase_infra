@@ -1199,14 +1199,6 @@ class RuntimeHostProcess:
         # can receive materialized resources via dependency injection).
         await self._materialize_dependencies()
 
-        # Step 3.6: Config prefetch from Infisical (OMN-2287)
-        # Opt-in: only runs when INFISICAL_ADDR is set in the environment.
-        # Extracts config requirements from discovered contracts, resolves
-        # Infisical paths via TransportConfigMap, and prefetches values
-        # through HandlerInfisical. Prefetched values are applied to the
-        # process environment so handlers can read them during initialize().
-        await self._prefetch_config_from_infisical()
-
         # Step 4: Populate self._handlers from singleton registry
         # The wiring/discovery step registers handler classes, so we need to:
         # - Get each registered handler class from the singleton registry
@@ -1214,6 +1206,18 @@ class RuntimeHostProcess:
         # - Call initialize() on each handler instance with config
         # - Store the handler instance in self._handlers for routing
         await self._populate_handlers_from_registry()
+
+        # Step 4.05: Config prefetch from Infisical (OMN-2287)
+        # Opt-in: only runs when INFISICAL_ADDR is set in the environment.
+        # Extracts config requirements from discovered contracts, resolves
+        # Infisical paths via TransportConfigMap, and prefetches values
+        # through HandlerInfisical. Prefetched values are applied to the
+        # process environment so downstream steps can read them.
+        #
+        # NOTE: This MUST run after Step 4 (_populate_handlers_from_registry)
+        # because it searches self._handlers for a HandlerInfisical instance.
+        # Handlers are not available until the registry has been populated.
+        await self._prefetch_config_from_infisical()
 
         # Step 4.1: FAIL-FAST validation - runtime MUST have at least one handler
         # A runtime with no handlers cannot process any events and is misconfigured.

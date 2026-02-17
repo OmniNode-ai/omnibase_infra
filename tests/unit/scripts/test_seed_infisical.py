@@ -10,7 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Add scripts dir to path so we can import
+# Script has hyphenated name so cannot use normal import; add scripts dir
+# to sys.path and use importlib.import_module("seed-infisical") instead.
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "scripts"
 sys.path.insert(0, str(_SCRIPTS_DIR))
 
