@@ -25,6 +25,9 @@ from typing import TYPE_CHECKING
 from omnibase_infra.adapters.llm.model_llm_adapter_request import (
     ModelLlmAdapterRequest,
 )
+from omnibase_infra.adapters.llm.model_llm_adapter_response import (
+    ModelLlmAdapterResponse,
+)
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraUnavailableError,
@@ -204,15 +207,44 @@ class AdapterModelRouter:
             context=context,
         )
 
+    async def generate_typed(
+        self, request: ModelLlmAdapterRequest
+    ) -> ModelLlmAdapterResponse:
+        """Type-safe wrapper around generate() for callers with known types.
+
+        Delegates to ``generate()`` and casts the result to
+        ``ModelLlmAdapterResponse``. This avoids the ``object`` return type
+        mandated by the SPI ``ProtocolModelRouter`` interface, giving callers
+        static type safety without a runtime isinstance check.
+
+        Args:
+            request: The typed LLM request.
+
+        Returns:
+            Generated response with full type information.
+
+        Raises:
+            ProtocolConfigurationError: If no providers are registered.
+            InfraUnavailableError: If all providers are unavailable or fail.
+        """
+        from typing import cast
+
+        result = await self.generate(request)
+        return cast("ModelLlmAdapterResponse", result)
+
     async def get_available_providers(self) -> list[str]:
         """Get list of currently available provider names.
 
         Returns:
             List of provider names that are registered and reporting as available.
         """
+        async with self._lock:
+            provider_order = list(self._provider_order)
+            providers_snapshot = dict(self._providers)
+
         available = []
-        for name in self._provider_order:
-            provider = self._providers.get(name)
+        for name in provider_order:
+            provider = providers_snapshot.get(name)
             if provider is not None and provider.is_available:
                 available.append(name)
         return available

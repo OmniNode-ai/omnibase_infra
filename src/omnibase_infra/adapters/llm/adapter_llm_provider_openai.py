@@ -44,6 +44,8 @@ from omnibase_infra.adapters.llm.model_llm_model_capabilities import (
 from omnibase_infra.enums import EnumInfraTransportType, EnumLlmOperationType
 from omnibase_infra.errors import (
     InfraConnectionError,
+    InfraTimeoutError,
+    InfraUnavailableError,
     ModelInfraErrorContext,
     RuntimeHostError,
 )
@@ -57,6 +59,10 @@ from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_r
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
+    import httpx
+
     from omnibase_infra.adapters.llm.model_llm_provider_config import (
         ModelLlmProviderConfig,
     )
@@ -81,6 +87,36 @@ class _TransportHolder(MixinLlmHttpTransport):
             target_name=target_name,
             max_timeout_seconds=max_timeout_seconds,
         )
+
+    async def execute_circuit_protected_get(
+        self,
+        url: str,
+        correlation_id: UUID,
+        timeout: float = 10.0,
+    ) -> httpx.Response:
+        """Execute a GET request with circuit breaker protection.
+
+        Checks circuit breaker state before making the request to avoid
+        hammering a known-down endpoint. Unlike ``_execute_llm_http_call``
+        (which is designed for inference POST requests), this method performs
+        a simple GET without CIDR allowlisting or HMAC signing.
+
+        Args:
+            url: The full URL to GET.
+            correlation_id: Correlation ID for circuit breaker tracking.
+            timeout: Per-request timeout in seconds.
+
+        Returns:
+            The httpx.Response from the GET request.
+
+        Raises:
+            InfraUnavailableError: If the circuit breaker is open.
+        """
+        async with self._circuit_breaker_lock:
+            await self._check_circuit_breaker("get_available_models", correlation_id)
+
+        client = await self._get_http_client()
+        return await client.get(url, timeout=timeout)
 
     async def close(self) -> None:
         """Close the HTTP client if owned."""
@@ -221,15 +257,11 @@ class AdapterLlmProviderOpenai:
 
         correlation_id = uuid4()
         try:
-            # Respect circuit breaker state to avoid calling a down endpoint
-            async with self._transport._circuit_breaker_lock:
-                await self._transport._check_circuit_breaker(
-                    "get_available_models", correlation_id
-                )
-
-            client = await self._transport._get_http_client()
             url = f"{self._base_url.rstrip('/')}/v1/models"
-            response = await client.get(url, timeout=10.0)
+            response = await self._transport.execute_circuit_protected_get(
+                url=url,
+                correlation_id=correlation_id,
+            )
             if response.status_code == 200:
                 data = response.json()
                 if isinstance(data, dict) and "data" in data:
@@ -239,6 +271,12 @@ class AdapterLlmProviderOpenai:
                             models.append(str(item["id"]))
                     if models:
                         return models
+        except (InfraUnavailableError, InfraTimeoutError):
+            logger.warning(
+                "Could not fetch models from %s (circuit breaker open or timeout), "
+                "returning default",
+                self._provider_name_value,
+            )
         except Exception:
             logger.debug(
                 "Could not fetch models from %s, returning default",
@@ -282,7 +320,9 @@ class AdapterLlmProviderOpenai:
 
         ModelLlmAdapterRequest enforces ``min_length=1`` on both ``prompt``
         and ``model_name`` via Pydantic field constraints. This method
-        additionally checks that the provider is currently available.
+        additionally checks that the provider is currently available and
+        that the requested model is known when the capabilities cache is
+        populated.
 
         Args:
             request: LLM request to validate.
@@ -292,6 +332,24 @@ class AdapterLlmProviderOpenai:
         """
         if not self._is_available:
             return False
+
+        # When the capabilities cache is populated, verify the requested model
+        # is known. An empty cache means no capability discovery has occurred,
+        # so we allow any model through.
+        if (
+            self._capabilities_cache
+            and request.model_name not in self._capabilities_cache
+        ):
+            known = ", ".join(sorted(self._capabilities_cache.keys()))
+            logger.warning(
+                "Model '%s' not found in capabilities cache for provider '%s'. "
+                "Available models: %s",
+                request.model_name,
+                self._provider_name_value,
+                known,
+            )
+            return False
+
         return True
 
     # ── Generation ─────────────────────────────────────────────────────
@@ -452,7 +510,7 @@ class AdapterLlmProviderOpenai:
                 is_healthy=True,
                 provider_name=self._provider_name_value,
                 response_time_ms=latency_ms,
-                available_models=models,
+                available_models=tuple(models),
             )
         except Exception as exc:
             latency_ms = (time.perf_counter() - start_time) * 1000
@@ -498,8 +556,9 @@ class AdapterLlmProviderOpenai:
     # ── Lifecycle ──────────────────────────────────────────────────────
 
     async def close(self) -> None:
-        """Close the HTTP transport client."""
+        """Close the HTTP transport client and mark provider as unavailable."""
         await self._transport.close()
+        self._is_available = False
 
     # ── Internal helpers ─────────────────────────────────────────────────
 

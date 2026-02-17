@@ -802,7 +802,10 @@ class EventBusKafka(
             InfraConnectionError: If the producer cannot be recreated.
             InfraTimeoutError: If the producer recreation times out.
         """
-        assert self._producer_lock.locked(), "Must be called under _producer_lock"
+        if not self._producer_lock.locked():
+            raise RuntimeError(
+                "_ensure_producer must be called with _producer_lock held"
+            )
 
         if self._producer is not None:
             return
