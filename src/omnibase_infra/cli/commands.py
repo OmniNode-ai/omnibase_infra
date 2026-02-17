@@ -8,6 +8,7 @@ registry queries.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 from uuid import uuid4
@@ -16,6 +17,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+logger = logging.getLogger(__name__)
 console = Console()
 
 
@@ -499,6 +501,167 @@ def registry_list_topics() -> None:
     except Exception as e:
         console.print(f"[red]Error: {type(e).__name__}[/red]")
         raise SystemExit(1)
+
+
+# =============================================================================
+# Demo Commands (OMN-2299)
+# =============================================================================
+
+
+@cli.group()
+def demo() -> None:
+    """Demo environment management commands."""
+
+
+@demo.command("reset")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Show what would be reset without making changes.",
+)
+@click.option(
+    "--purge-topics",
+    is_flag=True,
+    default=False,
+    help="Also purge messages from demo Kafka topics.",
+)
+@click.option(
+    "--env-file",
+    default="",
+    help="Path to .env file to source before running.",
+)
+def demo_reset(dry_run: bool, purge_topics: bool, env_file: str) -> None:
+    """Reset demo environment to a clean state.
+
+    Safely resets demo-scoped resources:
+
+    \b
+    1. Clears projector state (registration_projections rows)
+    2. Deletes demo consumer groups (projector starts fresh)
+    3. Optionally purges demo topic messages (--purge-topics)
+
+    Shared infrastructure is explicitly preserved.
+    Running twice produces the same result (idempotent).
+    """
+    if env_file:
+        _load_env_for_demo(env_file)
+
+    try:
+        asyncio.run(_run_demo_reset(dry_run=dry_run, purge_topics=purge_topics))
+    except SystemExit:
+        raise
+    except Exception as e:
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.models.errors.model_infra_error_context import (
+            ModelInfraErrorContext,
+        )
+        from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="demo_reset",
+        )
+        console.print(f"[red]Error: {sanitize_error_message(e)}[/red]")
+        console.print(f"[dim]correlation_id: {context.correlation_id}[/dim]")
+        raise SystemExit(1)
+
+
+async def _run_demo_reset(*, dry_run: bool, purge_topics: bool) -> None:
+    """Async implementation for demo reset command."""
+    from omnibase_infra.cli.service_demo_reset import (
+        DemoResetEngine,
+        ModelDemoResetConfig,
+    )
+
+    config = ModelDemoResetConfig.from_env(purge_topics=purge_topics)
+
+    if dry_run:
+        console.print("[bold yellow]DRY RUN -- no changes will be made[/bold yellow]\n")
+    else:
+        console.print("[bold red]EXECUTING demo reset...[/bold red]\n")
+
+    engine = DemoResetEngine(config)
+    report = await engine.execute(dry_run=dry_run)
+
+    # Print the formatted report
+    console.print(report.format_summary())
+
+    # Exit with error code if any actions failed
+    if report.error_count > 0:
+        raise SystemExit(1)
+
+
+def _load_env_for_demo(path: str) -> None:
+    """Load environment variables from a file for demo commands.
+
+    Simple .env parser that handles KEY=VALUE lines, ignoring comments
+    and blank lines. Does NOT override existing environment variables.
+
+    Supports:
+    - ``KEY=VALUE`` and ``export KEY=VALUE`` syntax
+    - Single- and double-quoted values (outer quotes stripped)
+    - Inline comments for **unquoted** values only (``KEY=val # comment``)
+    - Values containing ``=`` (only the first ``=`` is split on)
+
+    Limitations:
+        Inline comments (``# ...``) are only stripped from **unquoted** values
+        where the ``#`` is preceded by a space (`` #``). Quoted values are
+        returned verbatim (including any ``#`` characters inside). A ``#``
+        immediately adjacent to the value (no space) in an unquoted value is
+        **not** treated as a comment delimiter.
+
+        Whitespace *before* an opening quote is stripped by ``value.strip()``
+        before quote detection runs, so ``KEY= "quoted"`` (space between
+        ``=`` and the opening ``"``) is parsed identically to ``KEY="quoted"``
+        -- the outer quotes are removed and the result is ``quoted``.  This
+        is usually correct, but if the space-before-quote form is intended
+        to produce a *literal* quoted string (i.e. the value should include
+        the quote characters), this parser cannot distinguish that intent.
+
+        The ``export`` prefix is detected via a literal ``"export "`` (with a
+        single space).  Tab-separated forms such as ``export\\tKEY=VALUE``
+        are **not** recognized and will be treated as a key named
+        ``export\\tKEY`` rather than stripping the ``export`` prefix.
+
+    Args:
+        path: Path to the .env file.
+    """
+    from pathlib import Path
+
+    env_path = Path(path)
+    if not env_path.exists():
+        logger.warning("Env file not found: %s", path)
+        console.print(f"[yellow]Warning: env file not found: {path}[/yellow]")
+        return
+
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key.startswith("export "):
+            # Strip "export " first, then .strip() any remaining whitespace.
+            # This ordering is correct: .strip() on the outer key handles
+            # leading whitespace before "export", while the inner .strip()
+            # handles whitespace between "export" and the variable name
+            # (e.g. "  export  MY_VAR  =val").
+            key = key[len("export ") :].strip()
+        value = value.strip()
+        # Strip matching outer quotes.  Degenerate single-char values like
+        # KEY=" or KEY=' are not matched (len < 2), so the lone quote is
+        # kept as a literal value -- this is intentional and acceptable.
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        else:
+            comment_idx = value.find(" #")
+            if comment_idx != -1:
+                value = value[:comment_idx].rstrip()
+        if key and key not in os.environ:
+            os.environ[key] = value
 
 
 # =============================================================================

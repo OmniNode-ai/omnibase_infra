@@ -73,9 +73,7 @@ def compute_migration_fingerprint(migrations_dir: Path) -> tuple[str, int]:
             f"Migrations directory does not exist: {migrations_dir}"
         )
     if not migrations_dir.is_dir():
-        raise FileNotFoundError(
-            f"Migrations path is not a directory: {migrations_dir}"
-        )
+        raise FileNotFoundError(f"Migrations path is not a directory: {migrations_dir}")
 
     sql_files = sorted(migrations_dir.glob("*.sql"))
 
