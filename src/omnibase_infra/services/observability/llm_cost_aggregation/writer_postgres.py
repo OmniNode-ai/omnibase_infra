@@ -637,7 +637,11 @@ def _safe_uuid(value: object) -> UUID | None:
 
 
 def _safe_int(value: object) -> int | None:
-    """Safely convert a value to int, returning None on failure."""
+    """Safely convert a value to int, returning None on failure.
+
+    Rejects NaN and Infinity float values which would raise ValueError
+    on int() conversion.
+    """
     if value is None:
         return None
     if isinstance(value, bool):
@@ -645,6 +649,8 @@ def _safe_int(value: object) -> int | None:
     if isinstance(value, int):
         return value
     if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
         return int(value)
     try:
         return int(str(value))

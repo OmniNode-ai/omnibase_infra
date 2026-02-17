@@ -382,6 +382,15 @@ class TestSafeConversions:
         assert _safe_int("abc") is None
 
     @pytest.mark.unit
+    def test_safe_int_rejects_nan_float(self) -> None:
+        assert _safe_int(float("nan")) is None
+
+    @pytest.mark.unit
+    def test_safe_int_rejects_infinity_float(self) -> None:
+        assert _safe_int(float("inf")) is None
+        assert _safe_int(float("-inf")) is None
+
+    @pytest.mark.unit
     def test_safe_decimal_from_float(self) -> None:
         result = _safe_decimal(0.005)
         assert isinstance(result, Decimal)
