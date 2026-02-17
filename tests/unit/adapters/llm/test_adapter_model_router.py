@@ -47,37 +47,51 @@ def _make_request() -> ModelLlmAdapterRequest:
 class TestAdapterModelRouterRegistration:
     """Tests for provider registration."""
 
-    def test_register_provider(self) -> None:
+    @pytest.mark.asyncio
+    async def test_register_provider(self) -> None:
         """Register adds provider to routing pool."""
         router = AdapterModelRouter()
         provider = _make_mock_provider("vllm")
         router.register_provider("vllm", provider)
-        assert "vllm" in router._providers
-        assert "vllm" in router._provider_order
+        available = await router.get_available_providers()
+        assert "vllm" in available
 
-    def test_register_sets_default(self) -> None:
-        """First registered provider becomes default."""
+    @pytest.mark.asyncio
+    async def test_register_sets_default(self) -> None:
+        """First registered provider becomes default and is routable."""
         router = AdapterModelRouter()
         provider = _make_mock_provider("vllm")
         router.register_provider("vllm", provider)
-        assert router._default_provider == "vllm"
+        # Verify it is routable by generating a request
+        response = await router.generate(_make_request())
+        assert isinstance(response, ModelLlmAdapterResponse)
+        provider.generate_async.assert_awaited_once()
 
-    def test_remove_provider(self) -> None:
+    @pytest.mark.asyncio
+    async def test_remove_provider(self) -> None:
         """Remove provider from routing pool."""
         router = AdapterModelRouter()
         provider = _make_mock_provider("vllm")
         router.register_provider("vllm", provider)
         router.remove_provider("vllm")
-        assert "vllm" not in router._providers
-        assert "vllm" not in router._provider_order
+        available = await router.get_available_providers()
+        assert "vllm" not in available
 
-    def test_remove_default_updates(self) -> None:
+    @pytest.mark.asyncio
+    async def test_remove_default_updates(self) -> None:
         """Removing default provider selects next available."""
         router = AdapterModelRouter()
         router.register_provider("a", _make_mock_provider("a"))
-        router.register_provider("b", _make_mock_provider("b"))
+        b_provider = _make_mock_provider("b")
+        router.register_provider("b", b_provider)
         router.remove_provider("a")
-        assert router._default_provider == "b"
+        # After removing "a", "b" should be the only available provider
+        available = await router.get_available_providers()
+        assert available == ["b"]
+        # Verify "b" is actually used for generation
+        response = await router.generate(_make_request())
+        assert isinstance(response, ModelLlmAdapterResponse)
+        b_provider.generate_async.assert_awaited_once()
 
 
 class TestAdapterModelRouterGenerate:
@@ -158,16 +172,60 @@ class TestAdapterModelRouterGenerate:
 
     @pytest.mark.asyncio
     async def test_round_robin_advances(self) -> None:
-        """Round-robin index advances after successful generation."""
+        """Round-robin alternates which provider handles each request."""
         router = AdapterModelRouter()
-        router.register_provider("a", _make_mock_provider("a"))
-        router.register_provider("b", _make_mock_provider("b"))
+        provider_a = _make_mock_provider("a")
+        provider_b = _make_mock_provider("b")
+        router.register_provider("a", provider_a)
+        router.register_provider("b", provider_b)
 
-        assert router._current_index == 0
-        await router.generate(_make_request())
-        assert router._current_index == 1
-        await router.generate(_make_request())
-        assert router._current_index == 0  # wraps around
+        # First call should go to provider "a"
+        resp1 = await router.generate(_make_request())
+        assert resp1.generated_text == "Response from a"
+        provider_a.generate_async.assert_awaited_once()
+        provider_b.generate_async.assert_not_awaited()
+
+        # Second call should go to provider "b"
+        resp2 = await router.generate(_make_request())
+        assert resp2.generated_text == "Response from b"
+        provider_b.generate_async.assert_awaited_once()
+
+        # Third call wraps around back to provider "a"
+        resp3 = await router.generate(_make_request())
+        assert resp3.generated_text == "Response from a"
+        assert provider_a.generate_async.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_generate_all_providers_unavailable(self) -> None:
+        """Generate raises when all providers are registered but unavailable."""
+        router = AdapterModelRouter()
+        router.register_provider(
+            "offline_a", _make_mock_provider("offline_a", available=False)
+        )
+        router.register_provider(
+            "offline_b", _make_mock_provider("offline_b", available=False)
+        )
+
+        with pytest.raises(RuntimeError, match="unavailable"):
+            await router.generate(_make_request())
+
+    @pytest.mark.asyncio
+    async def test_generate_all_unavailable_zero_attempted(self) -> None:
+        """All-unavailable results in zero attempted providers."""
+        router = AdapterModelRouter()
+
+        providers: list[MagicMock] = []
+        for name in ["x", "y", "z"]:
+            provider = _make_mock_provider(name, available=False)
+            router.register_provider(name, provider)
+            providers.append(provider)
+
+        with pytest.raises(RuntimeError, match="none were attempted"):
+            await router.generate(_make_request())
+
+        # None of the providers should have been called
+        for provider in providers:
+            provider.generate_async.assert_not_awaited()
 
 
 class TestAdapterModelRouterAvailability:

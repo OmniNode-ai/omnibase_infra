@@ -71,6 +71,22 @@ class TestModelLlmAdapterRequest:
                 temperature=2.1,
             )
 
+    def test_default_parameters_is_empty_dict(self) -> None:
+        """parameters defaults to an empty dict."""
+        req = ModelLlmAdapterRequest(prompt="Hello", model_name="test")
+        assert req.parameters == {}
+        assert isinstance(req.parameters, dict)
+
+    def test_default_max_tokens_is_none(self) -> None:
+        """max_tokens defaults to None (provider default)."""
+        req = ModelLlmAdapterRequest(prompt="Hello", model_name="test")
+        assert req.max_tokens is None
+
+    def test_default_temperature_is_none(self) -> None:
+        """temperature defaults to None (provider default)."""
+        req = ModelLlmAdapterRequest(prompt="Hello", model_name="test")
+        assert req.temperature is None
+
     def test_satisfies_protocol(self) -> None:
         """Verify structural compatibility with ProtocolLLMRequest."""
         req = ModelLlmAdapterRequest(

@@ -4,7 +4,7 @@
 
 Coordinates request routing across multiple ProtocolLLMProvider instances
 based on availability, capability matching, and round-robin load balancing.
-Integrates with MixinAsyncCircuitBreaker for failover support.
+Provides round-robin failover across healthy providers.
 
 Architecture:
     - Maintains a registry of named providers
@@ -131,6 +131,8 @@ class AdapterModelRouter:
             TypeError: If the request is not a ModelLlmAdapterRequest.
         """
         if not self._providers:
+            # RuntimeError is intentional: this is an adapter-layer programming
+            # error (misconfiguration), not an infrastructure connection failure.
             raise RuntimeError("No LLM providers registered with the router")
 
         if not isinstance(request, ModelLlmAdapterRequest):
@@ -164,7 +166,13 @@ class AdapterModelRouter:
                 )
                 attempted += 1
 
-        # All providers failed
+        # RuntimeError is intentional: this is an adapter-layer routing
+        # failure (all providers exhausted), not an infrastructure connection error.
+        if attempted == 0:
+            raise RuntimeError(
+                f"All {len(self._provider_order)} registered LLM providers "
+                "are unavailable (none were attempted)"
+            )
         error_details = "; ".join(f"{name}: {exc}" for name, exc in errors)
         raise RuntimeError(
             f"All LLM providers failed ({attempted} attempted). Errors: {error_details}"

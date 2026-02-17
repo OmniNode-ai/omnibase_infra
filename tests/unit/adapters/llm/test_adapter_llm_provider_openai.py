@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 
 from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
@@ -163,7 +161,7 @@ class TestAdapterLlmProviderOpenaiTranslation:
     def test_translate_request_maps_fields(self) -> None:
         """Translation correctly maps SPI fields to infra fields."""
         adapter = AdapterLlmProviderOpenai(
-            base_url="http://192.168.86.201:8000",
+            base_url="http://localhost:8000",
             default_model="qwen2.5-coder-14b",
         )
         spi_request = ModelLlmAdapterRequest(
@@ -174,7 +172,7 @@ class TestAdapterLlmProviderOpenaiTranslation:
         )
         infra_request = adapter._translate_request(spi_request)
 
-        assert infra_request.base_url == "http://192.168.86.201:8000"
+        assert infra_request.base_url == "http://localhost:8000"
         assert infra_request.model == "qwen2.5-coder-14b"
         assert infra_request.temperature == 0.7
         assert infra_request.max_tokens == 500
@@ -182,18 +180,32 @@ class TestAdapterLlmProviderOpenaiTranslation:
         assert infra_request.messages[0]["role"] == "user"
         assert infra_request.messages[0]["content"] == "Explain ONEX"
 
-    def test_translate_request_uses_default_model(self) -> None:
-        """Translation falls back to default model when not specified."""
+    def test_translate_request_uses_request_model(self) -> None:
+        """Translation uses the model_name from the request directly."""
         adapter = AdapterLlmProviderOpenai(
-            base_url="http://192.168.86.201:8000",
+            base_url="http://localhost:8000",
             default_model="qwen2.5-coder-14b",
         )
         spi_request = ModelLlmAdapterRequest(
             prompt="Hello",
-            model_name="qwen2.5-coder-14b",
+            model_name="other-model",
         )
         infra_request = adapter._translate_request(spi_request)
-        assert infra_request.model == "qwen2.5-coder-14b"
+        assert infra_request.model == "other-model"
+
+    def test_default_model_fallback_unreachable(self) -> None:
+        """Document that model_name fallback to default_model is unreachable.
+
+        ModelLlmAdapterRequest.model_name has min_length=1, so Pydantic
+        rejects empty strings before the adapter's ``or self._default_model``
+        fallback in _translate_request can ever execute. This test documents
+        that the fallback path is dead code by construction.
+        """
+        with pytest.raises(Exception):
+            ModelLlmAdapterRequest(
+                prompt="Hello",
+                model_name="",
+            )
 
 
 class TestTransportHolder:

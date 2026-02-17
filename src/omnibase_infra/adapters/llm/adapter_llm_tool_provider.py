@@ -38,6 +38,13 @@ class AdapterLlmToolProvider:
     router, providing a single entry point for LLM services in the
     ONEX container DI system.
 
+    Note:
+        Getter methods (``get_model_router``, ``get_gemini_provider``, etc.)
+        are ``async def`` despite performing no async work internally. This
+        satisfies the SPI ``ProtocolLLMToolProvider`` async interface contract,
+        allowing future implementations to perform async initialization or
+        lazy provider setup without breaking the interface.
+
     Attributes:
         _router: The model router instance.
         _providers: Named provider instances.

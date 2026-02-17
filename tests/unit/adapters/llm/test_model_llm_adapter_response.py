@@ -57,6 +57,29 @@ class TestModelLlmAdapterResponse:
         with pytest.raises(Exception):
             resp.generated_text = "Changed"  # type: ignore[misc]
 
+    def test_default_generated_text_is_empty_string(self) -> None:
+        """generated_text defaults to empty string."""
+        resp = ModelLlmAdapterResponse(model_used="test-model")
+        assert resp.generated_text == ""
+        assert isinstance(resp.generated_text, str)
+
+    def test_default_usage_statistics_is_empty_dict(self) -> None:
+        """usage_statistics defaults to an empty dict."""
+        resp = ModelLlmAdapterResponse(model_used="test-model")
+        assert resp.usage_statistics == {}
+        assert isinstance(resp.usage_statistics, dict)
+
+    def test_default_finish_reason_is_unknown(self) -> None:
+        """finish_reason defaults to 'unknown'."""
+        resp = ModelLlmAdapterResponse(model_used="test-model")
+        assert resp.finish_reason == "unknown"
+
+    def test_default_response_metadata_is_empty_dict(self) -> None:
+        """response_metadata defaults to an empty dict."""
+        resp = ModelLlmAdapterResponse(model_used="test-model")
+        assert resp.response_metadata == {}
+        assert isinstance(resp.response_metadata, dict)
+
     def test_satisfies_protocol(self) -> None:
         """Verify structural compatibility with ProtocolLLMResponse."""
         resp = ModelLlmAdapterResponse(

@@ -12,6 +12,8 @@ Related:
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -77,7 +79,7 @@ class ModelLlmProviderConfig(BaseModel):
         le=10,
         description="Maximum retry attempts on transient failures.",
     )
-    provider_type: str = Field(
+    provider_type: Literal["local", "external_trusted", "external"] = Field(
         default="local",
         description="Deployment type: 'local', 'external_trusted', or 'external'.",
     )

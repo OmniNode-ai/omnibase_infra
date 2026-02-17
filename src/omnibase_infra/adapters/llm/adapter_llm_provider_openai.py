@@ -22,6 +22,7 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import AsyncGenerator, Iterator
 from typing import TYPE_CHECKING
@@ -102,7 +103,7 @@ class AdapterLlmProviderOpenai:
 
     Example:
         >>> adapter = AdapterLlmProviderOpenai(
-        ...     base_url="http://192.168.86.201:8000",
+        ...     base_url="http://localhost:8000",
         ...     default_model="qwen2.5-coder-14b",
         ... )
         >>> response = await adapter.generate_async(request)
@@ -111,7 +112,7 @@ class AdapterLlmProviderOpenai:
 
     def __init__(
         self,
-        base_url: str = "http://192.168.86.201:8000",
+        base_url: str | None = None,
         default_model: str = "qwen2.5-coder-14b",
         api_key: str | None = None,
         provider_name: str = "openai-compatible",
@@ -122,7 +123,8 @@ class AdapterLlmProviderOpenai:
         """Initialize the OpenAI-compatible provider adapter.
 
         Args:
-            base_url: Base URL of the LLM endpoint.
+            base_url: Base URL of the LLM endpoint. Defaults to
+                ``LLM_CODER_URL`` env var, falling back to ``http://localhost:8000``.
             default_model: Default model identifier.
             api_key: Optional API key for Bearer token auth.
             provider_name: Provider identifier for logging/routing.
@@ -132,7 +134,9 @@ class AdapterLlmProviderOpenai:
         """
         self._provider_name_value = provider_name
         self._provider_type_value = provider_type
-        self._base_url = base_url
+        self._base_url = base_url or os.environ.get(
+            "LLM_CODER_URL", "http://localhost:8000"
+        )
         self._default_model = default_model
         self._api_key = api_key
         self._is_available = True
@@ -245,16 +249,16 @@ class AdapterLlmProviderOpenai:
     def validate_request(self, request: ModelLlmAdapterRequest) -> bool:
         """Validate that the request is compatible with this provider.
 
+        ModelLlmAdapterRequest enforces ``min_length=1`` on both ``prompt``
+        and ``model_name`` via Pydantic field constraints, so no additional
+        validation is needed here.
+
         Args:
             request: LLM request to validate.
 
         Returns:
             True if the request can be handled by this provider.
         """
-        if not request.prompt:
-            return False
-        if not request.model_name:
-            return False
         return True
 
     # ── Generation ─────────────────────────────────────────────────────
@@ -385,6 +389,10 @@ class AdapterLlmProviderOpenai:
         Attempts to reach the /v1/models endpoint. Updates internal
         availability state.
 
+        Note:
+            Checks endpoint reachability via /v1/models. Does not verify
+            inference capability.
+
         Returns:
             Health check response with latency and available models.
         """
@@ -459,11 +467,9 @@ class AdapterLlmProviderOpenai:
         Returns:
             Infra-layer request ready for handler dispatch.
         """
-        model_name = request.model_name or self._default_model
-
         return ModelLlmInferenceRequest(
             base_url=self._base_url,
-            model=model_name,
+            model=request.model_name,
             operation_type=EnumLlmOperationType.CHAT_COMPLETION,
             messages=({"role": "user", "content": request.prompt},),
             max_tokens=request.max_tokens,
