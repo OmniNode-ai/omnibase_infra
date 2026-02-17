@@ -32,6 +32,7 @@ from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.utils.util_consumer_group import (
     KAFKA_CONSUMER_GROUP_MAX_LENGTH,
+    apply_instance_discriminator,
     compute_consumer_group_id,
     normalize_kafka_identifier,
 )
@@ -1127,6 +1128,162 @@ class TestIntegration:
         assert group_id == "upper_env.service_name.node_special.consume.v1"
 
 
+class TestApplyInstanceDiscriminator:
+    """Tests for apply_instance_discriminator() (OMN-2251).
+
+    Verifies:
+    - Instance discriminator is appended with .__i. infix
+    - None and empty instance_id returns group_id unchanged
+    - Idempotency: already-discriminated IDs are not double-suffixed
+    - Instance ID is normalized via normalize_kafka_identifier
+    - Length truncation with hash suffix for long results
+    - Whitespace-only instance_id raises ValueError
+    """
+
+    def test_none_instance_id_returns_unchanged(self) -> None:
+        """Test that None instance_id returns the group_id unchanged."""
+        group_id = "dev.svc.node.consume.v1"
+        result = apply_instance_discriminator(group_id, None)
+        assert result == group_id
+
+    def test_empty_string_instance_id_returns_unchanged(self) -> None:
+        """Test that empty string instance_id returns the group_id unchanged."""
+        group_id = "dev.svc.node.consume.v1"
+        result = apply_instance_discriminator(group_id, "")
+        assert result == group_id
+
+    def test_basic_discriminator_appended(self) -> None:
+        """Test that instance_id is appended with .__i. infix."""
+        group_id = "dev.svc.node.consume.v1"
+        result = apply_instance_discriminator(group_id, "container-1")
+        assert result == "dev.svc.node.consume.v1.__i.container-1"
+
+    def test_discriminator_with_pod_name(self) -> None:
+        """Test with a typical Kubernetes pod name."""
+        group_id = "prod.api.handler.consume.v2"
+        result = apply_instance_discriminator(group_id, "my-pod-abc123")
+        assert result == "prod.api.handler.consume.v2.__i.my-pod-abc123"
+
+    def test_idempotent_no_double_suffix(self) -> None:
+        """Test that already-discriminated IDs are not double-suffixed."""
+        group_id = "dev.svc.node.consume.v1.__i.container-1"
+        result = apply_instance_discriminator(group_id, "container-1")
+        assert result == group_id
+
+    def test_different_instance_id_still_appended(self) -> None:
+        """Test that a different instance_id is appended even if one exists."""
+        group_id = "dev.svc.node.consume.v1.__i.container-1"
+        result = apply_instance_discriminator(group_id, "container-2")
+        assert result == "dev.svc.node.consume.v1.__i.container-1.__i.container-2"
+
+    def test_instance_id_normalized(self) -> None:
+        """Test that instance_id is normalized (lowercased, special chars replaced)."""
+        group_id = "dev.svc.node.consume.v1"
+        result = apply_instance_discriminator(group_id, "Container-1")
+        assert result == "dev.svc.node.consume.v1.__i.container-1"
+
+    def test_instance_id_with_spaces_normalized(self) -> None:
+        """Test that instance_id with spaces is normalized."""
+        group_id = "dev.svc.node.consume.v1"
+        result = apply_instance_discriminator(group_id, "my container")
+        assert result == "dev.svc.node.consume.v1.__i.my_container"
+
+    def test_whitespace_only_instance_id_returns_unchanged(self) -> None:
+        """Test that whitespace-only instance_id is treated like empty string."""
+        group_id = "dev.svc.node.consume.v1"
+        result = apply_instance_discriminator(group_id, "   ")
+        assert result == group_id
+
+    def test_deterministic_output(self) -> None:
+        """Test that same inputs produce same output."""
+        group_id = "dev.svc.node.consume.v1"
+        result1 = apply_instance_discriminator(group_id, "abc")
+        result2 = apply_instance_discriminator(group_id, "abc")
+        assert result1 == result2
+
+    def test_different_instance_ids_produce_different_results(self) -> None:
+        """Test that different instance_ids produce different results."""
+        group_id = "dev.svc.node.consume.v1"
+        result_a = apply_instance_discriminator(group_id, "instance-a")
+        result_b = apply_instance_discriminator(group_id, "instance-b")
+        assert result_a != result_b
+
+    def test_length_truncation_for_long_result(self) -> None:
+        """Test that long results are truncated with hash suffix."""
+        # Create a group_id that, combined with instance discriminator, exceeds 255 chars
+        group_id = "a" * 240
+        instance_id = "b" * 20
+        result = apply_instance_discriminator(group_id, instance_id)
+        assert len(result) <= KAFKA_CONSUMER_GROUP_MAX_LENGTH
+
+    def test_single_container_behavior_preserved(self) -> None:
+        """Test that single-container behavior is completely unchanged.
+
+        When instance_id is None, the function must be a pure no-op.
+        This verifies the requirement that single-container deployments
+        are not affected.
+        """
+        identity = ModelNodeIdentity(
+            env="dev",
+            service="myservice",
+            node_name="mynode",
+            version="v1",
+        )
+        base_group_id = compute_consumer_group_id(identity)
+        discriminated = apply_instance_discriminator(base_group_id, None)
+
+        # Must be exactly the same string object or equal value
+        assert discriminated == base_group_id
+        assert discriminated is base_group_id  # No copy, same object
+
+    def test_multi_container_discrimination(self) -> None:
+        """Test that multi-container environments get unique group IDs.
+
+        Simulates two containers running the same service. Each should
+        get a unique consumer group ID when instance_id differs.
+        """
+        identity = ModelNodeIdentity(
+            env="dev",
+            service="myservice",
+            node_name="mynode",
+            version="v1",
+        )
+        base_group_id = compute_consumer_group_id(identity)
+
+        container_1_id = apply_instance_discriminator(base_group_id, "container-1")
+        container_2_id = apply_instance_discriminator(base_group_id, "container-2")
+
+        # Both should be different from each other
+        assert container_1_id != container_2_id
+
+        # Both should be different from the base
+        assert container_1_id != base_group_id
+        assert container_2_id != base_group_id
+
+        # Both should contain the instance discriminator infix
+        assert ".__i." in container_1_id
+        assert ".__i." in container_2_id
+
+    def test_integration_with_topic_suffix_ordering(self) -> None:
+        """Test that instance discriminator works correctly before topic suffix.
+
+        In the real flow, instance discriminator is applied first, then
+        the .__t.{topic} suffix. Verify the expected final format.
+        """
+        base_group_id = "dev.svc.node.consume.v1"
+
+        # Step 1: Apply instance discriminator (as done in _start_consumer_for_topic)
+        with_instance = apply_instance_discriminator(base_group_id, "pod-x")
+
+        # Step 2: Apply topic suffix (as done in _start_consumer_for_topic)
+        topic = "my-events"
+        topic_suffix = f".__t.{topic}"
+        final_group_id = f"{with_instance}{topic_suffix}"
+
+        expected = "dev.svc.node.consume.v1.__i.pod-x.__t.my-events"
+        assert final_group_id == expected
+
+
 __all__: list[str] = [
     "TestNormalizeKafkaIdentifier",
     "TestNormalizeKafkaIdentifierEdgeCases",
@@ -1137,4 +1294,5 @@ __all__: list[str] = [
     "TestModelNodeIdentity",
     "TestEnumConsumerGroupPurpose",
     "TestIntegration",
+    "TestApplyInstanceDiscriminator",
 ]

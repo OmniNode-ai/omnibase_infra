@@ -86,6 +86,14 @@ Environment Variables:
             Default: None (DLQ disabled)
             Example: "dlq-events"
 
+    Instance Discriminator (OMN-2251):
+        KAFKA_INSTANCE_ID: Instance discriminator for consumer group IDs (optional)
+            Default: None (no discrimination, single-container behavior)
+            Example: "container-1", "pod-abc123"
+            When set, appended as '.__i.{instance_id}' to consumer group IDs
+            so each container gets unique consumer group membership and
+            proper Kafka partition assignment in multi-container dev environments.
+
 Parsing Behavior:
     - Integer/Float fields: Logs warning and uses default if parsing fails
     - Boolean fields: Logs warning if value not in expected set, treats as False
@@ -98,6 +106,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -236,6 +245,53 @@ class ModelKafkaEventBusConfig(BaseModel):
             "(e.g., 'dev.dlq.intents.v1', 'prod.dlq.events.v1')"
         ),
     )
+
+    # Instance discriminator for multi-container dev environments (OMN-2251)
+    instance_id: str | None = Field(
+        default=None,
+        description=(
+            "Instance discriminator for consumer group IDs. When set, appended "
+            "as '.__i.{instance_id}' to consumer group IDs so that each container "
+            "in a multi-container dev environment gets unique consumer group "
+            "membership and proper partition assignment. When None (default), "
+            "consumer group IDs are unchanged (single-container behavior)."
+        ),
+    )
+
+    @field_validator("instance_id", mode="before")
+    @classmethod
+    def validate_instance_id(cls, v: object) -> str | None:
+        """Validate instance_id contains only Kafka-safe characters.
+
+        Rejects values containing characters other than ``[a-zA-Z0-9._-]``,
+        which is the same character set accepted by
+        ``normalize_kafka_identifier``. This catches invalid characters
+        (slashes, spaces, etc.) at config time rather than silently
+        normalizing them at runtime.
+
+        Args:
+            v: Instance ID value (any type before Pydantic conversion).
+
+        Returns:
+            The validated instance_id string, or None if not provided.
+
+        Raises:
+            ValueError: If instance_id contains characters outside
+                ``[a-zA-Z0-9._-]``.
+        """
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError(f"instance_id must be a string, got {type(v).__name__}")
+        if not v.strip():
+            return None
+        if not re.match(r"^[a-zA-Z0-9._-]+$", v):
+            raise ValueError(
+                f"instance_id {v!r} contains invalid characters. "
+                "Only alphanumeric characters, periods (.), underscores (_), "
+                "and hyphens (-) are allowed."
+            )
+        return v
 
     # NOTE: mypy reports "prop-decorator" error because it doesn't understand that
     # Pydantic's @computed_field transforms the @property into a computed field.
@@ -427,6 +483,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             "KAFKA_AUTO_OFFSET_RESET": "auto_offset_reset",
             "KAFKA_ENABLE_AUTO_COMMIT": "enable_auto_commit",
             "KAFKA_DEAD_LETTER_TOPIC": "dead_letter_topic",
+            "KAFKA_INSTANCE_ID": "instance_id",
         }
 
         # Integer fields for type conversion
@@ -557,6 +614,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             auto_offset_reset="latest",
             enable_auto_commit=True,
             dead_letter_topic=None,
+            instance_id=None,
         )
         return base_config.apply_environment_overrides()
 

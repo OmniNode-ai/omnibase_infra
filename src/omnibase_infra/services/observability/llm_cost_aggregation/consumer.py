@@ -35,7 +35,7 @@ Example:
     >>>
     >>> config = ConfigLlmCostAggregation(
     ...     kafka_bootstrap_servers="localhost:9092",
-    ...     postgres_dsn="postgresql://postgres:secret@localhost:5432/omnibase_infra",
+    ...     postgres_dsn="postgresql://postgres:<password>@localhost:5432/omnibase_infra",
     ... )
     >>> service = ServiceLlmCostAggregator(config)
     >>>
@@ -52,7 +52,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import signal
+import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -64,9 +67,12 @@ from aiohttp import web
 from aiokafka import AIOKafkaConsumer, TopicPartition
 from aiokafka.errors import KafkaError
 from aiokafka.structs import OffsetAndMetadata
+from pydantic import ValidationError
 
 from omnibase_core.errors import OnexError
 from omnibase_core.types import JsonType
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.services.observability.llm_cost_aggregation.config import (
     ConfigLlmCostAggregation,
 )
@@ -79,14 +85,52 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Fatal Kafka commit errors that indicate the consumer's group membership is
+# invalid and it must rejoin.  Retriable errors (e.g. transient coordinator
+# issues) are expected to self-resolve and are NOT in this set.
+_FATAL_COMMIT_ERROR_NAMES: frozenset[str] = frozenset(
+    {
+        "UnknownMemberIdError",
+        "RebalanceInProgressError",
+        "IllegalGenerationError",
+        "FencedInstanceIdError",
+    }
+)
+
+# How many consecutive getmany() timeouts before emitting a warning.
+_CONSECUTIVE_TIMEOUT_LOG_INTERVAL: int = 5
+
 
 # =============================================================================
 # Utility Functions
 # =============================================================================
 
 
+# Pre-compiled pattern for credential masking in DSN query strings.
+# Fires only as a **fallback** when urlparse does not detect a password
+# (e.g., password passed as a query parameter).
+_DSN_QUERY_PASSWORD_PATTERN: tuple[re.Pattern[str], str] = (
+    # password=value, pwd=value, passwd=value in query params (key=value&...)
+    # Groups: (1) key=, (2) value  ->  replacement preserves key, masks value
+    re.compile(r"((?:password|passwd|pwd)\s*=\s*)([^&\s]+)", re.IGNORECASE),
+    r"\g<1>***",
+)
+
+
 def mask_dsn_password(dsn: str) -> str:
     """Mask password in a PostgreSQL DSN for safe logging.
+
+    First attempts structured masking via ``urlparse``. If ``urlparse``
+    does not detect a password in the netloc (e.g., password passed as a
+    query parameter or in a non-standard format), falls back to
+    regex-based masking of common query-string credential patterns
+    (``password=``, ``pwd=``, ``passwd=``).
+
+    The previous regex fallback for ``:secret@`` in the netloc has been
+    removed because it could false-positive on DSNs without passwords
+    (e.g., matching port numbers or other non-credential components).
+    Instead, ``urlparse`` is the sole mechanism for detecting and masking
+    netloc-embedded passwords.
 
     Args:
         dsn: PostgreSQL connection string.
@@ -94,27 +138,61 @@ def mask_dsn_password(dsn: str) -> str:
     Returns:
         DSN with password replaced by '***'.
     """
+    _MASKING_FAILED = "***DSN_MASKING_FAILED***"
+
+    # Extract the original password (if any) up front so we can verify
+    # it was actually removed from the masked result.
+    try:
+        _original_password = urlparse(dsn).password
+    except Exception:
+        _original_password = None
+
     try:
         parsed = urlparse(dsn)
-        if not parsed.password:
-            return dsn
-        user_part = parsed.username or ""
-        host_part = (
-            f"{parsed.hostname}:{parsed.port}" if parsed.port else str(parsed.hostname)
-        )
-        masked_netloc = f"{user_part}:***@{host_part}"
-        return urlunparse(
-            (
-                parsed.scheme,
-                masked_netloc,
-                parsed.path,
-                parsed.params,
-                parsed.query,
-                parsed.fragment,
+        if parsed.password:
+            user_part = parsed.username or ""
+            host_part = (
+                f"{parsed.hostname}:{parsed.port}"
+                if parsed.port
+                else str(parsed.hostname)
             )
-        )
+            masked_netloc = f"{user_part}:***@{host_part}"
+            masked = urlunparse(
+                (
+                    parsed.scheme,
+                    masked_netloc,
+                    parsed.path,
+                    parsed.params,
+                    parsed.query,
+                    parsed.fragment,
+                )
+            )
+        else:
+            # urlparse did not detect a password in the netloc.  Apply
+            # regex fallback only for query-string credential patterns
+            # (password=, pwd=, passwd=).  The previous :secret@ regex
+            # was removed to avoid false-positives on non-credential
+            # components (e.g., user:port@host in unusual formats).
+            pattern, replacement = _DSN_QUERY_PASSWORD_PATTERN
+            masked = pattern.sub(replacement, dsn)
+
+    except (ValueError, AttributeError):
+        # Even on parse failure, attempt regex masking on the raw string
+        pattern, replacement = _DSN_QUERY_PASSWORD_PATTERN
+        masked = pattern.sub(replacement, dsn)
     except Exception:
-        return dsn
+        logger.warning(
+            "Unexpected error masking DSN password; returning placeholder to prevent credential leak",
+        )
+        return _MASKING_FAILED
+
+    # Defense-in-depth: verify the original password was actually removed.
+    # If masking somehow failed to strip it, fall back to the safe placeholder.
+    if _original_password and _original_password in masked:
+        logger.warning("DSN masking did not fully remove password; using fallback")
+        return _MASKING_FAILED
+
+    return masked
 
 
 # =============================================================================
@@ -135,10 +213,25 @@ class EnumHealthStatus(StrEnum):
 # =============================================================================
 
 
+@dataclass(frozen=True)
+class HealthSnapshot:
+    """Immutable snapshot of ConsumerMetrics fields needed for health checks.
+
+    Taken under the metrics lock to guarantee a consistent view across all
+    fields. Used by ``_determine_health_status`` instead of reading live
+    mutable attributes without synchronization.
+    """
+
+    last_poll_at: datetime | None
+    last_successful_write_at: datetime | None
+    messages_received: int
+    started_at: datetime
+
+
 class ConsumerMetrics:
     """Metrics tracking for the LLM cost aggregation consumer.
 
-    Thread-safe via asyncio lock protection.
+    Coroutine-safe via asyncio.Lock protection (single event loop only).
     """
 
     def __init__(self) -> None:
@@ -149,7 +242,7 @@ class ConsumerMetrics:
         self.messages_skipped: int = 0
         self.batches_processed: int = 0
         self.aggregations_written: int = 0
-        self.commit_failures: int = 0
+        self.consecutive_commit_failures: int = 0
         self.last_poll_at: datetime | None = None
         self.last_successful_write_at: datetime | None = None
         self.last_commit_failure_at: datetime | None = None
@@ -194,15 +287,15 @@ class ConsumerMetrics:
             self.last_poll_at = datetime.now(UTC)
 
     async def record_commit_failure(self) -> None:
-        """Record an offset commit failure."""
+        """Record a consecutive offset commit failure."""
         async with self._lock:
-            self.commit_failures += 1
+            self.consecutive_commit_failures += 1
             self.last_commit_failure_at = datetime.now(UTC)
 
-    async def reset_commit_failures(self) -> None:
+    async def reset_consecutive_commit_failures(self) -> None:
         """Reset consecutive commit failure counter after successful commit."""
         async with self._lock:
-            self.commit_failures = 0
+            self.consecutive_commit_failures = 0
 
     async def snapshot(self) -> dict[str, object]:
         """Get a snapshot of current metrics."""
@@ -214,7 +307,7 @@ class ConsumerMetrics:
                 "messages_skipped": self.messages_skipped,
                 "batches_processed": self.batches_processed,
                 "aggregations_written": self.aggregations_written,
-                "commit_failures": self.commit_failures,
+                "consecutive_commit_failures": self.consecutive_commit_failures,
                 "last_poll_at": (
                     self.last_poll_at.isoformat() if self.last_poll_at else None
                 ),
@@ -230,6 +323,21 @@ class ConsumerMetrics:
                 ),
                 "started_at": self.started_at.isoformat(),
             }
+
+    async def health_snapshot(self) -> HealthSnapshot:
+        """Get a consistent snapshot of fields needed for health determination.
+
+        Acquires the metrics lock to ensure all returned fields reflect the
+        same point in time, preventing torn reads when multiple attributes
+        are updated by concurrent coroutines.
+        """
+        async with self._lock:
+            return HealthSnapshot(
+                last_poll_at=self.last_poll_at,
+                last_successful_write_at=self.last_successful_write_at,
+                messages_received=self.messages_received,
+                started_at=self.started_at,
+            )
 
 
 # =============================================================================
@@ -517,10 +625,12 @@ class ServiceLlmCostAggregator:
             return
 
         batch_timeout_seconds = self._config.batch_timeout_ms / 1000.0
+        consecutive_timeouts: int = 0
 
         try:
             while self._running:
                 try:
+                    # Buffer accounts for event loop scheduling latency; increase if TimeoutError is frequent.
                     records = await asyncio.wait_for(
                         self._consumer.getmany(
                             timeout_ms=self._config.batch_timeout_ms,
@@ -530,8 +640,21 @@ class ServiceLlmCostAggregator:
                         + self._config.poll_timeout_buffer_seconds,
                     )
                 except TimeoutError:
+                    consecutive_timeouts += 1
+                    if consecutive_timeouts % _CONSECUTIVE_TIMEOUT_LOG_INTERVAL == 0:
+                        logger.warning(
+                            "Kafka getmany() timed out %d consecutive times",
+                            consecutive_timeouts,
+                            extra={
+                                "consumer_id": self._consumer_id,
+                                "correlation_id": str(correlation_id),
+                                "consecutive_timeouts": consecutive_timeouts,
+                            },
+                        )
                     continue
 
+                # Successful poll -- reset timeout counter.
+                consecutive_timeouts = 0
                 await self.metrics.record_polled()
 
                 if not records:
@@ -750,26 +873,44 @@ class ServiceLlmCostAggregator:
 
         try:
             await self._consumer.commit(commit_map)
-            await self.metrics.reset_commit_failures()
+            await self.metrics.reset_consecutive_commit_failures()
 
-        except KafkaError:
+        except KafkaError as exc:
             await self.metrics.record_commit_failure()
 
-            metrics_snapshot = await self.metrics.snapshot()
-            commit_failures = metrics_snapshot.get("commit_failures", 0)
+            error_name = type(exc).__name__
+            is_fatal = error_name in _FATAL_COMMIT_ERROR_NAMES
 
-            if isinstance(commit_failures, int) and commit_failures >= 5:
+            metrics_snapshot = await self.metrics.snapshot()
+            commit_failures = metrics_snapshot.get("consecutive_commit_failures", 0)
+
+            if is_fatal:
+                # Fatal: consumer group membership is stale.  Log at ERROR
+                # and re-raise so the consume loop can trigger reconnection.
                 logger.exception(
-                    "Persistent commit failures detected",
+                    "Fatal commit error (%s) -- consumer must rejoin group",
+                    error_name,
                     extra={
                         "consumer_id": self._consumer_id,
                         "correlation_id": str(correlation_id),
-                        "commit_failures": commit_failures,
+                        "error_name": error_name,
+                    },
+                )
+                raise
+            if isinstance(commit_failures, int) and commit_failures >= 5:
+                logger.exception(
+                    "Persistent consecutive commit failures detected",
+                    extra={
+                        "consumer_id": self._consumer_id,
+                        "correlation_id": str(correlation_id),
+                        "consecutive_commit_failures": commit_failures,
                     },
                 )
             else:
-                logger.exception(
-                    "Failed to commit offsets",
+                logger.warning(
+                    "Retriable commit error (%s), will retry on next batch",
+                    error_name,
+                    exc_info=True,
                     extra={
                         "consumer_id": self._consumer_id,
                         "correlation_id": str(correlation_id),
@@ -781,7 +922,12 @@ class ServiceLlmCostAggregator:
     # =========================================================================
 
     async def _start_health_server(self) -> None:
-        """Start minimal HTTP health check server."""
+        """Start minimal HTTP health check server.
+
+        Raises:
+            InfraConnectionError: If the health check port is already in use
+                or otherwise unavailable (wraps ``OSError``).
+        """
         self._health_app = web.Application()
         self._health_app.router.add_get("/health", self._health_handler)
         self._health_app.router.add_get("/health/live", self._liveness_handler)
@@ -795,7 +941,31 @@ class ServiceLlmCostAggregator:
             host=self._config.health_check_host,
             port=self._config.health_check_port,
         )
-        await self._health_site.start()
+
+        try:
+            await self._health_site.start()
+        except OSError as exc:
+            port = self._config.health_check_port
+            host = self._config.health_check_host
+            logger.exception(
+                "Health check port %d already in use (host=%s)",
+                port,
+                host,
+                extra={
+                    "consumer_id": self._consumer_id,
+                    "host": host,
+                    "port": port,
+                    "error": str(exc),
+                },
+            )
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="start_health_server",
+            )
+            raise InfraConnectionError(
+                f"Health check port {port} already in use (host={host})",
+                context=context,
+            ) from exc
 
         logger.info(
             "Health check server started",
@@ -806,12 +976,24 @@ class ServiceLlmCostAggregator:
             },
         )
 
-    def _determine_health_status(
+    async def _determine_health_status(
         self,
-        metrics_snapshot: dict[str, object],
+        consumer_metrics: ConsumerMetrics,
         circuit_state: dict[str, JsonType],
     ) -> EnumHealthStatus:
-        """Determine consumer health status based on current state."""
+        """Determine consumer health status based on current state.
+
+        Acquires the metrics lock via ``health_snapshot()`` to read a
+        consistent set of datetime/counter fields, preventing torn reads
+        when fields are updated concurrently by the consume loop.
+
+        Args:
+            consumer_metrics: Metrics object (snapshot is taken under lock).
+            circuit_state: Circuit breaker state dictionary from the writer.
+
+        Returns:
+            Health status enum value.
+        """
         if not self._running:
             return EnumHealthStatus.UNHEALTHY
 
@@ -819,51 +1001,34 @@ class ServiceLlmCostAggregator:
         if circuit_breaker_state in ("open", "half_open"):
             return EnumHealthStatus.DEGRADED
 
-        last_poll = metrics_snapshot.get("last_poll_at")
-        if last_poll is not None:
-            try:
-                last_poll_dt = datetime.fromisoformat(str(last_poll))
-                poll_age_seconds = (datetime.now(UTC) - last_poll_dt).total_seconds()
-                if poll_age_seconds > self._config.health_check_poll_staleness_seconds:
-                    return EnumHealthStatus.DEGRADED
-            except (ValueError, TypeError):
-                pass
+        snap = await consumer_metrics.health_snapshot()
+        now = datetime.now(UTC)
 
-        last_write = metrics_snapshot.get("last_successful_write_at")
-        messages_received = metrics_snapshot.get("messages_received", 0)
-
-        if last_write is None:
-            started_at_str = metrics_snapshot.get("started_at")
-            if started_at_str is not None:
-                try:
-                    started_at_dt = datetime.fromisoformat(str(started_at_str))
-                    age_seconds = (datetime.now(UTC) - started_at_dt).total_seconds()
-                    if age_seconds <= self._config.startup_grace_period_seconds:
-                        return EnumHealthStatus.HEALTHY
-                    return EnumHealthStatus.DEGRADED
-                except (ValueError, TypeError):
-                    return EnumHealthStatus.HEALTHY
-            return EnumHealthStatus.HEALTHY
-
-        try:
-            last_write_dt = datetime.fromisoformat(str(last_write))
-            write_age_seconds = (datetime.now(UTC) - last_write_dt).total_seconds()
-            if (
-                write_age_seconds > self._config.health_check_staleness_seconds
-                and isinstance(messages_received, int)
-                and messages_received > 0
-            ):
+        if snap.last_poll_at is not None:
+            poll_age_seconds = (now - snap.last_poll_at).total_seconds()
+            if poll_age_seconds > self._config.health_check_poll_staleness_seconds:
                 return EnumHealthStatus.DEGRADED
-            return EnumHealthStatus.HEALTHY
-        except (ValueError, TypeError):
-            return EnumHealthStatus.HEALTHY
+
+        if snap.last_successful_write_at is None:
+            age_seconds = (now - snap.started_at).total_seconds()
+            if age_seconds <= self._config.startup_grace_period_seconds:
+                return EnumHealthStatus.HEALTHY
+            return EnumHealthStatus.DEGRADED
+
+        write_age_seconds = (now - snap.last_successful_write_at).total_seconds()
+        if (
+            write_age_seconds > self._config.health_check_staleness_seconds
+            and snap.messages_received > 0
+        ):
+            return EnumHealthStatus.DEGRADED
+        return EnumHealthStatus.HEALTHY
 
     async def _health_handler(self, request: web.Request) -> web.Response:
         """Handle health check requests."""
         metrics_snapshot = await self.metrics.snapshot()
         circuit_state = self._writer.get_circuit_breaker_state() if self._writer else {}
 
-        status = self._determine_health_status(metrics_snapshot, circuit_state)
+        status = await self._determine_health_status(self.metrics, circuit_state)
 
         response_body = {
             "status": status.value,
@@ -878,7 +1043,13 @@ class ServiceLlmCostAggregator:
             "batches_processed": metrics_snapshot.get("batches_processed", 0),
         }
 
-        http_status = 200 if status == EnumHealthStatus.HEALTHY else 503
+        # Return HTTP 200 for HEALTHY and DEGRADED so that Kubernetes
+        # readiness probes continue routing traffic when the service is
+        # functional but experiencing minor staleness. DEGRADED indicates
+        # slightly stale data, not inability to serve. Only UNHEALTHY
+        # returns 503 to stop traffic routing.  The "status" field in the
+        # JSON body allows monitoring to differentiate the actual state.
+        http_status = 200 if status != EnumHealthStatus.UNHEALTHY else 503
         return web.json_response(response_body, status=http_status)
 
     async def _liveness_handler(self, request: web.Request) -> web.Response:
@@ -923,7 +1094,7 @@ class ServiceLlmCostAggregator:
         metrics_snapshot = await self.metrics.snapshot()
         circuit_state = self._writer.get_circuit_breaker_state() if self._writer else {}
 
-        status = self._determine_health_status(metrics_snapshot, circuit_state)
+        status = await self._determine_health_status(self.metrics, circuit_state)
 
         return {
             "status": status.value,
@@ -943,7 +1114,26 @@ class ServiceLlmCostAggregator:
 
 async def _main() -> None:
     """Main entry point for running the consumer as a module."""
-    config = ConfigLlmCostAggregation()
+    try:
+        config = ConfigLlmCostAggregation()
+    except ValidationError as exc:
+        # Translate Pydantic's raw ValidationError into a user-friendly
+        # message that tells the operator which env vars to set.
+        missing = [str(e["loc"][-1]) for e in exc.errors() if e["type"] == "missing"]
+        prefix = "OMNIBASE_INFRA_LLM_COST_"
+        if missing:
+            env_vars = ", ".join(f"{prefix}{f.upper()}" for f in missing)
+            print(
+                f"ERROR: Missing required configuration. "
+                f"Set the following environment variable(s): {env_vars}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"ERROR: Invalid configuration: {exc}",
+                file=sys.stderr,
+            )
+        sys.exit(1)
 
     logger.info(
         "Starting LLM cost aggregation consumer",
@@ -980,6 +1170,7 @@ async def _main() -> None:
             shutdown_task = asyncio.create_task(consumer.stop())
             shutdown_task.add_done_callback(_shutdown_task_done)
 
+    # Note: add_signal_handler is Unix-only; this consumer targets Linux/Docker.
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, signal_handler)
 
@@ -1008,6 +1199,7 @@ if __name__ == "__main__":
 __all__ = [
     "ConsumerMetrics",
     "EnumHealthStatus",
+    "HealthSnapshot",
     "ServiceLlmCostAggregator",
     "mask_dsn_password",
 ]

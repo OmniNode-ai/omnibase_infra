@@ -20,6 +20,7 @@ Related:
 from __future__ import annotations
 
 import logging
+import math
 import time
 from datetime import UTC, datetime
 
@@ -234,12 +235,16 @@ def _parse_openai_usage(data: dict[str, JsonType]) -> ModelLlmUsage:
         )
 
     prompt_tokens = usage_raw.get("prompt_tokens", 0)
-    if not isinstance(prompt_tokens, int):
+    if not isinstance(prompt_tokens, (int, float)) or not math.isfinite(prompt_tokens):
         prompt_tokens = 0
+    else:
+        prompt_tokens = int(prompt_tokens)
 
     total_tokens = usage_raw.get("total_tokens", 0)
-    if not isinstance(total_tokens, int):
+    if not isinstance(total_tokens, (int, float)) or not math.isfinite(total_tokens):
         total_tokens = 0
+    else:
+        total_tokens = int(total_tokens)
 
     # Fallback: for embeddings, if prompt_tokens is 0 but total_tokens is
     # valid, use total_tokens.  Embedding endpoints typically report only

@@ -166,6 +166,45 @@ jobs:
       - name: Check event registry fingerprint (CI twin for B3)
         run: uv run python scripts/check_event_registry_fingerprint.py verify
 
+  # Demo loop assertion gate -- validates canonical event pipeline (OMN-2297)
+  # Runs in CI mode (skips live infra checks) as pre-deploy validation
+  demo-loop-gate:
+    name: Demo Loop Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Load cached uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/uv.lock') }}-${{ env.CACHE_VERSION }}
+          restore-keys: |
+            uv-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ env.CACHE_VERSION }}-
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run demo loop assertion gate
+        run: |
+          echo "================================================================"
+          echo "Demo Loop Assertion Gate (OMN-2297)"
+          echo "================================================================"
+          uv run python -m omnibase_infra.validation.demo_loop_gate --ci
+
   # Migration freeze enforcement - blocks new migrations when .migration_freeze exists
   # Part of DB-per-repo refactor (OMN-2055), tracking: OMN-2071
   migration-freeze:
@@ -186,7 +225,7 @@ jobs:
   # Split strategy: 9265 tests / 10 = ~927 tests per split (~3-4 min each)
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/10)
-    needs: [lint, onex-validation, migration-freeze, fingerprint-check]
+    needs: [lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -266,7 +305,7 @@ jobs:
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
-    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check]
+    needs: [tests-gate, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate]
     if: always()
 
     steps:
@@ -277,18 +316,21 @@ jobs:
           onex="${{ needs.onex-validation.result }}"
           migrationfreeze="${{ needs.migration-freeze.result }}"
           fingerprint="${{ needs.fingerprint-check.result }}"
+          demoloop="${{ needs.demo-loop-gate.result }}"
 
           if [[ "$gate" == "success" ]] && \
              [[ "$lint" == "success" ]] && \
              [[ "$onex" == "success" ]] && \
              [[ "$migrationfreeze" == "success" ]] && \
-             [[ "$fingerprint" == "success" ]]; then
+             [[ "$fingerprint" == "success" ]] && \
+             [[ "$demoloop" == "success" ]]; then
             echo "All checks passed successfully"
             echo "CI Tests Gate (10 splits): Passed"
             echo "Code Quality: Passed"
             echo "ONEX Validators: Passed"
             echo "Migration Freeze: Passed"
             echo "Fingerprint Check: Passed"
+            echo "Demo Loop Gate: Passed"
             exit 0
           else
             echo "Checks failed"
@@ -297,5 +339,6 @@ jobs:
             echo "ONEX Validators: $onex"
             echo "Migration Freeze: $migrationfreeze"
             echo "Fingerprint Check: $fingerprint"
+            echo "Demo Loop Gate: $demoloop"
             exit 1
           fi

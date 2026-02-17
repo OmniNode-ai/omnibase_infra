@@ -225,8 +225,107 @@ def compute_consumer_group_id(
     return group_id
 
 
+def apply_instance_discriminator(group_id: str, instance_id: str | None) -> str:
+    """Append an instance discriminator to a consumer group ID.
+
+    In multi-container dev environments, multiple containers running the same
+    service share the same consumer group ID (derived from node identity). Kafka
+    treats these as competing members and rebalances partitions between them,
+    which can leave some consumers with zero partitions.
+
+    This function appends a ``.__i.{instance_id}`` suffix to the group ID so
+    that each container instance gets its own consumer group and receives all
+    partitions for its subscribed topics.
+
+    The suffix is **idempotent**: if ``group_id`` already ends with
+    ``.__i.{instance_id}``, the suffix is not appended again.
+
+    When ``instance_id`` is None, empty, or contains only whitespace, the
+    group ID is returned unchanged.  This preserves single-container behavior
+    where consumer group sharing (for load balancing) is desirable.
+
+    Args:
+        group_id: Base consumer group ID (from ``compute_consumer_group_id``
+            or an explicit override).
+        instance_id: Instance discriminator string. Typically set via the
+            ``KAFKA_INSTANCE_ID`` environment variable. Common values include
+            container IDs, pod names, or hostname suffixes.
+
+    Returns:
+        The group ID with instance discriminator appended, or the original
+        group ID if ``instance_id`` is None, empty, or whitespace-only.
+
+    Example:
+        >>> apply_instance_discriminator("dev.svc.node.consume.v1", "container-1")
+        'dev.svc.node.consume.v1.__i.container-1'
+
+        >>> apply_instance_discriminator("dev.svc.node.consume.v1", None)
+        'dev.svc.node.consume.v1'
+
+        >>> apply_instance_discriminator("dev.svc.node.consume.v1", "")
+        'dev.svc.node.consume.v1'
+
+        Idempotent — already-discriminated IDs are not double-suffixed:
+
+        >>> apply_instance_discriminator(
+        ...     "dev.svc.node.consume.v1.__i.container-1", "container-1"
+        ... )
+        'dev.svc.node.consume.v1.__i.container-1'
+
+    Note:
+        The ``.__i.`` infix was chosen (analogous to ``.__t.`` for topic
+        scoping) because:
+        - It is unlikely to appear in organic group IDs
+        - It is short enough to stay within Kafka's 255-char group_id limit
+        - It makes the idempotency check unambiguous
+
+    Important:
+        The ``instance_id`` is **normalized** via
+        :func:`normalize_kafka_identifier` before being appended. This means
+        characters like slashes, spaces, and uppercase letters are transformed
+        (e.g., ``'My Pod/abc'`` becomes ``'my_pod_abc'``). The idempotency
+        check (``group_id.endswith(instance_suffix)``) uses the **normalized**
+        form of ``instance_id``, not the raw input.
+
+        Callers should **not** pre-normalize ``instance_id`` before passing it
+        to this function. If you pass a raw ``instance_id`` on the first call
+        and then a pre-normalized one on a subsequent call (or vice versa), the
+        idempotency check may fail and a double-suffix could be appended.
+
+    .. versionadded:: 0.3.1
+        Created as part of OMN-2251.
+    """
+    # Treat None, empty string, and whitespace-only identically: no
+    # discrimination applied.  Stripping first unifies "" and "  " behavior.
+    if instance_id is None or not instance_id.strip():
+        return group_id
+
+    stripped = instance_id.strip()
+
+    # Normalize instance_id for Kafka safety
+    normalized = normalize_kafka_identifier(stripped)
+
+    instance_suffix = f".__i.{normalized}"
+
+    # Idempotency: don't double-suffix
+    if group_id.endswith(instance_suffix):
+        return group_id
+
+    result = f"{group_id}{instance_suffix}"
+
+    # Handle length constraint with truncation + hash
+    if len(result) > KAFKA_CONSUMER_GROUP_MAX_LENGTH:
+        hash_input = f"{group_id}|{normalized}"
+        hash_suffix = hashlib.sha256(hash_input.encode()).hexdigest()[:8]
+        max_prefix_length = KAFKA_CONSUMER_GROUP_MAX_LENGTH - 9
+        result = f"{result[:max_prefix_length]}_{hash_suffix}"
+
+    return result
+
+
 __all__: list[str] = [
     "KAFKA_CONSUMER_GROUP_MAX_LENGTH",
+    "apply_instance_discriminator",
     "compute_consumer_group_id",
     "normalize_kafka_identifier",
 ]

@@ -24,10 +24,12 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
     InfraUnavailableError,
+    ProtocolConfigurationError,
 )
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.utils.util_consumer_group import KAFKA_CONSUMER_GROUP_MAX_LENGTH
 from tests.conftest import make_test_node_identity
 
 # Test constants - use these for assertions to avoid hardcoded values
@@ -35,122 +37,134 @@ TEST_BOOTSTRAP_SERVERS: str = "localhost:9092"
 TEST_ENVIRONMENT: str = "test"
 
 
+# ---------------------------------------------------------------------------
+# Module-level fixtures shared by multiple test classes.
+#
+# mock_producer_basic and kafka_event_bus_basic provide a minimal mocked
+# Kafka producer and an EventBusKafka instance.  They are used by
+# TestKafkaEventBusLifecycle, TestKafkaEventBusSubscribe, and any other
+# class that does NOT need a custom send side-effect.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_producer_basic() -> AsyncMock:
+    """Create mock Kafka producer (shared, module-level)."""
+    producer = AsyncMock()
+    producer.start = AsyncMock()
+    producer.stop = AsyncMock()
+    producer.send = AsyncMock()
+    producer._closed = False
+    return producer
+
+
+@pytest.fixture
+async def kafka_event_bus_basic(mock_producer_basic: AsyncMock) -> EventBusKafka:
+    """Create EventBusKafka with the shared mock producer (module-level)."""
+    with patch(
+        "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+        return_value=mock_producer_basic,
+    ):
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+            environment=TEST_ENVIRONMENT,
+        )
+        bus = EventBusKafka(config=config)
+        yield bus
+        # Cleanup: Ensure resources are freed even if test fails
+        try:
+            await bus.close()
+        except Exception:
+            pass  # Best effort cleanup
+
+
 class TestKafkaEventBusLifecycle:
     """Test suite for event bus lifecycle management."""
 
-    @pytest.fixture
-    def mock_producer(self) -> AsyncMock:
-        """Create mock Kafka producer."""
-        producer = AsyncMock()
-        producer.start = AsyncMock()
-        producer.stop = AsyncMock()
-        producer.send = AsyncMock()
-        producer._closed = False
-        return producer
-
-    @pytest.fixture
-    async def kafka_event_bus(self, mock_producer: AsyncMock) -> EventBusKafka:
-        """Create EventBusKafka with mocked producer."""
-        with patch(
-            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
-            return_value=mock_producer,
-        ):
-            config = ModelKafkaEventBusConfig(
-                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
-                environment=TEST_ENVIRONMENT,
-            )
-            bus = EventBusKafka(config=config)
-            yield bus
-            # Cleanup: Ensure resources are freed even if test fails
-            try:
-                await bus.close()
-            except Exception:
-                pass  # Best effort cleanup
-
     @pytest.mark.asyncio
     async def test_start_and_close(
-        self, kafka_event_bus: EventBusKafka, mock_producer: AsyncMock
+        self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
     ) -> None:
         """Test bus lifecycle - start and close operations."""
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
-            return_value=mock_producer,
+            return_value=mock_producer_basic,
         ):
             # Initially not started
-            health = await kafka_event_bus.health_check()
+            health = await kafka_event_bus_basic.health_check()
             assert health["healthy"] is False
             assert health["started"] is False
 
             # Start the bus
-            await kafka_event_bus.start()
-            mock_producer.start.assert_called_once()
-            health = await kafka_event_bus.health_check()
+            await kafka_event_bus_basic.start()
+            mock_producer_basic.start.assert_called_once()
+            health = await kafka_event_bus_basic.health_check()
             assert health["started"] is True
 
             # Close the bus
-            await kafka_event_bus.close()
-            mock_producer.stop.assert_called_once()
-            health = await kafka_event_bus.health_check()
+            await kafka_event_bus_basic.close()
+            mock_producer_basic.stop.assert_called_once()
+            health = await kafka_event_bus_basic.health_check()
             assert health["healthy"] is False
             assert health["started"] is False
 
     @pytest.mark.asyncio
     async def test_multiple_start_calls(
-        self, kafka_event_bus: EventBusKafka, mock_producer: AsyncMock
+        self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
     ) -> None:
         """Test that multiple start calls are safe (idempotent)."""
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
-            return_value=mock_producer,
+            return_value=mock_producer_basic,
         ):
-            await kafka_event_bus.start()
-            await kafka_event_bus.start()  # Second start should be idempotent
+            await kafka_event_bus_basic.start()
+            await kafka_event_bus_basic.start()  # Second start should be idempotent
 
             # Producer.start should only be called once
-            assert mock_producer.start.call_count == 1
+            assert mock_producer_basic.start.call_count == 1
 
-            health = await kafka_event_bus.health_check()
+            health = await kafka_event_bus_basic.health_check()
             assert health["started"] is True
 
-            await kafka_event_bus.close()
+            await kafka_event_bus_basic.close()
 
     @pytest.mark.asyncio
     async def test_multiple_close_calls(
-        self, kafka_event_bus: EventBusKafka, mock_producer: AsyncMock
+        self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
     ) -> None:
         """Test that multiple close calls are safe (idempotent)."""
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
-            return_value=mock_producer,
+            return_value=mock_producer_basic,
         ):
-            await kafka_event_bus.start()
-            await kafka_event_bus.close()
-            await kafka_event_bus.close()  # Second close should be idempotent
+            await kafka_event_bus_basic.start()
+            await kafka_event_bus_basic.close()
+            await kafka_event_bus_basic.close()  # Second close should be idempotent
 
-            health = await kafka_event_bus.health_check()
+            health = await kafka_event_bus_basic.health_check()
             assert health["started"] is False
 
     @pytest.mark.asyncio
     async def test_shutdown_alias(
-        self, kafka_event_bus: EventBusKafka, mock_producer: AsyncMock
+        self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
     ) -> None:
         """Test shutdown() is an alias for close()."""
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
-            return_value=mock_producer,
+            return_value=mock_producer_basic,
         ):
-            await kafka_event_bus.start()
-            await kafka_event_bus.shutdown()
+            await kafka_event_bus_basic.start()
+            await kafka_event_bus_basic.shutdown()
 
-            health = await kafka_event_bus.health_check()
+            health = await kafka_event_bus_basic.health_check()
             assert health["started"] is False
 
     @pytest.mark.asyncio
-    async def test_initialize_with_config(self, mock_producer: AsyncMock) -> None:
+    async def test_initialize_with_config(self, mock_producer_basic: AsyncMock) -> None:
         """Test initialize() method with configuration override."""
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
-            return_value=mock_producer,
+            return_value=mock_producer_basic,
         ):
             event_bus = EventBusKafka()
             await event_bus.initialize(
@@ -347,50 +361,26 @@ class TestKafkaEventBusPublish:
 
 
 class TestKafkaEventBusSubscribe:
-    """Test suite for subscribe operations."""
+    """Test suite for subscribe operations.
 
-    @pytest.fixture
-    def mock_producer(self) -> AsyncMock:
-        """Create mock Kafka producer."""
-        producer = AsyncMock()
-        producer.start = AsyncMock()
-        producer.stop = AsyncMock()
-        producer._closed = False
-        return producer
-
-    @pytest.fixture
-    async def kafka_event_bus(self, mock_producer: AsyncMock) -> EventBusKafka:
-        """Create EventBusKafka with mocked producer."""
-        with patch(
-            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
-            return_value=mock_producer,
-        ):
-            config = ModelKafkaEventBusConfig(
-                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
-                environment=TEST_ENVIRONMENT,
-            )
-            bus = EventBusKafka(config=config)
-            yield bus
-            # Cleanup: Ensure resources are freed even if test fails
-            try:
-                await bus.close()
-            except Exception:
-                pass  # Best effort cleanup
+    Uses module-level ``mock_producer_basic`` and ``kafka_event_bus_basic``
+    fixtures (identical to the ones formerly duplicated in Lifecycle).
+    """
 
     @pytest.mark.asyncio
     async def test_subscribe_returns_unsubscribe_function(
-        self, kafka_event_bus: EventBusKafka, mock_producer: AsyncMock
+        self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
     ) -> None:
         """Test that subscribe returns an unsubscribe callable."""
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
-            return_value=mock_producer,
+            return_value=mock_producer_basic,
         ):
             # Don't start the bus - subscribe should still work for registration
             async def handler(msg: ModelEventMessage) -> None:
                 pass
 
-            unsubscribe = await kafka_event_bus.subscribe(
+            unsubscribe = await kafka_event_bus_basic.subscribe(
                 "test-topic", make_test_node_identity("1"), handler
             )
 
@@ -399,28 +389,28 @@ class TestKafkaEventBusSubscribe:
 
     @pytest.mark.asyncio
     async def test_unsubscribe_removes_handler(
-        self, kafka_event_bus: EventBusKafka, mock_producer: AsyncMock
+        self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
     ) -> None:
         """Test unsubscribe removes handler from registry."""
 
         async def handler(msg: ModelEventMessage) -> None:
             pass
 
-        unsubscribe = await kafka_event_bus.subscribe(
+        unsubscribe = await kafka_event_bus_basic.subscribe(
             "test-topic", make_test_node_identity("1"), handler
         )
 
         # Verify subscription exists
-        assert len(kafka_event_bus._subscribers["test-topic"]) == 1
+        assert len(kafka_event_bus_basic._subscribers["test-topic"]) == 1
 
         await unsubscribe()
 
         # Verify subscription was removed
-        assert len(kafka_event_bus._subscribers.get("test-topic", [])) == 0
+        assert len(kafka_event_bus_basic._subscribers.get("test-topic", [])) == 0
 
     @pytest.mark.asyncio
     async def test_multiple_subscribers_same_topic(
-        self, kafka_event_bus: EventBusKafka, mock_producer: AsyncMock
+        self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
     ) -> None:
         """Test multiple subscribers on same topic."""
 
@@ -430,26 +420,26 @@ class TestKafkaEventBusSubscribe:
         async def handler2(msg: ModelEventMessage) -> None:
             pass
 
-        await kafka_event_bus.subscribe(
+        await kafka_event_bus_basic.subscribe(
             "test-topic", make_test_node_identity("1"), handler1
         )
-        await kafka_event_bus.subscribe(
+        await kafka_event_bus_basic.subscribe(
             "test-topic", make_test_node_identity("2"), handler2
         )
 
         # Verify both subscriptions exist
-        assert len(kafka_event_bus._subscribers["test-topic"]) == 2
+        assert len(kafka_event_bus_basic._subscribers["test-topic"]) == 2
 
     @pytest.mark.asyncio
     async def test_double_unsubscribe_safe(
-        self, kafka_event_bus: EventBusKafka, mock_producer: AsyncMock
+        self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
     ) -> None:
         """Test that double unsubscribe is safe."""
 
         async def handler(msg: ModelEventMessage) -> None:
             pass
 
-        unsubscribe = await kafka_event_bus.subscribe(
+        unsubscribe = await kafka_event_bus_basic.subscribe(
             "test-topic", make_test_node_identity("1"), handler
         )
         await unsubscribe()
@@ -457,42 +447,18 @@ class TestKafkaEventBusSubscribe:
 
 
 class TestKafkaEventBusHealthCheck:
-    """Test suite for health check operations."""
+    """Test suite for health check operations.
 
-    @pytest.fixture
-    def mock_producer(self) -> AsyncMock:
-        """Create mock Kafka producer."""
-        producer = AsyncMock()
-        producer.start = AsyncMock()
-        producer.stop = AsyncMock()
-        producer._closed = False
-        return producer
-
-    @pytest.fixture
-    async def kafka_event_bus(self, mock_producer: AsyncMock) -> EventBusKafka:
-        """Create EventBusKafka with mocked producer."""
-        with patch(
-            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
-            return_value=mock_producer,
-        ):
-            config = ModelKafkaEventBusConfig(
-                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
-                environment=TEST_ENVIRONMENT,
-            )
-            bus = EventBusKafka(config=config)
-            yield bus
-            # Cleanup: Ensure resources are freed even if test fails
-            try:
-                await bus.close()
-            except Exception:
-                pass  # Best effort cleanup
+    Uses module-level ``mock_producer_basic`` and ``kafka_event_bus_basic``
+    fixtures.
+    """
 
     @pytest.mark.asyncio
     async def test_health_check_not_started(
-        self, kafka_event_bus: EventBusKafka
+        self, kafka_event_bus_basic: EventBusKafka
     ) -> None:
         """Test health check when not started."""
-        health = await kafka_event_bus.health_check()
+        health = await kafka_event_bus_basic.health_check()
 
         assert health["healthy"] is False
         assert health["started"] is False
@@ -504,45 +470,45 @@ class TestKafkaEventBusHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_started(
-        self, kafka_event_bus: EventBusKafka, mock_producer: AsyncMock
+        self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
     ) -> None:
         """Test health check when started."""
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
-            return_value=mock_producer,
+            return_value=mock_producer_basic,
         ):
-            await kafka_event_bus.start()
-            health = await kafka_event_bus.health_check()
+            await kafka_event_bus_basic.start()
+            health = await kafka_event_bus_basic.health_check()
 
             assert health["started"] is True
             # healthy depends on producer not being closed
             assert health["healthy"] is True
 
-            await kafka_event_bus.close()
+            await kafka_event_bus_basic.close()
 
     @pytest.mark.asyncio
     async def test_health_check_circuit_breaker_status(
-        self, kafka_event_bus: EventBusKafka, mock_producer: AsyncMock
+        self, kafka_event_bus_basic: EventBusKafka, mock_producer_basic: AsyncMock
     ) -> None:
         """Test health check includes circuit breaker status."""
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
-            return_value=mock_producer,
+            return_value=mock_producer_basic,
         ):
-            await kafka_event_bus.start()
-            health = await kafka_event_bus.health_check()
+            await kafka_event_bus_basic.start()
+            health = await kafka_event_bus_basic.health_check()
 
             assert health["circuit_state"] == "closed"
 
             # Record failures to change circuit state
-            async with kafka_event_bus._circuit_breaker_lock:
-                kafka_event_bus._circuit_breaker_failures = 5
-                kafka_event_bus._circuit_breaker_open = True
+            async with kafka_event_bus_basic._circuit_breaker_lock:
+                kafka_event_bus_basic._circuit_breaker_failures = 5
+                kafka_event_bus_basic._circuit_breaker_open = True
 
-            health = await kafka_event_bus.health_check()
+            health = await kafka_event_bus_basic.health_check()
             assert health["circuit_state"] == "open"
 
-            await kafka_event_bus.close()
+            await kafka_event_bus_basic.close()
 
 
 class TestKafkaEventBusCircuitBreaker:
@@ -1326,7 +1292,6 @@ class TestKafkaEventBusConsumerGroupId:
         self, mock_producer: AsyncMock
     ) -> None:
         """Test whitespace-only group_id raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
@@ -1344,7 +1309,6 @@ class TestKafkaEventBusConsumerGroupId:
     @pytest.mark.asyncio
     async def test_empty_group_id_raises_error(self, mock_producer: AsyncMock) -> None:
         """Test empty group_id raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
@@ -1473,6 +1437,405 @@ class TestKafkaEventBusConsumerGroupId:
             # Previously this would incorrectly remain "foo.bar" due to
             # endswith(".bar") matching.  Now it correctly gets the topic suffix.
             assert call_kwargs.kwargs["group_id"] == "foo.bar.__t.bar"
+
+
+class TestKafkaEventBusInstanceDiscriminator:
+    """Test suite for instance-discriminated consumer group IDs (OMN-2251).
+
+    Verifies that:
+    - When instance_id is None, consumer group IDs are unchanged
+    - When instance_id is set, .__i.{instance_id} is inserted before .__t.{topic}
+    - Multi-container dev environments get unique consumer group IDs
+    """
+
+    @pytest.fixture
+    def mock_producer(self) -> AsyncMock:
+        """Create mock Kafka producer."""
+        producer = AsyncMock()
+        producer.start = AsyncMock()
+        producer.stop = AsyncMock()
+        producer._closed = False
+        return producer
+
+    @pytest.fixture
+    def mock_consumer(self) -> AsyncMock:
+        """Create mock Kafka consumer."""
+        consumer = AsyncMock()
+        consumer.start = AsyncMock()
+        consumer.stop = AsyncMock()
+        return consumer
+
+    @pytest.mark.asyncio
+    async def test_no_instance_id_unchanged_behavior(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that consumer group ID is unchanged when instance_id is None."""
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id=None,
+            )
+            event_bus = EventBusKafka(config=config)
+
+            await event_bus._start_consumer_for_topic("events", "my-group")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            # No instance discriminator, just topic suffix
+            assert call_kwargs.kwargs["group_id"] == "my-group.__t.events"
+
+    @pytest.mark.asyncio
+    async def test_instance_id_appended_before_topic_suffix(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that instance_id is inserted as .__i.{id} before .__t.{topic}."""
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id="container-1",
+            )
+            event_bus = EventBusKafka(config=config)
+
+            await event_bus._start_consumer_for_topic("events", "my-group")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            assert (
+                call_kwargs.kwargs["group_id"] == "my-group.__i.container-1.__t.events"
+            )
+
+    @pytest.mark.asyncio
+    async def test_different_instance_ids_produce_different_groups(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that different instance_ids produce different consumer group IDs."""
+        consumer_cls = MagicMock(return_value=mock_consumer)
+
+        group_ids: list[str] = []
+        for instance_id in ["container-1", "container-2"]:
+            consumer_cls.reset_mock()
+            mock_consumer.reset_mock()
+            with (
+                patch(
+                    "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                    return_value=mock_producer,
+                ),
+                patch(
+                    "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                    consumer_cls,
+                ),
+            ):
+                config = ModelKafkaEventBusConfig(
+                    bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                    instance_id=instance_id,
+                )
+                event_bus = EventBusKafka(config=config)
+
+                await event_bus._start_consumer_for_topic("events", "my-group")
+
+                call_kwargs = consumer_cls.call_args
+                group_ids.append(call_kwargs.kwargs["group_id"])
+
+        # Different instance IDs must produce different group IDs
+        assert group_ids[0] != group_ids[1]
+        assert "container-1" in group_ids[0]
+        assert "container-2" in group_ids[1]
+
+    @pytest.mark.asyncio
+    async def test_instance_id_from_env_var(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that KAFKA_INSTANCE_ID environment variable is picked up."""
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+            patch.dict("os.environ", {"KAFKA_INSTANCE_ID": "pod-xyz"}),
+        ):
+            config = ModelKafkaEventBusConfig.default()
+            event_bus = EventBusKafka(config=config)
+
+            await event_bus._start_consumer_for_topic("events", "my-group")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            assert ".__i.pod-xyz" in call_kwargs.kwargs["group_id"]
+
+    @pytest.mark.asyncio
+    async def test_empty_instance_id_preserves_original_behavior(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that empty string instance_id preserves single-container behavior."""
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            # Empty string should behave same as None
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id="",
+            )
+            event_bus = EventBusKafka(config=config)
+
+            await event_bus._start_consumer_for_topic("events", "my-group")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            # No instance discriminator
+            assert call_kwargs.kwargs["group_id"] == "my-group.__t.events"
+
+    @pytest.mark.asyncio
+    async def test_pre_scoped_group_id_with_instance_id_no_double_topic_suffix(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test pre-scoped group_id with instance_id does not double topic suffix.
+
+        When a group_id already ends with .__t.{topic} (pre-scoped) and
+        instance_id is set, the instance discriminator must be inserted
+        between the base and the topic suffix, NOT after it.
+
+        Without the fix this would produce:
+            my-group.__t.events.__i.c1.__t.events  (WRONG)
+        Correct result:
+            my-group.__i.c1.__t.events
+        """
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id="c1",
+            )
+            event_bus = EventBusKafka(config=config)
+
+            # group_id already ends with .__t.events (pre-scoped)
+            await event_bus._start_consumer_for_topic("events", "my-group.__t.events")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            # Instance discriminator inserted between base and topic suffix
+            assert call_kwargs.kwargs["group_id"] == "my-group.__i.c1.__t.events"
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_instance_id_treated_as_empty(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that whitespace-only instance_id is treated as empty (no discrimination).
+
+        apply_instance_discriminator() treats whitespace-only the same as empty
+        string: silently returns the group_id unchanged. The consumer should
+        start normally with the base group_id + topic suffix (no instance
+        discriminator segment).
+        """
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id="   ",
+            )
+            event_bus = EventBusKafka(config=config)
+
+            await event_bus._start_consumer_for_topic("events", "my-group")
+
+            # Whitespace-only instance_id means no .__i. segment; only topic suffix
+            call_kwargs = consumer_cls.call_args_list[-1]
+            assert call_kwargs.kwargs["group_id"] == "my-group.__t.events"
+
+    @pytest.mark.asyncio
+    async def test_effective_group_id_enforces_max_length(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that effective_group_id does not exceed Kafka's 255-char limit.
+
+        When base_group_id + instance discriminator + topic suffix exceed
+        255 characters, the final ID must be truncated with a hash suffix.
+        """
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id="b" * 20,
+            )
+            event_bus = EventBusKafka(config=config)
+
+            # Long group_id + instance_id + topic suffix should exceed 255
+            long_group_id = "a" * 230
+            await event_bus._start_consumer_for_topic("events", long_group_id)
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            assert (
+                len(call_kwargs.kwargs["group_id"]) <= KAFKA_CONSUMER_GROUP_MAX_LENGTH
+            )
+
+    @pytest.mark.asyncio
+    async def test_truncation_with_very_long_topic_name(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test truncation when topic name approaches 255 chars.
+
+        When the topic suffix (.__t.{topic}) is so long that
+        available_for_prefix <= 0, the code falls back to plain prefix
+        truncation without suffix preservation.
+        """
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id=None,
+            )
+            event_bus = EventBusKafka(config=config)
+
+            # Topic name of 240 chars: .__t. prefix (5 chars) + 240 = 245 suffix
+            # With a group_id of 20 chars: 20 + 245 = 265 > 255
+            # available_for_prefix = 255 - 245 - 9 = 1, still > 0 but very small
+            long_topic = "t" * 240
+            await event_bus._start_consumer_for_topic(long_topic, "a" * 20)
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            effective_gid = call_kwargs.kwargs["group_id"]
+            assert len(effective_gid) <= KAFKA_CONSUMER_GROUP_MAX_LENGTH
+
+    @pytest.mark.asyncio
+    async def test_truncation_hash_fallback_path(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test the hash-only fallback when topic suffix + hash exceed max length.
+
+        When the topic suffix alone is so long that there is no room for the
+        prefix (available_for_prefix <= 0), the code falls back to plain
+        hash truncation without preserving the topic suffix.
+        """
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id=None,
+            )
+            event_bus = EventBusKafka(config=config)
+
+            # Topic suffix = ".__t." + 250 chars = 255 chars
+            # available_for_prefix = 255 - 255 - 9 = -9, triggers fallback
+            very_long_topic = "x" * 250
+            await event_bus._start_consumer_for_topic(very_long_topic, "base-group")
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            effective_gid = call_kwargs.kwargs["group_id"]
+            assert len(effective_gid) <= KAFKA_CONSUMER_GROUP_MAX_LENGTH
+
+    @pytest.mark.asyncio
+    async def test_truncation_preserves_topic_suffix_when_possible(
+        self, mock_producer: AsyncMock, mock_consumer: AsyncMock
+    ) -> None:
+        """Test that the topic suffix is preserved during truncation when space allows."""
+        consumer_cls = MagicMock(return_value=mock_consumer)
+        with (
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+                return_value=mock_producer,
+            ),
+            patch(
+                "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer",
+                consumer_cls,
+            ),
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                instance_id="inst-1",
+            )
+            event_bus = EventBusKafka(config=config)
+
+            # Use a group_id long enough to trigger truncation but with a
+            # short topic so the suffix can be preserved.
+            long_group_id = "g" * 240
+            topic = "events"
+            await event_bus._start_consumer_for_topic(topic, long_group_id)
+
+            consumer_cls.assert_called_once()
+            call_kwargs = consumer_cls.call_args
+            effective_gid = call_kwargs.kwargs["group_id"]
+            assert len(effective_gid) <= KAFKA_CONSUMER_GROUP_MAX_LENGTH
+            # Topic suffix should be preserved at the end
+            assert effective_gid.endswith(f".__t.{topic}")
 
 
 class TestKafkaEventBusStartConsuming:
@@ -1612,7 +1975,6 @@ enable_auto_commit: false
 
     def test_from_yaml_file_not_found(self, tmp_path: Path) -> None:
         """Test from_yaml() raises ProtocolConfigurationError for missing file."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         missing_file = tmp_path / "nonexistent.yaml"
 
@@ -1623,7 +1985,6 @@ enable_auto_commit: false
 
     def test_from_yaml_invalid_yaml_syntax(self, tmp_path: Path) -> None:
         """Test from_yaml() raises ProtocolConfigurationError for invalid YAML."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         config_file = tmp_path / "invalid.yaml"
         config_file.write_text("invalid: yaml: syntax: [")
@@ -1633,7 +1994,6 @@ enable_auto_commit: false
 
     def test_from_yaml_non_dict_content(self, tmp_path: Path) -> None:
         """Test from_yaml() raises ProtocolConfigurationError for non-dict YAML."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         config_file = tmp_path / "list.yaml"
         config_file.write_text("- item1\n- item2\n")
@@ -2250,7 +2610,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test empty topic name raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="cannot be empty"):
             event_bus._validate_topic_name("", correlation_id)
@@ -2259,7 +2618,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test topic name exceeding 255 chars raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         topic = "a" * 256
         with pytest.raises(
@@ -2271,7 +2629,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test reserved topic name '.' raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="reserved"):
             event_bus._validate_topic_name(".", correlation_id)
@@ -2280,7 +2637,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test reserved topic name '..' raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="reserved"):
             event_bus._validate_topic_name("..", correlation_id)
@@ -2289,7 +2645,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test topic name with space raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
             event_bus._validate_topic_name("my topic", correlation_id)
@@ -2298,7 +2653,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test topic name with @ symbol raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
             event_bus._validate_topic_name("topic@name", correlation_id)
@@ -2307,7 +2661,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test topic name with special characters raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         invalid_topics = [
             "topic#name",
@@ -2332,7 +2685,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test topic name with unicode characters raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
             event_bus._validate_topic_name("topic\u00e9name", correlation_id)
@@ -2341,7 +2693,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test topic name with newline raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
             event_bus._validate_topic_name("topic\nname", correlation_id)
@@ -2350,7 +2701,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test topic name with tab raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
             event_bus._validate_topic_name("topic\tname", correlation_id)

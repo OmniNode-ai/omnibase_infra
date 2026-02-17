@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from aiokafka import TopicPartition
 
 from omnibase_infra.services.observability.llm_cost_aggregation.config import (
     ConfigLlmCostAggregation,
@@ -118,7 +119,7 @@ class TestConsumerMetrics:
         assert metrics.messages_skipped == 0
         assert metrics.batches_processed == 0
         assert metrics.aggregations_written == 0
-        assert metrics.commit_failures == 0
+        assert metrics.consecutive_commit_failures == 0
         assert metrics.last_poll_at is None
         assert metrics.last_successful_write_at is None
         assert metrics.last_commit_failure_at is None
@@ -170,7 +171,7 @@ class TestConsumerMetrics:
         assert snap["messages_skipped"] == 1
         assert snap["batches_processed"] == 0
         assert snap["aggregations_written"] == 0
-        assert snap["commit_failures"] == 0
+        assert snap["consecutive_commit_failures"] == 0
         assert snap["started_at"] is not None
         assert snap["last_poll_at"] is not None
         assert snap["last_successful_write_at"] is not None
@@ -198,11 +199,11 @@ class TestConsumerMetrics:
         metrics = ConsumerMetrics()
         await metrics.record_commit_failure()
         await metrics.record_commit_failure()
-        assert metrics.commit_failures == 2
+        assert metrics.consecutive_commit_failures == 2
         assert metrics.last_commit_failure_at is not None
 
-        await metrics.reset_commit_failures()
-        assert metrics.commit_failures == 0
+        await metrics.reset_consecutive_commit_failures()
+        assert metrics.consecutive_commit_failures == 0
 
     @pytest.mark.asyncio
     async def test_record_aggregations(self) -> None:
@@ -274,6 +275,28 @@ class TestMaskDsnPassword:
         assert "pass" not in result
         assert "***" in result
         assert "user:***@host" in result
+
+    def test_password_in_query_param(self) -> None:
+        """Password in query string parameter is masked by regex fallback."""
+        dsn = "postgresql://user@host:5432/db?password=s3cret&sslmode=require"
+        result = mask_dsn_password(dsn)
+        assert "s3cret" not in result
+        assert "password=***" in result
+        assert "sslmode=require" in result
+
+    def test_pwd_in_query_param(self) -> None:
+        """pwd= in query string parameter is masked by regex fallback."""
+        dsn = "postgresql://user@host:5432/db?pwd=s3cret"
+        result = mask_dsn_password(dsn)
+        assert "s3cret" not in result
+        assert "pwd=***" in result
+
+    def test_passwd_in_query_param(self) -> None:
+        """passwd= in query string parameter is masked by regex fallback."""
+        dsn = "postgresql://user@host:5432/db?passwd=s3cret"
+        result = mask_dsn_password(dsn)
+        assert "s3cret" not in result
+        assert "passwd=***" in result
 
 
 # =============================================================================
@@ -509,7 +532,6 @@ class TestProcessBatch:
         mock_writer.write_cost_aggregates.assert_awaited_once()
 
         # Offsets should track highest per partition
-        from aiokafka import TopicPartition
 
         tp0 = TopicPartition("onex.evt.omniintelligence.llm-call-completed.v1", 0)
         tp1 = TopicPartition("onex.evt.omniintelligence.llm-call-completed.v1", 1)
@@ -540,7 +562,6 @@ class TestProcessBatch:
         mock_writer.write_call_metrics.assert_awaited_once()
 
         # Offsets should still be tracked (raw metrics succeeded)
-        from aiokafka import TopicPartition
 
         tp = TopicPartition("onex.evt.omniintelligence.llm-call-completed.v1", 0)
         assert offsets[tp] == 10
@@ -570,8 +591,6 @@ class TestProcessBatch:
         ]
         correlation_id = uuid4()
         offsets = await service_with_writer._process_batch(messages, correlation_id)
-
-        from aiokafka import TopicPartition
 
         tp = TopicPartition("onex.evt.omniintelligence.llm-call-completed.v1", 0)
         assert offsets[tp] == 7  # Highest offset
@@ -629,7 +648,6 @@ class TestProcessBatch:
         assert len(events_arg) == 1
 
         # Highest offset should be tracked across both null and valid
-        from aiokafka import TopicPartition
 
         tp = TopicPartition("onex.evt.omniintelligence.llm-call-completed.v1", 0)
         assert offsets[tp] == 2  # Highest across skipped + successful

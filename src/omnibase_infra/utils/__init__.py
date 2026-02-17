@@ -30,6 +30,7 @@ from omnibase_infra.utils.util_atomic_file import (
 )
 from omnibase_infra.utils.util_consumer_group import (
     KAFKA_CONSUMER_GROUP_MAX_LENGTH,
+    apply_instance_discriminator,
     compute_consumer_group_id,
     normalize_kafka_identifier,
 )
@@ -96,6 +97,7 @@ __all__: list[str] = [
     "SAFE_ERROR_PATTERNS",
     "SEMVER_PATTERN",
     "SENSITIVE_PATTERNS",
+    "apply_instance_discriminator",
     "clear_correlation_id",
     "compute_consumer_group_id",
     "ensure_timezone_aware",

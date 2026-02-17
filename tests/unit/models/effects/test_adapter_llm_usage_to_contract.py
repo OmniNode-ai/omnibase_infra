@@ -167,6 +167,32 @@ class TestToCallMetrics:
         with pytest.raises(ValueError, match="model_id must be a non-empty string"):
             to_call_metrics(usage, model_id="")
 
+    def test_to_call_metrics_none_model_id_raises(self) -> None:
+        """to_call_metrics rejects None model_id with ValueError.
+
+        Although model_id is typed as ``str``, callers may pass None at
+        runtime (e.g. from unvalidated user input). The ``if not model_id``
+        guard catches this because ``not None`` is True.
+        """
+        usage = ModelLlmUsage(tokens_input=10, tokens_output=5)
+
+        with pytest.raises(ValueError, match="model_id must be a non-empty string"):
+            to_call_metrics(usage, model_id=None)  # type: ignore[arg-type]
+
+    def test_to_call_metrics_whitespace_model_id_accepted(self) -> None:
+        """to_call_metrics accepts whitespace-only model_id (truthy string).
+
+        The guard ``if not model_id`` only rejects empty strings and None.
+        Whitespace-only strings are truthy in Python, so they pass validation.
+        This test documents the current behavior; callers are responsible for
+        stripping model IDs before passing them.
+        """
+        usage = ModelLlmUsage(tokens_input=10, tokens_output=5)
+
+        # Whitespace-only string is truthy, so no ValueError is raised.
+        result = to_call_metrics(usage, model_id="   ")
+        assert result.model_id == "   "
+
     def test_basic_conversion(self) -> None:
         """Basic conversion with required fields."""
         usage = ModelLlmUsage(
