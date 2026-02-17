@@ -27,11 +27,11 @@ from omnibase_infra.services.observability.static_context_attribution.model_cont
 
 logger = logging.getLogger(__name__)
 
-# Regex for heading lines: starts with ## or ### (but not ####+)
+# Regex for heading lines: matches ## or ### only (excludes # and ####+)
 _HEADING_PATTERN = re.compile(r"^(#{2,3})\s+(.+)$")
 
-# Regex for fenced code block delimiter
-_FENCE_PATTERN = re.compile(r"^```")
+# Regex for fenced code block delimiter (up to 3 leading spaces per CommonMark)
+_FENCE_PATTERN = re.compile(r"^\s{0,3}```")
 
 # Regex for table row (starts with |)
 _TABLE_PATTERN = re.compile(r"^\|.+\|")
@@ -90,7 +90,7 @@ class ServiceStaticContextParser:
             line_num = line_idx + 1  # 1-based
 
             # Track fenced code blocks to ignore headings inside them
-            if _FENCE_PATTERN.match(line.strip()):
+            if _FENCE_PATTERN.match(line):
                 in_code_fence = not in_code_fence
                 has_code_block = True
                 current_lines.append(line)

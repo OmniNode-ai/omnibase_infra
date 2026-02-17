@@ -99,9 +99,10 @@ class ServiceAttributionReporter:
         Returns:
             Complete attribution report with provenance metadata.
         """
-        # Compute provenance hashes
+        # Compute provenance hashes (sort keys for deterministic ordering)
         full_context = "\n".join(
-            f"--- {path} ---\n{content}" for path, content in context_files.items()
+            f"--- {path} ---\n{content}"
+            for path, content in sorted(context_files.items())
         )
         input_hash = ModelStaticContextReport.compute_hash(full_context)
         response_hash = ModelStaticContextReport.compute_hash(response)

@@ -46,6 +46,9 @@ from omnibase_infra.services.observability.static_context_attribution.service_st
 )
 from omnibase_infra.services.observability.static_context_attribution.service_token_counter import (
     ServiceTokenCounter,
+    TokenizerFn,
+    estimate_tokens_char_ratio,
+    estimate_tokens_word_boundary,
 )
 from omnibase_infra.services.observability.static_context_attribution.service_utilization_scorer import (
     ServiceUtilizationScorer,
@@ -61,4 +64,7 @@ __all__ = [
     "ServiceStaticContextParser",
     "ServiceTokenCounter",
     "ServiceUtilizationScorer",
+    "TokenizerFn",
+    "estimate_tokens_char_ratio",
+    "estimate_tokens_word_boundary",
 ]

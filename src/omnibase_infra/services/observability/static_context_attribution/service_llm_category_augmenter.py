@@ -146,20 +146,40 @@ class ServiceLlmCategoryAugmenter:
             if raw_category in _CATEGORY_MAP:
                 return _CATEGORY_MAP[raw_category]
 
-            # Try partial match (LLM might return extra text).
-            # Prefer the longest matching key so that e.g. "error_handling"
-            # wins over "error", and "documentation about architecture"
-            # matches "architecture" (12 chars) over "documentation" only
-            # when both appear.  "uncategorized" is excluded from partial
-            # matching because it is the fallback default.
+            # Extract first token to reduce false-positive partial matches
+            # on verbose LLM responses (e.g. "config - this section contains...")
+            tokens = raw_category.split()
+            first_token = tokens[0] if tokens else raw_category
+
+            # Try first-token direct match
+            if first_token in _CATEGORY_MAP:
+                return _CATEGORY_MAP[first_token]
+
+            # Try partial match against first token, then fall back to
+            # full response.  Prefer the longest matching key so that
+            # e.g. "error_handling" wins over "error", and
+            # "documentation about architecture" matches "architecture"
+            # (12 chars) over "documentation" only when both appear.
+            # "uncategorized" is excluded from partial matching because
+            # it is the fallback default.
             best_match: EnumContextSectionCategory | None = None
             best_key_len = 0
             for key, member in _CATEGORY_MAP.items():
                 if key == "uncategorized":
                     continue
-                if key in raw_category and len(key) > best_key_len:
+                if key in first_token and len(key) > best_key_len:
                     best_match = member
                     best_key_len = len(key)
+
+            # Fall back to full response partial match if first token
+            # did not produce a result
+            if best_match is None:
+                for key, member in _CATEGORY_MAP.items():
+                    if key == "uncategorized":
+                        continue
+                    if key in raw_category and len(key) > best_key_len:
+                        best_match = member
+                        best_key_len = len(key)
             if best_match is not None:
                 return best_match
 
