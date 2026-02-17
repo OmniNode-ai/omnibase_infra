@@ -2501,6 +2501,19 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (Pydantic Model Standards)
     ticket: OMN-2310
+  # ==========================================================================
+  # Pricing Model Exemptions (OMN-2239) - model_id is an LLM model name
+  # ==========================================================================
+  # model_id is an LLM model name (e.g., "claude-opus-4-6", "qwen2.5-coder-14b"),
+  # not a UUID entity reference. The _id suffix triggers a false positive UUID suggestion.
+  - file_pattern: 'model_cost_estimate\.py'
+    violation_pattern: "Field 'model_id' should use UUID"
+    reason: >
+      model_id is a human-readable LLM model name (e.g., 'claude-opus-4-6'), not a UUID. The _id suffix triggers a false positive UUID suggestion.
+
+    documentation:
+      - CLAUDE.md (Pydantic Model Standards)
+    ticket: OMN-2239
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
