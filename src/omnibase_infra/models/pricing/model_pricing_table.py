@@ -120,6 +120,9 @@ class ModelPricingTable(BaseModel):
             ``estimated_cost_usd=None`` if the model is not in the
             pricing manifest.
         """
+        if prompt_tokens < 0 or completion_tokens < 0:
+            raise ValueError("Token counts must be non-negative")
+
         entry = self.models.get(model_id)
         if entry is None:
             logger.debug(
@@ -230,7 +233,7 @@ class ModelPricingTable(BaseModel):
             ValueError: If required fields are missing or malformed.
         """
         schema_version = data.get("schema_version")
-        if not schema_version:
+        if schema_version is None:
             raise ValueError(
                 "Pricing manifest missing required field: 'schema_version'"
             )

@@ -23,6 +23,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import datetime
 import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -94,6 +95,12 @@ class ModelPricingEntry(BaseModel):
         """
         if not _ISO_DATE_RE.match(v):
             raise ValueError(f"effective_date must be YYYY-MM-DD format, got: {v!r}")
+        try:
+            datetime.date.fromisoformat(v)
+        except ValueError:
+            raise ValueError(
+                f"effective_date is not a valid calendar date: {v!r}"
+            ) from None
         return v
 
 

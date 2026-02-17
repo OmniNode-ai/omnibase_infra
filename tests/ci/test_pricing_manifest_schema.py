@@ -11,21 +11,16 @@ Related Tickets:
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 import yaml
 
 from omnibase_infra.models.pricing.model_pricing_entry import ModelPricingEntry
-from omnibase_infra.models.pricing.model_pricing_table import ModelPricingTable
-
-_MANIFEST_PATH = (
-    Path(__file__).resolve().parent.parent.parent
-    / "src"
-    / "omnibase_infra"
-    / "configs"
-    / "pricing_manifest.yaml"
+from omnibase_infra.models.pricing.model_pricing_table import (
+    _DEFAULT_MANIFEST_PATH,
+    ModelPricingTable,
 )
+
+_MANIFEST_PATH = _DEFAULT_MANIFEST_PATH
 
 
 @pytest.mark.unit
