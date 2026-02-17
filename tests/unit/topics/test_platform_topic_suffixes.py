@@ -28,6 +28,9 @@ from omnibase_infra.topics import (
     SUFFIX_REGISTRY_REQUEST_INTROSPECTION,
     SUFFIX_REQUEST_INTROSPECTION,
     SUFFIX_RUNTIME_TICK,
+    SUFFIX_TOPIC_CATALOG_CHANGED,
+    SUFFIX_TOPIC_CATALOG_QUERY,
+    SUFFIX_TOPIC_CATALOG_RESPONSE,
 )
 
 pytestmark = [pytest.mark.unit]
@@ -56,6 +59,9 @@ class TestPlatformTopicSuffixes:
             SUFFIX_CONTRACT_REGISTERED,
             SUFFIX_CONTRACT_DEREGISTERED,
             SUFFIX_NODE_REGISTRATION_ACKED,
+            SUFFIX_TOPIC_CATALOG_QUERY,
+            SUFFIX_TOPIC_CATALOG_RESPONSE,
+            SUFFIX_TOPIC_CATALOG_CHANGED,
         }
         assert set(ALL_PLATFORM_SUFFIXES) == expected_suffixes
 
