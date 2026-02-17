@@ -271,8 +271,9 @@ class BatchComputeEffectivenessMetrics:
             Number of rows written.
         """
         # This query:
-        # 1. Groups agent_routing_decisions by correlation_id (one session per correlation)
-        # 2. JOINs with agent_actions to compute action success rates
+        # 1. Iterates agent_routing_decisions rows, deduplicating by session_id
+        #    via ON CONFLICT DO NOTHING (no GROUP BY; one row per routing decision)
+        # 2. LATERAL JOINs with agent_actions to compute action success rates
         # 3. Derives utilization_score from completed/total action ratio
         # 4. Sets agent_match_score and expected_agent to NULL (not yet tracked)
         # 5. Computes user_visible_latency_ms from MAX(duration_ms)
@@ -384,8 +385,13 @@ class BatchComputeEffectivenessMetrics:
                 aa.created_at AS emitted_at,
                 NOW() AS created_at
             FROM agent_actions aa
-            LEFT JOIN agent_routing_decisions rd
-                ON rd.correlation_id = aa.correlation_id
+            LEFT JOIN LATERAL (
+                SELECT sub.confidence_score
+                FROM agent_routing_decisions sub
+                WHERE sub.correlation_id = aa.correlation_id
+                ORDER BY sub.created_at DESC
+                LIMIT 1
+            ) rd ON TRUE
             WHERE aa.duration_ms IS NOT NULL
                 AND aa.duration_ms > 0
                 AND NOT EXISTS (

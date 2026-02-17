@@ -82,14 +82,14 @@ class TestModelEffectivenessInvalidationEvent:
         )
         assert event.event_type == "effectiveness_data_changed"
 
-    def test_empty_tables_allowed(self) -> None:
-        """Empty tuple is technically valid (no tables affected)."""
-        event = ModelEffectivenessInvalidationEvent(
-            tables_affected=(),
-            rows_written=0,
-            source="batch_compute",
-        )
-        assert event.tables_affected == ()
+    def test_empty_tables_rejected(self) -> None:
+        """Empty tuple is semantically meaningless and must be rejected."""
+        with pytest.raises(ValidationError):
+            ModelEffectivenessInvalidationEvent(
+                tables_affected=(),
+                rows_written=0,
+                source="batch_compute",
+            )
 
     def test_unknown_table_name_rejected(self) -> None:
         """Validator rejects table names not in the known set."""

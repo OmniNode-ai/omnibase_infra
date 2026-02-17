@@ -56,6 +56,7 @@ class ModelEffectivenessInvalidationEvent(BaseModel):
     )
     tables_affected: tuple[str, ...] = Field(
         ...,
+        min_length=1,
         description=(
             "Names of tables that were updated. Possible values: "
             "injection_effectiveness, latency_breakdowns, pattern_hit_rates"
