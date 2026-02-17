@@ -552,23 +552,33 @@ cleanup_on_exit() {
         fi
     fi
 
-    # If a --force backup exists, restore it so the previous working
-    # deployment is not lost after a failed overwrite.
+    # If a --force backup exists, decide whether to restore it or clean it up
+    # based on how far the deployment progressed.
     if [[ -n "${FORCE_BACKUP_DIR}" && -d "${FORCE_BACKUP_DIR}" ]]; then
         # Derive the original deployment directory from the backup path.
         # Backup convention: {deploy_target}.bak -> restore to {deploy_target}
         local original_dir="${FORCE_BACKUP_DIR%.bak}"
-        log_warn "Restoring previous deployment from backup: ${FORCE_BACKUP_DIR}"
-        # Remove the (possibly partial) new deployment first
-        rm -rf "${original_dir}" 2>/dev/null || true
-        if ! mv "${FORCE_BACKUP_DIR}" "${original_dir}" 2>/dev/null; then
-            log_error "================================================================="
-            log_error "CRITICAL: Failed to restore previous deployment from backup!"
-            log_error "Backup location: ${FORCE_BACKUP_DIR}"
-            log_error "Expected restore target: ${original_dir}"
-            log_error "Manual recovery required: mv '${FORCE_BACKUP_DIR}' '${original_dir}'"
-            log_error "================================================================="
+        if [[ -n "${DEPLOY_DIR_TO_CLEANUP}" ]]; then
+            # Pre-registry failure: the new deployment is partial and not yet
+            # recorded in registry.json. Remove it and restore the backup so
+            # the previous working deployment is not lost.
+            log_warn "Restoring previous deployment from backup: ${FORCE_BACKUP_DIR}"
+            rm -rf "${original_dir}" 2>/dev/null || true
+            if ! mv "${FORCE_BACKUP_DIR}" "${original_dir}" 2>/dev/null; then
+                log_error "================================================================="
+                log_error "CRITICAL: Failed to restore previous deployment from backup!"
+                log_error "Backup location: ${FORCE_BACKUP_DIR}"
+                log_error "Expected restore target: ${original_dir}"
+                log_error "Manual recovery required: mv '${FORCE_BACKUP_DIR}' '${original_dir}'"
+                log_error "================================================================="
+            fi
+        else
+            # Post-registry: the new deployment is complete and registered.
+            # The backup is stale -- just clean it up.
+            log_info "Cleaning up stale backup: ${FORCE_BACKUP_DIR}"
+            rm -rf "${FORCE_BACKUP_DIR}" 2>/dev/null || true
         fi
+        FORCE_BACKUP_DIR=""
     fi
 
     # Release concurrency lock
@@ -1340,14 +1350,6 @@ main() {
     # Registry now points to this deployment -- disable partial cleanup
     DEPLOY_DIR_TO_CLEANUP=""
 
-    # The new deployment is now the active deployment. Remove the --force
-    # backup (if any) since we no longer need to restore it on failure.
-    if [[ -n "${FORCE_BACKUP_DIR}" && -d "${FORCE_BACKUP_DIR}" ]]; then
-        log_info "Removing previous deployment backup: ${FORCE_BACKUP_DIR}"
-        rm -rf "${FORCE_BACKUP_DIR}"
-        FORCE_BACKUP_DIR=""
-    fi
-
     # Phase 10: Build
     build_images "${deploy_target}" "${compose_project}" "${git_sha}"
 
@@ -1366,6 +1368,16 @@ main() {
 
     # Phase 14: Prune old deployments
     prune_old_deployments
+
+    # All phases completed successfully. Remove the --force backup (if any)
+    # since the new deployment is fully built and running. This is intentionally
+    # placed AFTER build and restart so that cleanup_on_exit can still restore
+    # the backup if Docker build or container restart fails.
+    if [[ -n "${FORCE_BACKUP_DIR}" && -d "${FORCE_BACKUP_DIR}" ]]; then
+        log_info "Removing previous deployment backup: ${FORCE_BACKUP_DIR}"
+        rm -rf "${FORCE_BACKUP_DIR}"
+        FORCE_BACKUP_DIR=""
+    fi
 }
 
 main "$@"
