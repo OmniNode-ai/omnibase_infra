@@ -28,6 +28,7 @@ Return Type:
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from uuid import UUID, uuid4
 
@@ -47,6 +48,7 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
+    InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
     RuntimeHostError,
@@ -121,6 +123,7 @@ class HandlerInfisical(
         self._circuit_breaker_initialized: bool = False
         # Handler-owned cache: secret_key -> CacheEntry
         self._cache: dict[str, CacheEntry] = {}
+        self._cache_lock = threading.Lock()
         # Metrics
         self._cache_hits: int = 0
         self._cache_misses: int = 0
@@ -198,6 +201,21 @@ class HandlerInfisical(
                 transport_type=EnumInfraTransportType.INFISICAL,
                 operation="initialize",
             )
+            # Check if the original cause is already an auth error
+            if isinstance(e.__cause__, InfraAuthenticationError):
+                raise e.__cause__ from e
+            # Check error context transport type hints if available
+            if (
+                hasattr(e, "context")
+                and e.context is not None
+                and hasattr(e.context, "transport_type")
+                and str(e.context.transport_type).lower() == "auth"
+            ):
+                raise InfraAuthenticationError(
+                    "Infisical authentication failed",
+                    context=ctx,
+                ) from e
+            # Fall back to string matching as secondary heuristic
             error_msg = str(e)
             if "auth" in error_msg.lower() or "credential" in error_msg.lower():
                 raise InfraAuthenticationError(
@@ -243,7 +261,8 @@ class HandlerInfisical(
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
-        self._cache.clear()
+        with self._cache_lock:
+            self._cache.clear()
         self._initialized = False
         self._config = None
         self._circuit_breaker_initialized = False
@@ -352,7 +371,13 @@ class HandlerInfisical(
 
             return result
 
-        except (RuntimeHostError, SecretResolutionError, InfraUnavailableError):
+        except (
+            RuntimeHostError,
+            SecretResolutionError,
+            InfraUnavailableError,
+            InfraAuthenticationError,
+            InfraTimeoutError,
+        ):
             raise
         except Exception as e:
             # Record circuit breaker failure
@@ -406,32 +431,33 @@ class HandlerInfisical(
             payload.get("secret_path"),
         )
 
-        cached = self._cache.get(cache_key)
-        if cached is not None and not cached.is_expired:
-            self._cache_hits += 1
-            logger.debug(
-                "Cache hit for secret",
-                extra={
-                    "correlation_id": str(correlation_id),
-                    "cache_hit": True,
-                },
-            )
-            # NOTE: SecretStr must be unwrapped here because for_compute()
-            # enforces JSON-ledger-safe types only. The consumer (SecretResolver)
-            # re-wraps the value in SecretStr at the resolution boundary.
-            return ModelHandlerOutput.for_compute(
-                handler_id=HANDLER_ID_INFISICAL,
-                correlation_id=correlation_id,
-                input_envelope_id=input_envelope_id,
-                result={
-                    "secret_name": secret_name,
-                    "value": cached.value.get_secret_value(),
-                    "source": "cache",
-                },
-            )
+        with self._cache_lock:
+            cached = self._cache.get(cache_key)
+            if cached is not None and not cached.is_expired:
+                self._cache_hits += 1
+                logger.debug(
+                    "Cache hit for secret",
+                    extra={
+                        "correlation_id": str(correlation_id),
+                        "cache_hit": True,
+                    },
+                )
+                # NOTE: SecretStr must be unwrapped here because for_compute()
+                # enforces JSON-ledger-safe types only. The consumer (SecretResolver)
+                # re-wraps the value in SecretStr at the resolution boundary.
+                return ModelHandlerOutput.for_compute(
+                    handler_id=HANDLER_ID_INFISICAL,
+                    correlation_id=correlation_id,
+                    input_envelope_id=input_envelope_id,
+                    result={
+                        "secret_name": secret_name,
+                        "value": cached.value.get_secret_value(),
+                        "source": "cache",
+                    },
+                )
 
-        self._cache_misses += 1
-        self._total_fetches += 1
+            self._cache_misses += 1
+            self._total_fetches += 1
 
         # Fetch from Infisical - extract optional overrides with type narrowing
         raw_project = payload.get("project_id")
@@ -447,11 +473,12 @@ class HandlerInfisical(
 
         # Cache the result (with eviction if over limit)
         if self._config.cache_ttl_seconds > 0:
-            self._maybe_evict_cache()
-            self._cache[cache_key] = CacheEntry(
-                value=result.value,
-                ttl=self._config.cache_ttl_seconds,
-            )
+            with self._cache_lock:
+                self._maybe_evict_cache()
+                self._cache[cache_key] = CacheEntry(
+                    value=result.value,
+                    ttl=self._config.cache_ttl_seconds,
+                )
 
         # Audit log (no secret values)
         logger.info(
@@ -488,7 +515,8 @@ class HandlerInfisical(
         if self._adapter is None:
             raise RuntimeError("Adapter not initialized - call initialize() first")
 
-        self._total_fetches += 1
+        with self._cache_lock:
+            self._total_fetches += 1
 
         raw_project = payload.get("project_id")
         raw_env = payload.get("environment_slug")
@@ -556,25 +584,27 @@ class HandlerInfisical(
         to_fetch: list[str] = []
 
         # Check cache for each secret
-        for name in secret_names:
-            cache_key = self._build_cache_key(
-                name,
-                payload.get("project_id"),
-                payload.get("environment_slug"),
-                payload.get("secret_path"),
-            )
-            cached = self._cache.get(cache_key)
-            if cached is not None and not cached.is_expired:
-                self._cache_hits += 1
-                results[name] = cached.value.get_secret_value()
-                from_cache.append(name)
-            else:
-                self._cache_misses += 1
-                to_fetch.append(name)
+        with self._cache_lock:
+            for name in secret_names:
+                cache_key = self._build_cache_key(
+                    name,
+                    payload.get("project_id"),
+                    payload.get("environment_slug"),
+                    payload.get("secret_path"),
+                )
+                cached = self._cache.get(cache_key)
+                if cached is not None and not cached.is_expired:
+                    self._cache_hits += 1
+                    results[name] = cached.value.get_secret_value()
+                    from_cache.append(name)
+                else:
+                    self._cache_misses += 1
+                    to_fetch.append(name)
 
         # Fetch remaining from Infisical
         if to_fetch:
-            self._total_fetches += 1
+            with self._cache_lock:
+                self._total_fetches += 1
             raw_project = payload.get("project_id")
             raw_env = payload.get("environment_slug")
             raw_path = payload.get("secret_path")
@@ -598,11 +628,12 @@ class HandlerInfisical(
                         payload.get("environment_slug"),
                         payload.get("secret_path"),
                     )
-                    self._maybe_evict_cache()
-                    self._cache[cache_key] = CacheEntry(
-                        value=secret_result.value,
-                        ttl=self._config.cache_ttl_seconds,
-                    )
+                    with self._cache_lock:
+                        self._maybe_evict_cache()
+                        self._cache[cache_key] = CacheEntry(
+                            value=secret_result.value,
+                            ttl=self._config.cache_ttl_seconds,
+                        )
 
             errors = batch_result.errors
 
@@ -686,15 +717,19 @@ class HandlerInfisical(
             Dict with handler type, category, operations, and metrics.
             Never exposes credentials.
         """
+        with self._cache_lock:
+            cache_hits = self._cache_hits
+            cache_misses = self._cache_misses
+            total_fetches = self._total_fetches
         return {
             "handler_type": self.handler_type.value,
             "handler_category": self.handler_category.value,
             "supported_operations": sorted(SUPPORTED_OPERATIONS),
             "cache_ttl_seconds": self._config.cache_ttl_seconds if self._config else 0,
             "initialized": self._initialized,
-            "cache_hits": self._cache_hits,
-            "cache_misses": self._cache_misses,
-            "total_fetches": self._total_fetches,
+            "cache_hits": cache_hits,
+            "cache_misses": cache_misses,
+            "total_fetches": total_fetches,
             "version": "0.1.0",
         }
 
@@ -731,13 +766,14 @@ class HandlerInfisical(
         cache_key = self._build_cache_key(
             secret_name, project_id, environment_slug, secret_path
         )
-        cached = self._cache.get(cache_key)
-        if cached is not None and not cached.is_expired:
-            self._cache_hits += 1
-            return cached.value
+        with self._cache_lock:
+            cached = self._cache.get(cache_key)
+            if cached is not None and not cached.is_expired:
+                self._cache_hits += 1
+                return cached.value
 
-        self._cache_misses += 1
-        self._total_fetches += 1
+            self._cache_misses += 1
+            self._total_fetches += 1
 
         result = self._adapter.get_secret(
             secret_name=secret_name,
@@ -748,11 +784,12 @@ class HandlerInfisical(
 
         # Cache the result (with eviction if over limit)
         if self._config.cache_ttl_seconds > 0:
-            self._maybe_evict_cache()
-            self._cache[cache_key] = CacheEntry(
-                value=result.value,
-                ttl=self._config.cache_ttl_seconds,
-            )
+            with self._cache_lock:
+                self._maybe_evict_cache()
+                self._cache[cache_key] = CacheEntry(
+                    value=result.value,
+                    ttl=self._config.cache_ttl_seconds,
+                )
 
         return result.value
 
@@ -766,15 +803,16 @@ class HandlerInfisical(
         Returns:
             Number of cache entries invalidated.
         """
-        if secret_name is None:
-            count = len(self._cache)
-            self._cache.clear()
-            return count
+        with self._cache_lock:
+            if secret_name is None:
+                count = len(self._cache)
+                self._cache.clear()
+                return count
 
-        to_remove = [k for k in self._cache if k.endswith(f"::{secret_name}")]
-        for k in to_remove:
-            del self._cache[k]
-        return len(to_remove)
+            to_remove = [k for k in self._cache if k.endswith(f"::{secret_name}")]
+            for k in to_remove:
+                del self._cache[k]
+            return len(to_remove)
 
 
 __all__: list[str] = ["HandlerInfisical", "HANDLER_ID_INFISICAL"]

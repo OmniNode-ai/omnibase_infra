@@ -308,6 +308,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         self._file_loads = 0
         self._env_loads = 0
         self._vault_loads = 0
+        self._infisical_loads = 0
         self._async_key_lock_cleanups = 0  # Track cleanup events for observability
 
         # RLock (Reentrant Lock) is REQUIRED - DO NOT CHANGE TO REGULAR LOCK.
@@ -323,6 +324,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         #       -> _load_from_file() [updates _file_loads]
         #       -> _load_from_env() [updates _env_loads]
         #       -> _resolve_vault_refs() [updates _vault_loads]
+        #       -> _load_from_infisical() [updates _infisical_loads]
         #     -> _cache_config() [updates _misses, _lru_evictions]
         #
         # With a regular threading.Lock, this would cause DEADLOCK because:
@@ -756,6 +758,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 file_loads=self._file_loads,
                 env_loads=self._env_loads,
                 vault_loads=self._vault_loads,
+                infisical_loads=self._infisical_loads,
                 async_key_lock_count=len(self._async_key_locks),
                 async_key_lock_cleanups=self._async_key_lock_cleanups,
             )
@@ -1921,12 +1924,20 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 context=context,
             )
 
-        logical_name = infisical_path
+        # Build the full path for the Infisical reader (includes #field if present)
+        infisical_full_path = infisical_path
         if fragment:
-            logical_name = f"{infisical_path}#{fragment}"
+            infisical_full_path = f"{infisical_path}#{fragment}"
 
+        # Call the Infisical reader directly instead of going through
+        # get_secret() which requires a pre-registered mapping. This mirrors
+        # how the path is a raw Infisical secret path, not a logical name.
         try:
-            secret = secret_resolver.get_secret(logical_name, required=True)
+            secret_value = secret_resolver._read_infisical_secret_sync(
+                infisical_full_path,
+                logical_name=infisical_path,
+                correlation_id=correlation_id,
+            )
         except (SecretResolutionError, NotImplementedError) as e:
             logger.debug(
                 "Infisical configuration retrieval failed (correlation_id=%s): %s",
@@ -1946,7 +1957,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 context=context,
             )
 
-        if secret is None:
+        if secret_value is None:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.INFISICAL,
@@ -1957,8 +1968,6 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 "Infisical secret not found",
                 context=context,
             )
-
-        secret_value = secret.get_secret_value()
         data: object = None
         try:
             data = json.loads(secret_value)
@@ -1988,6 +1997,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 "Infisical secret must contain a dictionary",
                 context=context,
             )
+
+        with self._lock:
+            self._infisical_loads += 1
 
         return data
 
@@ -2024,12 +2036,20 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 context=context,
             )
 
-        logical_name = infisical_path
+        # Build the full path for the Infisical reader (includes #field if present)
+        infisical_full_path = infisical_path
         if fragment:
-            logical_name = f"{infisical_path}#{fragment}"
+            infisical_full_path = f"{infisical_path}#{fragment}"
 
+        # Call the Infisical reader directly instead of going through
+        # get_secret_async() which requires a pre-registered mapping. This mirrors
+        # how the path is a raw Infisical secret path, not a logical name.
         try:
-            secret = await secret_resolver.get_secret_async(logical_name, required=True)
+            secret_value = await secret_resolver._read_infisical_secret_async(
+                infisical_full_path,
+                logical_name=infisical_path,
+                correlation_id=correlation_id,
+            )
         except (SecretResolutionError, NotImplementedError) as e:
             logger.debug(
                 "Infisical configuration retrieval failed async "
@@ -2050,7 +2070,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 context=context,
             )
 
-        if secret is None:
+        if secret_value is None:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.INFISICAL,
@@ -2061,8 +2081,6 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 "Infisical secret not found",
                 context=context,
             )
-
-        secret_value = secret.get_secret_value()
         data: object = None
         try:
             data = json.loads(secret_value)
@@ -2092,6 +2110,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 "Infisical secret must contain a dictionary",
                 context=context,
             )
+
+        with self._lock:
+            self._infisical_loads += 1
 
         return data
 

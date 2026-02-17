@@ -123,6 +123,7 @@ Observability (OMN-1374):
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import random
@@ -414,7 +415,7 @@ class SecretResolver:
         Args:
             config: Resolver configuration with mappings and TTLs
             vault_handler: Optional Vault handler for Vault-sourced secrets
-                (deprecated: prefer infisical_handler)
+                (for new deployments, consider infisical_handler as an alternative)
             infisical_handler: Optional HandlerInfisical for Infisical-sourced
                 secrets (OMN-2286). Typed as ``object`` to avoid circular imports.
             metrics_collector: Optional external metrics collector for observability
@@ -2118,11 +2119,19 @@ class SecretResolver:
             secret_path = path
             field = None
 
+        # Extract the last path segment as the secret key name.
+        # Infisical paths may contain slashes (e.g., "projects/env/DB_PASSWORD")
+        # but the adapter's get_secret_by_name() expects a flat key like "DB_PASSWORD".
+        if "/" in secret_path:
+            secret_name = secret_path.rsplit("/", 1)[1]
+        else:
+            secret_name = secret_path
+
         # For sync access, use the handler's public get_secret_sync() method
         # (handler.execute is async, so we use the sync API instead)
         try:
             secret_value = self._infisical_handler.get_secret_sync(
-                secret_name=secret_path
+                secret_name=secret_name
             )
             if secret_value is None:
                 return None
@@ -2130,8 +2139,6 @@ class SecretResolver:
             if field:
                 # If field is specified, try to parse value as JSON and extract field
                 try:
-                    import json
-
                     data = json.loads(value)
                     if isinstance(data, dict):
                         field_value = data.get(field)
@@ -2176,10 +2183,18 @@ class SecretResolver:
 
         # Parse path
         if "#" in path:
-            secret_name, field = path.rsplit("#", 1)
+            raw_path, field = path.rsplit("#", 1)
         else:
-            secret_name = path
+            raw_path = path
             field = None
+
+        # Extract the last path segment as the secret key name.
+        # Infisical paths may contain slashes (e.g., "projects/env/DB_PASSWORD")
+        # but the adapter's get_secret_by_name() expects a flat key like "DB_PASSWORD".
+        if "/" in raw_path:
+            secret_name = raw_path.rsplit("/", 1)[1]
+        else:
+            secret_name = raw_path
 
         envelope: dict[str, object] = {
             "operation": "infisical.get_secret",
@@ -2204,8 +2219,6 @@ class SecretResolver:
 
             if field:
                 try:
-                    import json
-
                     data = json.loads(value_str)
                     if isinstance(data, dict):
                         field_value = data.get(field)

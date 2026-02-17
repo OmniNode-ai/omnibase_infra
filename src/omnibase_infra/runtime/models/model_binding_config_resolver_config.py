@@ -178,7 +178,8 @@ class ModelBindingConfigResolverConfig(BaseModel):
     # Secret resolution error handling behavior (applies to all secret backends:
     # vault:, infisical:, and any future secret schemes).  Named
     # ``fail_on_vault_error`` for historical reasons; renaming would be a
-    # breaking change across the codebase.
+    # breaking change across the codebase.  Use the ``fail_on_secret_error``
+    # property alias for backend-neutral code.
     fail_on_vault_error: bool = Field(
         default=False,
         description="If True, raise ProtocolConfigurationError when a secret "
@@ -186,8 +187,20 @@ class ModelBindingConfigResolverConfig(BaseModel):
         "error and keep the original placeholder value (which may be insecure). "
         "Set to True in production to prevent silent security fallbacks. "
         "Despite the name, this flag governs ALL secret backend resolution "
-        "errors, not only Vault.",
+        "errors, not only Vault. Prefer the ``fail_on_secret_error`` property "
+        "alias for backend-neutral code.",
     )
+
+    @property
+    def fail_on_secret_error(self) -> bool:
+        """Backend-neutral alias for ``fail_on_vault_error``.
+
+        This property delegates to ``fail_on_vault_error`` and exists so that
+        callers do not need to reference a Vault-specific name when the flag
+        actually governs all secret backends (Vault, Infisical, and any future
+        secret schemes).
+        """
+        return self.fail_on_vault_error
 
     # Cache size limit with LRU eviction
     max_cache_entries: int | None = Field(

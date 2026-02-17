@@ -40,7 +40,10 @@ from omnibase_infra.adapters.models.model_infisical_secret_result import (
 )
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
+    InfraAuthenticationError,
     InfraConnectionError,
+    InfraTimeoutError,
+    InfraUnavailableError,
     ModelInfraErrorContext,
     SecretResolutionError,
 )
@@ -217,6 +220,13 @@ class AdapterInfisical:
                 secret_path=effective_path,
                 environment=effective_env,
             )
+        except (
+            SecretResolutionError,
+            InfraAuthenticationError,
+            InfraTimeoutError,
+            InfraUnavailableError,
+        ):
+            raise
         except Exception as e:
             self._loads_failed += 1
             sanitized_path = sanitize_secret_path(effective_path)
@@ -299,6 +309,13 @@ class AdapterInfisical:
             self._loads_success += 1
 
             return secrets
+        except (
+            SecretResolutionError,
+            InfraAuthenticationError,
+            InfraTimeoutError,
+            InfraUnavailableError,
+        ):
+            raise
         except Exception as e:
             self._loads_failed += 1
             sanitized_path = sanitize_secret_path(effective_path)
