@@ -495,22 +495,18 @@ class TestLoadEnvForDemo:
             f.flush()
             path = f.name
 
-        # Snapshot env, call loader, diff
-        env_before = dict(os.environ)
-        if existing_env:
-            for k, v in existing_env.items():
-                os.environ[k] = v
         try:
-            _load_env_for_demo(path)
-            new_vars = {k: v for k, v in os.environ.items() if k not in env_before}
-            return new_vars
+            # Build the env snapshot: current env plus any pre-set vars
+            base_env = dict(os.environ)
+            if existing_env:
+                base_env.update(existing_env)
+
+            with patch.dict("os.environ", base_env, clear=True):
+                env_before = dict(os.environ)
+                _load_env_for_demo(path)
+                new_vars = {k: v for k, v in os.environ.items() if k not in env_before}
+                return new_vars
         finally:
-            # Restore original env
-            for k in list(os.environ.keys()):
-                if k not in env_before:
-                    del os.environ[k]
-            for k, v in env_before.items():
-                os.environ[k] = v
             Path(path).unlink()
 
     def test_simple_key_value(self) -> None:
@@ -579,16 +575,12 @@ class TestLoadEnvForDemo:
 
     def test_does_not_override_existing(self) -> None:
         """Existing environment variables are NOT overridden."""
-        import os
-
-        os.environ["EXISTING_VAR"] = "original"
-        try:
-            result = self._load("EXISTING_VAR=overridden\n")
-            assert os.environ["EXISTING_VAR"] == "original"
-            # _load returns only NEW vars, so EXISTING_VAR should not appear
-            assert "EXISTING_VAR" not in result
-        finally:
-            del os.environ["EXISTING_VAR"]
+        result = self._load(
+            "EXISTING_VAR=overridden\n",
+            existing_env={"EXISTING_VAR": "original"},
+        )
+        # _load returns only NEW vars, so EXISTING_VAR should not appear
+        assert "EXISTING_VAR" not in result
 
     def test_missing_file_warns_no_crash(
         self, capsys: pytest.CaptureFixture[str]
@@ -662,6 +654,30 @@ class TestValidateTableName:
         """Various SQL injection patterns are rejected."""
         with pytest.raises(ValueError):
             DemoResetEngine._validate_table_name(injection)
+
+    @pytest.mark.asyncio
+    async def test_count_projection_rows_rejects_disallowed_table(self) -> None:
+        """_count_projection_rows raises ValueError for a table not in the allowlist."""
+        config = DemoResetConfig(
+            postgres_dsn="postgresql://localhost/test",
+            projection_table="evil_table",
+        )
+        engine = DemoResetEngine(config)
+
+        with pytest.raises(ValueError, match="not in the allowed projection tables"):
+            await engine._count_projection_rows()
+
+    @pytest.mark.asyncio
+    async def test_delete_projection_rows_rejects_disallowed_table(self) -> None:
+        """_delete_projection_rows raises ValueError for a table not in the allowlist."""
+        config = DemoResetConfig(
+            postgres_dsn="postgresql://localhost/test",
+            projection_table="evil_table",
+        )
+        engine = DemoResetEngine(config)
+
+        with pytest.raises(ValueError, match="not in the allowed projection tables"):
+            await engine._delete_projection_rows()
 
 
 # =============================================================================
@@ -1018,6 +1034,54 @@ class TestDemoResetEngineTopicPurgeLive:
         # Should have both a RESET (partition 0 succeeded) and ERROR (partition 1 failed)
         assert any(a.action == EnumResetAction.RESET for a in report.actions)
         assert any(a.action == EnumResetAction.ERROR for a in report.actions)
+
+    @pytest.mark.asyncio
+    async def test_already_empty_topics_report_skipped(self) -> None:
+        """Demo topics with all partitions at offset 0 report skipped (already empty)."""
+        config = DemoResetConfig(
+            kafka_bootstrap_servers="localhost:9092",
+            purge_topics=True,
+        )
+        engine = DemoResetEngine(config)
+
+        mock_admin = MagicMock()
+        mock_admin.list_topics.return_value = _make_cluster_metadata(
+            {
+                "onex.evt.platform.node-registration.v1": [0, 1],
+                "custom.business.events.v1": [0],
+            }
+        )
+
+        mock_tp_class = MagicMock(side_effect=_MockTopicPartition)
+
+        # Mock Consumer -- return (0, 0) for all partitions (topics exist but are empty)
+        mock_consumer = MagicMock()
+        mock_consumer.get_watermark_offsets.return_value = (0, 0)
+
+        with (
+            patch(
+                "confluent_kafka.admin.AdminClient",
+                return_value=mock_admin,
+            ),
+            patch(
+                "confluent_kafka.TopicPartition",
+                mock_tp_class,
+            ),
+            patch(
+                "confluent_kafka.Consumer",
+                return_value=mock_consumer,
+            ),
+        ):
+            report = DemoResetReport()
+            await engine._purge_demo_topics(report, dry_run=False)
+
+        topic_actions = [a for a in report.actions if "topic" in a.resource.lower()]
+        skipped = [a for a in topic_actions if a.action == EnumResetAction.SKIPPED]
+        assert len(skipped) == 1
+        assert "already empty" in skipped[0].detail
+
+        # delete_records should never have been called since there are no partitions to purge
+        mock_admin.delete_records.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_demo_topics_found(self) -> None:

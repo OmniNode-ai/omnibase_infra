@@ -627,7 +627,8 @@ class DemoResetEngine:
                     )
 
             # Record non-demo groups as preserved
-            non_demo = [g for g in all_groups if g not in demo_groups]
+            demo_groups_set = set(demo_groups)
+            non_demo = [g for g in all_groups if g not in demo_groups_set]
             if non_demo:
                 report.actions.append(
                     ResetActionResult(
@@ -812,6 +813,17 @@ class DemoResetEngine:
                                 detail="; ".join(errors[:5]),
                             )
                         )
+                else:
+                    report.actions.append(
+                        ResetActionResult(
+                            resource="Demo topic data",
+                            action=EnumResetAction.SKIPPED,
+                            detail=(
+                                "Demo topics exist but all partitions are "
+                                "already empty — nothing to purge"
+                            ),
+                        )
+                    )
 
             # Record non-demo topics as preserved
             if non_demo_topics:
