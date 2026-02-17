@@ -170,7 +170,7 @@ class ModelBindingConfigResolverConfig(BaseModel):
 
     # Allowed config_ref schemes (for security)
     allowed_schemes: frozenset[str] = Field(
-        default=frozenset({"file", "env", "vault"}),
+        default=frozenset({"file", "env", "vault", "infisical"}),
         description="Set of allowed config_ref URI schemes for security. "
         "Only these schemes can be used in config_ref values.",
     )
@@ -320,7 +320,7 @@ class ModelBindingConfigResolverConfig(BaseModel):
             raise ValueError(msg)
 
         # Known valid schemes
-        valid_schemes = {"file", "env", "vault"}
+        valid_schemes = {"file", "env", "vault", "infisical"}
         unknown_schemes = value - valid_schemes
 
         if unknown_schemes:
