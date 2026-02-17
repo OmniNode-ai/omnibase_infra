@@ -2,11 +2,6 @@
 # Copyright (c) 2025 OmniNode Team
 """HashiCorp Vault Handler - MVP implementation using hvac async client.
 
-.. deprecated:: 0.9.0
-    Vault handler is deprecated in favor of ``HandlerInfisical`` (OMN-2286).
-    New code should use the Infisical handler. This handler remains functional
-    for existing deployments but will not receive new features.
-
 Supports secret management operations with configurable retry logic and
 automatic token renewal management.
 

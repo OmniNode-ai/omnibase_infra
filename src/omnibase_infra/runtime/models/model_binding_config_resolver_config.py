@@ -21,7 +21,7 @@ Example:
             cache_ttl_seconds=600.0,
             env_prefix="ONEX_HANDLER",
             strict_validation=True,
-            fail_on_vault_error=True,  # Fail on vault: resolution errors
+            fail_on_secret_error=True,  # Fail on secret resolution errors
             max_cache_entries=100,  # LRU eviction after 100 entries
         )
 """
@@ -67,10 +67,10 @@ class ModelBindingConfigResolverConfig(BaseModel):
             If False, log warning and skip. Default is False.
         allowed_schemes: Set of allowed config_ref URI schemes for security.
             Only these schemes can be used in config_ref values.
-        fail_on_vault_error: If True, fail when secret references (vault: or
+        fail_on_secret_error: If True, fail when secret references (vault: or
             infisical:) cannot be resolved. If False, keep placeholder (may be
-            insecure). Default is False. Despite the name, this flag governs all
-            secret backend resolution errors.
+            insecure). Default is False. This flag governs all secret backend
+            resolution errors.
         max_cache_entries: Maximum cache entries before LRU eviction.
             None means unlimited. Default is None. Only applies when
             enable_caching=True. To disable caching, use enable_caching=False.
@@ -100,7 +100,7 @@ class ModelBindingConfigResolverConfig(BaseModel):
                 cache_ttl_seconds=300.0,
                 env_prefix="ONEX_HANDLER",
                 strict_validation=True,
-                fail_on_vault_error=True,  # Fail on vault: resolution errors
+                fail_on_secret_error=True,  # Fail on secret resolution errors
                 max_cache_entries=100,  # LRU eviction after 100 entries
                 allow_symlinks=False,  # Reject symlinks for security
             )
@@ -176,31 +176,14 @@ class ModelBindingConfigResolverConfig(BaseModel):
     )
 
     # Secret resolution error handling behavior (applies to all secret backends:
-    # vault:, infisical:, and any future secret schemes).  Named
-    # ``fail_on_vault_error`` for historical reasons; renaming would be a
-    # breaking change across the codebase.  Use the ``fail_on_secret_error``
-    # property alias for backend-neutral code.
-    fail_on_vault_error: bool = Field(
+    # vault:, infisical:, and any future secret schemes).
+    fail_on_secret_error: bool = Field(
         default=False,
         description="If True, raise ProtocolConfigurationError when a secret "
         "reference (vault: or infisical:) fails to resolve. If False, log an "
         "error and keep the original placeholder value (which may be insecure). "
-        "Set to True in production to prevent silent security fallbacks. "
-        "Despite the name, this flag governs ALL secret backend resolution "
-        "errors, not only Vault. Prefer the ``fail_on_secret_error`` property "
-        "alias for backend-neutral code.",
+        "Set to True in production to prevent silent security fallbacks.",
     )
-
-    @property
-    def fail_on_secret_error(self) -> bool:
-        """Backend-neutral alias for ``fail_on_vault_error``.
-
-        This property delegates to ``fail_on_vault_error`` and exists so that
-        callers do not need to reference a Vault-specific name when the flag
-        actually governs all secret backends (Vault, Infisical, and any future
-        secret schemes).
-        """
-        return self.fail_on_vault_error
 
     # Cache size limit with LRU eviction
     max_cache_entries: int | None = Field(

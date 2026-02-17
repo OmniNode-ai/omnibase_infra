@@ -18,7 +18,7 @@ Supported Reference Formats:
         env:HANDLER_CONFIG_JSON                # JSON config in env var
         env:DATABASE_CONFIG_YAML               # YAML config in env var
 
-    Vault secret references (deprecated: use infisical:)::
+    Vault secret references::
 
         vault:secret/data/handlers/db#config   # Specific field from secret
         vault:secret/data/handlers/db          # Whole secret as JSON/YAML

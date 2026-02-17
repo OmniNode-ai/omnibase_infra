@@ -307,7 +307,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         self._refreshes = 0
         self._file_loads = 0
         self._env_loads = 0
-        self._vault_loads = 0
+        self._secret_loads = 0
         self._infisical_loads = 0
         self._async_key_lock_cleanups = 0  # Track cleanup events for observability
 
@@ -323,7 +323,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         #     -> _resolve_config() [no lock needed directly]
         #       -> _load_from_file() [updates _file_loads]
         #       -> _load_from_env() [updates _env_loads]
-        #       -> _resolve_vault_refs() [updates _vault_loads]
+        #       -> _resolve_vault_refs() [updates _secret_loads]
         #       -> _load_from_infisical() [updates _infisical_loads]
         #     -> _cache_config() [updates _misses, _lru_evictions]
         #
@@ -757,7 +757,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 lru_evictions=self._lru_evictions,
                 file_loads=self._file_loads,
                 env_loads=self._env_loads,
-                vault_loads=self._vault_loads,
+                secret_loads=self._secret_loads,
                 infisical_loads=self._infisical_loads,
                 async_key_lock_count=len(self._async_key_locks),
                 async_key_lock_cleanups=self._async_key_lock_cleanups,
@@ -1772,7 +1772,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             )
 
         with self._lock:
-            self._vault_loads += 1
+            self._secret_loads += 1
 
         return data
 
@@ -1884,7 +1884,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             )
 
         with self._lock:
-            self._vault_loads += 1
+            self._secret_loads += 1
 
         return data
 
@@ -2457,7 +2457,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_vault_error is True and a vault reference fails.
+                or if fail_on_secret_error is True and a vault reference fails.
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
             context = ModelInfraErrorContext.with_correlation(
@@ -2474,8 +2474,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         secret_resolver = self._get_secret_resolver()
         if secret_resolver is None:
             # Check if there are vault references that need resolution
-            # If fail_on_vault_error is True and vault refs exist, this is a security issue
-            if self._config.fail_on_vault_error and self._has_vault_references(config):
+            # If fail_on_secret_error is True and vault refs exist, this is a security issue
+            if self._config.fail_on_secret_error and self._has_vault_references(config):
                 context = ModelInfraErrorContext.with_correlation(
                     correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.RUNTIME,
@@ -2500,8 +2500,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret is not None:
                         result[key] = secret.get_secret_value()
                     else:
-                        # Secret not found - check fail_on_vault_error
-                        if self._config.fail_on_vault_error:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
                             logger.error(
                                 "Vault secret not found for config key '%s'",
                                 key,
@@ -2538,8 +2538,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             "config_key": key,
                         },
                     )
-                    # Respect fail_on_vault_error config option
-                    if self._config.fail_on_vault_error:
+                    # Respect fail_on_secret_error config option
+                    if self._config.fail_on_secret_error:
                         context = ModelInfraErrorContext.with_correlation(
                             correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.VAULT,
@@ -2592,7 +2592,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_vault_error is True and a vault reference fails.
+                or if fail_on_secret_error is True and a vault reference fails.
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
             context = ModelInfraErrorContext.with_correlation(
@@ -2618,8 +2618,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret is not None:
                         result.append(secret.get_secret_value())
                     else:
-                        # Secret not found - check fail_on_vault_error
-                        if self._config.fail_on_vault_error:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
                             logger.error(
                                 "Vault secret not found at list index %d",
                                 i,
@@ -2655,7 +2655,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             "list_index": i,
                         },
                     )
-                    if self._config.fail_on_vault_error:
+                    if self._config.fail_on_secret_error:
                         context = ModelInfraErrorContext.with_correlation(
                             correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.VAULT,
@@ -2701,7 +2701,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_vault_error is True and a vault reference fails.
+                or if fail_on_secret_error is True and a vault reference fails.
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
             context = ModelInfraErrorContext.with_correlation(
@@ -2718,8 +2718,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         secret_resolver = self._get_secret_resolver()
         if secret_resolver is None:
             # Check if there are vault references that need resolution
-            # If fail_on_vault_error is True and vault refs exist, this is a security issue
-            if self._config.fail_on_vault_error and self._has_vault_references(config):
+            # If fail_on_secret_error is True and vault refs exist, this is a security issue
+            if self._config.fail_on_secret_error and self._has_vault_references(config):
                 context = ModelInfraErrorContext.with_correlation(
                     correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.RUNTIME,
@@ -2746,8 +2746,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret is not None:
                         result[key] = secret.get_secret_value()
                     else:
-                        # Secret not found - check fail_on_vault_error
-                        if self._config.fail_on_vault_error:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
                             logger.error(
                                 "Vault secret not found for config key '%s'",
                                 key,
@@ -2784,8 +2784,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             "config_key": key,
                         },
                     )
-                    # Respect fail_on_vault_error config option
-                    if self._config.fail_on_vault_error:
+                    # Respect fail_on_secret_error config option
+                    if self._config.fail_on_secret_error:
                         context = ModelInfraErrorContext.with_correlation(
                             correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.VAULT,
@@ -2840,7 +2840,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_vault_error is True and a vault reference fails.
+                or if fail_on_secret_error is True and a vault reference fails.
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
             context = ModelInfraErrorContext.with_correlation(
@@ -2868,8 +2868,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret is not None:
                         result.append(secret.get_secret_value())
                     else:
-                        # Secret not found - check fail_on_vault_error
-                        if self._config.fail_on_vault_error:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
                             logger.error(
                                 "Vault secret not found at list index %d",
                                 i,
@@ -2905,7 +2905,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             "list_index": i,
                         },
                     )
-                    if self._config.fail_on_vault_error:
+                    if self._config.fail_on_secret_error:
                         context = ModelInfraErrorContext.with_correlation(
                             correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.VAULT,
@@ -2959,8 +2959,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if ``fail_on_vault_error`` is True and an infisical reference
-                fails.  (``fail_on_vault_error`` governs all secret backends
+                or if ``fail_on_secret_error`` is True and an infisical reference
+                fails.  (``fail_on_secret_error`` governs all secret backends
                 despite its Vault-centric name.)
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
@@ -2978,7 +2978,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         secret_resolver = self._get_secret_resolver()
         if secret_resolver is None:
             if self._has_infisical_references(config):
-                if self._config.fail_on_vault_error:
+                if self._config.fail_on_secret_error:
                     context = ModelInfraErrorContext.with_correlation(
                         correlation_id=correlation_id,
                         transport_type=EnumInfraTransportType.INFISICAL,
@@ -3013,8 +3013,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret_value is not None:
                         result[key] = secret_value
                     else:
-                        # Secret not found - check fail_on_vault_error
-                        if self._config.fail_on_vault_error:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
                             logger.error(
                                 "Infisical secret not found for config key '%s'",
                                 key,
@@ -3050,8 +3050,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             "config_key": key,
                         },
                     )
-                    # Respect fail_on_vault_error config option
-                    if self._config.fail_on_vault_error:
+                    # Respect fail_on_secret_error config option
+                    if self._config.fail_on_secret_error:
                         context = ModelInfraErrorContext.with_correlation(
                             correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.INFISICAL,
@@ -3102,8 +3102,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if ``fail_on_vault_error`` is True and an infisical reference
-                fails.  (``fail_on_vault_error`` governs all secret backends
+                or if ``fail_on_secret_error`` is True and an infisical reference
+                fails.  (``fail_on_secret_error`` governs all secret backends
                 despite its Vault-centric name.)
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
@@ -3121,7 +3121,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         secret_resolver = self._get_secret_resolver()
         if secret_resolver is None:
             if self._has_infisical_references(config):
-                if self._config.fail_on_vault_error:
+                if self._config.fail_on_secret_error:
                     context = ModelInfraErrorContext.with_correlation(
                         correlation_id=correlation_id,
                         transport_type=EnumInfraTransportType.INFISICAL,
@@ -3156,8 +3156,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret_value is not None:
                         result[key] = secret_value
                     else:
-                        # Secret not found - check fail_on_vault_error
-                        if self._config.fail_on_vault_error:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
                             logger.error(
                                 "Infisical secret not found for config key '%s'",
                                 key,
@@ -3193,8 +3193,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             "config_key": key,
                         },
                     )
-                    # Respect fail_on_vault_error config option
-                    if self._config.fail_on_vault_error:
+                    # Respect fail_on_secret_error config option
+                    if self._config.fail_on_secret_error:
                         context = ModelInfraErrorContext.with_correlation(
                             correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.INFISICAL,
@@ -3282,8 +3282,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if ``fail_on_vault_error`` is True and an infisical reference
-                fails.  (``fail_on_vault_error`` governs all secret backends
+                or if ``fail_on_secret_error`` is True and an infisical reference
+                fails.  (``fail_on_secret_error`` governs all secret backends
                 despite its Vault-centric name.)
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
@@ -3319,8 +3319,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret_value is not None:
                         result.append(secret_value)
                     else:
-                        # Secret not found - check fail_on_vault_error
-                        if self._config.fail_on_vault_error:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
                             logger.error(
                                 "Infisical secret not found at list index %d",
                                 i,
@@ -3356,7 +3356,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             "list_index": i,
                         },
                     )
-                    if self._config.fail_on_vault_error:
+                    if self._config.fail_on_secret_error:
                         context = ModelInfraErrorContext.with_correlation(
                             correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.INFISICAL,
@@ -3409,8 +3409,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if ``fail_on_vault_error`` is True and an infisical reference
-                fails.  (``fail_on_vault_error`` governs all secret backends
+                or if ``fail_on_secret_error`` is True and an infisical reference
+                fails.  (``fail_on_secret_error`` governs all secret backends
                 despite its Vault-centric name.)
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
@@ -3446,8 +3446,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret_value is not None:
                         result.append(secret_value)
                     else:
-                        # Secret not found - check fail_on_vault_error
-                        if self._config.fail_on_vault_error:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
                             logger.error(
                                 "Infisical secret not found at list index %d",
                                 i,
@@ -3483,7 +3483,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             "list_index": i,
                         },
                     )
-                    if self._config.fail_on_vault_error:
+                    if self._config.fail_on_secret_error:
                         context = ModelInfraErrorContext.with_correlation(
                             correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.INFISICAL,

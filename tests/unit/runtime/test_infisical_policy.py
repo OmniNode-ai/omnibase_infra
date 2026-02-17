@@ -17,11 +17,8 @@ class TestModelInfisicalPolicy:
         policy = ModelInfisicalPolicy()
         assert policy.policy_name == "INFISICAL_REQUIRED"
         assert policy.enforce is True
-        assert policy.reject_vault is True
         assert "infisical" in policy.allowed_source_types
-        assert "env" in policy.allowed_source_types
-        assert "file" in policy.allowed_source_types
-        assert "vault" not in policy.allowed_source_types
+        assert policy.allowed_source_types == frozenset({"infisical"})
 
     def test_policy_immutable(self) -> None:
         """Test policy is frozen/immutable."""

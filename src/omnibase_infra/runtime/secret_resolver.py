@@ -415,9 +415,8 @@ class SecretResolver:
         Args:
             config: Resolver configuration with mappings and TTLs
             vault_handler: Optional Vault handler for Vault-sourced secrets
-                (for new deployments, consider infisical_handler as an alternative)
             infisical_handler: Optional HandlerInfisical for Infisical-sourced
-                secrets (OMN-2286). Typed as ``object`` to avoid circular imports.
+                secrets (OMN-2286).
             metrics_collector: Optional external metrics collector for observability
 
         Note:

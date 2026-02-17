@@ -22,7 +22,7 @@ class EnumConfigRefScheme(str, Enum):
     Attributes:
         FILE: File-based configuration (local filesystem).
         ENV: Environment variable containing configuration.
-        VAULT: HashiCorp Vault secret containing configuration (deprecated: use INFISICAL).
+        VAULT: HashiCorp Vault secret containing configuration.
         INFISICAL: Infisical secret containing configuration (OMN-2286).
     """
 

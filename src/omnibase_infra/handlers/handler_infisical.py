@@ -19,7 +19,7 @@ Return Type:
     handlers return synchronous result data rather than emitting events to the event bus.
     ``for_effect()`` returns ``ModelHandlerOutput[None]`` with ``events`` tuple, which is
     intended for event-emitting orchestrator patterns. This is consistent with all other
-    EFFECT-category handlers (HandlerVault, HandlerConsul, HandlerDb, HandlerHttp, etc.).
+    EFFECT-category handlers (HandlerConsul, HandlerDb, HandlerHttp, etc.).
 
 .. versionadded:: 0.9.0
     Initial implementation for OMN-2286.
@@ -36,6 +36,7 @@ from pydantic import SecretStr
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.dispatch import ModelHandlerOutput
+from omnibase_infra import __version__ as _pkg_version
 from omnibase_infra.adapters._internal.adapter_infisical import (
     AdapterInfisical,
     ModelInfisicalAdapterConfig,
@@ -209,7 +210,7 @@ class HandlerInfisical(
                 hasattr(e, "context")
                 and e.context is not None
                 and hasattr(e.context, "transport_type")
-                and str(e.context.transport_type).lower() == "auth"
+                and str(getattr(e.context, "transport_type", None)).lower() == "auth"
             ):
                 raise InfraAuthenticationError(
                     "Infisical authentication failed",
@@ -730,7 +731,7 @@ class HandlerInfisical(
             "cache_hits": cache_hits,
             "cache_misses": cache_misses,
             "total_fetches": total_fetches,
-            "version": "0.1.0",
+            "version": _pkg_version,
         }
 
     def get_secret_sync(

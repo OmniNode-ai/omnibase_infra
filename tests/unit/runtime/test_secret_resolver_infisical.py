@@ -39,14 +39,6 @@ class TestSecretSourceTypeInfisical:
         )
         assert spec.source_type == "env"
 
-    def test_vault_still_works(self) -> None:
-        """Test that 'vault' source type still works."""
-        spec = ModelSecretSourceSpec(
-            source_type="vault",
-            source_path="secret/data/db#pass",
-        )
-        assert spec.source_type == "vault"
-
     def test_file_still_works(self) -> None:
         """Test that 'file' source type still works."""
         spec = ModelSecretSourceSpec(
@@ -95,4 +87,3 @@ class TestSecretResolverInfisicalHandler:
         resolver = SecretResolver(config=config)
 
         assert resolver._infisical_handler is None
-        assert resolver._vault_handler is None
