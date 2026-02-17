@@ -664,9 +664,15 @@ def _safe_numeric_or_none(value: object) -> float | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        return round(float(value), 2)
+        fval = float(value)
+        if not math.isfinite(fval):
+            return None
+        return round(fval, 2)
     try:
-        return round(float(str(value)), 2)
+        fval = float(str(value))
+        if not math.isfinite(fval):
+            return None
+        return round(fval, 2)
     except (ValueError, TypeError):
         return None
 
