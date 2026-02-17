@@ -116,11 +116,13 @@ class TestInfraValidatorConstants:
           - ModelPayloadPostgresUpdateRegistration.updates: AckUpdate | HeartbeatUpdate
         - 126 (2026-02-13): OMN-2151 validation checks, artifacts, flake detection (+1 union)
           - ServiceArtifactStore.write_artifact(): content: str | bytes parameter
+        - 127 (2026-02-17): OMN-2239 pricing table manifest loading (+1 union)
+          - ModelPricingTable.from_yaml(): path: Path | str | None parameter
 
-        Current: 126 (as of OMN-2151). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
+        Current: 127 (as of OMN-2239). Target: Keep below 150 - if this grows, consider typed patterns from omnibase_core.
         """
-        assert INFRA_MAX_UNIONS == 126, (
-            "INFRA_MAX_UNIONS should be 126 (non-optional unions only, X | None excluded)"
+        assert INFRA_MAX_UNIONS == 127, (
+            "INFRA_MAX_UNIONS should be 127 (non-optional unions only, X | None excluded)"
         )
 
     def test_infra_max_violations_constant(self) -> None:

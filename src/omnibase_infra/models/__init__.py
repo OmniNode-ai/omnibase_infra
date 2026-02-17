@@ -47,6 +47,11 @@ from omnibase_infra.models.model_node_identity import ModelNodeIdentity
 from omnibase_infra.models.model_retry_error_classification import (
     ModelRetryErrorClassification,
 )
+from omnibase_infra.models.pricing import (
+    ModelCostEstimate,
+    ModelPricingEntry,
+    ModelPricingTable,
+)
 
 # ModelSemVer and SEMVER_DEFAULT must be imported from omnibase_core.models.primitives.model_semver
 # The local model_semver.py has been REMOVED and raises ImportError on import.
@@ -171,6 +176,10 @@ __all__: list[str] = [
     "ModelNodeMetadata",
     "ModelNodeRegistration",
     "ModelParsedTopic",
+    # Pricing models
+    "ModelCostEstimate",
+    "ModelPricingEntry",
+    "ModelPricingTable",
     # Projection models
     "ModelRegistrationProjection",
     # Projector schema models

@@ -463,7 +463,9 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #                     ModelPayloadPostgresUpdateRegistration.updates: AckUpdate | HeartbeatUpdate
 # - 126 (2026-02-13): OMN-2151 validation checks, artifacts, flake detection
 #                     ServiceArtifactStore.write_artifact(): content: str | bytes parameter
-INFRA_MAX_UNIONS = 126
+# - 127 (2026-02-17): OMN-2239 pricing table manifest loading
+#                     ModelPricingTable.from_yaml(): path: Path | str | None parameter
+INFRA_MAX_UNIONS = 127
 
 # Maximum allowed architecture violations in infrastructure code.
 # Set to 0 (strict enforcement) to ensure one-model-per-file principle is always followed.

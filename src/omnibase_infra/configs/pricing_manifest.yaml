@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# LLM Model Pricing Manifest
+#
+# Canonical pricing data for all supported LLM models. Used by
+# ModelPricingTable to compute estimated_cost_usd per LLM call.
+#
+# Update cadence: Manual update via PR. CI validates manifest schema.
+# No auto-fetch from provider APIs.
+#
+# Cost convention:
+#   - Costs are in USD per 1,000 tokens.
+#   - Local models have explicit 0.0 costs (not omitted).
+#   - Unknown models (not listed here) return null cost, NOT 0.
+#
+# Related Tickets:
+#   - OMN-2239: E1-T3 Model pricing table and cost estimation
+#
+# Schema version for compatibility checking.
+schema_version: "1.0.0"
+models:
+  # --- Anthropic Claude models ---
+  claude-opus-4-6:
+    input_cost_per_1k: 0.015
+    output_cost_per_1k: 0.075
+    effective_date: "2026-02-01"
+  claude-sonnet-4-20250514:
+    input_cost_per_1k: 0.003
+    output_cost_per_1k: 0.015
+    effective_date: "2025-05-22"
+  claude-haiku-3-5:
+    input_cost_per_1k: 0.0008
+    output_cost_per_1k: 0.004
+    effective_date: "2025-06-01"
+  # --- OpenAI GPT models ---
+  gpt-4o:
+    input_cost_per_1k: 0.0025
+    output_cost_per_1k: 0.01
+    effective_date: "2025-11-01"
+  gpt-4o-mini:
+    input_cost_per_1k: 0.00015
+    output_cost_per_1k: 0.0006
+    effective_date: "2025-07-01"
+  gpt-4-turbo:
+    input_cost_per_1k: 0.01
+    output_cost_per_1k: 0.03
+    effective_date: "2025-04-01"
+  o1:
+    input_cost_per_1k: 0.015
+    output_cost_per_1k: 0.06
+    effective_date: "2025-12-01"
+  o1-mini:
+    input_cost_per_1k: 0.003
+    output_cost_per_1k: 0.012
+    effective_date: "2025-09-01"
+  o3-mini:
+    input_cost_per_1k: 0.0011
+    output_cost_per_1k: 0.0044
+    effective_date: "2026-01-01"
+  # --- Google Gemini models ---
+  gemini-2.0-flash:
+    input_cost_per_1k: 0.0001
+    output_cost_per_1k: 0.0004
+    effective_date: "2026-02-01"
+  gemini-1.5-pro:
+    input_cost_per_1k: 0.00125
+    output_cost_per_1k: 0.005
+    effective_date: "2025-05-01"
+  # --- Local models (zero API cost) ---
+  qwen2.5-coder-14b:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: "2026-02-01"
+    note: "Local model on RTX 5090 - zero API cost"
+  qwen2.5-72b:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: "2026-02-01"
+    note: "Local model on Mac Studio M2 Ultra - zero API cost"
+  qwen2.5-14b:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: "2026-02-01"
+    note: "Local model on Mac Mini M2 Pro - zero API cost"
+  qwen2.5-7b:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: "2026-02-01"
+    note: "Local model on RTX 4090 (hot-swap) - zero API cost"
+  gte-qwen2-1.5b:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: "2026-02-01"
+    note: "Local embedding model on RTX 4090 - zero API cost"
+  deepseek-v2-lite:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: "2026-02-01"
+    note: "Local model on RTX 4090 (hot-swap) - zero API cost"
+  deepseek-r1-distill:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: "2026-02-01"
+    note: "Local model on Mac Studio M2 Ultra (hot-swap) - zero API cost"
+  qwen2-vl:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: "2026-02-01"
+    note: "Local vision model on Mac Studio M2 Ultra - zero API cost"
