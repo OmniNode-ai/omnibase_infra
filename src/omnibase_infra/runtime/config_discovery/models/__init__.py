@@ -15,9 +15,13 @@ from omnibase_infra.runtime.config_discovery.models.model_config_requirements im
 from omnibase_infra.runtime.config_discovery.models.model_transport_config_spec import (
     ModelTransportConfigSpec,
 )
+from omnibase_infra.runtime.config_discovery.models.protocol_secret_resolver import (
+    ProtocolSecretResolver,
+)
 
 __all__ = [
     "ModelConfigRequirement",
     "ModelConfigRequirements",
     "ModelTransportConfigSpec",
+    "ProtocolSecretResolver",
 ]

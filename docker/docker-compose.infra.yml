@@ -286,15 +286,17 @@ services:
     environment:
       DB_CONNECTION_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for Infisical DB}@postgres:5432/infisical_db
       # Redis URL for Infisical's cache backend (Valkey is Redis-compatible)
-      # NOTE: Default includes the dev password matching VALKEY_PASSWORD default.
-      # If you change VALKEY_PASSWORD, update INFISICAL_REDIS_URL to match.
-      # See docker/.env.example for details.
-      REDIS_URL: ${INFISICAL_REDIS_URL:-redis://:valkey-dev-password@valkey:6379}
-      # SECURITY: Set INFISICAL_ENCRYPTION_KEY and INFISICAL_AUTH_SECRET in .env
-      # for production. Defaults below are for local development only.
+      # NOTE: Uses VALKEY_PASSWORD variable interpolation so changing
+      # VALKEY_PASSWORD automatically updates this URL.
+      # Requires Docker Compose v2.20+ for nested variable expansion.
+      REDIS_URL: ${INFISICAL_REDIS_URL:-redis://:${VALKEY_PASSWORD:-valkey-dev-password}@valkey:6379}
+      # SECURITY: INFISICAL_ENCRYPTION_KEY and INFISICAL_AUTH_SECRET must be set
+      # in .env (or environment). There are no inline defaults -- the service will
+      # refuse to start without them to prevent running with known-insecure keys.
       # Generate with: openssl rand -hex 16 (encryption) / openssl rand -hex 32 (auth)
-      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef}
-      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2}
+      # Development defaults are provided in docker/.env.example.
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:?INFISICAL_ENCRYPTION_KEY must be set in .env}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:?INFISICAL_AUTH_SECRET must be set in .env}
       SITE_URL: ${INFISICAL_SITE_URL:-http://localhost:8880}
       TELEMETRY_ENABLED: "false"
     ports:

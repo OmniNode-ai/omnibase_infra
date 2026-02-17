@@ -2571,6 +2571,19 @@ class RuntimeHostProcess:
                 )
                 return
 
+            # Narrow type: ConfigPrefetcher expects ProtocolSecretResolver
+            from omnibase_infra.runtime.config_discovery.models import (
+                ProtocolSecretResolver,
+            )
+
+            if not isinstance(handler, ProtocolSecretResolver):
+                logger.warning(
+                    "Handler %s does not satisfy ProtocolSecretResolver, "
+                    "skipping config prefetch",
+                    type(handler).__name__,
+                )
+                return
+
             # Step 3: Prefetch through the handler
             service_slug = self._node_identity.service if self._node_identity else ""
             infisical_required = os.environ.get("INFISICAL_REQUIRED", "").lower() in (

@@ -25,7 +25,8 @@ from omnibase_infra.runtime.config_discovery.transport_config_map import (
     TransportConfigMap,
 )
 
-NODES_DIR = Path("/Volumes/PRO-G40/Code/omnibase_infra5/src/omnibase_infra/nodes")
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+NODES_DIR = _REPO_ROOT / "src" / "omnibase_infra" / "nodes"
 
 
 @pytest.mark.skipif(

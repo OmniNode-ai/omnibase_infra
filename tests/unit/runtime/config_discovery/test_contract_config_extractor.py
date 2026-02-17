@@ -225,9 +225,8 @@ handler_routing:
 
     def test_extract_from_real_contracts(self) -> None:
         """Should extract requirements from actual repo contracts."""
-        nodes_dir = Path(
-            "/Volumes/PRO-G40/Code/omnibase_infra5/src/omnibase_infra/nodes"
-        )
+        repo_root = Path(__file__).resolve().parent.parent.parent.parent.parent
+        nodes_dir = repo_root / "src" / "omnibase_infra" / "nodes"
         if not nodes_dir.is_dir():
             pytest.skip("Repo nodes directory not available")
 

@@ -33,8 +33,11 @@ Usage:
         --set-values \\
         --execute
 
-    # Export current Infisical state
+    # Export current Infisical keys (values masked)
     uv run python scripts/seed-infisical.py --export
+
+    # Export with actual values (use with caution -- not for CI logs)
+    uv run python scripts/seed-infisical.py --export --reveal
 
 .. versionadded:: 0.10.0
     Created as part of OMN-2287.
@@ -74,7 +77,7 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
         logger.warning("Env file not found: %s", env_path)
         return values
 
-    for line_no, line in enumerate(env_path.read_text().splitlines(), start=1):
+    for line in env_path.read_text().splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -83,11 +86,13 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
         key, _, value = stripped.partition("=")
         key = key.strip()
         value = value.strip()
+        # Check if value is quoted BEFORE stripping quotes
+        is_quoted = len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"')
         # Strip quotes
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        if is_quoted:
             value = value[1:-1]
         # Strip inline comments (only for unquoted values)
-        if " #" in value and not value.startswith(("'", '"')):
+        if " #" in value and not is_quoted:
             value = value.split(" #")[0].strip()
         if key:
             values[key] = value
@@ -185,6 +190,30 @@ def _print_diff_summary(
     print("\n--- End Diff Summary ---\n")
 
 
+def _load_infisical_credentials() -> tuple[str, str, str, str]:
+    """Load Infisical credentials from environment variables.
+
+    Returns:
+        Tuple of (infisical_addr, client_id, client_secret, project_id).
+
+    Raises:
+        SystemExit: If required credentials are missing.
+    """
+    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
+    client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
+    client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")
+    project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
+
+    if not all([client_id, client_secret, project_id]):
+        logger.error(
+            "Missing Infisical credentials. Set INFISICAL_CLIENT_ID, "
+            "INFISICAL_CLIENT_SECRET, and INFISICAL_PROJECT_ID in environment."
+        )
+        raise SystemExit(1)
+
+    return infisical_addr, client_id, client_secret, project_id
+
+
 def _do_seed(
     requirements: list[dict[str, str]],
     env_values: dict[str, str],
@@ -196,7 +225,9 @@ def _do_seed(
     """Execute the actual seed operation.
 
     Returns:
-        Tuple of (created, updated, skipped) counts.
+        Tuple of (planned, updated, skipped) counts. The ``planned``
+        count tracks secrets that would be created once the Infisical
+        SDK create_secret method is implemented (currently a no-op).
     """
     # This function requires Infisical connectivity.
     # For now, it uses the AdapterInfisical for operations.
@@ -214,16 +245,11 @@ def _do_seed(
         return 0, 0, len(requirements)
 
     # Build adapter config from environment
-    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
-    client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
-    client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")
-    project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
-
-    if not all([client_id, client_secret, project_id]):
-        logger.error(
-            "Missing Infisical credentials. Set INFISICAL_CLIENT_ID, "
-            "INFISICAL_CLIENT_SECRET, and INFISICAL_PROJECT_ID in environment."
+    try:
+        infisical_addr, client_id, client_secret, project_id = (
+            _load_infisical_credentials()
         )
+    except SystemExit:
         return 0, 0, len(requirements)
 
     try:
@@ -239,7 +265,7 @@ def _do_seed(
         logger.exception("Failed to initialize Infisical adapter")
         return 0, 0, len(requirements)
 
-    created = 0
+    planned = 0
     updated = 0
     skipped = 0
 
@@ -256,8 +282,8 @@ def _do_seed(
                     secret_name=key,
                     secret_path=folder,
                 )
-            except Exception:
-                pass  # Key does not exist
+            except Exception as exc:
+                logger.debug("Key check failed for %s at %s: %s", key, folder, exc)
 
             if existing is not None and not overwrite_existing:
                 skipped += 1
@@ -265,19 +291,16 @@ def _do_seed(
                 continue
 
             if create_missing and existing is None:
-                # Create with empty value or .env value
-                value = env_values.get(key, "") if set_values else ""
-                logger.info("Creating %s%s", folder, key)
                 # Note: The adapter's get/list operations work; for creating
                 # we would need the Infisical SDK create_secret method.
-                # For now, log what would be created.
+                # For now, track as planned (not yet implemented).
                 logger.info(
-                    "Would create secret %s at %s (value %s)",
+                    "Planned for creation: %s at %s (value %s)",
                     key,
                     folder,
                     "from .env" if has_value and set_values else "empty",
                 )
-                created += 1
+                planned += 1
 
             elif set_values and has_value:
                 logger.info("Setting %s%s from .env", folder, key)
@@ -291,11 +314,16 @@ def _do_seed(
             skipped += 1
 
     adapter.shutdown()
-    return created, updated, skipped
+    return planned, updated, skipped
 
 
-def _do_export() -> None:
-    """Export current Infisical values to stdout."""
+def _do_export(*, reveal: bool = False) -> None:
+    """Export current Infisical values to stdout.
+
+    Args:
+        reveal: If True, print actual secret values. If False (default),
+            print key names with masked placeholders.
+    """
     try:
         from pydantic import SecretStr
 
@@ -309,29 +337,45 @@ def _do_export() -> None:
         logger.exception("Cannot import Infisical adapter")
         return
 
-    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
-    client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
-    client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")
-    project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
-
-    if not all([client_id, client_secret, project_id]):
-        logger.error("Missing Infisical credentials for export")
+    try:
+        infisical_addr, client_id, client_secret, project_id = (
+            _load_infisical_credentials()
+        )
+    except SystemExit:
         return
 
-    config = ModelInfisicalAdapterConfig(
-        host=infisical_addr,
-        client_id=SecretStr(client_id),
-        client_secret=SecretStr(client_secret),
-        project_id=project_id,  # type: ignore[arg-type]
-    )
-    adapter = AdapterInfisical(config)
-    adapter.initialize()
+    try:
+        config = ModelInfisicalAdapterConfig(
+            host=infisical_addr,
+            client_id=SecretStr(client_id),
+            client_secret=SecretStr(client_secret),
+            project_id=project_id,  # type: ignore[arg-type]
+        )
+        adapter = AdapterInfisical(config)
+        adapter.initialize()
+    except Exception:
+        logger.exception("Failed to initialize Infisical adapter for export")
+        return
 
-    secrets = adapter.list_secrets()
-    for secret in secrets:
-        print(f"{secret.key}={secret.value.get_secret_value()}")
+    try:
+        secrets = adapter.list_secrets()
 
-    adapter.shutdown()
+        if reveal:
+            print(
+                "WARNING: Secret values are being printed in plaintext. "
+                "Do NOT use this output in CI logs or shared terminals.",
+                file=sys.stderr,
+            )
+            print("=" * 72, file=sys.stderr)
+            for secret in secrets:
+                print(f"{secret.key}={secret.value.get_secret_value()}")
+        else:
+            for secret in secrets:
+                print(f"{secret.key}=****")
+    except Exception:
+        logger.exception("Failed to list secrets from Infisical")
+    finally:
+        adapter.shutdown()
 
 
 def main() -> int:
@@ -392,14 +436,20 @@ def main() -> int:
         "--export",
         action="store_true",
         default=False,
-        help="Export current Infisical values to stdout",
+        help="Export current Infisical values to stdout (keys only; use --reveal for values)",
+    )
+    parser.add_argument(
+        "--reveal",
+        action="store_true",
+        default=False,
+        help="Show actual secret values in --export output (use with caution)",
     )
 
     args = parser.parse_args()
 
     # Handle export mode
     if args.export:
-        _do_export()
+        _do_export(reveal=args.reveal)
         return 0
 
     # Extract requirements from contracts
@@ -436,7 +486,7 @@ def main() -> int:
     # Execute or dry-run
     if args.execute:
         logger.info("Executing seed operation...")
-        created, updated, skipped = _do_seed(
+        planned, updated, skipped = _do_seed(
             requirements,
             env_values,
             create_missing=args.create_missing_keys,
@@ -444,8 +494,9 @@ def main() -> int:
             overwrite_existing=args.overwrite_existing,
         )
         logger.info(
-            "Seed complete: %d created, %d updated, %d skipped",
-            created,
+            "Seed complete: %d secrets planned for creation (not yet implemented), "
+            "%d updated, %d skipped",
+            planned,
             updated,
             skipped,
         )

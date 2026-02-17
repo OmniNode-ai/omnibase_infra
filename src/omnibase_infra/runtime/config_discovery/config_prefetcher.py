@@ -37,6 +37,14 @@ from omnibase_infra.runtime.config_discovery.models.model_config_requirements im
 from omnibase_infra.runtime.config_discovery.models.model_transport_config_spec import (
     ModelTransportConfigSpec,
 )
+
+# ProtocolSecretResolver lives in the local models subpackage (not the handler
+# layer), so importing it here does NOT introduce circular imports.  The
+# protocol was created specifically to break the previous circular-import
+# risk that motivated the original ``handler: object`` typing.
+from omnibase_infra.runtime.config_discovery.models.protocol_secret_resolver import (
+    ProtocolSecretResolver,
+)
 from omnibase_infra.runtime.config_discovery.transport_config_map import (
     TransportConfigMap,
 )
@@ -92,16 +100,17 @@ class ConfigPrefetcher:
     def __init__(
         self,
         *,
-        handler: object,
+        handler: ProtocolSecretResolver,
         service_slug: str = "",
         infisical_required: bool = False,
     ) -> None:
         """Initialize the config prefetcher.
 
         Args:
-            handler: A ``HandlerInfisical`` instance (typed as object to
-                avoid circular imports). Must have a ``get_secret_sync``
-                method.
+            handler: Any object satisfying ``ProtocolSecretResolver`` (e.g.
+                ``HandlerInfisical``).  The protocol is defined in the
+                local models subpackage to avoid circular imports with the
+                handler layer.
             service_slug: Optional service name for per-service paths.
                 If empty, shared paths are used.
             infisical_required: If True, missing keys cause errors.
@@ -126,16 +135,8 @@ class ConfigPrefetcher:
         Returns:
             The secret value, or None if not found.
         """
-        get_secret_sync = getattr(self._handler, "get_secret_sync", None)
-        if get_secret_sync is None:
-            logger.error(
-                "Handler does not have get_secret_sync method; cannot prefetch key %s",
-                key,
-            )
-            return None
-
         try:
-            result: SecretStr | None = get_secret_sync(
+            result: SecretStr | None = self._handler.get_secret_sync(
                 secret_name=key,
                 secret_path=spec.infisical_folder,
             )

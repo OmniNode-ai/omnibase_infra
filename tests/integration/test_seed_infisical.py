@@ -14,8 +14,9 @@ from pathlib import Path
 
 import pytest
 
-SCRIPTS_DIR = Path("/Volumes/PRO-G40/Code/omnibase_infra5/scripts")
-NODES_DIR = Path("/Volumes/PRO-G40/Code/omnibase_infra5/src/omnibase_infra/nodes")
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+SCRIPTS_DIR = _REPO_ROOT / "scripts"
+NODES_DIR = _REPO_ROOT / "src" / "omnibase_infra" / "nodes"
 
 
 @pytest.mark.skipif(
