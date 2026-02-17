@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 
-from omnibase_infra.services.observability.static_context_attribution.model_section_attribution import (
+from omnibase_infra.services.observability.static_context_attribution.model_static_context_report import (
     ModelStaticContextReport,
 )
 from omnibase_infra.services.observability.static_context_attribution.service_llm_category_augmenter import (

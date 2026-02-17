@@ -22,6 +22,8 @@ from omnibase_infra.services.observability.static_context_attribution.model_cont
 )
 from omnibase_infra.services.observability.static_context_attribution.model_section_attribution import (
     ModelSectionAttribution,
+)
+from omnibase_infra.services.observability.static_context_attribution.model_static_context_report import (
     ModelStaticContextReport,
 )
 
