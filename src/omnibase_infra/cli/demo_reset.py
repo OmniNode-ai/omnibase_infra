@@ -252,13 +252,11 @@ class PostgresConnectionContext:
     during ``asyncpg.create_pool()``: the partially-initialized pool was
     never closed.
 
-    The connection is established inside ``__aenter__`` with an explicit
-    timeout.  Because the ``connect()`` coroutine is awaited directly
-    (not wrapped in ``asyncio.wait_for``), the ``asyncpg`` driver itself
-    handles cancellation cleanly.  If the timeout fires, the underlying
-    socket is closed by ``asyncpg`` before the ``TimeoutError`` propagates.
-    Regardless of success or failure, ``__aexit__`` always closes the
-    connection if it was opened.
+    The connection is established inside ``__aenter__`` via
+    ``asyncio.wait_for(asyncpg.connect(...), timeout=...)``.  If the
+    timeout fires, ``__aexit__`` still closes any partially-opened
+    connection.  Regardless of success or failure, ``__aexit__`` always
+    closes the connection if it was opened.
     """
 
     def __init__(self, dsn: str, timeout: float) -> None:
@@ -567,17 +565,17 @@ class DemoResetEngine:
                         detail="No demo consumer groups found",
                     )
                 )
-                # Record non-demo groups as preserved
-                non_demo: list[str] = [g for g in all_groups if g not in demo_groups]
-                if non_demo:
+                # Record non-demo groups as preserved (demo_groups is empty,
+                # so all_groups are non-demo)
+                if all_groups:
                     report.actions.append(
                         ResetActionResult(
-                            resource=f"Non-demo consumer groups ({len(non_demo)})",
+                            resource=f"Non-demo consumer groups ({len(all_groups)})",
                             action=EnumResetAction.PRESERVED,
-                            detail=f"Groups preserved: {', '.join(non_demo[:5])}"
+                            detail=f"Groups preserved: {', '.join(all_groups[:5])}"
                             + (
-                                f" (+{len(non_demo) - 5} more)"
-                                if len(non_demo) > 5
+                                f" (+{len(all_groups) - 5} more)"
+                                if len(all_groups) > 5
                                 else ""
                             ),
                         )
