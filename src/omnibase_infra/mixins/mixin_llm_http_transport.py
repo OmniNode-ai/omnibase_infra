@@ -201,8 +201,24 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
     #:    is a routine security operation that should complete without service
     #:    interruption; requiring a restart for secret rotation would create
     #:    unnecessary downtime and discourage frequent rotation.
-    # Parsed at import time; tests that modify LLM_ENDPOINT_CIDR_ALLOWLIST must reset this ClassVar.
+    # Parsed at import time; use _reload_cidr_allowlist() to refresh after env changes.
     LOCAL_LLM_CIDRS: ClassVar[tuple[IPv4Network, ...]] = _parse_cidr_allowlist()
+
+    @classmethod
+    def _reload_cidr_allowlist(cls) -> None:
+        """Re-parse ``LLM_ENDPOINT_CIDR_ALLOWLIST`` and update ``LOCAL_LLM_CIDRS``.
+
+        Primarily for testing: after modifying the ``LLM_ENDPOINT_CIDR_ALLOWLIST``
+        environment variable at runtime, call this method to refresh the cached
+        CIDR allowlist without restarting the process.
+
+        Example::
+
+            os.environ["LLM_ENDPOINT_CIDR_ALLOWLIST"] = "10.0.0.0/8"
+            MixinLlmHttpTransport._reload_cidr_allowlist()
+            # LOCAL_LLM_CIDRS now contains IPv4Network('10.0.0.0/8')
+        """
+        cls.LOCAL_LLM_CIDRS = _parse_cidr_allowlist()
 
     #: Environment variable name for the HMAC shared secret.
     LOCAL_LLM_SECRET_ENV: ClassVar[str] = "LOCAL_LLM_SHARED_SECRET"
@@ -442,7 +458,8 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                         f"allowlist_check:{url}", correlation_id
                     )
                     raise InfraAuthenticationError(
-                        f"DNS resolution returned no results for {hostname}",
+                        f"DNS resolution returned no IPv4 results for {hostname} "
+                        "(IPv6-only hosts are not supported)",
                         context=ctx,
                     )
                 resolved_ip = ip_address(resolved[0][4][0])

@@ -279,6 +279,19 @@ def apply_instance_discriminator(group_id: str, instance_id: str | None) -> str:
         - It is short enough to stay within Kafka's 255-char group_id limit
         - It makes the idempotency check unambiguous
 
+    Important:
+        The ``instance_id`` is **normalized** via
+        :func:`normalize_kafka_identifier` before being appended. This means
+        characters like slashes, spaces, and uppercase letters are transformed
+        (e.g., ``'My Pod/abc'`` becomes ``'my_pod_abc'``). The idempotency
+        check (``group_id.endswith(instance_suffix)``) uses the **normalized**
+        form of ``instance_id``, not the raw input.
+
+        Callers should **not** pre-normalize ``instance_id`` before passing it
+        to this function. If you pass a raw ``instance_id`` on the first call
+        and then a pre-normalized one on a subsequent call (or vice versa), the
+        idempotency check may fail and a double-suffix could be appended.
+
     .. versionadded:: 0.3.1
         Created as part of OMN-2251.
     """

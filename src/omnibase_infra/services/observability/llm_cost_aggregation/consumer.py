@@ -35,7 +35,7 @@ Example:
     >>>
     >>> config = ConfigLlmCostAggregation(
     ...     kafka_bootstrap_servers="localhost:9092",
-    ...     postgres_dsn="postgresql://postgres:secret@localhost:5432/omnibase_infra",
+    ...     postgres_dsn="postgresql://postgres:<password>@localhost:5432/omnibase_infra",
     ... )
     >>> service = ServiceLlmCostAggregator(config)
     >>>
@@ -947,10 +947,22 @@ class ServiceLlmCostAggregator:
 
     def _determine_health_status(
         self,
-        metrics_snapshot: dict[str, object],
+        consumer_metrics: ConsumerMetrics,
         circuit_state: dict[str, JsonType],
     ) -> EnumHealthStatus:
-        """Determine consumer health status based on current state."""
+        """Determine consumer health status based on current state.
+
+        Uses raw ``datetime`` fields from ``ConsumerMetrics`` directly rather
+        than re-parsing ISO strings from a snapshot, avoiding an unnecessary
+        serialization round-trip.
+
+        Args:
+            consumer_metrics: Live metrics object with raw datetime fields.
+            circuit_state: Circuit breaker state dictionary from the writer.
+
+        Returns:
+            Health status enum value.
+        """
         if not self._running:
             return EnumHealthStatus.UNHEALTHY
 
@@ -958,51 +970,38 @@ class ServiceLlmCostAggregator:
         if circuit_breaker_state in ("open", "half_open"):
             return EnumHealthStatus.DEGRADED
 
-        last_poll = metrics_snapshot.get("last_poll_at")
-        if last_poll is not None:
-            try:
-                last_poll_dt = datetime.fromisoformat(str(last_poll))
-                poll_age_seconds = (datetime.now(UTC) - last_poll_dt).total_seconds()
-                if poll_age_seconds > self._config.health_check_poll_staleness_seconds:
-                    return EnumHealthStatus.DEGRADED
-            except (ValueError, TypeError):
-                pass
+        now = datetime.now(UTC)
 
-        last_write = metrics_snapshot.get("last_successful_write_at")
-        messages_received = metrics_snapshot.get("messages_received", 0)
-
-        if last_write is None:
-            started_at_str = metrics_snapshot.get("started_at")
-            if started_at_str is not None:
-                try:
-                    started_at_dt = datetime.fromisoformat(str(started_at_str))
-                    age_seconds = (datetime.now(UTC) - started_at_dt).total_seconds()
-                    if age_seconds <= self._config.startup_grace_period_seconds:
-                        return EnumHealthStatus.HEALTHY
-                    return EnumHealthStatus.DEGRADED
-                except (ValueError, TypeError):
-                    return EnumHealthStatus.HEALTHY
-            return EnumHealthStatus.HEALTHY
-
-        try:
-            last_write_dt = datetime.fromisoformat(str(last_write))
-            write_age_seconds = (datetime.now(UTC) - last_write_dt).total_seconds()
-            if (
-                write_age_seconds > self._config.health_check_staleness_seconds
-                and isinstance(messages_received, int)
-                and messages_received > 0
-            ):
+        last_poll_dt = consumer_metrics.last_poll_at
+        if last_poll_dt is not None:
+            poll_age_seconds = (now - last_poll_dt).total_seconds()
+            if poll_age_seconds > self._config.health_check_poll_staleness_seconds:
                 return EnumHealthStatus.DEGRADED
-            return EnumHealthStatus.HEALTHY
-        except (ValueError, TypeError):
-            return EnumHealthStatus.HEALTHY
+
+        last_write_dt = consumer_metrics.last_successful_write_at
+        messages_received = consumer_metrics.messages_received
+
+        if last_write_dt is None:
+            started_at_dt = consumer_metrics.started_at
+            age_seconds = (now - started_at_dt).total_seconds()
+            if age_seconds <= self._config.startup_grace_period_seconds:
+                return EnumHealthStatus.HEALTHY
+            return EnumHealthStatus.DEGRADED
+
+        write_age_seconds = (now - last_write_dt).total_seconds()
+        if (
+            write_age_seconds > self._config.health_check_staleness_seconds
+            and messages_received > 0
+        ):
+            return EnumHealthStatus.DEGRADED
+        return EnumHealthStatus.HEALTHY
 
     async def _health_handler(self, request: web.Request) -> web.Response:
         """Handle health check requests."""
         metrics_snapshot = await self.metrics.snapshot()
         circuit_state = self._writer.get_circuit_breaker_state() if self._writer else {}
 
-        status = self._determine_health_status(metrics_snapshot, circuit_state)
+        status = self._determine_health_status(self.metrics, circuit_state)
 
         response_body = {
             "status": status.value,
@@ -1068,7 +1067,7 @@ class ServiceLlmCostAggregator:
         metrics_snapshot = await self.metrics.snapshot()
         circuit_state = self._writer.get_circuit_breaker_state() if self._writer else {}
 
-        status = self._determine_health_status(metrics_snapshot, circuit_state)
+        status = self._determine_health_status(self.metrics, circuit_state)
 
         return {
             "status": status.value,

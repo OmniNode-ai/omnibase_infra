@@ -242,12 +242,27 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         # database persistence to prevent data loss on write failures.
         unique_events: list[tuple[str, dict[str, object]]] = []
         seen_in_batch: set[str] = set()
+        empty_dedup_fields_count = 0
         async with self._dedup_lock:
             for event in events:
                 event_id = _derive_stable_dedup_key(event)
+                if _has_empty_dedup_fields(event):
+                    empty_dedup_fields_count += 1
                 if not self._is_duplicate(event_id) and event_id not in seen_in_batch:
                     unique_events.append((event_id, event))
                     seen_in_batch.add(event_id)
+
+        if empty_dedup_fields_count > 0:
+            logger.warning(
+                "Batch contained %d event(s) with all dedup fallback fields empty; "
+                "deduplication may not work correctly for these events",
+                empty_dedup_fields_count,
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "total_events": len(events),
+                    "empty_dedup_fields_count": empty_dedup_fields_count,
+                },
+            )
 
         if not unique_events:
             logger.debug(
@@ -416,14 +431,29 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         unique_events: list[dict[str, object]] = []
         agg_dedup_keys: list[str] = []
         seen_in_batch: set[str] = set()
+        empty_dedup_fields_count = 0
         async with self._dedup_lock:
             for event in events:
                 event_id = _derive_stable_dedup_key(event)
+                if _has_empty_dedup_fields(event):
+                    empty_dedup_fields_count += 1
                 dedup_key = f"agg:{event_id}"
                 if not self._is_duplicate(dedup_key) and dedup_key not in seen_in_batch:
                     unique_events.append(event)
                     agg_dedup_keys.append(dedup_key)
                     seen_in_batch.add(dedup_key)
+
+        if empty_dedup_fields_count > 0:
+            logger.warning(
+                "Aggregation batch contained %d event(s) with all dedup fallback "
+                "fields empty; deduplication may not work correctly for these events",
+                empty_dedup_fields_count,
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "total_events": len(events),
+                    "empty_dedup_fields_count": empty_dedup_fields_count,
+                },
+            )
 
         if not unique_events:
             return 0
@@ -544,11 +574,13 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
 def _derive_stable_dedup_key(event: dict[str, object]) -> str:
     """Derive a stable deduplication key from event fields.
 
-    When ``input_hash`` is present, it is used directly. Otherwise, a composite
-    key is built from ``correlation_id``, ``model_id``, and ``created_at``
-    (falling back to ``session_id``) and hashed with SHA-256 to produce a
-    deterministic, replay-safe dedup key. This ensures events without
-    ``input_hash`` can still be deduplicated on consumer replay.
+    When ``input_hash`` is present and at least 8 characters long, it is used
+    directly. Shorter values are considered unreliable (e.g., truncated or
+    placeholder) and fall through to the composite hash path. Otherwise, a
+    composite key is built from ``correlation_id``, ``model_id``, and
+    ``created_at`` (falling back to ``session_id``) and hashed with SHA-256
+    to produce a deterministic, replay-safe dedup key. This ensures events
+    without ``input_hash`` can still be deduplicated on consumer replay.
 
     Note: If multiple events share the same (correlation_id, model_id) pair
     and lack created_at/session_id, they will produce identical dedup keys.
@@ -561,8 +593,15 @@ def _derive_stable_dedup_key(event: dict[str, object]) -> str:
         A stable string suitable for dedup cache lookup.
     """
     input_hash = str(event.get("input_hash", "")).strip()
-    if input_hash:
+    if len(input_hash) >= 8:
         return input_hash
+
+    if input_hash:
+        logger.debug(
+            "input_hash too short (%d chars) to be a reliable dedup key; "
+            "falling through to composite hash",
+            len(input_hash),
+        )
 
     # Build a composite key from stable event fields
     parts = [
@@ -572,17 +611,43 @@ def _derive_stable_dedup_key(event: dict[str, object]) -> str:
         str(event.get("session_id", "")),
     ]
 
-    # Warn when all fallback fields are empty -- the resulting hash will be
-    # identical for every such event, defeating dedup.
+    # Log at debug level per-event to avoid noise when a producer
+    # systematically omits these fields.  Callers may emit a batch-level
+    # summary warning instead.
     if all(p == "" for p in parts):
-        logger.warning(
+        logger.debug(
             "All dedup fallback fields are empty; deduplication may not work "
-            "correctly for events without identifiers (correlation_id, model_id, "
+            "correctly for this event (correlation_id, model_id, "
             "created_at, session_id are all absent or empty)",
         )
 
     composite = "|".join(parts)
     return hashlib.sha256(composite.encode("utf-8")).hexdigest()
+
+
+def _has_empty_dedup_fields(event: dict[str, object]) -> bool:
+    """Check whether all dedup fallback fields are empty for an event.
+
+    Used by batch-level callers to count events with unreliable dedup keys
+    and emit a single summary warning per batch.
+
+    Args:
+        event: Event dictionary.
+
+    Returns:
+        True if correlation_id, model_id, created_at, and session_id are
+        all absent or empty AND input_hash is also absent or too short.
+    """
+    input_hash = str(event.get("input_hash", "")).strip()
+    if len(input_hash) >= 8:
+        return False
+    parts = [
+        str(event.get("correlation_id", "")),
+        str(event.get("model_id", "")),
+        str(event.get("created_at", "")),
+        str(event.get("session_id", "")),
+    ]
+    return all(p == "" for p in parts)
 
 
 # Pre-compiled regex for control characters (C0 + C1 control codes).

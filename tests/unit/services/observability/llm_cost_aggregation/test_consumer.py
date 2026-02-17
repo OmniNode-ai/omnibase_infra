@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from aiokafka import TopicPartition
 
 from omnibase_infra.services.observability.llm_cost_aggregation.config import (
     ConfigLlmCostAggregation,
@@ -531,7 +532,6 @@ class TestProcessBatch:
         mock_writer.write_cost_aggregates.assert_awaited_once()
 
         # Offsets should track highest per partition
-        from aiokafka import TopicPartition
 
         tp0 = TopicPartition("onex.evt.omniintelligence.llm-call-completed.v1", 0)
         tp1 = TopicPartition("onex.evt.omniintelligence.llm-call-completed.v1", 1)
@@ -562,7 +562,6 @@ class TestProcessBatch:
         mock_writer.write_call_metrics.assert_awaited_once()
 
         # Offsets should still be tracked (raw metrics succeeded)
-        from aiokafka import TopicPartition
 
         tp = TopicPartition("onex.evt.omniintelligence.llm-call-completed.v1", 0)
         assert offsets[tp] == 10
@@ -592,8 +591,6 @@ class TestProcessBatch:
         ]
         correlation_id = uuid4()
         offsets = await service_with_writer._process_batch(messages, correlation_id)
-
-        from aiokafka import TopicPartition
 
         tp = TopicPartition("onex.evt.omniintelligence.llm-call-completed.v1", 0)
         assert offsets[tp] == 7  # Highest offset
@@ -651,7 +648,6 @@ class TestProcessBatch:
         assert len(events_arg) == 1
 
         # Highest offset should be tracked across both null and valid
-        from aiokafka import TopicPartition
 
         tp = TopicPartition("onex.evt.omniintelligence.llm-call-completed.v1", 0)
         assert offsets[tp] == 2  # Highest across skipped + successful

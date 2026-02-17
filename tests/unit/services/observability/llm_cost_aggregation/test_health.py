@@ -129,6 +129,23 @@ class TestEnumHealthStatus:
 # =============================================================================
 
 
+def _make_consumer_metrics(
+    *,
+    messages_received: int = 0,
+    last_poll_at: datetime | None = None,
+    last_successful_write_at: datetime | None = None,
+    started_at: datetime | None = None,
+) -> ConsumerMetrics:
+    """Build a ConsumerMetrics object with specified field values."""
+    metrics = ConsumerMetrics()
+    metrics.messages_received = messages_received
+    metrics.last_poll_at = last_poll_at
+    metrics.last_successful_write_at = last_successful_write_at
+    if started_at is not None:
+        metrics.started_at = started_at
+    return metrics
+
+
 @pytest.mark.unit
 class TestDetermineHealthStatus:
     """Tests for _determine_health_status logic."""
@@ -139,15 +156,15 @@ class TestDetermineHealthStatus:
         """All conditions good returns HEALTHY."""
         service._running = True
         now = datetime.now(UTC)
-        snapshot = _make_metrics_snapshot(
+        metrics = _make_consumer_metrics(
             messages_received=10,
-            last_poll_at=(now - timedelta(seconds=5)).isoformat(),
-            last_successful_write_at=(now - timedelta(seconds=10)).isoformat(),
-            started_at=(now - timedelta(minutes=5)).isoformat(),
+            last_poll_at=now - timedelta(seconds=5),
+            last_successful_write_at=now - timedelta(seconds=10),
+            started_at=now - timedelta(minutes=5),
         )
         circuit_state: dict[str, object] = {"state": "closed"}
 
-        result = service._determine_health_status(snapshot, circuit_state)
+        result = service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.HEALTHY
 
@@ -156,10 +173,10 @@ class TestDetermineHealthStatus:
     ) -> None:
         """Circuit breaker in OPEN state returns DEGRADED."""
         service._running = True
-        snapshot = _make_metrics_snapshot()
+        metrics = _make_consumer_metrics()
         circuit_state: dict[str, object] = {"state": "open"}
 
-        result = service._determine_health_status(snapshot, circuit_state)
+        result = service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.DEGRADED
 
@@ -168,10 +185,10 @@ class TestDetermineHealthStatus:
     ) -> None:
         """Circuit breaker in HALF_OPEN state returns DEGRADED."""
         service._running = True
-        snapshot = _make_metrics_snapshot()
+        metrics = _make_consumer_metrics()
         circuit_state: dict[str, object] = {"state": "half_open"}
 
-        result = service._determine_health_status(snapshot, circuit_state)
+        result = service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.DEGRADED
 
@@ -182,15 +199,15 @@ class TestDetermineHealthStatus:
         stale_poll = now - timedelta(
             seconds=service._config.health_check_poll_staleness_seconds + 30
         )
-        snapshot = _make_metrics_snapshot(
-            last_poll_at=stale_poll.isoformat(),
-            last_successful_write_at=now.isoformat(),
+        metrics = _make_consumer_metrics(
+            last_poll_at=stale_poll,
+            last_successful_write_at=now,
             messages_received=10,
-            started_at=(now - timedelta(minutes=5)).isoformat(),
+            started_at=now - timedelta(minutes=5),
         )
         circuit_state: dict[str, object] = {"state": "closed"}
 
-        result = service._determine_health_status(snapshot, circuit_state)
+        result = service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.DEGRADED
 
@@ -201,15 +218,15 @@ class TestDetermineHealthStatus:
         stale_write = now - timedelta(
             seconds=service._config.health_check_staleness_seconds + 30
         )
-        snapshot = _make_metrics_snapshot(
+        metrics = _make_consumer_metrics(
             messages_received=10,
-            last_poll_at=now.isoformat(),
-            last_successful_write_at=stale_write.isoformat(),
-            started_at=(now - timedelta(minutes=10)).isoformat(),
+            last_poll_at=now,
+            last_successful_write_at=stale_write,
+            started_at=now - timedelta(minutes=10),
         )
         circuit_state: dict[str, object] = {"state": "closed"}
 
-        result = service._determine_health_status(snapshot, circuit_state)
+        result = service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.DEGRADED
 
@@ -220,13 +237,13 @@ class TestDetermineHealthStatus:
         service._running = True
         now = datetime.now(UTC)
         # Started 10 seconds ago, grace period is 60 seconds
-        snapshot = _make_metrics_snapshot(
+        metrics = _make_consumer_metrics(
             last_successful_write_at=None,
-            started_at=(now - timedelta(seconds=10)).isoformat(),
+            started_at=now - timedelta(seconds=10),
         )
         circuit_state: dict[str, object] = {"state": "closed"}
 
-        result = service._determine_health_status(snapshot, circuit_state)
+        result = service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.HEALTHY
 
@@ -237,13 +254,13 @@ class TestDetermineHealthStatus:
         service._running = True
         now = datetime.now(UTC)
         # Started 120 seconds ago, grace period is 60 seconds
-        snapshot = _make_metrics_snapshot(
+        metrics = _make_consumer_metrics(
             last_successful_write_at=None,
-            started_at=(now - timedelta(seconds=120)).isoformat(),
+            started_at=now - timedelta(seconds=120),
         )
         circuit_state: dict[str, object] = {"state": "closed"}
 
-        result = service._determine_health_status(snapshot, circuit_state)
+        result = service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.DEGRADED
 
@@ -252,29 +269,12 @@ class TestDetermineHealthStatus:
     ) -> None:
         """Service not running returns UNHEALTHY."""
         service._running = False
-        snapshot = _make_metrics_snapshot()
+        metrics = _make_consumer_metrics()
         circuit_state: dict[str, object] = {"state": "closed"}
 
-        result = service._determine_health_status(snapshot, circuit_state)
+        result = service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.UNHEALTHY
-
-    def test_healthy_when_no_started_at_and_no_writes(
-        self, service: ServiceLlmCostAggregator
-    ) -> None:
-        """No started_at and no writes returns HEALTHY (fallback)."""
-        service._running = True
-        snapshot = _make_metrics_snapshot(
-            last_successful_write_at=None,
-            started_at=None,
-        )
-        # Remove started_at key entirely to test the None branch
-        snapshot.pop("started_at", None)
-        circuit_state: dict[str, object] = {"state": "closed"}
-
-        result = service._determine_health_status(snapshot, circuit_state)
-
-        assert result == EnumHealthStatus.HEALTHY
 
     def test_healthy_when_write_fresh_and_messages_received(
         self, service: ServiceLlmCostAggregator
@@ -282,15 +282,15 @@ class TestDetermineHealthStatus:
         """Recent write with received messages returns HEALTHY."""
         service._running = True
         now = datetime.now(UTC)
-        snapshot = _make_metrics_snapshot(
+        metrics = _make_consumer_metrics(
             messages_received=50,
-            last_poll_at=now.isoformat(),
-            last_successful_write_at=(now - timedelta(seconds=10)).isoformat(),
-            started_at=(now - timedelta(minutes=10)).isoformat(),
+            last_poll_at=now,
+            last_successful_write_at=now - timedelta(seconds=10),
+            started_at=now - timedelta(minutes=10),
         )
         circuit_state: dict[str, object] = {"state": "closed"}
 
-        result = service._determine_health_status(snapshot, circuit_state)
+        result = service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.HEALTHY
 

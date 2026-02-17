@@ -106,6 +106,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -256,6 +257,41 @@ class ModelKafkaEventBusConfig(BaseModel):
             "consumer group IDs are unchanged (single-container behavior)."
         ),
     )
+
+    @field_validator("instance_id", mode="before")
+    @classmethod
+    def validate_instance_id(cls, v: object) -> str | None:
+        """Validate instance_id contains only Kafka-safe characters.
+
+        Rejects values containing characters other than ``[a-zA-Z0-9._-]``,
+        which is the same character set accepted by
+        ``normalize_kafka_identifier``. This catches invalid characters
+        (slashes, spaces, etc.) at config time rather than silently
+        normalizing them at runtime.
+
+        Args:
+            v: Instance ID value (any type before Pydantic conversion).
+
+        Returns:
+            The validated instance_id string, or None if not provided.
+
+        Raises:
+            ValueError: If instance_id contains characters outside
+                ``[a-zA-Z0-9._-]``.
+        """
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError(f"instance_id must be a string, got {type(v).__name__}")
+        if not v.strip():
+            return None
+        if not re.match(r"^[a-zA-Z0-9._-]+$", v):
+            raise ValueError(
+                f"instance_id {v!r} contains invalid characters. "
+                "Only alphanumeric characters, periods (.), underscores (_), "
+                "and hyphens (-) are allowed."
+            )
+        return v
 
     # NOTE: mypy reports "prop-decorator" error because it doesn't understand that
     # Pydantic's @computed_field transforms the @property into a computed field.

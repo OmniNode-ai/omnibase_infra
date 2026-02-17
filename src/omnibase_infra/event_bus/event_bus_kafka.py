@@ -675,17 +675,15 @@ class EventBusKafka(
         stops the producer. Safe to call multiple times. Uses proper
         synchronization to prevent races during shutdown.
         """
-        # First, signal shutdown to all background tasks
+        # Signal shutdown and snapshot consumer tasks in a single lock
+        # acquisition to prevent another coroutine from modifying
+        # _consumer_tasks between the flag set and the snapshot.
         async with self._lock:
             if self._shutdown:
                 # Already shutting down or shutdown
                 return
             self._shutdown = True
             self._started = False
-
-        # Cancel all consumer tasks (outside main lock to avoid deadlock)
-        tasks_to_cancel = []
-        async with self._lock:
             tasks_to_cancel = list(self._consumer_tasks.values())
 
         for task in tasks_to_cancel:
@@ -1429,6 +1427,32 @@ class EventBusKafka(
                     subscribers[0][0] if subscribers else "unknown"
                 )
 
+                # Warn when a message arrives but no subscribers are registered.
+                # The message will be silently dropped (no DLQ entry) since there
+                # is no handler to fail. This typically indicates a race between
+                # unsubscribe and the consumer loop, or a misconfigured topic.
+                if not subscribers:
+                    event_type = "unknown"
+                    try:
+                        raw_headers = getattr(msg, "headers", None) or []
+                        for hdr_key, hdr_val in raw_headers:
+                            if hdr_key == "event_type" and hdr_val is not None:
+                                event_type = hdr_val.decode("utf-8")
+                                break
+                    except Exception:
+                        pass
+                    logger.warning(
+                        "Message received on topic '%s' with event_type='%s' "
+                        "but no subscribers are registered; message will be dropped",
+                        topic,
+                        event_type,
+                        extra={
+                            "topic": topic,
+                            "event_type": event_type,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
+
                 # Convert Kafka message to ModelEventMessage - handle conversion errors
                 try:
                     event_message = self._kafka_msg_to_model(msg, topic)
@@ -1879,6 +1903,10 @@ class EventBusKafka(
         timestamp_str = headers_dict.get("timestamp")
         if timestamp_str:
             timestamp = datetime.fromisoformat(timestamp_str)
+            # Assume UTC if the stored ISO string lacks timezone info, since the
+            # rest of the codebase (publish, DLQ, health) uses UTC-aware datetimes.
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=UTC)
         else:
             timestamp = datetime.now(UTC)
 

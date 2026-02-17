@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any, Literal, Self
+from urllib.parse import urlparse
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -73,11 +74,9 @@ class ConfigLlmCostAggregation(BaseSettings):
 
     # PostgreSQL connection
     postgres_dsn: str = Field(
+        ...,
         repr=False,
-        description=(
-            "PostgreSQL connection string. Set via "
-            "OMNIBASE_INFRA_LLM_COST_POSTGRES_DSN env var."
-        ),
+        description="PostgreSQL connection string",
     )
 
     @field_validator("postgres_dsn")
@@ -99,9 +98,18 @@ class ConfigLlmCostAggregation(BaseSettings):
                 ``postgres://``.
         """
         if not v.startswith(("postgresql://", "postgres://")):
+            # Show only the scheme (or first 10 chars if no scheme found)
+            # to avoid leaking credentials embedded in the DSN.
+            try:
+                parsed = urlparse(v)
+                safe_prefix = (
+                    f"{parsed.scheme}://..." if parsed.scheme else repr(v[:10])
+                )
+            except Exception:
+                safe_prefix = repr(v[:10])
             raise ValueError(
                 f"postgres_dsn must start with 'postgresql://' or 'postgres://', "
-                f"got: {v[:30]!r}{'...' if len(v) > 30 else ''}. "
+                f"got: {safe_prefix}. "
                 f"Example: postgresql://user:password@host:5432/dbname"
             )
         return v
