@@ -117,6 +117,29 @@ class TestModelPricingTableFromDict:
                 }
             )
 
+    def test_from_dict_rejects_unexpected_top_level_keys(self) -> None:
+        """Unexpected top-level keys should raise ValueError."""
+        with pytest.raises(ValueError, match="unexpected fields"):
+            ModelPricingTable.from_dict(
+                {
+                    "schema_version": "1.0.0",
+                    "models": {},
+                    "typo_field": "oops",
+                }
+            )
+
+    def test_from_dict_rejects_multiple_unexpected_keys(self) -> None:
+        """Multiple unexpected top-level keys should all be listed."""
+        with pytest.raises(ValueError, match=r"unexpected fields.*extra_a.*extra_b"):
+            ModelPricingTable.from_dict(
+                {
+                    "schema_version": "1.0.0",
+                    "models": {},
+                    "extra_a": 1,
+                    "extra_b": 2,
+                }
+            )
+
 
 @pytest.mark.unit
 class TestModelPricingTableFromYaml:

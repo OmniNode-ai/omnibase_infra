@@ -235,6 +235,13 @@ class ModelPricingTable(BaseModel):
                 "Pricing manifest missing required field: 'schema_version'"
             )
 
+        allowed_keys = {"schema_version", "models"}
+        extra_keys = set(data.keys()) - allowed_keys
+        if extra_keys:
+            raise ValueError(
+                f"Pricing manifest contains unexpected fields: {sorted(extra_keys)!r}"
+            )
+
         raw_models = data.get("models", {})
         if not isinstance(raw_models, dict):
             raise ValueError(
