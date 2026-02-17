@@ -24,8 +24,9 @@ from omnibase_infra.runtime.config_discovery.contract_config_extractor import (
 from omnibase_infra.runtime.config_discovery.transport_config_map import (
     TransportConfigMap,
 )
+from tests.helpers.path_utils import find_project_root
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = find_project_root(Path(__file__).resolve().parent)
 NODES_DIR = _REPO_ROOT / "src" / "omnibase_infra" / "nodes"
 
 

@@ -92,13 +92,16 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
             continue
         key, _, value = stripped.partition("=")
         key = key.strip()
+        # Value processing order:
+        # 1. Strip surrounding whitespace from the raw value.
+        # 2. Detect whether the value is quoted (before removing quotes).
+        # 3. If quoted, strip the outer quotes -- inline comments inside
+        #    quoted strings are preserved as literal text.
+        # 4. If NOT quoted, strip inline comments (text after ' #').
         value = value.strip()
-        # Check if value is quoted BEFORE stripping quotes
         is_quoted = len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"')
-        # Strip quotes
         if is_quoted:
             value = value[1:-1]
-        # Strip inline comments (only for unquoted values)
         if " #" in value and not is_quoted:
             value = value.split(" #")[0].strip()
         if key:
@@ -176,6 +179,8 @@ def _print_diff_summary(
     print(
         f"Values available from .env: {sum(1 for r in requirements if r['key'] in env_values)}"
     )
+    if overwrite_existing:
+        print("Mode: OVERWRITE (existing keys will be overwritten)")
     print()
 
     for req in sorted(requirements, key=lambda r: r["key"]):
@@ -183,11 +188,14 @@ def _print_diff_summary(
         folder = req["folder"]
         has_value = key in env_values
 
-        action = "SKIP"
+        # Determine the action label based on flags.
+        # When overwrite_existing is active, existing keys are tagged
+        # OVERWRITE instead of SKIP so the user sees the intent clearly.
+        action = "OVERWRITE" if overwrite_existing else "SKIP"
         if create_missing:
             action = "CREATE"
         if set_values and has_value:
-            action = "SET"
+            action = "OVERWRITE" if overwrite_existing else "SET"
         elif set_values and not has_value:
             action = "CREATE (no value)"
 
@@ -228,18 +236,18 @@ def _do_seed(
     create_missing: bool,
     set_values: bool,
     overwrite_existing: bool,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     """Execute the actual seed operation.
 
     Returns:
-        Tuple of (planned, skipped, total) counts. The ``planned``
-        count tracks secrets that would be created or updated once the
-        Infisical SDK create/update methods are implemented (currently
-        a no-op). The third element is the total requirement count for
-        backwards-compatible unpacking.
+        Tuple of (created, updated, skipped, errors) counts.
+        ``created`` tracks secrets newly created in Infisical.
+        ``updated`` tracks secrets overwritten with new values.
+        ``skipped`` tracks secrets left untouched.
+        ``errors`` tracks secrets that failed to process.
     """
-    # This function requires Infisical connectivity.
-    # For now, it uses the AdapterInfisical for operations.
+    from uuid import UUID
+
     try:
         from pydantic import SecretStr
 
@@ -251,7 +259,7 @@ def _do_seed(
         )
     except ImportError:
         logger.exception("Cannot import Infisical adapter")
-        return 0, 0, len(requirements)
+        return 0, 0, 0, len(requirements)
 
     # Build adapter config from environment
     try:
@@ -259,28 +267,43 @@ def _do_seed(
             _load_infisical_credentials()
         )
     except SystemExit:
-        return 0, 0, len(requirements)
+        return 0, 0, 0, len(requirements)
 
+    # Validate project_id is a valid UUID
+    try:
+        project_uuid = UUID(project_id)
+    except ValueError:
+        logger.exception(
+            "INFISICAL_PROJECT_ID is not a valid UUID: '%s'. "
+            "Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+            project_id,
+        )
+        return 0, 0, 0, len(requirements)
+
+    # Initialize the adapter -- errors must propagate so main() can exit(1).
     try:
         config = ModelInfisicalAdapterConfig(
             host=infisical_addr,
             client_id=SecretStr(client_id),
             client_secret=SecretStr(client_secret),
-            project_id=project_id,  # type: ignore[arg-type]
+            project_id=project_uuid,
         )
         adapter = AdapterInfisical(config)
         adapter.initialize()
     except Exception:
         logger.exception("Failed to initialize Infisical adapter")
-        return 0, 0, len(requirements)
+        raise
 
-    planned = 0
+    created = 0
+    updated = 0
     skipped = 0
+    error_count = 0
 
     for req in requirements:
         key = req["key"]
         folder = req["folder"]
         has_value = key in env_values
+        secret_value = env_values.get(key, "") if set_values else ""
 
         try:
             # Check if key exists
@@ -298,47 +321,63 @@ def _do_seed(
                 logger.debug("Key %s already exists at %s, skipping", key, folder)
                 continue
 
-            if create_missing and existing is None:
-                # Note: The adapter's get/list operations work; for creating
-                # we would need the Infisical SDK create_secret method.
-                # For now, track as planned (not yet implemented).
+            if existing is not None and overwrite_existing:
+                # Update existing secret via Infisical SDK
+                adapter._client.secrets.update_secret_by_name(  # type: ignore[union-attr]
+                    current_secret_name=key,
+                    secret_path=folder,
+                    environment_slug=adapter._config.environment_slug,
+                    project_id=str(adapter._config.project_id),
+                    secret_value=secret_value,
+                )
+                updated += 1
                 logger.info(
-                    "Planned for creation: %s at %s (value %s)",
+                    "Updated secret: %s at %s (value %s)",
                     key,
                     folder,
                     "from .env" if has_value and set_values else "empty",
                 )
-                planned += 1
 
-            elif set_values and has_value:
-                # NOTE: Actual write to Infisical is not yet implemented.
-                # The adapter supports get/list but not create/update.
-                # Tracked as planned alongside create_missing.
-                logger.info(
-                    "PLANNED: would set %s%s from .env (not yet implemented)",
-                    folder,
-                    key,
+            elif create_missing and existing is None:
+                # Create new secret via Infisical SDK
+                adapter._client.secrets.create_secret_by_name(  # type: ignore[union-attr]
+                    secret_name=key,
+                    secret_path=folder,
+                    environment_slug=adapter._config.environment_slug,
+                    project_id=str(adapter._config.project_id),
+                    secret_value=secret_value,
                 )
-                planned += 1
+                created += 1
+                logger.info(
+                    "Created secret: %s at %s (value %s)",
+                    key,
+                    folder,
+                    "from .env" if has_value and set_values else "empty",
+                )
 
             else:
                 skipped += 1
 
         except Exception as exc:
             logger.warning("Error processing %s: %s", key, exc)
-            skipped += 1
+            error_count += 1
 
     adapter.shutdown()
-    return planned, skipped, len(requirements)
+    return created, updated, skipped, error_count
 
 
-def _do_export(*, reveal: bool = False) -> None:
+def _do_export(*, reveal: bool = False) -> bool:
     """Export current Infisical values to stdout.
 
     Args:
         reveal: If True, print actual secret values. If False (default),
             print key names with masked placeholders.
+
+    Returns:
+        True if export succeeded, False on any error.
     """
+    from uuid import UUID
+
     try:
         from pydantic import SecretStr
 
@@ -350,27 +389,39 @@ def _do_export(*, reveal: bool = False) -> None:
         )
     except ImportError:
         logger.exception("Cannot import Infisical adapter")
-        return
+        return False
 
     try:
         infisical_addr, client_id, client_secret, project_id = (
             _load_infisical_credentials()
         )
     except SystemExit:
-        return
+        return False
 
+    # Validate project_id is a valid UUID
+    try:
+        project_uuid = UUID(project_id)
+    except ValueError:
+        logger.exception(
+            "INFISICAL_PROJECT_ID is not a valid UUID: '%s'. "
+            "Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+            project_id,
+        )
+        return False
+
+    # Initialize the adapter -- errors must propagate so main() can exit(1).
     try:
         config = ModelInfisicalAdapterConfig(
             host=infisical_addr,
             client_id=SecretStr(client_id),
             client_secret=SecretStr(client_secret),
-            project_id=project_id,  # type: ignore[arg-type]
+            project_id=project_uuid,
         )
         adapter = AdapterInfisical(config)
         adapter.initialize()
     except Exception:
         logger.exception("Failed to initialize Infisical adapter for export")
-        return
+        raise
 
     try:
         secrets = adapter.list_secrets()
@@ -387,8 +438,10 @@ def _do_export(*, reveal: bool = False) -> None:
         else:
             for secret in secrets:
                 print(f"{secret.key}=****")
+        return True
     except Exception:
         logger.exception("Failed to list secrets from Infisical")
+        return False
     finally:
         adapter.shutdown()
 
@@ -458,12 +511,20 @@ def main() -> int:
 
     # Handle export mode
     if args.export:
-        _do_export(reveal=args.reveal)
-        return 0
+        try:
+            ok = _do_export(reveal=args.reveal)
+        except Exception:
+            logger.exception("Export failed with unhandled error")
+            return 1
+        return 0 if ok else 1
 
     # Extract requirements from contracts
     logger.info("Scanning contracts in %s", args.contracts_dir)
-    requirements, errors = _extract_requirements(args.contracts_dir)
+    try:
+        requirements, errors = _extract_requirements(args.contracts_dir)
+    except Exception:
+        logger.exception("Failed to extract config requirements from contracts")
+        return 1
 
     if errors:
         for err in errors:
@@ -495,19 +556,29 @@ def main() -> int:
     # Execute or dry-run
     if args.execute:
         logger.info("Executing seed operation...")
-        planned, skipped, total = _do_seed(
-            requirements,
-            env_values,
-            create_missing=args.create_missing_keys,
-            set_values=args.set_values,
-            overwrite_existing=args.overwrite_existing,
-        )
+        try:
+            created, updated, skipped, error_count = _do_seed(
+                requirements,
+                env_values,
+                create_missing=args.create_missing_keys,
+                set_values=args.set_values,
+                overwrite_existing=args.overwrite_existing,
+            )
+        except Exception:
+            logger.exception("Seed operation failed with unhandled error")
+            return 1
         logger.info(
-            "Seed complete: %d planned (not yet implemented), %d skipped, %d total",
-            planned,
+            "Seed complete: %d created, %d updated, %d skipped, %d errors",
+            created,
+            updated,
             skipped,
-            total,
+            error_count,
         )
+        if error_count > 0:
+            logger.error(
+                "%d secret(s) failed to process -- exiting with error", error_count
+            )
+            return 1
     else:
         logger.info("Dry run complete. Use --execute to write to Infisical.")
 

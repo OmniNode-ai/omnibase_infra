@@ -22,44 +22,52 @@ class ModelConfigRequirements(BaseModel):
     """Aggregated configuration requirements from one or more contracts.
 
     Attributes:
-        requirements: List of individual config requirements.
-        transport_types: Deduplicated set of transport types discovered.
+        requirements: Individual config requirements.
+        transport_types: Deduplicated transport types discovered.
         contract_paths: Paths of contracts that were scanned.
         errors: Errors encountered during extraction (non-fatal).
     """
 
-    # Not frozen: uses mutable list fields for merge() aggregation during
-    # contract scanning.  Other infra models are frozen for thread safety,
-    # but this model is built up incrementally and never shared across threads.
-    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    requirements: list[ModelConfigRequirement] = Field(
-        default_factory=list,
+    requirements: tuple[ModelConfigRequirement, ...] = Field(
+        default_factory=tuple,
         description="Individual config requirements.",
     )
-    transport_types: list[EnumInfraTransportType] = Field(
-        default_factory=list,
+    transport_types: tuple[EnumInfraTransportType, ...] = Field(
+        default_factory=tuple,
         description="Deduplicated transport types discovered.",
     )
-    contract_paths: list[Path] = Field(
-        default_factory=list,
+    contract_paths: tuple[Path, ...] = Field(
+        default_factory=tuple,
         description="Contract paths that were scanned.",
     )
-    errors: list[str] = Field(
-        default_factory=list,
+    errors: tuple[str, ...] = Field(
+        default_factory=tuple,
         description="Non-fatal extraction errors.",
     )
 
     def merge(self, other: ModelConfigRequirements) -> ModelConfigRequirements:
         """Merge another requirements set into this one.
 
-        Returns a new instance with combined requirements, deduped
-        transport types, and concatenated errors.
+        Returns a new frozen instance with combined requirements,
+        deduplicated transport types and contract paths, and concatenated
+        errors. Neither ``self`` nor ``other`` is mutated.
+
+        Args:
+            other: The requirements to merge into this set.
+
+        Returns:
+            A new ``ModelConfigRequirements`` containing the union of both
+            sets' requirements, transport types (deduplicated, order-preserved),
+            contract paths (deduplicated, order-preserved), and errors.
         """
-        all_reqs = [*self.requirements, *other.requirements]
-        all_types = list(dict.fromkeys([*self.transport_types, *other.transport_types]))
-        all_paths = list(dict.fromkeys([*self.contract_paths, *other.contract_paths]))
-        all_errors = [*self.errors, *other.errors]
+        all_reqs = (*self.requirements, *other.requirements)
+        all_types = tuple(
+            dict.fromkeys((*self.transport_types, *other.transport_types))
+        )
+        all_paths = tuple(dict.fromkeys((*self.contract_paths, *other.contract_paths)))
+        all_errors = (*self.errors, *other.errors)
         return ModelConfigRequirements(
             requirements=all_reqs,
             transport_types=all_types,

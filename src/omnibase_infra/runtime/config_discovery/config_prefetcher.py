@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Configuration prefetcher for ONEX Infrastructure.
+"""Configuration prefetcher service for ONEX Infrastructure.
 
 Orchestrates the prefetching of configuration values from Infisical during
 runtime bootstrap. This module:
@@ -21,6 +21,11 @@ Design Decisions:
 
 .. versionadded:: 0.10.0
     Created as part of OMN-2287.
+
+.. versionchanged:: 0.10.1
+    ``ModelPrefetchResult`` renamed from ``PrefetchResult``.
+    Class ``ConfigPrefetcher`` renamed to ``ConfigPrefetcher``.
+    Dataclass ``PrefetchResult`` renamed to ``ModelPrefetchResult``.
 """
 
 from __future__ import annotations
@@ -48,20 +53,23 @@ from omnibase_infra.runtime.config_discovery.models.protocol_secret_resolver imp
 from omnibase_infra.runtime.config_discovery.transport_config_map import (
     TransportConfigMap,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class PrefetchResult:
+class ModelPrefetchResult:
     """Result of a config prefetch operation.
 
     Attributes:
         resolved: Successfully resolved key-value pairs. Values are
-            ``SecretStr`` to prevent accidental logging.
-        missing: Keys that could not be resolved.
-        errors: Per-key error messages for failed resolutions.
-        specs_attempted: Number of transport specs attempted.
+            ``SecretStr`` to prevent accidental logging of secret material.
+        missing: Keys that could not be resolved (handler returned ``None``).
+        errors: Per-key error messages for failed resolutions. Keys are the
+            config key names; values are human-readable error descriptions.
+        specs_attempted: Number of transport specs that were attempted during
+            the prefetch operation.
     """
 
     resolved: dict[str, SecretStr] = field(default_factory=dict)
@@ -71,17 +79,22 @@ class PrefetchResult:
 
     @property
     def success_count(self) -> int:
-        """Number of successfully resolved keys."""
+        """Return the number of successfully resolved keys."""
         return len(self.resolved)
 
     @property
     def failure_count(self) -> int:
-        """Number of keys that failed to resolve."""
+        """Return the number of keys that failed to resolve."""
         return len(self.missing) + len(self.errors)
 
 
 class ConfigPrefetcher:
     """Prefetches configuration values from Infisical for runtime bootstrap.
+
+    This service coordinates the extraction of configuration requirements from
+    ONEX contracts, maps them to Infisical folder paths via
+    ``TransportConfigMap``, and fetches values through a
+    ``ProtocolSecretResolver`` (typically ``HandlerInfisical``).
 
     Usage::
 
@@ -133,7 +146,7 @@ class ConfigPrefetcher:
             spec: The transport config spec (provides the folder path).
 
         Returns:
-            The secret value, or None if not found.
+            The secret value, or ``None`` if not found.
         """
         try:
             result: SecretStr | None = self._handler.get_secret_sync(
@@ -146,30 +159,35 @@ class ConfigPrefetcher:
                 "Failed to prefetch key %s from %s: %s",
                 key,
                 spec.infisical_folder,
-                exc,
+                sanitize_error_message(exc),
             )
             return None
 
     def prefetch(
         self,
         requirements: ModelConfigRequirements,
-    ) -> PrefetchResult:
+    ) -> ModelPrefetchResult:
         """Prefetch all configuration values for the given requirements.
 
         Builds transport specs from the requirements' transport types,
-        then fetches each key via the handler.
+        then fetches each key via the handler. Keys already present in
+        the process environment are skipped (env always takes precedence).
 
         Args:
             requirements: Config requirements extracted from contracts.
 
         Returns:
-            ``PrefetchResult`` with resolved values and any errors.
+            ``ModelPrefetchResult`` with resolved values and any errors.
+
+        Raises:
+            No exceptions are raised; all errors are captured in the result
+            object or logged as warnings.
         """
-        result = PrefetchResult()
+        result = ModelPrefetchResult()
 
         # Build specs from discovered transport types
         specs = self._transport_map.specs_for_transports(
-            requirements.transport_types,
+            list(requirements.transport_types),
             service_slug=self._service_slug,
         )
         result.specs_attempted = len(specs)
@@ -242,7 +260,7 @@ class ConfigPrefetcher:
 
         return result
 
-    def apply_to_environment(self, result: PrefetchResult) -> int:
+    def apply_to_environment(self, result: ModelPrefetchResult) -> int:
         """Apply prefetched values to the process environment.
 
         Only sets keys that are NOT already in the environment (environment

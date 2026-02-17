@@ -75,7 +75,7 @@ done
 
 # Check Infisical connectivity
 log_info "Checking Infisical connectivity at ${INFISICAL_ADDR}..."
-if ! curl -sf "${INFISICAL_ADDR}/api/status" >/dev/null 2>&1; then
+if ! curl -sf --max-time 10 --connect-timeout 5 "${INFISICAL_ADDR}/api/status" >/dev/null 2>&1; then
     log_error "Cannot connect to Infisical at ${INFISICAL_ADDR}"
     log_error "Make sure Infisical is running (docker compose --profile secrets up)"
     exit 1

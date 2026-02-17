@@ -12,6 +12,7 @@ values during runtime bootstrap.
 
 from omnibase_infra.runtime.config_discovery.config_prefetcher import (
     ConfigPrefetcher,
+    ModelPrefetchResult,
 )
 from omnibase_infra.runtime.config_discovery.contract_config_extractor import (
     ContractConfigExtractor,
@@ -23,5 +24,6 @@ from omnibase_infra.runtime.config_discovery.transport_config_map import (
 __all__ = [
     "ConfigPrefetcher",
     "ContractConfigExtractor",
+    "ModelPrefetchResult",
     "TransportConfigMap",
 ]

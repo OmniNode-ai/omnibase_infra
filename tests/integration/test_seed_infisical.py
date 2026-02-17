@@ -14,7 +14,9 @@ from pathlib import Path
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+from tests.helpers.path_utils import find_project_root
+
+_REPO_ROOT = find_project_root(Path(__file__).resolve().parent)
 SCRIPTS_DIR = _REPO_ROOT / "scripts"
 NODES_DIR = _REPO_ROOT / "src" / "omnibase_infra" / "nodes"
 

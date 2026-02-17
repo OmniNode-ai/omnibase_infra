@@ -108,12 +108,27 @@ class ContractConfigExtractor:
         try:
             raw = contract_path.read_text(encoding="utf-8")
             # ONEX_EXCLUDE: any_type - yaml.safe_load returns untyped dict from contract YAML
-            data: dict[str, object] = yaml.safe_load(raw) or {}
+            raw_data: object = yaml.safe_load(raw)
         except Exception as exc:
             return ModelConfigRequirements(
-                contract_paths=[contract_path],
-                errors=[f"Failed to parse {contract_path}: {exc}"],
+                contract_paths=(contract_path,),
+                errors=(f"Failed to parse {contract_path}: {exc}",),
             )
+
+        if raw_data is None:
+            # Empty file -- valid but nothing to extract.
+            return ModelConfigRequirements(contract_paths=(contract_path,))
+
+        if not isinstance(raw_data, dict):
+            return ModelConfigRequirements(
+                contract_paths=(contract_path,),
+                errors=(
+                    f"Contract {contract_path} has a non-mapping YAML root "
+                    f"(got {type(raw_data).__name__})",
+                ),
+            )
+
+        data: dict[str, object] = raw_data
 
         # 1. metadata.transport_type
         metadata = data.get("metadata", {})
@@ -192,10 +207,10 @@ class ContractConfigExtractor:
                 )
 
         return ModelConfigRequirements(
-            requirements=requirements,
-            transport_types=transport_types,
-            contract_paths=[contract_path],
-            errors=errors,
+            requirements=tuple(requirements),
+            transport_types=tuple(transport_types),
+            contract_paths=(contract_path,),
+            errors=tuple(errors),
         )
 
     def extract_from_paths(self, contract_paths: list[Path]) -> ModelConfigRequirements:
@@ -219,7 +234,11 @@ class ContractConfigExtractor:
             elif path.is_file():
                 files_to_scan.append(path)
             else:
-                result.errors.append(f"Path does not exist: {path}")
+                result = result.merge(
+                    ModelConfigRequirements(
+                        errors=(f"Path does not exist: {path}",),
+                    )
+                )
 
         for contract_file in files_to_scan:
             extracted = self.extract_from_yaml(contract_file)

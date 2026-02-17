@@ -13,6 +13,7 @@ from omnibase_infra.runtime.config_discovery.contract_config_extractor import (
     ContractConfigExtractor,
     _resolve_transport,
 )
+from tests.helpers.path_utils import find_project_root
 
 
 class TestResolveTransport:
@@ -225,7 +226,7 @@ handler_routing:
 
     def test_extract_from_real_contracts(self) -> None:
         """Should extract requirements from actual repo contracts."""
-        repo_root = Path(__file__).resolve().parent.parent.parent.parent.parent
+        repo_root = find_project_root(Path(__file__).resolve().parent)
         nodes_dir = repo_root / "src" / "omnibase_infra" / "nodes"
         if not nodes_dir.is_dir():
             pytest.skip("Repo nodes directory not available")

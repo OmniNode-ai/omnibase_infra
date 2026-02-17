@@ -14,7 +14,7 @@ from pydantic import SecretStr
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.runtime.config_discovery.config_prefetcher import (
     ConfigPrefetcher,
-    PrefetchResult,
+    ModelPrefetchResult,
 )
 from omnibase_infra.runtime.config_discovery.models.model_config_requirement import (
     ModelConfigRequirement,
@@ -24,23 +24,23 @@ from omnibase_infra.runtime.config_discovery.models.model_config_requirements im
 )
 
 
-class TestPrefetchResult:
-    """Tests for PrefetchResult dataclass."""
+class TestModelPrefetchResult:
+    """Tests for ModelPrefetchResult dataclass."""
 
     def test_empty_result(self) -> None:
-        result = PrefetchResult()
+        result = ModelPrefetchResult()
         assert result.success_count == 0
         assert result.failure_count == 0
         assert result.specs_attempted == 0
 
     def test_success_count(self) -> None:
-        result = PrefetchResult(
+        result = ModelPrefetchResult(
             resolved={"KEY1": SecretStr("val1"), "KEY2": SecretStr("val2")}
         )
         assert result.success_count == 2
 
     def test_failure_count(self) -> None:
-        result = PrefetchResult(
+        result = ModelPrefetchResult(
             missing=["KEY1"],
             errors={"KEY2": "not found"},
         )
@@ -83,9 +83,9 @@ class TestConfigPrefetcher:
                     )
                 )
         return ModelConfigRequirements(
-            requirements=reqs,
-            transport_types=transport_types or [],
-            contract_paths=[Path("/test/contract.yaml")],
+            requirements=tuple(reqs),
+            transport_types=tuple(transport_types or []),
+            contract_paths=(Path("/test/contract.yaml"),),
         )
 
     def test_prefetch_database_keys(self) -> None:
@@ -219,7 +219,9 @@ class TestConfigPrefetcher:
         # Clean environment
         monkeypatch.delenv("TEST_PREFETCH_KEY", raising=False)
 
-        result = PrefetchResult(resolved={"TEST_PREFETCH_KEY": SecretStr("test-value")})
+        result = ModelPrefetchResult(
+            resolved={"TEST_PREFETCH_KEY": SecretStr("test-value")}
+        )
 
         applied = prefetcher.apply_to_environment(result)
         assert applied == 1
@@ -237,7 +239,9 @@ class TestConfigPrefetcher:
         handler = self._make_handler(secrets={})
         prefetcher = ConfigPrefetcher(handler=handler)
 
-        result = PrefetchResult(resolved={"EXISTING_KEY": SecretStr("from-infisical")})
+        result = ModelPrefetchResult(
+            resolved={"EXISTING_KEY": SecretStr("from-infisical")}
+        )
 
         applied = prefetcher.apply_to_environment(result)
         assert applied == 0

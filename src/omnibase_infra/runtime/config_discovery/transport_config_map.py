@@ -139,6 +139,12 @@ class TransportConfigMap:
 
         Uses the enum value directly (e.g., ``"db"`` for DATABASE,
         ``"kafka"`` for KAFKA).
+
+        Args:
+            transport: The transport type enum member.
+
+        Returns:
+            The string slug used as the Infisical folder name.
         """
         return transport.value
 
@@ -265,6 +271,14 @@ class TransportConfigMap:
         self, *, required: bool = False
     ) -> list[ModelTransportConfigSpec]:
         """Build shared specs for ALL transport types that have config keys.
+
+        Convenience method that calls ``specs_for_transports`` with every
+        member of ``EnumInfraTransportType``.  Bootstrap-only transports
+        (e.g. ``INFISICAL``) and transports with no keys (e.g. ``INMEMORY``)
+        are automatically excluded.
+
+        Args:
+            required: Whether these configs are required for startup.
 
         Returns:
             List of shared ``ModelTransportConfigSpec`` for every transport

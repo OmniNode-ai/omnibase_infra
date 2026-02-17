@@ -110,6 +110,7 @@ from omnibase_infra.runtime.runtime_contract_config_loader import (
 from omnibase_infra.runtime.util_wiring import wire_default_handlers
 from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
 from omnibase_infra.utils.util_env_parsing import parse_env_float
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -2558,35 +2559,93 @@ class RuntimeHostProcess:
                 )
                 return
 
-            # Step 2: Get or create HandlerInfisical
-            # Look for an already-initialized handler in the registry
-            handler = None
-            for h in self._handlers.values():
-                handler_class_name = type(h).__name__
-                if handler_class_name == "HandlerInfisical":
-                    handler = h
-                    break
-
-            if handler is None:
-                logger.info(
-                    "HandlerInfisical not found in handler registry, "
-                    "skipping config prefetch "
-                    "(Infisical opt-in: set INFISICAL_ADDR to enable)"
-                )
-                return
-
-            # Narrow type: ConfigPrefetcher expects ProtocolSecretResolver
+            # Step 2: Get or create a ProtocolSecretResolver
+            # First, try to find an already-initialized HandlerInfisical in the
+            # handler registry. If not found (typical case -- HandlerInfisical
+            # is not contract-declared), build a lightweight adapter directly
+            # from env vars so the prefetch is not a no-op.
             from omnibase_infra.runtime.config_discovery.models import (
                 ProtocolSecretResolver,
             )
 
-            if not isinstance(handler, ProtocolSecretResolver):
-                logger.warning(
-                    "Handler %s does not satisfy ProtocolSecretResolver, "
-                    "skipping config prefetch",
-                    type(handler).__name__,
+            handler: ProtocolSecretResolver | None = None
+            for h in self._handlers.values():
+                if isinstance(h, ProtocolSecretResolver):
+                    handler = h
+                    logger.debug(
+                        "Found ProtocolSecretResolver in handler registry: %s",
+                        type(h).__name__,
+                    )
+                    break
+
+            if handler is None:
+                # Build a lightweight adapter from env vars.  This avoids
+                # depending on the handler registry which may not contain
+                # HandlerInfisical if it is not contract-declared.
+                client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
+                client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")
+                project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
+
+                if not client_id or not client_secret or not project_id:
+                    logger.info(
+                        "Infisical credentials not fully configured "
+                        "(INFISICAL_CLIENT_ID, INFISICAL_CLIENT_SECRET, "
+                        "INFISICAL_PROJECT_ID required), skipping config prefetch"
+                    )
+                    return
+
+                from uuid import UUID as _UUID
+
+                from pydantic import SecretStr as _SecretStr
+
+                from omnibase_infra.adapters._internal.adapter_infisical import (
+                    AdapterInfisical,
                 )
-                return
+                from omnibase_infra.adapters.models.model_infisical_config import (
+                    ModelInfisicalAdapterConfig,
+                )
+
+                env_slug = os.environ.get("INFISICAL_ENVIRONMENT", "prod")
+                adapter_config = ModelInfisicalAdapterConfig(
+                    host=infisical_addr,
+                    client_id=_SecretStr(client_id),
+                    client_secret=_SecretStr(client_secret),
+                    project_id=_UUID(project_id),
+                    environment_slug=env_slug,
+                )
+                adapter = AdapterInfisical(adapter_config)
+                adapter.initialize()
+
+                # Wrap the adapter in a thin shim that satisfies
+                # ProtocolSecretResolver (get_secret_sync).
+                class AdapterSecretResolver:
+                    """Thin shim adapting AdapterInfisical to ProtocolSecretResolver."""
+
+                    def __init__(
+                        self,
+                        _adapter: AdapterInfisical,
+                        _config: ModelInfisicalAdapterConfig,
+                    ) -> None:
+                        self._adapter = _adapter
+                        self._config = _config
+
+                    def get_secret_sync(
+                        self,
+                        *,
+                        secret_name: str,
+                        secret_path: str,
+                    ) -> _SecretStr | None:
+                        try:
+                            result = self._adapter.get_secret(
+                                secret_name=secret_name,
+                                secret_path=secret_path,
+                            )
+                            return result.value
+                        except Exception:
+                            return None
+
+                handler = AdapterSecretResolver(adapter, adapter_config)
+                logger.info("Built lightweight Infisical adapter for config prefetch")
 
             # Step 3: Prefetch through the handler
             service_slug = self._node_identity.service
@@ -2621,11 +2680,14 @@ class RuntimeHostProcess:
                     logger.warning("Config prefetch error for %s: %s", key, err)
 
         except Exception as exc:
-            # Prefetch failures are non-fatal
+            # Prefetch failures are non-fatal.
+            # Sanitize the error to avoid leaking secrets (e.g. connection
+            # strings embedded in exception messages).  Do NOT use
+            # exc_info=True here because the full traceback may contain
+            # locals with secret values.
             logger.warning(
                 "Config prefetch failed (non-fatal): %s",
-                exc,
-                exc_info=True,
+                sanitize_error_message(exc),
             )
 
     async def _resolve_handler_dependencies(

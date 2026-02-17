@@ -90,7 +90,7 @@ pre-commit run --all-files                    # All hooks
 
 ## Architecture: Four-Node Pattern
 
-```
+```text
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
 │   EFFECT    │───▶│   COMPUTE   │───▶│   REDUCER   │───▶│ORCHESTRATOR │
 │ External I/O│    │  Transform  │    │  FSM State  │    │  Workflow   │
@@ -155,7 +155,7 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
 
 ### Canonical Node Directory Structure
 
-```
+```text
 nodes/<node_name>/
 ├── __init__.py           # Public exports
 ├── contract.yaml         # ONEX contract (REQUIRED)
@@ -327,7 +327,7 @@ Examples:
 
 ### Error Hierarchy
 
-```
+```text
 ModelOnexError (omnibase_core)
 └── RuntimeHostError (base infrastructure error)
     ├── ProtocolConfigurationError
@@ -532,7 +532,7 @@ def __bool__(self) -> bool:
 
 ### Test Directory Structure
 
-```
+```text
 tests/
 ├── conftest.py              # Root conftest with shared fixtures
 ├── helpers/                 # Test helper utilities
@@ -621,14 +621,14 @@ three Pydantic-backed contract fields:
 
 ### Infisical Path Convention
 
-```
+```text
 Shared:      /shared/<transport>/KEY
 Per-service: /services/<service>/<transport>/KEY
 ```
 
 ### Bootstrap Sequence
 
-```
+```text
 Step 1: PostgreSQL starts (POSTGRES_PASSWORD from .env)
 Step 2: Valkey starts
 Step 3: Infisical starts (depends_on: postgres + valkey healthy)

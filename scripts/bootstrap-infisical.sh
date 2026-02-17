@@ -168,7 +168,7 @@ if [[ "${DRY_RUN}" != "true" ]]; then
     max_attempts=30
     attempt=0
     while [[ $attempt -lt $max_attempts ]]; do
-        if $COMPOSE_CMD -f "${COMPOSE_FILE}" exec infisical wget -q --spider http://localhost:8080/api/status 2>/dev/null; then
+        if $COMPOSE_CMD -f "${COMPOSE_FILE}" exec infisical wget -q --spider --timeout=5 http://localhost:8080/api/status 2>/dev/null; then
             break
         fi
         attempt=$((attempt + 1))
