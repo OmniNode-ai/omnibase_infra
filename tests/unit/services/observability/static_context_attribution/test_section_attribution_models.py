@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.enums.enum_context_section_category import (
     EnumContextSectionCategory,
@@ -212,3 +213,143 @@ class TestModelStaticContextReport:
         assert report.total_attributed_tokens == 25
         assert len(report.attributions) == 1
         assert report.source_files == ("CLAUDE.md",)
+
+    # --- _validate_token_consistency tests ---
+
+    def test_validate_attributed_exceeds_total_raises(self) -> None:
+        """total_attributed_tokens > total_tokens raises ValidationError."""
+        with pytest.raises(ValidationError, match="must not exceed total_tokens"):
+            ModelStaticContextReport(
+                total_tokens=50,
+                total_attributed_tokens=100,
+            )
+
+    def test_validate_attributed_equals_total_passes(self) -> None:
+        """total_attributed_tokens == total_tokens is valid."""
+        report = ModelStaticContextReport(
+            total_tokens=100,
+            total_attributed_tokens=100,
+        )
+        assert report.total_attributed_tokens == report.total_tokens
+
+    def test_validate_attributed_less_than_total_passes(self) -> None:
+        """total_attributed_tokens < total_tokens is valid."""
+        report = ModelStaticContextReport(
+            total_tokens=100,
+            total_attributed_tokens=50,
+        )
+        assert report.total_attributed_tokens < report.total_tokens
+
+    def test_validate_attribution_sum_exceeds_total_attributed_raises(self) -> None:
+        """Sum of attributed_tokens across attributions > total_attributed_tokens raises."""
+        section = ModelContextSection(
+            content="test",
+            token_count=100,
+            line_start=1,
+            line_end=1,
+        )
+        attr = ModelSectionAttribution(
+            section=section,
+            utilization_score=1.0,
+            matched_fragments=10,
+            total_fragments=10,
+        )
+        # attr.attributed_tokens = 100, but total_attributed_tokens = 50
+        with pytest.raises(
+            ValidationError, match="must not exceed total_attributed_tokens"
+        ):
+            ModelStaticContextReport(
+                attributions=(attr,),
+                total_tokens=200,
+                total_attributed_tokens=50,
+            )
+
+    def test_validate_attribution_sum_equals_total_attributed_passes(self) -> None:
+        """Sum of attributed_tokens == total_attributed_tokens is valid."""
+        section = ModelContextSection(
+            content="test",
+            token_count=100,
+            line_start=1,
+            line_end=1,
+        )
+        attr = ModelSectionAttribution(
+            section=section,
+            utilization_score=0.5,
+            matched_fragments=5,
+            total_fragments=10,
+        )
+        # attr.attributed_tokens = 50
+        report = ModelStaticContextReport(
+            attributions=(attr,),
+            total_tokens=100,
+            total_attributed_tokens=50,
+        )
+        assert len(report.attributions) == 1
+
+    def test_validate_attribution_sum_less_than_total_attributed_passes(self) -> None:
+        """Sum of attributed_tokens < total_attributed_tokens is valid."""
+        section = ModelContextSection(
+            content="test",
+            token_count=100,
+            line_start=1,
+            line_end=1,
+        )
+        attr = ModelSectionAttribution(
+            section=section,
+            utilization_score=0.2,
+            matched_fragments=2,
+            total_fragments=10,
+        )
+        # attr.attributed_tokens = 20
+        report = ModelStaticContextReport(
+            attributions=(attr,),
+            total_tokens=100,
+            total_attributed_tokens=50,
+        )
+        assert len(report.attributions) == 1
+
+    def test_validate_multiple_attributions_sum_exceeds_raises(self) -> None:
+        """Multiple attributions whose sum exceeds total_attributed_tokens raises."""
+        section_a = ModelContextSection(
+            content="section a",
+            token_count=60,
+            line_start=1,
+            line_end=1,
+        )
+        section_b = ModelContextSection(
+            content="section b",
+            token_count=60,
+            line_start=2,
+            line_end=2,
+        )
+        attr_a = ModelSectionAttribution(
+            section=section_a,
+            utilization_score=1.0,
+            matched_fragments=6,
+            total_fragments=6,
+        )
+        attr_b = ModelSectionAttribution(
+            section=section_b,
+            utilization_score=1.0,
+            matched_fragments=6,
+            total_fragments=6,
+        )
+        # Sum = 60 + 60 = 120, but total_attributed_tokens = 100
+        with pytest.raises(
+            ValidationError, match="must not exceed total_attributed_tokens"
+        ):
+            ModelStaticContextReport(
+                attributions=(attr_a, attr_b),
+                total_tokens=200,
+                total_attributed_tokens=100,
+            )
+
+    def test_validate_empty_attributions_skips_sum_check(self) -> None:
+        """Empty attributions tuple skips the sum-of-attributions check."""
+        report = ModelStaticContextReport(
+            attributions=(),
+            total_tokens=100,
+            total_attributed_tokens=50,
+        )
+        assert report.attributions == ()
+        assert report.total_attributed_tokens == 50

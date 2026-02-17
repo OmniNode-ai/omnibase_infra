@@ -37,15 +37,15 @@ from omnibase_infra.services.observability.static_context_attribution.model_stat
 from omnibase_infra.services.observability.static_context_attribution.service_attribution_reporter import (
     ServiceAttributionReporter,
 )
+from omnibase_infra.services.observability.static_context_attribution.service_llm_category_augmenter import (
+    LlmInferenceFn,
+    ServiceLlmCategoryAugmenter,
+)
 from omnibase_infra.services.observability.static_context_attribution.service_static_context_parser import (
     ServiceStaticContextParser,
 )
 from omnibase_infra.services.observability.static_context_attribution.service_token_counter import (
     ServiceTokenCounter,
-)
-from omnibase_infra.services.observability.static_context_attribution.service_llm_category_augmenter import (
-    LlmInferenceFn,
-    ServiceLlmCategoryAugmenter,
 )
 from omnibase_infra.services.observability.static_context_attribution.service_utilization_scorer import (
     ServiceUtilizationScorer,
