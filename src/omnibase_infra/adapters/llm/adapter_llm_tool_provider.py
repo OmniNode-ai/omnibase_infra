@@ -43,6 +43,14 @@ class AdapterLlmToolProvider:
         allowing future implementations to perform async initialization or
         lazy provider setup without breaking the interface.
 
+    Provider Registration Names:
+        The typed getter methods (``get_gemini_provider``, etc.) expect
+        providers to be registered under the canonical names defined by
+        the ``PROVIDER_NAME_*`` class constants.  Callers **must** use
+        these constants (or their string values) when calling
+        ``register_provider`` to ensure the typed getters resolve
+        correctly.
+
     Attributes:
         _router: The model router instance.
         _providers: Named provider instances.
@@ -53,6 +61,12 @@ class AdapterLlmToolProvider:
         >>> router = await tool_provider.get_model_router()
         >>> response = await router.generate(request)
     """
+
+    # Canonical registration names expected by the typed getter methods.
+    PROVIDER_NAME_GEMINI: str = "gemini"
+    PROVIDER_NAME_OPENAI: str = "openai"
+    PROVIDER_NAME_OLLAMA: str = "ollama"
+    PROVIDER_NAME_CLAUDE: str = "claude"
 
     def __init__(self) -> None:
         """Initialize the tool provider with an empty router."""
@@ -92,46 +106,58 @@ class AdapterLlmToolProvider:
     async def get_gemini_provider(self) -> ProtocolLLMProvider:
         """Get Gemini LLM provider instance.
 
+        Expects the provider to be registered under
+        ``PROVIDER_NAME_GEMINI`` (``"gemini"``).
+
         Returns:
             Configured Gemini provider.
 
         Raises:
-            KeyError: If no Gemini provider is registered.
+            KeyError: If no provider is registered under the expected name.
         """
-        return self._get_provider("gemini")
+        return self._get_provider(self.PROVIDER_NAME_GEMINI)
 
     async def get_openai_provider(self) -> ProtocolLLMProvider:
         """Get OpenAI LLM provider instance.
+
+        Expects the provider to be registered under
+        ``PROVIDER_NAME_OPENAI`` (``"openai"``).
 
         Returns:
             Configured OpenAI provider.
 
         Raises:
-            KeyError: If no OpenAI provider is registered.
+            KeyError: If no provider is registered under the expected name.
         """
-        return self._get_provider("openai")
+        return self._get_provider(self.PROVIDER_NAME_OPENAI)
 
     async def get_ollama_provider(self) -> ProtocolLLMProvider:
         """Get Ollama LLM provider instance.
+
+        Expects the provider to be registered under
+        ``PROVIDER_NAME_OLLAMA`` (``"ollama"``).
 
         Returns:
             Configured Ollama provider.
 
         Raises:
-            KeyError: If no Ollama provider is registered.
+            KeyError: If no provider is registered under the expected name.
         """
-        return self._get_provider("ollama")
+        return self._get_provider(self.PROVIDER_NAME_OLLAMA)
 
     async def get_claude_provider(self) -> ProtocolLLMProvider:
         """Get Claude LLM provider instance (Anthropic).
+
+        Expects the provider to be registered under
+        ``PROVIDER_NAME_CLAUDE`` (``"claude"``).
 
         Returns:
             Configured Claude provider.
 
         Raises:
-            KeyError: If no Claude provider is registered.
+            KeyError: If no provider is registered under the expected name.
         """
-        return self._get_provider("claude")
+        return self._get_provider(self.PROVIDER_NAME_CLAUDE)
 
     # ── Generic provider access ────────────────────────────────────────
 
@@ -198,6 +224,8 @@ class AdapterLlmToolProvider:
             available = list(self._providers.keys())
             raise KeyError(
                 f"LLM provider '{name}' is not registered. "
+                f"Providers must be registered with the exact name "
+                f"expected by the getter (see PROVIDER_NAME_* constants). "
                 f"Available providers: {available}"
             )
         return provider

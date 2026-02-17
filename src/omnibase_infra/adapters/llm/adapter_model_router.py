@@ -226,11 +226,15 @@ class AdapterModelRouter:
         Raises:
             ProtocolConfigurationError: If no providers are registered.
             InfraUnavailableError: If all providers are unavailable or fail.
+            TypeError: If the provider returns an unexpected type.
         """
-        from typing import cast
-
         result = await self.generate(request)
-        return cast("ModelLlmAdapterResponse", result)
+        if not isinstance(result, ModelLlmAdapterResponse):
+            raise TypeError(
+                f"Expected ModelLlmAdapterResponse from generate(), "
+                f"got {type(result).__name__}"
+            )
+        return result
 
     async def get_available_providers(self) -> list[str]:
         """Get list of currently available provider names.

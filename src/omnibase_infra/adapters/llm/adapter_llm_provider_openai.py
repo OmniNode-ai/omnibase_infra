@@ -28,6 +28,8 @@ import urllib.parse
 from collections.abc import AsyncGenerator, Iterator
 from typing import TYPE_CHECKING
 
+import httpx
+
 from omnibase_core.types import JsonType
 from omnibase_infra.adapters.llm.model_llm_adapter_request import (
     ModelLlmAdapterRequest,
@@ -60,8 +62,6 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 if TYPE_CHECKING:
     from uuid import UUID
-
-    import httpx
 
     from omnibase_infra.adapters.llm.model_llm_provider_config import (
         ModelLlmProviderConfig,
@@ -277,7 +277,7 @@ class AdapterLlmProviderOpenai:
                 "returning default",
                 self._provider_name_value,
             )
-        except Exception:
+        except (httpx.HTTPError, OSError, ValueError):
             logger.debug(
                 "Could not fetch models from %s, returning default",
                 self._provider_name_value,
@@ -385,9 +385,21 @@ class AdapterLlmProviderOpenai:
             Generated response with usage metrics.
 
         Raises:
+            InfraUnavailableError: If the provider has been closed.
             InfraConnectionError: If the provider cannot be reached.
             InfraTimeoutError: If the request times out.
         """
+        if not self._is_available:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="generate_async",
+                target_name=self._provider_name_value,
+            )
+            raise InfraUnavailableError(
+                f"LLM provider '{self._provider_name_value}' is closed or unavailable",
+                context=context,
+            )
+
         infra_request = self._translate_request(request)
         try:
             infra_response = await self._handler.handle(infra_request)

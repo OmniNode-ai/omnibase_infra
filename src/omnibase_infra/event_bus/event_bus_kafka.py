@@ -802,6 +802,10 @@ class EventBusKafka(
             InfraConnectionError: If the producer cannot be recreated.
             InfraTimeoutError: If the producer recreation times out.
         """
+        # NOTE: Lock.locked() only proves *some* coroutine holds the lock,
+        # not that the caller does.  All call-sites are guarded by
+        # `async with self._producer_lock:`, so this is a reasonable
+        # best-effort assertion in asyncio's cooperative model.
         if not self._producer_lock.locked():
             raise RuntimeError(
                 "_ensure_producer must be called with _producer_lock held"
