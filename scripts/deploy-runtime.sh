@@ -574,6 +574,9 @@ cleanup_on_exit() {
                 log_error "Expected restore target: ${original_dir}"
                 log_error "Manual recovery required: mv '${FORCE_BACKUP_DIR}' '${original_dir}'"
                 log_error "================================================================="
+            else
+                log_warn "NOTE: registry.json may contain stale metadata (git_sha, deployed_at)"
+                log_warn "from the failed deployment. Verify or re-deploy to restore consistency."
             fi
         else
             # Full deployment succeeded -- backup is stale, clean it up.
