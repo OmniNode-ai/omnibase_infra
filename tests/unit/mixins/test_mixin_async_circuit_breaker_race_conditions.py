@@ -60,6 +60,7 @@ class MockServiceWithCircuitBreaker(MixinAsyncCircuitBreaker):
             reset_timeout=reset_timeout,
             service_name=service_name,
             transport_type=EnumInfraTransportType.HTTP,
+            enable_active_recovery=False,
         )
         self.operation_count = 0
         self._count_lock = asyncio.Lock()

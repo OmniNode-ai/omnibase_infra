@@ -777,6 +777,89 @@ class EventBusKafka(
         # Publish with retry
         await self._publish_with_retry(topic, key, value, kafka_headers, headers)
 
+    async def _ensure_producer(self, correlation_id: UUID) -> None:
+        """Lazily recreate the Kafka producer if it was destroyed.
+
+        When a timeout destroys the producer (sets self._producer = None) but
+        the bus is still logically started (self._started is True), this method
+        recreates the producer so subsequent publish attempts can succeed once
+        Kafka is healthy again.
+
+        Must be called under self._producer_lock to prevent thundering herd
+        (multiple coroutines recreating simultaneously).
+
+        Args:
+            correlation_id: Correlation ID for error context and logging.
+
+        Raises:
+            InfraConnectionError: If the producer cannot be recreated.
+        """
+        if self._producer is not None:
+            return
+
+        if not self._started:
+            return
+
+        logger.info(
+            "Recreating Kafka producer after previous failure",
+            extra={
+                "environment": self._environment,
+                "correlation_id": str(correlation_id),
+            },
+        )
+
+        try:
+            self._producer = AIOKafkaProducer(
+                bootstrap_servers=self._bootstrap_servers,
+                acks=self._config.acks_aiokafka,
+                enable_idempotence=self._config.enable_idempotence,
+            )
+
+            await asyncio.wait_for(
+                self._producer.start(),
+                timeout=self._timeout_seconds,
+            )
+
+            logger.info(
+                "Kafka producer recreated successfully",
+                extra={
+                    "environment": self._environment,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        except Exception as e:
+            # Clean up the failed producer
+            if self._producer is not None:
+                try:
+                    await self._producer.stop()
+                except Exception as cleanup_err:
+                    logger.warning(
+                        "Cleanup failed for Kafka producer stop during recreation: %s",
+                        cleanup_err,
+                        exc_info=True,
+                    )
+            self._producer = None
+
+            logger.warning(
+                "Failed to recreate Kafka producer: %s",
+                e,
+                extra={
+                    "environment": self._environment,
+                    "correlation_id": str(correlation_id),
+                    "error": str(e),
+                },
+            )
+            raise InfraConnectionError(
+                f"Failed to recreate Kafka producer: {e}",
+                context=ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="recreate_producer",
+                    target_name=f"kafka.{self._environment}",
+                    correlation_id=correlation_id,
+                ),
+            ) from e
+
     async def _publish_with_retry(
         self,
         topic: str,
@@ -803,6 +886,10 @@ class EventBusKafka(
             try:
                 # Thread-safe producer access - acquire lock to check and use producer
                 async with self._producer_lock:
+                    # Lazily recreate producer if it was destroyed by a previous
+                    # timeout but the bus is still logically started.
+                    await self._ensure_producer(headers.correlation_id)
+
                     if self._producer is None:
                         raise InfraConnectionError(
                             "Kafka producer not initialized",

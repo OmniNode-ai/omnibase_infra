@@ -127,6 +127,17 @@ class ModelCircuitBreakerConfig(BaseModel):
         ),
     )
 
+    enable_active_recovery: bool = Field(
+        default=True,
+        description=(
+            "Enable active recovery timer. When True, an asyncio background task "
+            "automatically transitions the circuit from OPEN to HALF_OPEN after "
+            "reset_timeout_seconds, even if no callers invoke _check_circuit_breaker. "
+            "When False, the OPEN to HALF_OPEN transition is purely passive and only "
+            "occurs when a caller checks the circuit."
+        ),
+    )
+
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
@@ -138,6 +149,7 @@ class ModelCircuitBreakerConfig(BaseModel):
                     "service_name": "kafka.production",
                     "transport_type": "kafka",
                     "half_open_successes": 1,
+                    "enable_active_recovery": True,
                 },
                 {
                     "threshold": 3,
@@ -145,6 +157,7 @@ class ModelCircuitBreakerConfig(BaseModel):
                     "service_name": "postgresql-primary",
                     "transport_type": "db",
                     "half_open_successes": 2,
+                    "enable_active_recovery": True,
                 },
             ]
         },

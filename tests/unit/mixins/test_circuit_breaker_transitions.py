@@ -101,6 +101,7 @@ class CircuitBreakerTestService(MixinAsyncCircuitBreaker):
             reset_timeout=reset_timeout,
             service_name=service_name,
             transport_type=transport_type,
+            enable_active_recovery=False,
         )
 
     async def check_circuit(

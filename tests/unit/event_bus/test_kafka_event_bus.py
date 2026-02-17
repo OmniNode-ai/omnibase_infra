@@ -2354,3 +2354,276 @@ class TestKafkaEventBusTopicValidation:
 
         with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
             event_bus._validate_topic_name("topic\tname", correlation_id)
+
+
+class TestKafkaEventBusProducerRecreation:
+    """Test suite for producer recreation after timeout-induced destruction.
+
+    Validates that when a timeout destroys the producer (sets self._producer = None),
+    subsequent publish attempts lazily recreate the producer and succeed once Kafka
+    is healthy again, rather than entering a permanent failure loop.
+
+    The tests simulate the destroyed-producer state by directly setting
+    self._producer = None (which is exactly what the TimeoutError handler does)
+    rather than relying on real timeouts, keeping tests fast and deterministic.
+    """
+
+    @pytest.fixture
+    def mock_record_metadata(self) -> MagicMock:
+        """Create mock record metadata for successful publishes."""
+        metadata = MagicMock()
+        metadata.partition = 0
+        metadata.offset = 42
+        return metadata
+
+    @staticmethod
+    def _make_successful_producer(mock_record_metadata: MagicMock) -> AsyncMock:
+        """Create a mock producer whose send() always succeeds."""
+        producer = AsyncMock()
+        producer.start = AsyncMock()
+        producer.stop = AsyncMock()
+        producer._closed = False
+
+        async def mock_send(*args: object, **kwargs: object) -> asyncio.Future[object]:
+            future = asyncio.get_running_loop().create_future()
+            future.set_result(mock_record_metadata)
+            return future
+
+        producer.send = AsyncMock(side_effect=mock_send)
+        return producer
+
+    @pytest.mark.asyncio
+    async def test_producer_recreated_after_timeout_destroys_it(
+        self, mock_record_metadata: MagicMock
+    ) -> None:
+        """Test that producer is recreated after timeout sets it to None.
+
+        Scenario:
+            1. Start the bus with a working producer
+            2. Simulate timeout destroying the producer (self._producer = None)
+            3. Next publish should recreate the producer and succeed
+
+        This is the core bug fix: previously, the next publish would fail with
+        'Kafka producer not initialized' because no code path recreated the producer.
+        """
+        producer_instances: list[AsyncMock] = []
+
+        def make_mock_producer(**kwargs: object) -> AsyncMock:
+            """Create a fresh mock producer (accepts AIOKafkaProducer kwargs)."""
+            producer = self._make_successful_producer(mock_record_metadata)
+            producer_instances.append(producer)
+            return producer
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            side_effect=make_mock_producer,
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                max_retry_attempts=0,
+                circuit_breaker_threshold=100,
+            )
+            bus = EventBusKafka(config=config)
+
+            # Step 1: Start the bus - first producer is created
+            await bus.start()
+            assert len(producer_instances) == 1
+            assert bus._producer is not None
+            assert bus._started is True
+
+            # Step 2: Simulate what TimeoutError handler does: destroy the producer
+            # This is exactly lines 847-859 in the original code
+            async with bus._producer_lock:
+                bus._producer = None
+
+            # Verify: producer is gone but bus is still logically started
+            assert bus._producer is None
+            assert bus._started is True
+
+            # Step 3: Next publish should recreate the producer and succeed
+            await bus.publish("test-topic", None, b"recovery-message")
+
+            # Verify: a new producer was created (total of 2 instances)
+            assert len(producer_instances) == 2
+            assert bus._producer is not None
+
+            # Verify: the new producer's start() was called
+            producer_instances[1].start.assert_called_once()
+
+            # Verify: the new producer's send() was called
+            producer_instances[1].send.assert_called_once()
+            call_args = producer_instances[1].send.call_args
+            assert call_args[0][0] == "test-topic"
+            assert call_args[1]["value"] == b"recovery-message"
+
+            await bus.close()
+
+    @pytest.mark.asyncio
+    async def test_producer_recreation_fails_gracefully(
+        self,
+    ) -> None:
+        """Test that failed producer recreation raises InfraConnectionError.
+
+        If Kafka is truly unavailable, _ensure_producer should fail with a
+        clear error rather than silently proceeding with producer=None.
+        """
+        producer_create_count = 0
+
+        def make_mock_producer(**kwargs: object) -> AsyncMock:
+            nonlocal producer_create_count
+            producer_create_count += 1
+            producer = AsyncMock()
+            producer._closed = False
+            producer.stop = AsyncMock()
+
+            if producer_create_count == 1:
+                # First producer: starts successfully
+                producer.start = AsyncMock()
+                producer.send = AsyncMock()
+            else:
+                # Subsequent producers: fail to start (Kafka still down)
+                producer.start = AsyncMock(
+                    side_effect=ConnectionError("Kafka broker unavailable")
+                )
+                producer.send = AsyncMock()
+            return producer
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            side_effect=make_mock_producer,
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                max_retry_attempts=0,
+                circuit_breaker_threshold=100,
+            )
+            bus = EventBusKafka(config=config)
+            await bus.start()
+
+            # Simulate timeout destroying the producer
+            async with bus._producer_lock:
+                bus._producer = None
+
+            assert bus._producer is None
+            assert bus._started is True
+
+            # Next publish: _ensure_producer tries to recreate but Kafka is down.
+            # The InfraConnectionError from _ensure_producer is caught by the retry
+            # loop and re-raised as "Failed to publish" with the recreation error
+            # as the cause chain.
+            with pytest.raises(InfraConnectionError, match="Failed to publish"):
+                await bus.publish("test-topic", None, b"retry-message")
+
+            # Producer should still be None after failed recreation
+            assert bus._producer is None
+
+            await bus.close()
+
+    @pytest.mark.asyncio
+    async def test_ensure_producer_noop_when_producer_exists(
+        self, mock_record_metadata: MagicMock
+    ) -> None:
+        """Test that _ensure_producer is a no-op when producer already exists.
+
+        Normal publish operations should not be affected by the new code path.
+        """
+        producer_create_count = 0
+
+        def make_mock_producer(**kwargs: object) -> AsyncMock:
+            nonlocal producer_create_count
+            producer_create_count += 1
+            return self._make_successful_producer(mock_record_metadata)
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            side_effect=make_mock_producer,
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                max_retry_attempts=0,
+                circuit_breaker_threshold=100,
+            )
+            bus = EventBusKafka(config=config)
+            await bus.start()
+
+            # Multiple successful publishes should NOT create additional producers
+            for _ in range(5):
+                await bus.publish("test-topic", None, b"message")
+
+            # Only one producer should have been created (during start())
+            assert producer_create_count == 1
+
+            await bus.close()
+
+    @pytest.mark.asyncio
+    async def test_ensure_producer_noop_when_not_started(self) -> None:
+        """Test that _ensure_producer does nothing when bus is not started.
+
+        If bus._started is False, _ensure_producer should not attempt recreation.
+        """
+        config = ModelKafkaEventBusConfig(
+            bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+            environment=TEST_ENVIRONMENT,
+        )
+        bus = EventBusKafka(config=config)
+
+        # Bus not started: _ensure_producer should be a no-op
+        async with bus._producer_lock:
+            await bus._ensure_producer(uuid4())
+
+        assert bus._producer is None
+
+    @pytest.mark.asyncio
+    async def test_concurrent_publishes_after_timeout_single_recreation(
+        self, mock_record_metadata: MagicMock
+    ) -> None:
+        """Test that concurrent publishes after timeout don't cause thundering herd.
+
+        When multiple coroutines try to publish after the producer was destroyed,
+        only one should recreate the producer (protected by _producer_lock).
+        """
+        producer_create_count = 0
+
+        def make_mock_producer(**kwargs: object) -> AsyncMock:
+            nonlocal producer_create_count
+            producer_create_count += 1
+            return self._make_successful_producer(mock_record_metadata)
+
+        with patch(
+            "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
+            side_effect=make_mock_producer,
+        ):
+            config = ModelKafkaEventBusConfig(
+                bootstrap_servers=TEST_BOOTSTRAP_SERVERS,
+                environment=TEST_ENVIRONMENT,
+                max_retry_attempts=0,
+                circuit_breaker_threshold=100,
+            )
+            bus = EventBusKafka(config=config)
+            await bus.start()
+            assert producer_create_count == 1
+
+            # Simulate timeout destroying producer
+            async with bus._producer_lock:
+                bus._producer = None
+
+            assert bus._producer is None
+
+            # Launch 5 concurrent publishes -- all should succeed,
+            # but only 1 new producer should be created
+            tasks = [
+                bus.publish("test-topic", None, f"msg-{i}".encode()) for i in range(5)
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # All should succeed (no exceptions)
+            for i, result in enumerate(results):
+                assert result is None, f"Publish {i} failed: {result}"
+
+            # Exactly 2 producers total: 1 original + 1 recreation
+            assert producer_create_count == 2
+
+            await bus.close()

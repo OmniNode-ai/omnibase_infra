@@ -192,6 +192,7 @@ class MixinAsyncCircuitBreaker:
         service_name: str = "unknown",
         transport_type: EnumInfraTransportType = EnumInfraTransportType.HTTP,
         half_open_successes: int = 1,
+        enable_active_recovery: bool = True,
     ) -> None:
         """Initialize circuit breaker state and configuration.
 
@@ -205,6 +206,9 @@ class MixinAsyncCircuitBreaker:
             transport_type: Transport type for error context (default: HTTP)
             half_open_successes: Successful requests required to close circuit
                 from half-open state (default: 1)
+            enable_active_recovery: When True, an asyncio background task
+                automatically transitions from OPEN to HALF_OPEN after
+                reset_timeout, even without callers. (default: True)
 
         Raises:
             ValueError: If threshold < 1 or reset_timeout < 0 or half_open_successes < 1
@@ -276,6 +280,10 @@ class MixinAsyncCircuitBreaker:
             transport_type  # Use private name to avoid property conflicts
         )
 
+        # Active recovery configuration and state
+        self._cb_enable_active_recovery = enable_active_recovery
+        self._cb_recovery_task: asyncio.Task[None] | None = None
+
         # Coroutine-safety lock (asyncio.Lock for concurrent async access, not thread-safe)
         self._circuit_breaker_lock = asyncio.Lock()
 
@@ -286,6 +294,7 @@ class MixinAsyncCircuitBreaker:
                 "reset_timeout": reset_timeout,
                 "half_open_successes": half_open_successes,
                 "transport_type": transport_type.value,
+                "enable_active_recovery": enable_active_recovery,
             },
         )
 
@@ -333,6 +342,7 @@ class MixinAsyncCircuitBreaker:
             service_name=config.service_name,
             transport_type=config.transport_type,
             half_open_successes=config.half_open_successes,
+            enable_active_recovery=config.enable_active_recovery,
         )
 
     async def _check_circuit_breaker(
@@ -408,6 +418,8 @@ class MixinAsyncCircuitBreaker:
         if self._circuit_breaker_open:
             # Check if reset timeout has passed
             if current_time >= self._circuit_breaker_open_until:
+                # Cancel active recovery timer (passive check beat it or it already fired)
+                self._cancel_active_recovery_timer()
                 # Transition to HALF_OPEN (atomic write protected by caller's lock)
                 self._circuit_breaker_open = False
                 self._circuit_breaker_half_open = True
@@ -527,6 +539,8 @@ class MixinAsyncCircuitBreaker:
                     "correlation_id": str(correlation_id) if correlation_id else None,
                 },
             )
+            # Start active recovery timer for the re-opened circuit
+            self._start_active_recovery_timer()
             return
 
         # Check if threshold reached
@@ -548,6 +562,8 @@ class MixinAsyncCircuitBreaker:
                     "correlation_id": str(correlation_id) if correlation_id else None,
                 },
             )
+            # Start active recovery timer
+            self._start_active_recovery_timer()
 
     async def _reset_circuit_breaker(self) -> None:
         """Reset circuit breaker to closed state.
@@ -626,6 +642,8 @@ class MixinAsyncCircuitBreaker:
                         "required_successes": self.circuit_breaker_half_open_successes,
                     },
                 )
+                # Cancel active recovery timer (should already be done, but be safe)
+                self._cancel_active_recovery_timer()
                 self._circuit_breaker_half_open = False
                 self._circuit_breaker_half_open_success_count = 0
                 self._circuit_breaker_failures = 0
@@ -658,12 +676,99 @@ class MixinAsyncCircuitBreaker:
                 },
             )
 
+        # Cancel active recovery timer since circuit is closing
+        self._cancel_active_recovery_timer()
+
         # Reset state (atomic write protected by caller's lock)
         self._circuit_breaker_open = False
         self._circuit_breaker_half_open = False
         self._circuit_breaker_half_open_success_count = 0
         self._circuit_breaker_failures = 0
         self._circuit_breaker_open_until = 0.0
+
+    def _start_active_recovery_timer(self) -> None:
+        """Start or restart the active recovery background task.
+
+        When active recovery is enabled, this schedules an asyncio task that
+        sleeps for ``circuit_breaker_reset_timeout`` seconds and then transitions
+        the circuit from OPEN to HALF_OPEN.
+
+        This method is idempotent: calling it when a timer is already running
+        will cancel the existing timer before starting a new one.
+
+        Concurrency Safety:
+            REQUIRES: self._circuit_breaker_lock must be held by caller.
+
+            This method reads ``_cb_enable_active_recovery`` and mutates
+            ``_cb_recovery_task``, so the lock must be held.
+
+        Side Effects:
+            - Cancels existing recovery task if one is running
+            - Creates a new asyncio.Task that transitions to HALF_OPEN after timeout
+        """
+        if not self._cb_enable_active_recovery:
+            return
+
+        # Cancel existing timer if running (idempotent)
+        self._cancel_active_recovery_timer()
+
+        # Schedule the recovery coroutine as a background task.
+        # _start_active_recovery_timer is always called while holding the lock,
+        # which means a coroutine is running, so get_running_loop() is safe.
+        loop = asyncio.get_running_loop()
+        self._cb_recovery_task = loop.create_task(self._active_recovery_coroutine())
+
+    def _cancel_active_recovery_timer(self) -> None:
+        """Cancel the active recovery background task if running.
+
+        Safe to call even when no timer is active (no-op in that case).
+
+        Concurrency Safety:
+            REQUIRES: self._circuit_breaker_lock must be held by caller.
+        """
+        if self._cb_recovery_task is not None and not self._cb_recovery_task.done():
+            self._cb_recovery_task.cancel()
+        self._cb_recovery_task = None
+
+    async def _active_recovery_coroutine(self) -> None:
+        """Background coroutine that transitions OPEN to HALF_OPEN after timeout.
+
+        Sleeps for ``circuit_breaker_reset_timeout`` seconds, then acquires the
+        lock and transitions the circuit to HALF_OPEN if it is still OPEN.
+
+        This coroutine handles cancellation gracefully via ``asyncio.CancelledError``.
+        """
+        try:
+            await asyncio.sleep(self.circuit_breaker_reset_timeout)
+        except asyncio.CancelledError:
+            return
+
+        # Acquire lock to transition state safely
+        async with self._circuit_breaker_lock:
+            # Only transition if circuit is still OPEN
+            if self._circuit_breaker_open:
+                self._circuit_breaker_open = False
+                self._circuit_breaker_half_open = True
+                self._circuit_breaker_half_open_success_count = 0
+                self._circuit_breaker_failures = 0
+                logger.info(
+                    f"Circuit breaker active recovery: transitioning to half-open for {self.service_name}",
+                    extra={
+                        "service": self.service_name,
+                        "required_successes": self.circuit_breaker_half_open_successes,
+                    },
+                )
+            # Clear the task reference now that we are done
+            self._cb_recovery_task = None
+
+    async def cancel_active_recovery(self) -> None:
+        """Public method to cancel the active recovery timer and clean up.
+
+        Use this in shutdown/close paths to ensure the background task does
+        not outlive the component. Acquires the lock internally.
+        """
+        async with self._circuit_breaker_lock:
+            self._cancel_active_recovery_timer()
 
     def _get_circuit_breaker_state(self) -> dict[str, JsonType]:
         """Return current circuit breaker state for introspection.
