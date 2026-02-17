@@ -33,6 +33,10 @@ Example:
     >>> await consumer.run()
 """
 
+from omnibase_infra.services.observability.injection_effectiveness.batch_compute import (
+    BatchComputeEffectivenessMetrics,
+    BatchComputeResult,
+)
 from omnibase_infra.services.observability.injection_effectiveness.config import (
     ConfigInjectionEffectivenessConsumer,
 )
@@ -51,6 +55,7 @@ from omnibase_infra.services.observability.injection_effectiveness.ledger_sink_p
 from omnibase_infra.services.observability.injection_effectiveness.models import (
     ModelAgentMatchEvent,
     ModelContextUtilizationEvent,
+    ModelEffectivenessInvalidationEvent,
     ModelInjectionEffectivenessQuery,
     ModelInjectionEffectivenessQueryResult,
     ModelInjectionEffectivenessRow,
@@ -58,6 +63,10 @@ from omnibase_infra.services.observability.injection_effectiveness.models import
     ModelLatencyBreakdownRow,
     ModelPatternHitRateRow,
     ModelPatternUtilization,
+)
+from omnibase_infra.services.observability.injection_effectiveness.notifier import (
+    TOPIC_EFFECTIVENESS_INVALIDATION,
+    EffectivenessInvalidationNotifier,
 )
 from omnibase_infra.services.observability.injection_effectiveness.protocol_reader import (
     ProtocolInjectionEffectivenessReader,
@@ -70,14 +79,18 @@ from omnibase_infra.services.observability.injection_effectiveness.writer_postgr
 )
 
 __all__ = [
+    "BatchComputeEffectivenessMetrics",
+    "BatchComputeResult",
     "ConfigInjectionEffectivenessConsumer",
     "ConsumerMetrics",
+    "EffectivenessInvalidationNotifier",
     "EnumHealthStatus",
     "InjectionEffectivenessConsumer",
     "LedgerEntryDict",
     "LedgerSinkInjectionEffectivenessPostgres",
     "ModelAgentMatchEvent",
     "ModelContextUtilizationEvent",
+    "ModelEffectivenessInvalidationEvent",
     "ModelInjectionEffectivenessQuery",
     "ModelInjectionEffectivenessQueryResult",
     "ModelInjectionEffectivenessRow",
@@ -87,6 +100,7 @@ __all__ = [
     "ModelPatternUtilization",
     "ProtocolInjectionEffectivenessReader",
     "ReaderInjectionEffectivenessPostgres",
+    "TOPIC_EFFECTIVENESS_INVALIDATION",
     "TOPIC_TO_MODEL",
     "TOPIC_TO_WRITER_METHOD",
     "WriterInjectionEffectivenessPostgres",

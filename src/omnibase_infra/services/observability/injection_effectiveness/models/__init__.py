@@ -34,6 +34,9 @@ from omnibase_infra.services.observability.injection_effectiveness.models.model_
 from omnibase_infra.services.observability.injection_effectiveness.models.model_injection_effectiveness_row import (
     ModelInjectionEffectivenessRow,
 )
+from omnibase_infra.services.observability.injection_effectiveness.models.model_invalidation_event import (
+    ModelEffectivenessInvalidationEvent,
+)
 from omnibase_infra.services.observability.injection_effectiveness.models.model_latency_breakdown import (
     ModelLatencyBreakdownEvent,
 )
@@ -50,6 +53,7 @@ from omnibase_infra.services.observability.injection_effectiveness.models.model_
 __all__ = [
     "ModelAgentMatchEvent",
     "ModelContextUtilizationEvent",
+    "ModelEffectivenessInvalidationEvent",
     "ModelInjectionEffectivenessQuery",
     "ModelInjectionEffectivenessQueryResult",
     "ModelInjectionEffectivenessRow",
