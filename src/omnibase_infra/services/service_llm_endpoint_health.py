@@ -15,7 +15,7 @@ Architecture:
     - One circuit breaker **per endpoint** (independent failure tracking)
     - Probes hit ``GET /health`` first; if that returns non-2xx, falls back
       to ``GET /v1/models`` (vLLM-style discovery)
-    - Results are stored in a dict keyed by endpoint URL
+    - Results are stored in a dict keyed by endpoint name
     - An optional ``ProtocolEventBusLike`` dependency enables Kafka emission
 
 Topic:
@@ -36,7 +36,7 @@ import asyncio
 import logging
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 import httpx
@@ -63,10 +63,34 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Topic constant
+# Type alias and constants
 # ---------------------------------------------------------------------------
+CircuitState = Literal["closed", "open", "half_open"]
+"""Valid circuit breaker states for endpoint status."""
+
+_VALID_CIRCUIT_STATES: frozenset[str] = frozenset({"closed", "open", "half_open"})
+
 TOPIC_LLM_ENDPOINT_HEALTH: str = "onex.evt.omnibase-infra.llm-endpoint-health.v1"
 """Canonical topic for LLM endpoint health events."""
+
+
+def _parse_circuit_state(
+    cb_state: dict[str, JsonType],
+    default: CircuitState,
+) -> CircuitState:
+    """Extract and validate the circuit breaker state from introspection dict.
+
+    Args:
+        cb_state: Dict returned by ``EndpointCircuitBreaker.get_state()``.
+        default: Fallback value if the state key is missing or invalid.
+
+    Returns:
+        A validated ``CircuitState`` literal value.
+    """
+    raw = str(cb_state.get("state", default))
+    if raw in _VALID_CIRCUIT_STATES:
+        return raw  # type: ignore[return-value]
+    return default
 
 
 # ---------------------------------------------------------------------------
@@ -330,12 +354,17 @@ class ServiceLlmEndpointHealth:
             Updated status map after probing all endpoints.
         """
         correlation_id = generate_correlation_id()
-        results: list[ModelLlmEndpointStatus] = []
 
-        for name, url in self._config.endpoints.items():
-            status = await self._probe_endpoint(name, url, correlation_id)
-            self._status_map[name] = status
-            results.append(status)
+        # Probe all endpoints concurrently to avoid worst-case
+        # N * 2 * timeout sequential latency.
+        probe_coros = [
+            self._probe_endpoint(name, url, correlation_id)
+            for name, url in self._config.endpoints.items()
+        ]
+        results: list[ModelLlmEndpointStatus] = list(await asyncio.gather(*probe_coros))
+
+        for status in results:
+            self._status_map[status.name] = status
 
         # Emit health event if event bus is available
         if self._event_bus is not None and results:
@@ -400,7 +429,7 @@ class ServiceLlmEndpointHealth:
                 last_check=now,
                 latency_ms=-1.0,
                 error="Circuit breaker open",
-                circuit_state=str(cb_state.get("state", "open")),
+                circuit_state=_parse_circuit_state(cb_state, "open"),
             )
 
         # Probe the endpoint
@@ -426,10 +455,10 @@ class ServiceLlmEndpointHealth:
                 url=url,
                 name=name,
                 available=available,
-                last_check=datetime.now(UTC),
+                last_check=now,
                 latency_ms=round(elapsed_ms, 2) if available else -1.0,
                 error=error,
-                circuit_state=str(cb_state.get("state", "closed")),
+                circuit_state=_parse_circuit_state(cb_state, "closed"),
             )
 
         except Exception as exc:
@@ -453,10 +482,10 @@ class ServiceLlmEndpointHealth:
                 url=url,
                 name=name,
                 available=False,
-                last_check=datetime.now(UTC),
+                last_check=now,
                 latency_ms=-1.0,
                 error=error_msg,
-                circuit_state=str(cb_state.get("state", "closed")),
+                circuit_state=_parse_circuit_state(cb_state, "closed"),
             )
 
     def _get_http_client(self) -> httpx.AsyncClient:
@@ -476,7 +505,8 @@ class ServiceLlmEndpointHealth:
         """Perform the HTTP probe against an endpoint.
 
         Tries ``GET /health`` first.  If that returns a non-2xx status,
-        falls back to ``GET /v1/models`` (vLLM model listing).
+        falls back to ``GET /v1/models`` (vLLM model listing).  If both
+        probes fail, the error message includes details from both attempts.
 
         Args:
             base_url: The endpoint base URL (no trailing slash).
@@ -487,23 +517,27 @@ class ServiceLlmEndpointHealth:
             a human-readable error description.
         """
         client = self._get_http_client()
+        primary_error: str = ""
 
         # Primary probe: /health
         try:
             resp = await client.get(f"{base_url.rstrip('/')}/health")
             if 200 <= resp.status_code < 300:
                 return True, ""
-        except httpx.HTTPError:
-            pass  # Fall through to fallback probe
+            primary_error = f"Primary /health: HTTP {resp.status_code}"
+        except httpx.HTTPError as exc:
+            primary_error = f"Primary /health: {type(exc).__name__}"
 
         # Fallback probe: /v1/models (vLLM-style)
         try:
             resp = await client.get(f"{base_url.rstrip('/')}/v1/models")
             if 200 <= resp.status_code < 300:
                 return True, ""
-            return False, f"HTTP {resp.status_code} from /v1/models"
+            fallback_error = f"Fallback /v1/models: HTTP {resp.status_code}"
+            return False, f"{primary_error}; {fallback_error}"
         except httpx.HTTPError as exc:
-            return False, f"Connection failed: {type(exc).__name__}"
+            fallback_error = f"Fallback /v1/models: {type(exc).__name__}"
+            return False, f"{primary_error}; {fallback_error}"
 
     async def _emit_health_event(
         self,

@@ -9,8 +9,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ModelLlmEndpointStatus(BaseModel):
@@ -32,12 +33,29 @@ class ModelLlmEndpointStatus(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     url: str = Field(..., description="Endpoint base URL")
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url_scheme(cls, v: str) -> str:
+        """Validate that the URL uses an HTTP(S) scheme.
+
+        Raises:
+            ValueError: If the URL does not start with ``http://`` or
+                ``https://``.
+        """
+        if not v.startswith(("http://", "https://")):
+            msg = f"Invalid URL '{v}': must start with 'http://' or 'https://'"
+            raise ValueError(msg)
+        return v
+
     name: str = Field(..., description="Logical endpoint name")
     available: bool = Field(..., description="Whether the endpoint is healthy")
     last_check: datetime = Field(..., description="UTC timestamp of last probe")
     latency_ms: float = Field(..., description="Probe latency in ms (-1.0 on failure)")
     error: str = Field(default="", description="Error message if probe failed")
-    circuit_state: str = Field(default="closed", description="Circuit breaker state")
+    circuit_state: Literal["closed", "open", "half_open"] = Field(
+        default="closed", description="Circuit breaker state"
+    )
 
 
 __all__: list[str] = ["ModelLlmEndpointStatus"]

@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ModelLlmEndpointHealthConfig(BaseModel):
@@ -32,6 +32,25 @@ class ModelLlmEndpointHealthConfig(BaseModel):
         default_factory=dict,
         description="Mapping of logical name to base URL",
     )
+
+    @field_validator("endpoints")
+    @classmethod
+    def _validate_endpoint_urls(cls, v: dict[str, str]) -> dict[str, str]:
+        """Validate that every endpoint URL uses an HTTP(S) scheme.
+
+        Raises:
+            ValueError: If any URL does not start with ``http://`` or
+                ``https://``.
+        """
+        for name, url in v.items():
+            if not url.startswith(("http://", "https://")):
+                msg = (
+                    f"Endpoint '{name}' has invalid URL '{url}': "
+                    "must start with 'http://' or 'https://'"
+                )
+                raise ValueError(msg)
+        return v
+
     probe_interval_seconds: float = Field(
         default=30.0,
         ge=1.0,

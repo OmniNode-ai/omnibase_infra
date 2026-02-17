@@ -48,9 +48,6 @@ from omnibase_infra.services.corpus_capture import CorpusCapture
 from omnibase_infra.services.service_capability_query import ServiceCapabilityQuery
 from omnibase_infra.services.service_llm_endpoint_health import (
     TOPIC_LLM_ENDPOINT_HEALTH,
-    ModelLlmEndpointHealthConfig,
-    ModelLlmEndpointHealthEvent,
-    ModelLlmEndpointStatus,
     ServiceLlmEndpointHealth,
 )
 from omnibase_infra.services.service_node_selector import (
@@ -114,9 +111,6 @@ __all__ = [
     "SessionSnapshotStore",
     "SessionStoreNotInitializedError",
     # LLM endpoint health checker (OMN-2255)
-    "ModelLlmEndpointHealthConfig",
-    "ModelLlmEndpointHealthEvent",
-    "ModelLlmEndpointStatus",
     "ServiceLlmEndpointHealth",
     "TOPIC_LLM_ENDPOINT_HEALTH",
     # Contract publisher service (OMN-1752)
