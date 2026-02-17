@@ -396,6 +396,36 @@ class TestSafeConversions:
         assert _safe_decimal(None) is None
 
     @pytest.mark.unit
+    def test_safe_decimal_rejects_nan_string(self) -> None:
+        assert _safe_decimal("NaN") is None
+        assert _safe_decimal("nan") is None
+
+    @pytest.mark.unit
+    def test_safe_decimal_rejects_infinity_string(self) -> None:
+        assert _safe_decimal("Infinity") is None
+        assert _safe_decimal("-Infinity") is None
+        assert _safe_decimal("inf") is None
+
+    @pytest.mark.unit
+    def test_safe_decimal_rejects_nan_decimal(self) -> None:
+        assert _safe_decimal(Decimal("NaN")) is None
+        assert _safe_decimal(Decimal("sNaN")) is None
+
+    @pytest.mark.unit
+    def test_safe_decimal_rejects_infinity_decimal(self) -> None:
+        assert _safe_decimal(Decimal("Infinity")) is None
+        assert _safe_decimal(Decimal("-Infinity")) is None
+
+    @pytest.mark.unit
+    def test_safe_decimal_rejects_nan_float(self) -> None:
+        assert _safe_decimal(float("nan")) is None
+
+    @pytest.mark.unit
+    def test_safe_decimal_rejects_infinity_float(self) -> None:
+        assert _safe_decimal(float("inf")) is None
+        assert _safe_decimal(float("-inf")) is None
+
+    @pytest.mark.unit
     def test_safe_uuid_from_string(self) -> None:
         uid = uuid4()
         assert _safe_uuid(str(uid)) == uid

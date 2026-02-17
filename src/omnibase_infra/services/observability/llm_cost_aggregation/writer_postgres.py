@@ -695,13 +695,22 @@ def _safe_numeric_or_none(value: object) -> float | None:
 
 
 def _safe_decimal(value: object) -> Decimal | None:
-    """Safely convert a value to Decimal, returning None on failure."""
+    """Safely convert a value to Decimal, returning None on failure.
+
+    Rejects NaN and Infinity values to prevent aggregation corruption
+    in PostgreSQL NUMERIC columns (NaN + x = NaN).
+    """
     if value is None:
         return None
     if isinstance(value, Decimal):
+        if not value.is_finite():
+            return None
         return value
     try:
-        return Decimal(str(value))
+        result = Decimal(str(value))
+        if not result.is_finite():
+            return None
+        return result
     except Exception:
         return None
 
