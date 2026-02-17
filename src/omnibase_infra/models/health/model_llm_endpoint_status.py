@@ -2,6 +2,11 @@
 # Copyright (c) 2025 OmniNode Team
 """Status model for a single LLM endpoint health probe.
 
+Each instance represents a point-in-time snapshot produced by
+``ServiceLlmEndpointHealth`` after probing a single endpoint. Instances
+are frozen and stored in the service's in-memory status map and included
+in ``ModelLlmEndpointHealthEvent`` payloads emitted to Kafka.
+
 .. versionadded:: 0.9.0
     Part of OMN-2255 LLM endpoint health checker.
 """
@@ -10,8 +15,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from omnibase_infra.utils.util_error_sanitization import sanitize_url
 
 
 class ModelLlmEndpointStatus(BaseModel):
@@ -37,14 +45,26 @@ class ModelLlmEndpointStatus(BaseModel):
     @field_validator("url")
     @classmethod
     def _validate_url_scheme(cls, v: str) -> str:
-        """Validate that the URL uses an HTTP(S) scheme.
+        """Validate that the URL uses an HTTP(S) scheme and has a hostname.
+
+        Rejects non-HTTP schemes to prevent construction of status objects
+        with invalid endpoint URLs.  Also rejects URLs with empty netloc
+        (e.g. ``http://``) which would produce invalid probe requests.
+        Error messages are sanitized via ``sanitize_url`` to avoid leaking
+        credentials embedded in URLs.
 
         Raises:
             ValueError: If the URL does not start with ``http://`` or
-                ``https://``.
+                ``https://``, or has an empty netloc (no hostname).
         """
         if not v.startswith(("http://", "https://")):
-            msg = f"Invalid URL '{v}': must start with 'http://' or 'https://'"
+            safe_url = sanitize_url(v)
+            msg = f"Invalid URL '{safe_url}': must start with 'http://' or 'https://'"
+            raise ValueError(msg)
+        parsed = urlparse(v)
+        if not parsed.netloc:
+            safe_url = sanitize_url(v)
+            msg = f"Invalid URL '{safe_url}': URL must have a hostname"
             raise ValueError(msg)
         return v
 
