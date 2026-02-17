@@ -22,9 +22,10 @@ Design Decisions:
 Metrics Derivation Logic:
     - **injection_effectiveness**: One row per unique correlation_id from
       agent_routing_decisions. Utilization derived from action success rates.
-      Agent match from routing confidence scores.
-    - **latency_breakdowns**: One row per agent_action with duration_ms,
-      derived from action timing data.
+      Agent match fields are NULL until expected-agent tracking is available.
+    - **latency_breakdowns**: One row per agent_action with total duration_ms.
+      Sub-component latencies (routing, retrieval, injection) are NULL
+      because individual timing is not yet instrumented.
     - **pattern_hit_rates**: Aggregated from routing decisions grouped by
       selected_agent, treating agent selection as the "pattern".
 
@@ -139,6 +140,7 @@ class BatchComputeEffectivenessMetrics:
         self._batch_size = batch_size
         self._query_timeout = query_timeout
         self._notifier = notifier
+        self._has_uuid_ossp: bool | None = None
 
     async def compute_and_persist(
         self,
@@ -258,8 +260,9 @@ class BatchComputeEffectivenessMetrics:
 
         Each unique correlation_id in agent_routing_decisions becomes one
         row in injection_effectiveness. The utilization_score is derived
-        from the action success rate for that correlation, and agent_match
-        uses the routing confidence_score.
+        from the action success rate for that correlation. Agent match
+        fields (expected_agent, agent_match_score) are NULL until
+        expected-agent tracking is implemented.
 
         Args:
             correlation_id: Correlation ID for tracing.
@@ -271,7 +274,7 @@ class BatchComputeEffectivenessMetrics:
         # 1. Groups agent_routing_decisions by correlation_id (one session per correlation)
         # 2. JOINs with agent_actions to compute action success rates
         # 3. Derives utilization_score from completed/total action ratio
-        # 4. Uses routing confidence_score as agent_match_score
+        # 4. Sets agent_match_score and expected_agent to NULL (not yet tracked)
         # 5. Computes user_visible_latency_ms from MAX(duration_ms)
         sql = """
             INSERT INTO injection_effectiveness (
@@ -295,9 +298,13 @@ class BatchComputeEffectivenessMetrics:
                     0.0
                 ) AS utilization_score,
                 'batch_derived' AS utilization_method,
-                -- agent_match_score: routing confidence
-                rd.confidence_score AS agent_match_score,
-                rd.selected_agent AS expected_agent,
+                -- agent_match_score: NULL until expected-agent tracking
+                -- is implemented; without a true expected agent the
+                -- match score is meaningless.
+                NULL AS agent_match_score,
+                -- expected_agent: NULL because the true expected agent
+                -- is not available in routing decisions data.
+                NULL AS expected_agent,
                 rd.selected_agent AS actual_agent,
                 -- user_visible_latency: max action duration
                 action_stats.max_duration_ms AS user_visible_latency_ms,
@@ -367,21 +374,12 @@ class BatchComputeEffectivenessMetrics:
                     ELSE NULL
                 END AS cohort,
                 FALSE AS cache_hit,
-                -- Estimate routing latency as 10% of total duration
-                CASE WHEN aa.duration_ms IS NOT NULL
-                    THEN (aa.duration_ms * 0.1)::INTEGER
-                    ELSE NULL
-                END AS routing_latency_ms,
-                -- Estimate retrieval latency as 20% of total duration
-                CASE WHEN aa.duration_ms IS NOT NULL
-                    THEN (aa.duration_ms * 0.2)::INTEGER
-                    ELSE NULL
-                END AS retrieval_latency_ms,
-                -- Estimate injection latency as 5% of total duration
-                CASE WHEN aa.duration_ms IS NOT NULL
-                    THEN (aa.duration_ms * 0.05)::INTEGER
-                    ELSE NULL
-                END AS injection_latency_ms,
+                -- Sub-component latencies are NULL because individual
+                -- routing/retrieval/injection timing is not yet
+                -- instrumented. Only total duration is available.
+                NULL AS routing_latency_ms,
+                NULL AS retrieval_latency_ms,
+                NULL AS injection_latency_ms,
                 COALESCE(aa.duration_ms, 0) AS user_latency_ms,
                 aa.created_at AS emitted_at,
                 NOW() AS created_at
@@ -460,12 +458,10 @@ class BatchComputeEffectivenessMetrics:
                 NOW() AS updated_at
             FROM agent_routing_decisions rd
             GROUP BY rd.selected_agent
-            HAVING COUNT(*) >= 1
             ON CONFLICT (pattern_id, utilization_method) DO UPDATE SET
-                utilization_score = (
-                    (pattern_hit_rates.utilization_score * pattern_hit_rates.sample_count)
-                    + EXCLUDED.utilization_score * EXCLUDED.sample_count
-                ) / NULLIF(pattern_hit_rates.sample_count + EXCLUDED.sample_count, 0),
+                -- Counts are full snapshots (not accumulated), so the
+                -- score must also be a snapshot to stay consistent.
+                utilization_score = EXCLUDED.utilization_score,
                 hit_count = EXCLUDED.hit_count,
                 miss_count = EXCLUDED.miss_count,
                 sample_count = EXCLUDED.sample_count,
@@ -480,14 +476,15 @@ class BatchComputeEffectivenessMetrics:
             async with conn.transaction():
                 await set_statement_timeout(conn, self._query_timeout * 1000)
 
-                # Check if uuid-ossp extension is available; if not, use a fallback
-                has_uuid_ossp: bool = False
-                row = await conn.fetchrow(
-                    "SELECT 1 FROM pg_extension WHERE extname = 'uuid-ossp'"
-                )
-                has_uuid_ossp = row is not None
+                # Check if uuid-ossp extension is available; if not, use a fallback.
+                # Result is cached on the instance after the first query.
+                if self._has_uuid_ossp is None:
+                    row = await conn.fetchrow(
+                        "SELECT 1 FROM pg_extension WHERE extname = 'uuid-ossp'"
+                    )
+                    self._has_uuid_ossp = row is not None
 
-                if has_uuid_ossp:
+                if self._has_uuid_ossp:
                     result: str = await conn.execute(sql)
                 else:
                     # Fallback: use md5-based UUID generation without extension
@@ -510,16 +507,10 @@ class BatchComputeEffectivenessMetrics:
                             NOW() AS updated_at
                         FROM agent_routing_decisions rd
                         GROUP BY rd.selected_agent
-                        HAVING COUNT(*) >= 1
-                        ON CONFLICT (pattern_id, utilization_method) DO UPDATE SET
-                            utilization_score = (
-                                (pattern_hit_rates.utilization_score
-                                 * pattern_hit_rates.sample_count)
-                                + EXCLUDED.utilization_score * EXCLUDED.sample_count
-                            ) / NULLIF(
-                                pattern_hit_rates.sample_count
-                                + EXCLUDED.sample_count, 0
-                            ),
+                                    ON CONFLICT (pattern_id, utilization_method) DO UPDATE SET
+                            -- Counts are full snapshots (not accumulated), so the
+                            -- score must also be a snapshot to stay consistent.
+                            utilization_score = EXCLUDED.utilization_score,
                             hit_count = EXCLUDED.hit_count,
                             miss_count = EXCLUDED.miss_count,
                             sample_count = EXCLUDED.sample_count,

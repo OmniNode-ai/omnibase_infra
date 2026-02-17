@@ -33,6 +33,9 @@ Example:
     >>> await consumer.run()
 """
 
+from omnibase_infra.event_bus.topic_constants import (
+    TOPIC_EFFECTIVENESS_INVALIDATION,
+)
 from omnibase_infra.services.observability.injection_effectiveness.batch_compute import (
     BatchComputeEffectivenessMetrics,
     BatchComputeResult,
@@ -65,7 +68,6 @@ from omnibase_infra.services.observability.injection_effectiveness.models import
     ModelPatternUtilization,
 )
 from omnibase_infra.services.observability.injection_effectiveness.notifier import (
-    TOPIC_EFFECTIVENESS_INVALIDATION,
     EffectivenessInvalidationNotifier,
 )
 from omnibase_infra.services.observability.injection_effectiveness.protocol_reader import (

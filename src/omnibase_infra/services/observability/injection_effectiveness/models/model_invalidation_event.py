@@ -15,7 +15,16 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# The three known effectiveness measurement tables
+_VALID_TABLES: frozenset[str] = frozenset(
+    {
+        "injection_effectiveness",
+        "latency_breakdowns",
+        "pattern_hit_rates",
+    }
+)
 
 
 class ModelEffectivenessInvalidationEvent(BaseModel):
@@ -65,3 +74,18 @@ class ModelEffectivenessInvalidationEvent(BaseModel):
         default_factory=lambda: datetime.now(UTC),
         description="Timestamp when this event was created",
     )
+
+    @field_validator("tables_affected")
+    @classmethod
+    def _validate_tables_affected(
+        cls,
+        v: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        """Validate that every entry is a known effectiveness table."""
+        invalid = set(v) - _VALID_TABLES
+        if invalid:
+            msg = (
+                f"Unknown table(s): {sorted(invalid)}. Allowed: {sorted(_VALID_TABLES)}"
+            )
+            raise ValueError(msg)
+        return v
