@@ -200,6 +200,33 @@ SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED: str = "onex.evt.pattern.discovered.v1"
 """Topic for generic pattern discovery events."""
 
 # =============================================================================
+# TOPIC CATALOG TOPIC SUFFIXES
+# =============================================================================
+
+SUFFIX_TOPIC_CATALOG_QUERY: str = "onex.cmd.platform.topic-catalog-query.v1"
+"""Topic suffix for topic catalog query commands.
+
+Published when a client requests the current topic catalog. Contains optional
+filters (topic_pattern, include_inactive) and a correlation_id for
+request-response matching.
+"""
+
+SUFFIX_TOPIC_CATALOG_RESPONSE: str = "onex.evt.platform.topic-catalog-response.v1"
+"""Topic suffix for topic catalog response events.
+
+Published in response to a catalog query. Contains the full list of topic
+entries with publisher/subscriber counts, plus catalog metadata.
+"""
+
+SUFFIX_TOPIC_CATALOG_CHANGED: str = "onex.evt.platform.topic-catalog-changed.v1"
+"""Topic suffix for topic catalog change notification events.
+
+Published when topics are added or removed from the catalog. Contains
+delta tuples (topics_added, topics_removed) sorted alphabetically for
+deterministic ordering.
+"""
+
+# =============================================================================
 # PLATFORM TOPIC SPEC REGISTRY
 # =============================================================================
 
@@ -232,6 +259,22 @@ ALL_PLATFORM_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_REGISTERED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_CONTRACT_DEREGISTERED, partitions=6),
     ModelTopicSpec(suffix=SUFFIX_NODE_REGISTRATION_ACKED, partitions=6),
+    # Topic catalog topics (low-throughput coordination, 1 partition each)
+    ModelTopicSpec(
+        suffix=SUFFIX_TOPIC_CATALOG_QUERY,
+        partitions=1,
+        kafka_config={"retention.ms": "3600000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_TOPIC_CATALOG_RESPONSE,
+        partitions=1,
+        kafka_config={"retention.ms": "3600000", "cleanup.policy": "delete"},
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_TOPIC_CATALOG_CHANGED,
+        partitions=1,
+        kafka_config={"retention.ms": "604800000", "cleanup.policy": "delete"},
+    ),
 )
 """Complete tuple of all platform topic specs with per-topic configuration.
 
