@@ -149,9 +149,7 @@ class ServiceLlmCategoryAugmenter:
                     return member
 
             safe_category = sanitize_error_string(raw_category)
-            safe_heading = sanitize_error_string(
-                section.heading or "(preamble)"
-            )
+            safe_heading = sanitize_error_string(section.heading or "(preamble)")
             logger.warning(
                 "LLM returned unrecognized category '%s' for section '%s', "
                 "falling back to UNCATEGORIZED",
@@ -161,9 +159,7 @@ class ServiceLlmCategoryAugmenter:
             return EnumContextSectionCategory.UNCATEGORIZED
 
         except Exception:
-            safe_heading = sanitize_error_string(
-                section.heading or "(preamble)"
-            )
+            safe_heading = sanitize_error_string(section.heading or "(preamble)")
             logger.warning(
                 "LLM classification failed for section '%s', "
                 "falling back to UNCATEGORIZED",
