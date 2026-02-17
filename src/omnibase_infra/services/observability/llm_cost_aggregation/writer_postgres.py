@@ -268,18 +268,18 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                     ON CONFLICT (id) DO NOTHING
                                     """,
                                     _safe_uuid(event.get("correlation_id")),
-                                    str(event.get("session_id", "unknown")),
+                                    event.get("session_id") or None,
                                     event.get("run_id"),
                                     str(event.get("model_id", "unknown")),
                                     _safe_int(event.get("prompt_tokens")),
                                     _safe_int(event.get("completion_tokens")),
                                     _safe_int(event.get("total_tokens")),
                                     _safe_decimal(event.get("estimated_cost_usd")),
-                                    _safe_int_or_zero(event.get("latency_ms")),
+                                    _safe_numeric_or_none(event.get("latency_ms")),
                                     _resolve_usage_source(event),
                                     bool(event.get("usage_is_estimated", False)),
                                     _safe_jsonb(event.get("usage_raw")),
-                                    str(event.get("input_hash", ""))[:64] or None,
+                                    str(event.get("input_hash", ""))[:71] or None,
                                     str(event.get("code_version", ""))[:64] or None,
                                     str(event.get("contract_version", ""))[:64] or None,
                                     str(event.get("reporting_source", ""))[:255]
@@ -644,6 +644,31 @@ def _safe_int_or_zero(value: object) -> int:
     """
     result = _safe_int(value)
     return result if result is not None else 0
+
+
+def _safe_numeric_or_none(value: object) -> float | None:
+    """Safely convert a value to float, returning None if missing or invalid.
+
+    Used for nullable ``NUMERIC`` columns (e.g., ``latency_ms``) where:
+    - A valid numeric value should be preserved with sub-millisecond precision
+      (rounded to 2 decimal places to match the ``NUMERIC(10, 2)`` column).
+    - Missing or invalid values should map to SQL ``NULL`` (via ``None``),
+      rather than a default like ``0``, to distinguish "no data" from
+      "zero latency".
+
+    asyncpg maps Python ``None`` to SQL ``NULL`` transparently, so callers
+    can pass the return value directly as a query parameter.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return round(float(value), 2)
+    try:
+        return round(float(str(value)), 2)
+    except (ValueError, TypeError):
+        return None
 
 
 def _safe_decimal(value: object) -> Decimal | None:

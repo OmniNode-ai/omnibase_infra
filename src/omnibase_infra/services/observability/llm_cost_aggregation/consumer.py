@@ -90,13 +90,28 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-# Pre-compiled patterns for credential masking in DSN query strings and
-# non-standard formats that urlparse may not detect.
-_DSN_PASSWORD_PATTERNS: tuple[re.Pattern[str], ...] = (
+# Pre-compiled pattern/replacement pairs for credential masking in DSN
+# query strings and non-standard formats that urlparse may not detect.
+#
+# These patterns fire only as a **fallback** when urlparse does not detect
+# a password (e.g., password passed as a query parameter or in a
+# non-standard format).  The :secret@ pattern could theoretically match
+# non-credential text in a user:port@ scenario, but since it only runs
+# when urlparse failed to find any password, the false-positive risk is
+# acceptable for this defense-in-depth masking layer.
+_DSN_PASSWORD_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # password=value, pwd=value, passwd=value in query params (key=value&...)
-    re.compile(r"((?:password|passwd|pwd)\s*=\s*)([^&\s]+)", re.IGNORECASE),
+    # Groups: (1) key=, (2) value  ->  replacement preserves key, masks value
+    (
+        re.compile(r"((?:password|passwd|pwd)\s*=\s*)([^&\s]+)", re.IGNORECASE),
+        r"\g<1>***",
+    ),
     # :secret@ pattern in netloc that urlparse missed
-    re.compile(r"(:)([^:@/]+)(@)"),
+    # Groups: (1) ':', (2) secret, (3) '@'  ->  replacement preserves : and @
+    (
+        re.compile(r"(:)([^:@/]+)(@)"),
+        r"\g<1>***\g<3>",
+    ),
 )
 
 
@@ -140,15 +155,15 @@ def mask_dsn_password(dsn: str) -> str:
         # catch password=<value>, pwd=<value>, passwd=<value> in query
         # strings, and :secret@ patterns in the netloc.
         masked = dsn
-        for pattern in _DSN_PASSWORD_PATTERNS:
-            masked = pattern.sub(r"\g<1>***", masked)
+        for pattern, replacement in _DSN_PASSWORD_PATTERNS:
+            masked = pattern.sub(replacement, masked)
         return masked
 
     except (ValueError, AttributeError):
         # Even on parse failure, attempt regex masking on the raw string
         masked = dsn
-        for pattern in _DSN_PASSWORD_PATTERNS:
-            masked = pattern.sub(r"\g<1>***", masked)
+        for pattern, replacement in _DSN_PASSWORD_PATTERNS:
+            masked = pattern.sub(replacement, masked)
         return masked
     except Exception:
         logger.warning(
