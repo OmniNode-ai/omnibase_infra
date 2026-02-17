@@ -46,6 +46,7 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import (
     InfraAuthenticationError,
+    InfraConnectionError,
     InfraUnavailableError,
     ModelInfraErrorContext,
     RuntimeHostError,
@@ -191,7 +192,7 @@ class HandlerInfisical(
             )
             self._adapter = AdapterInfisical(adapter_config)
             self._adapter.initialize()
-        except RuntimeError as e:
+        except InfraConnectionError as e:
             ctx = ModelInfraErrorContext.with_correlation(
                 correlation_id=init_correlation_id,
                 transport_type=EnumInfraTransportType.INFISICAL,

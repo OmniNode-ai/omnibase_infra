@@ -57,13 +57,23 @@ class TestNoDirectAdapterRule:
         violations = check_no_direct_adapter_usage(temp_src)
         assert len(violations) == 0
 
-    def test_test_files_allowed(self, temp_src: Path) -> None:
-        """Test files named test_* are allowed to import adapters."""
-        (temp_src / "test_adapter_infisical.py").write_text(
+    def test_test_dir_files_allowed(self, temp_src: Path) -> None:
+        """Test files inside a tests/ directory are allowed to import adapters."""
+        tests_dir = temp_src / "tests" / "unit"
+        tests_dir.mkdir(parents=True)
+        (tests_dir / "test_adapter_infisical.py").write_text(
             "from omnibase_infra.adapters._internal.adapter_infisical import AdapterInfisical\n"
         )
         violations = check_no_direct_adapter_usage(temp_src)
         assert len(violations) == 0
+
+    def test_test_prefix_in_production_code_not_allowed(self, temp_src: Path) -> None:
+        """Test that a test_* file outside a test directory IS flagged."""
+        (temp_src / "test_adapter_infisical.py").write_text(
+            "from omnibase_infra.adapters._internal.adapter_infisical import AdapterInfisical\n"
+        )
+        violations = check_no_direct_adapter_usage(temp_src)
+        assert len(violations) == 1
 
     def test_internal_module_allowed(self, temp_src: Path) -> None:
         """Test _internal modules themselves are allowed."""

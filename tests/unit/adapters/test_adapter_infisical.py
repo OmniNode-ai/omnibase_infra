@@ -9,7 +9,7 @@ without requiring an actual Infisical server.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from uuid import UUID
 
 import pytest
@@ -21,6 +21,7 @@ from omnibase_infra.adapters._internal.adapter_infisical import (
     ModelInfisicalBatchResult,
     ModelInfisicalSecretResult,
 )
+from omnibase_infra.errors import InfraConnectionError, SecretResolutionError
 
 
 @pytest.fixture
@@ -108,7 +109,7 @@ class TestAdapterInfisicalInitialization:
         sys.modules["infisical_sdk"] = None  # type: ignore[assignment]
         try:
             with pytest.raises(
-                RuntimeError, match="infisical-sdk package is not installed"
+                InfraConnectionError, match="infisical-sdk package is not installed"
             ):
                 adapter.initialize()
         finally:
@@ -126,7 +127,7 @@ class TestAdapterInfisicalGetSecret:
     ) -> None:
         """Test get_secret raises when not initialized."""
         adapter = AdapterInfisical(adapter_config)
-        with pytest.raises(RuntimeError, match="not initialized"):
+        with pytest.raises(SecretResolutionError, match="not initialized"):
             adapter.get_secret("my_secret")
 
     def test_get_secret_success(
@@ -289,3 +290,111 @@ class TestAdapterInfisicalShutdown:
 
         assert adapter._client is None
         assert not adapter.is_authenticated
+
+
+class TestAdapterInfisicalObservability:
+    """Test observability counters."""
+
+    def test_initial_counters_zero(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test counters start at zero."""
+        adapter = AdapterInfisical(adapter_config)
+        assert adapter.loads_success == 0
+        assert adapter.loads_failed == 0
+
+    def test_success_counter_incremented(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test success counter incremented on successful get_secret."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        mock_result = MagicMock()
+        mock_result.secretValue = "val"
+        mock_result.version = 1
+        mock_client.secrets.get_secret_by_name.return_value = mock_result
+
+        adapter.get_secret("KEY")
+        assert adapter.loads_success == 1
+        assert adapter.loads_failed == 0
+
+    def test_failure_counter_incremented(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test failure counter incremented on failed get_secret."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        mock_client.secrets.get_secret_by_name.side_effect = Exception("boom")
+
+        with pytest.raises(SecretResolutionError):
+            adapter.get_secret("KEY")
+        assert adapter.loads_success == 0
+        assert adapter.loads_failed == 1
+
+    def test_list_secrets_increments_success(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test success counter incremented on successful list_secrets."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        mock_response = MagicMock()
+        mock_response.secrets = []
+        mock_client.secrets.list_secrets.return_value = mock_response
+
+        adapter.list_secrets()
+        assert adapter.loads_success == 1
+
+    def test_list_secrets_increments_failure(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test failure counter incremented on failed list_secrets."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        mock_client.secrets.list_secrets.side_effect = Exception("boom")
+
+        with pytest.raises(SecretResolutionError):
+            adapter.list_secrets()
+        assert adapter.loads_failed == 1
+
+
+class TestAdapterInfisicalExtractSecretValue:
+    """Test the _extract_secret_value helper."""
+
+    def test_extracts_camel_case(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test extraction from secretValue (camelCase)."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_result = MagicMock()
+        mock_result.secretValue = "my-value"
+        assert adapter._extract_secret_value(mock_result) == "my-value"
+
+    def test_falls_back_to_snake_case(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test fallback to secret_value (snake_case) when secretValue is None."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_result = MagicMock(spec=[])  # No attributes by default
+        mock_result.secret_value = "snake-value"
+        assert adapter._extract_secret_value(mock_result) == "snake-value"
+
+    def test_empty_string_not_replaced(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test that empty string secretValue is not replaced by fallback."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_result = MagicMock()
+        mock_result.secretValue = ""
+        assert adapter._extract_secret_value(mock_result) == ""

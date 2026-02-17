@@ -95,7 +95,7 @@ def check_no_direct_adapter_usage(
         module_path = rel_path.replace("/", ".").removesuffix(".py")
 
         # Check if this module is in the allowlist
-        if _is_allowed_importer(module_path, py_file.name):
+        if _is_allowed_importer(module_path):
             continue
 
         # Parse and check for _internal imports
@@ -133,23 +133,34 @@ def check_no_direct_adapter_usage(
     return violations
 
 
-def _is_allowed_importer(module_path: str, filename: str) -> bool:
+def _is_allowed_importer(module_path: str) -> bool:
     """Check if a module is allowed to import from _internal adapters.
 
+    A module is allowed if:
+    - Its dotted module path matches one of ``_ALLOWED_IMPORT_PATTERNS``
+      (e.g., ``omnibase_infra.handlers.`` or ``tests.``).
+    - It resides inside a test directory (any segment of the dotted path is
+      ``tests`` or ``test``, or the final module name starts with ``test_``
+      **and** is inside a recognized test path).
+    - It is part of the ``_internal`` package itself.
+
     Args:
-        module_path: Dotted module path.
-        filename: The file name (for test file detection).
+        module_path: Dotted module path (e.g.,
+            ``omnibase_infra.adapters._internal.foo``).
 
     Returns:
         True if the module is allowed to import adapters directly.
     """
-    # Handler modules are allowed
+    # Handler modules and test directories are allowed via _ALLOWED_IMPORT_PATTERNS
     for pattern in _ALLOWED_IMPORT_PATTERNS:
         if pattern in module_path:
             return True
 
-    # Files named test_* are allowed
-    if filename.startswith("test_"):
+    # Check if ANY segment of the module path is a test directory.
+    # This catches files like ``tests.unit.test_foo`` as well as
+    # ``some_package.tests.helpers.conftest``.
+    segments = module_path.split(".")
+    if any(segment in {"tests", "test"} for segment in segments):
         return True
 
     # The _internal package itself is allowed

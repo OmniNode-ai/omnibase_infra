@@ -16,6 +16,8 @@ Security:
     - Client credentials (client_id, client_secret) are accepted as ``SecretStr``
       and only unwrapped at the point of SDK invocation.
     - No secret values are logged at any level.
+    - Error messages are sanitized via ``sanitize_secret_path`` and
+      ``sanitize_error_message`` to prevent leaking infrastructure details.
 
 .. versionadded:: 0.9.0
     Initial implementation for OMN-2286.
@@ -35,6 +37,16 @@ from omnibase_infra.adapters.models.model_infisical_config import (
 )
 from omnibase_infra.adapters.models.model_infisical_secret_result import (
     ModelInfisicalSecretResult,
+)
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    ModelInfraErrorContext,
+    SecretResolutionError,
+)
+from omnibase_infra.utils.util_error_sanitization import (
+    sanitize_error_message,
+    sanitize_secret_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,11 +71,24 @@ class AdapterInfisical:
         self._config = config
         self._client: object | None = None  # InfisicalSDKClient (lazy import)
         self._authenticated: bool = False
+        # Observability counters
+        self._loads_success: int = 0
+        self._loads_failed: int = 0
 
     @property
     def is_authenticated(self) -> bool:
         """Whether the adapter has successfully authenticated."""
         return self._authenticated
+
+    @property
+    def loads_success(self) -> int:
+        """Number of successful secret loads."""
+        return self._loads_success
+
+    @property
+    def loads_failed(self) -> int:
+        """Number of failed secret loads."""
+        return self._loads_failed
 
     def initialize(self) -> None:
         """Initialize the Infisical SDK client and authenticate.
@@ -71,14 +96,20 @@ class AdapterInfisical:
         Uses Universal Auth with machine identity credentials.
 
         Raises:
-            RuntimeError: If SDK initialization or authentication fails.
+            InfraConnectionError: If SDK is not installed or initialization fails.
         """
         try:
             from infisical_sdk import InfisicalSDKClient
         except ImportError as e:
-            raise RuntimeError(
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="initialize",
+                target_name="infisical-sdk",
+            )
+            raise InfraConnectionError(
                 "infisical-sdk package is not installed. "
-                "Install with: pip install 'infisicalsdk>=1.0.15,<2.0.0'"
+                "Install with: pip install 'infisicalsdk>=1.0.15,<2.0.0'",
+                context=ctx,
             ) from e
 
         try:
@@ -93,14 +124,38 @@ class AdapterInfisical:
             self._authenticated = True
             logger.info(
                 "Infisical adapter initialized and authenticated",
-                extra={"host": self._config.host},
             )
         except Exception as e:
             self._authenticated = False
-            # Do NOT log credentials - only the host
-            raise RuntimeError(
-                f"Failed to initialize Infisical client for host {self._config.host}"
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="initialize",
+                target_name="infisical-adapter",
+            )
+            raise InfraConnectionError(
+                f"Failed to initialize Infisical client: {sanitize_error_message(e)}",
+                context=ctx,
             ) from e
+
+    def _extract_secret_value(self, result: object) -> str:
+        """Extract the secret value from an SDK result object.
+
+        The Infisical SDK may return the value under either ``secretValue``
+        (camelCase) or ``secret_value`` (snake_case) depending on the SDK
+        version. This method checks both attribute names with an explicit
+        ``is None`` guard so that an empty string (a valid secret value) is
+        not silently replaced by the fallback attribute.
+
+        Args:
+            result: SDK result object (single secret or list entry).
+
+        Returns:
+            The raw secret value as a string.
+        """
+        raw_value = getattr(result, "secretValue", None)
+        if raw_value is None:
+            raw_value = getattr(result, "secret_value", "")
+        return str(raw_value)
 
     def get_secret(
         self,
@@ -122,11 +177,17 @@ class AdapterInfisical:
             ModelInfisicalSecretResult with the secret value wrapped in SecretStr.
 
         Raises:
-            RuntimeError: If client is not initialized or secret not found.
+            SecretResolutionError: If client is not initialized or secret not found.
         """
         if self._client is None or not self._authenticated:
-            raise RuntimeError(
-                "Infisical adapter not initialized. Call initialize() first."
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="get_secret",
+                target_name="infisical-adapter",
+            )
+            raise SecretResolutionError(
+                "Infisical adapter not initialized. Call initialize() first.",
+                context=ctx,
             )
 
         effective_project = project_id or str(self._config.project_id)
@@ -144,13 +205,10 @@ class AdapterInfisical:
                 include_imports=True,
             )
 
-            # Extract value - the SDK returns an object with secretValue attribute.
-            # Use explicit ``is None`` check so that an empty string (a valid
-            # secret value) is not silently replaced by the fallback attribute.
-            raw_value = getattr(result, "secretValue", None)
-            if raw_value is None:
-                raw_value = getattr(result, "secret_value", "")
+            raw_value = self._extract_secret_value(result)
             version = getattr(result, "version", None)
+
+            self._loads_success += 1
 
             return ModelInfisicalSecretResult(
                 key=secret_name,
@@ -160,9 +218,16 @@ class AdapterInfisical:
                 environment=effective_env,
             )
         except Exception as e:
-            # SECURITY: Do not log secret_name in production (reveals structure)
-            raise RuntimeError(
-                f"Failed to retrieve secret from Infisical (path={effective_path})"
+            self._loads_failed += 1
+            sanitized_path = sanitize_secret_path(effective_path)
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="get_secret",
+                target_name="infisical-adapter",
+            )
+            raise SecretResolutionError(
+                f"Failed to retrieve secret from Infisical (path={sanitized_path})",
+                context=ctx,
             ) from e
 
     def list_secrets(
@@ -183,11 +248,17 @@ class AdapterInfisical:
             List of ModelInfisicalSecretResult with values wrapped in SecretStr.
 
         Raises:
-            RuntimeError: If client is not initialized.
+            SecretResolutionError: If client is not initialized.
         """
         if self._client is None or not self._authenticated:
-            raise RuntimeError(
-                "Infisical adapter not initialized. Call initialize() first."
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="list_secrets",
+                target_name="infisical-adapter",
+            )
+            raise SecretResolutionError(
+                "Infisical adapter not initialized. Call initialize() first.",
+                context=ctx,
             )
 
         effective_project = project_id or str(self._config.project_id)
@@ -213,9 +284,7 @@ class AdapterInfisical:
                 key = getattr(s, "secretKey", None)
                 if key is None:
                     key = getattr(s, "secret_key", "")
-                val = getattr(s, "secretValue", None)
-                if val is None:
-                    val = getattr(s, "secret_value", "")
+                val = self._extract_secret_value(s)
                 version = getattr(s, "version", None)
                 secrets.append(
                     ModelInfisicalSecretResult(
@@ -226,10 +295,21 @@ class AdapterInfisical:
                         environment=effective_env,
                     )
                 )
+
+            self._loads_success += 1
+
             return secrets
         except Exception as e:
-            raise RuntimeError(
-                f"Failed to list secrets from Infisical (path={effective_path})"
+            self._loads_failed += 1
+            sanitized_path = sanitize_secret_path(effective_path)
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="list_secrets",
+                target_name="infisical-adapter",
+            )
+            raise SecretResolutionError(
+                f"Failed to list secrets from Infisical (path={sanitized_path})",
+                context=ctx,
             ) from e
 
     def get_secrets_batch(
