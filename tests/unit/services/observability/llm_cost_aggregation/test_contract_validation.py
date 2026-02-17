@@ -363,9 +363,7 @@ class TestContractLlmCallMetricsImmutability:
     @pytest.mark.unit
     def test_frozen_cost(self) -> None:
         """Cannot mutate cost after construction."""
-        metrics = ContractLlmCallMetrics(
-            model_id="gpt-4o", estimated_cost_usd=0.05
-        )
+        metrics = ContractLlmCallMetrics(model_id="gpt-4o", estimated_cost_usd=0.05)
 
         with pytest.raises(ValidationError):
             metrics.estimated_cost_usd = 999.0  # type: ignore[misc]
@@ -566,17 +564,15 @@ class TestAggregateConsistencyContracts:
     @pytest.mark.unit
     def test_mixed_cost_records_preserve_distinction(self) -> None:
         """Multiple records with mixed NULL/zero/positive costs are all distinct."""
-        null_cost = ContractLlmCallMetrics(
-            model_id="m1", estimated_cost_usd=None
-        )
-        zero_cost = ContractLlmCallMetrics(
-            model_id="m2", estimated_cost_usd=0.0
-        )
-        positive_cost = ContractLlmCallMetrics(
-            model_id="m3", estimated_cost_usd=0.005
-        )
+        null_cost = ContractLlmCallMetrics(model_id="m1", estimated_cost_usd=None)
+        zero_cost = ContractLlmCallMetrics(model_id="m2", estimated_cost_usd=0.0)
+        positive_cost = ContractLlmCallMetrics(model_id="m3", estimated_cost_usd=0.005)
 
-        costs = [null_cost.estimated_cost_usd, zero_cost.estimated_cost_usd, positive_cost.estimated_cost_usd]
+        costs = [
+            null_cost.estimated_cost_usd,
+            zero_cost.estimated_cost_usd,
+            positive_cost.estimated_cost_usd,
+        ]
 
         # NULL should be filtered out before aggregation, not treated as 0
         non_null_costs = [c for c in costs if c is not None]

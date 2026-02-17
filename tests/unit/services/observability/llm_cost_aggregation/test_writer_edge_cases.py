@@ -398,12 +398,16 @@ class TestAggregationRowsCostNullVsZero:
         aggregated = _pre_aggregate_rows(raw_rows)
 
         # All three events share model_id -> one key per window -> 3 aggregated rows
-        model_rows = [r for r in aggregated if str(r["aggregation_key"]).startswith("model:")]
+        model_rows = [
+            r for r in aggregated if str(r["aggregation_key"]).startswith("model:")
+        ]
         assert len(model_rows) == 3  # one per window
 
         for row in model_rows:
             # NULL(0) + 0.0 + 0.01 = 0.01
-            assert row["total_cost_usd"] == Decimal("0") + Decimal("0.0") + Decimal("0.01")
+            assert row["total_cost_usd"] == Decimal("0") + Decimal("0.0") + Decimal(
+                "0.01"
+            )
             assert row["total_tokens"] == 600
             assert row["call_count"] == 3
 
