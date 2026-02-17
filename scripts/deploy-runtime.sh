@@ -537,13 +537,14 @@ acquire_lock() {
 }
 
 # =============================================================================
-# Cleanup -- partial deployment rollback + lock release
+# Cleanup -- partial deployment rollback, --force backup restore, + lock release
 # =============================================================================
 
 cleanup_on_exit() {
-    # Remove orphaned deployment directory on failure. If DEPLOY_DIR_TO_CLEANUP
-    # is set and registry.json does NOT point to it, the deployment was partial
-    # and should be removed.
+    # Remove orphaned deployment directory on failure and restore --force backups.
+    # If DEPLOY_DIR_TO_CLEANUP is set and registry.json does NOT point to it,
+    # the deployment was partial and should be removed. If a --force backup
+    # exists (FORCE_BACKUP_DIR), restore it on failure or remove it on success.
     if [[ -n "${DEPLOY_DIR_TO_CLEANUP}" && -d "${DEPLOY_DIR_TO_CLEANUP}" ]]; then
         local active_path=""
         if [[ -f "${REGISTRY_FILE}" ]]; then
@@ -564,7 +565,7 @@ cleanup_on_exit() {
         if [[ "${DEPLOYMENT_COMPLETE}" != "true" ]]; then
             # Deployment did not complete -- restore previous working deployment.
             # This covers both pre-registry failures (rsync/sanity) and
-            # post-registry failures (build/restart/verify/prune).
+            # post-registry failures (build/restart/verify).
             log_warn "Restoring previous deployment from backup: ${FORCE_BACKUP_DIR}"
             rm -rf "${original_dir}" 2>/dev/null || true
             if ! mv "${FORCE_BACKUP_DIR}" "${original_dir}" 2>/dev/null; then
@@ -1368,12 +1369,6 @@ main() {
         verify_deployment "${git_sha}" "${compose_project}"
     fi
 
-    # Phase 13: Summary
-    show_summary "${deploy_target}" "${version}" "${git_sha}" "${compose_project}"
-
-    # Phase 14: Prune old deployments
-    prune_old_deployments
-
     # All phases completed successfully. Mark deployment as complete so that
     # cleanup_on_exit knows the backup can be safely removed rather than restored.
     DEPLOYMENT_COMPLETE=true
@@ -1387,6 +1382,12 @@ main() {
         rm -rf "${FORCE_BACKUP_DIR}"
         FORCE_BACKUP_DIR=""
     fi
+
+    # Phase 13: Summary
+    show_summary "${deploy_target}" "${version}" "${git_sha}" "${compose_project}"
+
+    # Phase 14: Prune old deployments (non-fatal -- must not trigger rollback)
+    prune_old_deployments || log_warn "Pruning old deployments failed (non-fatal)"
 }
 
 main "$@"
