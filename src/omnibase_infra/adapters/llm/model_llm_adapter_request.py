@@ -31,6 +31,13 @@ class ModelLlmAdapterRequest(BaseModel):
         max_tokens: Maximum tokens to generate, or None for default.
         temperature: Sampling temperature, or None for default.
 
+    Warning:
+        Dict fields (``parameters``) are shallowly mutable despite
+        ``frozen=True`` on the model.  Pydantic's freeze prevents field
+        *reassignment* but does **not** deep-freeze mutable containers.
+        This is accepted for SPI ``JsonType`` conformance (OMN-2319).
+        Callers must not mutate dict contents after construction.
+
     Example:
         >>> req = ModelLlmAdapterRequest(
         ...     prompt="Explain ONEX architecture",
@@ -53,7 +60,6 @@ class ModelLlmAdapterRequest(BaseModel):
         min_length=1,
         description="Name of the model to use.",
     )
-    # NOTE: Mutable dict accepted for SPI JsonType conformance (OMN-2319)
     parameters: dict[str, JsonType] = Field(
         default_factory=dict,
         description="Generation parameters as JSON-compatible dictionary.",

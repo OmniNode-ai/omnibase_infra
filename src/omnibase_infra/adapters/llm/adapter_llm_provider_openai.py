@@ -295,6 +295,12 @@ class AdapterLlmProviderOpenai:
                             models.append(str(item["id"]))
                     if models:
                         return models
+            else:
+                logger.warning(
+                    "Non-200 status %d from %s /v1/models, returning default",
+                    response.status_code,
+                    self._provider_name_value,
+                )
         except (InfraUnavailableError, InfraTimeoutError):
             logger.warning(
                 "Could not fetch models from %s (circuit breaker open or timeout), "
