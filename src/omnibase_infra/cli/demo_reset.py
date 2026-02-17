@@ -203,6 +203,13 @@ class DemoResetReport:
 class DemoResetConfig:
     """Configuration for the demo reset engine.
 
+    Note:
+        ``consumer_group_pattern`` is typed as ``re.Pattern`` which is
+        technically a mutable object (compiled regex patterns have mutable
+        internal caching).  In practice ``re.Pattern`` is effectively
+        immutable -- its public API is read-only -- so ``frozen=True``
+        is safe here despite the dataclass not performing a deep-freeze.
+
     Attributes:
         postgres_dsn: PostgreSQL connection string.
         kafka_bootstrap_servers: Kafka broker address(es).
@@ -552,7 +559,7 @@ class DemoResetEngine:
 
         async with self._postgres_connection() as conn:
             row = await conn.fetchrow(
-                f"SELECT COUNT(*) as cnt FROM {table}"  # noqa: S608
+                f"SELECT COUNT(*) as cnt FROM {table}"  # noqa: S608 -- table name validated against allowlist
             )
             return int(row["cnt"]) if row else 0
 
@@ -581,7 +588,7 @@ class DemoResetEngine:
 
         async with self._postgres_connection() as conn:
             result = await conn.execute(
-                f"DELETE FROM {table}"  # noqa: S608
+                f"DELETE FROM {table}"  # noqa: S608 -- table name validated against allowlist
             )
             # asyncpg returns "DELETE N" where N is the row count
             match = re.search(r"\d+", result)
@@ -836,6 +843,9 @@ class DemoResetEngine:
                 # all" across confluent-kafka versions.
                 from confluent_kafka import Consumer as _KafkaConsumer
 
+                # 16 hex chars from uuid4 = 64 bits of entropy, sufficient for
+                # single-CLI-invocation uniqueness but not globally collision-proof
+                # under high concurrency (birthday bound ~2^32 simultaneous resets).
                 ephemeral_group_id = f"_demo-reset-watermark-query-{uuid4().hex[:16]}"
                 consumer = _KafkaConsumer(
                     {

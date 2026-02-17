@@ -648,6 +648,9 @@ def _load_env_for_demo(path: str) -> None:
             # (e.g. "  export  MY_VAR  =val").
             key = key[len("export ") :].strip()
         value = value.strip()
+        # Strip matching outer quotes.  Degenerate single-char values like
+        # KEY=" or KEY=' are not matched (len < 2), so the lone quote is
+        # kept as a literal value -- this is intentional and acceptable.
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
             value = value[1:-1]
         else:
