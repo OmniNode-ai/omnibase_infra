@@ -125,12 +125,27 @@ class TestTransportConfigMap:
         assert len(specs) == 1
         assert "/services/my-service/db/" in specs[0].infisical_folder
 
+    def test_specs_skip_bootstrap_transports(self) -> None:
+        """INFISICAL transport should be excluded by _BOOTSTRAP_TRANSPORTS guard."""
+        specs = self.tcm.specs_for_transports(
+            [
+                EnumInfraTransportType.DATABASE,
+                EnumInfraTransportType.INFISICAL,
+                EnumInfraTransportType.KAFKA,
+            ]
+        )
+        transport_types = {s.transport_type for s in specs}
+        assert EnumInfraTransportType.INFISICAL not in transport_types
+        # The non-bootstrap transports should still be present
+        assert EnumInfraTransportType.DATABASE in transport_types
+        assert EnumInfraTransportType.KAFKA in transport_types
+
     # --- all_shared_specs ---
 
     def test_all_shared_specs(self) -> None:
         """Should return specs for all transports with keys."""
         specs = self.tcm.all_shared_specs()
-        # At least DATABASE, KAFKA, CONSUL, INFISICAL should be present
+        # At least DATABASE, KAFKA, CONSUL should be present
         transport_types = {s.transport_type for s in specs}
         assert EnumInfraTransportType.DATABASE in transport_types
         assert EnumInfraTransportType.KAFKA in transport_types

@@ -654,7 +654,7 @@ resolution. This means local development works without Infisical.
 ### .env Reduction
 
 The `.env.example` has been reduced from ~660 lines to ~30 lines (bootstrap-only).
-The full pre-Infisical config is preserved in `.env.example.full`.
+The full pre-Infisical config is preserved in `docs/env-example-full.txt`.
 
 ---
 

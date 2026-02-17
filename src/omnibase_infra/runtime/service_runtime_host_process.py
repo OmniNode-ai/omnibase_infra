@@ -2569,9 +2569,9 @@ class RuntimeHostProcess:
 
             if handler is None:
                 logger.info(
-                    "HandlerInfisical not yet initialized, "
-                    "skipping config prefetch (handler will be initialized "
-                    "in step 4)"
+                    "HandlerInfisical not found in handler registry, "
+                    "skipping config prefetch "
+                    "(Infisical opt-in: set INFISICAL_ADDR to enable)"
                 )
                 return
 
@@ -2589,7 +2589,7 @@ class RuntimeHostProcess:
                 return
 
             # Step 3: Prefetch through the handler
-            service_slug = self._node_identity.service if self._node_identity else ""
+            service_slug = self._node_identity.service
             infisical_required = os.environ.get("INFISICAL_REQUIRED", "").lower() in (
                 "true",
                 "1",
