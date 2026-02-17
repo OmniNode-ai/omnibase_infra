@@ -222,6 +222,7 @@ from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.observability.wiring_health import MixinEmissionCounter
 from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
 from omnibase_infra.utils.util_consumer_group import KAFKA_CONSUMER_GROUP_MAX_LENGTH
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -339,11 +340,10 @@ class EventBusKafka(
 
         # Circuit breaker configuration
         if config.circuit_breaker_threshold < 1:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="init",
                 target_name="kafka_event_bus",
-                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 f"circuit_breaker_threshold must be a positive integer, got {config.circuit_breaker_threshold}",
@@ -375,6 +375,7 @@ class EventBusKafka(
         # State flags
         self._started = False
         self._shutdown = False
+        self._closing = False
 
         # Background consumer tasks
         self._consumer_tasks: dict[str, asyncio.Task[None]] = {}
@@ -537,6 +538,7 @@ class EventBusKafka(
 
                 self._started = True
                 self._shutdown = False
+                self._closing = False
 
                 # Reset circuit breaker on success
                 async with self._circuit_breaker_lock:
@@ -616,11 +618,11 @@ class EventBusKafka(
                 sanitized_servers = self._sanitize_bootstrap_servers(
                     self._bootstrap_servers
                 )
-                context = ModelInfraErrorContext(
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="start",
                     target_name=f"kafka.{self._environment}",
-                    correlation_id=correlation_id,
                 )
                 logger.warning(
                     f"Failed to connect to Kafka: {e}",
@@ -682,9 +684,14 @@ class EventBusKafka(
             if self._shutdown:
                 # Already shutting down or shutdown
                 return
+            self._closing = True
             self._shutdown = True
             self._started = False
             tasks_to_cancel = list(self._consumer_tasks.values())
+
+        # Cancel circuit breaker active recovery timer to prevent it from
+        # outliving the EventBusKafka instance (inherited from MixinAsyncCircuitBreaker)
+        await self.cancel_active_recovery()
 
         for task in tasks_to_cancel:
             if not task.done():
@@ -751,13 +758,13 @@ class EventBusKafka(
             InfraConnectionError: If publish fails after all retries
         """
         if not self._started:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=(
+                    headers.correlation_id if headers is not None else None
+                ),
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="publish",
                 target_name=f"kafka.{self._environment}",
-                correlation_id=(
-                    headers.correlation_id if headers is not None else uuid4()
-                ),
             )
             raise InfraUnavailableError(
                 "Event bus not started. Call start() first.",
@@ -788,6 +795,133 @@ class EventBusKafka(
         # Publish with retry
         await self._publish_with_retry(topic, key, value, kafka_headers, headers)
 
+    async def _ensure_producer(self, correlation_id: UUID) -> None:
+        """Lazily recreate the Kafka producer if it was destroyed.
+
+        When a timeout destroys the producer (sets self._producer = None) but
+        the bus is still logically started (self._started is True), this method
+        recreates the producer so subsequent publish attempts can succeed once
+        Kafka is healthy again.
+
+        Must be called under self._producer_lock to prevent thundering herd
+        (multiple coroutines recreating simultaneously).
+
+        Args:
+            correlation_id: Correlation ID for error context and logging.
+
+        Raises:
+            InfraConnectionError: If the producer cannot be recreated.
+            InfraTimeoutError: If the producer recreation times out.
+        """
+        # NOTE: Lock.locked() only proves *some* coroutine holds the lock,
+        # not that the caller does.  All call-sites are guarded by
+        # `async with self._producer_lock:`, so this is a reasonable
+        # best-effort assertion in asyncio's cooperative model.
+        if not self._producer_lock.locked():
+            raise RuntimeError(
+                "_ensure_producer must be called with _producer_lock held"
+            )
+
+        if self._producer is not None:
+            return
+
+        if not self._started:
+            return
+
+        logger.info(
+            "Recreating Kafka producer after previous failure",
+            extra={
+                "environment": self._environment,
+                "correlation_id": str(correlation_id),
+            },
+        )
+
+        try:
+            self._producer = AIOKafkaProducer(
+                bootstrap_servers=self._bootstrap_servers,
+                acks=self._config.acks_aiokafka,
+                enable_idempotence=self._config.enable_idempotence,
+            )
+
+            await asyncio.wait_for(
+                self._producer.start(),
+                timeout=self._timeout_seconds,
+            )
+
+            logger.info(
+                "Kafka producer recreated successfully",
+                extra={
+                    "environment": self._environment,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+
+        except TimeoutError as e:
+            # Clean up the failed producer
+            if self._producer is not None:
+                try:
+                    await self._producer.stop()
+                except Exception as cleanup_err:
+                    logger.warning(
+                        "Cleanup failed for Kafka producer stop during recreation: %s",
+                        cleanup_err,
+                        exc_info=True,
+                    )
+            self._producer = None
+
+            logger.warning(
+                "Kafka producer recreation timed out: %s",
+                sanitize_error_message(e),
+                extra={
+                    "environment": self._environment,
+                    "correlation_id": str(correlation_id),
+                    "error": sanitize_error_message(e),
+                },
+            )
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="recreate_producer_timeout",
+                target_name=f"kafka.{self._environment}",
+                correlation_id=correlation_id,
+                timeout_seconds=self._timeout_seconds,
+            )
+            raise InfraTimeoutError(
+                "Producer recreation timed out",
+                context=timeout_ctx,
+            ) from e
+
+        except Exception as e:
+            # Clean up the failed producer
+            if self._producer is not None:
+                try:
+                    await self._producer.stop()
+                except Exception as cleanup_err:
+                    logger.warning(
+                        "Cleanup failed for Kafka producer stop during recreation: %s",
+                        cleanup_err,
+                        exc_info=True,
+                    )
+            self._producer = None
+
+            logger.warning(
+                "Failed to recreate Kafka producer: %s",
+                sanitize_error_message(e),
+                extra={
+                    "environment": self._environment,
+                    "correlation_id": str(correlation_id),
+                    "error": sanitize_error_message(e),
+                },
+            )
+            raise InfraConnectionError(
+                f"Failed to recreate Kafka producer: {sanitize_error_message(e)}",
+                context=ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="recreate_producer",
+                    target_name=f"kafka.{self._environment}",
+                ),
+            ) from e
+
     async def _publish_with_retry(
         self,
         topic: str,
@@ -811,26 +945,79 @@ class EventBusKafka(
         last_exception: Exception | None = None
 
         for attempt in range(self._max_retry_attempts + 1):
+            if self._closing:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=headers.correlation_id,
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="publish",
+                    target_name=f"kafka.{topic}",
+                )
+                raise InfraUnavailableError(
+                    "Kafka event bus is shutting down",
+                    context=context,
+                    topic=topic,
+                )
+
             try:
-                # Thread-safe producer access - acquire lock to check and use producer
+                # Acquire lock only for producer check and reference capture,
+                # then release before network I/O to avoid serializing all publishes.
                 async with self._producer_lock:
-                    if self._producer is None:
+                    # Lazily recreate producer if it was destroyed by a previous
+                    # timeout but the bus is still logically started.
+                    await self._ensure_producer(headers.correlation_id)
+
+                    producer = self._producer
+                    if producer is None:
+                        if not self._started:
+                            raise InfraUnavailableError(
+                                "Kafka event bus is shutting down",
+                                context=ModelInfraErrorContext.with_correlation(
+                                    correlation_id=headers.correlation_id,
+                                    transport_type=EnumInfraTransportType.KAFKA,
+                                    operation="publish",
+                                    target_name=f"kafka.{topic}",
+                                ),
+                                topic=topic,
+                            )
                         raise InfraConnectionError(
                             "Kafka producer not initialized",
-                            context=ModelInfraErrorContext(
+                            context=ModelInfraErrorContext.with_correlation(
+                                correlation_id=headers.correlation_id,
                                 transport_type=EnumInfraTransportType.KAFKA,
                                 operation="publish",
                                 target_name=f"kafka.{topic}",
-                                correlation_id=headers.correlation_id,
                             ),
                         )
 
-                    future = await self._producer.send(
-                        topic,
-                        value=value,
-                        key=key,
-                        headers=kafka_headers,
+                # Send outside lock to allow concurrent publishes.
+                #
+                # Intentional TOCTOU trade-off: The producer reference was
+                # captured under _producer_lock above, but send() runs without
+                # the lock held.  A concurrent close() could stop the producer
+                # while send() is in-flight.  Holding the lock during send()
+                # would serialize ALL publishers for the duration of each
+                # network round-trip, which is worse than the occasional
+                # spurious error log during shutdown.  The _closing re-check
+                # below narrows the window.
+                if self._closing:
+                    context = ModelInfraErrorContext.with_correlation(
+                        correlation_id=headers.correlation_id,
+                        transport_type=EnumInfraTransportType.KAFKA,
+                        operation="publish",
+                        target_name=f"kafka.{topic}",
                     )
+                    raise InfraUnavailableError(
+                        "Kafka event bus is shutting down",
+                        context=context,
+                        topic=topic,
+                    )
+
+                future = await producer.send(
+                    topic,
+                    value=value,
+                    key=key,
+                    headers=kafka_headers,
+                )
 
                 # Wait for completion outside lock to allow other operations
                 record_metadata = await asyncio.wait_for(
@@ -917,11 +1104,11 @@ class EventBusKafka(
                 await asyncio.sleep(delay)
 
         # All retries exhausted - differentiate timeout vs connection errors
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=headers.correlation_id,
             transport_type=EnumInfraTransportType.KAFKA,
             operation="publish",
             target_name=f"kafka.{topic}",
-            correlation_id=headers.correlation_id,
         )
         if isinstance(last_exception, TimeoutError):
             timeout_ctx = ModelTimeoutErrorContext(
@@ -1328,11 +1515,11 @@ class EventBusKafka(
                 )
 
             # Propagate connection error to surface startup failures (differentiate from timeout)
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="start_consumer",
                 target_name=f"kafka.{topic}",
-                correlation_id=correlation_id,
             )
             logger.exception(
                 f"Failed to start consumer for topic {topic}: {e}",
@@ -1760,11 +1947,11 @@ class EventBusKafka(
         Reference:
             https://kafka.apache.org/documentation/#topicconfigs
         """
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
             transport_type=EnumInfraTransportType.KAFKA,
             operation="validate_topic",
             target_name=f"kafka.{self._environment}",
-            correlation_id=correlation_id,
         )
 
         if not topic:

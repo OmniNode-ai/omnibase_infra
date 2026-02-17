@@ -2481,6 +2481,52 @@ pattern_exemptions:
       - CLAUDE.md (File & Class Naming - Service convention)
     ticket: OMN-2151
   # ==========================================================================
+  # SPI LLM Protocol Adapter Exemptions (OMN-2319)
+  # ==========================================================================
+  # Design Doc: OMN-2319 ticket description - SPI protocol field matching
+  - file_pattern: 'model_llm_provider_config\.py'
+    violation_pattern: "Field 'provider_name' might reference an entity"
+    reason: >
+      provider_name matches the SPI protocol ProtocolProviderConfig.provider_name property exactly. Renaming would break protocol conformance.
+
+    documentation:
+      - ProtocolProviderConfig (omnibase_spi.protocols.types.protocol_llm_types)
+    ticket: OMN-2319
+  - file_pattern: 'model_llm_model_capabilities\.py'
+    violation_pattern: "Field 'model_name' might reference an entity"
+    reason: >
+      model_name matches the SPI protocol ProtocolModelCapabilities.model_name property exactly. Renaming would break protocol conformance.
+
+    documentation:
+      - ProtocolModelCapabilities (omnibase_spi.protocols.types.protocol_llm_types)
+    ticket: OMN-2319
+  - file_pattern: 'model_llm_adapter_request\.py'
+    violation_pattern: "Field 'model_name' might reference an entity"
+    reason: >
+      model_name matches the SPI protocol ProtocolLLMRequest.model_name property exactly. Renaming would break protocol conformance.
+
+    documentation:
+      - ProtocolLLMRequest (omnibase_spi.protocols.types.protocol_llm_types)
+    ticket: OMN-2319
+  - file_pattern: 'model_llm_health_response\.py'
+    violation_pattern: "Field 'provider_name' might reference an entity"
+    reason: >
+      provider_name matches the SPI protocol ProtocolLLMHealthResponse.provider_name property exactly. Renaming would break protocol conformance.
+
+    documentation:
+      - ProtocolLLMHealthResponse (omnibase_spi.protocols.types.protocol_llm_types)
+    ticket: OMN-2319
+  # Removed: _TransportHolder naming exemption no longer needed after rename to TransportHolderLlmHttp (OMN-2319)
+  - file_pattern: 'adapter_llm_provider_openai\.py'
+    class_pattern: 'AdapterLlmProviderOpenai'
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      AdapterLlmProviderOpenai implements the SPI ProtocolLLMProvider protocol which requires 13+ methods. Method count is dictated by the protocol interface.
+
+    documentation:
+      - ProtocolLLMProvider (omnibase_spi.protocols.llm.protocol_llm_provider)
+    ticket: OMN-2319
+  # ==========================================================================
   # Topic Catalog Model Exemptions (OMN-2310)
   # ==========================================================================
   # client_id is a service/node name identifier (e.g., "node-registration-orchestrator"),
