@@ -45,6 +45,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Final
+from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
     import asyncpg
@@ -287,7 +288,10 @@ class PostgresConnectionContext:
             except Exception:
                 # Best-effort cleanup; the connection may already be dead
                 # after a timeout or network error.
-                logger.debug("Failed to close PostgreSQL connection during cleanup")
+                logger.debug(
+                    "Failed to close PostgreSQL connection during cleanup",
+                    exc_info=True,
+                )
 
 
 # =============================================================================
@@ -353,8 +357,12 @@ class DemoResetEngine:
         """
         report = DemoResetReport(dry_run=dry_run)
 
+        correlation_id = uuid4()
+
         # Step 1: Clear projector state
-        await self._reset_projector_state(report, dry_run=dry_run)
+        await self._reset_projector_state(
+            report, dry_run=dry_run, correlation_id=correlation_id
+        )
 
         # Step 2: Reset consumer group offsets
         await self._reset_consumer_groups(report, dry_run=dry_run)
@@ -392,6 +400,7 @@ class DemoResetEngine:
         report: DemoResetReport,
         *,
         dry_run: bool,
+        correlation_id: UUID,
     ) -> None:
         """Clear all rows from the demo projection table.
 
@@ -401,6 +410,7 @@ class DemoResetEngine:
         Args:
             report: Report to append results to.
             dry_run: If True, only report what would happen.
+            correlation_id: Trace identifier for error diagnostics.
         """
         table = self._config.projection_table
 
@@ -416,7 +426,9 @@ class DemoResetEngine:
 
         if dry_run:
             try:
-                row_count = await self._count_projection_rows()
+                row_count = await self._count_projection_rows(
+                    correlation_id=correlation_id,
+                )
                 report.actions.append(
                     ResetActionResult(
                         resource=f"Projector state ({table})",
@@ -425,7 +437,10 @@ class DemoResetEngine:
                     )
                 )
             except Exception as exc:
-                logger.exception("Failed to count projector rows (dry run)")
+                logger.exception(
+                    "Failed to count projector rows (dry run), correlation_id=%s",
+                    correlation_id,
+                )
                 report.actions.append(
                     ResetActionResult(
                         resource=f"Projector state ({table})",
@@ -436,7 +451,9 @@ class DemoResetEngine:
             return
 
         try:
-            deleted = await self._delete_projection_rows()
+            deleted = await self._delete_projection_rows(
+                correlation_id=correlation_id,
+            )
             report.actions.append(
                 ResetActionResult(
                     resource=f"Projector state ({table})",
@@ -445,7 +462,10 @@ class DemoResetEngine:
                 )
             )
         except Exception as exc:
-            logger.exception("Failed to clear projector state")
+            logger.exception(
+                "Failed to clear projector state, correlation_id=%s",
+                correlation_id,
+            )
             report.actions.append(
                 ResetActionResult(
                     resource=f"Projector state ({table})",
@@ -484,10 +504,27 @@ class DemoResetEngine:
             timeout=self._postgres_connection_timeout(),
         )
 
-    async def _count_projection_rows(self) -> int:
-        """Count rows in the projection table."""
+    async def _count_projection_rows(
+        self,
+        *,
+        correlation_id: UUID,
+    ) -> int:
+        """Count rows in the projection table.
+
+        Args:
+            correlation_id: Trace identifier for error diagnostics.
+        """
         table = self._config.projection_table
         self._validate_table_name(table)
+
+        # SAFETY: The f-string SQL interpolation below is safe because
+        # ``_validate_table_name`` restricts ``table`` to the frozen
+        # allowlist ``_ALLOWED_PROJECTION_TABLES``.  Any expansion of
+        # that allowlist requires coordinated security review.
+        assert table in _ALLOWED_PROJECTION_TABLES, (
+            f"Table {table!r} passed validation but is not in the allowlist "
+            f"(correlation_id={correlation_id})"
+        )
 
         async with self._postgres_connection() as conn:
             row = await conn.fetchrow(
@@ -495,10 +532,27 @@ class DemoResetEngine:
             )
             return int(row["cnt"]) if row else 0
 
-    async def _delete_projection_rows(self) -> int:
-        """Delete all rows from the projection table. Returns count deleted."""
+    async def _delete_projection_rows(
+        self,
+        *,
+        correlation_id: UUID,
+    ) -> int:
+        """Delete all rows from the projection table. Returns count deleted.
+
+        Args:
+            correlation_id: Trace identifier for error diagnostics.
+        """
         table = self._config.projection_table
         self._validate_table_name(table)
+
+        # SAFETY: The f-string SQL interpolation below is safe because
+        # ``_validate_table_name`` restricts ``table`` to the frozen
+        # allowlist ``_ALLOWED_PROJECTION_TABLES``.  Any expansion of
+        # that allowlist requires coordinated security review.
+        assert table in _ALLOWED_PROJECTION_TABLES, (
+            f"Table {table!r} passed validation but is not in the allowlist "
+            f"(correlation_id={correlation_id})"
+        )
 
         async with self._postgres_connection() as conn:
             result = await conn.execute(
@@ -750,7 +804,7 @@ class DemoResetEngine:
                 consumer = _KafkaConsumer(
                     {
                         "bootstrap.servers": self._config.kafka_bootstrap_servers,
-                        "group.id": "_demo-reset-watermark-query",
+                        "group.id": f"_demo-reset-watermark-query-{uuid4().hex[:8]}",
                         "enable.auto.commit": False,
                     }
                 )

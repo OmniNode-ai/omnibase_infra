@@ -8,6 +8,7 @@ registry queries.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 from uuid import uuid4
@@ -16,6 +17,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+logger = logging.getLogger(__name__)
 console = Console()
 
 
@@ -615,6 +617,7 @@ def _load_env_for_demo(path: str) -> None:
 
     env_path = Path(path)
     if not env_path.exists():
+        logger.warning("Env file not found: %s", path)
         console.print(f"[yellow]Warning: env file not found: {path}[/yellow]")
         return
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from click.testing import CliRunner
@@ -665,7 +666,7 @@ class TestValidateTableName:
         engine = DemoResetEngine(config)
 
         with pytest.raises(ValueError, match="not in the allowed projection tables"):
-            await engine._count_projection_rows()
+            await engine._count_projection_rows(correlation_id=uuid4())
 
     @pytest.mark.asyncio
     async def test_delete_projection_rows_rejects_disallowed_table(self) -> None:
@@ -677,7 +678,7 @@ class TestValidateTableName:
         engine = DemoResetEngine(config)
 
         with pytest.raises(ValueError, match="not in the allowed projection tables"):
-            await engine._delete_projection_rows()
+            await engine._delete_projection_rows(correlation_id=uuid4())
 
 
 # =============================================================================
