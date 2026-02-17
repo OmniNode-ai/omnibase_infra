@@ -978,7 +978,29 @@ class EventBusKafka(
                             ),
                         )
 
-                # Send outside lock to allow concurrent publishes
+                # Send outside lock to allow concurrent publishes.
+                #
+                # Intentional TOCTOU trade-off: The producer reference was
+                # captured under _producer_lock above, but send() runs without
+                # the lock held.  A concurrent close() could stop the producer
+                # while send() is in-flight.  Holding the lock during send()
+                # would serialize ALL publishers for the duration of each
+                # network round-trip, which is worse than the occasional
+                # spurious error log during shutdown.  The _closing re-check
+                # below narrows the window.
+                if self._closing:
+                    context = ModelInfraErrorContext(
+                        transport_type=EnumInfraTransportType.KAFKA,
+                        operation="publish",
+                        target_name=f"kafka.{topic}",
+                        correlation_id=headers.correlation_id,
+                    )
+                    raise InfraUnavailableError(
+                        "Kafka event bus is shutting down",
+                        context=context,
+                        topic=topic,
+                    )
+
                 future = await producer.send(
                     topic,
                     value=value,

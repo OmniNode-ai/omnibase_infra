@@ -129,6 +129,11 @@ class AdapterModelRouter:
         provider fails, automatically falls back to the next healthy provider
         in the round-robin order.
 
+        The ``object`` parameter and return types satisfy the SPI
+        ``ProtocolModelRouter`` interface contract. For type-safe usage,
+        see :meth:`generate_typed` which accepts
+        ``ModelLlmAdapterRequest`` and returns ``ModelLlmAdapterResponse``.
+
         Args:
             request: LLM request (ModelLlmAdapterRequest or compatible).
 
@@ -156,9 +161,13 @@ class AdapterModelRouter:
                 f"Expected ModelLlmAdapterRequest, got {type(request).__name__}"
             )
 
-        # Snapshot provider state under lock for thread-safe iteration
+        # Snapshot provider state under lock for thread-safe iteration.
+        # Both _provider_order and _providers are snapshotted together so a
+        # concurrent remove_provider() cannot delete a provider between the
+        # order snapshot and the dict lookup.
         async with self._lock:
             provider_order = list(self._provider_order)
+            providers_snapshot = dict(self._providers)
             current_index = self._current_index
 
         # Try providers in round-robin order, starting from current index
@@ -168,7 +177,7 @@ class AdapterModelRouter:
         for i in range(len(provider_order)):
             idx = (current_index + i) % len(provider_order)
             provider_name = provider_order[idx]
-            provider = self._providers.get(provider_name)
+            provider = providers_snapshot.get(provider_name)
 
             if provider is None or not provider.is_available:
                 continue

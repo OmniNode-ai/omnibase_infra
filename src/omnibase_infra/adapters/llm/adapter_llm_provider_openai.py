@@ -97,7 +97,9 @@ class _TransportHolder(MixinLlmHttpTransport):
         """Execute a GET request with circuit breaker protection.
 
         Checks circuit breaker state before making the request to avoid
-        hammering a known-down endpoint. Unlike ``_execute_llm_http_call``
+        hammering a known-down endpoint. Records success/failure to the
+        circuit breaker so that GET requests (e.g., model discovery) also
+        contribute to the circuit state. Unlike ``_execute_llm_http_call``
         (which is designed for inference POST requests), this method performs
         a simple GET without CIDR allowlisting or HMAC signing.
 
@@ -111,12 +113,31 @@ class _TransportHolder(MixinLlmHttpTransport):
 
         Raises:
             InfraUnavailableError: If the circuit breaker is open.
+            httpx.ConnectError: If connection to the endpoint fails.
+            httpx.TimeoutException: If the request times out.
         """
+        operation = "get_available_models"
+
         async with self._circuit_breaker_lock:
-            await self._check_circuit_breaker("get_available_models", correlation_id)
+            await self._check_circuit_breaker(operation, correlation_id)
 
         client = await self._get_http_client()
-        return await client.get(url, timeout=timeout)
+        try:
+            response = await client.get(url, timeout=timeout)
+        except (httpx.ConnectError, httpx.TimeoutException):
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(operation, correlation_id)
+            raise
+        except httpx.HTTPError:
+            async with self._circuit_breaker_lock:
+                await self._record_circuit_failure(operation, correlation_id)
+            raise
+
+        # Record success so the circuit breaker can close after recovery
+        async with self._circuit_breaker_lock:
+            await self._reset_circuit_breaker()
+
+        return response
 
     async def close(self) -> None:
         """Close the HTTP client if owned."""
@@ -132,6 +153,9 @@ class AdapterLlmProviderOpenai:
 
     This adapter supports all OpenAI-compatible inference servers including
     vLLM, text-generation-inference, and the OpenAI API itself.
+
+    Falls back to the ``LLM_CODER_URL`` environment variable (default:
+    ``http://localhost:8000``) if ``base_url`` is not provided at construction.
 
     Attributes:
         _provider_name: Provider identifier.
@@ -278,6 +302,8 @@ class AdapterLlmProviderOpenai:
                 self._provider_name_value,
             )
         except (httpx.HTTPError, OSError, ValueError):
+            # ValueError catches json.JSONDecodeError (its subclass) from
+            # response.json() when the endpoint returns non-JSON content.
             logger.debug(
                 "Could not fetch models from %s, returning default",
                 self._provider_name_value,
@@ -407,6 +433,9 @@ class AdapterLlmProviderOpenai:
             # Already an infra error with correlation context -- propagate as-is
             raise
         except Exception as exc:
+            # Note: asyncio.CancelledError is a BaseException in Python 3.12+,
+            # so it is NOT caught by this ``except Exception`` clause and will
+            # propagate cleanly during task cancellation / shutdown.
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="generate_async",
@@ -475,6 +504,13 @@ class AdapterLlmProviderOpenai:
 
         For local providers, returns 0.0. For external providers, estimates
         based on cached model capabilities.
+
+        Note:
+            Returns a rough order-of-magnitude estimate, not a precise
+            calculation. Uses an approximate 4-chars-per-token heuristic
+            and assumes output length is roughly ``max_tokens / 2``.
+            Actual costs will vary based on real tokenization and generation
+            length.
 
         Args:
             request: The LLM request to estimate.

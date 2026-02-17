@@ -89,6 +89,11 @@ class AdapterLlmToolProvider:
             name: Unique provider name.
             provider: The provider adapter instance.
         """
+        if not hasattr(provider, "generate_async"):
+            msg = (
+                f"Provider {name!r} must implement generate_async (ProtocolLLMProvider)"
+            )
+            raise ValueError(msg)
         self._providers[name] = provider
         await self._router.register_provider(name, provider)
         logger.info("Registered LLM provider in tool provider: %s", name)
