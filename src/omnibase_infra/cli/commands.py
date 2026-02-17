@@ -618,6 +618,11 @@ def _load_env_for_demo(path: str) -> None:
         to produce a *literal* quoted string (i.e. the value should include
         the quote characters), this parser cannot distinguish that intent.
 
+        The ``export`` prefix is detected via a literal ``"export "`` (with a
+        single space).  Tab-separated forms such as ``export\\tKEY=VALUE``
+        are **not** recognized and will be treated as a key named
+        ``export\\tKEY`` rather than stripping the ``export`` prefix.
+
     Args:
         path: Path to the .env file.
     """

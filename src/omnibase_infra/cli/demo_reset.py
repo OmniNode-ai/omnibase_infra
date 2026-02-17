@@ -255,9 +255,13 @@ class PostgresConnectionContext:
 
     The connection is established inside ``__aenter__`` via
     ``asyncio.wait_for(asyncpg.connect(...), timeout=...)``.  If the
-    timeout fires, ``__aexit__`` still closes any partially-opened
-    connection.  Regardless of success or failure, ``__aexit__`` always
-    closes the connection if it was opened.
+    timeout fires before ``asyncpg.connect()`` returns, the assignment to
+    ``self._conn`` never occurs, so ``__aexit__`` sees ``None`` and skips
+    cleanup.  This is safe because ``asyncio.wait_for`` cancels the
+    wrapped coroutine on timeout, and asyncpg internally closes any
+    underlying socket resources when the coroutine is cancelled.
+    ``__aexit__`` only closes connections that were successfully
+    established and assigned to ``self._conn``.
     """
 
     def __init__(self, dsn: str, timeout: float) -> None:
@@ -310,6 +314,15 @@ class DemoResetEngine:
     - **Idempotent**: Running twice produces the same result
     - **Observable**: Every action is reported with detail
     - **Reversible**: Topic purge is the only destructive operation
+
+    Note:
+        The Kafka consumer group and topic operations use
+        ``confluent-kafka``'s ``AdminClient``, which performs blocking I/O
+        internally.  This is acceptable for CLI use where ``execute()``
+        is invoked via ``asyncio.run()`` and the event loop is otherwise
+        idle, but the engine **must not** be used within an event loop
+        that serves concurrent requests (e.g. a FastAPI endpoint) because
+        the blocking calls would stall the loop.
 
     Example:
         >>> config = DemoResetConfig.from_env(purge_topics=False)
@@ -872,6 +885,18 @@ class DemoResetEngine:
                         "Failed to delete ephemeral consumer group %s: %s",
                         ephemeral_group_id,
                         sanitize_error_message(exc),
+                    )
+                    report.actions.append(
+                        ResetActionResult(
+                            resource="Ephemeral consumer group cleanup",
+                            action=EnumResetAction.ERROR,
+                            detail=(
+                                f"Failed to delete ephemeral group "
+                                f"{ephemeral_group_id}: "
+                                f"{sanitize_error_message(exc)} "
+                                f"(orphan may remain in Kafka)"
+                            ),
+                        )
                     )
 
                 if partitions_to_delete:
