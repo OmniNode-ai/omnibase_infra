@@ -16,8 +16,8 @@ import pytest
 from pydantic import SecretStr
 
 from omnibase_infra.adapters._internal.adapter_infisical import (
-    InfisicalBatchResult,
-    InfisicalSecretResult,
+    ModelInfisicalBatchResult,
+    ModelInfisicalSecretResult,
 )
 from omnibase_infra.handlers.handler_infisical import HandlerInfisical
 
@@ -68,7 +68,7 @@ class TestInfisicalHandlerLifecycle:
             assert handler._initialized
 
             # 1. Get single secret
-            mock_adapter.get_secret.return_value = InfisicalSecretResult(
+            mock_adapter.get_secret.return_value = ModelInfisicalSecretResult(
                 key="API_KEY",
                 value=SecretStr("sk-test-123"),
                 version=5,
@@ -99,9 +99,9 @@ class TestInfisicalHandlerLifecycle:
 
             # 3. List secrets
             mock_adapter.list_secrets.return_value = [
-                InfisicalSecretResult(key="KEY_A", value=SecretStr("a")),
-                InfisicalSecretResult(key="KEY_B", value=SecretStr("b")),
-                InfisicalSecretResult(key="KEY_C", value=SecretStr("c")),
+                ModelInfisicalSecretResult(key="KEY_A", value=SecretStr("a")),
+                ModelInfisicalSecretResult(key="KEY_B", value=SecretStr("b")),
+                ModelInfisicalSecretResult(key="KEY_C", value=SecretStr("c")),
             ]
 
             result3 = await handler.execute(
@@ -113,12 +113,12 @@ class TestInfisicalHandlerLifecycle:
             assert result3.result["count"] == 3
 
             # 4. Batch fetch
-            mock_adapter.get_secrets_batch.return_value = InfisicalBatchResult(
+            mock_adapter.get_secrets_batch.return_value = ModelInfisicalBatchResult(
                 secrets={
-                    "NEW_1": InfisicalSecretResult(
+                    "NEW_1": ModelInfisicalSecretResult(
                         key="NEW_1", value=SecretStr("val1")
                     ),
-                    "NEW_2": InfisicalSecretResult(
+                    "NEW_2": ModelInfisicalSecretResult(
                         key="NEW_2", value=SecretStr("val2")
                     ),
                 },
@@ -160,7 +160,7 @@ class TestInfisicalHandlerLifecycle:
         ) as mock_adapter_cls:
             mock_adapter = MagicMock()
             mock_adapter_cls.return_value = mock_adapter
-            mock_adapter.get_secret.return_value = InfisicalSecretResult(
+            mock_adapter.get_secret.return_value = ModelInfisicalSecretResult(
                 key="ROTATED",
                 value=SecretStr("old-value"),
             )
@@ -180,7 +180,7 @@ class TestInfisicalHandlerLifecycle:
             handler.invalidate_cache("ROTATED")
 
             # Update mock to return new value
-            mock_adapter.get_secret.return_value = InfisicalSecretResult(
+            mock_adapter.get_secret.return_value = ModelInfisicalSecretResult(
                 key="ROTATED",
                 value=SecretStr("new-rotated-value"),
             )

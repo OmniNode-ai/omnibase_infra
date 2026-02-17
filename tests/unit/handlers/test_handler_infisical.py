@@ -16,8 +16,8 @@ import pytest
 from pydantic import SecretStr
 
 from omnibase_infra.adapters._internal.adapter_infisical import (
-    InfisicalBatchResult,
-    InfisicalSecretResult,
+    ModelInfisicalBatchResult,
+    ModelInfisicalSecretResult,
 )
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import RuntimeHostError
@@ -126,7 +126,7 @@ class TestHandlerInfisicalGetSecret:
         ) as mock_adapter_cls:
             mock_adapter = MagicMock()
             mock_adapter_cls.return_value = mock_adapter
-            mock_adapter.get_secret.return_value = InfisicalSecretResult(
+            mock_adapter.get_secret.return_value = ModelInfisicalSecretResult(
                 key="DB_PASS",
                 value=SecretStr("secret123"),
                 version=1,
@@ -188,7 +188,7 @@ class TestHandlerInfisicalCaching:
         ) as mock_adapter_cls:
             mock_adapter = MagicMock()
             mock_adapter_cls.return_value = mock_adapter
-            mock_adapter.get_secret.return_value = InfisicalSecretResult(
+            mock_adapter.get_secret.return_value = ModelInfisicalSecretResult(
                 key="CACHED_KEY",
                 value=SecretStr("cached-value"),
                 version=1,
@@ -236,7 +236,7 @@ class TestHandlerInfisicalCaching:
         ) as mock_adapter_cls:
             mock_adapter = MagicMock()
             mock_adapter_cls.return_value = mock_adapter
-            mock_adapter.get_secret.return_value = InfisicalSecretResult(
+            mock_adapter.get_secret.return_value = ModelInfisicalSecretResult(
                 key="KEY",
                 value=SecretStr("val"),
             )
@@ -271,7 +271,7 @@ class TestHandlerInfisicalCaching:
         ) as mock_adapter_cls:
             mock_adapter = MagicMock()
             mock_adapter_cls.return_value = mock_adapter
-            mock_adapter.get_secret.return_value = InfisicalSecretResult(
+            mock_adapter.get_secret.return_value = ModelInfisicalSecretResult(
                 key="K",
                 value=SecretStr("v"),
             )
@@ -306,8 +306,8 @@ class TestHandlerInfisicalListSecrets:
             mock_adapter = MagicMock()
             mock_adapter_cls.return_value = mock_adapter
             mock_adapter.list_secrets.return_value = [
-                InfisicalSecretResult(key="A", value=SecretStr("v1")),
-                InfisicalSecretResult(key="B", value=SecretStr("v2")),
+                ModelInfisicalSecretResult(key="A", value=SecretStr("v1")),
+                ModelInfisicalSecretResult(key="B", value=SecretStr("v2")),
             ]
 
             await handler.initialize(infisical_config)
@@ -341,7 +341,7 @@ class TestHandlerInfisicalBatch:
             mock_adapter_cls.return_value = mock_adapter
 
             # First secret fetched individually (will be cached)
-            mock_adapter.get_secret.return_value = InfisicalSecretResult(
+            mock_adapter.get_secret.return_value = ModelInfisicalSecretResult(
                 key="CACHED",
                 value=SecretStr("cached-val"),
             )
@@ -357,9 +357,9 @@ class TestHandlerInfisicalBatch:
             )
 
             # Batch fetch including cached + new
-            mock_adapter.get_secrets_batch.return_value = InfisicalBatchResult(
+            mock_adapter.get_secrets_batch.return_value = ModelInfisicalBatchResult(
                 secrets={
-                    "NEW_KEY": InfisicalSecretResult(
+                    "NEW_KEY": ModelInfisicalSecretResult(
                         key="NEW_KEY",
                         value=SecretStr("new-val"),
                     ),

@@ -17,9 +17,9 @@ from pydantic import SecretStr
 
 from omnibase_infra.adapters._internal.adapter_infisical import (
     AdapterInfisical,
-    InfisicalBatchResult,
-    InfisicalSecretResult,
     ModelInfisicalAdapterConfig,
+    ModelInfisicalBatchResult,
+    ModelInfisicalSecretResult,
 )
 
 
@@ -146,7 +146,7 @@ class TestAdapterInfisicalGetSecret:
 
         result = adapter.get_secret("DB_PASSWORD")
 
-        assert isinstance(result, InfisicalSecretResult)
+        assert isinstance(result, ModelInfisicalSecretResult)
         assert result.key == "DB_PASSWORD"
         assert result.value.get_secret_value() == "super-secret-value"
         assert result.version == 3
@@ -241,7 +241,7 @@ class TestAdapterInfisicalBatchFetch:
 
         batch = adapter.get_secrets_batch(["KEY_A", "KEY_B"])
 
-        assert isinstance(batch, InfisicalBatchResult)
+        assert isinstance(batch, ModelInfisicalBatchResult)
         assert len(batch.secrets) == 2
         assert len(batch.errors) == 0
         assert batch.secrets["KEY_A"].value.get_secret_value() == "value-KEY_A"

@@ -29,7 +29,6 @@ _ALLOWED_IMPORT_PATTERNS: frozenset[str] = frozenset(
     {
         "omnibase_infra.handlers.",  # Handlers can use adapters
         "tests.",  # Test modules can use adapters
-        "test_",  # Test files can use adapters
     }
 )
 
@@ -38,7 +37,7 @@ _INTERNAL_ADAPTER_MODULE = "omnibase_infra.adapters._internal"
 
 
 @dataclass(frozen=True)
-class AdapterViolation:
+class ModelAdapterViolation:
     """A single violation of the no-direct-adapter-usage rule.
 
     Attributes:
@@ -58,7 +57,7 @@ def check_no_direct_adapter_usage(
     source_root: Path,
     *,
     exclude_dirs: frozenset[str] | None = None,
-) -> list[AdapterViolation]:
+) -> list[ModelAdapterViolation]:
     """Scan Python source files for direct _internal adapter imports.
 
     Args:
@@ -66,14 +65,14 @@ def check_no_direct_adapter_usage(
         exclude_dirs: Directory names to skip (default: ``__pycache__``, ``.git``).
 
     Returns:
-        List of AdapterViolation for each offending import found.
+        List of ModelAdapterViolation for each offending import found.
     """
     if exclude_dirs is None:
         exclude_dirs = frozenset(
             {"__pycache__", ".git", ".mypy_cache", ".pytest_cache"}
         )
 
-    violations: list[AdapterViolation] = []
+    violations: list[ModelAdapterViolation] = []
 
     for py_file in source_root.rglob("*.py"):
         # Skip excluded directories
@@ -81,7 +80,7 @@ def check_no_direct_adapter_usage(
             continue
 
         # Determine the module path for allowlist checking
-        rel_path = str(py_file.relative_to(source_root.parent.parent))
+        rel_path = py_file.relative_to(source_root.parent.parent).as_posix()
         module_path = rel_path.replace("/", ".").removesuffix(".py")
 
         # Check if this module is in the allowlist
@@ -100,7 +99,7 @@ def check_no_direct_adapter_usage(
                 for alias in node.names:
                     if _INTERNAL_ADAPTER_MODULE in alias.name:
                         violations.append(
-                            AdapterViolation(
+                            ModelAdapterViolation(
                                 file_path=str(py_file),
                                 line_number=node.lineno,
                                 module_imported=alias.name,
@@ -111,7 +110,7 @@ def check_no_direct_adapter_usage(
             elif isinstance(node, ast.ImportFrom):
                 if node.module and _INTERNAL_ADAPTER_MODULE in node.module:
                     violations.append(
-                        AdapterViolation(
+                        ModelAdapterViolation(
                             file_path=str(py_file),
                             line_number=node.lineno,
                             module_imported=node.module,
@@ -150,6 +149,6 @@ def _is_allowed_importer(module_path: str, filename: str) -> bool:
 
 
 __all__: list[str] = [
-    "AdapterViolation",
+    "ModelAdapterViolation",
     "check_no_direct_adapter_usage",
 ]

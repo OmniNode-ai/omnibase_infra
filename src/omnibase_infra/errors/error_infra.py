@@ -96,7 +96,7 @@ class RuntimeHostError(ModelOnexError):
     Provides common structured fields for infrastructure operations.
 
     Structured Fields (via ModelInfraErrorContext):
-        transport_type: Type of transport (http, db, kafka, etc.)
+        transport_type: Type of transport (http, db, kafka, infisical, etc.)
         operation: Operation being performed
         correlation_id: Request correlation ID for tracking
         target_name: Target resource/endpoint name
@@ -255,7 +255,7 @@ class InfraConnectionError(RuntimeHostError):
     in the context:
         - DATABASE -> DATABASE_CONNECTION_ERROR
         - HTTP, GRPC -> NETWORK_ERROR
-        - KAFKA, CONSUL, VAULT, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP -> SERVICE_UNAVAILABLE
+        - KAFKA, CONSUL, VAULT, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP -> SERVICE_UNAVAILABLE
         - None (no context) -> SERVICE_UNAVAILABLE
 
     Example:
@@ -343,7 +343,7 @@ class InfraConnectionError(RuntimeHostError):
         The error code is automatically selected based on context.transport_type:
             - DATABASE -> DATABASE_CONNECTION_ERROR
             - HTTP, GRPC -> NETWORK_ERROR
-            - KAFKA, CONSUL, VAULT, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP -> SERVICE_UNAVAILABLE
+            - KAFKA, CONSUL, VAULT, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP -> SERVICE_UNAVAILABLE
             - None (no context) -> SERVICE_UNAVAILABLE
 
         Args:

@@ -2923,7 +2923,23 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Returns:
             Configuration with infisical references resolved.
+
+        Raises:
+            ProtocolConfigurationError: If recursion depth exceeds maximum,
+                or if fail_on_vault_error is True and an infisical reference fails.
         """
+        if depth > _MAX_NESTED_CONFIG_DEPTH:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="resolve_infisical_refs",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Configuration nesting exceeds maximum depth of {_MAX_NESTED_CONFIG_DEPTH}",
+                context=context,
+            )
+
         secret_resolver = self._get_secret_resolver()
         if secret_resolver is None:
             if self._has_infisical_references(config):
@@ -2934,7 +2950,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                         operation="resolve_infisical_refs",
                         target_name="binding_config_resolver",
                     )
-                    raise SecretResolutionError(
+                    raise ProtocolConfigurationError(
                         "Config contains infisical: references but no "
                         "SecretResolver is configured",
                         context=context,
@@ -2959,7 +2975,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             operation="resolve_infisical_refs",
                             target_name="binding_config_resolver",
                         )
-                        raise SecretResolutionError(
+                        raise ProtocolConfigurationError(
                             "Infisical secret not found",
                             context=context,
                         )
@@ -2975,7 +2991,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             operation="resolve_infisical_refs",
                             target_name="binding_config_resolver",
                         )
-                        raise SecretResolutionError(
+                        raise ProtocolConfigurationError(
                             "Failed to resolve infisical: reference",
                             context=context,
                         )
@@ -2983,6 +2999,10 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             elif isinstance(value, dict):
                 result[key] = self._resolve_infisical_refs(
                     value, correlation_id, depth + 1
+                )
+            elif isinstance(value, list):
+                result[key] = self._resolve_infisical_refs_in_list(
+                    value, secret_resolver, correlation_id, depth + 1
                 )
             else:
                 result[key] = value
@@ -3006,7 +3026,23 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Returns:
             Configuration with infisical references resolved.
+
+        Raises:
+            ProtocolConfigurationError: If recursion depth exceeds maximum,
+                or if fail_on_vault_error is True and an infisical reference fails.
         """
+        if depth > _MAX_NESTED_CONFIG_DEPTH:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="resolve_infisical_refs_async",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Configuration nesting exceeds maximum depth of {_MAX_NESTED_CONFIG_DEPTH}",
+                context=context,
+            )
+
         secret_resolver = self._get_secret_resolver()
         if secret_resolver is None:
             if self._has_infisical_references(config):
@@ -3017,7 +3053,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                         operation="resolve_infisical_refs_async",
                         target_name="binding_config_resolver",
                     )
-                    raise SecretResolutionError(
+                    raise ProtocolConfigurationError(
                         "Config contains infisical: references but no "
                         "SecretResolver is configured",
                         context=context,
@@ -3042,7 +3078,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             operation="resolve_infisical_refs_async",
                             target_name="binding_config_resolver",
                         )
-                        raise SecretResolutionError(
+                        raise ProtocolConfigurationError(
                             "Infisical secret not found",
                             context=context,
                         )
@@ -3058,7 +3094,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             operation="resolve_infisical_refs_async",
                             target_name="binding_config_resolver",
                         )
-                        raise SecretResolutionError(
+                        raise ProtocolConfigurationError(
                             "Failed to resolve infisical: reference",
                             context=context,
                         )
@@ -3066,6 +3102,10 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             elif isinstance(value, dict):
                 result[key] = await self._resolve_infisical_refs_async(
                     value, correlation_id, depth + 1
+                )
+            elif isinstance(value, list):
+                result[key] = await self._resolve_infisical_refs_in_list_async(
+                    value, secret_resolver, correlation_id, depth + 1
                 )
             else:
                 result[key] = value
@@ -3084,8 +3124,197 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         infisical_path = value[len("infisical:") :]
         return _split_path_and_fragment(infisical_path)
 
+    def _resolve_infisical_refs_in_list(
+        self,
+        items: list[object],
+        secret_resolver: SecretResolver,
+        correlation_id: UUID,
+        depth: int,
+    ) -> list[object]:
+        """Resolve infisical: references within a list.
+
+        Processes each item in the list, resolving any infisical: references found
+        in strings, nested dicts, or nested lists.
+
+        Args:
+            items: List of items to process.
+            secret_resolver: SecretResolver instance for infisical lookups.
+            correlation_id: Correlation ID for error tracking.
+            depth: Current recursion depth.
+
+        Returns:
+            List with infisical references resolved.
+
+        Raises:
+            ProtocolConfigurationError: If recursion depth exceeds maximum,
+                or if fail_on_vault_error is True and an infisical reference fails.
+        """
+        if depth > _MAX_NESTED_CONFIG_DEPTH:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="resolve_infisical_refs_in_list",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Configuration nesting exceeds maximum depth of {_MAX_NESTED_CONFIG_DEPTH}",
+                context=context,
+            )
+
+        result: list[object] = []
+        for i, item in enumerate(items):
+            if isinstance(item, str) and item.startswith("infisical:"):
+                infisical_path, fragment = self._parse_infisical_reference(item)
+                logical_name = (
+                    f"{infisical_path}#{fragment}" if fragment else infisical_path
+                )
+                try:
+                    secret = secret_resolver.get_secret(logical_name)
+                    if secret is not None:
+                        result.append(secret.get_secret_value())
+                    elif self._config.fail_on_vault_error:
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.INFISICAL,
+                            operation="resolve_infisical_refs_in_list",
+                            target_name="binding_config_resolver",
+                        )
+                        raise ProtocolConfigurationError(
+                            f"Infisical secret not found at list index {i}",
+                            context=context,
+                        )
+                    else:
+                        result.append(item)
+                except SecretResolutionError:
+                    raise
+                except Exception:
+                    if self._config.fail_on_vault_error:
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.INFISICAL,
+                            operation="resolve_infisical_refs_in_list",
+                            target_name="binding_config_resolver",
+                        )
+                        raise ProtocolConfigurationError(
+                            f"Failed to resolve Infisical secret reference at list index {i}. "
+                            f"correlation_id={correlation_id}",
+                            context=context,
+                        )
+                    result.append(item)
+            elif isinstance(item, dict):
+                result.append(
+                    self._resolve_infisical_refs(item, correlation_id, depth + 1)
+                )
+            elif isinstance(item, list):
+                result.append(
+                    self._resolve_infisical_refs_in_list(
+                        item, secret_resolver, correlation_id, depth + 1
+                    )
+                )
+            else:
+                result.append(item)
+
+        return result
+
+    async def _resolve_infisical_refs_in_list_async(
+        self,
+        items: list[object],
+        secret_resolver: SecretResolver,
+        correlation_id: UUID,
+        depth: int,
+    ) -> list[object]:
+        """Resolve infisical: references within a list asynchronously.
+
+        Processes each item in the list, resolving any infisical: references found
+        in strings, nested dicts, or nested lists.
+
+        Args:
+            items: List of items to process.
+            secret_resolver: SecretResolver instance for infisical lookups.
+            correlation_id: Correlation ID for error tracking.
+            depth: Current recursion depth.
+
+        Returns:
+            List with infisical references resolved.
+
+        Raises:
+            ProtocolConfigurationError: If recursion depth exceeds maximum,
+                or if fail_on_vault_error is True and an infisical reference fails.
+        """
+        if depth > _MAX_NESTED_CONFIG_DEPTH:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="resolve_infisical_refs_in_list_async",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Configuration nesting exceeds maximum depth of {_MAX_NESTED_CONFIG_DEPTH}",
+                context=context,
+            )
+
+        result: list[object] = []
+        for i, item in enumerate(items):
+            if isinstance(item, str) and item.startswith("infisical:"):
+                infisical_path, fragment = self._parse_infisical_reference(item)
+                logical_name = (
+                    f"{infisical_path}#{fragment}" if fragment else infisical_path
+                )
+                try:
+                    secret = await secret_resolver.get_secret_async(logical_name)
+                    if secret is not None:
+                        result.append(secret.get_secret_value())
+                    elif self._config.fail_on_vault_error:
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.INFISICAL,
+                            operation="resolve_infisical_refs_in_list_async",
+                            target_name="binding_config_resolver",
+                        )
+                        raise ProtocolConfigurationError(
+                            f"Infisical secret not found at list index {i}",
+                            context=context,
+                        )
+                    else:
+                        result.append(item)
+                except SecretResolutionError:
+                    raise
+                except Exception:
+                    if self._config.fail_on_vault_error:
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.INFISICAL,
+                            operation="resolve_infisical_refs_in_list_async",
+                            target_name="binding_config_resolver",
+                        )
+                        raise ProtocolConfigurationError(
+                            f"Failed to resolve Infisical secret reference at list index {i}. "
+                            f"correlation_id={correlation_id}",
+                            context=context,
+                        )
+                    result.append(item)
+            elif isinstance(item, dict):
+                result.append(
+                    await self._resolve_infisical_refs_async(
+                        item, correlation_id, depth + 1
+                    )
+                )
+            elif isinstance(item, list):
+                result.append(
+                    await self._resolve_infisical_refs_in_list_async(
+                        item, secret_resolver, correlation_id, depth + 1
+                    )
+                )
+            else:
+                result.append(item)
+
+        return result
+
     def _has_infisical_references(self, config: dict[str, object]) -> bool:
-        """Check if config contains any infisical: references.
+        """Check if config contains any infisical: references (including nested dicts and lists).
+
+        Recursively scans the configuration dictionary to detect any string
+        values that start with "infisical:".
 
         Args:
             config: Configuration dict to check.
@@ -3096,8 +3325,31 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         for value in config.values():
             if isinstance(value, str) and value.startswith("infisical:"):
                 return True
-            elif isinstance(value, dict):
+            if isinstance(value, dict):
                 if self._has_infisical_references(value):
+                    return True
+            if isinstance(value, list):
+                if self._has_infisical_references_in_list(value):
+                    return True
+        return False
+
+    def _has_infisical_references_in_list(self, items: list[object]) -> bool:
+        """Check if a list contains any infisical: references (including nested structures).
+
+        Args:
+            items: List to check for infisical references.
+
+        Returns:
+            True if any infisical: references are found, False otherwise.
+        """
+        for item in items:
+            if isinstance(item, str) and item.startswith("infisical:"):
+                return True
+            if isinstance(item, dict):
+                if self._has_infisical_references(item):
+                    return True
+            if isinstance(item, list):
+                if self._has_infisical_references_in_list(item):
                     return True
         return False
 

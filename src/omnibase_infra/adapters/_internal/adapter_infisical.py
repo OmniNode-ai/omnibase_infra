@@ -24,89 +24,20 @@ Security:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import SecretStr
+
+from omnibase_infra.adapters.models.model_infisical_batch_result import (
+    ModelInfisicalBatchResult,
+)
+from omnibase_infra.adapters.models.model_infisical_config import (
+    ModelInfisicalAdapterConfig,
+)
+from omnibase_infra.adapters.models.model_infisical_secret_result import (
+    ModelInfisicalSecretResult,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class ModelInfisicalAdapterConfig(BaseModel):
-    """Configuration for the Infisical adapter.
-
-    Attributes:
-        host: Infisical server URL.
-        client_id: Machine identity client ID for Universal Auth.
-        client_secret: Machine identity client secret for Universal Auth.
-        project_id: Default Infisical project ID.
-        environment_slug: Default environment slug (e.g., ``dev``, ``staging``, ``prod``).
-        secret_path: Default secret path prefix (e.g., ``/``).
-    """
-
-    model_config = ConfigDict(
-        frozen=True,
-        extra="forbid",
-        from_attributes=True,
-    )
-
-    host: str = Field(
-        default="https://app.infisical.com",
-        description="Infisical server URL.",
-    )
-    client_id: SecretStr = Field(
-        ...,
-        description="Machine identity client ID for Universal Auth.",
-    )
-    client_secret: SecretStr = Field(
-        ...,
-        description="Machine identity client secret for Universal Auth.",
-    )
-    project_id: UUID = Field(
-        ...,
-        description="Default Infisical project ID.",
-    )
-    environment_slug: str = Field(
-        default="prod",
-        min_length=1,
-        description="Default environment slug.",
-    )
-    secret_path: str = Field(
-        default="/",
-        description="Default secret path prefix.",
-    )
-
-
-@dataclass(frozen=True)
-class InfisicalSecretResult:
-    """Result of a single secret fetch from Infisical.
-
-    Attributes:
-        key: The secret name / key.
-        value: The secret value wrapped in ``SecretStr``.
-        version: The secret version (if available).
-        secret_path: The path where the secret was found.
-        environment: The environment slug.
-    """
-
-    key: str
-    value: SecretStr
-    version: int | None = None
-    secret_path: str = "/"
-    environment: str = ""
-
-
-@dataclass
-class InfisicalBatchResult:
-    """Result of a batch secret fetch.
-
-    Attributes:
-        secrets: Mapping of secret name to result.
-        errors: Mapping of secret name to error message for failed fetches.
-    """
-
-    secrets: dict[str, InfisicalSecretResult] = field(default_factory=dict)
-    errors: dict[str, str] = field(default_factory=dict)
 
 
 class AdapterInfisical:
@@ -178,7 +109,7 @@ class AdapterInfisical:
         project_id: str | None = None,
         environment_slug: str | None = None,
         secret_path: str | None = None,
-    ) -> InfisicalSecretResult:
+    ) -> ModelInfisicalSecretResult:
         """Retrieve a single secret by name.
 
         Args:
@@ -188,7 +119,7 @@ class AdapterInfisical:
             secret_path: Override default secret path.
 
         Returns:
-            InfisicalSecretResult with the secret value wrapped in SecretStr.
+            ModelInfisicalSecretResult with the secret value wrapped in SecretStr.
 
         Raises:
             RuntimeError: If client is not initialized or secret not found.
@@ -219,7 +150,7 @@ class AdapterInfisical:
             )
             version = getattr(result, "version", None)
 
-            return InfisicalSecretResult(
+            return ModelInfisicalSecretResult(
                 key=secret_name,
                 value=SecretStr(str(raw_value)),
                 version=version,
@@ -238,7 +169,7 @@ class AdapterInfisical:
         project_id: str | None = None,
         environment_slug: str | None = None,
         secret_path: str | None = None,
-    ) -> list[InfisicalSecretResult]:
+    ) -> list[ModelInfisicalSecretResult]:
         """List all secrets at the given path.
 
         Args:
@@ -247,7 +178,7 @@ class AdapterInfisical:
             secret_path: Override default secret path.
 
         Returns:
-            List of InfisicalSecretResult with values wrapped in SecretStr.
+            List of ModelInfisicalSecretResult with values wrapped in SecretStr.
 
         Raises:
             RuntimeError: If client is not initialized.
@@ -271,7 +202,7 @@ class AdapterInfisical:
                 include_imports=True,
             )
 
-            secrets: list[InfisicalSecretResult] = []
+            secrets: list[ModelInfisicalSecretResult] = []
             # The SDK returns an object with a secrets attribute (list)
             raw_secrets = getattr(result, "secrets", []) or []
             for s in raw_secrets:
@@ -279,7 +210,7 @@ class AdapterInfisical:
                 val = getattr(s, "secretValue", None) or getattr(s, "secret_value", "")
                 version = getattr(s, "version", None)
                 secrets.append(
-                    InfisicalSecretResult(
+                    ModelInfisicalSecretResult(
                         key=str(key),
                         value=SecretStr(str(val)),
                         version=version,
@@ -300,7 +231,7 @@ class AdapterInfisical:
         project_id: str | None = None,
         environment_slug: str | None = None,
         secret_path: str | None = None,
-    ) -> InfisicalBatchResult:
+    ) -> ModelInfisicalBatchResult:
         """Retrieve multiple secrets by name.
 
         Fetches each secret individually and collects results. Partial failures
@@ -313,9 +244,9 @@ class AdapterInfisical:
             secret_path: Override default secret path.
 
         Returns:
-            InfisicalBatchResult with successes and per-key errors.
+            ModelInfisicalBatchResult with successes and per-key errors.
         """
-        batch_result = InfisicalBatchResult()
+        batch_result = ModelInfisicalBatchResult()
 
         for name in secret_names:
             try:
@@ -340,7 +271,7 @@ class AdapterInfisical:
 
 __all__: list[str] = [
     "AdapterInfisical",
-    "InfisicalBatchResult",
-    "InfisicalSecretResult",
+    "ModelInfisicalBatchResult",
+    "ModelInfisicalSecretResult",
     "ModelInfisicalAdapterConfig",
 ]

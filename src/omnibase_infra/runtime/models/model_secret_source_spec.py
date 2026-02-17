@@ -32,11 +32,25 @@ class ModelSecretSourceSpec(BaseModel):
 
             ModelSecretSourceSpec(source_type="env", source_path="POSTGRES_PASSWORD")
 
-        Vault secret::
+        Vault secret (deprecated)::
 
             ModelSecretSourceSpec(
                 source_type="vault",
                 source_path="secret/data/database/postgres#password"
+            )
+
+        Infisical secret::
+
+            ModelSecretSourceSpec(
+                source_type="infisical",
+                source_path="DB_PASSWORD"
+            )
+
+        Infisical secret with field::
+
+            ModelSecretSourceSpec(
+                source_type="infisical",
+                source_path="DB_CREDENTIALS#password"
             )
 
         File-based secret::
@@ -61,7 +75,9 @@ class ModelSecretSourceSpec(BaseModel):
         ...,
         min_length=1,
         description="Path or key to the secret. Format depends on source_type: "
-        "env=VAR_NAME, vault=path/to/secret#key, file=/path/to/file.",
+        "env=VAR_NAME, vault=path/to/secret#key, "
+        "infisical=SECRET_NAME or infisical=SECRET_NAME#field, "
+        "file=/path/to/file.",
     )
 
 

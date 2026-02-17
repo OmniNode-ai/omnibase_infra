@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from omnibase_infra.validation.validator_no_direct_adapter import (
-    AdapterViolation,
+    ModelAdapterViolation,
     check_no_direct_adapter_usage,
 )
 
@@ -91,7 +91,7 @@ class TestNoDirectAdapterRule:
         violations = check_no_direct_adapter_usage(temp_src)
         assert len(violations) == 1
         v = violations[0]
-        assert isinstance(v, AdapterViolation)
+        assert isinstance(v, ModelAdapterViolation)
         assert "violator.py" in v.file_path
         assert v.line_number == 1
         assert "not allowed" in v.message
