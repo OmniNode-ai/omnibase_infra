@@ -28,6 +28,8 @@ from uuid import uuid4
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
@@ -471,6 +473,26 @@ class TestSQLQueries:
         assert "ctid" in sql
         assert "LIMIT" in sql
 
+    @pytest.mark.asyncio
+    async def test_execute_passes_query_timeout(
+        self,
+        mock_pool: MagicMock,
+        mock_conn: AsyncMock,
+    ) -> None:
+        """DELETE execution should use the configured query_timeout_seconds."""
+        config = ConfigTTLCleanup(
+            postgres_dsn="postgresql://postgres:test@localhost:5432/test_db",
+            query_timeout_seconds=45.0,
+            table_ttl_columns={"agent_actions": "created_at"},
+        )
+        service = ServiceTTLCleanup(pool=mock_pool, config=config)
+
+        mock_conn.execute.return_value = "DELETE 0"
+        await service.cleanup_once()
+
+        call_kwargs = mock_conn.execute.call_args.kwargs
+        assert call_kwargs.get("timeout") == 45.0
+
 
 # =============================================================================
 # Circuit Breaker Tests
@@ -486,7 +508,9 @@ class TestCircuitBreaker:
     ) -> None:
         """Circuit breaker should start in closed state."""
         health = service.get_health_status()
-        assert health["circuit_breaker"]["state"] == "closed"
+        circuit_breaker = health["circuit_breaker"]
+        assert isinstance(circuit_breaker, dict)
+        assert circuit_breaker["state"] == "closed"
 
     @pytest.mark.asyncio
     async def test_connection_error_raises_infra_connection_error(
@@ -599,7 +623,7 @@ class TestErrorHandling:
         # First table fails, second succeeds
         call_count = 0
 
-        async def side_effect(*args, **kwargs):
+        async def side_effect(*args: object, **kwargs: object) -> str:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -669,7 +693,7 @@ class TestGracefulShutdown:
         mock_conn.execute.return_value = "DELETE 0"
 
         # Stop immediately after starting
-        async def stop_after_delay():
+        async def stop_after_delay() -> None:
             await asyncio.sleep(0.1)
             service.stop()
 
@@ -697,8 +721,10 @@ class TestHealthStatus:
 
         assert health["service"] == "ttl-cleanup"
         assert health["last_result"] is None
-        assert health["config"]["retention_days"] == 30
-        assert health["config"]["batch_size"] == 1000
+        config = health["config"]
+        assert isinstance(config, dict)
+        assert config["retention_days"] == 30
+        assert config["batch_size"] == 1000
 
     @pytest.mark.asyncio
     async def test_health_status_after_cleanup(
@@ -713,7 +739,11 @@ class TestHealthStatus:
 
         health = service.get_health_status()
         assert health["last_result"] is not None
-        assert health["last_result"]["total_rows_deleted"] > 0
+        last_result = health["last_result"]
+        assert isinstance(last_result, dict)
+        rows_deleted = last_result["total_rows_deleted"]
+        assert isinstance(rows_deleted, (int, float))
+        assert rows_deleted > 0
 
 
 # =============================================================================
