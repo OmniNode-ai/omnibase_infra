@@ -17,7 +17,9 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from omnibase_infra.utils import validate_timezone_aware_datetime
 
 
 class ModelTopicCatalogChanged(BaseModel):
@@ -91,6 +93,15 @@ class ModelTopicCatalogChanged(BaseModel):
         ge=1,
         description="Schema version for forward compatibility.",
     )
+
+    @field_validator("changed_at")
+    @classmethod
+    def validate_changed_at_timezone_aware(cls, v: datetime) -> datetime:
+        """Validate that changed_at is timezone-aware.
+
+        Delegates to shared utility for consistent validation across all models.
+        """
+        return validate_timezone_aware_datetime(v)
 
     @model_validator(mode="after")
     def sort_delta_tuples(self) -> ModelTopicCatalogChanged:

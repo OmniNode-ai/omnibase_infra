@@ -17,11 +17,12 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.models.catalog.model_topic_catalog_entry import (
     ModelTopicCatalogEntry,
 )
+from omnibase_infra.utils import validate_timezone_aware_datetime
 
 
 class ModelTopicCatalogResponse(BaseModel):
@@ -94,6 +95,15 @@ class ModelTopicCatalogResponse(BaseModel):
         ge=1,
         description="Schema version for forward compatibility.",
     )
+
+    @field_validator("generated_at")
+    @classmethod
+    def validate_generated_at_timezone_aware(cls, v: datetime) -> datetime:
+        """Validate that generated_at is timezone-aware.
+
+        Delegates to shared utility for consistent validation across all models.
+        """
+        return validate_timezone_aware_datetime(v)
 
 
 __all__: list[str] = ["ModelTopicCatalogResponse"]

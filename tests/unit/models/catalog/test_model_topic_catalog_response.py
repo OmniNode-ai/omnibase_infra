@@ -153,6 +153,16 @@ class TestModelTopicCatalogResponseValidation:
                 schema_version=0,
             )
 
+    def test_naive_datetime_rejected(self) -> None:
+        """Test that naive (timezone-unaware) generated_at is rejected."""
+        with pytest.raises(ValidationError, match="timezone-aware"):
+            ModelTopicCatalogResponse(
+                correlation_id=uuid4(),
+                catalog_version=1,
+                node_count=0,
+                generated_at=datetime(2026, 1, 1, 12, 0, 0),
+            )
+
 
 class TestModelTopicCatalogResponseWarnings:
     """Test warnings tuple behavior."""

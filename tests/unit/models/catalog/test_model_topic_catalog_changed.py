@@ -228,3 +228,12 @@ class TestModelTopicCatalogChangedValidation:
                 changed_at=datetime.now(UTC),
                 trigger_reason="x" * 1025,
             )
+
+    def test_naive_datetime_rejected(self) -> None:
+        """Test that naive (timezone-unaware) changed_at is rejected."""
+        with pytest.raises(ValidationError, match="timezone-aware"):
+            ModelTopicCatalogChanged(
+                correlation_id=uuid4(),
+                catalog_version=1,
+                changed_at=datetime(2026, 1, 1, 12, 0, 0),
+            )

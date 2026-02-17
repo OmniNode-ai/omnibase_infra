@@ -77,14 +77,8 @@ class TestPlatformTopicSuffixes:
 
     def test_suffix_constants_are_strings(self) -> None:
         """All suffix constants should be strings."""
-        assert isinstance(SUFFIX_NODE_REGISTRATION, str)
-        assert isinstance(SUFFIX_NODE_INTROSPECTION, str)
-        assert isinstance(SUFFIX_NODE_HEARTBEAT, str)
-        assert isinstance(SUFFIX_REQUEST_INTROSPECTION, str)
-        assert isinstance(SUFFIX_FSM_STATE_TRANSITIONS, str)
-        assert isinstance(SUFFIX_RUNTIME_TICK, str)
-        assert isinstance(SUFFIX_REGISTRATION_SNAPSHOTS, str)
-        assert isinstance(SUFFIX_NODE_REGISTRATION_ACKED, str)
+        for suffix in ALL_PLATFORM_SUFFIXES:
+            assert isinstance(suffix, str), f"Suffix must be a string: {suffix}"
 
     def test_suffix_kinds_are_valid(self) -> None:
         """All suffixes should use valid message kinds."""
