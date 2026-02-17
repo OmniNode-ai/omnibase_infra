@@ -2926,7 +2926,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_vault_error is True and an infisical reference fails.
+                or if ``fail_on_vault_error`` is True and an infisical reference
+                fails.  (``fail_on_vault_error`` governs all secret backends
+                despite its Vault-centric name.)
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
             context = ModelInfraErrorContext.with_correlation(
@@ -3029,7 +3031,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_vault_error is True and an infisical reference fails.
+                or if ``fail_on_vault_error`` is True and an infisical reference
+                fails.  (``fail_on_vault_error`` governs all secret backends
+                despite its Vault-centric name.)
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
             context = ModelInfraErrorContext.with_correlation(
@@ -3147,7 +3151,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_vault_error is True and an infisical reference fails.
+                or if ``fail_on_vault_error`` is True and an infisical reference
+                fails.  (``fail_on_vault_error`` governs all secret backends
+                despite its Vault-centric name.)
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
             context = ModelInfraErrorContext.with_correlation(
@@ -3239,7 +3245,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_vault_error is True and an infisical reference fails.
+                or if ``fail_on_vault_error`` is True and an infisical reference
+                fails.  (``fail_on_vault_error`` governs all secret backends
+                despite its Vault-centric name.)
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
             context = ModelInfraErrorContext.with_correlation(

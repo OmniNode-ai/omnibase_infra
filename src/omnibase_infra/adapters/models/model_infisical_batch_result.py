@@ -19,6 +19,12 @@ from omnibase_infra.adapters.models.model_infisical_secret_result import (
 class ModelInfisicalBatchResult:
     """Result of a batch secret fetch.
 
+    Note:
+        This dataclass is intentionally **mutable** (not ``frozen=True``)
+        because batch results are accumulated incrementally: each secret
+        fetch appends to ``secrets`` or ``errors`` during the batch loop
+        in ``AdapterInfisical.get_secrets_batch``.
+
     Attributes:
         secrets: Mapping of secret name to result.
         errors: Mapping of secret name to error message for failed fetches.

@@ -2118,23 +2118,15 @@ class SecretResolver:
             secret_path = path
             field = None
 
-        # For sync access, we call the adapter directly if available
-        # (handler.execute is async, so we use adapter for sync path)
-        handler = self._infisical_handler
-        adapter = getattr(handler, "_adapter", None)
-        if adapter is None:
-            logger.warning(
-                "Infisical handler adapter not available for sync resolution",
-                extra={
-                    "logical_name": logical_name,
-                    "correlation_id": str(effective_correlation_id),
-                },
-            )
-            return None
-
+        # For sync access, use the handler's public get_secret_sync() method
+        # (handler.execute is async, so we use the sync API instead)
         try:
-            result = adapter.get_secret(secret_name=secret_path)
-            value: str = str(result.value.get_secret_value())
+            secret_value = self._infisical_handler.get_secret_sync(
+                secret_name=secret_path
+            )
+            if secret_value is None:
+                return None
+            value: str = secret_value.get_secret_value()
             if field:
                 # If field is specified, try to parse value as JSON and extract field
                 try:
@@ -2155,9 +2147,8 @@ class SecretResolver:
                 target_name="secret_resolver",
             )
             raise SecretResolutionError(
-                f"Failed to resolve secret from Infisical: {logical_name}",
+                "Failed to resolve secret from Infisical",
                 context=context,
-                logical_name=logical_name,
             ) from e
 
     async def _read_infisical_secret_async(
@@ -2234,9 +2225,8 @@ class SecretResolver:
                 target_name="secret_resolver",
             )
             raise SecretResolutionError(
-                f"Failed to resolve secret from Infisical: {logical_name}",
+                "Failed to resolve secret from Infisical",
                 context=context,
-                logical_name=logical_name,
             ) from e
 
     def _cache_secret(

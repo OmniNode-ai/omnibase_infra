@@ -15,6 +15,11 @@ Architecture:
 
 Return Type:
     All operations return ``ModelHandlerOutput[dict[str, object]]`` per OMN-975.
+    Uses ``ModelHandlerOutput.for_compute()`` despite EFFECT handler_category because
+    handlers return synchronous result data rather than emitting events to the event bus.
+    ``for_effect()`` returns ``ModelHandlerOutput[None]`` with ``events`` tuple, which is
+    intended for event-emitting orchestrator patterns. This is consistent with all other
+    EFFECT-category handlers (HandlerVault, HandlerConsul, HandlerDb, HandlerHttp, etc.).
 
 .. versionadded:: 0.9.0
     Initial implementation for OMN-2286.
@@ -96,6 +101,11 @@ class HandlerInfisical(
         - ``describe()`` never exposes credentials.
         - Error messages are sanitized to exclude secret names and values.
     """
+
+    MAX_CACHE_SIZE: int = 1000
+    """Upper bound on cached secret entries.  When exceeded, expired entries
+    are evicted first; if still over limit the oldest entries (by expiry time)
+    are removed."""
 
     def __init__(self, container: ModelONEXContainer) -> None:
         """Initialize HandlerInfisical with ONEX container.
@@ -330,7 +340,11 @@ class HandlerInfisical(
                     payload, correlation_id, input_envelope_id
                 )
 
-            # Record circuit breaker success
+            # Record circuit breaker success.
+            # _reset_circuit_breaker() handles half-open state correctly:
+            # it increments the half-open success counter and only fully
+            # resets (CLOSED) once enough successes are recorded. Despite
+            # the name, it does NOT skip the half-open -> closed transition.
             if self._circuit_breaker_initialized:
                 async with self._circuit_breaker_lock:
                     await self._reset_circuit_breaker()
@@ -378,8 +392,10 @@ class HandlerInfisical(
                 context=ctx,
             )
 
-        assert self._adapter is not None
-        assert self._config is not None
+        if self._adapter is None:
+            raise RuntimeError("Adapter not initialized - call initialize() first")
+        if self._config is None:
+            raise RuntimeError("Config not initialized - call initialize() first")
 
         # Check cache first
         cache_key = self._build_cache_key(
@@ -399,6 +415,9 @@ class HandlerInfisical(
                     "cache_hit": True,
                 },
             )
+            # NOTE: SecretStr must be unwrapped here because for_compute()
+            # enforces JSON-ledger-safe types only. The consumer (SecretResolver)
+            # re-wraps the value in SecretStr at the resolution boundary.
             return ModelHandlerOutput.for_compute(
                 handler_id=HANDLER_ID_INFISICAL,
                 correlation_id=correlation_id,
@@ -425,8 +444,9 @@ class HandlerInfisical(
             secret_path=raw_path if isinstance(raw_path, str) else None,
         )
 
-        # Cache the result
+        # Cache the result (with eviction if over limit)
         if self._config.cache_ttl_seconds > 0:
+            self._maybe_evict_cache()
             self._cache[cache_key] = CacheEntry(
                 value=result.value,
                 ttl=self._config.cache_ttl_seconds,
@@ -442,6 +462,9 @@ class HandlerInfisical(
             },
         )
 
+        # NOTE: SecretStr must be unwrapped here because for_compute()
+        # enforces JSON-ledger-safe types only. The consumer (SecretResolver)
+        # re-wraps the value in SecretStr at the resolution boundary.
         return ModelHandlerOutput.for_compute(
             handler_id=HANDLER_ID_INFISICAL,
             correlation_id=correlation_id,
@@ -461,7 +484,8 @@ class HandlerInfisical(
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[dict[str, object]]:
         """List secrets at a given path."""
-        assert self._adapter is not None
+        if self._adapter is None:
+            raise RuntimeError("Adapter not initialized - call initialize() first")
 
         self._total_fetches += 1
 
@@ -519,8 +543,10 @@ class HandlerInfisical(
                 context=ctx,
             )
 
-        assert self._adapter is not None
-        assert self._config is not None
+        if self._adapter is None:
+            raise RuntimeError("Adapter not initialized - call initialize() first")
+        if self._config is None:
+            raise RuntimeError("Config not initialized - call initialize() first")
 
         results: dict[str, str] = {}
         errors: dict[str, str] = {}
@@ -563,7 +589,7 @@ class HandlerInfisical(
                 results[name] = secret_result.value.get_secret_value()
                 from_fetch.append(name)
 
-                # Cache the fetched secret
+                # Cache the fetched secret (with eviction if over limit)
                 if self._config.cache_ttl_seconds > 0:
                     cache_key = self._build_cache_key(
                         name,
@@ -571,6 +597,7 @@ class HandlerInfisical(
                         payload.get("environment_slug"),
                         payload.get("secret_path"),
                     )
+                    self._maybe_evict_cache()
                     self._cache[cache_key] = CacheEntry(
                         value=secret_result.value,
                         ttl=self._config.cache_ttl_seconds,
@@ -610,7 +637,8 @@ class HandlerInfisical(
         secret_path: object = None,
     ) -> str:
         """Build a unique cache key from secret coordinates."""
-        assert self._config is not None
+        if self._config is None:
+            raise RuntimeError("Config not initialized - call initialize() first")
         parts = [
             str(project_id)
             if isinstance(project_id, str)
@@ -624,6 +652,31 @@ class HandlerInfisical(
             secret_name,
         ]
         return "::".join(parts)
+
+    def _maybe_evict_cache(self) -> None:
+        """Evict cache entries if the cache exceeds ``MAX_CACHE_SIZE``.
+
+        Eviction strategy (minimal, not a full LRU):
+        1. Remove all expired entries.
+        2. If still over limit, remove entries with the earliest ``expires_at``
+           until the cache is back under the limit.
+        """
+        if len(self._cache) < self.MAX_CACHE_SIZE:
+            return
+
+        # Phase 1: purge expired entries
+        expired_keys = [k for k, v in self._cache.items() if v.is_expired]
+        for k in expired_keys:
+            del self._cache[k]
+
+        if len(self._cache) < self.MAX_CACHE_SIZE:
+            return
+
+        # Phase 2: evict oldest (earliest expiry) entries
+        sorted_keys = sorted(self._cache, key=lambda k: self._cache[k].expires_at)
+        to_remove = len(self._cache) - self.MAX_CACHE_SIZE + 1  # +1 for incoming entry
+        for k in sorted_keys[:to_remove]:
+            del self._cache[k]
 
     def describe(self) -> dict[str, object]:
         """Return handler metadata and capabilities.
@@ -643,6 +696,64 @@ class HandlerInfisical(
             "total_fetches": self._total_fetches,
             "version": "0.1.0",
         }
+
+    def get_secret_sync(
+        self,
+        secret_name: str,
+        project_id: str | None = None,
+        environment_slug: str | None = None,
+        secret_path: str | None = None,
+    ) -> SecretStr | None:
+        """Retrieve a single secret synchronously.
+
+        Provides a synchronous interface for callers that cannot use the async
+        ``execute()`` method (e.g., ``SecretResolver._read_infisical_secret_sync``).
+        Checks the handler-owned cache first, then delegates to the adapter.
+
+        Args:
+            secret_name: The secret key to retrieve.
+            project_id: Optional project override.
+            environment_slug: Optional environment override.
+            secret_path: Optional path override.
+
+        Returns:
+            Secret value as ``SecretStr``, or ``None`` if the handler is not
+            initialized or the adapter is unavailable.
+
+        Raises:
+            RuntimeError: Propagated from adapter on SDK failures.
+        """
+        if not self._initialized or self._adapter is None or self._config is None:
+            return None
+
+        # Check cache first
+        cache_key = self._build_cache_key(
+            secret_name, project_id, environment_slug, secret_path
+        )
+        cached = self._cache.get(cache_key)
+        if cached is not None and not cached.is_expired:
+            self._cache_hits += 1
+            return cached.value
+
+        self._cache_misses += 1
+        self._total_fetches += 1
+
+        result = self._adapter.get_secret(
+            secret_name=secret_name,
+            project_id=project_id,
+            environment_slug=environment_slug,
+            secret_path=secret_path,
+        )
+
+        # Cache the result (with eviction if over limit)
+        if self._config.cache_ttl_seconds > 0:
+            self._maybe_evict_cache()
+            self._cache[cache_key] = CacheEntry(
+                value=result.value,
+                ttl=self._config.cache_ttl_seconds,
+            )
+
+        return result.value
 
     def invalidate_cache(self, secret_name: str | None = None) -> int:
         """Invalidate cached secrets.

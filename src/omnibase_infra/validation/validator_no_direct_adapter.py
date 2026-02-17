@@ -79,8 +79,19 @@ def check_no_direct_adapter_usage(
         if any(part in exclude_dirs for part in py_file.parts):
             continue
 
-        # Determine the module path for allowlist checking
-        rel_path = py_file.relative_to(source_root.parent.parent).as_posix()
+        # Determine the module path for allowlist checking.
+        # Assumes source_root is src/omnibase_infra (or similar), so
+        # parent.parent resolves to the ``src/`` directory, yielding a
+        # dotted module path like ``omnibase_infra.adapters.foo``.
+        try:
+            rel_path = py_file.relative_to(source_root.parent.parent).as_posix()
+        except ValueError as e:
+            raise ValueError(
+                f"Cannot compute relative path for {py_file} from "
+                f"{source_root.parent.parent}. Ensure source_root is a "
+                f"directory like src/omnibase_infra (two levels below the "
+                f"project root)."
+            ) from e
         module_path = rel_path.replace("/", ".").removesuffix(".py")
 
         # Check if this module is in the allowlist

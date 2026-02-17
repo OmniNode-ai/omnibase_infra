@@ -67,8 +67,10 @@ class ModelBindingConfigResolverConfig(BaseModel):
             If False, log warning and skip. Default is False.
         allowed_schemes: Set of allowed config_ref URI schemes for security.
             Only these schemes can be used in config_ref values.
-        fail_on_vault_error: If True, fail when vault: references cannot be resolved.
-            If False, keep placeholder (may be insecure). Default is False.
+        fail_on_vault_error: If True, fail when secret references (vault: or
+            infisical:) cannot be resolved. If False, keep placeholder (may be
+            insecure). Default is False. Despite the name, this flag governs all
+            secret backend resolution errors.
         max_cache_entries: Maximum cache entries before LRU eviction.
             None means unlimited. Default is None. Only applies when
             enable_caching=True. To disable caching, use enable_caching=False.
@@ -173,13 +175,18 @@ class ModelBindingConfigResolverConfig(BaseModel):
         "Only these schemes can be used in config_ref values.",
     )
 
-    # Vault error handling behavior
+    # Secret resolution error handling behavior (applies to all secret backends:
+    # vault:, infisical:, and any future secret schemes).  Named
+    # ``fail_on_vault_error`` for historical reasons; renaming would be a
+    # breaking change across the codebase.
     fail_on_vault_error: bool = Field(
         default=False,
-        description="If True, raise ProtocolConfigurationError when a vault: "
-        "reference fails to resolve. If False, log an error and keep the original "
-        "placeholder value (which may be insecure). "
-        "Set to True in production to prevent silent security fallbacks.",
+        description="If True, raise ProtocolConfigurationError when a secret "
+        "reference (vault: or infisical:) fails to resolve. If False, log an "
+        "error and keep the original placeholder value (which may be insecure). "
+        "Set to True in production to prevent silent security fallbacks. "
+        "Despite the name, this flag governs ALL secret backend resolution "
+        "errors, not only Vault.",
     )
 
     # Cache size limit with LRU eviction

@@ -144,10 +144,12 @@ class AdapterInfisical:
                 include_imports=True,
             )
 
-            # Extract value - the SDK returns an object with secretValue attribute
-            raw_value = getattr(result, "secretValue", None) or getattr(
-                result, "secret_value", ""
-            )
+            # Extract value - the SDK returns an object with secretValue attribute.
+            # Use explicit ``is None`` check so that an empty string (a valid
+            # secret value) is not silently replaced by the fallback attribute.
+            raw_value = getattr(result, "secretValue", None)
+            if raw_value is None:
+                raw_value = getattr(result, "secret_value", "")
             version = getattr(result, "version", None)
 
             return ModelInfisicalSecretResult(
@@ -206,8 +208,14 @@ class AdapterInfisical:
             # The SDK returns an object with a secrets attribute (list)
             raw_secrets = getattr(result, "secrets", []) or []
             for s in raw_secrets:
-                key = getattr(s, "secretKey", None) or getattr(s, "secret_key", "")
-                val = getattr(s, "secretValue", None) or getattr(s, "secret_value", "")
+                # Use explicit ``is None`` checks so that empty strings (valid
+                # secret keys/values) are not silently replaced by the fallback.
+                key = getattr(s, "secretKey", None)
+                if key is None:
+                    key = getattr(s, "secret_key", "")
+                val = getattr(s, "secretValue", None)
+                if val is None:
+                    val = getattr(s, "secret_value", "")
                 version = getattr(s, "version", None)
                 secrets.append(
                     ModelInfisicalSecretResult(
