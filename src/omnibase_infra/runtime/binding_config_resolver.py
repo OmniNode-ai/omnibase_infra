@@ -2996,13 +2996,22 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         for key, value in config.items():
             if isinstance(value, str) and value.startswith("infisical:"):
                 infisical_path, fragment = self._parse_infisical_reference(value)
-                logical_name = (
+                # Build the full path for the Infisical reader (includes
+                # #field if present).  We call _read_infisical_secret_sync
+                # directly instead of get_secret() to avoid silent fallback
+                # to env-var lookup when enable_convention_fallback=True and
+                # no explicit mapping exists.
+                infisical_full_path = (
                     f"{infisical_path}#{fragment}" if fragment else infisical_path
                 )
                 try:
-                    secret = secret_resolver.get_secret(logical_name, required=False)
-                    if secret is not None:
-                        result[key] = secret.get_secret_value()
+                    secret_value = secret_resolver._read_infisical_secret_sync(
+                        infisical_full_path,
+                        logical_name=infisical_path,
+                        correlation_id=correlation_id,
+                    )
+                    if secret_value is not None:
+                        result[key] = secret_value
                     else:
                         # Secret not found - check fail_on_vault_error
                         if self._config.fail_on_vault_error:
@@ -3130,15 +3139,22 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         for key, value in config.items():
             if isinstance(value, str) and value.startswith("infisical:"):
                 infisical_path, fragment = self._parse_infisical_reference(value)
-                logical_name = (
+                # Build the full path for the Infisical reader (includes
+                # #field if present).  We call _read_infisical_secret_async
+                # directly instead of get_secret_async() to avoid silent
+                # fallback to env-var lookup when enable_convention_fallback=True
+                # and no explicit mapping exists.
+                infisical_full_path = (
                     f"{infisical_path}#{fragment}" if fragment else infisical_path
                 )
                 try:
-                    secret = await secret_resolver.get_secret_async(
-                        logical_name, required=False
+                    secret_value = await secret_resolver._read_infisical_secret_async(
+                        infisical_full_path,
+                        logical_name=infisical_path,
+                        correlation_id=correlation_id,
                     )
-                    if secret is not None:
-                        result[key] = secret.get_secret_value()
+                    if secret_value is not None:
+                        result[key] = secret_value
                     else:
                         # Secret not found - check fail_on_vault_error
                         if self._config.fail_on_vault_error:
@@ -3286,13 +3302,22 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         for i, item in enumerate(items):
             if isinstance(item, str) and item.startswith("infisical:"):
                 infisical_path, fragment = self._parse_infisical_reference(item)
-                logical_name = (
+                # Build the full path for the Infisical reader (includes
+                # #field if present).  We call _read_infisical_secret_sync
+                # directly instead of get_secret() to avoid silent fallback
+                # to env-var lookup when enable_convention_fallback=True and
+                # no explicit mapping exists.
+                infisical_full_path = (
                     f"{infisical_path}#{fragment}" if fragment else infisical_path
                 )
                 try:
-                    secret = secret_resolver.get_secret(logical_name, required=False)
-                    if secret is not None:
-                        result.append(secret.get_secret_value())
+                    secret_value = secret_resolver._read_infisical_secret_sync(
+                        infisical_full_path,
+                        logical_name=infisical_path,
+                        correlation_id=correlation_id,
+                    )
+                    if secret_value is not None:
+                        result.append(secret_value)
                     else:
                         # Secret not found - check fail_on_vault_error
                         if self._config.fail_on_vault_error:
@@ -3404,15 +3429,22 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         for i, item in enumerate(items):
             if isinstance(item, str) and item.startswith("infisical:"):
                 infisical_path, fragment = self._parse_infisical_reference(item)
-                logical_name = (
+                # Build the full path for the Infisical reader (includes
+                # #field if present).  We call _read_infisical_secret_async
+                # directly instead of get_secret_async() to avoid silent
+                # fallback to env-var lookup when enable_convention_fallback=True
+                # and no explicit mapping exists.
+                infisical_full_path = (
                     f"{infisical_path}#{fragment}" if fragment else infisical_path
                 )
                 try:
-                    secret = await secret_resolver.get_secret_async(
-                        logical_name, required=False
+                    secret_value = await secret_resolver._read_infisical_secret_async(
+                        infisical_full_path,
+                        logical_name=infisical_path,
+                        correlation_id=correlation_id,
                     )
-                    if secret is not None:
-                        result.append(secret.get_secret_value())
+                    if secret_value is not None:
+                        result.append(secret_value)
                     else:
                         # Secret not found - check fail_on_vault_error
                         if self._config.fail_on_vault_error:

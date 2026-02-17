@@ -74,7 +74,9 @@ class AdapterInfisical:
         self._config = config
         self._client: object | None = None  # InfisicalSDKClient (lazy import)
         self._authenticated: bool = False
-        # Observability counters
+        # Observability counters.
+        # Note: Counter increments are not thread-safe. Thread safety is
+        # provided by the calling HandlerInfisical's _cache_lock.
         self._loads_success: int = 0
         self._loads_failed: int = 0
 
