@@ -184,7 +184,11 @@ class AdapterModelRouter:
 
             try:
                 response = await provider.generate_async(request)
-                # Advance round-robin for next call
+                # Advance round-robin for next call.
+                # NOTE: Round-robin is best-effort under concurrency -- two
+                # concurrent generate() calls may snapshot the same index.
+                # This is intentional: strict ordering would require holding
+                # the lock during network I/O.
                 async with self._lock:
                     self._current_index = (idx + 1) % len(provider_order)
                 return response

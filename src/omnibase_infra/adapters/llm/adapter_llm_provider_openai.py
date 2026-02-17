@@ -545,8 +545,10 @@ class AdapterLlmProviderOpenai:
     async def health_check(self) -> ModelLlmHealthResponse:
         """Perform a health check on the provider.
 
-        Attempts to reach the /v1/models endpoint. Updates internal
-        availability state.
+        Probes endpoint reachability by issuing a direct GET to /v1/models
+        via the circuit-protected transport. Unlike ``get_available_models()``,
+        this method does **not** swallow connection errors or fall back to
+        defaults -- a failed GET always results in ``is_healthy=False``.
 
         Note:
             Checks endpoint reachability via /v1/models. Does not verify
@@ -555,16 +557,16 @@ class AdapterLlmProviderOpenai:
         Returns:
             Health check response with latency and available models.
         """
+        from uuid import uuid4
+
         start_time = time.perf_counter()
+        correlation_id = uuid4()
+        url = f"{self._base_url.rstrip('/')}/v1/models"
+
         try:
-            models = await self.get_available_models()
-            latency_ms = (time.perf_counter() - start_time) * 1000
-            self._is_available = True
-            return ModelLlmHealthResponse(
-                is_healthy=True,
-                provider_name=self._provider_name_value,
-                response_time_ms=latency_ms,
-                available_models=tuple(models),
+            response = await self._transport.execute_circuit_protected_get(
+                url=url,
+                correlation_id=correlation_id,
             )
         except Exception as exc:
             latency_ms = (time.perf_counter() - start_time) * 1000
@@ -575,6 +577,41 @@ class AdapterLlmProviderOpenai:
                 response_time_ms=latency_ms,
                 error_message=sanitize_error_message(exc),
             )
+
+        latency_ms = (time.perf_counter() - start_time) * 1000
+
+        if response.status_code != 200:
+            self._is_available = False
+            return ModelLlmHealthResponse(
+                is_healthy=False,
+                provider_name=self._provider_name_value,
+                response_time_ms=latency_ms,
+                error_message=(f"/v1/models returned HTTP {response.status_code}"),
+            )
+
+        # Parse models from a successful response
+        models: list[str] = []
+        try:
+            data = response.json()
+            if isinstance(data, dict) and "data" in data:
+                for item in data["data"]:
+                    if isinstance(item, dict) and "id" in item:
+                        models.append(str(item["id"]))
+        except (ValueError, KeyError):
+            # JSON parse failure on an otherwise 200 response -- still
+            # consider the endpoint reachable but note the models are unknown.
+            pass
+
+        if not models and self._default_model:
+            models = [self._default_model]
+
+        self._is_available = True
+        return ModelLlmHealthResponse(
+            is_healthy=True,
+            provider_name=self._provider_name_value,
+            response_time_ms=latency_ms,
+            available_models=tuple(models),
+        )
 
     # ── Provider info ──────────────────────────────────────────────────
 
