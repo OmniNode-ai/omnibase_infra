@@ -602,6 +602,8 @@ prune_old_deployments() {
     local version_dir
     for version_dir in "${deployed_root}"/*/; do
         [[ -d "${version_dir}" ]] || continue
+        # Skip backup directories from failed --force deploys
+        [[ "$(basename "${version_dir}")" == *.bak ]] && continue
         all_deployments+=("${version_dir%/}")
     done
 
