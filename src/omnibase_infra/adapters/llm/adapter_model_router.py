@@ -268,12 +268,13 @@ class AdapterModelRouter:
         Raises:
             KeyError: If provider_name is not registered.
         """
-        provider = self._providers.get(provider_name)
-        if provider is None:
-            raise KeyError(
-                f"Provider '{provider_name}' not registered. "
-                f"Available: {list(self._providers.keys())}"
-            )
+        async with self._lock:
+            provider = self._providers.get(provider_name)
+            if provider is None:
+                raise KeyError(
+                    f"Provider '{provider_name}' not registered. "
+                    f"Available: {list(self._providers.keys())}"
+                )
         return await provider.generate_async(request)
 
     async def health_check_all(
@@ -284,8 +285,10 @@ class AdapterModelRouter:
         Returns:
             Mapping of provider names to health check results.
         """
+        async with self._lock:
+            providers_snapshot = dict(self._providers)
         results: dict[str, object] = {}
-        for name, provider in self._providers.items():
+        for name, provider in providers_snapshot.items():
             try:
                 health = await provider.health_check()
                 results[name] = health
