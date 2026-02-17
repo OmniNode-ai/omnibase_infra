@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Unit tests for demo reset engine and CLI command.
+"""Unit tests for demo reset service and CLI command.
 
 Tests cover:
 - DemoResetEngine with dry-run and live execution
@@ -29,17 +29,17 @@ from uuid import uuid4
 import pytest
 from click.testing import CliRunner
 
-from omnibase_infra.cli.demo_reset import (
+from omnibase_infra.cli.enum_reset_action import EnumResetAction
+from omnibase_infra.cli.model_demo_reset_config import ModelDemoResetConfig
+from omnibase_infra.cli.model_demo_reset_report import ModelDemoResetReport
+from omnibase_infra.cli.model_reset_action_result import ModelResetActionResult
+from omnibase_infra.cli.service_demo_reset import (
     _ALLOWED_PROJECTION_TABLES,
     DEMO_CONSUMER_GROUP_PATTERN,
     DEMO_PROJECTION_TABLE,
     DEMO_TOPIC_PREFIXES,
     PRESERVED_RESOURCES,
-    DemoResetConfig,
     DemoResetEngine,
-    DemoResetReport,
-    EnumResetAction,
-    ResetActionResult,
 )
 
 pytestmark = [pytest.mark.unit]
@@ -50,12 +50,12 @@ pytestmark = [pytest.mark.unit]
 # =============================================================================
 
 
-class TestDemoResetConfig:
-    """Tests for DemoResetConfig construction."""
+class TestModelDemoResetConfig:
+    """Tests for ModelDemoResetConfig construction."""
 
     def test_default_config(self) -> None:
         """Default config has expected defaults."""
-        config = DemoResetConfig()
+        config = ModelDemoResetConfig()
         assert config.postgres_dsn == ""
         assert config.kafka_bootstrap_servers == ""
         assert config.purge_topics is False
@@ -70,7 +70,7 @@ class TestDemoResetConfig:
                 "KAFKA_BOOTSTRAP_SERVERS": "localhost:9092",
             },
         ):
-            config = DemoResetConfig.from_env(purge_topics=True)
+            config = ModelDemoResetConfig.from_env(purge_topics=True)
             assert config.postgres_dsn == "postgresql://localhost/test"
             assert config.kafka_bootstrap_servers == "localhost:9092"
             assert config.purge_topics is True
@@ -85,7 +85,7 @@ class TestDemoResetConfig:
             if k not in ("OMNIBASE_INFRA_DB_URL", "KAFKA_BOOTSTRAP_SERVERS")
         }
         with patch.dict("os.environ", env_without_keys, clear=True):
-            config = DemoResetConfig.from_env()
+            config = ModelDemoResetConfig.from_env()
             assert config.postgres_dsn == ""
             assert config.kafka_bootstrap_servers == ""
 
@@ -168,12 +168,12 @@ class TestDemoTopicPrefixes:
 # =============================================================================
 
 
-class TestDemoResetReport:
-    """Tests for DemoResetReport formatting and properties."""
+class TestModelDemoResetReport:
+    """Tests for ModelDemoResetReport formatting and properties."""
 
     def test_empty_report(self) -> None:
         """Empty report has zero counts."""
-        report = DemoResetReport()
+        report = ModelDemoResetReport()
         assert report.reset_count == 0
         assert report.preserved_count == 0
         assert report.error_count == 0
@@ -181,13 +181,13 @@ class TestDemoResetReport:
 
     def test_counts_by_action_type(self) -> None:
         """Report counts actions by type correctly."""
-        report = DemoResetReport(
+        report = ModelDemoResetReport(
             actions=[
-                ResetActionResult("a", EnumResetAction.RESET, "done"),
-                ResetActionResult("b", EnumResetAction.RESET, "done"),
-                ResetActionResult("c", EnumResetAction.PRESERVED, "kept"),
-                ResetActionResult("d", EnumResetAction.SKIPPED, "na"),
-                ResetActionResult("e", EnumResetAction.ERROR, "fail"),
+                ModelResetActionResult("a", EnumResetAction.RESET, "done"),
+                ModelResetActionResult("b", EnumResetAction.RESET, "done"),
+                ModelResetActionResult("c", EnumResetAction.PRESERVED, "kept"),
+                ModelResetActionResult("d", EnumResetAction.SKIPPED, "na"),
+                ModelResetActionResult("e", EnumResetAction.ERROR, "fail"),
             ]
         )
         assert report.reset_count == 2
@@ -197,21 +197,21 @@ class TestDemoResetReport:
 
     def test_format_summary_dry_run(self) -> None:
         """Summary indicates dry run mode."""
-        report = DemoResetReport(dry_run=True)
+        report = ModelDemoResetReport(dry_run=True)
         summary = report.format_summary()
         assert "DRY RUN" in summary
 
     def test_format_summary_executed(self) -> None:
         """Summary indicates execution mode."""
-        report = DemoResetReport(dry_run=False)
+        report = ModelDemoResetReport(dry_run=False)
         summary = report.format_summary()
         assert "EXECUTED" in summary
 
     def test_format_summary_includes_actions(self) -> None:
         """Summary includes action details."""
-        report = DemoResetReport(
+        report = ModelDemoResetReport(
             actions=[
-                ResetActionResult(
+                ModelResetActionResult(
                     "Projector state",
                     EnumResetAction.RESET,
                     "Deleted 5 rows",
@@ -234,7 +234,7 @@ class TestDemoResetEngineProjectorState:
     @pytest.mark.asyncio
     async def test_skip_when_no_postgres_dsn(self) -> None:
         """Projector reset skips when no DSN configured."""
-        config = DemoResetConfig(postgres_dsn="")
+        config = ModelDemoResetConfig(postgres_dsn="")
         engine = DemoResetEngine(config)
         report = await engine.execute(dry_run=True)
 
@@ -246,7 +246,7 @@ class TestDemoResetEngineProjectorState:
     @pytest.mark.asyncio
     async def test_dry_run_counts_rows(self) -> None:
         """Dry run reports row count without deleting."""
-        config = DemoResetConfig(postgres_dsn="postgresql://localhost/test")
+        config = ModelDemoResetConfig(postgres_dsn="postgresql://localhost/test")
         engine = DemoResetEngine(config)
 
         with patch.object(engine, "_count_projection_rows", return_value=42):
@@ -261,7 +261,7 @@ class TestDemoResetEngineProjectorState:
     @pytest.mark.asyncio
     async def test_live_deletes_rows(self) -> None:
         """Live execution deletes rows and reports count."""
-        config = DemoResetConfig(postgres_dsn="postgresql://localhost/test")
+        config = ModelDemoResetConfig(postgres_dsn="postgresql://localhost/test")
         engine = DemoResetEngine(config)
 
         with patch.object(engine, "_delete_projection_rows", return_value=10):
@@ -276,7 +276,7 @@ class TestDemoResetEngineProjectorState:
     @pytest.mark.asyncio
     async def test_error_handling_on_db_failure(self) -> None:
         """Database errors are caught and reported."""
-        config = DemoResetConfig(postgres_dsn="postgresql://localhost/test")
+        config = ModelDemoResetConfig(postgres_dsn="postgresql://localhost/test")
         engine = DemoResetEngine(config)
 
         with patch.object(
@@ -301,7 +301,7 @@ class TestDemoResetEngineConsumerGroups:
     @pytest.mark.asyncio
     async def test_skip_when_no_kafka_configured(self) -> None:
         """Consumer group reset skips when Kafka not configured."""
-        config = DemoResetConfig(kafka_bootstrap_servers="")
+        config = ModelDemoResetConfig(kafka_bootstrap_servers="")
         engine = DemoResetEngine(config)
         report = await engine.execute(dry_run=True)
 
@@ -321,7 +321,7 @@ class TestDemoResetEngineTopicPurge:
     @pytest.mark.asyncio
     async def test_skip_when_not_requested(self) -> None:
         """Topic purge skips when purge_topics is False."""
-        config = DemoResetConfig(purge_topics=False)
+        config = ModelDemoResetConfig(purge_topics=False)
         engine = DemoResetEngine(config)
         report = await engine.execute(dry_run=True)
 
@@ -341,7 +341,7 @@ class TestDemoResetPreservation:
     @pytest.mark.asyncio
     async def test_preserved_resources_listed(self) -> None:
         """All preserved resources appear in the report."""
-        config = DemoResetConfig()
+        config = ModelDemoResetConfig()
         engine = DemoResetEngine(config)
         report = await engine.execute(dry_run=True)
 
@@ -357,7 +357,7 @@ class TestDemoResetPreservation:
     @pytest.mark.asyncio
     async def test_preserved_count_minimum(self) -> None:
         """At least the static preserved resources are counted."""
-        config = DemoResetConfig()
+        config = ModelDemoResetConfig()
         engine = DemoResetEngine(config)
         report = await engine.execute(dry_run=True)
         assert report.preserved_count >= len(PRESERVED_RESOURCES)
@@ -374,7 +374,7 @@ class TestDemoResetIdempotency:
     @pytest.mark.asyncio
     async def test_running_twice_same_result(self) -> None:
         """Running reset twice produces the same report structure."""
-        config = DemoResetConfig()
+        config = ModelDemoResetConfig()
         engine = DemoResetEngine(config)
 
         report1 = await engine.execute(dry_run=True)
@@ -389,7 +389,7 @@ class TestDemoResetIdempotency:
     @pytest.mark.asyncio
     async def test_delete_zero_rows_is_not_error(self) -> None:
         """Deleting zero rows (already clean) is reported as reset, not error."""
-        config = DemoResetConfig(postgres_dsn="postgresql://localhost/test")
+        config = ModelDemoResetConfig(postgres_dsn="postgresql://localhost/test")
         engine = DemoResetEngine(config)
 
         with patch.object(engine, "_delete_projection_rows", return_value=0):
@@ -668,7 +668,7 @@ class TestValidateTableName:
     @pytest.mark.asyncio
     async def test_count_projection_rows_rejects_disallowed_table(self) -> None:
         """_count_projection_rows raises ValueError for a table not in the allowlist."""
-        config = DemoResetConfig(
+        config = ModelDemoResetConfig(
             postgres_dsn="postgresql://localhost/test",
             projection_table="evil_table",
         )
@@ -680,7 +680,7 @@ class TestValidateTableName:
     @pytest.mark.asyncio
     async def test_delete_projection_rows_rejects_disallowed_table(self) -> None:
         """_delete_projection_rows raises ValueError for a table not in the allowlist."""
-        config = DemoResetConfig(
+        config = ModelDemoResetConfig(
             postgres_dsn="postgresql://localhost/test",
             projection_table="evil_table",
         )
@@ -730,7 +730,7 @@ class TestDemoResetEngineConsumerGroupsLive:
     @pytest.mark.asyncio
     async def test_dry_run_reports_matching_groups(self) -> None:
         """Dry run lists demo groups that would be deleted."""
-        config = DemoResetConfig(kafka_bootstrap_servers="localhost:9092")
+        config = ModelDemoResetConfig(kafka_bootstrap_servers="localhost:9092")
         engine = DemoResetEngine(config)
 
         mock_admin = MagicMock()
@@ -744,7 +744,7 @@ class TestDemoResetEngineConsumerGroupsLive:
         )
 
         with patch("confluent_kafka.admin.AdminClient", return_value=mock_admin):
-            report = DemoResetReport(dry_run=True)
+            report = ModelDemoResetReport(dry_run=True)
             await engine._reset_consumer_groups(
                 report, dry_run=True, correlation_id=uuid4()
             )
@@ -757,7 +757,7 @@ class TestDemoResetEngineConsumerGroupsLive:
     @pytest.mark.asyncio
     async def test_live_deletes_demo_groups(self) -> None:
         """Live execution deletes demo groups and preserves non-demo ones."""
-        config = DemoResetConfig(kafka_bootstrap_servers="localhost:9092")
+        config = ModelDemoResetConfig(kafka_bootstrap_servers="localhost:9092")
         engine = DemoResetEngine(config)
 
         mock_admin = MagicMock()
@@ -780,7 +780,7 @@ class TestDemoResetEngineConsumerGroupsLive:
         }
 
         with patch("confluent_kafka.admin.AdminClient", return_value=mock_admin):
-            report = DemoResetReport()
+            report = ModelDemoResetReport()
             await engine._reset_consumer_groups(
                 report, dry_run=False, correlation_id=uuid4()
             )
@@ -803,7 +803,7 @@ class TestDemoResetEngineConsumerGroupsLive:
     @pytest.mark.asyncio
     async def test_partial_failure_on_group_deletion(self) -> None:
         """Partial failure during group deletion reports both success and error."""
-        config = DemoResetConfig(kafka_bootstrap_servers="localhost:9092")
+        config = ModelDemoResetConfig(kafka_bootstrap_servers="localhost:9092")
         engine = DemoResetEngine(config)
 
         mock_admin = MagicMock()
@@ -828,7 +828,7 @@ class TestDemoResetEngineConsumerGroupsLive:
         }
 
         with patch("confluent_kafka.admin.AdminClient", return_value=mock_admin):
-            report = DemoResetReport()
+            report = ModelDemoResetReport()
             await engine._reset_consumer_groups(
                 report, dry_run=False, correlation_id=uuid4()
             )
@@ -840,7 +840,7 @@ class TestDemoResetEngineConsumerGroupsLive:
     @pytest.mark.asyncio
     async def test_no_demo_groups_found(self) -> None:
         """When no demo groups match, report skipped."""
-        config = DemoResetConfig(kafka_bootstrap_servers="localhost:9092")
+        config = ModelDemoResetConfig(kafka_bootstrap_servers="localhost:9092")
         engine = DemoResetEngine(config)
 
         mock_admin = MagicMock()
@@ -851,7 +851,7 @@ class TestDemoResetEngineConsumerGroupsLive:
         )
 
         with patch("confluent_kafka.admin.AdminClient", return_value=mock_admin):
-            report = DemoResetReport()
+            report = ModelDemoResetReport()
             await engine._reset_consumer_groups(
                 report, dry_run=False, correlation_id=uuid4()
             )
@@ -913,7 +913,7 @@ class TestDemoResetEngineTopicPurgeLive:
     @pytest.mark.asyncio
     async def test_dry_run_reports_demo_topics(self) -> None:
         """Dry run lists demo topics that would be purged."""
-        config = DemoResetConfig(
+        config = ModelDemoResetConfig(
             kafka_bootstrap_servers="localhost:9092",
             purge_topics=True,
         )
@@ -928,7 +928,7 @@ class TestDemoResetEngineTopicPurgeLive:
         )
 
         with patch("confluent_kafka.admin.AdminClient", return_value=mock_admin):
-            report = DemoResetReport(dry_run=True)
+            report = ModelDemoResetReport(dry_run=True)
             await engine._purge_demo_topics(
                 report, dry_run=True, correlation_id=uuid4()
             )
@@ -940,7 +940,7 @@ class TestDemoResetEngineTopicPurgeLive:
     @pytest.mark.asyncio
     async def test_live_purges_demo_topics(self) -> None:
         """Live execution purges demo topics and preserves non-demo ones."""
-        config = DemoResetConfig(
+        config = ModelDemoResetConfig(
             kafka_bootstrap_servers="localhost:9092",
             purge_topics=True,
         )
@@ -989,7 +989,7 @@ class TestDemoResetEngineTopicPurgeLive:
                 return_value=mock_consumer,
             ),
         ):
-            report = DemoResetReport()
+            report = ModelDemoResetReport()
             await engine._purge_demo_topics(
                 report, dry_run=False, correlation_id=uuid4()
             )
@@ -1010,7 +1010,7 @@ class TestDemoResetEngineTopicPurgeLive:
     @pytest.mark.asyncio
     async def test_partial_failure_on_topic_purge(self) -> None:
         """Partial failure during topic purge reports both success and error."""
-        config = DemoResetConfig(
+        config = ModelDemoResetConfig(
             kafka_bootstrap_servers="localhost:9092",
             purge_topics=True,
         )
@@ -1056,7 +1056,7 @@ class TestDemoResetEngineTopicPurgeLive:
                 return_value=mock_consumer,
             ),
         ):
-            report = DemoResetReport()
+            report = ModelDemoResetReport()
             await engine._purge_demo_topics(
                 report, dry_run=False, correlation_id=uuid4()
             )
@@ -1068,7 +1068,7 @@ class TestDemoResetEngineTopicPurgeLive:
     @pytest.mark.asyncio
     async def test_already_empty_topics_report_skipped(self) -> None:
         """Demo topics with all partitions at offset 0 report skipped (already empty)."""
-        config = DemoResetConfig(
+        config = ModelDemoResetConfig(
             kafka_bootstrap_servers="localhost:9092",
             purge_topics=True,
         )
@@ -1102,7 +1102,7 @@ class TestDemoResetEngineTopicPurgeLive:
                 return_value=mock_consumer,
             ),
         ):
-            report = DemoResetReport()
+            report = ModelDemoResetReport()
             await engine._purge_demo_topics(
                 report, dry_run=False, correlation_id=uuid4()
             )
@@ -1124,7 +1124,7 @@ class TestDemoResetEngineTopicPurgeLive:
         stays empty -- but we must NOT report SKIPPED because we have no idea
         whether the topics are actually empty.
         """
-        config = DemoResetConfig(
+        config = ModelDemoResetConfig(
             kafka_bootstrap_servers="localhost:9092",
             purge_topics=True,
         )
@@ -1159,7 +1159,7 @@ class TestDemoResetEngineTopicPurgeLive:
                 return_value=mock_consumer,
             ),
         ):
-            report = DemoResetReport()
+            report = ModelDemoResetReport()
             await engine._purge_demo_topics(
                 report, dry_run=False, correlation_id=uuid4()
             )
@@ -1186,7 +1186,7 @@ class TestDemoResetEngineTopicPurgeLive:
         be purged. The watermark failures for other partitions are logged but do
         not prevent the successful ones from being deleted.
         """
-        config = DemoResetConfig(
+        config = ModelDemoResetConfig(
             kafka_bootstrap_servers="localhost:9092",
             purge_topics=True,
         )
@@ -1235,7 +1235,7 @@ class TestDemoResetEngineTopicPurgeLive:
                 return_value=mock_consumer,
             ),
         ):
-            report = DemoResetReport()
+            report = ModelDemoResetReport()
             await engine._purge_demo_topics(
                 report, dry_run=False, correlation_id=uuid4()
             )
@@ -1255,7 +1255,7 @@ class TestDemoResetEngineTopicPurgeLive:
     @pytest.mark.asyncio
     async def test_no_demo_topics_found(self) -> None:
         """When no demo topics exist, report skipped."""
-        config = DemoResetConfig(
+        config = ModelDemoResetConfig(
             kafka_bootstrap_servers="localhost:9092",
             purge_topics=True,
         )
@@ -1270,7 +1270,7 @@ class TestDemoResetEngineTopicPurgeLive:
         )
 
         with patch("confluent_kafka.admin.AdminClient", return_value=mock_admin):
-            report = DemoResetReport()
+            report = ModelDemoResetReport()
             await engine._purge_demo_topics(
                 report, dry_run=False, correlation_id=uuid4()
             )
@@ -1290,13 +1290,13 @@ class TestConfluentKafkaImportError:
     @pytest.mark.asyncio
     async def test_reset_consumer_groups_import_error(self) -> None:
         """_reset_consumer_groups reports ERROR when confluent-kafka is missing."""
-        config = DemoResetConfig(kafka_bootstrap_servers="localhost:9092")
+        config = ModelDemoResetConfig(kafka_bootstrap_servers="localhost:9092")
         engine = DemoResetEngine(config)
 
         with patch.dict(
             "sys.modules", {"confluent_kafka": None, "confluent_kafka.admin": None}
         ):
-            report = DemoResetReport()
+            report = ModelDemoResetReport()
             await engine._reset_consumer_groups(
                 report, dry_run=False, correlation_id=uuid4()
             )
@@ -1309,7 +1309,7 @@ class TestConfluentKafkaImportError:
     @pytest.mark.asyncio
     async def test_purge_demo_topics_import_error(self) -> None:
         """_purge_demo_topics reports ERROR when confluent-kafka is missing."""
-        config = DemoResetConfig(
+        config = ModelDemoResetConfig(
             kafka_bootstrap_servers="localhost:9092",
             purge_topics=True,
         )
@@ -1318,7 +1318,7 @@ class TestConfluentKafkaImportError:
         with patch.dict(
             "sys.modules", {"confluent_kafka": None, "confluent_kafka.admin": None}
         ):
-            report = DemoResetReport()
+            report = ModelDemoResetReport()
             await engine._purge_demo_topics(
                 report, dry_run=False, correlation_id=uuid4()
             )
@@ -1330,12 +1330,12 @@ class TestConfluentKafkaImportError:
 
 
 # =============================================================================
-# Edge Case Tests -- PostgresConnectionContext timeout (Test 2)
+# Edge Case Tests -- AdapterPostgresConnection timeout (Test 2)
 # =============================================================================
 
 
-class TestPostgresConnectionContextTimeout:
-    """Tests for PostgresConnectionContext handling asyncio.TimeoutError."""
+class TestAdapterPostgresConnectionTimeout:
+    """Tests for AdapterPostgresConnection handling asyncio.TimeoutError."""
 
     @pytest.mark.asyncio
     async def test_timeout_on_connect_raises_and_does_not_leak(self) -> None:
@@ -1345,9 +1345,9 @@ class TestPostgresConnectionContextTimeout:
         the ``_conn`` attribute remains ``None``. The context manager's
         ``__aexit__`` must not attempt to close a ``None`` connection.
         """
-        from omnibase_infra.cli.demo_reset import PostgresConnectionContext
+        from omnibase_infra.cli.service_demo_reset import AdapterPostgresConnection
 
-        ctx = PostgresConnectionContext(
+        ctx = AdapterPostgresConnection(
             dsn="postgresql://localhost/test", timeout=0.001
         )
 
@@ -1368,7 +1368,7 @@ class TestPostgresConnectionContextTimeout:
         """A successfully opened connection is closed during __aexit__."""
         from unittest.mock import AsyncMock
 
-        from omnibase_infra.cli.demo_reset import PostgresConnectionContext
+        from omnibase_infra.cli.service_demo_reset import AdapterPostgresConnection
 
         mock_conn = MagicMock()
         mock_conn.close = AsyncMock(return_value=None)
@@ -1376,7 +1376,7 @@ class TestPostgresConnectionContextTimeout:
         async def _fast_connect(*args: object, **kwargs: object) -> MagicMock:
             return mock_conn
 
-        ctx = PostgresConnectionContext(dsn="postgresql://localhost/test", timeout=5.0)
+        ctx = AdapterPostgresConnection(dsn="postgresql://localhost/test", timeout=5.0)
 
         with patch("asyncpg.connect", side_effect=_fast_connect):
             async with ctx as conn:
@@ -1398,7 +1398,7 @@ class TestEphemeralConsumerGroupCleanupFailure:
     @pytest.mark.asyncio
     async def test_orphaned_group_error_appended_to_report(self) -> None:
         """When ephemeral consumer group deletion fails, an ERROR action is reported."""
-        config = DemoResetConfig(
+        config = ModelDemoResetConfig(
             kafka_bootstrap_servers="localhost:9092",
             purge_topics=True,
         )
@@ -1449,7 +1449,7 @@ class TestEphemeralConsumerGroupCleanupFailure:
                 return_value=mock_consumer,
             ),
         ):
-            report = DemoResetReport()
+            report = ModelDemoResetReport()
             await engine._purge_demo_topics(
                 report, dry_run=False, correlation_id=uuid4()
             )
@@ -1483,7 +1483,7 @@ class TestProjectorTimeoutError:
     @pytest.mark.asyncio
     async def test_count_projection_rows_timeout_reported_as_error(self) -> None:
         """TimeoutError in _count_projection_rows during dry run is reported as ERROR."""
-        config = DemoResetConfig(postgres_dsn="postgresql://localhost/test")
+        config = ModelDemoResetConfig(postgres_dsn="postgresql://localhost/test")
         engine = DemoResetEngine(config)
 
         with patch.object(
@@ -1501,7 +1501,7 @@ class TestProjectorTimeoutError:
     @pytest.mark.asyncio
     async def test_delete_projection_rows_timeout_reported_as_error(self) -> None:
         """TimeoutError in _delete_projection_rows during live run is reported as ERROR."""
-        config = DemoResetConfig(postgres_dsn="postgresql://localhost/test")
+        config = ModelDemoResetConfig(postgres_dsn="postgresql://localhost/test")
         engine = DemoResetEngine(config)
 
         with patch.object(
@@ -1526,7 +1526,7 @@ class TestCLIEnvFileLoading:
     """Tests for the CLI --env-file option loading environment variables."""
 
     def test_env_file_loaded_before_execution(self) -> None:
-        """CLI --env-file loads variables that DemoResetConfig.from_env() can read."""
+        """CLI --env-file loads variables that ModelDemoResetConfig.from_env() can read."""
         import tempfile
         from pathlib import Path
 

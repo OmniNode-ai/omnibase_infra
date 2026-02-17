@@ -24,7 +24,7 @@ Usage:
 
     Programmatic::
 
-        from omnibase_infra.cli.demo_reset import DemoResetEngine
+        from omnibase_infra.cli.service_demo_reset import DemoResetEngine
 
         engine = DemoResetEngine(config)
         report = await engine.execute(dry_run=True)
@@ -40,16 +40,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
-from dataclasses import dataclass, field
-from enum import Enum
 from typing import TYPE_CHECKING, Final
 from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
     import asyncpg
 
+from omnibase_infra.cli.enum_reset_action import EnumResetAction
+from omnibase_infra.cli.model_demo_reset_config import ModelDemoResetConfig
+from omnibase_infra.cli.model_demo_reset_report import ModelDemoResetReport
+from omnibase_infra.cli.model_reset_action_result import ModelResetActionResult
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
@@ -101,157 +102,11 @@ PRESERVED_RESOURCES: Final[tuple[str, ...]] = (
 
 
 # =============================================================================
-# Result Models
-# =============================================================================
-
-
-class EnumResetAction(str, Enum):
-    """Classification of a reset action."""
-
-    RESET = "reset"
-    PRESERVED = "preserved"
-    SKIPPED = "skipped"
-    ERROR = "error"
-
-
-@dataclass(frozen=True)
-class ResetActionResult:
-    """Result of a single reset action.
-
-    Attributes:
-        resource: Name of the resource affected.
-        action: What was done (reset, preserved, skipped, error).
-        detail: Human-readable description of what happened.
-    """
-
-    resource: str
-    action: EnumResetAction
-    detail: str
-
-
-@dataclass
-class DemoResetReport:
-    """Aggregate report of all demo reset actions.
-
-    Attributes:
-        actions: List of individual action results.
-        dry_run: Whether this was a dry-run (no changes made).
-    """
-
-    actions: list[ResetActionResult] = field(default_factory=list)
-    dry_run: bool = False
-
-    @property
-    def reset_count(self) -> int:
-        """Number of resources that were reset."""
-        return sum(1 for a in self.actions if a.action == EnumResetAction.RESET)
-
-    @property
-    def preserved_count(self) -> int:
-        """Number of resources explicitly preserved."""
-        return sum(1 for a in self.actions if a.action == EnumResetAction.PRESERVED)
-
-    @property
-    def error_count(self) -> int:
-        """Number of actions that failed."""
-        return sum(1 for a in self.actions if a.action == EnumResetAction.ERROR)
-
-    @property
-    def skipped_count(self) -> int:
-        """Number of actions skipped (e.g., already clean)."""
-        return sum(1 for a in self.actions if a.action == EnumResetAction.SKIPPED)
-
-    def format_summary(self) -> str:
-        """Format the report as a human-readable summary.
-
-        Returns:
-            Multi-line string suitable for CLI output.
-        """
-        lines: list[str] = []
-        mode = "DRY RUN" if self.dry_run else "EXECUTED"
-        lines.append(f"Demo Reset Report ({mode})")
-        lines.append("=" * 60)
-
-        # Group by action type
-        for action_type in EnumResetAction:
-            group = [a for a in self.actions if a.action == action_type]
-            if not group:
-                continue
-
-            label = action_type.value.upper()
-            lines.append(f"\n  [{label}]")
-            for item in group:
-                lines.append(f"    {item.resource}: {item.detail}")
-
-        lines.append("")
-        lines.append(
-            f"Summary: {self.reset_count} reset, "
-            f"{self.preserved_count} preserved, "
-            f"{self.skipped_count} skipped, "
-            f"{self.error_count} errors"
-        )
-
-        return "\n".join(lines)
-
-
-# =============================================================================
-# Configuration
-# =============================================================================
-
-
-@dataclass(frozen=True)
-class DemoResetConfig:
-    """Configuration for the demo reset engine.
-
-    Note:
-        ``consumer_group_pattern`` is typed as ``re.Pattern`` which is
-        technically a mutable object (compiled regex patterns have mutable
-        internal caching).  In practice ``re.Pattern`` is effectively
-        immutable -- its public API is read-only -- so ``frozen=True``
-        is safe here despite the dataclass not performing a deep-freeze.
-
-    Attributes:
-        postgres_dsn: PostgreSQL connection string.
-        kafka_bootstrap_servers: Kafka broker address(es).
-        purge_topics: Whether to delete messages from demo topics.
-        projection_table: Table name for projector state.
-        consumer_group_pattern: Regex to match demo consumer groups.
-        demo_topic_prefixes: Topic prefixes considered demo-scoped.
-    """
-
-    postgres_dsn: str = ""
-    kafka_bootstrap_servers: str = ""
-    purge_topics: bool = False
-    projection_table: str = DEMO_PROJECTION_TABLE
-    consumer_group_pattern: re.Pattern[str] = DEMO_CONSUMER_GROUP_PATTERN
-    demo_topic_prefixes: tuple[str, ...] = DEMO_TOPIC_PREFIXES
-
-    @classmethod
-    def from_env(cls, *, purge_topics: bool = False) -> DemoResetConfig:
-        """Create config from environment variables.
-
-        Reads OMNIBASE_INFRA_DB_URL and KAFKA_BOOTSTRAP_SERVERS from
-        the environment. Falls back to empty strings if not set.
-
-        Args:
-            purge_topics: Whether to purge demo topic data.
-
-        Returns:
-            DemoResetConfig populated from environment.
-        """
-        return cls(
-            postgres_dsn=os.environ.get("OMNIBASE_INFRA_DB_URL", ""),
-            kafka_bootstrap_servers=os.environ.get("KAFKA_BOOTSTRAP_SERVERS", ""),
-            purge_topics=purge_topics,
-        )
-
-
-# =============================================================================
 # Postgres Connection Context Manager
 # =============================================================================
 
 
-class PostgresConnectionContext:
+class AdapterPostgresConnection:
     """Async context manager for a single PostgreSQL connection with timeout.
 
     This replaces the previous pattern of creating a full ``asyncpg`` pool
@@ -272,11 +127,27 @@ class PostgresConnectionContext:
     """
 
     def __init__(self, dsn: str, timeout: float) -> None:
+        """Initialize the connection adapter.
+
+        Args:
+            dsn: PostgreSQL connection string (DSN).
+            timeout: Maximum seconds to wait for the connection to be
+                established before raising ``asyncio.TimeoutError``.
+        """
         self._dsn = dsn
         self._timeout = timeout
         self._conn: asyncpg.Connection | None = None
 
     async def __aenter__(self) -> asyncpg.Connection:
+        """Establish the PostgreSQL connection with timeout.
+
+        Returns:
+            An open ``asyncpg.Connection`` ready for queries.
+
+        Raises:
+            asyncio.TimeoutError: If the connection is not established
+                within the configured timeout.
+        """
         import asyncpg as _asyncpg
 
         self._conn = await asyncio.wait_for(
@@ -291,6 +162,12 @@ class PostgresConnectionContext:
         exc_val: BaseException | None,
         exc_tb: object,
     ) -> None:
+        """Close the connection if it was successfully established.
+
+        Performs best-effort cleanup: if the connection is already dead
+        (e.g. after a timeout or network error), the close failure is
+        logged at DEBUG level and silently suppressed.
+        """
         conn = self._conn
         self._conn = None
         if conn is not None:
@@ -332,13 +209,19 @@ class DemoResetEngine:
         the blocking calls would stall the loop.
 
     Example:
-        >>> config = DemoResetConfig.from_env(purge_topics=False)
+        >>> config = ModelDemoResetConfig.from_env(purge_topics=False)
         >>> engine = DemoResetEngine(config)
         >>> report = await engine.execute(dry_run=True)
         >>> print(report.format_summary())
     """
 
-    def __init__(self, config: DemoResetConfig) -> None:
+    def __init__(self, config: ModelDemoResetConfig) -> None:
+        """Initialize the demo reset engine.
+
+        Args:
+            config: Configuration controlling which resources to reset
+                and how to connect to infrastructure services.
+        """
         self._config = config
 
     @staticmethod
@@ -366,7 +249,7 @@ class DemoResetEngine:
                 msg += f" (correlation_id={correlation_id})"
             raise ValueError(msg)
 
-    async def execute(self, *, dry_run: bool = False) -> DemoResetReport:
+    async def execute(self, *, dry_run: bool = False) -> ModelDemoResetReport:
         """Execute the demo reset sequence.
 
         Operations are executed in order:
@@ -379,9 +262,9 @@ class DemoResetEngine:
             dry_run: If True, report what would happen without making changes.
 
         Returns:
-            DemoResetReport with all actions taken and their results.
+            ModelDemoResetReport with all actions taken and their results.
         """
-        report = DemoResetReport(dry_run=dry_run)
+        report = ModelDemoResetReport(dry_run=dry_run)
 
         correlation_id = uuid4()
 
@@ -402,7 +285,7 @@ class DemoResetEngine:
             )
         else:
             report.actions.append(
-                ResetActionResult(
+                ModelResetActionResult(
                     resource="Demo topic data",
                     action=EnumResetAction.SKIPPED,
                     detail="Topic purge not requested (use --purge-topics to enable)",
@@ -412,7 +295,7 @@ class DemoResetEngine:
         # Step 4: Record preserved resources
         for resource in PRESERVED_RESOURCES:
             report.actions.append(
-                ResetActionResult(
+                ModelResetActionResult(
                     resource=resource,
                     action=EnumResetAction.PRESERVED,
                     detail="Explicitly preserved (not demo-scoped)",
@@ -427,7 +310,7 @@ class DemoResetEngine:
 
     async def _reset_projector_state(
         self,
-        report: DemoResetReport,
+        report: ModelDemoResetReport,
         *,
         dry_run: bool,
         correlation_id: UUID,
@@ -446,7 +329,7 @@ class DemoResetEngine:
 
         if not self._config.postgres_dsn:
             report.actions.append(
-                ResetActionResult(
+                ModelResetActionResult(
                     resource=f"Projector state ({table})",
                     action=EnumResetAction.SKIPPED,
                     detail="OMNIBASE_INFRA_DB_URL not configured",
@@ -460,7 +343,7 @@ class DemoResetEngine:
                     correlation_id=correlation_id,
                 )
                 report.actions.append(
-                    ResetActionResult(
+                    ModelResetActionResult(
                         resource=f"Projector state ({table})",
                         action=EnumResetAction.RESET,
                         detail=f"Would delete {row_count} row(s) from {table}",
@@ -472,7 +355,7 @@ class DemoResetEngine:
                     correlation_id,
                 )
                 report.actions.append(
-                    ResetActionResult(
+                    ModelResetActionResult(
                         resource=f"Projector state ({table})",
                         action=EnumResetAction.ERROR,
                         detail=f"Failed: {sanitize_error_message(exc)}",
@@ -485,7 +368,7 @@ class DemoResetEngine:
                 correlation_id=correlation_id,
             )
             report.actions.append(
-                ResetActionResult(
+                ModelResetActionResult(
                     resource=f"Projector state ({table})",
                     action=EnumResetAction.RESET,
                     detail=f"Deleted {deleted} row(s) from {table}",
@@ -497,7 +380,7 @@ class DemoResetEngine:
                 correlation_id,
             )
             report.actions.append(
-                ResetActionResult(
+                ModelResetActionResult(
                     resource=f"Projector state ({table})",
                     action=EnumResetAction.ERROR,
                     detail=f"Failed: {sanitize_error_message(exc)}",
@@ -509,7 +392,7 @@ class DemoResetEngine:
         """Return the connection timeout in seconds for PostgreSQL."""
         return 10.0
 
-    def _postgres_connection(self) -> PostgresConnectionContext:
+    def _postgres_connection(self) -> AdapterPostgresConnection:
         """Create a single PostgreSQL connection with proper timeout handling.
 
         Uses ``asyncpg.connect()`` instead of a connection pool because each
@@ -529,7 +412,7 @@ class DemoResetEngine:
             asyncio.TimeoutError: If the connection cannot be established
                 within the configured timeout.
         """
-        return PostgresConnectionContext(
+        return AdapterPostgresConnection(
             dsn=self._config.postgres_dsn,
             timeout=self._postgres_connection_timeout(),
         )
@@ -543,6 +426,13 @@ class DemoResetEngine:
 
         Args:
             correlation_id: Trace identifier for error diagnostics.
+
+        Returns:
+            Number of rows currently in the projection table.
+
+        Raises:
+            ValueError: If the configured projection table name is not
+                in the allowlist.
         """
         table = self._config.projection_table
         self._validate_table_name(table, correlation_id=correlation_id)
@@ -568,10 +458,19 @@ class DemoResetEngine:
         *,
         correlation_id: UUID,
     ) -> int:
-        """Delete all rows from the projection table. Returns count deleted.
+        """Delete all rows from the projection table.
+
+        The table schema and indexes are preserved; only data rows are removed.
 
         Args:
             correlation_id: Trace identifier for error diagnostics.
+
+        Returns:
+            Number of rows deleted.
+
+        Raises:
+            ValueError: If the configured projection table name is not
+                in the allowlist.
         """
         table = self._config.projection_table
         self._validate_table_name(table, correlation_id=correlation_id)
@@ -600,7 +499,7 @@ class DemoResetEngine:
 
     async def _reset_consumer_groups(
         self,
-        report: DemoResetReport,
+        report: ModelDemoResetReport,
         *,
         dry_run: bool,
         correlation_id: UUID,
@@ -617,7 +516,7 @@ class DemoResetEngine:
         """
         if not self._config.kafka_bootstrap_servers:
             report.actions.append(
-                ResetActionResult(
+                ModelResetActionResult(
                     resource="Consumer group offsets",
                     action=EnumResetAction.SKIPPED,
                     detail="KAFKA_BOOTSTRAP_SERVERS not configured",
@@ -650,7 +549,7 @@ class DemoResetEngine:
 
             if not demo_groups:
                 report.actions.append(
-                    ResetActionResult(
+                    ModelResetActionResult(
                         resource="Consumer group offsets",
                         action=EnumResetAction.SKIPPED,
                         detail="No demo consumer groups found",
@@ -660,7 +559,7 @@ class DemoResetEngine:
                 # so all_groups are non-demo)
                 if all_groups:
                     report.actions.append(
-                        ResetActionResult(
+                        ModelResetActionResult(
                             resource=f"Non-demo consumer groups ({len(all_groups)})",
                             action=EnumResetAction.PRESERVED,
                             detail=f"Groups preserved: {', '.join(all_groups[:5])}"
@@ -675,7 +574,7 @@ class DemoResetEngine:
 
             if dry_run:
                 report.actions.append(
-                    ResetActionResult(
+                    ModelResetActionResult(
                         resource="Consumer group offsets",
                         action=EnumResetAction.RESET,
                         detail=(
@@ -699,7 +598,7 @@ class DemoResetEngine:
 
                 if deleted:
                     report.actions.append(
-                        ResetActionResult(
+                        ModelResetActionResult(
                             resource="Consumer group offsets",
                             action=EnumResetAction.RESET,
                             detail=(
@@ -710,7 +609,7 @@ class DemoResetEngine:
                     )
                 if errors:
                     report.actions.append(
-                        ResetActionResult(
+                        ModelResetActionResult(
                             resource="Consumer group offsets (partial failure)",
                             action=EnumResetAction.ERROR,
                             detail="; ".join(errors),
@@ -722,7 +621,7 @@ class DemoResetEngine:
             non_demo = [g for g in all_groups if g not in demo_groups_set]
             if non_demo:
                 report.actions.append(
-                    ResetActionResult(
+                    ModelResetActionResult(
                         resource=f"Non-demo consumer groups ({len(non_demo)})",
                         action=EnumResetAction.PRESERVED,
                         detail=f"Groups preserved: {', '.join(non_demo[:5])}"
@@ -734,7 +633,7 @@ class DemoResetEngine:
 
         except ImportError:
             report.actions.append(
-                ResetActionResult(
+                ModelResetActionResult(
                     resource="Consumer group offsets",
                     action=EnumResetAction.ERROR,
                     detail="confluent-kafka not installed",
@@ -746,7 +645,7 @@ class DemoResetEngine:
                 correlation_id,
             )
             report.actions.append(
-                ResetActionResult(
+                ModelResetActionResult(
                     resource="Consumer group offsets",
                     action=EnumResetAction.ERROR,
                     detail=f"Failed: {sanitize_error_message(exc)}",
@@ -759,7 +658,7 @@ class DemoResetEngine:
 
     async def _purge_demo_topics(
         self,
-        report: DemoResetReport,
+        report: ModelDemoResetReport,
         *,
         dry_run: bool,
         correlation_id: UUID,
@@ -777,7 +676,7 @@ class DemoResetEngine:
         """
         if not self._config.kafka_bootstrap_servers:
             report.actions.append(
-                ResetActionResult(
+                ModelResetActionResult(
                     resource="Demo topic data",
                     action=EnumResetAction.SKIPPED,
                     detail="KAFKA_BOOTSTRAP_SERVERS not configured",
@@ -816,7 +715,7 @@ class DemoResetEngine:
 
             if not demo_topics:
                 report.actions.append(
-                    ResetActionResult(
+                    ModelResetActionResult(
                         resource="Demo topic data",
                         action=EnumResetAction.SKIPPED,
                         detail="No demo topics found",
@@ -826,7 +725,7 @@ class DemoResetEngine:
 
             if dry_run:
                 report.actions.append(
-                    ResetActionResult(
+                    ModelResetActionResult(
                         resource="Demo topic data",
                         action=EnumResetAction.RESET,
                         detail=(
@@ -897,7 +796,7 @@ class DemoResetEngine:
                         sanitize_error_message(exc),
                     )
                     report.actions.append(
-                        ResetActionResult(
+                        ModelResetActionResult(
                             resource="Ephemeral consumer group cleanup",
                             action=EnumResetAction.ERROR,
                             detail=(
@@ -927,7 +826,7 @@ class DemoResetEngine:
 
                     if purged:
                         report.actions.append(
-                            ResetActionResult(
+                            ModelResetActionResult(
                                 resource="Demo topic data",
                                 action=EnumResetAction.RESET,
                                 detail=(
@@ -938,7 +837,7 @@ class DemoResetEngine:
                         )
                     if errors:
                         report.actions.append(
-                            ResetActionResult(
+                            ModelResetActionResult(
                                 resource="Demo topic data (partial failure)",
                                 action=EnumResetAction.ERROR,
                                 detail="; ".join(errors[:5]),
@@ -948,7 +847,7 @@ class DemoResetEngine:
                     # All watermark lookups failed -- we cannot
                     # determine whether the topics are truly empty.
                     report.actions.append(
-                        ResetActionResult(
+                        ModelResetActionResult(
                             resource="Demo topic data",
                             action=EnumResetAction.ERROR,
                             detail=(
@@ -960,7 +859,7 @@ class DemoResetEngine:
                     )
                 else:
                     report.actions.append(
-                        ResetActionResult(
+                        ModelResetActionResult(
                             resource="Demo topic data",
                             action=EnumResetAction.SKIPPED,
                             detail=(
@@ -973,7 +872,7 @@ class DemoResetEngine:
             # Record non-demo topics as preserved
             if non_demo_topics:
                 report.actions.append(
-                    ResetActionResult(
+                    ModelResetActionResult(
                         resource=f"Non-demo topics ({len(non_demo_topics)})",
                         action=EnumResetAction.PRESERVED,
                         detail=f"Topics preserved: {', '.join(sorted(non_demo_topics)[:5])}"
@@ -987,7 +886,7 @@ class DemoResetEngine:
 
         except ImportError:
             report.actions.append(
-                ResetActionResult(
+                ModelResetActionResult(
                     resource="Demo topic data",
                     action=EnumResetAction.ERROR,
                     detail="confluent-kafka not installed",
@@ -999,7 +898,7 @@ class DemoResetEngine:
                 correlation_id,
             )
             report.actions.append(
-                ResetActionResult(
+                ModelResetActionResult(
                     resource="Demo topic data",
                     action=EnumResetAction.ERROR,
                     detail=f"Failed: {sanitize_error_message(exc)}",
@@ -1012,13 +911,14 @@ class DemoResetEngine:
 # =============================================================================
 
 __all__: list[str] = [
+    "AdapterPostgresConnection",
     "DEMO_CONSUMER_GROUP_PATTERN",
     "DEMO_PROJECTION_TABLE",
     "DEMO_TOPIC_PREFIXES",
-    "DemoResetConfig",
     "DemoResetEngine",
-    "DemoResetReport",
     "EnumResetAction",
+    "ModelDemoResetConfig",
+    "ModelDemoResetReport",
+    "ModelResetActionResult",
     "PRESERVED_RESOURCES",
-    "ResetActionResult",
 ]

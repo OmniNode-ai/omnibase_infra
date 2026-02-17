@@ -569,9 +569,12 @@ def demo_reset(dry_run: bool, purge_topics: bool, env_file: str) -> None:
 
 async def _run_demo_reset(*, dry_run: bool, purge_topics: bool) -> None:
     """Async implementation for demo reset command."""
-    from omnibase_infra.cli.demo_reset import DemoResetConfig, DemoResetEngine
+    from omnibase_infra.cli.service_demo_reset import (
+        DemoResetEngine,
+        ModelDemoResetConfig,
+    )
 
-    config = DemoResetConfig.from_env(purge_topics=purge_topics)
+    config = ModelDemoResetConfig.from_env(purge_topics=purge_topics)
 
     if dry_run:
         console.print("[bold yellow]DRY RUN -- no changes will be made[/bold yellow]\n")
