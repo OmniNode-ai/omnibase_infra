@@ -63,6 +63,7 @@ from omnibase_infra.utils.util_error_sanitization import (
     sanitize_error_message,
     sanitize_error_string,
     sanitize_secret_path,
+    sanitize_url,
 )
 from omnibase_infra.utils.util_llm_response_redaction import (
     MAX_RAW_BLOB_BYTES,
@@ -114,6 +115,7 @@ __all__: list[str] = [
     "sanitize_error_message",
     "sanitize_error_string",
     "sanitize_secret_path",
+    "sanitize_url",
     "set_correlation_id",
     "set_statement_timeout",
     "transaction_context",

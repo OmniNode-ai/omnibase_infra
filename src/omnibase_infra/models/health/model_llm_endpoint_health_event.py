@@ -2,6 +2,11 @@
 # Copyright (c) 2025 OmniNode Team
 """Kafka event payload for LLM endpoint health probe results.
 
+Published by ``ServiceLlmEndpointHealth`` on the
+``onex.evt.omnibase-infra.llm-endpoint-health.v1`` topic after each
+probe cycle.  Downstream consumers (dashboards, alerting, orchestrators)
+subscribe to this topic to react to endpoint availability changes.
+
 .. versionadded:: 0.9.0
     Part of OMN-2255 LLM endpoint health checker.
 """
