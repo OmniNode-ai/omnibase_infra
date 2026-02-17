@@ -84,6 +84,10 @@ class TestEstimateTokensCharRatio:
         """Empty string returns 0."""
         assert estimate_tokens_char_ratio("") == 0
 
+    def test_whitespace_only(self) -> None:
+        """Whitespace-only string returns 0 tokens."""
+        assert estimate_tokens_char_ratio("   \n\n  ") == 0
+
     def test_short_string(self) -> None:
         """Short strings return at least 1."""
         assert estimate_tokens_char_ratio("hi") >= 1

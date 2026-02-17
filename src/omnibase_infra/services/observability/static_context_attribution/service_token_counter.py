@@ -83,7 +83,7 @@ def estimate_tokens_char_ratio(text: str) -> int:
     Returns:
         Estimated token count. 0 for empty text.
     """
-    if not text:
+    if not text or not text.strip():
         return 0
     return max(1, -(-len(text) // 4))  # ceil(len / 4)
 

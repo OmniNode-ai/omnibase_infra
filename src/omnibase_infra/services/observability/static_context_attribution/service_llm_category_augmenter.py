@@ -29,6 +29,7 @@ from omnibase_infra.enums.enum_context_section_category import (
 from omnibase_infra.services.observability.static_context_attribution.model_context_section import (
     ModelContextSection,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
 
@@ -147,19 +148,26 @@ class ServiceLlmCategoryAugmenter:
                 if key in raw_category:
                     return member
 
+            safe_category = sanitize_error_string(raw_category)
+            safe_heading = sanitize_error_string(
+                section.heading or "(preamble)"
+            )
             logger.warning(
                 "LLM returned unrecognized category '%s' for section '%s', "
                 "falling back to UNCATEGORIZED",
-                raw_category,
-                section.heading or "(preamble)",
+                safe_category,
+                safe_heading,
             )
             return EnumContextSectionCategory.UNCATEGORIZED
 
         except Exception:
+            safe_heading = sanitize_error_string(
+                section.heading or "(preamble)"
+            )
             logger.warning(
                 "LLM classification failed for section '%s', "
                 "falling back to UNCATEGORIZED",
-                section.heading or "(preamble)",
+                safe_heading,
                 exc_info=True,
             )
             return EnumContextSectionCategory.UNCATEGORIZED
