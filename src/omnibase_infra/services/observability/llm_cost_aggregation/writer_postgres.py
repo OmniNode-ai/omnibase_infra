@@ -570,7 +570,7 @@ def _truncate_input_hash(value: str) -> str | None:
     """
     if not value:
         return None
-    if value and not value.startswith("sha256-"):
+    if not value.startswith("sha256-"):
         logger.debug(
             "input_hash does not start with expected 'sha256-' prefix; "
             "truncation to 71 chars may cut non-standard formats. "
