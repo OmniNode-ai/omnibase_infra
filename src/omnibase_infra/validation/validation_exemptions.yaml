@@ -2480,6 +2480,27 @@ pattern_exemptions:
     documentation:
       - CLAUDE.md (File & Class Naming - Service convention)
     ticket: OMN-2151
+  # ==========================================================================
+  # Topic Catalog Model Exemptions (OMN-2310)
+  # ==========================================================================
+  # client_id is a service/node name identifier (e.g., "node-registration-orchestrator"),
+  # not a UUID entity reference. topic_name is the resolved Kafka topic string.
+  - file_pattern: 'model_topic_catalog_query\.py'
+    violation_pattern: "Field 'client_id' should use UUID"
+    reason: >
+      client_id is a human-readable service/node name identifier (e.g., 'node-registration-orchestrator'), not a UUID. The _id suffix triggers a false positive UUID suggestion.
+
+    documentation:
+      - CLAUDE.md (Pydantic Model Standards)
+    ticket: OMN-2310
+  - file_pattern: 'model_topic_catalog_entry\.py'
+    violation_pattern: "Field 'topic_name' might reference an entity"
+    reason: >
+      topic_name is the resolved Kafka topic string (e.g., 'dev.onex.evt.platform.node-registration.v1'), not an entity reference. Design decision D1 requires both topic_suffix and topic_name in every entry.
+
+    documentation:
+      - CLAUDE.md (Pydantic Model Standards)
+    ticket: OMN-2310
 # Architecture validator exemptions
 # These handle one-model-per-file violations for domain-grouped protocols
 architecture_exemptions:
