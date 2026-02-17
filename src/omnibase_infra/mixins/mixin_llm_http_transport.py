@@ -264,6 +264,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
             reset_timeout=60.0,
             service_name=target_name,
             transport_type=EnumInfraTransportType.HTTP,
+            half_open_successes=1,
         )
         # MixinAsyncCircuitBreaker._init_circuit_breaker does not set this flag;
         # it is required by MixinRetryExecution to gate circuit breaker helper calls.

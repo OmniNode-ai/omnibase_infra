@@ -2499,15 +2499,7 @@ pattern_exemptions:
     documentation:
       - ProtocolLLMHealthResponse (omnibase_spi.protocols.types.protocol_llm_types)
     ticket: OMN-2319
-  - file_pattern: 'adapter_llm_provider_openai\.py'
-    class_pattern: '_TransportHolder'
-    violation_pattern: "should use PascalCase"
-    reason: >
-      _TransportHolder is an internal (private) class. The underscore prefix follows Python convention for private classes.
-
-    documentation:
-      - PEP 8 naming conventions (private classes)
-    ticket: OMN-2319
+  # Removed: _TransportHolder naming exemption no longer needed after rename to TransportHolderLlmHttp (OMN-2319)
   - file_pattern: 'adapter_llm_provider_openai\.py'
     class_pattern: 'AdapterLlmProviderOpenai'
     violation_pattern: 'has \d+ methods'

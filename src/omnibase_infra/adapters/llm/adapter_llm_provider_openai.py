@@ -70,7 +70,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class _TransportHolder(MixinLlmHttpTransport):
+class TransportHolderLlmHttp(MixinLlmHttpTransport):
     """Internal transport holder that mixes in LLM HTTP transport.
 
     HandlerLlmOpenaiCompatible expects a transport instance with
@@ -93,6 +93,7 @@ class _TransportHolder(MixinLlmHttpTransport):
         url: str,
         correlation_id: UUID,
         timeout: float = 10.0,
+        headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         """Execute a GET request with circuit breaker protection.
 
@@ -103,10 +104,19 @@ class _TransportHolder(MixinLlmHttpTransport):
         (which is designed for inference POST requests), this method performs
         a simple GET without CIDR allowlisting or HMAC signing.
 
+        Note:
+            When ``headers`` includes an ``Authorization`` bearer token
+            (for authenticated model-discovery endpoints), the request
+            still bypasses HMAC signing and CIDR allowlisting -- those
+            controls apply only to the inference POST path.
+
         Args:
             url: The full URL to GET.
             correlation_id: Correlation ID for circuit breaker tracking.
             timeout: Per-request timeout in seconds.
+            headers: Optional HTTP headers to include in the request.
+                Used for forwarding API key authentication to discovery
+                endpoints.
 
         Returns:
             The httpx.Response from the GET request.
@@ -123,7 +133,7 @@ class _TransportHolder(MixinLlmHttpTransport):
 
         client = await self._get_http_client()
         try:
-            response = await client.get(url, timeout=timeout)
+            response = await client.get(url, timeout=timeout, headers=headers)
         except (httpx.ConnectError, httpx.TimeoutException):
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(operation, correlation_id)
@@ -208,7 +218,7 @@ class AdapterLlmProviderOpenai:
         self._api_key = api_key
         self._is_available = True
 
-        self._transport = _TransportHolder(
+        self._transport = TransportHolderLlmHttp(
             target_name=provider_name,
             max_timeout_seconds=max_timeout_seconds,
         )
@@ -266,6 +276,18 @@ class AdapterLlmProviderOpenai:
 
     # ── Model discovery ────────────────────────────────────────────────
 
+    @property
+    def _auth_headers(self) -> dict[str, str] | None:
+        """Build Bearer auth headers when an API key is configured.
+
+        Returns:
+            A dict with the ``Authorization`` header, or ``None`` if no
+            API key is set.
+        """
+        if self._api_key:
+            return {"Authorization": f"Bearer {self._api_key}"}
+        return None
+
     async def get_available_models(self) -> list[str]:
         """Get list of available models from this provider.
 
@@ -280,6 +302,12 @@ class AdapterLlmProviderOpenai:
             avoid hammering a known-down endpoint, but CIDR allowlisting and
             HMAC signing are not applied to this discovery call.
 
+            When an API key is configured, the ``Authorization: Bearer``
+            header is forwarded so that authenticated endpoints (e.g.,
+            the OpenAI API) accept the discovery request. HMAC signing
+            and CIDR allowlisting are inference-only controls and are
+            intentionally skipped here.
+
         Returns:
             List of model identifiers.
         """
@@ -291,6 +319,7 @@ class AdapterLlmProviderOpenai:
             response = await self._transport.execute_circuit_protected_get(
                 url=url,
                 correlation_id=correlation_id,
+                headers=self._auth_headers,
             )
             if response.status_code == 200:
                 data = response.json()
@@ -578,6 +607,7 @@ class AdapterLlmProviderOpenai:
             response = await self._transport.execute_circuit_protected_get(
                 url=url,
                 correlation_id=correlation_id,
+                headers=self._auth_headers,
             )
         except Exception as exc:
             latency_ms = (time.perf_counter() - start_time) * 1000
@@ -709,4 +739,4 @@ class AdapterLlmProviderOpenai:
         )
 
 
-__all__: list[str] = ["AdapterLlmProviderOpenai"]
+__all__: list[str] = ["AdapterLlmProviderOpenai", "TransportHolderLlmHttp"]

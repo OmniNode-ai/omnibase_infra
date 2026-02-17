@@ -209,7 +209,7 @@ class TestAdapterModelRouterGenerate:
             "offline_b", _make_mock_provider("offline_b", available=False)
         )
 
-        with pytest.raises(InfraUnavailableError, match="unavailable"):
+        with pytest.raises(InfraUnavailableError, match="is_available=False"):
             await router.generate(_make_request())
 
     @pytest.mark.asyncio
@@ -229,6 +229,46 @@ class TestAdapterModelRouterGenerate:
         # None of the providers should have been called
         for provider in providers:
             provider.generate_async.assert_not_awaited()
+
+
+class TestAdapterModelRouterErrorMessages:
+    """Tests for error message content and actionability."""
+
+    @pytest.mark.asyncio
+    async def test_all_unavailable_error_mentions_is_available_false(self) -> None:
+        """Error message mentions is_available=False when no providers attempted."""
+        router = AdapterModelRouter()
+        for name in ["p1", "p2", "p3"]:
+            await router.register_provider(
+                name, _make_mock_provider(name, available=False)
+            )
+
+        with pytest.raises(InfraUnavailableError, match="is_available=False"):
+            await router.generate(_make_request())
+
+    @pytest.mark.asyncio
+    async def test_all_unavailable_error_suggests_health_check(self) -> None:
+        """Error message suggests health_check_all() to re-probe status."""
+        router = AdapterModelRouter()
+        for name in ["p1", "p2"]:
+            await router.register_provider(
+                name, _make_mock_provider(name, available=False)
+            )
+
+        with pytest.raises(InfraUnavailableError, match=r"health_check_all\(\)"):
+            await router.generate(_make_request())
+
+    @pytest.mark.asyncio
+    async def test_all_unavailable_error_includes_provider_count(self) -> None:
+        """Error message includes the number of registered providers."""
+        router = AdapterModelRouter()
+        for name in ["alpha", "beta", "gamma"]:
+            await router.register_provider(
+                name, _make_mock_provider(name, available=False)
+            )
+
+        with pytest.raises(InfraUnavailableError, match="All 3 registered"):
+            await router.generate(_make_request())
 
 
 class TestAdapterModelRouterAvailability:

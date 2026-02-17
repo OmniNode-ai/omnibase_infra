@@ -222,6 +222,7 @@ from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.observability.wiring_health import MixinEmissionCounter
 from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
 from omnibase_infra.utils.util_consumer_group import KAFKA_CONSUMER_GROUP_MAX_LENGTH
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -339,11 +340,10 @@ class EventBusKafka(
 
         # Circuit breaker configuration
         if config.circuit_breaker_threshold < 1:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="init",
                 target_name="kafka_event_bus",
-                correlation_id=uuid4(),
             )
             raise ProtocolConfigurationError(
                 f"circuit_breaker_threshold must be a positive integer, got {config.circuit_breaker_threshold}",
@@ -618,11 +618,11 @@ class EventBusKafka(
                 sanitized_servers = self._sanitize_bootstrap_servers(
                     self._bootstrap_servers
                 )
-                context = ModelInfraErrorContext(
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="start",
                     target_name=f"kafka.{self._environment}",
-                    correlation_id=correlation_id,
                 )
                 logger.warning(
                     f"Failed to connect to Kafka: {e}",
@@ -758,13 +758,13 @@ class EventBusKafka(
             InfraConnectionError: If publish fails after all retries
         """
         if not self._started:
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=(
+                    headers.correlation_id if headers is not None else None
+                ),
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="publish",
                 target_name=f"kafka.{self._environment}",
-                correlation_id=(
-                    headers.correlation_id if headers is not None else uuid4()
-                ),
             )
             raise InfraUnavailableError(
                 "Event bus not started. Call start() first.",
@@ -871,11 +871,11 @@ class EventBusKafka(
 
             logger.warning(
                 "Kafka producer recreation timed out: %s",
-                e,
+                sanitize_error_message(e),
                 extra={
                     "environment": self._environment,
                     "correlation_id": str(correlation_id),
-                    "error": str(e),
+                    "error": sanitize_error_message(e),
                 },
             )
             timeout_ctx = ModelTimeoutErrorContext(
@@ -905,20 +905,20 @@ class EventBusKafka(
 
             logger.warning(
                 "Failed to recreate Kafka producer: %s",
-                e,
+                sanitize_error_message(e),
                 extra={
                     "environment": self._environment,
                     "correlation_id": str(correlation_id),
-                    "error": str(e),
+                    "error": sanitize_error_message(e),
                 },
             )
             raise InfraConnectionError(
-                f"Failed to recreate Kafka producer: {e}",
-                context=ModelInfraErrorContext(
+                f"Failed to recreate Kafka producer: {sanitize_error_message(e)}",
+                context=ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="recreate_producer",
                     target_name=f"kafka.{self._environment}",
-                    correlation_id=correlation_id,
                 ),
             ) from e
 
@@ -946,11 +946,11 @@ class EventBusKafka(
 
         for attempt in range(self._max_retry_attempts + 1):
             if self._closing:
-                context = ModelInfraErrorContext(
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=headers.correlation_id,
                     transport_type=EnumInfraTransportType.KAFKA,
                     operation="publish",
                     target_name=f"kafka.{topic}",
-                    correlation_id=headers.correlation_id,
                 )
                 raise InfraUnavailableError(
                     "Kafka event bus is shutting down",
@@ -971,21 +971,21 @@ class EventBusKafka(
                         if not self._started:
                             raise InfraUnavailableError(
                                 "Kafka event bus is shutting down",
-                                context=ModelInfraErrorContext(
+                                context=ModelInfraErrorContext.with_correlation(
+                                    correlation_id=headers.correlation_id,
                                     transport_type=EnumInfraTransportType.KAFKA,
                                     operation="publish",
                                     target_name=f"kafka.{topic}",
-                                    correlation_id=headers.correlation_id,
                                 ),
                                 topic=topic,
                             )
                         raise InfraConnectionError(
                             "Kafka producer not initialized",
-                            context=ModelInfraErrorContext(
+                            context=ModelInfraErrorContext.with_correlation(
+                                correlation_id=headers.correlation_id,
                                 transport_type=EnumInfraTransportType.KAFKA,
                                 operation="publish",
                                 target_name=f"kafka.{topic}",
-                                correlation_id=headers.correlation_id,
                             ),
                         )
 
@@ -1000,11 +1000,11 @@ class EventBusKafka(
                 # spurious error log during shutdown.  The _closing re-check
                 # below narrows the window.
                 if self._closing:
-                    context = ModelInfraErrorContext(
+                    context = ModelInfraErrorContext.with_correlation(
+                        correlation_id=headers.correlation_id,
                         transport_type=EnumInfraTransportType.KAFKA,
                         operation="publish",
                         target_name=f"kafka.{topic}",
-                        correlation_id=headers.correlation_id,
                     )
                     raise InfraUnavailableError(
                         "Kafka event bus is shutting down",
@@ -1104,11 +1104,11 @@ class EventBusKafka(
                 await asyncio.sleep(delay)
 
         # All retries exhausted - differentiate timeout vs connection errors
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=headers.correlation_id,
             transport_type=EnumInfraTransportType.KAFKA,
             operation="publish",
             target_name=f"kafka.{topic}",
-            correlation_id=headers.correlation_id,
         )
         if isinstance(last_exception, TimeoutError):
             timeout_ctx = ModelTimeoutErrorContext(
@@ -1515,11 +1515,11 @@ class EventBusKafka(
                 )
 
             # Propagate connection error to surface startup failures (differentiate from timeout)
-            context = ModelInfraErrorContext(
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
                 transport_type=EnumInfraTransportType.KAFKA,
                 operation="start_consumer",
                 target_name=f"kafka.{topic}",
-                correlation_id=correlation_id,
             )
             logger.exception(
                 f"Failed to start consumer for topic {topic}: {e}",
@@ -1947,11 +1947,11 @@ class EventBusKafka(
         Reference:
             https://kafka.apache.org/documentation/#topicconfigs
         """
-        context = ModelInfraErrorContext(
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
             transport_type=EnumInfraTransportType.KAFKA,
             operation="validate_topic",
             target_name=f"kafka.{self._environment}",
-            correlation_id=correlation_id,
         )
 
         if not topic:

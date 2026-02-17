@@ -4,11 +4,14 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
+import httpx
 import pytest
 
 from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
     AdapterLlmProviderOpenai,
-    _TransportHolder,
+    TransportHolderLlmHttp,
 )
 from omnibase_infra.adapters.llm.model_llm_adapter_request import (
     ModelLlmAdapterRequest,
@@ -208,10 +211,35 @@ class TestAdapterLlmProviderOpenaiTranslation:
             )
 
 
+class TestAdapterLlmProviderOpenaiModelDiscovery:
+    """Tests for model discovery behavior."""
+
+    @pytest.mark.asyncio
+    async def test_get_available_models_fallback_on_connect_error(self) -> None:
+        """get_available_models() returns default model when endpoint unreachable.
+
+        When the transport raises httpx.ConnectError (endpoint down or
+        unreachable), the adapter should gracefully fall back to returning
+        [self._default_model] instead of propagating the exception.
+        """
+        adapter = AdapterLlmProviderOpenai(
+            base_url="http://unreachable:9999",
+            default_model="fallback-model",
+        )
+        adapter._transport.execute_circuit_protected_get = AsyncMock(
+            side_effect=httpx.ConnectError("Connection refused"),
+        )
+
+        models = await adapter.get_available_models()
+
+        assert models == ["fallback-model"]
+        adapter._transport.execute_circuit_protected_get.assert_awaited_once()
+
+
 class TestTransportHolder:
     """Tests for the internal transport holder."""
 
     def test_transport_holder_init(self) -> None:
         """Transport holder initializes with LLM HTTP transport."""
-        holder = _TransportHolder(target_name="test")
+        holder = TransportHolderLlmHttp(target_name="test")
         assert holder._llm_target_name == "test"

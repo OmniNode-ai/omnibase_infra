@@ -210,7 +210,8 @@ class AdapterModelRouter:
         if attempted == 0:
             raise InfraUnavailableError(
                 f"All {len(provider_order)} registered LLM providers "
-                "are unavailable (none were attempted)",
+                "report is_available=False (none were attempted). "
+                "Run health_check_all() to re-probe provider status.",
                 context=context,
             )
         error_details = "; ".join(f"{name}: {msg}" for name, msg in errors)

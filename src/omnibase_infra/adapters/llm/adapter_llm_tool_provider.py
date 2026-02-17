@@ -22,6 +22,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from omnibase_infra.adapters.llm.adapter_model_router import AdapterModelRouter
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_spi.protocols.llm.protocol_llm_provider import ProtocolLLMProvider
@@ -203,11 +204,12 @@ class AdapterLlmToolProvider:
             try:
                 await close_fn()
                 logger.debug("Closed LLM provider: %s", name)
-            except Exception:
+            except Exception as exc:
+                sanitized = sanitize_error_message(exc)
                 logger.warning(
-                    "Failed to close LLM provider: %s",
+                    "Failed to close LLM provider %s: %s",
                     name,
-                    exc_info=True,
+                    sanitized,
                 )
 
     # ── Internal helpers ───────────────────────────────────────────────
