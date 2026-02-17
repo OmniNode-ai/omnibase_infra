@@ -182,7 +182,9 @@ class EndpointCircuitBreaker(MixinAsyncCircuitBreaker):
     def get_state(self) -> dict[str, JsonType]:
         """Return the current circuit breaker state for introspection.
 
-        Does **not** require holding the lock (read-only snapshot).
+        Returns a point-in-time snapshot.  Reads multiple mutable fields
+        without holding the lock, so the returned dict may not reflect a
+        single consistent state under concurrent access.
 
         Returns:
             Dict with keys ``initialized``, ``state``, ``failures``,
@@ -368,6 +370,7 @@ class ServiceLlmEndpointHealth:
             Updated status map after probing all endpoints.
         """
         correlation_id = generate_correlation_id()
+        cycle_start = datetime.now(UTC)
 
         # Probe all endpoints concurrently to avoid worst-case
         # N * 2 * timeout sequential latency.
@@ -385,6 +388,7 @@ class ServiceLlmEndpointHealth:
             await self._emit_health_event(
                 results=tuple(results),
                 correlation_id=correlation_id,
+                cycle_start=cycle_start,
             )
 
         return dict(self._status_map)
@@ -456,7 +460,7 @@ class ServiceLlmEndpointHealth:
         except InfraUnavailableError:
             cb_state = cb.get_state()
             return ModelLlmEndpointStatus(
-                url=url,
+                url=sanitize_url(url),
                 name=name,
                 available=False,
                 last_check=datetime.now(UTC),
@@ -486,7 +490,7 @@ class ServiceLlmEndpointHealth:
             cb_state = cb.get_state()
             now = datetime.now(UTC)
             return ModelLlmEndpointStatus(
-                url=url,
+                url=sanitize_url(url),
                 name=name,
                 available=available,
                 last_check=now,
@@ -514,7 +518,7 @@ class ServiceLlmEndpointHealth:
                 extra={"correlation_id": str(correlation_id)},
             )
             return ModelLlmEndpointStatus(
-                url=url,
+                url=sanitize_url(url),
                 name=name,
                 available=False,
                 last_check=now,
@@ -569,7 +573,7 @@ class ServiceLlmEndpointHealth:
             if 200 <= resp.status_code < 300:
                 return True, ""
             primary_error = f"Primary /health: HTTP {resp.status_code}"
-        except httpx.HTTPError as exc:
+        except Exception as exc:
             primary_error = f"Primary /health: {type(exc).__name__}"
 
         # Fallback probe: /v1/models (vLLM-style)
@@ -587,6 +591,7 @@ class ServiceLlmEndpointHealth:
         self,
         results: tuple[ModelLlmEndpointStatus, ...],
         correlation_id: UUID,
+        cycle_start: datetime,
     ) -> None:
         """Emit an LLM endpoint health event to the event bus.
 
@@ -599,12 +604,15 @@ class ServiceLlmEndpointHealth:
             results: Tuple of endpoint status snapshots from the current
                 probe cycle.
             correlation_id: Correlation ID for distributed tracing.
+            cycle_start: Timestamp captured at the beginning of the probe
+                cycle, used as the event timestamp so it stays close to
+                the individual endpoint probe timestamps.
         """
         if self._event_bus is None:
             return
 
         event = ModelLlmEndpointHealthEvent(
-            timestamp=datetime.now(UTC),
+            timestamp=cycle_start,
             endpoints=results,
             correlation_id=correlation_id,
         )

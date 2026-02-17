@@ -91,8 +91,11 @@ class ModelLlmEndpointHealthConfig(BaseModel):
     )
     circuit_breaker_reset_timeout: float = Field(
         default=60.0,
-        ge=0.0,
-        description="Seconds before circuit transitions from OPEN to HALF_OPEN",
+        ge=1.0,
+        description=(
+            "Minimum open-state cooling period in seconds before the circuit "
+            "transitions from OPEN to HALF_OPEN"
+        ),
     )
 
 
