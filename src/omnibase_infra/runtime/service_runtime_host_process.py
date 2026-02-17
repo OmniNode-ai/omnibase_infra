@@ -1199,6 +1199,14 @@ class RuntimeHostProcess:
         # can receive materialized resources via dependency injection).
         await self._materialize_dependencies()
 
+        # Step 3.6: Config prefetch from Infisical (OMN-2287)
+        # Opt-in: only runs when INFISICAL_ADDR is set in the environment.
+        # Extracts config requirements from discovered contracts, resolves
+        # Infisical paths via TransportConfigMap, and prefetches values
+        # through HandlerInfisical. Prefetched values are applied to the
+        # process environment so handlers can read them during initialize().
+        await self._prefetch_config_from_infisical()
+
         # Step 4: Populate self._handlers from singleton registry
         # The wiring/discovery step registers handler classes, so we need to:
         # - Get each registered handler class from the singleton registry
@@ -2501,6 +2509,106 @@ class RuntimeHostProcess:
                         self._materialized_resources.resources.keys()
                     ),
                 },
+            )
+
+    async def _prefetch_config_from_infisical(self) -> None:
+        """Prefetch configuration values from Infisical (OMN-2287).
+
+        Opt-in: Only runs when ``INFISICAL_ADDR`` is set in the environment.
+        This allows the bootstrap sequence to populate config before handlers
+        initialize, without requiring Infisical for local development.
+
+        Steps:
+            1. Check ``INFISICAL_ADDR`` env var (opt-in gate)
+            2. Extract config requirements from discovered contracts
+            3. Build transport specs via ``TransportConfigMap``
+            4. Prefetch values through ``HandlerInfisical``
+            5. Apply resolved values to process environment
+
+        Errors are logged but do NOT block startup (graceful degradation).
+        """
+        infisical_addr = os.environ.get("INFISICAL_ADDR", "")
+        if not infisical_addr:
+            logger.debug("INFISICAL_ADDR not set, skipping config prefetch")
+            return
+
+        if not self._contract_paths:
+            logger.debug("No contract_paths configured, skipping config prefetch")
+            return
+
+        try:
+            from omnibase_infra.runtime.config_discovery.config_prefetcher import (
+                ConfigPrefetcher,
+            )
+            from omnibase_infra.runtime.config_discovery.contract_config_extractor import (
+                ContractConfigExtractor,
+            )
+
+            # Step 1: Extract config requirements from contracts
+            extractor = ContractConfigExtractor()
+            requirements = extractor.extract_from_paths(self._contract_paths)
+
+            if not requirements.requirements:
+                logger.info(
+                    "No config requirements found in contracts, skipping prefetch"
+                )
+                return
+
+            # Step 2: Get or create HandlerInfisical
+            # Look for an already-initialized handler in the registry
+            handler = None
+            for h in self._handlers.values():
+                handler_class_name = type(h).__name__
+                if handler_class_name == "HandlerInfisical":
+                    handler = h
+                    break
+
+            if handler is None:
+                logger.info(
+                    "HandlerInfisical not yet initialized, "
+                    "skipping config prefetch (handler will be initialized "
+                    "in step 4)"
+                )
+                return
+
+            # Step 3: Prefetch through the handler
+            service_slug = self._node_identity.service if self._node_identity else ""
+            infisical_required = os.environ.get("INFISICAL_REQUIRED", "").lower() in (
+                "true",
+                "1",
+                "yes",
+            )
+
+            prefetcher = ConfigPrefetcher(
+                handler=handler,
+                service_slug=service_slug,
+                infisical_required=infisical_required,
+            )
+            result = prefetcher.prefetch(requirements)
+
+            # Step 4: Apply to environment
+            applied = prefetcher.apply_to_environment(result)
+
+            logger.info(
+                "Config prefetch complete",
+                extra={
+                    "resolved": result.success_count,
+                    "missing": len(result.missing),
+                    "errors": len(result.errors),
+                    "applied_to_env": applied,
+                },
+            )
+
+            if result.errors:
+                for key, err in result.errors.items():
+                    logger.warning("Config prefetch error for %s: %s", key, err)
+
+        except Exception as exc:
+            # Prefetch failures are non-fatal
+            logger.warning(
+                "Config prefetch failed (non-fatal): %s",
+                exc,
+                exc_info=True,
             )
 
     async def _resolve_handler_dependencies(

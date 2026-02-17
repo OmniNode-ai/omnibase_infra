@@ -204,6 +204,7 @@ mypy_*.txt
 # but preserve example files for documentation
 .env*
 !.env.example
+.infisical-identity
 
 # Virtual environments (consolidated - duplicates removed)
 .venv/

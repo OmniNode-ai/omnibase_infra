@@ -1,0 +1,660 @@
+# =============================================================================
+# ONEX Infrastructure Environment Configuration
+# =============================================================================
+# Copy this file to .env and configure with your specific values.
+#
+# HOSTNAME RESOLUTION:
+# -------------------
+# This project supports two usage patterns:
+#
+# 1. DOCKER CONTAINERS (integration tests, docker-compose):
+#    - Use service hostnames in the DSN: postgresql://role:pass@postgres:5432/omnibase_infra
+#    - Hostnames resolve via Docker's internal DNS or extra_hosts in docker-compose.yaml
+#    - Example: OMNIBASE_INFRA_DB_URL=postgresql://role_omnibase_infra:pass@postgres:5432/omnibase_infra
+#
+# 2. LOCAL/DIRECT ACCESS (scripts, local development):
+#    - Use IP addresses in the DSN: postgresql://role:pass@<your-server-ip>:5432/omnibase_infra
+#    - No Docker hostname resolution needed
+#    - Example: OMNIBASE_INFRA_DB_URL=postgresql://role_omnibase_infra:pass@<your-server-ip>:5432/omnibase_infra
+#
+# The docker-compose.yaml uses extra_hosts to map service hostnames:
+#   extra_hosts:
+#     - "omninode-bridge-postgres:${REMOTE_HOST:-host-gateway}"
+#     - "omninode-bridge-redpanda:${REMOTE_HOST:-host-gateway}"
+#
+# For remote infrastructure, set REMOTE_HOST to the server IP (e.g., <your-server-ip>)
+#
+# SECURITY WARNING:
+#   - Replace ALL placeholder values (marked __REPLACE_WITH_*__) before deployment
+#   - Generate secure passwords using: openssl rand -hex 32
+#   - Keep .env file out of version control (already in .gitignore)
+#   - NEVER use placeholder values in any environment (dev/staging/prod)
+# =============================================================================
+
+# =============================================================================
+# Per-Service Database URLs
+# =============================================================================
+# Each service connects to its own database using a full DSN (connection URL).
+# Format: postgresql://role:password@host:port/database
+#
+# SECURITY: Replace __REPLACE_WITH_SECURE_PASSWORD__ with a secure password.
+# Generate using: openssl rand -hex 32
+# NOTE: Use -hex (not -base64) because base64 output includes '/' and '+'
+# which break URI parsing.
+#
+# For Docker/integration tests: Use hostname (resolves via extra_hosts)
+#   e.g., postgresql://role:pass@omninode-bridge-postgres:5432/omnibase_infra
+# For local scripts/direct access: Use IP address
+#   e.g., postgresql://role:pass@<your-server-ip>:5432/omnibase_infra
+OMNIBASE_INFRA_DB_URL=postgresql://role_omnibase_infra:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omnibase_infra
+OMNICLAUDE_DB_URL=postgresql://role_omniclaude:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omniclaude
+OMNIDASH_ANALYTICS_DB_URL=postgresql://role_omnidash:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omnidash_analytics
+OMNIINTELLIGENCE_DB_URL=postgresql://role_omniintelligence:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omniintelligence
+OMNIMEMORY_DB_URL=postgresql://role_omnimemory:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omnimemory
+OMNINODE_CLOUD_DB_URL=postgresql://role_omninode_cloud:__REPLACE_WITH_SECURE_PASSWORD__@your-postgres-host:5432/omninode_cloud
+
+# =============================================================================
+# PostgreSQL Pool Configuration (Optional)
+# =============================================================================
+# Connection pooling configuration for high-performance scenarios.
+#
+# Pool and timeout configuration (alphabetical per dotenv-linter)
+# POSTGRES_COMMAND_TIMEOUT_SECONDS=30.0  # Range: 1.0-300.0, query timeout
+# POSTGRES_POOL_MAX_SIZE=5             # Range: 1-100, maximum connections
+# POSTGRES_POOL_MIN_SIZE=1             # Range: 1-100, minimum connections
+
+# =============================================================================
+# Kafka / Redpanda Event Bus Configuration
+# =============================================================================
+# For Docker/integration tests: Use hostname with internal port (resolves via extra_hosts)
+#   KAFKA_BOOTSTRAP_SERVERS=omninode-bridge-redpanda:9092
+# For local scripts/direct access: Use IP address with external port
+#   KAFKA_BOOTSTRAP_SERVERS=<your-server-ip>:29092
+KAFKA_BOOTSTRAP_SERVERS=your-kafka-host:9092
+
+# Kafka advanced settings (optional - defaults shown)
+#
+# Environment and group identification
+# KAFKA_ENVIRONMENT=local              # Values: local, development, staging, production
+# KAFKA_GROUP=default                  # Consumer group name
+#
+# Timeout and retry configuration
+# KAFKA_TIMEOUT_SECONDS=30             # Range: 1-300, request timeout
+# KAFKA_MAX_RETRY_ATTEMPTS=3           # Range: 0-10, max retries on failure
+# KAFKA_RETRY_BACKOFF_BASE=1.0         # Range: 0.1-60.0, exponential backoff base
+#
+# Circuit breaker configuration
+# KAFKA_CIRCUIT_BREAKER_THRESHOLD=5    # Range: 1-100, failures before circuit opens
+# KAFKA_CIRCUIT_BREAKER_RESET_TIMEOUT=30.0  # Range: 1.0-3600.0, seconds before retry
+#
+# Consumer configuration
+# KAFKA_CONSUMER_SLEEP_INTERVAL=0.1    # Range: 0.01-10.0, poll sleep interval
+# KAFKA_AUTO_OFFSET_RESET=latest       # Values: earliest, latest
+# KAFKA_ENABLE_AUTO_COMMIT=true        # Values: true, false
+#
+# Producer configuration
+# KAFKA_ACKS=all                       # Values: 0, 1, all (for durability)
+# KAFKA_ENABLE_IDEMPOTENCE=true        # Values: true, false
+#
+# Dead Letter Queue (DLQ) for failed messages
+# When set, failed messages are sent to this topic instead of being dropped.
+# Leave empty to disable DLQ (messages will be logged and discarded).
+# Example: my-app.dlq.v1, orders.dead-letter.v1
+# KAFKA_DEAD_LETTER_TOPIC=
+
+# =============================================================================
+# Consul Service Discovery Configuration
+# =============================================================================
+# For Docker/integration tests: Use hostname (resolves via extra_hosts)
+#   CONSUL_HOST=omninode-bridge-consul
+# For local scripts/direct access: Use IP address
+#   CONSUL_HOST=<your-server-ip>
+CONSUL_DNS_PORT=18600
+CONSUL_HOST=your-consul-host
+CONSUL_LOG_LEVEL=INFO
+CONSUL_PORT=8500
+CONSUL_SCHEME=http
+
+# Consul advanced settings (optional - defaults shown)
+#
+# SECURITY: Replace placeholder with your Consul ACL token
+# CONSUL_TOKEN=__REPLACE_WITH_CONSUL_ACL_TOKEN__
+#
+# Timeout configuration
+# CONSUL_TIMEOUT_SECONDS=30.0          # Range: 1.0-300.0, request timeout
+# CONSUL_CONNECT_TIMEOUT_SECONDS=10.0  # Range: 1.0-60.0, connection timeout
+#
+# Datacenter and health checks
+# CONSUL_DATACENTER=dc1                # Consul datacenter name
+# CONSUL_HEALTH_CHECK_INTERVAL_SECONDS=30.0  # Range: 5.0-3600.0, health check interval
+#
+# Circuit breaker configuration
+# CONSUL_CIRCUIT_BREAKER_THRESHOLD=5   # Range: 1-100, failures before circuit opens
+# CONSUL_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS=30.0  # Range: 1.0-3600.0, recovery timeout
+
+# =============================================================================
+# Vault Secret Management Configuration
+# =============================================================================
+# For Docker/integration tests: Use hostname (resolves via extra_hosts)
+#   VAULT_ADDR=http://omninode-bridge-vault:8200
+# For local scripts/direct access: Use IP address
+#   VAULT_ADDR=http://<your-server-ip>:8200
+VAULT_ADDR=http://your-vault-host:8200
+# SECURITY: Replace this placeholder with your Vault token
+# For development: Use Vault's root token from initial setup
+# For production: Use a properly scoped token with minimal permissions
+VAULT_TOKEN=__REPLACE_WITH_VAULT_TOKEN__
+# Optional: Vault namespace for enterprise deployments
+# VAULT_NAMESPACE=
+
+# =============================================================================
+# Valkey Cache Configuration
+# =============================================================================
+# For Docker/integration tests: Use hostname (resolves via extra_hosts)
+#   VALKEY_HOST=omninode-bridge-valkey
+# For local scripts/direct access: Use IP address
+#   VALKEY_HOST=<your-server-ip>
+VALKEY_HOST=your-valkey-host
+# SECURITY: Replace this placeholder with a secure password
+# Generate using: openssl rand -hex 32
+VALKEY_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
+VALKEY_PORT=6379
+
+# =============================================================================
+# RedPanda Event Streaming Configuration
+# =============================================================================
+# RedPanda broker ports (non-standard ports for security)
+REDPANDA_ADMIN_PORT=19654
+REDPANDA_DEFAULT_PARTITIONS=3
+REDPANDA_DEFAULT_REPLICATION_FACTOR=1
+REDPANDA_EXTERNAL_PORT=19102
+REDPANDA_LOG_LEVEL=info
+REDPANDA_LOG_RETENTION_MS=604800000
+REDPANDA_PORT=19092
+REDPANDA_PROXY_PORT=18092
+REDPANDA_SEGMENT_MS=86400000
+
+# RedPanda UI (non-standard port for security)
+REDPANDA_UI_PORT=18109
+
+# =============================================================================
+# ONEX Adapter Service Ports
+# =============================================================================
+# Consul Adapter (non-standard port for security)
+CONSUL_ADAPTER_PORT=18087
+
+# PostgreSQL Adapter (non-standard port for security)
+POSTGRES_ADAPTER_PORT=18085
+
+# =============================================================================
+# Webhook Notifications Configuration
+# =============================================================================
+# Slack Webhook for Infrastructure Alerts (fallback mode)
+# Get your webhook URL from: Slack App -> Incoming Webhooks -> Copy webhook URL
+SLACK_WEBHOOK_URL=__REPLACE_WITH_SLACK_WEBHOOK_URL__
+
+# Slack Web API (preferred - supports message threading)
+# Bot Token: Slack App -> OAuth & Permissions -> Bot User OAuth Token (xoxb-...)
+# Required scopes: chat:write
+# SLACK_BOT_TOKEN=xoxb-__REPLACE_WITH_BOT_TOKEN__
+# Channel ID: Right-click channel in Slack -> View channel details -> copy ID
+# SLACK_CHANNEL_ID=__REPLACE_WITH_CHANNEL_ID__
+
+# Optional: Additional webhook configurations for multi-channel notifications
+# DISCORD_WEBHOOK_URL=__REPLACE_WITH_DISCORD_WEBHOOK_URL__
+# TEAMS_WEBHOOK_URL=__REPLACE_WITH_TEAMS_WEBHOOK_URL__
+
+# =============================================================================
+# ONEX Runtime Configuration
+# =============================================================================
+# Core runtime settings for the ONEX kernel and services.
+
+# Contracts directory path (for contract-driven configuration)
+# Default: ./contracts
+# Example: ./contracts, /app/contracts, /etc/onex/contracts
+# ONEX_CONTRACTS_DIR=./contracts
+
+# Environment name: local, development, staging, production
+# Default: local
+# Example: local (development), staging (pre-prod), production (live)
+ONEX_ENVIRONMENT=local
+
+# Kafka consumer group ID for main runtime
+# Default: onex-runtime-main
+# Example: onex-runtime-main (dev), onex-runtime-prod (production)
+ONEX_GROUP_ID=onex-runtime-main
+
+# HTTP port for health check server (internal container port)
+# The health server exposes /health and /ready endpoints for Docker/K8s probes.
+# Range: 1-65535
+# Default: 8085
+# Example: 8085 (standard), 8080 (common alternative), 3000 (Node.js convention)
+ONEX_HTTP_PORT=8085
+
+# Kafka input topic for main runtime
+# Default: requests
+# Example: requests (dev), prod.requests (production)
+ONEX_INPUT_TOPIC=requests
+
+# Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+# Default: INFO
+# Example: DEBUG (verbose), INFO (standard), WARNING (quiet)
+ONEX_LOG_LEVEL=INFO
+
+# Kafka output topic for main runtime
+# Default: responses
+# Example: responses (dev), prod.responses (production)
+ONEX_OUTPUT_TOPIC=responses
+
+# Effects runtime Kafka topics (optional)
+# Default: effect-requests, effect-responses, onex-runtime-effects
+# ONEX_EFFECTS_INPUT_TOPIC=effect-requests
+# ONEX_EFFECTS_OUTPUT_TOPIC=effect-responses
+# ONEX_EFFECTS_GROUP_ID=onex-runtime-effects
+
+# Worker runtime Kafka topics (optional)
+# Default: worker-requests, worker-responses, onex-runtime-workers
+# ONEX_WORKER_INPUT_TOPIC=worker-requests
+# ONEX_WORKER_OUTPUT_TOPIC=worker-responses
+# ONEX_WORKER_GROUP_ID=onex-runtime-workers
+
+# =============================================================================
+# Registration Orchestrator Configuration (Optional)
+# =============================================================================
+# Liveness interval for node heartbeat monitoring.
+# After this interval, nodes that don't send heartbeats are considered expired.
+# Range: 1-3600 seconds (1 second to 1 hour)
+# Default: 60 seconds
+# Example: 60 (standard), 30 (strict), 120 (tolerant)
+# ONEX_LIVENESS_INTERVAL_SECONDS=60
+
+# =============================================================================
+# Runtime Scheduler Configuration (Optional)
+# =============================================================================
+# The Runtime Scheduler emits RuntimeTick events at configurable intervals.
+# It supports restart-safe behavior through sequence number persistence in Valkey.
+#
+# NOTE: All Runtime Scheduler variables use the ONEX_ prefix. There are no
+# legacy unprefixed variable names for this component.
+#
+# Core Settings:
+# Tick interval in milliseconds
+# Range: 10-60000 (10ms to 60 seconds)
+# Default: 1000 (1 second)
+# Example: 1000 (standard), 5000 (slow tick), 100 (high-frequency)
+# ONEX_RUNTIME_SCHEDULER_TICK_INTERVAL_MS=1000
+#
+# Unique scheduler identifier (for multi-scheduler deployments)
+# Default: runtime-scheduler-default
+# Example: runtime-scheduler-default, runtime-scheduler-primary, scheduler-eu-west-1
+# ONEX_RUNTIME_SCHEDULER_ID=runtime-scheduler-default
+#
+# Kafka topic for publishing tick events
+# Default: runtime.tick.v1
+# Example: runtime.tick.v1, dev.runtime.tick.v1, prod.runtime.tick.v1
+# ONEX_RUNTIME_SCHEDULER_TICK_TOPIC=runtime.tick.v1
+#
+# Restart-Safety Settings:
+# Enable sequence number persistence for restart safety
+# Values: true/1/yes/on or false/0/no/off
+# Default: true
+# ONEX_RUNTIME_SCHEDULER_PERSIST_SEQUENCE=true
+#
+# Key for sequence number storage in Valkey
+# Default: runtime_scheduler_sequence
+# Example: runtime_scheduler_sequence, scheduler_seq_primary
+# ONEX_RUNTIME_SCHEDULER_SEQUENCE_KEY=runtime_scheduler_sequence
+#
+# Performance Settings:
+# Maximum jitter in milliseconds to prevent thundering herd
+# Range: 0-10000 (0ms to 10 seconds)
+# Default: 100
+# Example: 0 (no jitter), 100 (standard), 500 (high jitter)
+# ONEX_RUNTIME_SCHEDULER_MAX_JITTER_MS=100
+#
+# Circuit Breaker Settings:
+# Number of consecutive failures before circuit opens
+# Range: 1-100
+# Default: 5
+# Example: 3 (strict), 5 (balanced), 10 (tolerant)
+# ONEX_RUNTIME_SCHEDULER_CB_THRESHOLD=5
+#
+# Reset timeout in seconds before circuit attempts to close
+# Range: 1.0-3600.0 (1 second to 1 hour)
+# Default: 60.0
+# Example: 30.0 (fast recovery), 60.0 (standard), 120.0 (slow recovery)
+# ONEX_RUNTIME_SCHEDULER_CB_RESET_TIMEOUT=60.0
+#
+# Metrics Settings:
+# Enable scheduler metrics collection
+# Values: true/1/yes/on or false/0/no/off
+# Default: true
+# ONEX_RUNTIME_SCHEDULER_ENABLE_METRICS=true
+#
+# Prefix for metrics names
+# Default: runtime_scheduler
+# Example: runtime_scheduler, onex_scheduler, app_scheduler
+# ONEX_RUNTIME_SCHEDULER_METRICS_PREFIX=runtime_scheduler
+#
+# Valkey Settings (for sequence number persistence):
+# Valkey timeout for operations in seconds
+# Range: 0.1-60.0
+# Default: 5.0
+# Example: 5.0 (standard), 1.0 (fast timeout), 30.0 (tolerant)
+# ONEX_RUNTIME_SCHEDULER_VALKEY_TIMEOUT=5.0
+#
+# Connection retries before fallback
+# Range: 0-10
+# Default: 3
+# Example: 0 (no retries), 3 (standard), 5 (resilient)
+# ONEX_RUNTIME_SCHEDULER_VALKEY_RETRIES=3
+
+# =============================================================================
+# Compute Registry Configuration (Optional)
+# =============================================================================
+# The Compute Registry manages deterministic compute plugins in the ONEX
+# infrastructure layer. This cache stores parsed semantic version strings
+# to optimize plugin version resolution.
+#
+# Semver LRU cache size for plugin version resolution.
+# Increase for large deployments with many unique version strings.
+# Range: 1-10000
+# Default: 128
+# Example: 128 (small), 256 (medium), 512 (large deployment)
+# ONEX_COMPUTE_REGISTRY_CACHE_SIZE=128
+#
+# Cache sizing guidelines:
+#   - Small deployment (10-30 plugins): 128 (default)
+#   - Medium deployment (30-50 plugins): 256
+#   - Large deployment (50-100 plugins): 512
+#   - Stress tested with 500+ registrations
+#
+# Memory footprint: ~100 bytes per cached entry
+#   - 128 entries = ~12.8 KB cache overhead
+#   - 512 entries = ~51.2 KB cache overhead
+
+# =============================================================================
+# Performance Threshold Configuration (Optional)
+# =============================================================================
+# Thresholds for performance monitoring in the registration reducer.
+# When processing time exceeds these thresholds, warnings are logged to help
+# identify performance regressions or unusually complex events.
+#
+# Adjust for stricter production monitoring or relaxed dev/CI environments.
+#
+# reduce() processing threshold in milliseconds (default: 300.0)
+# This is the primary performance metric for the reducer.
+# ONEX_PERF_THRESHOLD_REDUCE_MS=300.0         # No strict range, any positive value
+#
+# Intent building threshold in milliseconds (default: 50.0)
+# Consul and PostgreSQL intent construction should be fast.
+# ONEX_PERF_THRESHOLD_INTENT_BUILD_MS=50.0    # No strict range, any positive value
+#
+# Idempotency check threshold in milliseconds (default: 1.0)
+# Simple UUID comparison should be nearly instant.
+# ONEX_PERF_THRESHOLD_IDEMPOTENCY_CHECK_MS=1.0 # No strict range, any positive value
+#
+# Example configurations:
+#   Production (strict):
+#     ONEX_PERF_THRESHOLD_REDUCE_MS=100.0
+#     ONEX_PERF_THRESHOLD_INTENT_BUILD_MS=25.0
+#   Development/CI (relaxed):
+#     ONEX_PERF_THRESHOLD_REDUCE_MS=1000.0
+#     ONEX_PERF_THRESHOLD_INTENT_BUILD_MS=200.0
+
+# =============================================================================
+# ONEX Handler Configuration (Optional)
+# =============================================================================
+# Handler configuration for HTTP and Database operations.
+# These settings control timeouts, pool sizes, and security limits.
+#
+# IMPORTANT: Range Validation Behavior ("Soft Validation")
+# --------------------------------------------------------
+# Environment variables with range constraints use "soft validation":
+#
+#   - Values OUTSIDE the valid range will LOG A WARNING and USE THE DEFAULT
+#   - The application will NOT fail to start with invalid values
+#   - Example: Setting ONEX_HTTP_TIMEOUT=999999 logs a warning and uses 30.0
+#
+# This design choice prioritizes application availability over strict validation.
+# If you require strict validation, verify your values are within documented ranges.
+#
+# To check for validation warnings, look for these log messages:
+#   - "Value X for ENV_VAR is below minimum Y, using default Z"
+#   - "Value X for ENV_VAR is above maximum Y, using default Z"
+#
+# HTTP Handler Configuration
+# -------------------------
+# HTTP handler uses httpx async client for REST operations.
+# Supports GET and POST operations with configurable timeouts and size limits.
+#
+# Request timeout in seconds
+# Range: 1.0-300.0 seconds
+# Default: 30.0
+# Example: 30.0 (standard), 60.0 (slow APIs), 10.0 (fast local services)
+# ONEX_HTTP_TIMEOUT=30.0
+#
+# Maximum request body size in bytes
+# Provides DoS protection by preventing oversized request bodies.
+# Range: 1024-104857600 (1KB to 100MB)
+# Default: 10485760 (10MB)
+# Example: 10485760 (10MB), 52428800 (50MB for large payloads)
+# ONEX_HTTP_MAX_REQUEST_SIZE=10485760
+#
+# Maximum response body size in bytes
+# Provides memory exhaustion protection from malicious/misconfigured servers.
+# Content-Length is validated BEFORE reading response body.
+# Range: 1024-104857600 (1KB to 100MB)
+# Default: 52428800 (50MB)
+# Example: 52428800 (50MB), 104857600 (100MB for large responses)
+# ONEX_HTTP_MAX_RESPONSE_SIZE=52428800
+#
+# Database Handler Configuration
+# -----------------------------
+# Database handler uses asyncpg connection pool for PostgreSQL operations.
+# Supports query and execute operations with configurable pool size.
+#
+# Connection pool size
+# Range: 1-100
+# Default: 5
+# Example: 5 (development), 15 (production), 25 (high-traffic)
+# Recommended range for production is 10-20.
+# ONEX_DB_POOL_SIZE=5
+#
+# Query timeout in seconds
+# Range: 0.1-3600.0 seconds
+# Default: 30.0
+# Example: 30.0 (standard), 60.0 (complex queries), 5.0 (simple lookups)
+# ONEX_DB_TIMEOUT=30.0
+#
+# Example production configuration:
+#   ONEX_HTTP_TIMEOUT=60.0
+#   ONEX_HTTP_MAX_REQUEST_SIZE=52428800       # 50MB
+#   ONEX_HTTP_MAX_RESPONSE_SIZE=104857600     # 100MB
+#   ONEX_DB_POOL_SIZE=15
+#   ONEX_DB_TIMEOUT=60.0
+
+# =============================================================================
+# ONEX Runtime Timeout Configuration (Optional)
+# =============================================================================
+# Health check timeout in seconds (default: 5.0, range: 1.0-60.0)
+# Controls how long health probes wait before timing out.
+# ONEX_HEALTH_CHECK_TIMEOUT=5.0
+
+# Graceful shutdown drain timeout in seconds (default: 30.0, range: 1.0-300.0)
+# Controls how long the runtime waits for in-flight requests during shutdown.
+# ONEX_DRAIN_TIMEOUT=30.0
+
+# =============================================================================
+# Circuit Breaker Configuration (Optional)
+# =============================================================================
+# Global circuit breaker settings for external service integrations.
+# These defaults can be overridden per-service (e.g., KAFKA_CIRCUIT_BREAKER_*).
+#
+# Circuit breaker pattern prevents cascading failures in distributed systems by
+# temporarily blocking requests to a failing service. States:
+#   - CLOSED: Normal operation, requests allowed
+#   - OPEN: Circuit tripped after threshold failures, requests blocked
+#   - HALF_OPEN: Testing recovery after reset timeout
+#
+# Maximum consecutive failures before opening circuit
+# When reached, the circuit opens and fails fast without attempting calls.
+# Range: minimum 1 (no maximum, but 1-100 recommended)
+# Default: 5
+# Example: 5 (balanced), 3 (strict/critical services), 10 (tolerant/best-effort)
+# ONEX_CB_THRESHOLD=5
+#
+# Seconds before automatic transition from OPEN to HALF_OPEN
+# After this timeout, the circuit allows a test request through.
+# Range: minimum 0.0 (no maximum, but 0.0-3600.0 recommended)
+# Default: 60.0
+# Example: 60.0 (standard), 120.0 (slow recovery), 30.0 (fast retry)
+# ONEX_CB_RESET_TIMEOUT=60.0
+#
+# Configuration Guidelines:
+#   - High-reliability services: Use lower threshold (3) and longer timeout (120s)
+#   - Best-effort services: Use higher threshold (10) and shorter timeout (30s)
+#   - Tune based on service SLAs and failure characteristics
+
+# =============================================================================
+# Idempotency Store Configuration (Optional)
+# =============================================================================
+# Settings for the PostgreSQL-based idempotency store used to prevent duplicate
+# event processing. The store tracks processed event IDs with automatic cleanup
+# of old records to prevent unbounded table growth.
+#
+# The idempotency store is critical for ensuring exactly-once processing in
+# distributed systems where events may be redelivered.
+#
+# Time-to-live for idempotency records in seconds (default: 86400 = 24 hours)
+# Records older than this are eligible for cleanup.
+# ONEX_IDEMPOTENCY_TTL_SECONDS=86400        # Range: 60-2592000 (1 min to 30 days)
+#
+# Interval between cleanup runs in seconds (default: 3600 = 1 hour)
+# Controls how frequently the background cleanup task runs.
+# Lower values = more frequent cleanup, higher CPU usage
+# Higher values = less frequent cleanup, larger table size
+# ONEX_IDEMPOTENCY_CLEANUP_INTERVAL=3600    # Range: 60-86400 (1 min to 24 hours)
+#
+# Number of records to delete per cleanup batch (default: 10000)
+# Batched deletion reduces lock contention on high-volume tables by breaking
+# large deletes into smaller transactions. Adjust based on table size and I/O.
+# ONEX_IDEMPOTENCY_BATCH_SIZE=10000         # Range: 100-100000
+#
+# Connection pool settings
+# These control the PostgreSQL connection pool for idempotency operations.
+# ONEX_IDEMPOTENCY_POOL_MIN_SIZE=1          # Range: 1-100 (min connections)
+# ONEX_IDEMPOTENCY_POOL_MAX_SIZE=5          # Range: 1-100 (max connections)
+# ONEX_IDEMPOTENCY_COMMAND_TIMEOUT=30.0     # Range: 1.0-300.0 seconds
+#
+# Clock skew tolerance in seconds (default: 60)
+# Buffer added to TTL during cleanup to prevent premature deletion due to
+# clock skew between distributed nodes. Set to 0 to disable.
+# ONEX_IDEMPOTENCY_CLOCK_SKEW_TOLERANCE=60  # Range: 0-3600 (0 to 1 hour)
+#
+# Maximum cleanup iterations (default: 100)
+# Prevents runaway cleanup loops. Total max records deleted =
+# cleanup_batch_size * cleanup_max_iterations.
+# ONEX_IDEMPOTENCY_CLEANUP_MAX_ITERATIONS=100  # Range: 1-1000
+#
+# Example configuration for high-volume systems:
+#   ONEX_IDEMPOTENCY_TTL_SECONDS=43200      # 12 hours (faster cleanup)
+#   ONEX_IDEMPOTENCY_CLEANUP_INTERVAL=1800  # 30 minutes
+#   ONEX_IDEMPOTENCY_BATCH_SIZE=5000        # Smaller batches
+#   ONEX_IDEMPOTENCY_POOL_MAX_SIZE=10       # Larger pool
+
+# =============================================================================
+# DLQ Tracking Configuration (Optional)
+# =============================================================================
+# Settings for the PostgreSQL-based Dead Letter Queue (DLQ) replay tracking
+# service. This service tracks DLQ replay operations, enabling operators to
+# audit which messages have been replayed, when, and with what outcome.
+#
+# Connection pool settings for DLQ tracking operations.
+# These control the PostgreSQL connection pool for replay history persistence.
+# ONEX_DLQ_POOL_MIN_SIZE=1                   # Range: 1-100 (min connections)
+# ONEX_DLQ_POOL_MAX_SIZE=5                   # Range: 1-100 (max connections)
+# ONEX_DLQ_COMMAND_TIMEOUT=30.0              # Range: 1.0-300.0 seconds
+#
+# Example configuration for high-volume DLQ replay operations:
+#   ONEX_DLQ_POOL_MAX_SIZE=10                # Larger pool for concurrent replays
+#   ONEX_DLQ_COMMAND_TIMEOUT=60.0            # Longer timeout for large batches
+
+# =============================================================================
+# Snapshot Topic Configuration (Optional)
+# =============================================================================
+# Kafka snapshot topic settings for state persistence.
+# SNAPSHOT_TOPIC=onex.registration.snapshots
+# SNAPSHOT_PARTITION_COUNT=12
+# SNAPSHOT_REPLICATION_FACTOR=3
+# SNAPSHOT_MIN_COMPACTION_LAG_MS=60000
+# SNAPSHOT_MAX_COMPACTION_LAG_MS=300000
+# SNAPSHOT_SEGMENT_BYTES=104857600
+# SNAPSHOT_RETENTION_MS=-1
+# SNAPSHOT_MIN_INSYNC_REPLICAS=2
+
+# =============================================================================
+# OpenTelemetry Observability Configuration (Optional)
+# =============================================================================
+# OTLP exporter endpoint for distributed tracing and metrics.
+# OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+
+# Service name for tracing identification
+# OTEL_SERVICE_NAME=omnibase-infra-runtime
+
+# Exporter types: otlp, console, none
+# OTEL_TRACES_EXPORTER=otlp
+# OTEL_METRICS_EXPORTER=otlp
+
+# =============================================================================
+# Docker/Network Configuration (Optional)
+# =============================================================================
+# Docker network name for inter-service communication.
+# Must match the network created by omninode-bridge infrastructure.
+# DOCKER_NETWORK=omninode-bridge-network
+
+# IMPORTANT: REMOTE_HOST controls hostname resolution in Docker containers.
+# This value is used by extra_hosts in docker-compose.yaml to map service
+# hostnames (like omninode-bridge-postgres) to actual IP addresses.
+#
+# For local services (running on same machine):
+#   REMOTE_HOST=host-gateway  (default - resolves to Docker host IP)
+#
+# For remote services (running on different machine):
+#   REMOTE_HOST=<your-server-ip>  (or your remote server's IP)
+#
+# How it works:
+#   docker-compose.yaml has: extra_hosts: ["omninode-bridge-postgres:${REMOTE_HOST}"]
+#   This makes the hostname resolve to REMOTE_HOST inside containers.
+# REMOTE_HOST=host-gateway
+
+# Host port mappings for runtime services
+# RUNTIME_MAIN_PORT=8085
+# RUNTIME_EFFECTS_PORT=8086
+
+# Number of worker replicas for horizontal scaling
+# WORKER_REPLICAS=2
+
+# =============================================================================
+# Agent Actions Consumer Configuration (Observability Profile)
+# =============================================================================
+# The agent actions consumer is part of the observability profile in Docker.
+# It consumes agent action events from Kafka and persists them to PostgreSQL
+# for traceability of agent executions, tool calls, decisions, and errors.
+#
+# Host port mapping for the agent actions consumer health check endpoint
+# AGENT_ACTIONS_CONSUMER_PORT=8087
+#
+# Database: Uses OMNIBASE_INFRA_DB_URL (see Per-Service Database URLs above)
+
+# Batch size for database inserts (messages buffered before insert)
+# Range: 1-1000
+# Default: 100
+# Example: 100 (balanced), 50 (low latency), 500 (high throughput)
+# AGENT_ACTIONS_BATCH_SIZE=100
+
+# Batch timeout in milliseconds (max wait before flushing partial batch)
+# Range: 100-60000
+# Default: 1000 (1 second)
+# Example: 1000 (balanced), 500 (low latency), 5000 (high throughput)
+# AGENT_ACTIONS_BATCH_TIMEOUT_MS=1000
