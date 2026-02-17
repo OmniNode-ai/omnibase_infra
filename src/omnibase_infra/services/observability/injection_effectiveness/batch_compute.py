@@ -417,9 +417,9 @@ class BatchComputeEffectivenessMetrics:
     async def _compute_pattern_hit_rates(self, correlation_id: UUID) -> int:
         """Derive pattern_hit_rates from agent selection patterns.
 
-        Treats each unique (selected_agent, domain) combination as a
-        "pattern" and computes hit rates based on how often that routing
-        pattern led to successful actions.
+        Treats each unique per-agent selection as a "pattern" and
+        computes hit rates based on how often that routing pattern led
+        to successful actions.
 
         The pattern_id is derived deterministically from the selected_agent
         string using uuid5 with a fixed namespace.
@@ -458,6 +458,7 @@ class BatchComputeEffectivenessMetrics:
                 NOW() AS updated_at
             FROM agent_routing_decisions rd
             GROUP BY rd.selected_agent
+            LIMIT $1
             ON CONFLICT (pattern_id, utilization_method) DO UPDATE SET
                 -- Counts are full snapshots (not accumulated), so the
                 -- score must also be a snapshot to stay consistent.
@@ -485,7 +486,7 @@ class BatchComputeEffectivenessMetrics:
                     self._has_uuid_ossp = row is not None
 
                 if self._has_uuid_ossp:
-                    result: str = await conn.execute(sql)
+                    result: str = await conn.execute(sql, self._batch_size)
                 else:
                     # Fallback: use md5-based UUID generation without extension
                     sql_fallback = """
@@ -507,7 +508,8 @@ class BatchComputeEffectivenessMetrics:
                             NOW() AS updated_at
                         FROM agent_routing_decisions rd
                         GROUP BY rd.selected_agent
-                                    ON CONFLICT (pattern_id, utilization_method) DO UPDATE SET
+                        LIMIT $1
+                        ON CONFLICT (pattern_id, utilization_method) DO UPDATE SET
                             -- Counts are full snapshots (not accumulated), so the
                             -- score must also be a snapshot to stay consistent.
                             utilization_score = EXCLUDED.utilization_score,
@@ -521,7 +523,7 @@ class BatchComputeEffectivenessMetrics:
                             END,
                             updated_at = NOW()
                     """
-                    result = await conn.execute(sql_fallback)
+                    result = await conn.execute(sql_fallback, self._batch_size)
 
         count = _parse_execute_count(result)
 

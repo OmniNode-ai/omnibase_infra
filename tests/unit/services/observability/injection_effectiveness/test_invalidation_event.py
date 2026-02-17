@@ -91,6 +91,15 @@ class TestModelEffectivenessInvalidationEvent:
         )
         assert event.tables_affected == ()
 
+    def test_unknown_table_name_rejected(self) -> None:
+        """Validator rejects table names not in the known set."""
+        with pytest.raises(ValidationError):
+            ModelEffectivenessInvalidationEvent(
+                tables_affected=("nonexistent_table",),
+                rows_written=1,
+                source="batch_compute",
+            )
+
     def test_model_dump_json_mode(self) -> None:
         event = ModelEffectivenessInvalidationEvent(
             tables_affected=("injection_effectiveness", "latency_breakdowns"),
