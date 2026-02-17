@@ -247,6 +247,12 @@ class AdapterLlmProviderOpenai:
             ``provider_type`` but will **not** change timeout or retry settings
             on the existing transport.
 
+        Warning:
+            This method is **not thread-safe**. It must be called during
+            initialization, before the provider is used for concurrent
+            requests. Calling ``configure()`` while ``generate_async()`` or
+            ``health_check()`` are in flight may produce inconsistent results.
+
         Args:
             config: Provider configuration with API keys, URLs, timeouts.
         """
@@ -553,6 +559,11 @@ class AdapterLlmProviderOpenai:
         Note:
             Checks endpoint reachability via /v1/models. Does not verify
             inference capability.
+
+            This method has a **side effect**: it sets ``is_available`` to
+            ``True`` on success or ``False`` on failure. Callers should be
+            aware that invoking ``health_check()`` may change whether this
+            provider is selected for routing.
 
         Returns:
             Health check response with latency and available models.
