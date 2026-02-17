@@ -72,7 +72,7 @@ class TestConfigDefaults:
         assert cfg.circuit_breaker_reset_timeout == 60.0
         assert cfg.circuit_breaker_half_open_successes == 1
         assert cfg.health_check_port == 8089
-        assert cfg.health_check_host == "0.0.0.0"  # noqa: S104
+        assert cfg.health_check_host == "127.0.0.1"
         assert cfg.health_check_staleness_seconds == 300
         assert cfg.health_check_poll_staleness_seconds == 60
         assert cfg.startup_grace_period_seconds == 60.0
@@ -100,7 +100,7 @@ class TestConfigDefaults:
 
         assert 1 <= cfg.batch_size <= 1000
         assert 100 <= cfg.batch_timeout_ms <= 60000
-        assert 1.0 <= cfg.poll_timeout_buffer_seconds <= 30.0
+        assert 2.0 <= cfg.poll_timeout_buffer_seconds <= 30.0
 
     @pytest.mark.unit
     def test_circuit_breaker_defaults(self) -> None:
@@ -253,9 +253,9 @@ class TestConfigValidation:
 
     @pytest.mark.unit
     def test_poll_timeout_buffer_lower_bound(self) -> None:
-        """poll_timeout_buffer_seconds below 1.0 is rejected."""
+        """poll_timeout_buffer_seconds below 2.0 is rejected."""
         with pytest.raises(ValidationError, match="poll_timeout_buffer_seconds"):
-            _make_config(poll_timeout_buffer_seconds=0.5)
+            _make_config(poll_timeout_buffer_seconds=1.5)
 
     @pytest.mark.unit
     def test_poll_timeout_buffer_upper_bound(self) -> None:

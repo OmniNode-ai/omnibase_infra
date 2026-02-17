@@ -55,6 +55,7 @@ import logging
 import re
 import signal
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -212,6 +213,21 @@ class EnumHealthStatus(StrEnum):
 # =============================================================================
 
 
+@dataclass(frozen=True)
+class HealthSnapshot:
+    """Immutable snapshot of ConsumerMetrics fields needed for health checks.
+
+    Taken under the metrics lock to guarantee a consistent view across all
+    fields. Used by ``_determine_health_status`` instead of reading live
+    mutable attributes without synchronization.
+    """
+
+    last_poll_at: datetime | None
+    last_successful_write_at: datetime | None
+    messages_received: int
+    started_at: datetime
+
+
 class ConsumerMetrics:
     """Metrics tracking for the LLM cost aggregation consumer.
 
@@ -307,6 +323,21 @@ class ConsumerMetrics:
                 ),
                 "started_at": self.started_at.isoformat(),
             }
+
+    async def health_snapshot(self) -> HealthSnapshot:
+        """Get a consistent snapshot of fields needed for health determination.
+
+        Acquires the metrics lock to ensure all returned fields reflect the
+        same point in time, preventing torn reads when multiple attributes
+        are updated by concurrent coroutines.
+        """
+        async with self._lock:
+            return HealthSnapshot(
+                last_poll_at=self.last_poll_at,
+                last_successful_write_at=self.last_successful_write_at,
+                messages_received=self.messages_received,
+                started_at=self.started_at,
+            )
 
 
 # =============================================================================
@@ -945,19 +976,19 @@ class ServiceLlmCostAggregator:
             },
         )
 
-    def _determine_health_status(
+    async def _determine_health_status(
         self,
         consumer_metrics: ConsumerMetrics,
         circuit_state: dict[str, JsonType],
     ) -> EnumHealthStatus:
         """Determine consumer health status based on current state.
 
-        Uses raw ``datetime`` fields from ``ConsumerMetrics`` directly rather
-        than re-parsing ISO strings from a snapshot, avoiding an unnecessary
-        serialization round-trip.
+        Acquires the metrics lock via ``health_snapshot()`` to read a
+        consistent set of datetime/counter fields, preventing torn reads
+        when fields are updated concurrently by the consume loop.
 
         Args:
-            consumer_metrics: Live metrics object with raw datetime fields.
+            consumer_metrics: Metrics object (snapshot is taken under lock).
             circuit_state: Circuit breaker state dictionary from the writer.
 
         Returns:
@@ -970,28 +1001,24 @@ class ServiceLlmCostAggregator:
         if circuit_breaker_state in ("open", "half_open"):
             return EnumHealthStatus.DEGRADED
 
+        snap = await consumer_metrics.health_snapshot()
         now = datetime.now(UTC)
 
-        last_poll_dt = consumer_metrics.last_poll_at
-        if last_poll_dt is not None:
-            poll_age_seconds = (now - last_poll_dt).total_seconds()
+        if snap.last_poll_at is not None:
+            poll_age_seconds = (now - snap.last_poll_at).total_seconds()
             if poll_age_seconds > self._config.health_check_poll_staleness_seconds:
                 return EnumHealthStatus.DEGRADED
 
-        last_write_dt = consumer_metrics.last_successful_write_at
-        messages_received = consumer_metrics.messages_received
-
-        if last_write_dt is None:
-            started_at_dt = consumer_metrics.started_at
-            age_seconds = (now - started_at_dt).total_seconds()
+        if snap.last_successful_write_at is None:
+            age_seconds = (now - snap.started_at).total_seconds()
             if age_seconds <= self._config.startup_grace_period_seconds:
                 return EnumHealthStatus.HEALTHY
             return EnumHealthStatus.DEGRADED
 
-        write_age_seconds = (now - last_write_dt).total_seconds()
+        write_age_seconds = (now - snap.last_successful_write_at).total_seconds()
         if (
             write_age_seconds > self._config.health_check_staleness_seconds
-            and messages_received > 0
+            and snap.messages_received > 0
         ):
             return EnumHealthStatus.DEGRADED
         return EnumHealthStatus.HEALTHY
@@ -1001,7 +1028,7 @@ class ServiceLlmCostAggregator:
         metrics_snapshot = await self.metrics.snapshot()
         circuit_state = self._writer.get_circuit_breaker_state() if self._writer else {}
 
-        status = self._determine_health_status(self.metrics, circuit_state)
+        status = await self._determine_health_status(self.metrics, circuit_state)
 
         response_body = {
             "status": status.value,
@@ -1067,7 +1094,7 @@ class ServiceLlmCostAggregator:
         metrics_snapshot = await self.metrics.snapshot()
         circuit_state = self._writer.get_circuit_breaker_state() if self._writer else {}
 
-        status = self._determine_health_status(self.metrics, circuit_state)
+        status = await self._determine_health_status(self.metrics, circuit_state)
 
         return {
             "status": status.value,
@@ -1172,6 +1199,7 @@ if __name__ == "__main__":
 __all__ = [
     "ConsumerMetrics",
     "EnumHealthStatus",
+    "HealthSnapshot",
     "ServiceLlmCostAggregator",
     "mask_dsn_password",
 ]

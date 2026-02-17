@@ -76,7 +76,8 @@ class ConfigLlmCostAggregation(BaseSettings):
     postgres_dsn: str = Field(
         ...,
         repr=False,
-        description="PostgreSQL connection string",
+        exclude=True,
+        description="PostgreSQL connection string. Excluded from serialization to prevent accidental credential exposure.",
     )
 
     @field_validator("postgres_dsn")
@@ -129,11 +130,14 @@ class ConfigLlmCostAggregation(BaseSettings):
     )
     poll_timeout_buffer_seconds: float = Field(
         default=5.0,
-        ge=1.0,
+        ge=2.0,
         le=30.0,
         description=(
             "Additional buffer time in seconds added to batch_timeout_ms for "
-            "the asyncio.wait_for timeout when polling Kafka."
+            "the asyncio.wait_for timeout when polling Kafka. Minimum 2.0s to "
+            "account for event loop scheduling latency, GC pauses, and Kafka "
+            "broker response jitter that can cause spurious TimeoutErrors at "
+            "lower values."
         ),
     )
 
@@ -179,10 +183,11 @@ class ConfigLlmCostAggregation(BaseSettings):
         description="Port for HTTP health check endpoint",
     )
     health_check_host: str = Field(
-        default="0.0.0.0",  # noqa: S104 - Binds all interfaces for container deployments
+        default="127.0.0.1",
         description=(
-            "Host/IP for health check server binding. Binds on all interfaces by "
-            "default for container deployments. Use '127.0.0.1' for non-containerized environments."
+            "Host/IP for health check server binding. Defaults to localhost-only "
+            "for safety. Container deployments should explicitly set '0.0.0.0' to "
+            "expose the health endpoint on all network interfaces."
         ),
     )
     health_check_staleness_seconds: int = Field(

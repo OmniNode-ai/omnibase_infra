@@ -150,7 +150,7 @@ def _make_consumer_metrics(
 class TestDetermineHealthStatus:
     """Tests for _determine_health_status logic."""
 
-    def test_healthy_when_running_normally(
+    async def test_healthy_when_running_normally(
         self, service: ServiceLlmCostAggregator
     ) -> None:
         """All conditions good returns HEALTHY."""
@@ -164,11 +164,11 @@ class TestDetermineHealthStatus:
         )
         circuit_state: dict[str, object] = {"state": "closed"}
 
-        result = service._determine_health_status(metrics, circuit_state)
+        result = await service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.HEALTHY
 
-    def test_degraded_when_circuit_breaker_open(
+    async def test_degraded_when_circuit_breaker_open(
         self, service: ServiceLlmCostAggregator
     ) -> None:
         """Circuit breaker in OPEN state returns DEGRADED."""
@@ -176,11 +176,11 @@ class TestDetermineHealthStatus:
         metrics = _make_consumer_metrics()
         circuit_state: dict[str, object] = {"state": "open"}
 
-        result = service._determine_health_status(metrics, circuit_state)
+        result = await service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.DEGRADED
 
-    def test_degraded_when_circuit_breaker_half_open(
+    async def test_degraded_when_circuit_breaker_half_open(
         self, service: ServiceLlmCostAggregator
     ) -> None:
         """Circuit breaker in HALF_OPEN state returns DEGRADED."""
@@ -188,11 +188,13 @@ class TestDetermineHealthStatus:
         metrics = _make_consumer_metrics()
         circuit_state: dict[str, object] = {"state": "half_open"}
 
-        result = service._determine_health_status(metrics, circuit_state)
+        result = await service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.DEGRADED
 
-    def test_degraded_when_poll_stale(self, service: ServiceLlmCostAggregator) -> None:
+    async def test_degraded_when_poll_stale(
+        self, service: ServiceLlmCostAggregator
+    ) -> None:
         """Last poll time exceeds stale threshold returns DEGRADED."""
         service._running = True
         now = datetime.now(UTC)
@@ -207,11 +209,13 @@ class TestDetermineHealthStatus:
         )
         circuit_state: dict[str, object] = {"state": "closed"}
 
-        result = service._determine_health_status(metrics, circuit_state)
+        result = await service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.DEGRADED
 
-    def test_degraded_when_write_stale(self, service: ServiceLlmCostAggregator) -> None:
+    async def test_degraded_when_write_stale(
+        self, service: ServiceLlmCostAggregator
+    ) -> None:
         """Last write time exceeds stale threshold returns DEGRADED."""
         service._running = True
         now = datetime.now(UTC)
@@ -226,11 +230,11 @@ class TestDetermineHealthStatus:
         )
         circuit_state: dict[str, object] = {"state": "closed"}
 
-        result = service._determine_health_status(metrics, circuit_state)
+        result = await service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.DEGRADED
 
-    def test_healthy_during_startup_grace(
+    async def test_healthy_during_startup_grace(
         self, service: ServiceLlmCostAggregator
     ) -> None:
         """Within startup grace period and no writes yet returns HEALTHY."""
@@ -243,11 +247,11 @@ class TestDetermineHealthStatus:
         )
         circuit_state: dict[str, object] = {"state": "closed"}
 
-        result = service._determine_health_status(metrics, circuit_state)
+        result = await service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.HEALTHY
 
-    def test_degraded_after_startup_grace_no_writes(
+    async def test_degraded_after_startup_grace_no_writes(
         self, service: ServiceLlmCostAggregator
     ) -> None:
         """Past startup grace period with no writes returns DEGRADED."""
@@ -260,11 +264,11 @@ class TestDetermineHealthStatus:
         )
         circuit_state: dict[str, object] = {"state": "closed"}
 
-        result = service._determine_health_status(metrics, circuit_state)
+        result = await service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.DEGRADED
 
-    def test_unhealthy_when_not_running(
+    async def test_unhealthy_when_not_running(
         self, service: ServiceLlmCostAggregator
     ) -> None:
         """Service not running returns UNHEALTHY."""
@@ -272,11 +276,11 @@ class TestDetermineHealthStatus:
         metrics = _make_consumer_metrics()
         circuit_state: dict[str, object] = {"state": "closed"}
 
-        result = service._determine_health_status(metrics, circuit_state)
+        result = await service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.UNHEALTHY
 
-    def test_healthy_when_write_fresh_and_messages_received(
+    async def test_healthy_when_write_fresh_and_messages_received(
         self, service: ServiceLlmCostAggregator
     ) -> None:
         """Recent write with received messages returns HEALTHY."""
@@ -290,7 +294,7 @@ class TestDetermineHealthStatus:
         )
         circuit_state: dict[str, object] = {"state": "closed"}
 
-        result = service._determine_health_status(metrics, circuit_state)
+        result = await service._determine_health_status(metrics, circuit_state)
 
         assert result == EnumHealthStatus.HEALTHY
 

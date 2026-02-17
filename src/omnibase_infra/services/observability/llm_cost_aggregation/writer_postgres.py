@@ -42,6 +42,7 @@ from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.utils.util_db_transaction import set_statement_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -282,18 +283,8 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    # Defense-in-depth: PostgreSQL SET LOCAL does not support
-                    # $1 parameterized queries, so the value must be
-                    # interpolated.  _statement_timeout_ms() returns a
-                    # bounds-checked int clamped to [1, 600_000].  The
-                    # explicit int() cast at the interpolation site is a
-                    # second safety fence ensuring only a numeric literal
-                    # can ever reach the SQL string, even if the return
-                    # type of _statement_timeout_ms() were to change.
                     timeout_ms = self._statement_timeout_ms()
-                    await conn.execute(
-                        f"SET LOCAL statement_timeout = '{int(timeout_ms)}'"
-                    )
+                    await set_statement_timeout(conn, timeout_ms)
 
                     for event_id, event in unique_events:
                         try:
@@ -328,8 +319,9 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                     _resolve_usage_source(event),
                                     bool(event.get("usage_is_estimated", False)),
                                     _safe_jsonb(event.get("usage_raw")),
-                                    str(event.get("input_hash", ""))[:71]
-                                    or None,  # Truncate to VARCHAR(71): 'sha256-' (7) + hex (64) = 71 chars
+                                    _truncate_input_hash(
+                                        str(event.get("input_hash", ""))
+                                    ),
                                     str(event.get("code_version", ""))[:64] or None,
                                     str(event.get("contract_version", ""))[:64] or None,
                                     str(event.get("reporting_source", ""))[:255]
@@ -473,18 +465,8 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    # Defense-in-depth: PostgreSQL SET LOCAL does not support
-                    # $1 parameterized queries, so the value must be
-                    # interpolated.  _statement_timeout_ms() returns a
-                    # bounds-checked int clamped to [1, 600_000].  The
-                    # explicit int() cast at the interpolation site is a
-                    # second safety fence ensuring only a numeric literal
-                    # can ever reach the SQL string, even if the return
-                    # type of _statement_timeout_ms() were to change.
                     timeout_ms = self._statement_timeout_ms()
-                    await conn.execute(
-                        f"SET LOCAL statement_timeout = '{int(timeout_ms)}'"
-                    )
+                    await set_statement_timeout(conn, timeout_ms)
 
                     for row in agg_rows:
                         try:
@@ -569,6 +551,34 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
 # =============================================================================
 # Module-level helper functions
 # =============================================================================
+
+
+def _truncate_input_hash(value: str) -> str | None:
+    """Truncate an input hash to fit the VARCHAR(71) column.
+
+    Format contract: input_hash is expected to be ``sha256-<64 hex chars>``
+    (total 71 characters) as produced by ``_compute_input_hash`` in the
+    OpenAI-compatible handler. If the value does not match this expected
+    format, a debug log is emitted to flag potential format drift, but
+    truncation still proceeds to avoid data loss.
+
+    Args:
+        value: Raw input_hash string from the event.
+
+    Returns:
+        Truncated string (max 71 chars), or None if empty.
+    """
+    if not value:
+        return None
+    if value and not value.startswith("sha256-"):
+        logger.debug(
+            "input_hash does not start with expected 'sha256-' prefix; "
+            "truncation to 71 chars may cut non-standard formats. "
+            "Got prefix: %r",
+            value[:10],
+        )
+    truncated = value[:71]
+    return truncated or None
 
 
 def _derive_stable_dedup_key(event: dict[str, object]) -> str:
@@ -786,26 +796,52 @@ def _pre_aggregate_rows(
             existing = merged[key]
             existing_cost = existing["total_cost_usd"]
             row_cost = row["total_cost_usd"]
-            assert isinstance(existing_cost, Decimal)
-            assert isinstance(row_cost, Decimal)
+            if not isinstance(existing_cost, Decimal):
+                raise TypeError(
+                    f"expected Decimal for total_cost_usd, got {type(existing_cost).__name__}"
+                )
+            if not isinstance(row_cost, Decimal):
+                raise TypeError(
+                    f"expected Decimal for total_cost_usd, got {type(row_cost).__name__}"
+                )
             existing["total_cost_usd"] = existing_cost + row_cost
 
             existing_tokens = existing["total_tokens"]
             row_tokens = row["total_tokens"]
-            assert isinstance(existing_tokens, int)
-            assert isinstance(row_tokens, int)
+            if not isinstance(existing_tokens, int):
+                raise TypeError(
+                    f"expected int for total_tokens, got {type(existing_tokens).__name__}"
+                )
+            if not isinstance(row_tokens, int):
+                raise TypeError(
+                    f"expected int for total_tokens, got {type(row_tokens).__name__}"
+                )
             existing["total_tokens"] = existing_tokens + row_tokens
 
             existing_count = existing["call_count"]
             row_count = row["call_count"]
-            assert isinstance(existing_count, int)
-            assert isinstance(row_count, int)
+            if not isinstance(existing_count, int):
+                raise TypeError(
+                    f"expected int for call_count, got {type(existing_count).__name__}"
+                )
+            if not isinstance(row_count, int):
+                raise TypeError(
+                    f"expected int for call_count, got {type(row_count).__name__}"
+                )
 
             # Weighted average of estimated_coverage_pct
             existing_pct = existing["estimated_coverage_pct"]
             row_pct = row["estimated_coverage_pct"]
-            assert isinstance(existing_pct, Decimal)
-            assert isinstance(row_pct, Decimal)
+            if not isinstance(existing_pct, Decimal):
+                raise TypeError(
+                    f"expected Decimal for estimated_coverage_pct, "
+                    f"got {type(existing_pct).__name__}"
+                )
+            if not isinstance(row_pct, Decimal):
+                raise TypeError(
+                    f"expected Decimal for estimated_coverage_pct, "
+                    f"got {type(row_pct).__name__}"
+                )
 
             total_count = existing_count + row_count
             if total_count > 0:
