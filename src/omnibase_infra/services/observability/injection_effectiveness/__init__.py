@@ -36,10 +36,6 @@ Example:
 from omnibase_infra.event_bus.topic_constants import (
     TOPIC_EFFECTIVENESS_INVALIDATION,
 )
-from omnibase_infra.services.observability.injection_effectiveness.batch_compute import (
-    BatchComputeEffectivenessMetrics,
-    BatchComputeResult,
-)
 from omnibase_infra.services.observability.injection_effectiveness.config import (
     ConfigInjectionEffectivenessConsumer,
 )
@@ -67,8 +63,8 @@ from omnibase_infra.services.observability.injection_effectiveness.models import
     ModelPatternHitRateRow,
     ModelPatternUtilization,
 )
-from omnibase_infra.services.observability.injection_effectiveness.notifier import (
-    EffectivenessInvalidationNotifier,
+from omnibase_infra.services.observability.injection_effectiveness.models.model_batch_compute_result import (
+    ModelBatchComputeResult,
 )
 from omnibase_infra.services.observability.injection_effectiveness.protocol_reader import (
     ProtocolInjectionEffectivenessReader,
@@ -76,16 +72,22 @@ from omnibase_infra.services.observability.injection_effectiveness.protocol_read
 from omnibase_infra.services.observability.injection_effectiveness.reader_postgres import (
     ReaderInjectionEffectivenessPostgres,
 )
+from omnibase_infra.services.observability.injection_effectiveness.service_batch_compute_effectiveness import (
+    ServiceBatchComputeEffectivenessMetrics,
+)
+from omnibase_infra.services.observability.injection_effectiveness.service_effectiveness_invalidation_notifier import (
+    ServiceEffectivenessInvalidationNotifier,
+)
 from omnibase_infra.services.observability.injection_effectiveness.writer_postgres import (
     WriterInjectionEffectivenessPostgres,
 )
 
 __all__ = [
-    "BatchComputeEffectivenessMetrics",
-    "BatchComputeResult",
+    "ModelBatchComputeResult",
+    "ServiceBatchComputeEffectivenessMetrics",
     "ConfigInjectionEffectivenessConsumer",
     "ConsumerMetrics",
-    "EffectivenessInvalidationNotifier",
+    "ServiceEffectivenessInvalidationNotifier",
     "EnumHealthStatus",
     "InjectionEffectivenessConsumer",
     "LedgerEntryDict",

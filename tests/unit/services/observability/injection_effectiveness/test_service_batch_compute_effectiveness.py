@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Unit tests for BatchComputeEffectivenessMetrics.
+"""Unit tests for ServiceBatchComputeEffectivenessMetrics.
 
 Tests the batch computation engine that derives effectiveness metrics
 from agent_actions and agent_routing_decisions tables.
@@ -16,9 +16,11 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.services.observability.injection_effectiveness.batch_compute import (
-    BatchComputeEffectivenessMetrics,
-    BatchComputeResult,
+from omnibase_infra.services.observability.injection_effectiveness.models.model_batch_compute_result import (
+    ModelBatchComputeResult,
+)
+from omnibase_infra.services.observability.injection_effectiveness.service_batch_compute_effectiveness import (
+    ServiceBatchComputeEffectivenessMetrics,
     _parse_execute_count,
 )
 
@@ -53,17 +55,17 @@ def mock_pool() -> MagicMock:
 
 @pytest.fixture
 def mock_notifier() -> AsyncMock:
-    """Create a mock EffectivenessInvalidationNotifier."""
+    """Create a mock ServiceEffectivenessInvalidationNotifier."""
     notifier = AsyncMock()
     notifier.notify = AsyncMock()
     return notifier
 
 
-class TestBatchComputeResult:
-    """Tests for BatchComputeResult dataclass."""
+class TestModelBatchComputeResult:
+    """Tests for ModelBatchComputeResult Pydantic model."""
 
     def test_total_rows_sums_all(self) -> None:
-        result = BatchComputeResult(
+        result = ModelBatchComputeResult(
             effectiveness_rows=10,
             latency_rows=20,
             pattern_rows=5,
@@ -71,15 +73,15 @@ class TestBatchComputeResult:
         assert result.total_rows == 35
 
     def test_total_rows_default_zero(self) -> None:
-        result = BatchComputeResult()
+        result = ModelBatchComputeResult()
         assert result.total_rows == 0
 
     def test_has_errors_false_when_empty(self) -> None:
-        result = BatchComputeResult()
+        result = ModelBatchComputeResult()
         assert result.has_errors is False
 
     def test_has_errors_true_when_errors_present(self) -> None:
-        result = BatchComputeResult(errors=("something failed",))
+        result = ModelBatchComputeResult(errors=("something failed",))
         assert result.has_errors is True
 
 
@@ -102,8 +104,8 @@ class TestParseExecuteCount:
         assert _parse_execute_count("not a valid result") == 0
 
 
-class TestBatchComputeEffectivenessMetrics:
-    """Tests for BatchComputeEffectivenessMetrics."""
+class TestServiceBatchComputeEffectivenessMetrics:
+    """Tests for ServiceBatchComputeEffectivenessMetrics."""
 
     @pytest.mark.asyncio
     async def test_compute_and_persist_all_phases(self, mock_pool: MagicMock) -> None:
@@ -127,9 +129,9 @@ class TestBatchComputeEffectivenessMetrics:
             return "INSERT 0 3"
 
         conn.execute = AsyncMock(side_effect=execute_side_effect)
-        conn.fetchrow = AsyncMock(return_value=None)  # No uuid-ossp extension
+        conn.fetchrow = AsyncMock(return_value=None)
 
-        batch = BatchComputeEffectivenessMetrics(mock_pool, batch_size=100)
+        batch = ServiceBatchComputeEffectivenessMetrics(mock_pool, batch_size=100)
         result = await batch.compute_and_persist()
 
         assert result.effectiveness_rows == 10
@@ -157,7 +159,9 @@ class TestBatchComputeEffectivenessMetrics:
         conn.execute = AsyncMock(side_effect=execute_side_effect)
         conn.fetchrow = AsyncMock(return_value=None)
 
-        batch = BatchComputeEffectivenessMetrics(mock_pool, notifier=mock_notifier)
+        batch = ServiceBatchComputeEffectivenessMetrics(
+            mock_pool, notifier=mock_notifier
+        )
         result = await batch.compute_and_persist()
 
         assert result.total_rows == 10
@@ -184,7 +188,9 @@ class TestBatchComputeEffectivenessMetrics:
         conn.execute = AsyncMock(side_effect=execute_side_effect)
         conn.fetchrow = AsyncMock(return_value=None)
 
-        batch = BatchComputeEffectivenessMetrics(mock_pool, notifier=mock_notifier)
+        batch = ServiceBatchComputeEffectivenessMetrics(
+            mock_pool, notifier=mock_notifier
+        )
         result = await batch.compute_and_persist()
 
         assert result.total_rows == 0
@@ -212,7 +218,7 @@ class TestBatchComputeEffectivenessMetrics:
         conn.execute = AsyncMock(side_effect=execute_side_effect)
         conn.fetchrow = AsyncMock(return_value=None)
 
-        batch = BatchComputeEffectivenessMetrics(mock_pool)
+        batch = ServiceBatchComputeEffectivenessMetrics(mock_pool)
         result = await batch.compute_and_persist()
 
         assert result.effectiveness_rows == 0
@@ -221,29 +227,6 @@ class TestBatchComputeEffectivenessMetrics:
         assert result.has_errors is True
         assert len(result.errors) == 1
         assert "Phase 1" in result.errors[0]
-
-    @pytest.mark.asyncio
-    async def test_compute_with_uuid_ossp_extension(self, mock_pool: MagicMock) -> None:
-        """When uuid-ossp extension is available, uses uuid_generate_v5."""
-        conn = mock_pool._test_conn
-
-        async def execute_side_effect(sql, *args, **kwargs):
-            if "SET LOCAL" in str(sql):
-                return "SET"
-            if "injection_effectiveness" in str(sql):
-                return "INSERT 0 10"
-            if "latency_breakdowns" in str(sql):
-                return "INSERT 0 5"
-            return "INSERT 0 3"
-
-        conn.execute = AsyncMock(side_effect=execute_side_effect)
-        # Return a row for uuid-ossp check (extension is available)
-        conn.fetchrow = AsyncMock(return_value={"extname": "uuid-ossp"})
-
-        batch = BatchComputeEffectivenessMetrics(mock_pool)
-        result = await batch.compute_and_persist()
-
-        assert result.pattern_rows == 3
 
     @pytest.mark.asyncio
     async def test_compute_custom_correlation_id(self, mock_pool: MagicMock) -> None:
@@ -259,7 +242,7 @@ class TestBatchComputeEffectivenessMetrics:
         conn.fetchrow = AsyncMock(return_value=None)
 
         custom_id = uuid4()
-        batch = BatchComputeEffectivenessMetrics(mock_pool)
+        batch = ServiceBatchComputeEffectivenessMetrics(mock_pool)
         result = await batch.compute_and_persist(correlation_id=custom_id)
 
         assert result.total_rows == 0

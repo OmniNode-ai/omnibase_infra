@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Unit tests for EffectivenessInvalidationNotifier.
+"""Unit tests for ServiceEffectivenessInvalidationNotifier.
 
 Tests the Kafka notification publisher for effectiveness data changes.
 
@@ -15,9 +15,11 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.services.observability.injection_effectiveness.notifier import (
+from omnibase_infra.event_bus.topic_constants import (
     TOPIC_EFFECTIVENESS_INVALIDATION,
-    EffectivenessInvalidationNotifier,
+)
+from omnibase_infra.services.observability.injection_effectiveness.service_effectiveness_invalidation_notifier import (
+    ServiceEffectivenessInvalidationNotifier,
 )
 
 
@@ -29,13 +31,13 @@ def mock_producer() -> AsyncMock:
     return producer
 
 
-class TestEffectivenessInvalidationNotifier:
-    """Tests for EffectivenessInvalidationNotifier."""
+class TestServiceEffectivenessInvalidationNotifier:
+    """Tests for ServiceEffectivenessInvalidationNotifier."""
 
     @pytest.mark.asyncio
     async def test_notify_publishes_event(self, mock_producer: AsyncMock) -> None:
         """Successful notification publishes JSON to Kafka."""
-        notifier = EffectivenessInvalidationNotifier(mock_producer)
+        notifier = ServiceEffectivenessInvalidationNotifier(mock_producer)
         correlation_id = uuid4()
 
         await notifier.notify(
@@ -63,7 +65,7 @@ class TestEffectivenessInvalidationNotifier:
     @pytest.mark.asyncio
     async def test_notify_skips_zero_rows(self, mock_producer: AsyncMock) -> None:
         """Zero rows_written does not publish."""
-        notifier = EffectivenessInvalidationNotifier(mock_producer)
+        notifier = ServiceEffectivenessInvalidationNotifier(mock_producer)
 
         await notifier.notify(
             tables_affected=("injection_effectiveness",),
@@ -76,7 +78,7 @@ class TestEffectivenessInvalidationNotifier:
     @pytest.mark.asyncio
     async def test_notify_skips_negative_rows(self, mock_producer: AsyncMock) -> None:
         """Negative rows_written does not publish."""
-        notifier = EffectivenessInvalidationNotifier(mock_producer)
+        notifier = ServiceEffectivenessInvalidationNotifier(mock_producer)
 
         await notifier.notify(
             tables_affected=("injection_effectiveness",),
@@ -91,7 +93,7 @@ class TestEffectivenessInvalidationNotifier:
         self, mock_producer: AsyncMock
     ) -> None:
         """When no correlation_id is provided, one is generated."""
-        notifier = EffectivenessInvalidationNotifier(mock_producer)
+        notifier = ServiceEffectivenessInvalidationNotifier(mock_producer)
 
         await notifier.notify(
             tables_affected=("pattern_hit_rates",),
@@ -109,7 +111,9 @@ class TestEffectivenessInvalidationNotifier:
     async def test_notify_custom_topic(self, mock_producer: AsyncMock) -> None:
         """Custom topic is used when specified."""
         custom_topic = "custom.invalidation.topic"
-        notifier = EffectivenessInvalidationNotifier(mock_producer, topic=custom_topic)
+        notifier = ServiceEffectivenessInvalidationNotifier(
+            mock_producer, topic=custom_topic
+        )
 
         await notifier.notify(
             tables_affected=("injection_effectiveness",),
@@ -127,7 +131,7 @@ class TestEffectivenessInvalidationNotifier:
     ) -> None:
         """Producer errors are logged but not raised (fire-and-forget)."""
         mock_producer.send_and_wait = AsyncMock(side_effect=RuntimeError("Kafka down"))
-        notifier = EffectivenessInvalidationNotifier(mock_producer)
+        notifier = ServiceEffectivenessInvalidationNotifier(mock_producer)
 
         # Should not raise
         await notifier.notify(

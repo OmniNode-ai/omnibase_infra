@@ -20,13 +20,13 @@ Related Tickets:
 
 Example:
     >>> from aiokafka import AIOKafkaProducer
-    >>> from omnibase_infra.services.observability.injection_effectiveness.notifier import (
-    ...     EffectivenessInvalidationNotifier,
+    >>> from omnibase_infra.services.observability.injection_effectiveness.service_effectiveness_invalidation_notifier import (
+    ...     ServiceEffectivenessInvalidationNotifier,
     ... )
     >>>
     >>> producer = AIOKafkaProducer(bootstrap_servers="localhost:9092")
     >>> await producer.start()
-    >>> notifier = EffectivenessInvalidationNotifier(producer)
+    >>> notifier = ServiceEffectivenessInvalidationNotifier(producer)
     >>>
     >>> await notifier.notify(
     ...     tables_affected=("injection_effectiveness", "pattern_hit_rates"),
@@ -55,7 +55,7 @@ from omnibase_infra.services.observability.injection_effectiveness.models.model_
 logger = logging.getLogger(__name__)
 
 
-class EffectivenessInvalidationNotifier:
+class ServiceEffectivenessInvalidationNotifier:
     """Publishes invalidation events when effectiveness data changes.
 
     Best-effort notification: failures are logged at WARNING level but
@@ -67,7 +67,7 @@ class EffectivenessInvalidationNotifier:
         _topic: Target Kafka topic for invalidation events.
 
     Example:
-        >>> notifier = EffectivenessInvalidationNotifier(producer)
+        >>> notifier = ServiceEffectivenessInvalidationNotifier(producer)
         >>> await notifier.notify(
         ...     tables_affected=("injection_effectiveness",),
         ...     rows_written=10,
@@ -101,13 +101,27 @@ class EffectivenessInvalidationNotifier:
     ) -> None:
         """Publish an invalidation event for effectiveness data changes.
 
-        This method is fire-and-forget: it logs failures but never raises.
+        This method is fire-and-forget: Kafka send failures are caught and
+        logged at WARNING level but never propagated. The caller's write
+        has already succeeded and must not be affected by notification
+        failure.
+
+        No-ops silently when ``rows_written`` is zero or negative.
 
         Args:
-            tables_affected: Names of the tables that were updated.
-            rows_written: Total rows written in this batch.
-            source: Whether data came from kafka_consumer or batch_compute.
-            correlation_id: Optional correlation ID for tracing.
+            tables_affected: Names of the effectiveness tables that were
+                updated (e.g., ``("injection_effectiveness",)``).
+            rows_written: Total number of rows written in this batch.
+                Values <= 0 cause an early return with no event published.
+            source: Origin of the data write -- ``"kafka_consumer"`` for
+                real-time pipeline writes, ``"batch_compute"`` for
+                backfill writes.
+            correlation_id: Optional correlation ID for tracing. A new
+                UUID is generated if not provided.
+
+        Raises:
+            This method never raises. All exceptions from Kafka
+            serialization or publishing are caught internally.
         """
         if rows_written <= 0:
             return
@@ -159,6 +173,5 @@ class EffectivenessInvalidationNotifier:
 
 
 __all__ = [
-    "EffectivenessInvalidationNotifier",
-    "TOPIC_EFFECTIVENESS_INVALIDATION",
+    "ServiceEffectivenessInvalidationNotifier",
 ]

@@ -22,6 +22,9 @@ Query Models (OMN-2078):
 from omnibase_infra.services.observability.injection_effectiveness.models.model_agent_match import (
     ModelAgentMatchEvent,
 )
+from omnibase_infra.services.observability.injection_effectiveness.models.model_batch_compute_result import (
+    ModelBatchComputeResult,
+)
 from omnibase_infra.services.observability.injection_effectiveness.models.model_context_utilization import (
     ModelContextUtilizationEvent,
 )
@@ -52,6 +55,7 @@ from omnibase_infra.services.observability.injection_effectiveness.models.model_
 
 __all__ = [
     "ModelAgentMatchEvent",
+    "ModelBatchComputeResult",
     "ModelContextUtilizationEvent",
     "ModelEffectivenessInvalidationEvent",
     "ModelInjectionEffectivenessQuery",

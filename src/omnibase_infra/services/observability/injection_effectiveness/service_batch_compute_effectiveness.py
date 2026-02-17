@@ -34,12 +34,12 @@ Related Tickets:
 
 Example:
     >>> import asyncpg
-    >>> from omnibase_infra.services.observability.injection_effectiveness.batch_compute import (
-    ...     BatchComputeEffectivenessMetrics,
+    >>> from omnibase_infra.services.observability.injection_effectiveness.service_batch_compute_effectiveness import (
+    ...     ServiceBatchComputeEffectivenessMetrics,
     ... )
     >>>
     >>> pool = await asyncpg.create_pool(dsn="postgresql://...")
-    >>> batch = BatchComputeEffectivenessMetrics(pool)
+    >>> batch = ServiceBatchComputeEffectivenessMetrics(pool)
     >>> result = await batch.compute_and_persist()
     >>> print(f"Wrote {result.effectiveness_rows} effectiveness rows")
 """
@@ -47,16 +47,19 @@ Example:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import asyncpg
 
-from omnibase_infra.services.observability.injection_effectiveness.notifier import (
-    EffectivenessInvalidationNotifier,
+from omnibase_infra.services.observability.injection_effectiveness.models.model_batch_compute_result import (
+    ModelBatchComputeResult,
+)
+from omnibase_infra.services.observability.injection_effectiveness.service_effectiveness_invalidation_notifier import (
+    ServiceEffectivenessInvalidationNotifier,
 )
 from omnibase_infra.utils.util_db_transaction import set_statement_timeout
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -67,38 +70,7 @@ DEFAULT_BATCH_SIZE: int = 500
 DEFAULT_QUERY_TIMEOUT: float = 60.0
 
 
-@dataclass(frozen=True)
-class BatchComputeResult:
-    """Result of a batch computation run.
-
-    Attributes:
-        effectiveness_rows: Rows written to injection_effectiveness.
-        latency_rows: Rows written to latency_breakdowns.
-        pattern_rows: Rows written to pattern_hit_rates.
-        errors: Error messages for any failed batches.
-        started_at: Computation start timestamp.
-        completed_at: Computation end timestamp.
-    """
-
-    effectiveness_rows: int = 0
-    latency_rows: int = 0
-    pattern_rows: int = 0
-    errors: tuple[str, ...] = field(default_factory=tuple)
-    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-
-    @property
-    def total_rows(self) -> int:
-        """Total rows written across all tables."""
-        return self.effectiveness_rows + self.latency_rows + self.pattern_rows
-
-    @property
-    def has_errors(self) -> bool:
-        """Whether any errors occurred during computation."""
-        return len(self.errors) > 0
-
-
-class BatchComputeEffectivenessMetrics:
+class ServiceBatchComputeEffectivenessMetrics:
     """Batch computation engine for effectiveness metrics.
 
     Reads existing data from agent_actions and agent_routing_decisions
@@ -116,7 +88,7 @@ class BatchComputeEffectivenessMetrics:
 
     Example:
         >>> pool = await asyncpg.create_pool(dsn="postgresql://...")
-        >>> batch = BatchComputeEffectivenessMetrics(pool, batch_size=200)
+        >>> batch = ServiceBatchComputeEffectivenessMetrics(pool, batch_size=200)
         >>> result = await batch.compute_and_persist()
     """
 
@@ -125,7 +97,7 @@ class BatchComputeEffectivenessMetrics:
         pool: asyncpg.Pool,
         batch_size: int = DEFAULT_BATCH_SIZE,
         query_timeout: float = DEFAULT_QUERY_TIMEOUT,
-        notifier: EffectivenessInvalidationNotifier | None = None,
+        notifier: ServiceEffectivenessInvalidationNotifier | None = None,
     ) -> None:
         """Initialize batch computation engine.
 
@@ -140,26 +112,37 @@ class BatchComputeEffectivenessMetrics:
         self._batch_size = batch_size
         self._query_timeout = query_timeout
         self._notifier = notifier
-        self._has_uuid_ossp: bool | None = None
 
     async def compute_and_persist(
         self,
         correlation_id: UUID | None = None,
-    ) -> BatchComputeResult:
+    ) -> ModelBatchComputeResult:
         """Run the full batch computation pipeline.
 
-        Executes three computation phases:
+        Executes three computation phases sequentially:
             1. Derive injection_effectiveness rows from routing decisions
             2. Derive latency_breakdowns from agent action durations
             3. Derive pattern_hit_rates from agent selection patterns
 
         All writes are idempotent (ON CONFLICT DO NOTHING / DO UPDATE).
+        Individual phase failures are caught and recorded in the result's
+        ``errors`` tuple rather than raised, so subsequent phases still run.
+
+        If a notifier was provided and rows were written, publishes an
+        invalidation event listing the affected tables.
 
         Args:
-            correlation_id: Optional correlation ID for tracing.
+            correlation_id: Optional correlation ID for tracing. A new
+                UUID is generated if not provided.
 
         Returns:
-            BatchComputeResult with counts and any errors.
+            ModelBatchComputeResult with per-table row counts, any phase
+            error messages, and start/completion timestamps.
+
+        Raises:
+            Exception: Only if pool acquisition or the notifier fails
+                outside the per-phase try/except blocks. Phase-level
+                errors are captured in the result, not raised.
         """
         effective_correlation_id = correlation_id or uuid4()
         started_at = datetime.now(UTC)
@@ -180,7 +163,8 @@ class BatchComputeEffectivenessMetrics:
                 effective_correlation_id
             )
         except Exception as e:
-            msg = f"Phase 1 (injection_effectiveness) failed: {e}"
+            safe_msg = sanitize_error_message(e)
+            msg = f"Phase 1 (injection_effectiveness) failed: {safe_msg}"
             logger.exception(
                 msg, extra={"correlation_id": str(effective_correlation_id)}
             )
@@ -193,7 +177,8 @@ class BatchComputeEffectivenessMetrics:
                 effective_correlation_id
             )
         except Exception as e:
-            msg = f"Phase 2 (latency_breakdowns) failed: {e}"
+            safe_msg = sanitize_error_message(e)
+            msg = f"Phase 2 (latency_breakdowns) failed: {safe_msg}"
             logger.exception(
                 msg, extra={"correlation_id": str(effective_correlation_id)}
             )
@@ -206,7 +191,8 @@ class BatchComputeEffectivenessMetrics:
                 effective_correlation_id
             )
         except Exception as e:
-            msg = f"Phase 3 (pattern_hit_rates) failed: {e}"
+            safe_msg = sanitize_error_message(e)
+            msg = f"Phase 3 (pattern_hit_rates) failed: {safe_msg}"
             logger.exception(
                 msg, extra={"correlation_id": str(effective_correlation_id)}
             )
@@ -214,7 +200,7 @@ class BatchComputeEffectivenessMetrics:
 
         completed_at = datetime.now(UTC)
 
-        result = BatchComputeResult(
+        result = ModelBatchComputeResult(
             effectiveness_rows=effectiveness_rows,
             latency_rows=latency_rows,
             pattern_rows=pattern_rows,
@@ -353,6 +339,14 @@ class BatchComputeEffectivenessMetrics:
         latency_breakdowns, using the action's correlation_id as session_id
         and the action id as prompt_id.
 
+        Note:
+            Sub-component latencies (routing_latency_ms, retrieval_latency_ms,
+            injection_latency_ms) are set to NULL. These are **synthetic NULL
+            estimates** -- not based on real measurements. Only
+            ``user_latency_ms`` (sourced from ``agent_actions.duration_ms``)
+            reflects an actual measured value. The sub-component columns will
+            remain NULL until per-stage instrumentation is implemented.
+
         Args:
             correlation_id: Correlation ID for tracing.
 
@@ -375,9 +369,11 @@ class BatchComputeEffectivenessMetrics:
                     ELSE NULL
                 END AS cohort,
                 FALSE AS cache_hit,
-                -- Sub-component latencies are NULL because individual
-                -- routing/retrieval/injection timing is not yet
-                -- instrumented. Only total duration is available.
+                -- Synthetic estimates - not based on real measurements.
+                -- Sub-component latencies (routing, retrieval, injection)
+                -- are NULL placeholders until instrumentation is
+                -- implemented. Only total user_latency_ms (from
+                -- agent_actions.duration_ms) reflects a real measurement.
                 NULL AS routing_latency_ms,
                 NULL AS retrieval_latency_ms,
                 NULL AS injection_latency_ms,
@@ -428,7 +424,8 @@ class BatchComputeEffectivenessMetrics:
         to successful actions.
 
         The pattern_id is derived deterministically from the selected_agent
-        string using uuid5 with a fixed namespace.
+        string using ``md5(selected_agent)::uuid`` in SQL, which requires
+        no extensions and produces consistent UUIDs across environments.
 
         Args:
             correlation_id: Correlation ID for tracing.
@@ -436,9 +433,9 @@ class BatchComputeEffectivenessMetrics:
         Returns:
             Number of rows written.
         """
-        # Use a fixed namespace UUID for deterministic pattern_id generation
-        # from agent names. This ensures the same agent always maps to the
-        # same pattern_id across runs.
+        # Deterministic pattern_id via md5(selected_agent)::uuid.  This is a
+        # pure-SQL approach that requires no extensions and guarantees the same
+        # agent name always produces the same UUID across all environments.
         sql = """
             INSERT INTO pattern_hit_rates (
                 pattern_id, utilization_method, utilization_score,
@@ -446,24 +443,23 @@ class BatchComputeEffectivenessMetrics:
                 created_at, updated_at
             )
             SELECT
-                -- Deterministic UUID from agent name using MD5 hash cast
-                uuid_generate_v5(
-                    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid,
-                    rd.selected_agent
-                ) AS pattern_id,
+                md5(rd.selected_agent)::uuid AS pattern_id,
                 'batch_derived' AS utilization_method,
                 -- utilization_score: average confidence for this agent
                 AVG(rd.confidence_score) AS utilization_score,
                 -- hit_count: routing decisions with high confidence
-                COUNT(*) FILTER (WHERE rd.confidence_score >= 0.7) AS hit_count,
+                COUNT(*) FILTER (WHERE rd.confidence_score >= 0.7)
+                    AS hit_count,
                 -- miss_count: routing decisions with low confidence
-                COUNT(*) FILTER (WHERE rd.confidence_score < 0.7) AS miss_count,
+                COUNT(*) FILTER (WHERE rd.confidence_score < 0.7)
+                    AS miss_count,
                 -- sample_count: total decisions for this agent
                 COUNT(*) AS sample_count,
                 MIN(rd.created_at) AS created_at,
                 NOW() AS updated_at
             FROM agent_routing_decisions rd
             GROUP BY rd.selected_agent
+            ORDER BY rd.selected_agent
             LIMIT $1
             ON CONFLICT (pattern_id, utilization_method) DO UPDATE SET
                 -- Counts are full snapshots (not accumulated), so the
@@ -483,53 +479,7 @@ class BatchComputeEffectivenessMetrics:
             async with conn.transaction():
                 await set_statement_timeout(conn, self._query_timeout * 1000)
 
-                # Check if uuid-ossp extension is available; if not, use a fallback.
-                # Result is cached on the instance after the first query.
-                if self._has_uuid_ossp is None:
-                    row = await conn.fetchrow(
-                        "SELECT 1 FROM pg_extension WHERE extname = 'uuid-ossp'"
-                    )
-                    self._has_uuid_ossp = row is not None
-
-                if self._has_uuid_ossp:
-                    result: str = await conn.execute(sql, self._batch_size)
-                else:
-                    # Fallback: use md5-based UUID generation without extension
-                    sql_fallback = """
-                        INSERT INTO pattern_hit_rates (
-                            pattern_id, utilization_method, utilization_score,
-                            hit_count, miss_count, sample_count,
-                            created_at, updated_at
-                        )
-                        SELECT
-                            md5(rd.selected_agent)::uuid AS pattern_id,
-                            'batch_derived' AS utilization_method,
-                            AVG(rd.confidence_score) AS utilization_score,
-                            COUNT(*) FILTER (WHERE rd.confidence_score >= 0.7)
-                                AS hit_count,
-                            COUNT(*) FILTER (WHERE rd.confidence_score < 0.7)
-                                AS miss_count,
-                            COUNT(*) AS sample_count,
-                            MIN(rd.created_at) AS created_at,
-                            NOW() AS updated_at
-                        FROM agent_routing_decisions rd
-                        GROUP BY rd.selected_agent
-                        LIMIT $1
-                        ON CONFLICT (pattern_id, utilization_method) DO UPDATE SET
-                            -- Counts are full snapshots (not accumulated), so the
-                            -- score must also be a snapshot to stay consistent.
-                            utilization_score = EXCLUDED.utilization_score,
-                            hit_count = EXCLUDED.hit_count,
-                            miss_count = EXCLUDED.miss_count,
-                            sample_count = EXCLUDED.sample_count,
-                            confidence = CASE
-                                WHEN EXCLUDED.sample_count >= 20
-                                THEN EXCLUDED.utilization_score
-                                ELSE NULL
-                            END,
-                            updated_at = NOW()
-                    """
-                    result = await conn.execute(sql_fallback, self._batch_size)
+                result: str = await conn.execute(sql, self._batch_size)
 
         count = _parse_execute_count(result)
 
@@ -544,15 +494,18 @@ class BatchComputeEffectivenessMetrics:
 
 
 def _parse_execute_count(result: str) -> int:
-    """Parse row count from asyncpg execute result string.
+    """Parse row count from an asyncpg ``execute()`` result string.
 
-    asyncpg's execute() returns strings like "INSERT 0 42" or "UPDATE 42".
+    asyncpg's ``execute()`` returns status strings such as ``"INSERT 0 42"``
+    or ``"UPDATE 42"``. This helper extracts the trailing integer which
+    represents the number of affected rows.
 
     Args:
-        result: The result string from asyncpg execute().
+        result: Status string returned by ``asyncpg.Connection.execute()``.
 
     Returns:
-        Number of affected rows, or 0 if parsing fails.
+        Number of affected rows parsed from the last token, or ``0`` if
+        the string is empty or not parseable.
     """
     try:
         parts = result.split()
@@ -562,8 +515,7 @@ def _parse_execute_count(result: str) -> int:
 
 
 __all__ = [
-    "BatchComputeEffectivenessMetrics",
-    "BatchComputeResult",
+    "ServiceBatchComputeEffectivenessMetrics",
     "DEFAULT_BATCH_SIZE",
     "DEFAULT_QUERY_TIMEOUT",
 ]

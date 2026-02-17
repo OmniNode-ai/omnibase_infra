@@ -540,7 +540,7 @@ TOPIC_EFFECTIVENESS_INVALIDATION: Final[str] = (
 )
 """Effectiveness data invalidation events for dashboard refresh.
 
-Producer: WriterInjectionEffectivenessPostgres, BatchComputeEffectivenessMetrics
+Producer: WriterInjectionEffectivenessPostgres, ServiceBatchComputeEffectivenessMetrics
 Consumer: Dashboard WebSocket servers, API caches
 Payload: ModelEffectivenessInvalidationEvent (tables_affected, rows_written, source)
 """
