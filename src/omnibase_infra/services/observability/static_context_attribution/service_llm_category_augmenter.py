@@ -1,0 +1,208 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+"""Optional LLM augmentation pass for semantic category classification.
+
+Pass 2 of the two-pass architecture. Uses a handler-driven LLM to
+reclassify deterministically parsed sections into semantic categories
+(config, rules, topology, examples, etc.).
+
+This pass is optional. The deterministic parser (Pass 1) assigns
+UNCATEGORIZED to all sections. Pass 2 enriches sections with semantic
+categories for more granular cost attribution analysis.
+
+The augmenter uses a simple protocol: it accepts a callable that takes
+a prompt string and returns a category string. This allows plugging in
+any LLM backend (local, OpenAI, Anthropic) via the handler system.
+
+Related Tickets:
+    - OMN-2241: E1-T7 Static context token cost attribution
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Awaitable, Callable
+
+from omnibase_infra.enums.enum_context_section_category import (
+    EnumContextSectionCategory,
+)
+from omnibase_infra.services.observability.static_context_attribution.model_context_section import (
+    ModelContextSection,
+)
+from omnibase_infra.utils.util_error_sanitization import (
+    sanitize_error_message,
+    sanitize_error_string,
+)
+
+logger = logging.getLogger(__name__)
+
+# Type alias for async LLM inference function: prompt -> response text
+LlmInferenceFn = Callable[[str], Awaitable[str]]
+
+_CATEGORY_PROMPT_TEMPLATE = """Classify the following markdown section into exactly one semantic category.
+
+Categories:
+- config: Configuration and environment variables
+- rules: Development rules, standards, and invariants
+- topology: Infrastructure topology and network architecture
+- examples: Code examples, usage patterns, and snippets
+- commands: CLI commands, database operations, health checks
+- architecture: System architecture, node types, data flow
+- documentation: Documentation references and guides
+- testing: Testing standards, markers, fixtures
+- error_handling: Error hierarchy, patterns, recovery
+
+Section heading: {heading}
+Section content (first 500 chars):
+{content_preview}
+
+Respond with ONLY the category name (one word, lowercase). Example: config"""
+
+# Map from string values to enum members
+_CATEGORY_MAP: dict[str, EnumContextSectionCategory] = {
+    member.value: member for member in EnumContextSectionCategory
+}
+
+
+class ServiceLlmCategoryAugmenter:
+    """Optional LLM-driven semantic category classifier for context sections.
+
+    Accepts an async inference function and uses it to classify sections
+    into semantic categories. Falls back to UNCATEGORIZED on any error.
+
+    Usage:
+        >>> async def my_llm(prompt: str) -> str:
+        ...     return "config"  # Mock LLM
+        >>> augmenter = ServiceLlmCategoryAugmenter(llm_fn=my_llm)
+        >>> sections = [ModelContextSection(content="POSTGRES_HOST=...")]
+        >>> augmented = await augmenter.augment(sections)
+        >>> augmented[0].category
+        <EnumContextSectionCategory.CONFIG: 'config'>
+    """
+
+    def __init__(self, llm_fn: LlmInferenceFn) -> None:
+        """Initialize with an async LLM inference function.
+
+        Args:
+            llm_fn: Async callable that takes a prompt string and returns
+                the LLM response text.
+        """
+        self._llm_fn = llm_fn
+
+    async def augment(
+        self,
+        sections: list[ModelContextSection],
+    ) -> list[ModelContextSection]:
+        """Classify sections into semantic categories using LLM.
+
+        Processes sections sequentially to avoid overwhelming the LLM
+        endpoint. Falls back to UNCATEGORIZED on any individual error.
+
+        Args:
+            sections: Parsed sections to classify.
+
+        Returns:
+            New list of sections with updated ``category`` field.
+        """
+        augmented: list[ModelContextSection] = []
+        classified_count = 0
+
+        for section in sections:
+            category = await self._classify_section(section)
+            augmented.append(section.with_category(category))
+            if category != EnumContextSectionCategory.UNCATEGORIZED:
+                classified_count += 1
+
+        logger.info(
+            "LLM augmentation complete: %d/%d sections classified",
+            classified_count,
+            len(sections),
+        )
+        return augmented
+
+    async def _classify_section(
+        self,
+        section: ModelContextSection,
+    ) -> EnumContextSectionCategory:
+        """Classify a single section using the LLM.
+
+        Args:
+            section: Section to classify.
+
+        Returns:
+            Semantic category enum member.
+        """
+        content_preview = section.content[:500]
+        prompt = _CATEGORY_PROMPT_TEMPLATE.format(
+            heading=section.heading or "(preamble)",
+            content_preview=content_preview,
+        )
+
+        try:
+            response = await self._llm_fn(prompt)
+            raw_category = response.strip().lower().replace('"', "").replace("'", "")
+
+            # Try direct match
+            if raw_category in _CATEGORY_MAP:
+                return _CATEGORY_MAP[raw_category]
+
+            # Extract first token to reduce false-positive partial matches
+            # on verbose LLM responses (e.g. "config - this section contains...")
+            tokens = raw_category.split()
+            first_token = tokens[0] if tokens else raw_category
+
+            # Try first-token direct match
+            if first_token in _CATEGORY_MAP:
+                return _CATEGORY_MAP[first_token]
+
+            # Try partial match against first token, then fall back to
+            # full response.  Prefer the longest matching key so that
+            # e.g. "error_handling" wins over "error", and
+            # "documentation about architecture" matches "architecture"
+            # (12 chars) over "documentation" only when both appear.
+            # "uncategorized" is excluded from partial matching because
+            # it is the fallback default.
+            best_match: EnumContextSectionCategory | None = None
+            best_key_len = 0
+            for key, member in _CATEGORY_MAP.items():
+                if key == "uncategorized":
+                    continue
+                if key in first_token and len(key) > best_key_len:
+                    best_match = member
+                    best_key_len = len(key)
+
+            # Fall back to full response partial match if first token
+            # did not produce a result
+            if best_match is None:
+                for key, member in _CATEGORY_MAP.items():
+                    if key == "uncategorized":
+                        continue
+                    if key in raw_category and len(key) > best_key_len:
+                        best_match = member
+                        best_key_len = len(key)
+            if best_match is not None:
+                return best_match
+
+            safe_category = sanitize_error_string(raw_category)
+            safe_heading = sanitize_error_string(section.heading or "(preamble)")
+            logger.warning(
+                "LLM returned unrecognized category '%s' for section '%s', "
+                "falling back to UNCATEGORIZED",
+                safe_category,
+                safe_heading,
+            )
+            return EnumContextSectionCategory.UNCATEGORIZED
+
+        except Exception as exc:
+            safe_heading = sanitize_error_string(section.heading or "(preamble)")
+            safe_error = sanitize_error_message(exc)
+            logger.warning(
+                "LLM classification failed for section '%s': %s; "
+                "falling back to UNCATEGORIZED",
+                safe_heading,
+                safe_error,
+            )
+            return EnumContextSectionCategory.UNCATEGORIZED
+
+
+__all__ = ["LlmInferenceFn", "ServiceLlmCategoryAugmenter"]
