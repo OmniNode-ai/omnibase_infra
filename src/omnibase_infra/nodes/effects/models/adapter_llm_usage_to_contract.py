@@ -76,7 +76,7 @@ def to_usage_normalized(usage: ModelLlmUsage) -> ContractLlmUsageNormalized:
     """
     source = usage.usage_source
     usage_is_estimated = source == ContractEnumUsageSource.ESTIMATED
-    total = usage.tokens_total or 0
+    total = usage.tokens_total if usage.tokens_total is not None else 0
 
     return ContractLlmUsageNormalized(
         prompt_tokens=usage.tokens_input,
@@ -121,7 +121,7 @@ def to_call_metrics(
     if not model_id:
         raise ValueError("model_id must be a non-empty string")
 
-    total = usage.tokens_total or 0
+    total = usage.tokens_total if usage.tokens_total is not None else 0
     is_estimated = usage.usage_source == ContractEnumUsageSource.ESTIMATED
 
     return ContractLlmCallMetrics(

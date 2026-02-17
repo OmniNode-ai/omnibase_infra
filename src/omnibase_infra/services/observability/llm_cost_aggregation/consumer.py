@@ -84,6 +84,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Fatal Kafka commit errors that indicate the consumer's group membership is
+# invalid and it must rejoin.  Retriable errors (e.g. transient coordinator
+# issues) are expected to self-resolve and are NOT in this set.
+_FATAL_COMMIT_ERROR_NAMES: frozenset[str] = frozenset(
+    {
+        "UnknownMemberIdError",
+        "RebalanceInProgressError",
+        "IllegalGenerationError",
+        "FencedInstanceIdError",
+    }
+)
+
+# How many consecutive getmany() timeouts before emitting a warning.
+_CONSECUTIVE_TIMEOUT_LOG_INTERVAL: int = 5
+
 
 # =============================================================================
 # Utility Functions
@@ -587,6 +602,7 @@ class ServiceLlmCostAggregator:
             return
 
         batch_timeout_seconds = self._config.batch_timeout_ms / 1000.0
+        consecutive_timeouts: int = 0
 
         try:
             while self._running:
@@ -601,8 +617,21 @@ class ServiceLlmCostAggregator:
                         + self._config.poll_timeout_buffer_seconds,
                     )
                 except TimeoutError:
+                    consecutive_timeouts += 1
+                    if consecutive_timeouts % _CONSECUTIVE_TIMEOUT_LOG_INTERVAL == 0:
+                        logger.warning(
+                            "Kafka getmany() timed out %d consecutive times",
+                            consecutive_timeouts,
+                            extra={
+                                "consumer_id": self._consumer_id,
+                                "correlation_id": str(correlation_id),
+                                "consecutive_timeouts": consecutive_timeouts,
+                            },
+                        )
                     continue
 
+                # Successful poll -- reset timeout counter.
+                consecutive_timeouts = 0
                 await self.metrics.record_polled()
 
                 if not records:
@@ -826,18 +855,8 @@ class ServiceLlmCostAggregator:
         except KafkaError as exc:
             await self.metrics.record_commit_failure()
 
-            # Classify the error: fatal errors indicate the consumer's
-            # group membership is invalid and it must rejoin.  Retriable
-            # errors (e.g., transient coordinator issues) are expected to
-            # self-resolve.
-            _FATAL_ERROR_NAMES = {
-                "UnknownMemberIdError",
-                "RebalanceInProgressError",
-                "IllegalGenerationError",
-                "FencedInstanceIdError",
-            }
             error_name = type(exc).__name__
-            is_fatal = error_name in _FATAL_ERROR_NAMES
+            is_fatal = error_name in _FATAL_COMMIT_ERROR_NAMES
 
             metrics_snapshot = await self.metrics.snapshot()
             commit_failures = metrics_snapshot.get("commit_failures", 0)
