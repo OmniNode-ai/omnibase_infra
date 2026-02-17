@@ -562,9 +562,7 @@ def demo_reset(dry_run: bool, purge_topics: bool, env_file: str) -> None:
             transport_type=EnumInfraTransportType.RUNTIME,
             operation="demo_reset",
         )
-        console.print(
-            f"[red]Error: {type(e).__name__}: {sanitize_error_message(e)}[/red]"
-        )
+        console.print(f"[red]Error: {sanitize_error_message(e)}[/red]")
         console.print(f"[dim]correlation_id: {context.correlation_id}[/dim]")
         raise SystemExit(1)
 
