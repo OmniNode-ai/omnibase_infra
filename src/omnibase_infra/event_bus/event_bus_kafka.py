@@ -100,6 +100,17 @@ Environment Variables:
             - Correlation ID for tracking
             - Retry count and error type
 
+    Instance Discriminator (OMN-2251):
+        KAFKA_INSTANCE_ID: Instance discriminator for consumer group IDs
+            Default: None (no discrimination, single-container behavior)
+            Example: "container-1", "pod-abc123"
+
+            When set, appended as '.__i.{instance_id}' to consumer group IDs
+            so each container instance gets its own consumer group and receives
+            all partitions for its subscribed topics. This prevents the Kafka
+            rebalance problem where multiple containers sharing a consumer group
+            ID cause some consumers to get zero partition assignments.
+
 Dual Retry Configuration:
     ONEX uses TWO distinct retry mechanisms that serve different purposes:
 
@@ -176,6 +187,7 @@ Protocol Compatibility:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import random
 import re
@@ -208,7 +220,8 @@ from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.observability.wiring_health import MixinEmissionCounter
-from omnibase_infra.utils import compute_consumer_group_id
+from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
+from omnibase_infra.utils.util_consumer_group import KAFKA_CONSUMER_GROUP_MAX_LENGTH
 
 logger = logging.getLogger(__name__)
 
@@ -662,17 +675,15 @@ class EventBusKafka(
         stops the producer. Safe to call multiple times. Uses proper
         synchronization to prevent races during shutdown.
         """
-        # First, signal shutdown to all background tasks
+        # Signal shutdown and snapshot consumer tasks in a single lock
+        # acquisition to prevent another coroutine from modifying
+        # _consumer_tasks between the flag set and the snapshot.
         async with self._lock:
             if self._shutdown:
                 # Already shutting down or shutdown
                 return
             self._shutdown = True
             self._started = False
-
-        # Cancel all consumer tasks (outside main lock to avoid deadlock)
-        tasks_to_cancel = []
-        async with self._lock:
             tasks_to_cancel = list(self._consumer_tasks.values())
 
         for task in tasks_to_cancel:
@@ -1150,11 +1161,90 @@ class EventBusKafka(
         #   - It is short enough to stay within Kafka's 255-char group_id limit
         #   - It makes the idempotency check unambiguous
         topic_suffix = f".__t.{topic}"
-        effective_group_id = (
-            stripped_group_id
+
+        # Strip topic suffix before applying instance discriminator so that
+        # pre-scoped group IDs (already ending with .__t.{topic}) don't end up
+        # with the instance discriminator AFTER the topic suffix and the topic
+        # suffix appended again (OMN-2251 / CodeRabbit review).
+        base_group_id = (
+            stripped_group_id[: -len(topic_suffix)]
             if stripped_group_id.endswith(topic_suffix)
-            else f"{stripped_group_id}{topic_suffix}"
+            else stripped_group_id
         )
+
+        # Apply instance discriminator for multi-container dev environments
+        # (OMN-2251). When instance_id is configured, each container gets its
+        # own consumer group membership so Kafka assigns all partitions to each
+        # instance rather than rebalancing between them. When instance_id is
+        # None (default), this is a no-op and single-container behavior is
+        # preserved.
+        try:
+            instance_discriminated_id = apply_instance_discriminator(
+                base_group_id, self._config.instance_id
+            )
+        except ValueError as e:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="start_consumer",
+                target_name=f"kafka.{topic}",
+            )
+            raise ProtocolConfigurationError(
+                f"Invalid KAFKA_INSTANCE_ID: {self._config.instance_id!r}",
+                context=context,
+                parameter="instance_id",
+                value=self._config.instance_id,
+            ) from e
+
+        effective_group_id = f"{instance_discriminated_id}{topic_suffix}"
+
+        # Enforce Kafka's 255-char group_id limit on the *final* ID (after
+        # both instance discriminator and topic suffix have been applied).
+        # apply_instance_discriminator() enforces the limit on its own output,
+        # but the topic suffix added above can push the total over the max.
+        #
+        # Truncation strategy: preserve the topic suffix for debuggability.
+        #
+        # The group ID has the structure: {prefix}{topic_suffix} where the
+        # prefix is the instance-discriminated base ID and topic_suffix is
+        # ".__t.{topic}".  Naive truncation from the right destroys the
+        # topic suffix, making it impossible to tell which topic a consumer
+        # group belongs to when inspecting Kafka admin tools.
+        #
+        # Instead, we:
+        #   1. Extract the topic suffix (.__t.{topic})
+        #   2. Compute available space for the prefix: max - len(suffix) - 1 - 8
+        #      (1 for underscore separator, 8 for hash)
+        #   3. Truncate the prefix, append _<hash>, then re-append the suffix
+        #   4. If even the suffix + hash alone exceed max length, fall back to
+        #      a full hash truncation without suffix preservation
+        # Truncation logic is tested in TestKafkaEventBusInstanceDiscriminator:
+        #   test_effective_group_id_enforces_max_length (basic case)
+        #   test_truncation_with_very_long_topic_name (suffix near limit)
+        #   test_truncation_hash_fallback_path (suffix exceeds limit)
+        #   test_truncation_preserves_topic_suffix_when_possible
+        if len(effective_group_id) > KAFKA_CONSUMER_GROUP_MAX_LENGTH:
+            hash_input = f"{base_group_id}|{self._config.instance_id or ''}|{topic}"
+            hash_suffix = hashlib.sha256(hash_input.encode()).hexdigest()[:8]
+
+            # Try to preserve topic suffix for debuggability
+            # hash_overhead = 1 (underscore) + 8 (hash hex chars) = 9
+            hash_overhead = 9
+            available_for_prefix = (
+                KAFKA_CONSUMER_GROUP_MAX_LENGTH - len(topic_suffix) - hash_overhead
+            )
+
+            if available_for_prefix > 0:
+                # Suffix-preserving truncation: {truncated_prefix}_{hash}{topic_suffix}
+                truncated_prefix = instance_discriminated_id[:available_for_prefix]
+                effective_group_id = f"{truncated_prefix}_{hash_suffix}{topic_suffix}"
+            else:
+                # Topic suffix + hash alone exceed max length; fall back to
+                # plain prefix truncation without suffix preservation.
+                max_prefix_length = KAFKA_CONSUMER_GROUP_MAX_LENGTH - hash_overhead
+                effective_group_id = (
+                    f"{effective_group_id[:max_prefix_length]}_{hash_suffix}"
+                )
 
         # Apply consumer configuration from config model
         consumer = AIOKafkaConsumer(
@@ -1336,6 +1426,32 @@ class EventBusKafka(
                 effective_consumer_group = (
                     subscribers[0][0] if subscribers else "unknown"
                 )
+
+                # Warn when a message arrives but no subscribers are registered.
+                # The message will be silently dropped (no DLQ entry) since there
+                # is no handler to fail. This typically indicates a race between
+                # unsubscribe and the consumer loop, or a misconfigured topic.
+                if not subscribers:
+                    event_type = "unknown"
+                    try:
+                        raw_headers = getattr(msg, "headers", None) or []
+                        for hdr_key, hdr_val in raw_headers:
+                            if hdr_key == "event_type" and hdr_val is not None:
+                                event_type = hdr_val.decode("utf-8")
+                                break
+                    except Exception:
+                        pass
+                    logger.warning(
+                        "Message received on topic '%s' with event_type='%s' "
+                        "but no subscribers are registered; message will be dropped",
+                        topic,
+                        event_type,
+                        extra={
+                            "topic": topic,
+                            "event_type": event_type,
+                            "correlation_id": str(correlation_id),
+                        },
+                    )
 
                 # Convert Kafka message to ModelEventMessage - handle conversion errors
                 try:
@@ -1787,6 +1903,10 @@ class EventBusKafka(
         timestamp_str = headers_dict.get("timestamp")
         if timestamp_str:
             timestamp = datetime.fromisoformat(timestamp_str)
+            # Assume UTC if the stored ISO string lacks timezone info, since the
+            # rest of the codebase (publish, DLQ, health) uses UTC-aware datetimes.
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=UTC)
         else:
             timestamp = datetime.now(UTC)
 
@@ -1795,15 +1915,41 @@ class EventBusKafka(
         valid_priorities = ("low", "normal", "high", "critical")
         priority = priority_str if priority_str in valid_priorities else "normal"
 
-        # Parse integer fields with fallback defaults
+        # Parse integer fields with fallback defaults.
+        # Kafka headers are byte strings; malformed values (e.g. "abc", "1.5")
+        # must not crash the consume loop, so each int() call is guarded.
         retry_count_str = headers_dict.get("retry_count")
-        retry_count = int(retry_count_str) if retry_count_str else 0
+        retry_count = 0
+        if retry_count_str:
+            try:
+                retry_count = int(retry_count_str)
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Malformed retry_count header %r, defaulting to 0",
+                    retry_count_str,
+                )
 
         max_retries_str = headers_dict.get("max_retries")
-        max_retries = int(max_retries_str) if max_retries_str else 3
+        max_retries = 3
+        if max_retries_str:
+            try:
+                max_retries = int(max_retries_str)
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Malformed max_retries header %r, defaulting to 3",
+                    max_retries_str,
+                )
 
         ttl_seconds_str = headers_dict.get("ttl_seconds")
-        ttl_seconds = int(ttl_seconds_str) if ttl_seconds_str else None
+        ttl_seconds: int | None = None
+        if ttl_seconds_str:
+            try:
+                ttl_seconds = int(ttl_seconds_str)
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Malformed ttl_seconds header %r, defaulting to None",
+                    ttl_seconds_str,
+                )
 
         return ModelEventHeaders(
             content_type=headers_dict.get("content_type", "application/json"),

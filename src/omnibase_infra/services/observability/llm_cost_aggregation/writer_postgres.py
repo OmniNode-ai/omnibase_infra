@@ -26,8 +26,12 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import logging
+import math
+import re
 from collections import OrderedDict
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -36,7 +40,9 @@ import asyncpg
 
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.utils.util_db_transaction import set_statement_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +100,23 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
             circuit_breaker_half_open_successes: Successes to close from half-open.
             query_timeout: Statement timeout for database queries in seconds.
         """
+        # Validate query_timeout before storing
+        if not math.isfinite(query_timeout) or query_timeout <= 0:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="__init__",
+            )
+            raise ProtocolConfigurationError(
+                f"query_timeout must be a finite positive number, got {query_timeout!r}",
+                context=context,
+                parameter="query_timeout",
+                value=str(query_timeout),
+            )
+
         self._pool = pool
         self._query_timeout = query_timeout
         self._dedup_cache: OrderedDict[str, bool] = OrderedDict()
+        self._dedup_lock = asyncio.Lock()
 
         # Initialize circuit breaker
         self._init_circuit_breaker(
@@ -107,11 +127,46 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
             half_open_successes=circuit_breaker_half_open_successes,
         )
 
+    def _statement_timeout_ms(self) -> int:
+        """Compute the statement timeout in milliseconds as a bounded integer.
+
+        PostgreSQL's ``SET LOCAL statement_timeout`` does not support
+        parameterized queries (``$1`` placeholders), so the value must be
+        interpolated into the SQL string. This method converts
+        ``_query_timeout`` (validated as a finite positive float in
+        ``__init__``) to a bounded integer to guarantee the interpolated
+        value is safe.
+
+        Returns:
+            Timeout in milliseconds, clamped to [1, 600_000] (10 minutes max).
+        """
+        timeout_ms = int(self._query_timeout * 1000)
+        # Defensive bounds: even though __init__ validates query_timeout > 0,
+        # clamp to a safe range in case the attribute is mutated post-init.
+        timeout_ms = max(timeout_ms, 1)
+        timeout_ms = min(timeout_ms, 600_000)
+        return timeout_ms
+
     def _is_duplicate(self, event_id: str) -> bool:
         """Check if an event ID has already been processed.
 
         Uses an LRU-style bounded cache. If the cache exceeds
         ``_MAX_DEDUP_CACHE_SIZE``, the oldest entries are evicted.
+
+        This method only **checks** the cache; it does NOT add the event ID.
+        Callers must explicitly call ``_mark_seen`` after successful
+        persistence to avoid marking events as "seen" before they are
+        actually written to the database.
+
+        Precondition:
+            **Caller must hold** ``_dedup_lock``.  This method reads
+            ``_dedup_cache`` without acquiring the lock internally.
+            This is a deliberate design choice: callers
+            (``write_call_metrics`` and ``write_cost_aggregates``) batch
+            multiple ``_is_duplicate`` calls under a single lock acquisition
+            to avoid per-event lock overhead.  Making this method acquire
+            the lock itself would cause deadlocks with the existing callers
+            that already hold it.
 
         Args:
             event_id: Unique event identifier to check.
@@ -124,14 +179,27 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
             self._dedup_cache.move_to_end(event_id)
             return True
 
-        # Add to cache
+        return False
+
+    def _mark_seen(self, event_id: str) -> None:
+        """Record an event ID as successfully persisted.
+
+        Adds the event ID to the bounded LRU dedup cache. This must be
+        called only AFTER the corresponding database write has committed,
+        so that a failed write does not prevent retries.
+
+        Precondition:
+            **Caller must hold** ``_dedup_lock``.  See ``_is_duplicate``
+            docstring for rationale.
+
+        Args:
+            event_id: Unique event identifier to mark as seen.
+        """
         self._dedup_cache[event_id] = True
 
         # Evict oldest if over capacity
         while len(self._dedup_cache) > _MAX_DEDUP_CACHE_SIZE:
             self._dedup_cache.popitem(last=False)
-
-        return False
 
     async def write_call_metrics(
         self,
@@ -169,11 +237,33 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         # its own dedup state. This intentionally doubles the cache entries per
         # event but keeps the two write paths decoupled -- a failure in one
         # does not affect dedup tracking in the other.
-        unique_events: list[dict[str, object]] = []
-        for event in events:
-            event_id = _derive_stable_dedup_key(event)
-            if not self._is_duplicate(event_id):
-                unique_events.append(event)
+        #
+        # NOTE: _is_duplicate() only checks the cache; it does NOT add entries.
+        # Events are marked as seen via _mark_seen() only AFTER successful
+        # database persistence to prevent data loss on write failures.
+        unique_events: list[tuple[str, dict[str, object]]] = []
+        seen_in_batch: set[str] = set()
+        empty_dedup_fields_count = 0
+        async with self._dedup_lock:
+            for event in events:
+                event_id = _derive_stable_dedup_key(event)
+                if _has_empty_dedup_fields(event):
+                    empty_dedup_fields_count += 1
+                if not self._is_duplicate(event_id) and event_id not in seen_in_batch:
+                    unique_events.append((event_id, event))
+                    seen_in_batch.add(event_id)
+
+        if empty_dedup_fields_count > 0:
+            logger.warning(
+                "Batch contained %d event(s) with all dedup fallback fields empty; "
+                "deduplication may not work correctly for these events",
+                empty_dedup_fields_count,
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "total_events": len(events),
+                    "empty_dedup_fields_count": empty_dedup_fields_count,
+                },
+            )
 
         if not unique_events:
             logger.debug(
@@ -186,17 +276,17 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
             return 0
 
         written = 0
+        # Track dedup keys for events that were successfully persisted.
+        # We accumulate them here and add to the dedup cache only after
+        # the outer transaction commits.
+        persisted_dedup_keys: list[str] = []
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    # Safe f-string: self._query_timeout is always a float
-                    # (validated at __init__), so int(float * 1000) is guaranteed
-                    # to produce a plain integer -- no user-controlled input.
-                    await conn.execute(
-                        f"SET LOCAL statement_timeout = '{int(self._query_timeout * 1000)}'"
-                    )
+                    timeout_ms = self._statement_timeout_ms()
+                    await set_statement_timeout(conn, timeout_ms)
 
-                    for event in unique_events:
+                    for event_id, event in unique_events:
                         try:
                             # Use a SAVEPOINT so a per-row error does not
                             # abort the entire transaction.  asyncpg's nested
@@ -218,24 +308,30 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                     ON CONFLICT (id) DO NOTHING
                                     """,
                                     _safe_uuid(event.get("correlation_id")),
-                                    str(event.get("session_id", "unknown")),
+                                    event.get("session_id") or None,
                                     event.get("run_id"),
                                     str(event.get("model_id", "unknown")),
                                     _safe_int(event.get("prompt_tokens")),
                                     _safe_int(event.get("completion_tokens")),
                                     _safe_int(event.get("total_tokens")),
                                     _safe_decimal(event.get("estimated_cost_usd")),
-                                    _safe_int(event.get("latency_ms")) or 0,
+                                    _safe_numeric_or_none(event.get("latency_ms")),
                                     _resolve_usage_source(event),
                                     bool(event.get("usage_is_estimated", False)),
                                     _safe_jsonb(event.get("usage_raw")),
-                                    str(event.get("input_hash", ""))[:64] or None,
+                                    _truncate_input_hash(
+                                        str(event.get("input_hash", ""))
+                                    ),
                                     str(event.get("code_version", ""))[:64] or None,
                                     str(event.get("contract_version", ""))[:64] or None,
                                     str(event.get("reporting_source", ""))[:255]
                                     or None,
                                 )
+                            # SAVEPOINT released -- row is persisted within the
+                            # outer transaction. Record the dedup key for
+                            # post-commit cache insertion.
                             written += 1
+                            persisted_dedup_keys.append(event_id)
                         except Exception:
                             logger.warning(
                                 "Failed to insert call metric row, skipping",
@@ -245,6 +341,12 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                     "model_id": event.get("model_id"),
                                 },
                             )
+
+            # Outer transaction committed successfully. Now mark persisted
+            # events in the dedup cache so they are skipped on replay.
+            async with self._dedup_lock:
+                for dedup_key in persisted_dedup_keys:
+                    self._mark_seen(dedup_key)
 
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
@@ -314,18 +416,47 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         # consumes two cache slots (_MAX_DEDUP_CACHE_SIZE bounds total entries,
         # not per-event count), which is an acceptable trade-off to keep the
         # two write paths independently idempotent.
+        #
+        # NOTE: _is_duplicate() only checks the cache; it does NOT add entries.
+        # Events are marked as seen via _mark_seen() only AFTER successful
+        # database persistence to prevent data loss on write failures.
         unique_events: list[dict[str, object]] = []
-        for event in events:
-            event_id = _derive_stable_dedup_key(event)
-            dedup_key = f"agg:{event_id}"
-            if not self._is_duplicate(dedup_key):
-                unique_events.append(event)
+        agg_dedup_keys: list[str] = []
+        seen_in_batch: set[str] = set()
+        empty_dedup_fields_count = 0
+        async with self._dedup_lock:
+            for event in events:
+                event_id = _derive_stable_dedup_key(event)
+                if _has_empty_dedup_fields(event):
+                    empty_dedup_fields_count += 1
+                dedup_key = f"agg:{event_id}"
+                if not self._is_duplicate(dedup_key) and dedup_key not in seen_in_batch:
+                    unique_events.append(event)
+                    agg_dedup_keys.append(dedup_key)
+                    seen_in_batch.add(dedup_key)
+
+        if empty_dedup_fields_count > 0:
+            logger.warning(
+                "Aggregation batch contained %d event(s) with all dedup fallback "
+                "fields empty; deduplication may not work correctly for these events",
+                empty_dedup_fields_count,
+                extra={
+                    "correlation_id": str(correlation_id),
+                    "total_events": len(events),
+                    "empty_dedup_fields_count": empty_dedup_fields_count,
+                },
+            )
 
         if not unique_events:
             return 0
 
-        # Build aggregation rows from events
-        agg_rows = _build_aggregation_rows(unique_events)
+        # Build aggregation rows from events, then pre-aggregate rows
+        # sharing the same (aggregation_key, window) composite key. Without
+        # pre-aggregation, the SQL ON CONFLICT DO UPDATE clause computes
+        # weighted averages against stale intermediate values when the same
+        # key appears multiple times in the batch.
+        raw_agg_rows = _build_aggregation_rows(unique_events)
+        agg_rows = _pre_aggregate_rows(raw_agg_rows)
 
         if not agg_rows:
             return 0
@@ -334,12 +465,8 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
-                    # Safe f-string: self._query_timeout is always a float
-                    # (validated at __init__), so int(float * 1000) is guaranteed
-                    # to produce a plain integer -- no user-controlled input.
-                    await conn.execute(
-                        f"SET LOCAL statement_timeout = '{int(self._query_timeout * 1000)}'"
-                    )
+                    timeout_ms = self._statement_timeout_ms()
+                    await set_statement_timeout(conn, timeout_ms)
 
                     for row in agg_rows:
                         try:
@@ -384,6 +511,12 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                 },
                             )
 
+            # Outer transaction committed successfully. Now mark persisted
+            # events in the dedup cache so they are skipped on replay.
+            async with self._dedup_lock:
+                for dedup_key in agg_dedup_keys:
+                    self._mark_seen(dedup_key)
+
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
@@ -420,14 +553,48 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
 # =============================================================================
 
 
+def _truncate_input_hash(value: str) -> str | None:
+    """Truncate an input hash to fit the VARCHAR(71) column.
+
+    Format contract: input_hash is expected to be ``sha256-<64 hex chars>``
+    (total 71 characters) as produced by ``_compute_input_hash`` in the
+    OpenAI-compatible handler. If the value does not match this expected
+    format, a debug log is emitted to flag potential format drift, but
+    truncation still proceeds to avoid data loss.
+
+    Args:
+        value: Raw input_hash string from the event.
+
+    Returns:
+        Truncated string (max 71 chars), or None if empty.
+    """
+    if not value:
+        return None
+    if not value.startswith("sha256-"):
+        logger.debug(
+            "input_hash does not start with expected 'sha256-' prefix; "
+            "truncation to 71 chars may cut non-standard formats. "
+            "Got prefix: %r",
+            value[:10],
+        )
+    truncated = value[:71]
+    return truncated or None
+
+
 def _derive_stable_dedup_key(event: dict[str, object]) -> str:
     """Derive a stable deduplication key from event fields.
 
-    When ``input_hash`` is present, it is used directly. Otherwise, a composite
-    key is built from ``correlation_id``, ``model_id``, and ``created_at``
-    (falling back to ``session_id``) and hashed with SHA-256 to produce a
-    deterministic, replay-safe dedup key. This ensures events without
-    ``input_hash`` can still be deduplicated on consumer replay.
+    When ``input_hash`` is present and at least 8 characters long, it is used
+    directly. Shorter values are considered unreliable (e.g., truncated or
+    placeholder) and fall through to the composite hash path. Otherwise, a
+    composite key is built from ``correlation_id``, ``model_id``, and
+    ``created_at`` (falling back to ``session_id``) and hashed with SHA-256
+    to produce a deterministic, replay-safe dedup key. This ensures events
+    without ``input_hash`` can still be deduplicated on consumer replay.
+
+    Note: If multiple events share the same (correlation_id, model_id) pair
+    and lack created_at/session_id, they will produce identical dedup keys.
+    Producers should always include created_at to avoid silent deduplication.
 
     Args:
         event: Event dictionary from ContractLlmCallMetrics.
@@ -436,8 +603,15 @@ def _derive_stable_dedup_key(event: dict[str, object]) -> str:
         A stable string suitable for dedup cache lookup.
     """
     input_hash = str(event.get("input_hash", "")).strip()
-    if input_hash:
+    if len(input_hash) >= 8:
         return input_hash
+
+    if input_hash:
+        logger.debug(
+            "input_hash too short (%d chars) to be a reliable dedup key; "
+            "falling through to composite hash",
+            len(input_hash),
+        )
 
     # Build a composite key from stable event fields
     parts = [
@@ -446,8 +620,68 @@ def _derive_stable_dedup_key(event: dict[str, object]) -> str:
         str(event.get("created_at", "")),
         str(event.get("session_id", "")),
     ]
+
+    # Log at debug level per-event to avoid noise when a producer
+    # systematically omits these fields.  Callers may emit a batch-level
+    # summary warning instead.
+    if all(p == "" for p in parts):
+        logger.debug(
+            "All dedup fallback fields are empty; deduplication may not work "
+            "correctly for this event (correlation_id, model_id, "
+            "created_at, session_id are all absent or empty)",
+        )
+
     composite = "|".join(parts)
     return hashlib.sha256(composite.encode("utf-8")).hexdigest()
+
+
+def _has_empty_dedup_fields(event: dict[str, object]) -> bool:
+    """Check whether all dedup fallback fields are empty for an event.
+
+    Used by batch-level callers to count events with unreliable dedup keys
+    and emit a single summary warning per batch.
+
+    Args:
+        event: Event dictionary.
+
+    Returns:
+        True if correlation_id, model_id, created_at, and session_id are
+        all absent or empty AND input_hash is also absent or too short.
+    """
+    input_hash = str(event.get("input_hash", "")).strip()
+    if len(input_hash) >= 8:
+        return False
+    parts = [
+        str(event.get("correlation_id", "")),
+        str(event.get("model_id", "")),
+        str(event.get("created_at", "")),
+        str(event.get("session_id", "")),
+    ]
+    return all(p == "" for p in parts)
+
+
+# Pre-compiled regex for control characters (C0 + C1 control codes).
+_CONTROL_CHAR_RE: re.Pattern[str] = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _sanitize_dimension_value(value: str) -> str:
+    """Sanitize a dimension value for use in aggregation keys.
+
+    Strips control characters and replaces colons with underscores so that
+    the ``<prefix>:<value>`` aggregation key format remains unambiguous.
+
+    Args:
+        value: Raw dimension value (e.g., model_id, session_id).
+
+    Returns:
+        Sanitized string safe for use as the value portion of an
+        aggregation key.
+    """
+    # Replace colons to avoid ambiguity with the prefix:value separator
+    sanitized = str(value).replace(":", "_")
+    # Remove control characters
+    sanitized = _CONTROL_CHAR_RE.sub("", sanitized)
+    return sanitized.strip()
 
 
 def _build_aggregation_rows(
@@ -468,7 +702,7 @@ def _build_aggregation_rows(
 
     for event in events:
         cost = _safe_decimal(event.get("estimated_cost_usd")) or Decimal("0")
-        tokens = _safe_int(event.get("total_tokens")) or 0
+        tokens = _safe_int_or_zero(event.get("total_tokens"))
         is_estimated = bool(event.get("usage_is_estimated", False))
         estimated_pct = Decimal("100.00") if is_estimated else Decimal("0.00")
 
@@ -478,24 +712,32 @@ def _build_aggregation_rows(
         # Session dimension
         session_id = event.get("session_id")
         if session_id:
-            keys.append(f"{_KEY_PREFIX_SESSION}:{session_id}")
+            keys.append(
+                f"{_KEY_PREFIX_SESSION}:{_sanitize_dimension_value(str(session_id))}"
+            )
 
         # Model dimension (always present in ContractLlmCallMetrics)
         model_id = event.get("model_id")
         if model_id:
-            keys.append(f"{_KEY_PREFIX_MODEL}:{model_id}")
+            keys.append(
+                f"{_KEY_PREFIX_MODEL}:{_sanitize_dimension_value(str(model_id))}"
+            )
 
         # Repo dimension (from extensions if available)
         extensions = event.get("extensions")
         if isinstance(extensions, dict):
             repo = extensions.get("repo")
             if repo:
-                keys.append(f"{_KEY_PREFIX_REPO}:{repo}")
+                keys.append(
+                    f"{_KEY_PREFIX_REPO}:{_sanitize_dimension_value(str(repo))}"
+                )
 
             # Pattern dimension
             pattern_id = extensions.get("pattern_id")
             if pattern_id:
-                keys.append(f"{_KEY_PREFIX_PATTERN}:{pattern_id}")
+                keys.append(
+                    f"{_KEY_PREFIX_PATTERN}:{_sanitize_dimension_value(str(pattern_id))}"
+                )
 
         # Generate one row per key per window
         for key in keys:
@@ -514,6 +756,105 @@ def _build_aggregation_rows(
     return rows
 
 
+def _pre_aggregate_rows(
+    rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Pre-aggregate rows sharing the same (aggregation_key, window).
+
+    When a single batch contains multiple events that produce identical
+    aggregation keys (e.g., two calls to the same model in one batch),
+    ``_build_aggregation_rows`` emits separate rows for each. Sending
+    these as sequential INSERT ... ON CONFLICT DO UPDATE statements
+    within the same transaction causes the weighted average formula
+    to operate on intermediate (already-updated) values rather than
+    the pre-batch baseline.
+
+    This function merges duplicate composite keys in Python before
+    hitting the database, producing at most one row per
+    ``(aggregation_key, window)`` pair. Metrics are summed additively
+    and ``estimated_coverage_pct`` is computed as a proper weighted
+    average over the merged call counts.
+
+    Args:
+        rows: Aggregation rows from ``_build_aggregation_rows``.
+
+    Returns:
+        Deduplicated list of aggregation rows, one per composite key.
+    """
+    if not rows:
+        return []
+
+    merged: dict[tuple[str, str], dict[str, object]] = {}
+
+    for row in rows:
+        key = (str(row["aggregation_key"]), str(row["window"]))
+
+        if key not in merged:
+            # First occurrence -- shallow-copy to avoid mutating the input.
+            merged[key] = dict(row)
+        else:
+            existing = merged[key]
+            existing_cost = existing["total_cost_usd"]
+            row_cost = row["total_cost_usd"]
+            if not isinstance(existing_cost, Decimal):
+                raise TypeError(
+                    f"expected Decimal for total_cost_usd, got {type(existing_cost).__name__}"
+                )
+            if not isinstance(row_cost, Decimal):
+                raise TypeError(
+                    f"expected Decimal for total_cost_usd, got {type(row_cost).__name__}"
+                )
+            existing["total_cost_usd"] = existing_cost + row_cost
+
+            existing_tokens = existing["total_tokens"]
+            row_tokens = row["total_tokens"]
+            if not isinstance(existing_tokens, int):
+                raise TypeError(
+                    f"expected int for total_tokens, got {type(existing_tokens).__name__}"
+                )
+            if not isinstance(row_tokens, int):
+                raise TypeError(
+                    f"expected int for total_tokens, got {type(row_tokens).__name__}"
+                )
+            existing["total_tokens"] = existing_tokens + row_tokens
+
+            existing_count = existing["call_count"]
+            row_count = row["call_count"]
+            if not isinstance(existing_count, int):
+                raise TypeError(
+                    f"expected int for call_count, got {type(existing_count).__name__}"
+                )
+            if not isinstance(row_count, int):
+                raise TypeError(
+                    f"expected int for call_count, got {type(row_count).__name__}"
+                )
+
+            # Weighted average of estimated_coverage_pct
+            existing_pct = existing["estimated_coverage_pct"]
+            row_pct = row["estimated_coverage_pct"]
+            if not isinstance(existing_pct, Decimal):
+                raise TypeError(
+                    f"expected Decimal for estimated_coverage_pct, "
+                    f"got {type(existing_pct).__name__}"
+                )
+            if not isinstance(row_pct, Decimal):
+                raise TypeError(
+                    f"expected Decimal for estimated_coverage_pct, "
+                    f"got {type(row_pct).__name__}"
+                )
+
+            total_count = existing_count + row_count
+            if total_count > 0:
+                existing["estimated_coverage_pct"] = (
+                    existing_pct * existing_count + row_pct * row_count
+                ) / total_count
+            # else: keep existing pct (both counts are 0, degenerate case)
+
+            existing["call_count"] = total_count
+
+    return list(merged.values())
+
+
 def _safe_uuid(value: object) -> UUID | None:
     """Safely convert a value to UUID, returning None on failure."""
     if value is None:
@@ -527,7 +868,11 @@ def _safe_uuid(value: object) -> UUID | None:
 
 
 def _safe_int(value: object) -> int | None:
-    """Safely convert a value to int, returning None on failure."""
+    """Safely convert a value to int, returning None on failure.
+
+    Rejects NaN and Infinity float values which would raise ValueError
+    on int() conversion.
+    """
     if value is None:
         return None
     if isinstance(value, bool):
@@ -535,6 +880,8 @@ def _safe_int(value: object) -> int | None:
     if isinstance(value, int):
         return value
     if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
         return int(value)
     try:
         return int(str(value))
@@ -542,14 +889,65 @@ def _safe_int(value: object) -> int | None:
         return None
 
 
+def _safe_int_or_zero(value: object) -> int:
+    """Safely convert a value to int, returning 0 if None or unconvertible.
+
+    Unlike ``_safe_int(x) or 0``, this correctly preserves a legitimate
+    zero value returned by ``_safe_int`` instead of coalescing it to 0
+    via the falsy ``or`` branch.
+    """
+    result = _safe_int(value)
+    return result if result is not None else 0
+
+
+def _safe_numeric_or_none(value: object) -> float | None:
+    """Safely convert a value to float, returning None if missing or invalid.
+
+    Used for nullable ``NUMERIC`` columns (e.g., ``latency_ms``) where:
+    - A valid numeric value should be preserved with sub-millisecond precision
+      (rounded to 2 decimal places to match the ``NUMERIC(10, 2)`` column).
+    - Missing or invalid values should map to SQL ``NULL`` (via ``None``),
+      rather than a default like ``0``, to distinguish "no data" from
+      "zero latency".
+
+    asyncpg maps Python ``None`` to SQL ``NULL`` transparently, so callers
+    can pass the return value directly as a query parameter.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        fval = float(value)
+        if not math.isfinite(fval):
+            return None
+        return round(fval, 2)
+    try:
+        fval = float(str(value))
+        if not math.isfinite(fval):
+            return None
+        return round(fval, 2)
+    except (ValueError, TypeError):
+        return None
+
+
 def _safe_decimal(value: object) -> Decimal | None:
-    """Safely convert a value to Decimal, returning None on failure."""
+    """Safely convert a value to Decimal, returning None on failure.
+
+    Rejects NaN and Infinity values to prevent aggregation corruption
+    in PostgreSQL NUMERIC columns (NaN + x = NaN).
+    """
     if value is None:
         return None
     if isinstance(value, Decimal):
+        if not value.is_finite():
+            return None
         return value
     try:
-        return Decimal(str(value))
+        result = Decimal(str(value))
+        if not result.is_finite():
+            return None
+        return result
     except Exception:
         return None
 
@@ -561,8 +959,6 @@ def _safe_jsonb(value: object) -> str | None:
     if isinstance(value, str):
         return value
     if isinstance(value, dict):
-        import json
-
         try:
             return json.dumps(value, default=str)
         except Exception:

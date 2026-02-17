@@ -72,7 +72,7 @@ class TestConfigDefaults:
         assert cfg.circuit_breaker_reset_timeout == 60.0
         assert cfg.circuit_breaker_half_open_successes == 1
         assert cfg.health_check_port == 8089
-        assert cfg.health_check_host == "0.0.0.0"  # noqa: S104
+        assert cfg.health_check_host == "127.0.0.1"
         assert cfg.health_check_staleness_seconds == 300
         assert cfg.health_check_poll_staleness_seconds == 60
         assert cfg.startup_grace_period_seconds == 60.0
@@ -100,7 +100,7 @@ class TestConfigDefaults:
 
         assert 1 <= cfg.batch_size <= 1000
         assert 100 <= cfg.batch_timeout_ms <= 60000
-        assert 1.0 <= cfg.poll_timeout_buffer_seconds <= 30.0
+        assert 2.0 <= cfg.poll_timeout_buffer_seconds <= 30.0
 
     @pytest.mark.unit
     def test_circuit_breaker_defaults(self) -> None:
@@ -253,9 +253,9 @@ class TestConfigValidation:
 
     @pytest.mark.unit
     def test_poll_timeout_buffer_lower_bound(self) -> None:
-        """poll_timeout_buffer_seconds below 1.0 is rejected."""
+        """poll_timeout_buffer_seconds below 2.0 is rejected."""
         with pytest.raises(ValidationError, match="poll_timeout_buffer_seconds"):
-            _make_config(poll_timeout_buffer_seconds=0.5)
+            _make_config(poll_timeout_buffer_seconds=1.5)
 
     @pytest.mark.unit
     def test_poll_timeout_buffer_upper_bound(self) -> None:
@@ -319,6 +319,36 @@ class TestConfigValidation:
             ValidationError, match="health_check_poll_staleness_seconds"
         ):
             _make_config(health_check_poll_staleness_seconds=301)
+
+    @pytest.mark.unit
+    def test_postgres_dsn_valid_postgresql_scheme(self) -> None:
+        """DSN with postgresql:// scheme is accepted."""
+        cfg = _make_config(postgres_dsn="postgresql://user:pass@host:5432/db")
+        assert cfg.postgres_dsn == "postgresql://user:pass@host:5432/db"
+
+    @pytest.mark.unit
+    def test_postgres_dsn_valid_postgres_scheme(self) -> None:
+        """DSN with postgres:// scheme is also accepted."""
+        cfg = _make_config(postgres_dsn="postgres://user:pass@host:5432/db")
+        assert cfg.postgres_dsn == "postgres://user:pass@host:5432/db"
+
+    @pytest.mark.unit
+    def test_postgres_dsn_invalid_scheme_raises(self) -> None:
+        """DSN without postgresql:// or postgres:// scheme is rejected."""
+        with pytest.raises(ValidationError, match="postgres_dsn"):
+            _make_config(postgres_dsn="mysql://user:pass@host:3306/db")
+
+    @pytest.mark.unit
+    def test_postgres_dsn_empty_string_raises(self) -> None:
+        """Empty DSN is rejected."""
+        with pytest.raises(ValidationError, match="postgres_dsn"):
+            _make_config(postgres_dsn="")
+
+    @pytest.mark.unit
+    def test_postgres_dsn_plain_string_raises(self) -> None:
+        """Plain string without scheme is rejected."""
+        with pytest.raises(ValidationError, match="postgres_dsn"):
+            _make_config(postgres_dsn="host:5432/db")
 
 
 # =============================================================================

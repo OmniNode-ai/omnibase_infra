@@ -64,6 +64,7 @@ import hashlib
 import hmac
 import json as json_module
 import logging
+import math
 import os
 import socket
 from ipaddress import IPv4Address, IPv4Network, ip_address
@@ -179,12 +180,45 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
     #: Configurable via the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` environment variable
     #: (comma-separated CIDR ranges). Defaults to ``192.168.86.0/24``.
     #:
-    #: Read once at import time. Changes to the environment variable after
-    #: module import require a process restart to take effect. This differs
-    #: from ``LOCAL_LLM_SHARED_SECRET`` which is read per-call to support
-    #: runtime secret rotation.
-    # Frozen at import time; env var changes require process restart.
+    #: .. important:: Configuration reload asymmetry
+    #:
+    #:    This value is **parsed once at module import time** by
+    #:    ``_parse_cidr_allowlist()`` and stored as an immutable class variable.
+    #:    Changes to the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` environment variable
+    #:    after the module has been imported have **no effect** until the
+    #:    process is restarted.
+    #:
+    #:    This differs intentionally from ``LOCAL_LLM_SHARED_SECRET``, which
+    #:    is read from ``os.environ`` on **every call** to
+    #:    ``_compute_hmac_signature()`` so that the secret can be rotated at
+    #:    runtime (e.g., by a sidecar, operator, or orchestrator updating the
+    #:    environment) without requiring a process restart.
+    #:
+    #:    **Rationale**: CIDR allowlist changes are rare infrastructure-level
+    #:    modifications (adding or removing a network segment) that typically
+    #:    accompany a deployment or topology change -- situations where a
+    #:    process restart is already expected. In contrast, secret rotation
+    #:    is a routine security operation that should complete without service
+    #:    interruption; requiring a restart for secret rotation would create
+    #:    unnecessary downtime and discourage frequent rotation.
+    # Parsed at import time; use _reload_cidr_allowlist() to refresh after env changes.
     LOCAL_LLM_CIDRS: ClassVar[tuple[IPv4Network, ...]] = _parse_cidr_allowlist()
+
+    @classmethod
+    def _reload_cidr_allowlist(cls) -> None:
+        """Re-parse ``LLM_ENDPOINT_CIDR_ALLOWLIST`` and update ``LOCAL_LLM_CIDRS``.
+
+        Primarily for testing: after modifying the ``LLM_ENDPOINT_CIDR_ALLOWLIST``
+        environment variable at runtime, call this method to refresh the cached
+        CIDR allowlist without restarting the process.
+
+        Example::
+
+            os.environ["LLM_ENDPOINT_CIDR_ALLOWLIST"] = "10.0.0.0/8"
+            MixinLlmHttpTransport._reload_cidr_allowlist()
+            # LOCAL_LLM_CIDRS now contains IPv4Network('10.0.0.0/8')
+        """
+        cls.LOCAL_LLM_CIDRS = _parse_cidr_allowlist()
 
     #: Environment variable name for the HMAC shared secret.
     LOCAL_LLM_SECRET_ENV: ClassVar[str] = "LOCAL_LLM_SHARED_SECRET"
@@ -424,7 +458,8 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                         f"allowlist_check:{url}", correlation_id
                     )
                     raise InfraAuthenticationError(
-                        f"DNS resolution returned no results for {hostname}",
+                        f"DNS resolution returned no IPv4 results for {hostname} "
+                        "(IPv6-only hosts are not supported)",
                         context=ctx,
                     )
                 resolved_ip = ip_address(resolved[0][4][0])
@@ -940,6 +975,19 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         except (ValueError, OverflowError):
             logger.debug(
                 "Could not parse Retry-After header, using default backoff",
+                extra={
+                    "retry_after_raw": retry_after_raw,
+                    "target": self._llm_target_name,
+                },
+            )
+            return 1.0
+
+        # Guard against NaN/Inf which would cause asyncio.sleep() to raise
+        # ValueError.  float() happily parses 'nan', 'inf', and '-inf'.
+        if not math.isfinite(retry_after):
+            logger.debug(
+                "Non-finite Retry-After value (%s), using default backoff",
+                retry_after,
                 extra={
                     "retry_after_raw": retry_after_raw,
                     "target": self._llm_target_name,

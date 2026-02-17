@@ -11,9 +11,11 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-from typing import Literal, Self
+import os
+from typing import Any, Literal, Self
+from urllib.parse import urlparse
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,9 @@ class ConfigLlmCostAggregation(BaseSettings):
     aggregates costs into the llm_cost_aggregates table.
     """
 
+    # Env var prefix is intentionally verbose for namespace isolation.
+    # The most critical env var (required, no default) is:
+    #   OMNIBASE_INFRA_LLM_COST_POSTGRES_DSN=postgresql://user:pass@host:5432/db
     model_config = SettingsConfigDict(
         env_prefix="OMNIBASE_INFRA_LLM_COST_",
         env_file=".env",
@@ -69,11 +74,46 @@ class ConfigLlmCostAggregation(BaseSettings):
 
     # PostgreSQL connection
     postgres_dsn: str = Field(
-        description=(
-            "PostgreSQL connection string. Set via "
-            "OMNIBASE_INFRA_LLM_COST_POSTGRES_DSN env var."
-        ),
+        ...,
+        repr=False,
+        exclude=True,
+        description="PostgreSQL connection string. Excluded from serialization to prevent accidental credential exposure.",
     )
+
+    @field_validator("postgres_dsn")
+    @classmethod
+    def validate_postgres_dsn_scheme(cls, v: str) -> str:
+        """Validate that postgres_dsn starts with a recognized PostgreSQL scheme.
+
+        asyncpg.create_pool() produces cryptic errors for malformed DSNs.
+        This validator fails eagerly with clear guidance.
+
+        Args:
+            v: The DSN string to validate.
+
+        Returns:
+            The validated DSN string.
+
+        Raises:
+            ValueError: If the DSN does not start with ``postgresql://`` or
+                ``postgres://``.
+        """
+        if not v.startswith(("postgresql://", "postgres://")):
+            # Show only the scheme (or first 10 chars if no scheme found)
+            # to avoid leaking credentials embedded in the DSN.
+            try:
+                parsed = urlparse(v)
+                safe_prefix = (
+                    f"{parsed.scheme}://..." if parsed.scheme else repr(v[:10])
+                )
+            except Exception:
+                safe_prefix = repr(v[:10])
+            raise ValueError(
+                f"postgres_dsn must start with 'postgresql://' or 'postgres://', "
+                f"got: {safe_prefix}. "
+                f"Example: postgresql://user:password@host:5432/dbname"
+            )
+        return v
 
     # Batch processing
     batch_size: int = Field(
@@ -90,11 +130,14 @@ class ConfigLlmCostAggregation(BaseSettings):
     )
     poll_timeout_buffer_seconds: float = Field(
         default=5.0,
-        ge=1.0,
+        ge=2.0,
         le=30.0,
         description=(
             "Additional buffer time in seconds added to batch_timeout_ms for "
-            "the asyncio.wait_for timeout when polling Kafka."
+            "the asyncio.wait_for timeout when polling Kafka. Minimum 2.0s to "
+            "account for event loop scheduling latency, GC pauses, and Kafka "
+            "broker response jitter that can cause spurious TimeoutErrors at "
+            "lower values."
         ),
     )
 
@@ -140,10 +183,11 @@ class ConfigLlmCostAggregation(BaseSettings):
         description="Port for HTTP health check endpoint",
     )
     health_check_host: str = Field(
-        default="0.0.0.0",  # noqa: S104 - Configurable, see security note below
+        default="127.0.0.1",
         description=(
-            "Host/IP for health check server binding. Default '0.0.0.0' binds to all "
-            "interfaces for container/Kubernetes probe access."
+            "Host/IP for health check server binding. Defaults to localhost-only "
+            "for safety. Container deployments should explicitly set '0.0.0.0' to "
+            "expose the health endpoint on all network interfaces."
         ),
     )
     health_check_staleness_seconds: int = Field(
@@ -173,6 +217,43 @@ class ConfigLlmCostAggregation(BaseSettings):
             "is considered healthy even without writes."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    # ONEX_EXCLUDE: any_type - dict[str, Any] required for pydantic mode="before" validator
+    def warn_unrecognized_env_vars(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Log warnings for environment variables matching the prefix but not a known field.
+
+        Pydantic-settings silently drops env vars that match the prefix but
+        don't correspond to a declared field (regardless of the ``extra``
+        setting).  This validator scans the process environment at startup and
+        warns about potential typos so operators can fix them before they cause
+        silent misconfiguration.
+
+        Args:
+            data: Raw input data from pydantic-settings.
+
+        Returns:
+            Unmodified data dict.
+        """
+        prefix = "OMNIBASE_INFRA_LLM_COST_"
+        known_fields = set(cls.model_fields.keys())
+
+        for env_key in os.environ:
+            if not env_key.upper().startswith(prefix):
+                continue
+            # Strip prefix and lowercase to match pydantic field naming
+            field_name = env_key[len(prefix) :].lower()
+            if field_name not in known_fields:
+                logger.warning(
+                    "Unrecognized environment variable '%s' has prefix '%s' "
+                    "but does not match any configuration field. "
+                    "Known fields: %s. Check for typos.",
+                    env_key,
+                    prefix,
+                    ", ".join(sorted(known_fields)),
+                )
+        return data
 
     @model_validator(mode="after")
     def validate_topic_configuration(self) -> Self:

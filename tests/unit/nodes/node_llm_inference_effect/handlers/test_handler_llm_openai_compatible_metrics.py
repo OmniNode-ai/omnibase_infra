@@ -169,7 +169,13 @@ class TestMetricsBuilding:
 
     @pytest.mark.asyncio
     async def test_metrics_built_with_partial_usage(self) -> None:
-        """Partial usage response builds estimated metrics."""
+        """Partial usage response builds estimated metrics.
+
+        The response contains only ``prompt_tokens=20`` (no ``completion_tokens``).
+        The normalizer (Case 2 -- Partial) keeps the API-reported prompt tokens
+        and estimates completion tokens from the generated text length.
+        ``total_tokens`` is then the sum of prompt + estimated completion.
+        """
         transport = _make_transport()
         handler = _make_handler(transport)
         transport._execute_llm_http_call.return_value = _make_response_partial_usage()
@@ -180,6 +186,13 @@ class TestMetricsBuilding:
         assert metrics is not None
         assert metrics.prompt_tokens == 20
         assert metrics.usage_is_estimated is True
+        # completion_tokens is estimated from the generated text "Hello there!"
+        # (12 chars / ~4 chars-per-token = 3). It must be > 0 since text is
+        # non-empty, and it must be an int.
+        assert isinstance(metrics.completion_tokens, int)
+        assert metrics.completion_tokens > 0
+        # total_tokens must equal prompt + completion (consistency invariant)
+        assert metrics.total_tokens == metrics.prompt_tokens + metrics.completion_tokens
 
     @pytest.mark.asyncio
     async def test_metrics_built_with_absent_usage(self) -> None:
