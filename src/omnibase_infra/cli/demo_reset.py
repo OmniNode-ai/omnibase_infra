@@ -756,6 +756,7 @@ class DemoResetEngine:
                 )
                 try:
                     partitions_to_delete: list[TopicPartition] = []
+                    watermark_errors: int = 0
                     for topic_name in demo_topics:
                         topic_metadata = metadata.topics[topic_name]
                         for partition_id in topic_metadata.partitions:
@@ -764,11 +765,13 @@ class DemoResetEngine:
                                     TopicPartition(topic_name, partition_id),
                                     timeout=5,
                                 )
-                            except Exception:
+                            except Exception as exc:
+                                watermark_errors += 1
                                 logger.debug(
-                                    "Failed to get watermarks for %s[%d], skipping",
+                                    "Failed to get watermarks for %s[%d]: %s",
                                     topic_name,
                                     partition_id,
+                                    sanitize_error_message(exc),
                                 )
                                 continue
                             if high > 0:
@@ -813,6 +816,20 @@ class DemoResetEngine:
                                 detail="; ".join(errors[:5]),
                             )
                         )
+                elif watermark_errors > 0:
+                    # All watermark lookups failed -- we cannot
+                    # determine whether the topics are truly empty.
+                    report.actions.append(
+                        ResetActionResult(
+                            resource="Demo topic data",
+                            action=EnumResetAction.ERROR,
+                            detail=(
+                                f"Failed to read watermark offsets for "
+                                f"{watermark_errors} partition(s) — cannot "
+                                f"determine if topics are empty"
+                            ),
+                        )
+                    )
                 else:
                     report.actions.append(
                         ResetActionResult(

@@ -550,11 +550,20 @@ def demo_reset(dry_run: bool, purge_topics: bool, env_file: str) -> None:
     except SystemExit:
         raise
     except Exception as e:
+        from omnibase_infra.enums import EnumInfraTransportType
+        from omnibase_infra.models.errors.model_infra_error_context import (
+            ModelInfraErrorContext,
+        )
         from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="demo_reset",
+        )
         console.print(
             f"[red]Error: {type(e).__name__}: {sanitize_error_message(e)}[/red]"
         )
+        console.print(f"[dim]correlation_id: {context.correlation_id}[/dim]")
         raise SystemExit(1)
 
 

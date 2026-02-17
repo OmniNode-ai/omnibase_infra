@@ -1084,6 +1084,139 @@ class TestDemoResetEngineTopicPurgeLive:
         mock_admin.delete_records.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_all_watermark_lookups_fail_reports_error(self) -> None:
+        """When all watermark lookups fail, report ERROR instead of SKIPPED.
+
+        This guards against masking failures as "already empty". If every
+        ``get_watermark_offsets`` call raises an exception, ``partitions_to_delete``
+        stays empty -- but we must NOT report SKIPPED because we have no idea
+        whether the topics are actually empty.
+        """
+        config = DemoResetConfig(
+            kafka_bootstrap_servers="localhost:9092",
+            purge_topics=True,
+        )
+        engine = DemoResetEngine(config)
+
+        mock_admin = MagicMock()
+        mock_admin.list_topics.return_value = _make_cluster_metadata(
+            {
+                "onex.evt.platform.node-registration.v1": [0, 1],
+            }
+        )
+
+        mock_tp_class = MagicMock(side_effect=_MockTopicPartition)
+
+        # Mock Consumer -- every watermark lookup raises an exception
+        mock_consumer = MagicMock()
+        mock_consumer.get_watermark_offsets.side_effect = RuntimeError(
+            "broker unavailable"
+        )
+
+        with (
+            patch(
+                "confluent_kafka.admin.AdminClient",
+                return_value=mock_admin,
+            ),
+            patch(
+                "confluent_kafka.TopicPartition",
+                mock_tp_class,
+            ),
+            patch(
+                "confluent_kafka.Consumer",
+                return_value=mock_consumer,
+            ),
+        ):
+            report = DemoResetReport()
+            await engine._purge_demo_topics(report, dry_run=False)
+
+        topic_actions = [a for a in report.actions if "topic" in a.resource.lower()]
+
+        # Must NOT be SKIPPED -- should be ERROR
+        skipped = [a for a in topic_actions if a.action == EnumResetAction.SKIPPED]
+        assert len(skipped) == 0, "Watermark failures must not be masked as SKIPPED"
+
+        error_actions = [a for a in topic_actions if a.action == EnumResetAction.ERROR]
+        assert len(error_actions) == 1
+        assert "watermark" in error_actions[0].detail.lower()
+        assert "2 partition(s)" in error_actions[0].detail
+
+        # delete_records should never have been called
+        mock_admin.delete_records.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_partial_watermark_failure_still_purges_successful(self) -> None:
+        """When some watermark lookups fail but others succeed, purge the successful ones.
+
+        Partitions whose watermark lookup succeeds (with high > 0) should still
+        be purged. The watermark failures for other partitions are logged but do
+        not prevent the successful ones from being deleted.
+        """
+        config = DemoResetConfig(
+            kafka_bootstrap_servers="localhost:9092",
+            purge_topics=True,
+        )
+        engine = DemoResetEngine(config)
+
+        mock_admin = MagicMock()
+        mock_admin.list_topics.return_value = _make_cluster_metadata(
+            {
+                "onex.evt.platform.node-registration.v1": [0, 1],
+            }
+        )
+
+        mock_tp_class = MagicMock(side_effect=_MockTopicPartition)
+
+        # Mock Consumer -- partition 0 succeeds, partition 1 fails
+        mock_consumer = MagicMock()
+
+        def _watermark_side_effect(
+            tp: _MockTopicPartition, timeout: int = 5
+        ) -> tuple[int, int]:
+            if tp.partition == 0:
+                return (0, 50)
+            raise RuntimeError("broker unavailable")
+
+        mock_consumer.get_watermark_offsets.side_effect = _watermark_side_effect
+
+        success_future = MagicMock()
+        success_future.result.return_value = None
+
+        tp0 = _MockTopicPartition("onex.evt.platform.node-registration.v1", 0, 50)
+        mock_admin.delete_records.return_value = {
+            tp0: success_future,
+        }
+
+        with (
+            patch(
+                "confluent_kafka.admin.AdminClient",
+                return_value=mock_admin,
+            ),
+            patch(
+                "confluent_kafka.TopicPartition",
+                mock_tp_class,
+            ),
+            patch(
+                "confluent_kafka.Consumer",
+                return_value=mock_consumer,
+            ),
+        ):
+            report = DemoResetReport()
+            await engine._purge_demo_topics(report, dry_run=False)
+
+        # Should have a RESET action for the successful partition
+        reset_actions = [
+            a
+            for a in report.actions
+            if a.action == EnumResetAction.RESET and "topic" in a.resource.lower()
+        ]
+        assert len(reset_actions) == 1
+        assert "Purged" in reset_actions[0].detail
+
+        # delete_records should have been called (partition 0 had data)
+        mock_admin.delete_records.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_no_demo_topics_found(self) -> None:
         """When no demo topics exist, report skipped."""
         config = DemoResetConfig(
