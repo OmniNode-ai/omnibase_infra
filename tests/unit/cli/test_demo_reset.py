@@ -883,6 +883,12 @@ class _MockTopicPartition:
             return NotImplemented
         return self.topic == other.topic and self.partition == other.partition
 
+    def __repr__(self) -> str:
+        return (
+            f"_MockTopicPartition(topic={self.topic!r}, "
+            f"partition={self.partition}, offset={self.offset})"
+        )
+
 
 def _make_topic_metadata(partition_ids: list[int]) -> SimpleNamespace:
     """Create mock topic metadata with given partition IDs."""

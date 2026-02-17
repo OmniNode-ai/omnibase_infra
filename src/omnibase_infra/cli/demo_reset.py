@@ -322,7 +322,7 @@ class DemoResetEngine:
         self._config = config
 
     @staticmethod
-    def _validate_table_name(table: str) -> None:
+    def _validate_table_name(table: str, *, correlation_id: UUID | None = None) -> None:
         """Validate that a table name is in the allowlist.
 
         Prevents SQL injection by ensuring only known-safe table names
@@ -330,15 +330,21 @@ class DemoResetEngine:
 
         Args:
             table: Table name to validate.
+            correlation_id: Optional trace identifier included in the error
+                message for diagnostic consistency with defense-in-depth
+                checks downstream.
 
         Raises:
             ValueError: If the table name is not in ``_ALLOWED_PROJECTION_TABLES``.
         """
         if table not in _ALLOWED_PROJECTION_TABLES:
-            raise ValueError(
+            msg = (
                 f"Table name {table!r} is not in the allowed projection tables: "
                 f"{sorted(_ALLOWED_PROJECTION_TABLES)}"
             )
+            if correlation_id is not None:
+                msg += f" (correlation_id={correlation_id})"
+            raise ValueError(msg)
 
     async def execute(self, *, dry_run: bool = False) -> DemoResetReport:
         """Execute the demo reset sequence.
@@ -519,7 +525,7 @@ class DemoResetEngine:
             correlation_id: Trace identifier for error diagnostics.
         """
         table = self._config.projection_table
-        self._validate_table_name(table)
+        self._validate_table_name(table, correlation_id=correlation_id)
 
         # SAFETY: The f-string SQL interpolation below is safe because
         # ``_validate_table_name`` restricts ``table`` to the frozen
@@ -548,7 +554,7 @@ class DemoResetEngine:
             correlation_id: Trace identifier for error diagnostics.
         """
         table = self._config.projection_table
-        self._validate_table_name(table)
+        self._validate_table_name(table, correlation_id=correlation_id)
 
         # SAFETY: The f-string SQL interpolation below is safe because
         # ``_validate_table_name`` restricts ``table`` to the frozen
@@ -602,6 +608,9 @@ class DemoResetEngine:
         try:
             from confluent_kafka.admin import AdminClient
 
+            # NOTE: confluent-kafka's AdminClient uses blocking I/O internally.
+            # This is acceptable for CLI use where the event loop is otherwise
+            # idle, but these calls should not be used in a concurrent server.
             admin = AdminClient(
                 {"bootstrap.servers": self._config.kafka_bootstrap_servers}
             )
@@ -814,10 +823,11 @@ class DemoResetEngine:
                 # all" across confluent-kafka versions.
                 from confluent_kafka import Consumer as _KafkaConsumer
 
+                ephemeral_group_id = f"_demo-reset-watermark-query-{uuid4().hex[:16]}"
                 consumer = _KafkaConsumer(
                     {
                         "bootstrap.servers": self._config.kafka_bootstrap_servers,
-                        "group.id": f"_demo-reset-watermark-query-{uuid4().hex[:16]}",
+                        "group.id": ephemeral_group_id,
                         "enable.auto.commit": False,
                     }
                 )
@@ -847,6 +857,22 @@ class DemoResetEngine:
                                 )
                 finally:
                     consumer.close()
+
+                # Clean up the ephemeral consumer group so it does not
+                # remain as an orphan in Kafka after watermark queries.
+                try:
+                    delete_futures = admin.delete_consumer_groups([ephemeral_group_id])
+                    delete_futures[ephemeral_group_id].result(timeout=10)
+                    logger.debug(
+                        "Deleted ephemeral consumer group %s",
+                        ephemeral_group_id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to delete ephemeral consumer group %s: %s",
+                        ephemeral_group_id,
+                        sanitize_error_message(exc),
+                    )
 
                 if partitions_to_delete:
                     futures = admin.delete_records(partitions_to_delete)

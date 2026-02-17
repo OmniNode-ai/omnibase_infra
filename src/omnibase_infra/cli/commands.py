@@ -638,6 +638,11 @@ def _load_env_for_demo(path: str) -> None:
         key, _, value = line.partition("=")
         key = key.strip()
         if key.startswith("export "):
+            # Strip "export " first, then .strip() any remaining whitespace.
+            # This ordering is correct: .strip() on the outer key handles
+            # leading whitespace before "export", while the inner .strip()
+            # handles whitespace between "export" and the variable name
+            # (e.g. "  export  MY_VAR  =val").
             key = key[len("export ") :].strip()
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
