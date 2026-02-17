@@ -49,6 +49,10 @@ class TestTypeCoercionBehavior:
         before Pydantic coerces to int. The resulting tokens_total is 1020, not 30.
 
         This documents actual behavior. Callers should pass int values, not strings.
+
+        TODO(OMN-2295): File follow-up ticket to add type guards in
+        ModelLlmUsage.compute_total_tokens validator to reject non-int inputs
+        before arithmetic, preventing string concatenation.
         """
         usage = ModelLlmUsage(
             tokens_input="10",  # type: ignore[arg-type]

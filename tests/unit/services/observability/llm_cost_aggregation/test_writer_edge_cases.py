@@ -27,6 +27,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from omnibase_infra.errors import ProtocolConfigurationError
+
+# NOTE: These tests intentionally import private helper functions to verify
+# edge-case behavior of internal parsing/aggregation logic. This couples
+# tests to implementation details, which is an accepted trade-off for
+# thorough input validation coverage.
 from omnibase_infra.services.observability.llm_cost_aggregation.writer_postgres import (
     WriterLlmCostAggregationPostgres,
     _build_aggregation_rows,
@@ -640,7 +645,12 @@ class TestDedupKeyEdgeCases:
 
 
 class TestWriterInitializationValidation:
-    """WriterLlmCostAggregationPostgres constructor validation."""
+    """WriterLlmCostAggregationPostgres constructor validation.
+
+    Tests access private attributes (_query_timeout, _statement_timeout_ms)
+    to verify configuration validation boundaries. This is intentional:
+    these are constructor-enforced invariants with no public accessor.
+    """
 
     @pytest.mark.unit
     def test_zero_query_timeout_rejected(self) -> None:
