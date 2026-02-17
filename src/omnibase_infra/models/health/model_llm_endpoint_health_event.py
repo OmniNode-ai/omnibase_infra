@@ -31,8 +31,7 @@ class ModelLlmEndpointHealthEvent(BaseModel):
 
     timestamp: datetime = Field(..., description="Probe cycle completion time")
     endpoints: tuple[ModelLlmEndpointStatus, ...] = Field(
-        default_factory=tuple,
-        description="Per-endpoint status snapshots",
+        ..., description="Per-endpoint status snapshots"
     )
     correlation_id: UUID = Field(..., description="Correlation ID for tracing")
 

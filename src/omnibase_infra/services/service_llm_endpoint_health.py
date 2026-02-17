@@ -382,10 +382,19 @@ class ServiceLlmEndpointHealth:
         while self._running:
             try:
                 await self.probe_all()
+            except asyncio.CancelledError:
+                # In Python 3.12+ CancelledError is a BaseException and
+                # escapes ``except Exception``.  Handle it explicitly so
+                # that a normal stop() (which sets _running=False before
+                # cancelling the task) exits cleanly, while a spurious
+                # cancellation merely logs and retries.
+                if not self._running:
+                    raise
+                logger.warning(
+                    "Probe loop received spurious CancelledError, continuing"
+                )
+                continue
             except Exception:
-                # CancelledError is not caught here intentionally: in Python
-                # 3.12+ it derives from BaseException, so it propagates out
-                # for clean task cancellation via stop().
                 logger.exception("Unexpected error in probe loop")
             try:
                 await asyncio.sleep(self._config.probe_interval_seconds)
@@ -411,7 +420,6 @@ class ServiceLlmEndpointHealth:
             A ``ModelLlmEndpointStatus`` snapshot.
         """
         cb = self._circuit_breakers[name]
-        now = datetime.now(UTC)
 
         # Check circuit breaker
         try:
@@ -426,7 +434,7 @@ class ServiceLlmEndpointHealth:
                 url=url,
                 name=name,
                 available=False,
-                last_check=now,
+                last_check=datetime.now(UTC),
                 latency_ms=-1.0,
                 error="Circuit breaker open",
                 circuit_state=_parse_circuit_state(cb_state, "open"),
@@ -451,6 +459,7 @@ class ServiceLlmEndpointHealth:
                     )
 
             cb_state = cb.get_state()
+            now = datetime.now(UTC)
             return ModelLlmEndpointStatus(
                 url=url,
                 name=name,
@@ -470,6 +479,7 @@ class ServiceLlmEndpointHealth:
                 )
 
             cb_state = cb.get_state()
+            now = datetime.now(UTC)
             error_msg = f"{type(exc).__name__}: {exc}"
             logger.warning(
                 "Probe failed for %s (%s): %s",

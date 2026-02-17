@@ -103,6 +103,58 @@ def service_no_bus(
 class TestModelLlmEndpointHealthConfig:
     """Validate configuration model constraints."""
 
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "invalid_url",
+        [
+            "ftp://example.com",
+            "not-a-url",
+            "",
+            "ws://example.com:8000",
+            "file:///tmp/model",
+            "tcp://192.168.1.1:8000",
+        ],
+        ids=[
+            "ftp-scheme",
+            "bare-string",
+            "empty-string",
+            "websocket-scheme",
+            "file-scheme",
+            "tcp-scheme",
+        ],
+    )
+    def test_invalid_endpoint_url_rejected(self, invalid_url: str) -> None:
+        """Endpoint URLs with non-HTTP(S) schemes must raise ValidationError."""
+        with pytest.raises(ValidationError):
+            ModelLlmEndpointHealthConfig(
+                endpoints={"bad-ep": invalid_url},
+            )
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "valid_url",
+        [
+            "http://example.com",
+            "https://example.com",
+            "http://192.168.86.201:8000",
+            "https://example.com:8000/health",
+            "http://localhost:9999",
+        ],
+        ids=[
+            "http-plain",
+            "https-plain",
+            "http-ip-port",
+            "https-host-port-path",
+            "http-localhost",
+        ],
+    )
+    def test_valid_endpoint_url_accepted(self, valid_url: str) -> None:
+        """Endpoint URLs with HTTP or HTTPS schemes must be accepted."""
+        cfg = ModelLlmEndpointHealthConfig(
+            endpoints={"good-ep": valid_url},
+        )
+        assert cfg.endpoints["good-ep"] == valid_url
+
     def test_defaults(self) -> None:
         """Default config should have empty endpoints and sensible defaults."""
         cfg = ModelLlmEndpointHealthConfig()
@@ -137,6 +189,51 @@ class TestModelLlmEndpointHealthConfig:
 
 class TestModelLlmEndpointStatus:
     """Validate status model."""
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "invalid_url",
+        [
+            "ftp://example.com",
+            "not-a-url",
+            "",
+            "ws://example.com:8000",
+        ],
+        ids=["ftp-scheme", "bare-string", "empty-string", "websocket-scheme"],
+    )
+    def test_invalid_status_url_rejected(self, invalid_url: str) -> None:
+        """Status model URLs with non-HTTP(S) schemes must raise ValidationError."""
+        now = datetime.now(UTC)
+        with pytest.raises(ValidationError):
+            ModelLlmEndpointStatus(
+                url=invalid_url,
+                name="test",
+                available=True,
+                last_check=now,
+                latency_ms=10.0,
+            )
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "valid_url",
+        [
+            "http://example.com",
+            "https://example.com:8000/health",
+            "http://192.168.86.201:8000",
+        ],
+        ids=["http-plain", "https-host-port-path", "http-ip-port"],
+    )
+    def test_valid_status_url_accepted(self, valid_url: str) -> None:
+        """Status model URLs with HTTP or HTTPS schemes must be accepted."""
+        now = datetime.now(UTC)
+        status = ModelLlmEndpointStatus(
+            url=valid_url,
+            name="test",
+            available=True,
+            last_check=now,
+            latency_ms=10.0,
+        )
+        assert status.url == valid_url
 
     def test_healthy_status(self) -> None:
         """Healthy status should have available=True."""
@@ -449,6 +546,62 @@ class TestServiceLlmEndpointHealthCircuitBreaker:
         assert state["initialized"] is True
         assert state["state"] == "closed"
         assert state["threshold"] == 5
+
+    @pytest.mark.asyncio
+    async def test_circuit_recovers_after_reset_timeout(self) -> None:
+        """After reset_timeout elapses, a successful probe should close the circuit.
+
+        This validates the full CLOSED -> OPEN -> HALF_OPEN -> CLOSED recovery
+        transition.  The test:
+          1. Trips the circuit with consecutive failures.
+          2. Simulates time advancing past the reset_timeout by manipulating
+             the internal ``_circuit_breaker_open_until`` timestamp.
+          3. Issues a successful probe (half-open allows one trial).
+          4. Asserts the circuit is closed again and the endpoint is healthy.
+        """
+        cfg = ModelLlmEndpointHealthConfig(
+            endpoints={"recovery-ep": "http://localhost:7777"},
+            circuit_breaker_threshold=2,
+            circuit_breaker_reset_timeout=30.0,
+        )
+        svc = ServiceLlmEndpointHealth(config=cfg)
+
+        # -- Phase 1: Trip the circuit with consecutive failures ---------------
+        async def raise_error(url: str, **kwargs: object) -> None:
+            raise httpx.ConnectError("Connection refused")
+
+        with patch.object(httpx.AsyncClient, "get", side_effect=raise_error):
+            for _ in range(2):
+                await svc.probe_all()
+
+        cb = svc._circuit_breakers["recovery-ep"]
+        assert cb.is_open is True, "Circuit should be open after hitting threshold"
+
+        # Verify the status map reflects the open circuit
+        status_before = svc.get_endpoint_status("recovery-ep")
+        assert status_before is not None
+        assert status_before.available is False
+
+        # -- Phase 2: Simulate time passing the reset_timeout ------------------
+        # Set open_until to a time in the past so the next check() call
+        # transitions the CB from OPEN -> HALF_OPEN.
+        cb._circuit_breaker_open_until = 0.0
+
+        # -- Phase 3: Successful probe in half-open state ----------------------
+        mock_response = httpx.Response(
+            200, request=httpx.Request("GET", "http://localhost:7777/health")
+        )
+        with patch.object(httpx.AsyncClient, "get", return_value=mock_response):
+            status_map = await svc.probe_all()
+
+        # -- Phase 4: Verify full recovery -------------------------------------
+        assert cb.is_open is False, "Circuit should be closed after successful probe"
+
+        recovered_status = status_map["recovery-ep"]
+        assert recovered_status.available is True
+        assert recovered_status.circuit_state == "closed"
+        assert recovered_status.error == ""
+        assert recovered_status.latency_ms > 0
 
 
 # =============================================================================
