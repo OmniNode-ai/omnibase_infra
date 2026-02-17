@@ -136,10 +136,30 @@ def _levenshtein_ratio(s1: str, s2: str) -> float:
     return 1.0 - (distance / max_len)
 
 
+def _build_ngram_set(text: str, n: int = 4) -> frozenset[str]:
+    """Build a set of character n-grams from text.
+
+    Pre-computing n-gram sets allows O(1) membership tests instead of
+    O(R) substring scans, and the set can be reused across multiple
+    fragment comparisons against the same text.
+
+    Args:
+        text: Input text.
+        n: N-gram size.
+
+    Returns:
+        Frozen set of n-grams extracted from *text*.
+    """
+    if len(text) < n:
+        return frozenset()
+    return frozenset(text[i : i + n] for i in range(len(text) - n + 1))
+
+
 def _find_best_match_in_response(
     fragment: str,
     response_normalized: str,
     threshold: float,
+    response_ngrams: frozenset[str],
 ) -> bool:
     """Check if a fragment has a sufficiently close match in the response.
 
@@ -162,6 +182,9 @@ def _find_best_match_in_response(
         fragment: Normalized text fragment from a section.
         response_normalized: Normalized response text.
         threshold: Minimum similarity ratio for a match.
+        response_ngrams: Pre-computed n-gram set from the response,
+            built once via ``_build_ngram_set`` and reused across
+            all fragment comparisons.
 
     Returns:
         True if a sufficiently close match was found.
@@ -175,7 +198,7 @@ def _find_best_match_in_response(
     # threshold of 200 left a wide band of fragments (80-200 chars) in the
     # expensive sliding-window path.
     if len(fragment) > _NGRAM_FALLBACK_THRESHOLD:
-        return _ngram_overlap(fragment, response_normalized, threshold)
+        return _ngram_overlap(fragment, response_ngrams, threshold)
 
     # Sliding window approximate match
     frag_len = len(fragment)
@@ -203,14 +226,22 @@ def _find_best_match_in_response(
     return False
 
 
-def _ngram_overlap(text1: str, text2: str, threshold: float, n: int = 4) -> bool:
-    """Check n-gram overlap between two texts.
+def _ngram_overlap(
+    text1: str,
+    response_ngrams: frozenset[str],
+    threshold: float,
+    n: int = 4,
+) -> bool:
+    """Check n-gram overlap between a fragment and pre-computed response n-grams.
 
     Used for long fragments where full edit distance is too expensive.
+    Uses set intersection for O(F) complexity instead of O(F * R)
+    substring scanning.
 
     Args:
-        text1: First text (the fragment).
-        text2: Second text (the response).
+        text1: The fragment text.
+        response_ngrams: Pre-computed n-gram set from the response,
+            built via ``_build_ngram_set``.
         threshold: Minimum overlap ratio.
         n: N-gram size.
 
@@ -218,13 +249,17 @@ def _ngram_overlap(text1: str, text2: str, threshold: float, n: int = 4) -> bool
         True if overlap ratio meets threshold.
     """
     if len(text1) < n:
-        return text1 in text2
+        # Fragment too short for n-grams; fall back to membership check.
+        # response_ngrams cannot help here, so check against any single
+        # n-gram presence is not meaningful. Return False as a safe default
+        # since fragments this short are below _MIN_FRAGMENT_LENGTH anyway.
+        return False
 
     ngrams1 = {text1[i : i + n] for i in range(len(text1) - n + 1)}
     if not ngrams1:
         return False
 
-    matched = sum(1 for ng in ngrams1 if ng in text2)
+    matched = len(ngrams1 & response_ngrams)
     overlap = matched / len(ngrams1)
     return overlap >= threshold
 
@@ -287,6 +322,10 @@ class ServiceUtilizationScorer:
             ]
 
         response_normalized = _normalize_whitespace(response)
+        # Pre-compute response n-grams once and reuse across all sections
+        # and fragments.  This avoids rebuilding the set (or doing O(R)
+        # substring scans) for every fragment of every section.
+        response_ngrams = _build_ngram_set(response_normalized)
 
         attributions: list[ModelSectionAttribution] = []
         for section in sections:
@@ -308,7 +347,7 @@ class ServiceUtilizationScorer:
                 1
                 for frag in fragments
                 if _find_best_match_in_response(
-                    frag, response_normalized, self._threshold
+                    frag, response_normalized, self._threshold, response_ngrams
                 )
             )
 
