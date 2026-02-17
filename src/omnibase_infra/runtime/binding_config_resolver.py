@@ -7,7 +7,7 @@ from multiple sources with proper priority ordering (highest to lowest):
 
     1. Environment variables (HANDLER_{TYPE}_{FIELD}) - **highest priority**, always wins
     2. Inline config (passed directly to resolve()) - overrides config_ref values
-    3. Config reference (file:, env:, vault:) - **base configuration** (lowest priority)
+    3. Config reference (file:, env:, vault:, infisical:) - **base configuration** (lowest priority)
 
 Resolution Process:
     The resolver builds the final configuration by layering sources from lowest to highest
@@ -21,7 +21,7 @@ Resolution Process:
     and environment variables can override both for operational flexibility.
 
 Important: config_ref Schemes are Mutually Exclusive
-    The config_ref schemes (file:, env:, vault:) are **mutually exclusive** - only ONE
+    The config_ref schemes (file:, env:, vault:, infisical:) are **mutually exclusive** - only ONE
     config_ref can be provided per resolution call. The scheme determines WHERE to load
     the base configuration from, not a priority ordering between schemes.
 
@@ -225,10 +225,10 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
     Resolution Order:
         1. Check cache (if enabled and not expired)
-        2. Parse config_ref if present (file:, env:, vault:)
+        2. Parse config_ref if present (file:, env:, vault:, infisical:)
         3. Load base config from ref, then merge inline_config (inline takes precedence)
         4. Apply environment variable overrides (highest priority)
-        5. Resolve any vault: references in config values
+        5. Resolve any vault: and infisical: references in config values
         6. Validate and construct ModelBindingConfig
 
     Thread Safety:
@@ -307,7 +307,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         self._refreshes = 0
         self._file_loads = 0
         self._env_loads = 0
-        self._vault_loads = 0
+        self._secret_loads = 0
+        self._infisical_loads = 0
         self._async_key_lock_cleanups = 0  # Track cleanup events for observability
 
         # RLock (Reentrant Lock) is REQUIRED - DO NOT CHANGE TO REGULAR LOCK.
@@ -322,7 +323,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         #     -> _resolve_config() [no lock needed directly]
         #       -> _load_from_file() [updates _file_loads]
         #       -> _load_from_env() [updates _env_loads]
-        #       -> _resolve_vault_refs() [updates _vault_loads]
+        #       -> _resolve_vault_refs() [updates _secret_loads]
+        #       -> _load_from_infisical() [updates _infisical_loads]
         #     -> _cache_config() [updates _misses, _lru_evictions]
         #
         # With a regular threading.Lock, this would cause DEADLOCK because:
@@ -443,8 +445,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         Args:
             handler_type: Handler type identifier (e.g., "db", "vault", "consul").
             config_ref: Optional reference to external configuration.
-                Supported schemes: file:, env:, vault: (mutually exclusive - use only ONE)
-                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password
+                Supported schemes: file:, env:, vault:, infisical: (mutually exclusive - use only ONE)
+                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password,
+                    infisical:secret/path#field
             inline_config: Optional inline configuration dictionary.
                 Takes precedence over config_ref for overlapping keys.
             correlation_id: Optional correlation ID for error tracking.
@@ -566,7 +569,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         Args:
             handler_type: Handler type identifier (e.g., "db", "vault", "consul").
             config_ref: Optional reference to external configuration.
-                Supported schemes: file:, env:, vault: (mutually exclusive - use only ONE)
+                Supported schemes: file:, env:, vault:, infisical: (mutually exclusive - use only ONE)
             inline_config: Optional inline configuration dictionary.
             correlation_id: Optional correlation ID for error tracking.
 
@@ -755,7 +758,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 lru_evictions=self._lru_evictions,
                 file_loads=self._file_loads,
                 env_loads=self._env_loads,
-                vault_loads=self._vault_loads,
+                secret_loads=self._secret_loads,
+                infisical_loads=self._infisical_loads,
                 async_key_lock_count=len(self._async_key_locks),
                 async_key_lock_cleanups=self._async_key_lock_cleanups,
             )
@@ -1047,8 +1051,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             merged_config, handler_type, correlation_id
         )
 
-        # Resolve any vault: references in the config
+        # Resolve any vault: and infisical: references in the config
         merged_config = self._resolve_vault_refs(merged_config, correlation_id)
+        merged_config = self._resolve_infisical_refs(merged_config, correlation_id)
 
         # Validate and construct the final config
         return self._validate_config(merged_config, handler_type, correlation_id)
@@ -1094,8 +1099,11 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             merged_config, handler_type, correlation_id
         )
 
-        # Resolve any vault: references in the config (async)
+        # Resolve any vault: and infisical: references in the config (async)
         merged_config = await self._resolve_vault_refs_async(
+            merged_config, correlation_id
+        )
+        merged_config = await self._resolve_infisical_refs_async(
             merged_config, correlation_id
         )
 
@@ -1110,8 +1118,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         """Load configuration from a config_ref.
 
         Args:
-            config_ref: Configuration reference using scheme format (file:, env:, vault:).
-                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password
+            config_ref: Configuration reference using scheme format (file:, env:, vault:, infisical:).
+                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password,
+                    infisical:secret/path#field
             correlation_id: Correlation ID for error tracking.
 
         Returns:
@@ -1174,6 +1183,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             return self._load_from_env(ref.path, correlation_id)
         elif ref.scheme == EnumConfigRefScheme.VAULT:
             return self._load_from_vault(ref.path, ref.fragment, correlation_id)
+        elif ref.scheme == EnumConfigRefScheme.INFISICAL:
+            return self._load_from_infisical(ref.path, ref.fragment, correlation_id)
         else:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
@@ -1194,8 +1205,9 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         """Load configuration from a config_ref asynchronously.
 
         Args:
-            config_ref: Configuration reference using scheme format (file:, env:, vault:).
-                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password
+            config_ref: Configuration reference using scheme format (file:, env:, vault:, infisical:).
+                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password,
+                    infisical:secret/path#field
             correlation_id: Correlation ID for error tracking.
 
         Returns:
@@ -1261,6 +1273,10 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             return self._load_from_env(ref.path, correlation_id)
         elif ref.scheme == EnumConfigRefScheme.VAULT:
             return await self._load_from_vault_async(
+                ref.path, ref.fragment, correlation_id
+            )
+        elif ref.scheme == EnumConfigRefScheme.INFISICAL:
+            return await self._load_from_infisical_async(
                 ref.path, ref.fragment, correlation_id
             )
         else:
@@ -1759,7 +1775,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             )
 
         with self._lock:
-            self._vault_loads += 1
+            self._secret_loads += 1
 
         return data
 
@@ -1871,7 +1887,235 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             )
 
         with self._lock:
-            self._vault_loads += 1
+            self._secret_loads += 1
+
+        return data
+
+    def _load_from_infisical(
+        self,
+        infisical_path: str,
+        fragment: str | None,
+        correlation_id: UUID,
+    ) -> dict[str, object]:
+        """Load config from Infisical secret (sync).
+
+        Uses the same SecretResolver interface as Vault, but with source_type
+        ``infisical``. The path format is the same: ``path#field``.
+
+        Args:
+            infisical_path: Infisical secret path.
+            fragment: Optional field within the secret.
+            correlation_id: Correlation ID for error tracking.
+
+        Returns:
+            Loaded configuration dictionary.
+
+        Raises:
+            ProtocolConfigurationError: If Infisical is not configured or
+                secret cannot be read.
+        """
+        secret_resolver = self._get_secret_resolver()
+        if secret_resolver is None:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="load_from_infisical",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Infisical scheme used but no SecretResolver configured",
+                context=context,
+            )
+
+        # Build the full path for the Infisical reader (includes #field if present)
+        infisical_full_path = infisical_path
+        if fragment:
+            infisical_full_path = f"{infisical_path}#{fragment}"
+
+        # Call the Infisical reader directly instead of going through
+        # get_secret() which requires a pre-registered mapping. This mirrors
+        # how the path is a raw Infisical secret path, not a logical name.
+        try:
+            secret_value = secret_resolver._read_infisical_secret_sync(
+                infisical_full_path,
+                logical_name=infisical_path,
+                correlation_id=correlation_id,
+            )
+        except (SecretResolutionError, NotImplementedError) as e:
+            logger.debug(
+                "Infisical configuration retrieval failed (correlation_id=%s): %s",
+                correlation_id,
+                e,
+                extra={"correlation_id": str(correlation_id)},
+            )
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="load_from_infisical",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Failed to retrieve configuration from Infisical. "
+                f"correlation_id={correlation_id}",
+                context=context,
+            )
+
+        if secret_value is None:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="load_from_infisical",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Infisical secret not found",
+                context=context,
+            )
+        data: object = None
+        try:
+            data = json.loads(secret_value)
+        except json.JSONDecodeError:
+            try:
+                data = yaml.safe_load(secret_value)
+            except yaml.YAMLError:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.INFISICAL,
+                    operation="load_from_infisical",
+                    target_name="binding_config_resolver",
+                )
+                raise ProtocolConfigurationError(
+                    "Infisical secret contains invalid JSON/YAML",
+                    context=context,
+                )
+
+        if not isinstance(data, dict):
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="load_from_infisical",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Infisical secret must contain a dictionary",
+                context=context,
+            )
+
+        with self._lock:
+            self._infisical_loads += 1
+
+        return data
+
+    async def _load_from_infisical_async(
+        self,
+        infisical_path: str,
+        fragment: str | None,
+        correlation_id: UUID,
+    ) -> dict[str, object]:
+        """Load config from Infisical secret asynchronously.
+
+        Args:
+            infisical_path: Infisical secret path.
+            fragment: Optional field within the secret.
+            correlation_id: Correlation ID for error tracking.
+
+        Returns:
+            Loaded configuration dictionary.
+
+        Raises:
+            ProtocolConfigurationError: If Infisical is not configured or
+                secret cannot be read.
+        """
+        secret_resolver = self._get_secret_resolver()
+        if secret_resolver is None:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="load_from_infisical_async",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Infisical scheme used but no SecretResolver configured",
+                context=context,
+            )
+
+        # Build the full path for the Infisical reader (includes #field if present)
+        infisical_full_path = infisical_path
+        if fragment:
+            infisical_full_path = f"{infisical_path}#{fragment}"
+
+        # Call the Infisical reader directly instead of going through
+        # get_secret_async() which requires a pre-registered mapping. This mirrors
+        # how the path is a raw Infisical secret path, not a logical name.
+        try:
+            secret_value = await secret_resolver._read_infisical_secret_async(
+                infisical_full_path,
+                logical_name=infisical_path,
+                correlation_id=correlation_id,
+            )
+        except (SecretResolutionError, NotImplementedError) as e:
+            logger.debug(
+                "Infisical configuration retrieval failed async "
+                "(correlation_id=%s): %s",
+                correlation_id,
+                e,
+                extra={"correlation_id": str(correlation_id)},
+            )
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="load_from_infisical_async",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Failed to retrieve configuration from Infisical. "
+                f"correlation_id={correlation_id}",
+                context=context,
+            )
+
+        if secret_value is None:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="load_from_infisical_async",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Infisical secret not found",
+                context=context,
+            )
+        data: object = None
+        try:
+            data = json.loads(secret_value)
+        except json.JSONDecodeError:
+            try:
+                data = yaml.safe_load(secret_value)
+            except yaml.YAMLError:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.INFISICAL,
+                    operation="load_from_infisical_async",
+                    target_name="binding_config_resolver",
+                )
+                raise ProtocolConfigurationError(
+                    "Infisical secret contains invalid JSON/YAML",
+                    context=context,
+                )
+
+        if not isinstance(data, dict):
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="load_from_infisical_async",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                "Infisical secret must contain a dictionary",
+                context=context,
+            )
+
+        with self._lock:
+            self._infisical_loads += 1
 
         return data
 
@@ -1908,7 +2152,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         vault_path = value[6:]  # Remove "vault:" prefix
         return _split_path_and_fragment(vault_path)
 
-    def _has_vault_references(self, config: dict[str, object]) -> bool:
+    def _has_vault_references(self, config: dict[str, object], depth: int = 0) -> bool:
         """Check if config contains any vault: references (including nested dicts and lists).
 
         Recursively scans the configuration dictionary to detect any string
@@ -1916,38 +2160,50 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Args:
             config: Configuration dictionary to check.
+            depth: Current recursion depth (default 0). Returns False if
+                depth exceeds ``_MAX_NESTED_CONFIG_DEPTH`` to prevent
+                stack overflow on pathological inputs.
 
         Returns:
             True if any vault: references are found, False otherwise.
         """
+        if depth > _MAX_NESTED_CONFIG_DEPTH:
+            return False
         for value in config.values():
             if isinstance(value, str) and value.startswith("vault:"):
                 return True
             if isinstance(value, dict):
-                if self._has_vault_references(value):
+                if self._has_vault_references(value, depth=depth + 1):
                     return True
             if isinstance(value, list):
-                if self._has_vault_references_in_list(value):
+                if self._has_vault_references_in_list(value, depth=depth + 1):
                     return True
         return False
 
-    def _has_vault_references_in_list(self, items: list[object]) -> bool:
+    def _has_vault_references_in_list(
+        self, items: list[object], depth: int = 0
+    ) -> bool:
         """Check if a list contains any vault: references (including nested structures).
 
         Args:
             items: List to check for vault references.
+            depth: Current recursion depth (default 0). Returns False if
+                depth exceeds ``_MAX_NESTED_CONFIG_DEPTH`` to prevent
+                stack overflow on pathological inputs.
 
         Returns:
             True if any vault: references are found, False otherwise.
         """
+        if depth > _MAX_NESTED_CONFIG_DEPTH:
+            return False
         for item in items:
             if isinstance(item, str) and item.startswith("vault:"):
                 return True
             if isinstance(item, dict):
-                if self._has_vault_references(item):
+                if self._has_vault_references(item, depth=depth + 1):
                     return True
             if isinstance(item, list):
-                if self._has_vault_references_in_list(item):
+                if self._has_vault_references_in_list(item, depth=depth + 1):
                     return True
         return False
 
@@ -2204,7 +2460,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_vault_error is True and a vault reference fails.
+                or if fail_on_secret_error is True and a vault reference fails.
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
             context = ModelInfraErrorContext.with_correlation(
@@ -2221,8 +2477,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         secret_resolver = self._get_secret_resolver()
         if secret_resolver is None:
             # Check if there are vault references that need resolution
-            # If fail_on_vault_error is True and vault refs exist, this is a security issue
-            if self._config.fail_on_vault_error and self._has_vault_references(config):
+            # If fail_on_secret_error is True and vault refs exist, this is a security issue
+            if self._config.fail_on_secret_error and self._has_vault_references(config):
                 context = ModelInfraErrorContext.with_correlation(
                     correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.RUNTIME,
@@ -2247,8 +2503,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret is not None:
                         result[key] = secret.get_secret_value()
                     else:
-                        # Secret not found - check fail_on_vault_error
-                        if self._config.fail_on_vault_error:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
                             logger.error(
                                 "Vault secret not found for config key '%s'",
                                 key,
@@ -2285,8 +2541,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             "config_key": key,
                         },
                     )
-                    # Respect fail_on_vault_error config option
-                    if self._config.fail_on_vault_error:
+                    # Respect fail_on_secret_error config option
+                    if self._config.fail_on_secret_error:
                         context = ModelInfraErrorContext.with_correlation(
                             correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.VAULT,
@@ -2339,7 +2595,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_vault_error is True and a vault reference fails.
+                or if fail_on_secret_error is True and a vault reference fails.
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
             context = ModelInfraErrorContext.with_correlation(
@@ -2365,8 +2621,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret is not None:
                         result.append(secret.get_secret_value())
                     else:
-                        # Secret not found - check fail_on_vault_error
-                        if self._config.fail_on_vault_error:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
                             logger.error(
                                 "Vault secret not found at list index %d",
                                 i,
@@ -2402,7 +2658,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             "list_index": i,
                         },
                     )
-                    if self._config.fail_on_vault_error:
+                    if self._config.fail_on_secret_error:
                         context = ModelInfraErrorContext.with_correlation(
                             correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.VAULT,
@@ -2448,7 +2704,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_vault_error is True and a vault reference fails.
+                or if fail_on_secret_error is True and a vault reference fails.
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
             context = ModelInfraErrorContext.with_correlation(
@@ -2465,8 +2721,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         secret_resolver = self._get_secret_resolver()
         if secret_resolver is None:
             # Check if there are vault references that need resolution
-            # If fail_on_vault_error is True and vault refs exist, this is a security issue
-            if self._config.fail_on_vault_error and self._has_vault_references(config):
+            # If fail_on_secret_error is True and vault refs exist, this is a security issue
+            if self._config.fail_on_secret_error and self._has_vault_references(config):
                 context = ModelInfraErrorContext.with_correlation(
                     correlation_id=correlation_id,
                     transport_type=EnumInfraTransportType.RUNTIME,
@@ -2493,8 +2749,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret is not None:
                         result[key] = secret.get_secret_value()
                     else:
-                        # Secret not found - check fail_on_vault_error
-                        if self._config.fail_on_vault_error:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
                             logger.error(
                                 "Vault secret not found for config key '%s'",
                                 key,
@@ -2531,8 +2787,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             "config_key": key,
                         },
                     )
-                    # Respect fail_on_vault_error config option
-                    if self._config.fail_on_vault_error:
+                    # Respect fail_on_secret_error config option
+                    if self._config.fail_on_secret_error:
                         context = ModelInfraErrorContext.with_correlation(
                             correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.VAULT,
@@ -2587,7 +2843,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         Raises:
             ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_vault_error is True and a vault reference fails.
+                or if fail_on_secret_error is True and a vault reference fails.
         """
         if depth > _MAX_NESTED_CONFIG_DEPTH:
             context = ModelInfraErrorContext.with_correlation(
@@ -2615,8 +2871,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                     if secret is not None:
                         result.append(secret.get_secret_value())
                     else:
-                        # Secret not found - check fail_on_vault_error
-                        if self._config.fail_on_vault_error:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
                             logger.error(
                                 "Vault secret not found at list index %d",
                                 i,
@@ -2652,7 +2908,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                             "list_index": i,
                         },
                     )
-                    if self._config.fail_on_vault_error:
+                    if self._config.fail_on_secret_error:
                         context = ModelInfraErrorContext.with_correlation(
                             correlation_id=correlation_id,
                             transport_type=EnumInfraTransportType.VAULT,
@@ -2683,6 +2939,647 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 result.append(item)
 
         return result
+
+    def _resolve_infisical_refs(
+        self,
+        config: dict[str, object],
+        correlation_id: UUID,
+        depth: int = 0,
+    ) -> dict[str, object]:
+        """Resolve any infisical: references in config values.
+
+        Mirrors ``_resolve_vault_refs`` but for the ``infisical:`` scheme.
+        Scans all string values for the ``infisical:`` prefix and resolves
+        them through the SecretResolver.
+
+        Args:
+            config: Configuration dict potentially containing infisical: refs.
+            correlation_id: Correlation ID for error tracking.
+            depth: Recursion depth for nested resolution.
+
+        Returns:
+            Configuration with infisical references resolved.
+
+        Raises:
+            ProtocolConfigurationError: If recursion depth exceeds maximum,
+                or if ``fail_on_secret_error`` is True and an infisical reference
+                fails.  (``fail_on_secret_error`` governs all secret backends
+                despite its Vault-centric name.)
+        """
+        if depth > _MAX_NESTED_CONFIG_DEPTH:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="resolve_infisical_refs",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Configuration nesting exceeds maximum depth of {_MAX_NESTED_CONFIG_DEPTH}",
+                context=context,
+            )
+
+        secret_resolver = self._get_secret_resolver()
+        if secret_resolver is None:
+            # Check if there are infisical references that need resolution
+            # If fail_on_secret_error is True and infisical refs exist, this is a security issue
+            if self._config.fail_on_secret_error and self._has_infisical_references(
+                config, depth=depth
+            ):
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="resolve_infisical_refs",
+                    target_name="binding_config_resolver",
+                )
+                raise ProtocolConfigurationError(
+                    "Config contains infisical: references but no "
+                    "SecretResolver is configured",
+                    context=context,
+                )
+            return config
+
+        result: dict[str, object] = {}
+        for key, value in config.items():
+            if isinstance(value, str) and value.startswith("infisical:"):
+                infisical_path, fragment = self._parse_infisical_reference(value)
+                # Build the full path for the Infisical reader (includes
+                # #field if present).  We call _read_infisical_secret_sync
+                # directly instead of get_secret() to avoid silent fallback
+                # to env-var lookup when enable_convention_fallback=True and
+                # no explicit mapping exists.
+                infisical_full_path = (
+                    f"{infisical_path}#{fragment}" if fragment else infisical_path
+                )
+                try:
+                    secret_value = secret_resolver._read_infisical_secret_sync(
+                        infisical_full_path,
+                        logical_name=infisical_path,
+                        correlation_id=correlation_id,
+                    )
+                    if secret_value is not None:
+                        result[key] = secret_value
+                    else:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
+                            logger.error(
+                                "Infisical secret not found for config key '%s'",
+                                key,
+                                extra={
+                                    "correlation_id": str(correlation_id),
+                                    "config_key": key,
+                                },
+                            )
+                            context = ModelInfraErrorContext.with_correlation(
+                                correlation_id=correlation_id,
+                                transport_type=EnumInfraTransportType.INFISICAL,
+                                operation="resolve_infisical_refs",
+                                target_name="binding_config_resolver",
+                            )
+                            raise ProtocolConfigurationError(
+                                f"Infisical secret not found for config key '{key}'",
+                                context=context,
+                            )
+                        result[key] = value  # Keep original if not found
+                except (SecretResolutionError, NotImplementedError) as e:
+                    # SecretResolutionError: secret not found or resolution failed
+                    # NotImplementedError: Infisical integration not yet implemented
+                    # SECURITY: Log at DEBUG level only - exception may contain
+                    # secret paths in its message
+                    logger.debug(
+                        "Infisical resolution failed for config key '%s' "
+                        "(correlation_id=%s): %s",
+                        key,
+                        correlation_id,
+                        e,
+                        extra={
+                            "correlation_id": str(correlation_id),
+                            "config_key": key,
+                        },
+                    )
+                    # Respect fail_on_secret_error config option
+                    if self._config.fail_on_secret_error:
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.INFISICAL,
+                            operation="resolve_infisical_refs",
+                            target_name="binding_config_resolver",
+                        )
+                        # SECURITY: Do NOT chain original exception (from e) -
+                        # it may contain secret paths in its message. Original
+                        # error is logged at DEBUG level above.
+                        raise ProtocolConfigurationError(
+                            f"Failed to resolve Infisical secret reference for "
+                            f"config key '{key}'. "
+                            f"correlation_id={correlation_id}",
+                            context=context,
+                        )
+                    # Keep original on error (may be insecure - logged above)
+                    result[key] = value
+            elif isinstance(value, dict):
+                result[key] = self._resolve_infisical_refs(
+                    value, correlation_id, depth + 1
+                )
+            elif isinstance(value, list):
+                result[key] = self._resolve_infisical_refs_in_list(
+                    value, secret_resolver, correlation_id, depth + 1
+                )
+            else:
+                result[key] = value
+
+        return result
+
+    async def _resolve_infisical_refs_async(
+        self,
+        config: dict[str, object],
+        correlation_id: UUID,
+        depth: int = 0,
+    ) -> dict[str, object]:
+        """Resolve any infisical: references in config values asynchronously.
+
+        Async counterpart to ``_resolve_infisical_refs``.
+
+        Args:
+            config: Configuration dict potentially containing infisical: refs.
+            correlation_id: Correlation ID for error tracking.
+            depth: Recursion depth for nested resolution.
+
+        Returns:
+            Configuration with infisical references resolved.
+
+        Raises:
+            ProtocolConfigurationError: If recursion depth exceeds maximum,
+                or if ``fail_on_secret_error`` is True and an infisical reference
+                fails.  (``fail_on_secret_error`` governs all secret backends
+                despite its Vault-centric name.)
+        """
+        if depth > _MAX_NESTED_CONFIG_DEPTH:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="resolve_infisical_refs_async",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Configuration nesting exceeds maximum depth of {_MAX_NESTED_CONFIG_DEPTH}",
+                context=context,
+            )
+
+        secret_resolver = self._get_secret_resolver()
+        if secret_resolver is None:
+            # Check if there are infisical references that need resolution
+            # If fail_on_secret_error is True and infisical refs exist, this is a security issue
+            if self._config.fail_on_secret_error and self._has_infisical_references(
+                config, depth=depth
+            ):
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.RUNTIME,
+                    operation="resolve_infisical_refs_async",
+                    target_name="binding_config_resolver",
+                )
+                raise ProtocolConfigurationError(
+                    "Config contains infisical: references but no "
+                    "SecretResolver is configured",
+                    context=context,
+                )
+            return config
+
+        result: dict[str, object] = {}
+        for key, value in config.items():
+            if isinstance(value, str) and value.startswith("infisical:"):
+                infisical_path, fragment = self._parse_infisical_reference(value)
+                # Build the full path for the Infisical reader (includes
+                # #field if present).  We call _read_infisical_secret_async
+                # directly instead of get_secret_async() to avoid silent
+                # fallback to env-var lookup when enable_convention_fallback=True
+                # and no explicit mapping exists.
+                infisical_full_path = (
+                    f"{infisical_path}#{fragment}" if fragment else infisical_path
+                )
+                try:
+                    secret_value = await secret_resolver._read_infisical_secret_async(
+                        infisical_full_path,
+                        logical_name=infisical_path,
+                        correlation_id=correlation_id,
+                    )
+                    if secret_value is not None:
+                        result[key] = secret_value
+                    else:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
+                            logger.error(
+                                "Infisical secret not found for config key '%s'",
+                                key,
+                                extra={
+                                    "correlation_id": str(correlation_id),
+                                    "config_key": key,
+                                },
+                            )
+                            context = ModelInfraErrorContext.with_correlation(
+                                correlation_id=correlation_id,
+                                transport_type=EnumInfraTransportType.INFISICAL,
+                                operation="resolve_infisical_refs_async",
+                                target_name="binding_config_resolver",
+                            )
+                            raise ProtocolConfigurationError(
+                                f"Infisical secret not found for config key '{key}'",
+                                context=context,
+                            )
+                        result[key] = value  # Keep original if not found
+                except (SecretResolutionError, NotImplementedError) as e:
+                    # SecretResolutionError: secret not found or resolution failed
+                    # NotImplementedError: Infisical integration not yet implemented
+                    # SECURITY: Log at DEBUG level only - exception may contain
+                    # secret paths in its message
+                    logger.debug(
+                        "Infisical resolution failed for config key '%s' "
+                        "(correlation_id=%s): %s",
+                        key,
+                        correlation_id,
+                        e,
+                        extra={
+                            "correlation_id": str(correlation_id),
+                            "config_key": key,
+                        },
+                    )
+                    # Respect fail_on_secret_error config option
+                    if self._config.fail_on_secret_error:
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.INFISICAL,
+                            operation="resolve_infisical_refs_async",
+                            target_name="binding_config_resolver",
+                        )
+                        # SECURITY: Do NOT chain original exception (from e) -
+                        # it may contain secret paths in its message. Original
+                        # error is logged at DEBUG level above.
+                        raise ProtocolConfigurationError(
+                            f"Failed to resolve Infisical secret reference for "
+                            f"config key '{key}'. "
+                            f"correlation_id={correlation_id}",
+                            context=context,
+                        )
+                    # Keep original on error (may be insecure - logged above)
+                    result[key] = value
+            elif isinstance(value, dict):
+                result[key] = await self._resolve_infisical_refs_async(
+                    value, correlation_id, depth + 1
+                )
+            elif isinstance(value, list):
+                result[key] = await self._resolve_infisical_refs_in_list_async(
+                    value, secret_resolver, correlation_id, depth + 1
+                )
+            else:
+                result[key] = value
+
+        return result
+
+    def _parse_infisical_reference(self, value: str) -> tuple[str, str | None]:
+        """Parse an infisical: reference string into path and optional fragment.
+
+        Extracts the Infisical path and optional fragment from an infisical
+        reference.  The fragment is specified after a '#' character in the
+        reference.
+
+        Format::
+
+            infisical:path/to/secret#field
+
+        - **path**: The secret path in Infisical
+          (e.g., ``/project/env/secret-name``).
+        - **field**: Optional JSON field to extract from the secret value.
+
+        This mirrors ``_parse_vault_reference`` for the ``infisical:`` scheme.
+
+        Args:
+            value: The infisical reference string
+                (e.g., ``"infisical:project/env/db-creds#password"``).
+
+        Returns:
+            Tuple of (infisical_path, fragment) where fragment may be None.
+            The infisical_path has the ``"infisical:"`` prefix removed.
+
+        Example:
+            >>> self._parse_infisical_reference("infisical:project/env/db#password")
+            ("project/env/db", "password")
+            >>> self._parse_infisical_reference("infisical:project/env/api-key")
+            ("project/env/api-key", None)
+        """
+        infisical_path = value[len("infisical:") :]
+        return _split_path_and_fragment(infisical_path)
+
+    def _resolve_infisical_refs_in_list(
+        self,
+        items: list[object],
+        secret_resolver: SecretResolver,
+        correlation_id: UUID,
+        depth: int,
+    ) -> list[object]:
+        """Resolve infisical: references within a list.
+
+        Processes each item in the list, resolving any infisical: references found
+        in strings, nested dicts, or nested lists.
+
+        Args:
+            items: List of items to process.
+            secret_resolver: SecretResolver instance for infisical lookups.
+            correlation_id: Correlation ID for error tracking.
+            depth: Current recursion depth.
+
+        Returns:
+            List with infisical references resolved.
+
+        Raises:
+            ProtocolConfigurationError: If recursion depth exceeds maximum,
+                or if ``fail_on_secret_error`` is True and an infisical reference
+                fails.  (``fail_on_secret_error`` governs all secret backends
+                despite its Vault-centric name.)
+        """
+        if depth > _MAX_NESTED_CONFIG_DEPTH:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="resolve_infisical_refs_in_list",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Configuration nesting exceeds maximum depth of {_MAX_NESTED_CONFIG_DEPTH}",
+                context=context,
+            )
+
+        result: list[object] = []
+        for i, item in enumerate(items):
+            if isinstance(item, str) and item.startswith("infisical:"):
+                infisical_path, fragment = self._parse_infisical_reference(item)
+                # Build the full path for the Infisical reader (includes
+                # #field if present).  We call _read_infisical_secret_sync
+                # directly instead of get_secret() to avoid silent fallback
+                # to env-var lookup when enable_convention_fallback=True and
+                # no explicit mapping exists.
+                infisical_full_path = (
+                    f"{infisical_path}#{fragment}" if fragment else infisical_path
+                )
+                try:
+                    secret_value = secret_resolver._read_infisical_secret_sync(
+                        infisical_full_path,
+                        logical_name=infisical_path,
+                        correlation_id=correlation_id,
+                    )
+                    if secret_value is not None:
+                        result.append(secret_value)
+                    else:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
+                            logger.error(
+                                "Infisical secret not found at list index %d",
+                                i,
+                                extra={
+                                    "correlation_id": str(correlation_id),
+                                    "list_index": i,
+                                },
+                            )
+                            context = ModelInfraErrorContext.with_correlation(
+                                correlation_id=correlation_id,
+                                transport_type=EnumInfraTransportType.INFISICAL,
+                                operation="resolve_infisical_refs_in_list",
+                                target_name="binding_config_resolver",
+                            )
+                            raise ProtocolConfigurationError(
+                                f"Infisical secret not found at list index {i}",
+                                context=context,
+                            )
+                        result.append(item)  # Keep original if not found
+                except (SecretResolutionError, NotImplementedError) as e:
+                    # SecretResolutionError: secret not found or resolution failed
+                    # NotImplementedError: Infisical integration not yet implemented
+                    # SECURITY: Log at DEBUG level only - exception may contain
+                    # secret paths. Do not log infisical_path.
+                    logger.debug(
+                        "Infisical resolution failed at list index %d "
+                        "(correlation_id=%s): %s",
+                        i,
+                        correlation_id,
+                        e,
+                        extra={
+                            "correlation_id": str(correlation_id),
+                            "list_index": i,
+                        },
+                    )
+                    if self._config.fail_on_secret_error:
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.INFISICAL,
+                            operation="resolve_infisical_refs_in_list",
+                            target_name="binding_config_resolver",
+                        )
+                        # SECURITY: Do NOT chain original exception (from e) -
+                        # it may contain secret paths in its message.
+                        raise ProtocolConfigurationError(
+                            f"Failed to resolve Infisical secret reference at list index {i}. "
+                            f"correlation_id={correlation_id}",
+                            context=context,
+                        )
+                    result.append(item)
+            elif isinstance(item, dict):
+                result.append(
+                    self._resolve_infisical_refs(item, correlation_id, depth + 1)
+                )
+            elif isinstance(item, list):
+                result.append(
+                    self._resolve_infisical_refs_in_list(
+                        item, secret_resolver, correlation_id, depth + 1
+                    )
+                )
+            else:
+                result.append(item)
+
+        return result
+
+    async def _resolve_infisical_refs_in_list_async(
+        self,
+        items: list[object],
+        secret_resolver: SecretResolver,
+        correlation_id: UUID,
+        depth: int,
+    ) -> list[object]:
+        """Resolve infisical: references within a list asynchronously.
+
+        Processes each item in the list, resolving any infisical: references found
+        in strings, nested dicts, or nested lists.
+
+        Args:
+            items: List of items to process.
+            secret_resolver: SecretResolver instance for infisical lookups.
+            correlation_id: Correlation ID for error tracking.
+            depth: Current recursion depth.
+
+        Returns:
+            List with infisical references resolved.
+
+        Raises:
+            ProtocolConfigurationError: If recursion depth exceeds maximum,
+                or if ``fail_on_secret_error`` is True and an infisical reference
+                fails.  (``fail_on_secret_error`` governs all secret backends
+                despite its Vault-centric name.)
+        """
+        if depth > _MAX_NESTED_CONFIG_DEPTH:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="resolve_infisical_refs_in_list_async",
+                target_name="binding_config_resolver",
+            )
+            raise ProtocolConfigurationError(
+                f"Configuration nesting exceeds maximum depth of {_MAX_NESTED_CONFIG_DEPTH}",
+                context=context,
+            )
+
+        result: list[object] = []
+        for i, item in enumerate(items):
+            if isinstance(item, str) and item.startswith("infisical:"):
+                infisical_path, fragment = self._parse_infisical_reference(item)
+                # Build the full path for the Infisical reader (includes
+                # #field if present).  We call _read_infisical_secret_async
+                # directly instead of get_secret_async() to avoid silent
+                # fallback to env-var lookup when enable_convention_fallback=True
+                # and no explicit mapping exists.
+                infisical_full_path = (
+                    f"{infisical_path}#{fragment}" if fragment else infisical_path
+                )
+                try:
+                    secret_value = await secret_resolver._read_infisical_secret_async(
+                        infisical_full_path,
+                        logical_name=infisical_path,
+                        correlation_id=correlation_id,
+                    )
+                    if secret_value is not None:
+                        result.append(secret_value)
+                    else:
+                        # Secret not found - check fail_on_secret_error
+                        if self._config.fail_on_secret_error:
+                            logger.error(
+                                "Infisical secret not found at list index %d",
+                                i,
+                                extra={
+                                    "correlation_id": str(correlation_id),
+                                    "list_index": i,
+                                },
+                            )
+                            context = ModelInfraErrorContext.with_correlation(
+                                correlation_id=correlation_id,
+                                transport_type=EnumInfraTransportType.INFISICAL,
+                                operation="resolve_infisical_refs_in_list_async",
+                                target_name="binding_config_resolver",
+                            )
+                            raise ProtocolConfigurationError(
+                                f"Infisical secret not found at list index {i}",
+                                context=context,
+                            )
+                        result.append(item)  # Keep original if not found
+                except (SecretResolutionError, NotImplementedError) as e:
+                    # SecretResolutionError: secret not found or resolution failed
+                    # NotImplementedError: Infisical integration not yet implemented
+                    # SECURITY: Log at DEBUG level only - exception may contain
+                    # secret paths. Do not log infisical_path.
+                    logger.debug(
+                        "Infisical resolution failed at list index %d "
+                        "(correlation_id=%s): %s",
+                        i,
+                        correlation_id,
+                        e,
+                        extra={
+                            "correlation_id": str(correlation_id),
+                            "list_index": i,
+                        },
+                    )
+                    if self._config.fail_on_secret_error:
+                        context = ModelInfraErrorContext.with_correlation(
+                            correlation_id=correlation_id,
+                            transport_type=EnumInfraTransportType.INFISICAL,
+                            operation="resolve_infisical_refs_in_list_async",
+                            target_name="binding_config_resolver",
+                        )
+                        # SECURITY: Do NOT chain original exception (from e) -
+                        # it may contain secret paths in its message.
+                        raise ProtocolConfigurationError(
+                            f"Failed to resolve Infisical secret reference at list index {i}. "
+                            f"correlation_id={correlation_id}",
+                            context=context,
+                        )
+                    result.append(item)
+            elif isinstance(item, dict):
+                result.append(
+                    await self._resolve_infisical_refs_async(
+                        item, correlation_id, depth + 1
+                    )
+                )
+            elif isinstance(item, list):
+                result.append(
+                    await self._resolve_infisical_refs_in_list_async(
+                        item, secret_resolver, correlation_id, depth + 1
+                    )
+                )
+            else:
+                result.append(item)
+
+        return result
+
+    def _has_infisical_references(
+        self, config: dict[str, object], depth: int = 0
+    ) -> bool:
+        """Check if config contains any infisical: references (including nested dicts and lists).
+
+        Recursively scans the configuration dictionary to detect any string
+        values that start with "infisical:".
+
+        Args:
+            config: Configuration dict to check.
+            depth: Current recursion depth (default 0). Returns False if
+                depth exceeds ``_MAX_NESTED_CONFIG_DEPTH`` to prevent
+                stack overflow on pathological inputs.
+
+        Returns:
+            True if any infisical: references are found, False otherwise.
+        """
+        if depth > _MAX_NESTED_CONFIG_DEPTH:
+            return False
+        for value in config.values():
+            if isinstance(value, str) and value.startswith("infisical:"):
+                return True
+            if isinstance(value, dict):
+                if self._has_infisical_references(value, depth=depth + 1):
+                    return True
+            if isinstance(value, list):
+                if self._has_infisical_references_in_list(value, depth=depth + 1):
+                    return True
+        return False
+
+    def _has_infisical_references_in_list(
+        self, items: list[object], depth: int = 0
+    ) -> bool:
+        """Check if a list contains any infisical: references (including nested structures).
+
+        Args:
+            items: List to check for infisical references.
+            depth: Current recursion depth (default 0). Returns False if
+                depth exceeds ``_MAX_NESTED_CONFIG_DEPTH`` to prevent
+                stack overflow on pathological inputs.
+
+        Returns:
+            True if any infisical: references are found, False otherwise.
+        """
+        if depth > _MAX_NESTED_CONFIG_DEPTH:
+            return False
+        for item in items:
+            if isinstance(item, str) and item.startswith("infisical:"):
+                return True
+            if isinstance(item, dict):
+                if self._has_infisical_references(item, depth=depth + 1):
+                    return True
+            if isinstance(item, list):
+                if self._has_infisical_references_in_list(item, depth=depth + 1):
+                    return True
+        return False
 
     def _validate_config(
         self,

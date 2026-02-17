@@ -1867,6 +1867,23 @@ pattern_exemptions:
       - docs/patterns/binding_config_resolver.md
     ticket: OMN-765
   # ==========================================================================
+  # AdapterInfisical Method Count Exemption (OMN-2286)
+  # ==========================================================================
+  # SDK adapter with cohesive CRUD methods + extraction helpers:
+  # - Lifecycle (2): __init__, initialize
+  # - CRUD API (3): get_secret, list_secrets, get_secrets_batch
+  # - Properties (3): is_initialized, client_id_display, stats
+  # - Extraction helpers (3): _extract_secret_value, _extract_secret_key, _build_secret_result
+  - file_pattern: 'adapter_infisical\.py'
+    class_pattern: "Class 'AdapterInfisical'"
+    violation_pattern: 'has \d+ methods'
+    reason: >
+      AdapterInfisical is a thin SDK wrapper with 11 cohesive methods: 2 lifecycle (init, initialize), 3 CRUD API (get_secret, list_secrets, get_secrets_batch), 3 properties (is_initialized, client_id_display, stats), and 3 private extraction helpers (_extract_secret_value, _extract_secret_key, _build_secret_result). All methods operate on the same SDK client. Splitting would fragment the adapter interface.
+
+    documentation:
+      - CLAUDE.md (Adapter pattern)
+    ticket: OMN-2286
+  # ==========================================================================
   # HandlerMCP Method Count Exemption (OMN-1282)
   # ==========================================================================
   # MCP handler is a complex infrastructure component requiring many methods:

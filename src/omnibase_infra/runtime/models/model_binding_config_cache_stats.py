@@ -26,7 +26,8 @@ class ModelBindingConfigCacheStats(BaseModel):
         lru_evictions: Total number of entries evicted due to LRU policy.
         file_loads: Total number of configurations loaded from files.
         env_loads: Total number of configurations loaded from environment variables.
-        vault_loads: Total number of configurations loaded from Vault.
+        secret_loads: Total number of configurations loaded from secret backends (Vault, etc.).
+        infisical_loads: Total number of configurations loaded from Infisical.
         async_key_lock_count: Current number of async key locks held.
         async_key_lock_cleanups: Total number of stale lock cleanup operations.
 
@@ -83,10 +84,15 @@ class ModelBindingConfigCacheStats(BaseModel):
         ge=0,
         description="Total number of configurations loaded from environment variables.",
     )
-    vault_loads: int = Field(
+    secret_loads: int = Field(
         default=0,
         ge=0,
-        description="Total number of configurations loaded from Vault.",
+        description="Total number of configurations loaded from secret backends (Vault, etc.).",
+    )
+    infisical_loads: int = Field(
+        default=0,
+        ge=0,
+        description="Total number of configurations loaded from Infisical.",
     )
     async_key_lock_count: int = Field(
         default=0,
@@ -120,16 +126,18 @@ class ModelBindingConfigCacheStats(BaseModel):
         """Calculate total configuration loads from all sources.
 
         Returns:
-            Sum of file_loads, env_loads, and vault_loads.
+            Sum of file_loads, env_loads, secret_loads, and infisical_loads.
 
         Example:
             >>> stats = ModelBindingConfigCacheStats(
-            ...     file_loads=10, env_loads=5, vault_loads=3
+            ...     file_loads=10, env_loads=5, secret_loads=3, infisical_loads=2
             ... )
             >>> stats.total_loads
-            18
+            20
         """
-        return self.file_loads + self.env_loads + self.vault_loads
+        return (
+            self.file_loads + self.env_loads + self.secret_loads + self.infisical_loads
+        )
 
 
 __all__: list[str] = ["ModelBindingConfigCacheStats"]

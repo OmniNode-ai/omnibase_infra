@@ -23,11 +23,13 @@ class EnumConfigRefScheme(str, Enum):
         FILE: File-based configuration (local filesystem).
         ENV: Environment variable containing configuration.
         VAULT: HashiCorp Vault secret containing configuration.
+        INFISICAL: Infisical secret containing configuration (OMN-2286).
     """
 
     FILE = "file"
     ENV = "env"
     VAULT = "vault"
+    INFISICAL = "infisical"
 
 
 __all__: list[str] = ["EnumConfigRefScheme"]

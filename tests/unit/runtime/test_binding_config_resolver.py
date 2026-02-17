@@ -1105,12 +1105,12 @@ class TestBindingConfigResolverVaultSource:
             # Config should have the secret resolved (in the nested dict)
             assert result.config is not None
 
-    def test_fail_on_vault_error_true_raises_when_resolver_absent(self) -> None:
-        """Raise error when fail_on_vault_error=True and SecretResolver absent."""
+    def test_fail_on_secret_error_true_raises_when_resolver_absent(self) -> None:
+        """Raise error when fail_on_secret_error=True and SecretResolver absent."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
-                fail_on_vault_error=True,
+                fail_on_secret_error=True,
             )
             # Create container without SecretResolver registered
             resolver, _container = create_resolver(config, secret_resolver=None)
@@ -1127,12 +1127,12 @@ class TestBindingConfigResolverVaultSource:
 
             assert "secretresolver" in str(exc_info.value).lower()
 
-    def test_fail_on_vault_error_false_skips_when_resolver_absent(self) -> None:
-        """Skip vault resolution when fail_on_vault_error=False and SecretResolver absent."""
+    def test_fail_on_secret_error_false_skips_when_resolver_absent(self) -> None:
+        """Skip vault resolution when fail_on_secret_error=False and SecretResolver absent."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
-                fail_on_vault_error=False,  # Default, but explicit for clarity
+                fail_on_secret_error=False,  # Default, but explicit for clarity
             )
             # Create container without SecretResolver registered
             resolver, _container = create_resolver(config, secret_resolver=None)
@@ -1152,14 +1152,14 @@ class TestBindingConfigResolverVaultSource:
             assert result.config.get("password") == "vault:secret/db#password"
 
     @pytest.mark.asyncio
-    async def test_fail_on_vault_error_true_raises_async_when_resolver_absent(
+    async def test_fail_on_secret_error_true_raises_async_when_resolver_absent(
         self,
     ) -> None:
-        """Async: Raise error when fail_on_vault_error=True and SecretResolver absent."""
+        """Async: Raise error when fail_on_secret_error=True and SecretResolver absent."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
-                fail_on_vault_error=True,
+                fail_on_secret_error=True,
             )
             resolver, _container = create_resolver(config, secret_resolver=None)
 
@@ -1175,14 +1175,14 @@ class TestBindingConfigResolverVaultSource:
             assert "secretresolver" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
-    async def test_fail_on_vault_error_false_skips_async_when_resolver_absent(
+    async def test_fail_on_secret_error_false_skips_async_when_resolver_absent(
         self,
     ) -> None:
-        """Async: Skip vault resolution when fail_on_vault_error=False and SecretResolver absent."""
+        """Async: Skip vault resolution when fail_on_secret_error=False and SecretResolver absent."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
-                fail_on_vault_error=False,
+                fail_on_secret_error=False,
             )
             resolver, _container = create_resolver(config, secret_resolver=None)
 
@@ -3347,7 +3347,7 @@ class TestVaultReferencesInLists:
                 assert api_keys[1] == "async_secret"
 
     def test_vault_ref_resolution_failure_in_list(self) -> None:
-        """Test vault reference resolution failure in list with fail_on_vault_error."""
+        """Test vault reference resolution failure in list with fail_on_secret_error."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_resolver = MagicMock()
             # Use SecretResolutionError (specific exception) instead of generic Exception
@@ -3355,7 +3355,7 @@ class TestVaultReferencesInLists:
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
-                fail_on_vault_error=True,
+                fail_on_secret_error=True,
             )
             resolver, _container = create_resolver(config)
 

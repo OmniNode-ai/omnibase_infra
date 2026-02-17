@@ -11,6 +11,7 @@ Supported transport types:
     - KAFKA: Kafka message broker
     - CONSUL: Consul service discovery and KV operations
     - VAULT: HashiCorp Vault secret management
+    - INFISICAL: Infisical secret management
     - VALKEY: Valkey (Redis-compatible) cache/messaging
     - GRPC: gRPC protocol
     - RUNTIME: Runtime host internal transport
@@ -23,6 +24,7 @@ Supported transport types:
 Each transport type has a corresponding handler implementation:
     - HandlerConsul: Service registration, health checks, KV store operations
     - HandlerVault: Secret retrieval, token management, lease renewal
+    - HandlerInfisical: Secret retrieval, caching, batch fetch (OMN-2286)
     - EventBusKafka: Event publishing/subscription, consumer groups
     - EventBusInmemory: In-memory event bus for testing and local development
     - PostgresConnectionManager: Connection pooling, query execution
@@ -45,6 +47,7 @@ class EnumInfraTransportType(str, Enum):
         KAFKA: Kafka message broker transport
         CONSUL: Consul discovery transport
         VAULT: HashiCorp Vault secret transport
+        INFISICAL: Infisical secret management transport (OMN-2286)
         VALKEY: Valkey (Redis-compatible) cache/message transport
         GRPC: gRPC protocol transport
         RUNTIME: Runtime host process internal transport
@@ -60,6 +63,7 @@ class EnumInfraTransportType(str, Enum):
     KAFKA = "kafka"
     CONSUL = "consul"
     VAULT = "vault"
+    INFISICAL = "infisical"
     VALKEY = "valkey"
     GRPC = "grpc"
     RUNTIME = "runtime"
