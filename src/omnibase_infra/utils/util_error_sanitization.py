@@ -36,6 +36,8 @@ Example:
 
 from __future__ import annotations
 
+from urllib.parse import urlparse, urlunparse
+
 # Patterns that may indicate sensitive data in error messages.
 # These patterns are checked case-insensitively against the error message.
 # When matched, the error message is redacted to prevent credential leakage.
@@ -324,6 +326,56 @@ def sanitize_backend_error(backend_name: str, raw_error: object) -> str:
     return f"{backend_name} operation failed"
 
 
+def sanitize_url(url: str) -> str:
+    """Strip query parameters, fragments, and userinfo from a URL.
+
+    URLs may contain credentials in query parameters (e.g.,
+    ``http://host:8000/v1?token=secret``) or embedded in the netloc as
+    userinfo (e.g., ``http://user:pass@host:8000/path``).  This function
+    returns only the scheme, hostname, port, and path so that error
+    messages never leak sensitive data.
+
+    Args:
+        url: The URL to sanitize.
+
+    Returns:
+        URL with only scheme, hostname, port, and path preserved.
+        Query string, fragment, and userinfo are removed.
+
+    Examples:
+        >>> sanitize_url("http://host:8000/v1?token=secret")
+        'http://host:8000/v1'
+
+        >>> sanitize_url("https://example.com/health#anchor")
+        'https://example.com/health'
+
+        >>> sanitize_url("http://admin:s3cret@host:8000/v1?token=x")
+        'http://host:8000/v1'
+
+        >>> sanitize_url("not-a-url")
+        'not-a-url'
+    """
+    parsed = urlparse(url)
+
+    # Reconstruct netloc from hostname and port only, dropping any
+    # username:password userinfo that may be embedded in the URL.
+    hostname = parsed.hostname
+    port = parsed.port
+    if hostname:
+        netloc = f"{hostname}:{port}" if port else hostname
+    else:
+        # No hostname means urlparse couldn't identify a netloc (e.g.
+        # a bare path like "not-a-url").  Fall back to the original
+        # netloc which will be empty in this case.
+        netloc = parsed.netloc
+
+    # Reassemble with only scheme, safe netloc, and path
+    # (drop params, query, fragment)
+    sanitized = urlunparse((parsed.scheme, netloc, parsed.path, "", "", ""))
+    # urlunparse on a non-URL (no scheme/netloc) returns just the path unchanged
+    return sanitized
+
+
 def sanitize_secret_path(path: str | None) -> str | None:
     """Sanitize a Vault secret path to avoid exposing infrastructure details.
 
@@ -454,4 +506,5 @@ __all__: list[str] = [
     "sanitize_error_message",
     "sanitize_error_string",
     "sanitize_secret_path",
+    "sanitize_url",
 ]

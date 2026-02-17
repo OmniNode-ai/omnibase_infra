@@ -56,6 +56,10 @@ from omnibase_infra.models.health.model_llm_endpoint_status import (
     ModelLlmEndpointStatus,
 )
 from omnibase_infra.utils.correlation import generate_correlation_id
+from omnibase_infra.utils.util_error_sanitization import (
+    sanitize_error_message,
+    sanitize_url,
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
@@ -113,6 +117,15 @@ class EndpointCircuitBreaker(MixinAsyncCircuitBreaker):
         threshold: int,
         reset_timeout: float,
     ) -> None:
+        """Create a circuit breaker for a single LLM endpoint.
+
+        Args:
+            endpoint_name: Logical name used in the service name tag
+                (e.g. ``"coder-14b"`` becomes ``llm-endpoint.coder-14b``).
+            threshold: Consecutive failures before the circuit opens.
+            reset_timeout: Seconds before an open circuit transitions to
+                half-open.
+        """
         self._init_circuit_breaker(
             threshold=threshold,
             reset_timeout=reset_timeout,
@@ -378,7 +391,18 @@ class ServiceLlmEndpointHealth:
     # -- Internal -----------------------------------------------------------
 
     async def _probe_loop(self) -> None:
-        """Background loop that probes endpoints at the configured interval."""
+        """Background loop that probes endpoints at the configured interval.
+
+        Runs until ``_running`` is set to ``False`` by ``stop()``.  Handles
+        ``CancelledError`` in two cases:
+
+        - **Normal shutdown**: ``stop()`` sets ``_running = False`` then cancels
+          the task.  The ``CancelledError`` is re-raised to exit cleanly.
+        - **Spurious cancellation**: ``_running`` is still ``True``, so the
+          error is logged and the loop continues on the next iteration.
+
+        Unexpected exceptions are logged but do not terminate the loop.
+        """
         while self._running:
             try:
                 await self.probe_all()
@@ -480,11 +504,11 @@ class ServiceLlmEndpointHealth:
 
             cb_state = cb.get_state()
             now = datetime.now(UTC)
-            error_msg = f"{type(exc).__name__}: {exc}"
+            error_msg = sanitize_error_message(exc)
             logger.warning(
                 "Probe failed for %s (%s): %s",
                 name,
-                url,
+                sanitize_url(url),
                 error_msg,
                 extra={"correlation_id": str(correlation_id)},
             )
@@ -504,6 +528,10 @@ class ServiceLlmEndpointHealth:
         This allows ``probe_all`` to work both in background-loop mode
         (where ``start``/``stop`` manage the lifecycle) and in one-shot
         mode (where ``probe_all`` is called directly).
+
+        Returns:
+            A shared ``httpx.AsyncClient`` configured with the probe
+            timeout from the service config.
         """
         if self._http_client is None or self._http_client.is_closed:
             self._http_client = httpx.AsyncClient(
@@ -556,9 +584,15 @@ class ServiceLlmEndpointHealth:
     ) -> None:
         """Emit an LLM endpoint health event to the event bus.
 
+        Wraps the probe results in a ``ModelEventEnvelope`` and publishes
+        to ``TOPIC_LLM_ENDPOINT_HEALTH``.  This is fire-and-forget:
+        publication failures are logged but do not propagate, so the
+        in-memory status map is still updated even if Kafka is down.
+
         Args:
-            results: Tuple of endpoint status snapshots.
-            correlation_id: Correlation ID for tracing.
+            results: Tuple of endpoint status snapshots from the current
+                probe cycle.
+            correlation_id: Correlation ID for distributed tracing.
         """
         if self._event_bus is None:
             return

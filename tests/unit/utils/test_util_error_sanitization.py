@@ -17,6 +17,7 @@ from omnibase_infra.utils import (
     sanitize_consul_key,
     sanitize_error_message,
     sanitize_secret_path,
+    sanitize_url,
 )
 
 
@@ -360,6 +361,70 @@ class TestSanitizeConsulKey:
         assert "production" not in result
         assert "internal" not in result
         assert "primary" not in result
+
+
+class TestSanitizeUrl:
+    """Tests for sanitize_url function."""
+
+    def test_strips_query_params(self) -> None:
+        """Query parameters should be removed."""
+        result = sanitize_url("http://host:8000/v1?token=secret&key=abc")
+        assert result == "http://host:8000/v1"
+        assert "secret" not in result
+        assert "abc" not in result
+
+    def test_strips_fragment(self) -> None:
+        """Fragments should be removed."""
+        result = sanitize_url("https://example.com/health#secret-anchor")
+        assert result == "https://example.com/health"
+        assert "secret-anchor" not in result
+
+    def test_strips_query_and_fragment(self) -> None:
+        """Both query params and fragments should be removed."""
+        result = sanitize_url("http://host:8000/v1?token=x#frag")
+        assert result == "http://host:8000/v1"
+        assert "token" not in result
+        assert "frag" not in result
+
+    def test_preserves_scheme_host_port_path(self) -> None:
+        """Scheme, host, port, and path should be preserved."""
+        result = sanitize_url("https://192.168.86.201:8000/v1/models")
+        assert result == "https://192.168.86.201:8000/v1/models"
+
+    def test_plain_url_unchanged(self) -> None:
+        """URLs without query or fragment should be unchanged."""
+        url = "http://example.com:9999/health"
+        assert sanitize_url(url) == url
+
+    def test_non_url_passthrough(self) -> None:
+        """Non-URL strings should pass through without error."""
+        result = sanitize_url("not-a-url")
+        assert result == "not-a-url"
+
+    def test_strips_userinfo_credentials(self) -> None:
+        """Userinfo (username:password) embedded in the URL must be stripped."""
+        result = sanitize_url("http://admin:s3cret@host:8000/v1?token=x")
+        assert result == "http://host:8000/v1"
+        assert "admin" not in result
+        assert "s3cret" not in result
+        assert "token" not in result
+
+    def test_strips_userinfo_without_port(self) -> None:
+        """Userinfo should be stripped even when port is absent."""
+        result = sanitize_url("https://user:pass@example.com/path")
+        assert result == "https://example.com/path"
+        assert "user" not in result
+        assert "pass" not in result
+
+    def test_strips_username_only_userinfo(self) -> None:
+        """Username-only userinfo (no password) should also be stripped."""
+        result = sanitize_url("http://admin@host:9000/health")
+        assert result == "http://host:9000/health"
+        assert "admin" not in result
+
+    def test_empty_string(self) -> None:
+        """Empty string should return empty string."""
+        assert sanitize_url("") == ""
 
 
 class TestErrorClassSanitization:
