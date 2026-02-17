@@ -586,6 +586,19 @@ def _load_env_for_demo(path: str) -> None:
     Simple .env parser that handles KEY=VALUE lines, ignoring comments
     and blank lines. Does NOT override existing environment variables.
 
+    Supports:
+    - ``KEY=VALUE`` and ``export KEY=VALUE`` syntax
+    - Single- and double-quoted values (outer quotes stripped)
+    - Inline comments for **unquoted** values only (``KEY=val # comment``)
+    - Values containing ``=`` (only the first ``=`` is split on)
+
+    Limitations:
+        Inline comments (``# ...``) are only stripped from **unquoted** values
+        where the ``#`` is preceded by a space (`` #``). Quoted values are
+        returned verbatim (including any ``#`` characters inside). A ``#``
+        immediately adjacent to the value (no space) in an unquoted value is
+        **not** treated as a comment delimiter.
+
     Args:
         path: Path to the .env file.
     """

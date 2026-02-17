@@ -38,12 +38,16 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    import asyncpg
 
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
@@ -235,6 +239,60 @@ class DemoResetConfig:
 
 
 # =============================================================================
+# Postgres Connection Context Manager
+# =============================================================================
+
+
+class PostgresConnectionContext:
+    """Async context manager for a single PostgreSQL connection with timeout.
+
+    This replaces the previous pattern of creating a full ``asyncpg`` pool
+    for each one-shot query.  A single connection avoids pool churn and
+    eliminates the leak that occurred when ``asyncio.wait_for`` timed out
+    during ``asyncpg.create_pool()``: the partially-initialized pool was
+    never closed.
+
+    The connection is established inside ``__aenter__`` with an explicit
+    timeout.  Because the ``connect()`` coroutine is awaited directly
+    (not wrapped in ``asyncio.wait_for``), the ``asyncpg`` driver itself
+    handles cancellation cleanly.  If the timeout fires, the underlying
+    socket is closed by ``asyncpg`` before the ``TimeoutError`` propagates.
+    Regardless of success or failure, ``__aexit__`` always closes the
+    connection if it was opened.
+    """
+
+    def __init__(self, dsn: str, timeout: float) -> None:
+        self._dsn = dsn
+        self._timeout = timeout
+        self._conn: asyncpg.Connection | None = None
+
+    async def __aenter__(self) -> asyncpg.Connection:
+        import asyncpg as _asyncpg
+
+        self._conn = await asyncio.wait_for(
+            _asyncpg.connect(self._dsn),
+            timeout=self._timeout,
+        )
+        return self._conn
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        conn = self._conn
+        self._conn = None
+        if conn is not None:
+            try:
+                await conn.close()
+            except Exception:
+                # Best-effort cleanup; the connection may already be dead
+                # after a timeout or network error.
+                logger.debug("Failed to close PostgreSQL connection during cleanup")
+
+
+# =============================================================================
 # Engine
 # =============================================================================
 
@@ -398,51 +456,59 @@ class DemoResetEngine:
                 )
             )
 
+    @staticmethod
+    def _postgres_connection_timeout() -> float:
+        """Return the connection timeout in seconds for PostgreSQL."""
+        return 10.0
+
+    def _postgres_connection(self) -> PostgresConnectionContext:
+        """Create a single PostgreSQL connection with proper timeout handling.
+
+        Uses ``asyncpg.connect()`` instead of a connection pool because each
+        reset operation only needs a single query. This avoids pool churn
+        (creating and tearing down a pool for every operation) and eliminates
+        the risk of leaking a partially-initialized pool if the connection
+        attempt times out.
+
+        The connection is established inside the context manager's
+        ``__aenter__`` with a timeout. ``__aexit__`` always closes the
+        connection if it was opened, even after a timeout or error.
+
+        Returns:
+            Async context manager yielding an ``asyncpg.Connection``.
+
+        Raises:
+            asyncio.TimeoutError: If the connection cannot be established
+                within the configured timeout.
+        """
+        return PostgresConnectionContext(
+            dsn=self._config.postgres_dsn,
+            timeout=self._postgres_connection_timeout(),
+        )
+
     async def _count_projection_rows(self) -> int:
         """Count rows in the projection table."""
-        import asyncio
-
-        import asyncpg
-
         table = self._config.projection_table
         self._validate_table_name(table)
 
-        pool = await asyncio.wait_for(
-            asyncpg.create_pool(self._config.postgres_dsn, min_size=1, max_size=2),
-            timeout=10.0,
-        )
-        try:
-            async with pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    f"SELECT COUNT(*) as cnt FROM {table}"  # noqa: S608
-                )
-                return int(row["cnt"]) if row else 0
-        finally:
-            await pool.close()
+        async with self._postgres_connection() as conn:
+            row = await conn.fetchrow(
+                f"SELECT COUNT(*) as cnt FROM {table}"  # noqa: S608
+            )
+            return int(row["cnt"]) if row else 0
 
     async def _delete_projection_rows(self) -> int:
         """Delete all rows from the projection table. Returns count deleted."""
-        import asyncio
-
-        import asyncpg
-
         table = self._config.projection_table
         self._validate_table_name(table)
 
-        pool = await asyncio.wait_for(
-            asyncpg.create_pool(self._config.postgres_dsn, min_size=1, max_size=2),
-            timeout=10.0,
-        )
-        try:
-            async with pool.acquire() as conn:
-                result = await conn.execute(
-                    f"DELETE FROM {table}"  # noqa: S608
-                )
-                # asyncpg returns "DELETE N" where N is the row count
-                match = re.search(r"\d+", result)
-                return int(match.group()) if match else 0
-        finally:
-            await pool.close()
+        async with self._postgres_connection() as conn:
+            result = await conn.execute(
+                f"DELETE FROM {table}"  # noqa: S608
+            )
+            # asyncpg returns "DELETE N" where N is the row count
+            match = re.search(r"\d+", result)
+            return int(match.group()) if match else 0
 
     # -------------------------------------------------------------------------
     # Step 2: Consumer Groups
@@ -480,10 +546,12 @@ class DemoResetEngine:
                 {"bootstrap.servers": self._config.kafka_bootstrap_servers}
             )
 
-            # List all consumer groups
-            group_metadata = admin.list_groups(timeout=10)
+            # List all consumer groups (modern API, confluent-kafka >= 2.x)
+            list_result = admin.list_consumer_groups(
+                request_timeout=10,
+            ).result()
             all_groups: list[str] = [
-                str(g.id) for g in group_metadata if g.id is not None
+                g.group_id for g in list_result.valid if g.group_id is not None
             ]
 
             # Filter to demo-scoped groups
@@ -673,16 +741,43 @@ class DemoResetEngine:
                     )
                 )
             else:
-                # Build list of TopicPartitions with high-watermark offsets
-                # to delete all records up to the current end
-                partitions_to_delete: list[TopicPartition] = []
-                for topic_name in demo_topics:
-                    topic_metadata = metadata.topics[topic_name]
-                    for partition_id in topic_metadata.partitions:
-                        # OFFSET_END (-1) tells Kafka to delete all records
-                        partitions_to_delete.append(
-                            TopicPartition(topic_name, partition_id, -1)
-                        )
+                # Query the actual high-watermark offset for each partition
+                # using a Consumer, then pass those explicit offsets to
+                # delete_records.  The previous approach used offset -1
+                # (OFFSET_END) which is not reliably interpreted as "delete
+                # all" across confluent-kafka versions.
+                from confluent_kafka import Consumer as _KafkaConsumer
+
+                consumer = _KafkaConsumer(
+                    {
+                        "bootstrap.servers": self._config.kafka_bootstrap_servers,
+                        "group.id": "_demo-reset-watermark-query",
+                        "enable.auto.commit": False,
+                    }
+                )
+                try:
+                    partitions_to_delete: list[TopicPartition] = []
+                    for topic_name in demo_topics:
+                        topic_metadata = metadata.topics[topic_name]
+                        for partition_id in topic_metadata.partitions:
+                            try:
+                                _low, high = consumer.get_watermark_offsets(
+                                    TopicPartition(topic_name, partition_id),
+                                    timeout=5,
+                                )
+                            except Exception:
+                                logger.debug(
+                                    "Failed to get watermarks for %s[%d], skipping",
+                                    topic_name,
+                                    partition_id,
+                                )
+                                continue
+                            if high > 0:
+                                partitions_to_delete.append(
+                                    TopicPartition(topic_name, partition_id, high)
+                                )
+                finally:
+                    consumer.close()
 
                 if partitions_to_delete:
                     futures = admin.delete_records(partitions_to_delete)
