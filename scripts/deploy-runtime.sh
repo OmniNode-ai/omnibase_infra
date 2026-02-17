@@ -5,11 +5,11 @@
 # deploy-runtime.sh -- Stable runtime deployment for omnibase_infra
 #
 # Rsyncs the current repository to a versioned deployment root
-# (~/.omnibase/infra/deployed/{version}/{git-sha}/), then runs
-# docker compose from that stable location. This eliminates the
-# directory-derived compose project name collision that occurs when
-# multiple repo copies (omnibase_infra2, omnibase_infra4, etc.) all
-# share the same compose project name.
+# (~/.omnibase/infra/deployed/{version}/), then runs docker compose
+# from that stable location. This eliminates the directory-derived
+# compose project name collision that occurs when multiple repo
+# copies (omnibase_infra2, omnibase_infra4, etc.) all share the
+# same compose project name.
 #
 # Pattern: real rsync copies (not symlinks), versioned directories,
 # dry-run by default.
@@ -71,6 +71,13 @@ DEPLOY_DIR_TO_CLEANUP=""
 # Default is hardcoded and safe; any changes must comply with ^[a-zA-Z0-9_-]+$ (see parse_args).
 COMPOSE_PROFILE="runtime"
 PRINT_COMPOSE_CMD=false
+# When --force overwrites an existing deployment, the previous directory is
+# moved here as a backup. On success the backup is removed; on failure
+# cleanup_on_exit() restores it.
+FORCE_BACKUP_DIR=""
+# Set to true only when ALL deployment phases complete successfully.
+# Used by cleanup_on_exit to determine if the --force backup can be safely removed.
+DEPLOYMENT_COMPLETE=false
 
 # =============================================================================
 # Logging
@@ -110,7 +117,7 @@ usage() {
     cat <<EOF
 ${SCRIPT_NAME} v${SCRIPT_VERSION} -- Stable runtime deployment for omnibase_infra
 
-Rsyncs the current repo to ~/.omnibase/infra/deployed/{version}/{git-sha}/,
+Rsyncs the current repo to ~/.omnibase/infra/deployed/{version}/,
 then runs docker compose from that stable location.
 
 USAGE
@@ -119,7 +126,7 @@ USAGE
 OPTIONS
     (none)              Dry-run mode (default). Preview what would be deployed.
     --execute           Actually deploy: rsync, write registry, build images.
-    --force             Required to overwrite an existing version+sha directory.
+    --force             Required to overwrite an existing version directory.
     --restart           Restart runtime containers after build (requires --execute).
     --profile <name>    Docker compose profile (default: runtime).
     --print-compose-cmd Print exact compose commands without executing, then exit.
@@ -130,20 +137,19 @@ DEPLOYMENT ROOT
     +-- .deploy.lock/                       mkdir-based concurrency guard
     +-- registry.json                       tracks active deployment
     +-- deployed/
-        +-- {version}/
-            +-- {git-sha}/                  immutable build directory
-                +-- pyproject.toml
-                +-- poetry.lock
-                +-- src/omnibase_infra/
-                +-- contracts/
-                +-- docker/
-                    +-- docker-compose.infra.yml
-                    +-- Dockerfile.runtime
-                    +-- entrypoint-runtime.sh
-                    +-- .env                preserved across deploys
-                    +-- .env.local          preserved (user overrides)
-                    +-- certs/              preserved (TLS certs)
-                    +-- migrations/forward/
+        +-- {version}/                      build directory
+            +-- pyproject.toml
+            +-- uv.lock
+            +-- src/omnibase_infra/
+            +-- contracts/
+            +-- docker/
+                +-- docker-compose.infra.yml
+                +-- Dockerfile.runtime
+                +-- entrypoint-runtime.sh
+                +-- .env                    preserved across deploys
+                +-- .env.local              preserved (user overrides)
+                +-- certs/                  preserved (TLS certs)
+                +-- migrations/forward/
 
 EXAMPLES
     # Preview what would be deployed
@@ -155,7 +161,7 @@ EXAMPLES
     # Deploy, build, and restart containers
     ${SCRIPT_NAME} --execute --restart
 
-    # Redeploy same version+sha (overwrite)
+    # Redeploy same version (overwrite)
     ${SCRIPT_NAME} --execute --force
 
     # Print compose commands for manual use
@@ -323,7 +329,7 @@ validate_repo_structure() {
     local missing=()
 
     [[ -f "${repo_root}/pyproject.toml" ]]                          || missing+=("pyproject.toml")
-    [[ -f "${repo_root}/poetry.lock" ]]                             || missing+=("poetry.lock")
+    [[ -f "${repo_root}/uv.lock" ]]                                 || missing+=("uv.lock")
     [[ -d "${repo_root}/src/omnibase_infra" ]]                      || missing+=("src/omnibase_infra/")
     [[ -d "${repo_root}/contracts" ]]                                || missing+=("contracts/")
     [[ -d "${repo_root}/docker" ]]                                   || missing+=("docker/")
@@ -347,18 +353,18 @@ validate_repo_structure() {
 # =============================================================================
 
 read_version() {
-    # Extract the project version from pyproject.toml [tool.poetry] section.
+    # Extract the project version from pyproject.toml [project] section (PEP 621).
     local repo_root="$1"
     local version
 
-    # Extract version from the [tool.poetry] section of pyproject.toml.
+    # Extract version from the [project] section of pyproject.toml.
     # A naive grep -m1 '^version' could match a version key in any TOML
     # section (e.g. a dependency table).  This awk approach activates only
-    # inside [tool.poetry] and deactivates when the next section header
+    # inside [project] and deactivates when the next section header
     # is reached, ensuring we read the project version.
     version="$(awk '
-        /^\[tool\.poetry\]/ { in_section=1; next }
-        /^\[/               { in_section=0 }
+        /^\[project\]/ { in_section=1; next }
+        /^\[/          { in_section=0 }
         in_section && /^version[[:space:]]*=/ {
             gsub(/.*=[[:space:]]*"/, "");
             gsub(/".*/, "");
@@ -368,7 +374,7 @@ read_version() {
     ' "${repo_root}/pyproject.toml")"
 
     if [[ -z "${version}" ]]; then
-        log_error "Could not read version from pyproject.toml [tool.poetry] section"
+        log_error "Could not read version from pyproject.toml [project] section"
         exit 1
     fi
 
@@ -376,12 +382,10 @@ read_version() {
 }
 
 read_git_sha() {
-    # Read the 12-character abbreviated git SHA of HEAD.
+    # Read the 12-character abbreviated git SHA of HEAD for VCS_REF labeling.
     local repo_root="$1"
     local sha
 
-    # 12-char SHA prefix for deployment directory naming. 7-char prefixes risk
-    # collisions even in moderately sized repos; 12 chars is effectively unique.
     sha="$(git -C "${repo_root}" rev-parse --short=12 HEAD 2>/dev/null || true)"
 
     if [[ -z "${sha}" ]]; then
@@ -533,13 +537,14 @@ acquire_lock() {
 }
 
 # =============================================================================
-# Cleanup -- partial deployment rollback + lock release
+# Cleanup -- partial deployment rollback, --force backup restore, + lock release
 # =============================================================================
 
 cleanup_on_exit() {
-    # Remove orphaned deployment directory on failure. If DEPLOY_DIR_TO_CLEANUP
-    # is set and registry.json does NOT point to it, the deployment was partial
-    # and should be removed.
+    # Remove orphaned deployment directory on failure and restore --force backups.
+    # If DEPLOY_DIR_TO_CLEANUP is set and registry.json does NOT point to it,
+    # the deployment was partial and should be removed. If a --force backup
+    # exists (FORCE_BACKUP_DIR), restore it on failure or remove it on success.
     if [[ -n "${DEPLOY_DIR_TO_CLEANUP}" && -d "${DEPLOY_DIR_TO_CLEANUP}" ]]; then
         local active_path=""
         if [[ -f "${REGISTRY_FILE}" ]]; then
@@ -548,13 +553,38 @@ cleanup_on_exit() {
         if [[ "${active_path}" != "${DEPLOY_DIR_TO_CLEANUP}" ]]; then
             log_warn "Cleaning up partial deployment: ${DEPLOY_DIR_TO_CLEANUP}"
             rm -rf "${DEPLOY_DIR_TO_CLEANUP}" 2>/dev/null || true
-            # Remove empty parent version directory if this was the only SHA
-            local parent_dir
-            parent_dir="$(dirname "${DEPLOY_DIR_TO_CLEANUP}")"
-            if [[ -d "${parent_dir}" ]] && [[ -z "$(ls -A "${parent_dir}" 2>/dev/null)" ]]; then
-                rmdir "${parent_dir}" 2>/dev/null || true
-            fi
         fi
+    fi
+
+    # If a --force backup exists, decide whether to restore it or clean it up
+    # based on whether the full deployment completed successfully.
+    if [[ -n "${FORCE_BACKUP_DIR}" && -d "${FORCE_BACKUP_DIR}" ]]; then
+        # Derive the original deployment directory from the backup path.
+        # Backup convention: {deploy_target}.bak -> restore to {deploy_target}
+        local original_dir="${FORCE_BACKUP_DIR%.bak}"
+        if [[ "${DEPLOYMENT_COMPLETE}" != "true" ]]; then
+            # Deployment did not complete -- restore previous working deployment.
+            # This covers both pre-registry failures (rsync/sanity) and
+            # post-registry failures (build/restart/verify).
+            log_warn "Restoring previous deployment from backup: ${FORCE_BACKUP_DIR}"
+            rm -rf "${original_dir}" 2>/dev/null || true
+            if ! mv "${FORCE_BACKUP_DIR}" "${original_dir}" 2>/dev/null; then
+                log_error "================================================================="
+                log_error "CRITICAL: Failed to restore previous deployment from backup!"
+                log_error "Backup location: ${FORCE_BACKUP_DIR}"
+                log_error "Expected restore target: ${original_dir}"
+                log_error "Manual recovery required: mv '${FORCE_BACKUP_DIR}' '${original_dir}'"
+                log_error "================================================================="
+            else
+                log_warn "NOTE: registry.json may contain stale metadata (git_sha, deployed_at)"
+                log_warn "from the failed deployment. Verify or re-deploy to restore consistency."
+            fi
+        else
+            # Full deployment succeeded -- backup is stale, clean it up.
+            log_info "Cleaning up stale backup: ${FORCE_BACKUP_DIR}"
+            rm -rf "${FORCE_BACKUP_DIR}" 2>/dev/null || true
+        fi
+        FORCE_BACKUP_DIR=""
     fi
 
     # Release concurrency lock
@@ -581,18 +611,16 @@ prune_old_deployments() {
         active_path="$(jq -r '.deploy_path // empty' "${REGISTRY_FILE}" 2>/dev/null || true)"
     fi
 
-    # Collect all deployment directories (version/sha pairs) sorted by
-    # modification time, newest first. Each entry is a full path like
-    # ~/.omnibase/infra/deployed/1.2.3/abc123def456/
+    # Collect all deployment directories sorted by modification time,
+    # newest first. Each entry is a full path like
+    # ~/.omnibase/infra/deployed/1.2.3/
     local all_deployments=()
     local version_dir
     for version_dir in "${deployed_root}"/*/; do
         [[ -d "${version_dir}" ]] || continue
-        local sha_dir
-        for sha_dir in "${version_dir}"*/; do
-            [[ -d "${sha_dir}" ]] || continue
-            all_deployments+=("${sha_dir%/}")
-        done
+        # Skip backup directories from failed --force deploys
+        [[ "$(basename "${version_dir}")" == *.bak ]] && continue
+        all_deployments+=("${version_dir%/}")
     done
 
     # Sort by modification time (newest first) using stat.
@@ -643,14 +671,6 @@ prune_old_deployments() {
         log_info "  Removing old deployment: ${deploy_dir}"
         rm -rf "${deploy_dir}"
         pruned=$((pruned + 1))
-
-        # Remove empty parent version directory
-        local parent_dir
-        parent_dir="$(dirname "${deploy_dir}")"
-        if [[ -d "${parent_dir}" ]] && [[ -z "$(ls -A "${parent_dir}" 2>/dev/null)" ]]; then
-            log_info "  Removing empty version directory: ${parent_dir}"
-            rmdir "${parent_dir}" 2>/dev/null || true
-        fi
     done
 
     log_info "Pruned ${pruned} old deployment(s). Kept ${kept}."
@@ -662,6 +682,8 @@ prune_old_deployments() {
 
 guard_existing_deployment() {
     # Refuse to overwrite an existing deployment directory unless --force is set.
+    # When --force is active, the existing directory is moved to a .bak backup
+    # so it can be restored if the new deployment fails.
     local deploy_target="$1"
 
     if [[ -d "${deploy_target}" ]]; then
@@ -670,11 +692,29 @@ guard_existing_deployment() {
             log_warn "OVERWRITING existing deployment at:"
             log_warn "  ${deploy_target}"
             log_warn "====================================================="
+
+            # Back up the existing deployment so cleanup_on_exit can restore
+            # it if the new deployment fails partway through.
+            local backup_dir="${deploy_target}.bak"
+
+            # Remove any leftover backup from a previous failed --force deploy
+            if [[ -d "${backup_dir}" ]]; then
+                log_warn "Removing stale backup: ${backup_dir}"
+                rm -rf "${backup_dir}"
+            fi
+
+            log_info "Backing up existing deployment to: ${backup_dir}"
+            if ! mv "${deploy_target}" "${backup_dir}"; then
+                log_error "Failed to back up existing deployment."
+                log_error "Cannot proceed with --force: unable to move '${deploy_target}' to '${backup_dir}'"
+                exit 1
+            fi
+            FORCE_BACKUP_DIR="${backup_dir}"
         else
             log_error "Deployment directory already exists:"
             log_error "  ${deploy_target}"
             log_error ""
-            log_error "This version+sha has already been deployed."
+            log_error "This version has already been deployed."
             log_error "To overwrite, re-run with --force:"
             log_error "  ${SCRIPT_NAME} --execute --force"
             exit 1
@@ -749,12 +789,12 @@ sync_files() {
 
     mkdir -p "${deploy_target}/docker"
 
-    # 1. Root files (pyproject.toml, poetry.lock, README.md, LICENSE)
+    # 1. Root files (pyproject.toml, uv.lock, README.md, LICENSE)
     log_info "Syncing root files..."
-    log_cmd "rsync pyproject.toml, poetry.lock, README.md, LICENSE"
+    log_cmd "rsync pyproject.toml, uv.lock, README.md, LICENSE"
     rsync -a \
         "${repo_root}/pyproject.toml" \
-        "${repo_root}/poetry.lock" \
+        "${repo_root}/uv.lock" \
         "${deploy_target}/"
 
     # Copy README.md and LICENSE if they exist (optional files)
@@ -1246,17 +1286,19 @@ main() {
     # intentionally rejected to ensure only tested releases reach production.
     if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         log_error "Invalid version format: '${version}'"
-        log_error "Expected semantic version (e.g., 1.2.3). Check pyproject.toml [tool.poetry] version."
+        log_error "Expected semantic version (e.g., 1.2.3). Check pyproject.toml [project] version."
         exit 1
     fi
 
-    # Validate git SHA format before using it in directory path construction.
-    # A malformed SHA could create unexpected directory structures or indicate
-    # a corrupted git state.
-    if [[ ! "${git_sha}" =~ ^[0-9a-f]+$ ]]; then
-        log_error "Invalid git SHA format: '${git_sha}'"
-        log_error "Expected lowercase hex string. Is the git repository corrupted?"
-        exit 1
+    # Validate git SHA format for VCS_REF image labeling.
+    # Accept short (7+) or full (40) hex SHAs. read_git_sha uses --short=12
+    # but other inputs (e.g., CI injection) may vary.
+    # Normalize to lowercase first -- some CI systems produce uppercase hex.
+    git_sha=$(echo "${git_sha}" | tr '[:upper:]' '[:lower:]')
+    if [[ ! "${git_sha}" =~ ^[0-9a-f]{7,40}$ ]]; then
+        log_warn "Could not read valid git SHA (got: '${git_sha}')."
+        log_warn "The VCS_REF Docker label may be inaccurate."
+        git_sha="unknown"
     fi
 
     log_info "Version: ${version}"
@@ -1264,7 +1306,7 @@ main() {
     check_git_dirty "${repo_root}"
 
     # Compute paths
-    local deploy_target="${DEPLOY_ROOT}/deployed/${version}/${git_sha}"
+    local deploy_target="${DEPLOY_ROOT}/deployed/${version}"
     local compose_project="omnibase-infra-${COMPOSE_PROFILE}"
 
     # --print-compose-cmd: show commands and exit
@@ -1327,11 +1369,25 @@ main() {
         verify_deployment "${git_sha}" "${compose_project}"
     fi
 
+    # All phases completed successfully. Mark deployment as complete so that
+    # cleanup_on_exit knows the backup can be safely removed rather than restored.
+    DEPLOYMENT_COMPLETE=true
+
+    # Remove the --force backup (if any) since the new deployment is fully
+    # built and running. cleanup_on_exit would also handle this (since
+    # DEPLOYMENT_COMPLETE=true), but explicit cleanup here keeps the success
+    # path self-documenting.
+    if [[ -n "${FORCE_BACKUP_DIR}" && -d "${FORCE_BACKUP_DIR}" ]]; then
+        log_info "Removing previous deployment backup: ${FORCE_BACKUP_DIR}"
+        rm -rf "${FORCE_BACKUP_DIR}"
+        FORCE_BACKUP_DIR=""
+    fi
+
     # Phase 13: Summary
     show_summary "${deploy_target}" "${version}" "${git_sha}" "${compose_project}"
 
-    # Phase 14: Prune old deployments
-    prune_old_deployments
+    # Phase 14: Prune old deployments (non-fatal -- must not trigger rollback)
+    prune_old_deployments || log_warn "Pruning old deployments failed (non-fatal)"
 }
 
 main "$@"
