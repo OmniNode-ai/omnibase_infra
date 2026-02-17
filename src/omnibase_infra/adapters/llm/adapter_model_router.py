@@ -18,20 +18,23 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
 from omnibase_infra.adapters.llm.model_llm_adapter_request import (
     ModelLlmAdapterRequest,
 )
-from omnibase_infra.adapters.llm.model_llm_adapter_response import (
-    ModelLlmAdapterResponse,
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import (
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 if TYPE_CHECKING:
-    from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
-        AdapterLlmProviderOpenai,
-    )
+    from omnibase_spi.protocols.llm.protocol_llm_provider import ProtocolLLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -68,17 +71,18 @@ class AdapterModelRouter:
             default_provider: Name of the default provider. If None, the
                 first registered provider is used as default.
         """
-        self._providers: dict[str, AdapterLlmProviderOpenai] = {}
+        self._providers: dict[str, ProtocolLLMProvider] = {}
         self._provider_order: list[str] = []
         self._current_index: int = 0
         self._default_provider = default_provider
+        self._lock = asyncio.Lock()
 
     # ── Provider management ────────────────────────────────────────────
 
-    def register_provider(
+    async def register_provider(
         self,
         name: str,
-        provider: AdapterLlmProviderOpenai,
+        provider: ProtocolLLMProvider,
     ) -> None:
         """Register a provider instance for routing.
 
@@ -86,30 +90,32 @@ class AdapterModelRouter:
             name: Unique provider name for routing.
             provider: The provider adapter instance.
         """
-        self._providers[name] = provider
-        if name not in self._provider_order:
-            self._provider_order.append(name)
-        if self._default_provider is None:
-            self._default_provider = name
+        async with self._lock:
+            self._providers[name] = provider
+            if name not in self._provider_order:
+                self._provider_order.append(name)
+            if self._default_provider is None:
+                self._default_provider = name
         logger.info(
             "Registered LLM provider for routing: %s (total: %d)",
             name,
             len(self._providers),
         )
 
-    def remove_provider(self, name: str) -> None:
+    async def remove_provider(self, name: str) -> None:
         """Remove a provider from the routing pool.
 
         Args:
             name: Provider name to remove.
         """
-        self._providers.pop(name, None)
-        if name in self._provider_order:
-            self._provider_order.remove(name)
-        if self._default_provider == name:
-            self._default_provider = (
-                self._provider_order[0] if self._provider_order else None
-            )
+        async with self._lock:
+            self._providers.pop(name, None)
+            if name in self._provider_order:
+                self._provider_order.remove(name)
+            if self._default_provider == name:
+                self._default_provider = (
+                    self._provider_order[0] if self._provider_order else None
+                )
 
     # ── ProtocolModelRouter interface ──────────────────────────────────
 
@@ -127,26 +133,38 @@ class AdapterModelRouter:
             Generated response (ModelLlmAdapterResponse).
 
         Raises:
-            RuntimeError: If no providers are registered or all are unavailable.
+            ProtocolConfigurationError: If no providers are registered.
+            InfraUnavailableError: If all providers are unavailable or fail.
             TypeError: If the request is not a ModelLlmAdapterRequest.
         """
         if not self._providers:
-            # RuntimeError is intentional: this is an adapter-layer programming
-            # error (misconfiguration), not an infrastructure connection failure.
-            raise RuntimeError("No LLM providers registered with the router")
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="generate",
+                target_name="model-router",
+            )
+            raise ProtocolConfigurationError(
+                "No LLM providers registered with the router",
+                context=context,
+            )
 
         if not isinstance(request, ModelLlmAdapterRequest):
             raise TypeError(
                 f"Expected ModelLlmAdapterRequest, got {type(request).__name__}"
             )
 
+        # Snapshot provider state under lock for thread-safe iteration
+        async with self._lock:
+            provider_order = list(self._provider_order)
+            current_index = self._current_index
+
         # Try providers in round-robin order, starting from current index
-        errors: list[tuple[str, Exception]] = []
+        errors: list[tuple[str, str]] = []
         attempted = 0
 
-        for i in range(len(self._provider_order)):
-            idx = (self._current_index + i) % len(self._provider_order)
-            provider_name = self._provider_order[idx]
+        for i in range(len(provider_order)):
+            idx = (current_index + i) % len(provider_order)
+            provider_name = provider_order[idx]
             provider = self._providers.get(provider_name)
 
             if provider is None or not provider.is_available:
@@ -155,27 +173,35 @@ class AdapterModelRouter:
             try:
                 response = await provider.generate_async(request)
                 # Advance round-robin for next call
-                self._current_index = (idx + 1) % len(self._provider_order)
+                async with self._lock:
+                    self._current_index = (idx + 1) % len(provider_order)
                 return response
             except Exception as exc:
-                errors.append((provider_name, exc))
+                sanitized = sanitize_error_string(str(exc))
+                errors.append((provider_name, sanitized))
                 logger.warning(
                     "Provider %s failed, trying next: %s",
                     provider_name,
-                    exc,
+                    sanitized,
                 )
                 attempted += 1
 
-        # RuntimeError is intentional: this is an adapter-layer routing
-        # failure (all providers exhausted), not an infrastructure connection error.
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.HTTP,
+            operation="generate",
+            target_name="model-router",
+        )
         if attempted == 0:
-            raise RuntimeError(
-                f"All {len(self._provider_order)} registered LLM providers "
-                "are unavailable (none were attempted)"
+            raise InfraUnavailableError(
+                f"All {len(provider_order)} registered LLM providers "
+                "are unavailable (none were attempted)",
+                context=context,
             )
-        error_details = "; ".join(f"{name}: {exc}" for name, exc in errors)
-        raise RuntimeError(
-            f"All LLM providers failed ({attempted} attempted). Errors: {error_details}"
+        error_details = "; ".join(f"{name}: {msg}" for name, msg in errors)
+        raise InfraUnavailableError(
+            f"All LLM providers failed ({attempted} attempted). "
+            f"Errors: {error_details}",
+            context=context,
         )
 
     async def get_available_providers(self) -> list[str]:
@@ -197,7 +223,7 @@ class AdapterModelRouter:
         self,
         request: ModelLlmAdapterRequest,
         provider_name: str,
-    ) -> ModelLlmAdapterResponse:
+    ) -> object:
         """Generate using a specific provider by name.
 
         Args:
@@ -232,7 +258,7 @@ class AdapterModelRouter:
                 health = await provider.health_check()
                 results[name] = health
             except Exception as exc:
-                results[name] = {"error": str(exc)}
+                results[name] = {"error": sanitize_error_string(str(exc))}
         return results
 
 

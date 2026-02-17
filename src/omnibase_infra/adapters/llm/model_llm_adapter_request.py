@@ -53,6 +53,7 @@ class ModelLlmAdapterRequest(BaseModel):
         min_length=1,
         description="Name of the model to use.",
     )
+    # NOTE: Mutable dict accepted for SPI JsonType conformance (OMN-2319)
     parameters: dict[str, JsonType] = Field(
         default_factory=dict,
         description="Generation parameters as JSON-compatible dictionary.",

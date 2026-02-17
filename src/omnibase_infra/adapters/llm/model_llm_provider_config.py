@@ -58,6 +58,7 @@ class ModelLlmProviderConfig(BaseModel):
     api_key: str | None = Field(
         default=None,
         description="API key for authentication. None for local providers.",
+        repr=False,
     )
     base_url: str | None = Field(
         default=None,

@@ -141,6 +141,7 @@ class ModelCircuitBreakerConfig(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         extra="forbid",
+        from_attributes=True,
         json_schema_extra={
             "examples": [
                 {

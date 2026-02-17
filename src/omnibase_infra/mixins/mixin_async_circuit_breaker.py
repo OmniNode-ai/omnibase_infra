@@ -543,6 +543,13 @@ class MixinAsyncCircuitBreaker:
             self._start_active_recovery_timer()
             return
 
+        # Don't re-process if circuit is already open (prevents indefinite
+        # timeout extension under sustained failure load).  Without this guard,
+        # each failure while OPEN would reset _circuit_breaker_open_until and
+        # restart the recovery timer, keeping the circuit OPEN forever.
+        if self._circuit_breaker_open:
+            return
+
         # Check if threshold reached
         if self._circuit_breaker_failures >= self.circuit_breaker_threshold:
             # Transition to OPEN state (atomic write protected by caller's lock)
@@ -716,7 +723,10 @@ class MixinAsyncCircuitBreaker:
         # _start_active_recovery_timer is always called while holding the lock,
         # which means a coroutine is running, so get_running_loop() is safe.
         loop = asyncio.get_running_loop()
-        self._cb_recovery_task = loop.create_task(self._active_recovery_coroutine())
+        self._cb_recovery_task = loop.create_task(
+            self._active_recovery_coroutine(),
+            name=f"cb-recovery-{self.service_name}",
+        )
 
     def _cancel_active_recovery_timer(self) -> None:
         """Cancel the active recovery background task if running.
@@ -738,6 +748,11 @@ class MixinAsyncCircuitBreaker:
 
         This coroutine handles cancellation gracefully via ``asyncio.CancelledError``.
         """
+        # Capture reference to *this* task so we can avoid clearing a newer
+        # timer's reference if one was started between our sleep finishing and
+        # lock acquisition.
+        current_task = asyncio.current_task()
+
         try:
             await asyncio.sleep(self.circuit_breaker_reset_timeout)
         except asyncio.CancelledError:
@@ -758,8 +773,11 @@ class MixinAsyncCircuitBreaker:
                         "required_successes": self.circuit_breaker_half_open_successes,
                     },
                 )
-            # Clear the task reference now that we are done
-            self._cb_recovery_task = None
+            # Only clear the task reference if it still points to us.
+            # A new timer may have been started between our sleep completion
+            # and lock acquisition, and we must not nullify that reference.
+            if self._cb_recovery_task is current_task:
+                self._cb_recovery_task = None
 
     async def cancel_active_recovery(self) -> None:
         """Public method to cancel the active recovery timer and clean up.
@@ -850,6 +868,15 @@ class MixinAsyncCircuitBreaker:
 
         if cb_state == EnumCircuitState.HALF_OPEN.value:
             result["half_open_success_count"] = cb_half_open_success_count
+
+        # Active recovery observability
+        result["active_recovery_enabled"] = getattr(
+            self, "_cb_enable_active_recovery", False
+        )
+        recovery_task = getattr(self, "_cb_recovery_task", None)
+        result["active_recovery_running"] = (
+            recovery_task is not None and not recovery_task.done()
+        )
 
         return result
 

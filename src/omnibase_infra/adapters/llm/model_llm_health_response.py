@@ -26,7 +26,7 @@ class ModelLlmHealthResponse(BaseModel):
         is_healthy: Whether the provider is operational.
         provider_name: Identifier of the provider that was checked.
         response_time_ms: Round-trip latency of the health check in ms.
-        available_models: Models reported by the provider during check.
+        available_models: Models reported by the provider during check (immutable tuple).
         error_message: Error details when is_healthy is False, None otherwise.
 
     Example:
@@ -56,9 +56,9 @@ class ModelLlmHealthResponse(BaseModel):
         ge=0.0,
         description="Response time of the health check in milliseconds.",
     )
-    available_models: list[str] = Field(
-        default_factory=list,
-        description="List of available models reported by the provider.",
+    available_models: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description="Available models reported by the provider.",
     )
     error_message: str | None = Field(
         default=None,

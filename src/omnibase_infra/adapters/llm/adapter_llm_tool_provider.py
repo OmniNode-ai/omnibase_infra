@@ -24,9 +24,7 @@ from typing import TYPE_CHECKING
 from omnibase_infra.adapters.llm.adapter_model_router import AdapterModelRouter
 
 if TYPE_CHECKING:
-    from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
-        AdapterLlmProviderOpenai,
-    )
+    from omnibase_spi.protocols.llm.protocol_llm_provider import ProtocolLLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +49,7 @@ class AdapterLlmToolProvider:
 
     Example:
         >>> tool_provider = AdapterLlmToolProvider()
-        >>> tool_provider.register_provider("vllm", vllm_adapter)
+        >>> await tool_provider.register_provider("vllm", vllm_adapter)
         >>> router = await tool_provider.get_model_router()
         >>> response = await router.generate(request)
     """
@@ -59,14 +57,14 @@ class AdapterLlmToolProvider:
     def __init__(self) -> None:
         """Initialize the tool provider with an empty router."""
         self._router = AdapterModelRouter()
-        self._providers: dict[str, AdapterLlmProviderOpenai] = {}
+        self._providers: dict[str, ProtocolLLMProvider] = {}
 
     # ── Provider registration ──────────────────────────────────────────
 
-    def register_provider(
+    async def register_provider(
         self,
         name: str,
-        provider: AdapterLlmProviderOpenai,
+        provider: ProtocolLLMProvider,
     ) -> None:
         """Register a provider for access via the tool provider.
 
@@ -78,7 +76,7 @@ class AdapterLlmToolProvider:
             provider: The provider adapter instance.
         """
         self._providers[name] = provider
-        self._router.register_provider(name, provider)
+        await self._router.register_provider(name, provider)
         logger.info("Registered LLM provider in tool provider: %s", name)
 
     # ── ProtocolLLMToolProvider interface ───────────────────────────────
@@ -91,7 +89,7 @@ class AdapterLlmToolProvider:
         """
         return self._router
 
-    async def get_gemini_provider(self) -> AdapterLlmProviderOpenai:
+    async def get_gemini_provider(self) -> ProtocolLLMProvider:
         """Get Gemini LLM provider instance.
 
         Returns:
@@ -102,7 +100,7 @@ class AdapterLlmToolProvider:
         """
         return self._get_provider("gemini")
 
-    async def get_openai_provider(self) -> AdapterLlmProviderOpenai:
+    async def get_openai_provider(self) -> ProtocolLLMProvider:
         """Get OpenAI LLM provider instance.
 
         Returns:
@@ -113,7 +111,7 @@ class AdapterLlmToolProvider:
         """
         return self._get_provider("openai")
 
-    async def get_ollama_provider(self) -> AdapterLlmProviderOpenai:
+    async def get_ollama_provider(self) -> ProtocolLLMProvider:
         """Get Ollama LLM provider instance.
 
         Returns:
@@ -124,7 +122,7 @@ class AdapterLlmToolProvider:
         """
         return self._get_provider("ollama")
 
-    async def get_claude_provider(self) -> AdapterLlmProviderOpenai:
+    async def get_claude_provider(self) -> ProtocolLLMProvider:
         """Get Claude LLM provider instance (Anthropic).
 
         Returns:
@@ -137,7 +135,7 @@ class AdapterLlmToolProvider:
 
     # ── Generic provider access ────────────────────────────────────────
 
-    def get_provider_by_name(self, name: str) -> AdapterLlmProviderOpenai:
+    def get_provider_by_name(self, name: str) -> ProtocolLLMProvider:
         """Get a provider by its registered name.
 
         Args:
@@ -162,10 +160,17 @@ class AdapterLlmToolProvider:
     # ── Lifecycle ──────────────────────────────────────────────────────
 
     async def close_all(self) -> None:
-        """Close all registered provider transports."""
+        """Close all registered provider transports.
+
+        Calls ``close()`` on each provider that exposes a close method.
+        Providers that do not implement ``close()`` are silently skipped.
+        """
         for name, provider in self._providers.items():
+            close_fn = getattr(provider, "close", None)
+            if close_fn is None:
+                continue
             try:
-                await provider.close()
+                await close_fn()
                 logger.debug("Closed LLM provider: %s", name)
             except Exception:
                 logger.warning(
@@ -176,7 +181,7 @@ class AdapterLlmToolProvider:
 
     # ── Internal helpers ───────────────────────────────────────────────
 
-    def _get_provider(self, name: str) -> AdapterLlmProviderOpenai:
+    def _get_provider(self, name: str) -> ProtocolLLMProvider:
         """Get a provider by name with error handling.
 
         Args:

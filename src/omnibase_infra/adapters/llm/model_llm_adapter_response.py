@@ -53,6 +53,7 @@ class ModelLlmAdapterResponse(BaseModel):
         min_length=1,
         description="Model that was used for generation.",
     )
+    # NOTE: Mutable dict accepted for SPI JsonType conformance (OMN-2319)
     usage_statistics: dict[str, JsonType] = Field(
         default_factory=dict,
         description="Usage statistics (tokens, time, etc.) as JSON dict.",
@@ -61,6 +62,7 @@ class ModelLlmAdapterResponse(BaseModel):
         default="unknown",
         description="Reason generation finished.",
     )
+    # NOTE: Mutable dict accepted for SPI JsonType conformance (OMN-2319)
     response_metadata: dict[str, JsonType] = Field(
         default_factory=dict,
         description="Additional response metadata.",

@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+import urllib.parse
 from collections.abc import AsyncGenerator, Iterator
 from typing import TYPE_CHECKING
 
@@ -40,7 +41,12 @@ from omnibase_infra.adapters.llm.model_llm_health_response import (
 from omnibase_infra.adapters.llm.model_llm_model_capabilities import (
     ModelLlmModelCapabilities,
 )
-from omnibase_infra.enums import EnumLlmOperationType
+from omnibase_infra.enums import EnumInfraTransportType, EnumLlmOperationType
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    ModelInfraErrorContext,
+    RuntimeHostError,
+)
 from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
@@ -48,6 +54,7 @@ from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_
 from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
     ModelLlmInferenceRequest,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_infra.adapters.llm.model_llm_provider_config import (
@@ -172,6 +179,14 @@ class AdapterLlmProviderOpenai:
     def configure(self, config: ModelLlmProviderConfig) -> None:
         """Configure the provider with connection and authentication details.
 
+        Note:
+            ``connection_timeout`` and ``max_retries`` from ``config`` are only
+            applied at construction time via ``max_timeout_seconds`` in
+            ``__init__``. Calling ``configure()`` after initialization will
+            update ``base_url``, ``api_key``, ``default_model``, and
+            ``provider_type`` but will **not** change timeout or retry settings
+            on the existing transport.
+
         Args:
             config: Provider configuration with API keys, URLs, timeouts.
         """
@@ -192,10 +207,26 @@ class AdapterLlmProviderOpenai:
         endpoint. Falls back to returning the default model if the endpoint
         is unavailable.
 
+        Note:
+            This method uses a direct HTTP GET (not POST through the full
+            transport pipeline) because ``_execute_llm_http_call`` is designed
+            for inference POST requests. The circuit breaker is checked to
+            avoid hammering a known-down endpoint, but CIDR allowlisting and
+            HMAC signing are not applied to this discovery call.
+
         Returns:
             List of model identifiers.
         """
+        from uuid import uuid4
+
+        correlation_id = uuid4()
         try:
+            # Respect circuit breaker state to avoid calling a down endpoint
+            async with self._transport._circuit_breaker_lock:
+                await self._transport._check_circuit_breaker(
+                    "get_available_models", correlation_id
+                )
+
             client = await self._transport._get_http_client()
             url = f"{self._base_url.rstrip('/')}/v1/models"
             response = await client.get(url, timeout=10.0)
@@ -211,7 +242,7 @@ class AdapterLlmProviderOpenai:
         except Exception:
             logger.debug(
                 "Could not fetch models from %s, returning default",
-                self._base_url,
+                self._provider_name_value,
             )
 
         return [self._default_model] if self._default_model else []
@@ -250,8 +281,8 @@ class AdapterLlmProviderOpenai:
         """Validate that the request is compatible with this provider.
 
         ModelLlmAdapterRequest enforces ``min_length=1`` on both ``prompt``
-        and ``model_name`` via Pydantic field constraints, so no additional
-        validation is needed here.
+        and ``model_name`` via Pydantic field constraints. This method
+        additionally checks that the provider is currently available.
 
         Args:
             request: LLM request to validate.
@@ -259,6 +290,8 @@ class AdapterLlmProviderOpenai:
         Returns:
             True if the request can be handled by this provider.
         """
+        if not self._is_available:
+            return False
         return True
 
     # ── Generation ─────────────────────────────────────────────────────
@@ -298,7 +331,21 @@ class AdapterLlmProviderOpenai:
             InfraTimeoutError: If the request times out.
         """
         infra_request = self._translate_request(request)
-        infra_response = await self._handler.handle(infra_request)
+        try:
+            infra_response = await self._handler.handle(infra_request)
+        except RuntimeHostError:
+            # Already an infra error with correlation context -- propagate as-is
+            raise
+        except Exception as exc:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="generate_async",
+                target_name=self._provider_name_value,
+            )
+            raise InfraConnectionError(
+                f"LLM provider '{self._provider_name_value}' failed during generation",
+                context=context,
+            ) from exc
 
         return ModelLlmAdapterResponse(
             generated_text=infra_response.generated_text or "",
@@ -414,7 +461,7 @@ class AdapterLlmProviderOpenai:
                 is_healthy=False,
                 provider_name=self._provider_name_value,
                 response_time_ms=latency_ms,
-                error_message=str(exc),
+                error_message=sanitize_error_message(exc),
             )
 
     # ── Provider info ──────────────────────────────────────────────────
@@ -422,13 +469,16 @@ class AdapterLlmProviderOpenai:
     async def get_provider_info(self) -> JsonType:
         """Get comprehensive provider information.
 
+        The ``base_url`` value is sanitized to remove any userinfo
+        (username/password) component from the URL before returning.
+
         Returns:
             Dictionary with provider metadata.
         """
         return {
             "name": self._provider_name_value,
             "type": self._provider_type_value,
-            "base_url": self._base_url,
+            "base_url": self._sanitize_url(self._base_url),
             "default_model": self._default_model,
             "is_available": self._is_available,
             "supports_streaming": False,
@@ -451,7 +501,27 @@ class AdapterLlmProviderOpenai:
         """Close the HTTP transport client."""
         await self._transport.close()
 
-    # ── Internal translation ───────────────────────────────────────────
+    # ── Internal helpers ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _sanitize_url(url: str) -> str:
+        """Strip any userinfo (username:password) from a URL.
+
+        Args:
+            url: URL that may contain embedded credentials.
+
+        Returns:
+            URL with the userinfo component removed.
+        """
+        parsed = urllib.parse.urlparse(url)
+        if parsed.username or parsed.password:
+            # Reconstruct without credentials
+            host = parsed.hostname or ""
+            sanitized = parsed._replace(
+                netloc=host + (f":{parsed.port}" if parsed.port else ""),
+            )
+            return urllib.parse.urlunparse(sanitized)
+        return url
 
     def _translate_request(
         self, request: ModelLlmAdapterRequest

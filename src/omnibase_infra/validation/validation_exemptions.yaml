@@ -2510,7 +2510,7 @@ pattern_exemptions:
     ticket: OMN-2319
   - file_pattern: 'adapter_llm_provider_openai\.py'
     class_pattern: 'AdapterLlmProviderOpenai'
-    violation_pattern: 'has 1[0-9] methods'
+    violation_pattern: 'has \d+ methods'
     reason: >
       AdapterLlmProviderOpenai implements the SPI ProtocolLLMProvider protocol which requires 13+ methods. Method count is dictated by the protocol interface.
 

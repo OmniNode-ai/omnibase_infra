@@ -5,10 +5,12 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.adapters.llm.model_llm_health_response import (
     ModelLlmHealthResponse,
 )
+from omnibase_spi.protocols.types.protocol_llm_types import ProtocolLLMHealthResponse
 
 
 class TestModelLlmHealthResponse:
@@ -46,12 +48,12 @@ class TestModelLlmHealthResponse:
             provider_name="test",
             response_time_ms=10.0,
         )
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             resp.is_healthy = False  # type: ignore[misc]
 
     def test_extra_fields_forbidden(self) -> None:
         """Extra fields are rejected."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelLlmHealthResponse(
                 is_healthy=True,
                 provider_name="test",
@@ -60,17 +62,17 @@ class TestModelLlmHealthResponse:
             )
 
     def test_default_available_models(self) -> None:
-        """Available models defaults to empty list."""
+        """Available models defaults to empty tuple."""
         resp = ModelLlmHealthResponse(
             is_healthy=True,
             provider_name="test",
             response_time_ms=1.0,
         )
-        assert resp.available_models == []
+        assert resp.available_models == ()
 
     def test_negative_response_time_rejected(self) -> None:
         """Negative response time is rejected."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelLlmHealthResponse(
                 is_healthy=True,
                 provider_name="test",
@@ -87,7 +89,8 @@ class TestModelLlmHealthResponse:
             error_message=None,
         )
         # Protocol requires these properties
+        assert isinstance(resp, ProtocolLLMHealthResponse)
         assert isinstance(resp.is_healthy, bool)
         assert isinstance(resp.provider_name, str)
         assert isinstance(resp.response_time_ms, float)
-        assert isinstance(resp.available_models, list)
+        assert isinstance(resp.available_models, tuple)

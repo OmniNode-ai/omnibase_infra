@@ -15,6 +15,7 @@ from omnibase_infra.adapters.llm.model_llm_adapter_request import (
 from omnibase_infra.adapters.llm.model_llm_adapter_response import (
     ModelLlmAdapterResponse,
 )
+from omnibase_infra.errors import InfraUnavailableError, ProtocolConfigurationError
 
 
 def _make_mock_provider(
@@ -52,7 +53,7 @@ class TestAdapterModelRouterRegistration:
         """Register adds provider to routing pool."""
         router = AdapterModelRouter()
         provider = _make_mock_provider("vllm")
-        router.register_provider("vllm", provider)
+        await router.register_provider("vllm", provider)
         available = await router.get_available_providers()
         assert "vllm" in available
 
@@ -61,7 +62,7 @@ class TestAdapterModelRouterRegistration:
         """First registered provider becomes default and is routable."""
         router = AdapterModelRouter()
         provider = _make_mock_provider("vllm")
-        router.register_provider("vllm", provider)
+        await router.register_provider("vllm", provider)
         # Verify it is routable by generating a request
         response = await router.generate(_make_request())
         assert isinstance(response, ModelLlmAdapterResponse)
@@ -72,8 +73,8 @@ class TestAdapterModelRouterRegistration:
         """Remove provider from routing pool."""
         router = AdapterModelRouter()
         provider = _make_mock_provider("vllm")
-        router.register_provider("vllm", provider)
-        router.remove_provider("vllm")
+        await router.register_provider("vllm", provider)
+        await router.remove_provider("vllm")
         available = await router.get_available_providers()
         assert "vllm" not in available
 
@@ -81,10 +82,10 @@ class TestAdapterModelRouterRegistration:
     async def test_remove_default_updates(self) -> None:
         """Removing default provider selects next available."""
         router = AdapterModelRouter()
-        router.register_provider("a", _make_mock_provider("a"))
+        await router.register_provider("a", _make_mock_provider("a"))
         b_provider = _make_mock_provider("b")
-        router.register_provider("b", b_provider)
-        router.remove_provider("a")
+        await router.register_provider("b", b_provider)
+        await router.remove_provider("a")
         # After removing "a", "b" should be the only available provider
         available = await router.get_available_providers()
         assert available == ["b"]
@@ -102,7 +103,7 @@ class TestAdapterModelRouterGenerate:
         """Generate routes to the first available provider."""
         router = AdapterModelRouter()
         provider = _make_mock_provider("vllm")
-        router.register_provider("vllm", provider)
+        await router.register_provider("vllm", provider)
 
         response = await router.generate(_make_request())
         assert isinstance(response, ModelLlmAdapterResponse)
@@ -110,16 +111,18 @@ class TestAdapterModelRouterGenerate:
 
     @pytest.mark.asyncio
     async def test_generate_no_providers_raises(self) -> None:
-        """Generate with no providers raises RuntimeError."""
+        """Generate with no providers raises ProtocolConfigurationError."""
         router = AdapterModelRouter()
-        with pytest.raises(RuntimeError, match="No LLM providers registered"):
+        with pytest.raises(
+            ProtocolConfigurationError, match="No LLM providers registered"
+        ):
             await router.generate(_make_request())
 
     @pytest.mark.asyncio
     async def test_generate_wrong_type_raises(self) -> None:
         """Generate with wrong request type raises TypeError."""
         router = AdapterModelRouter()
-        router.register_provider("vllm", _make_mock_provider("vllm"))
+        await router.register_provider("vllm", _make_mock_provider("vllm"))
         with pytest.raises(TypeError, match="Expected ModelLlmAdapterRequest"):
             await router.generate("not a request")
 
@@ -130,10 +133,10 @@ class TestAdapterModelRouterGenerate:
 
         failing = _make_mock_provider("failing")
         failing.generate_async = AsyncMock(side_effect=ConnectionError("down"))
-        router.register_provider("failing", failing)
+        await router.register_provider("failing", failing)
 
         working = _make_mock_provider("working")
-        router.register_provider("working", working)
+        await router.register_provider("working", working)
 
         response = await router.generate(_make_request())
         assert isinstance(response, ModelLlmAdapterResponse)
@@ -149,9 +152,9 @@ class TestAdapterModelRouterGenerate:
             provider.generate_async = AsyncMock(
                 side_effect=ConnectionError(f"{name} down")
             )
-            router.register_provider(name, provider)
+            await router.register_provider(name, provider)
 
-        with pytest.raises(RuntimeError, match="All LLM providers failed"):
+        with pytest.raises(InfraUnavailableError, match="All LLM providers failed"):
             await router.generate(_make_request())
 
     @pytest.mark.asyncio
@@ -160,10 +163,10 @@ class TestAdapterModelRouterGenerate:
         router = AdapterModelRouter()
 
         unavailable = _make_mock_provider("unavailable", available=False)
-        router.register_provider("unavailable", unavailable)
+        await router.register_provider("unavailable", unavailable)
 
         available = _make_mock_provider("available")
-        router.register_provider("available", available)
+        await router.register_provider("available", available)
 
         response = await router.generate(_make_request())
         assert isinstance(response, ModelLlmAdapterResponse)
@@ -176,8 +179,8 @@ class TestAdapterModelRouterGenerate:
         router = AdapterModelRouter()
         provider_a = _make_mock_provider("a")
         provider_b = _make_mock_provider("b")
-        router.register_provider("a", provider_a)
-        router.register_provider("b", provider_b)
+        await router.register_provider("a", provider_a)
+        await router.register_provider("b", provider_b)
 
         # First call should go to provider "a"
         resp1 = await router.generate(_make_request())
@@ -199,14 +202,14 @@ class TestAdapterModelRouterGenerate:
     async def test_generate_all_providers_unavailable(self) -> None:
         """Generate raises when all providers are registered but unavailable."""
         router = AdapterModelRouter()
-        router.register_provider(
+        await router.register_provider(
             "offline_a", _make_mock_provider("offline_a", available=False)
         )
-        router.register_provider(
+        await router.register_provider(
             "offline_b", _make_mock_provider("offline_b", available=False)
         )
 
-        with pytest.raises(RuntimeError, match="unavailable"):
+        with pytest.raises(InfraUnavailableError, match="unavailable"):
             await router.generate(_make_request())
 
     @pytest.mark.asyncio
@@ -217,10 +220,10 @@ class TestAdapterModelRouterGenerate:
         providers: list[MagicMock] = []
         for name in ["x", "y", "z"]:
             provider = _make_mock_provider(name, available=False)
-            router.register_provider(name, provider)
+            await router.register_provider(name, provider)
             providers.append(provider)
 
-        with pytest.raises(RuntimeError, match="none were attempted"):
+        with pytest.raises(InfraUnavailableError, match="none were attempted"):
             await router.generate(_make_request())
 
         # None of the providers should have been called
@@ -235,9 +238,9 @@ class TestAdapterModelRouterAvailability:
     async def test_get_available_providers(self) -> None:
         """Returns only available providers."""
         router = AdapterModelRouter()
-        router.register_provider("a", _make_mock_provider("a", available=True))
-        router.register_provider("b", _make_mock_provider("b", available=False))
-        router.register_provider("c", _make_mock_provider("c", available=True))
+        await router.register_provider("a", _make_mock_provider("a", available=True))
+        await router.register_provider("b", _make_mock_provider("b", available=False))
+        await router.register_provider("c", _make_mock_provider("c", available=True))
 
         available = await router.get_available_providers()
         assert available == ["a", "c"]
@@ -247,7 +250,7 @@ class TestAdapterModelRouterAvailability:
         """Direct provider generation works."""
         router = AdapterModelRouter()
         provider = _make_mock_provider("vllm")
-        router.register_provider("vllm", provider)
+        await router.register_provider("vllm", provider)
 
         response = await router.generate_with_provider(_make_request(), "vllm")
         assert isinstance(response, ModelLlmAdapterResponse)
@@ -263,8 +266,8 @@ class TestAdapterModelRouterAvailability:
     async def test_health_check_all(self) -> None:
         """Health check runs on all registered providers."""
         router = AdapterModelRouter()
-        router.register_provider("a", _make_mock_provider("a"))
-        router.register_provider("b", _make_mock_provider("b"))
+        await router.register_provider("a", _make_mock_provider("a"))
+        await router.register_provider("b", _make_mock_provider("b"))
 
         results = await router.health_check_all()
         assert "a" in results

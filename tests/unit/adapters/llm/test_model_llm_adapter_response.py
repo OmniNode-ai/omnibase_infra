@@ -5,10 +5,12 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.adapters.llm.model_llm_adapter_response import (
     ModelLlmAdapterResponse,
 )
+from omnibase_spi.protocols.types.protocol_llm_types import ProtocolLLMResponse
 
 
 class TestModelLlmAdapterResponse:
@@ -54,7 +56,7 @@ class TestModelLlmAdapterResponse:
             generated_text="Hello",
             model_used="test",
         )
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             resp.generated_text = "Changed"  # type: ignore[misc]
 
     def test_default_generated_text_is_empty_string(self) -> None:
@@ -89,6 +91,7 @@ class TestModelLlmAdapterResponse:
             finish_reason="stop",
             response_metadata={"latency": 100},
         )
+        assert isinstance(resp, ProtocolLLMResponse)
         assert isinstance(resp.generated_text, str)
         assert isinstance(resp.model_used, str)
         assert isinstance(resp.usage_statistics, dict)

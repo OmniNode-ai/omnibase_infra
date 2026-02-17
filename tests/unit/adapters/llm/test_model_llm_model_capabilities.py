@@ -5,10 +5,12 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.adapters.llm.model_llm_model_capabilities import (
     ModelLlmModelCapabilities,
 )
+from omnibase_spi.protocols.types.protocol_llm_types import ProtocolModelCapabilities
 
 
 class TestModelLlmModelCapabilities:
@@ -37,14 +39,14 @@ class TestModelLlmModelCapabilities:
         assert caps.supports_streaming is True
         assert caps.supports_function_calling is False
         assert caps.max_context_length == 4096
-        assert caps.supported_modalities == ["text"]
+        assert caps.supported_modalities == ("text",)
         assert caps.cost_per_1k_input_tokens == 0.0
         assert caps.cost_per_1k_output_tokens == 0.0
 
     def test_frozen_model(self) -> None:
         """Model is immutable."""
         caps = ModelLlmModelCapabilities(model_name="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             caps.model_name = "other"  # type: ignore[misc]
 
     def test_multimodal_capabilities(self) -> None:
@@ -65,8 +67,9 @@ class TestModelLlmModelCapabilities:
             max_context_length=4096,
             supported_modalities=["text"],
         )
+        assert isinstance(caps, ProtocolModelCapabilities)
         assert isinstance(caps.model_name, str)
         assert isinstance(caps.supports_streaming, bool)
         assert isinstance(caps.supports_function_calling, bool)
         assert isinstance(caps.max_context_length, int)
-        assert isinstance(caps.supported_modalities, list)
+        assert isinstance(caps.supported_modalities, tuple)

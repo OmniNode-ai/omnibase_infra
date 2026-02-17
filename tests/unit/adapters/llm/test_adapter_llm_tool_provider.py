@@ -26,19 +26,21 @@ def _make_mock_provider(name: str = "test") -> MagicMock:
 class TestAdapterLlmToolProviderRegistration:
     """Tests for provider registration."""
 
-    def test_register_provider(self) -> None:
+    @pytest.mark.asyncio
+    async def test_register_provider(self) -> None:
         """Register adds provider to tool provider and router."""
         tool_provider = AdapterLlmToolProvider()
         provider = _make_mock_provider("vllm")
-        tool_provider.register_provider("vllm", provider)
+        await tool_provider.register_provider("vllm", provider)
         assert "vllm" in tool_provider._providers
         assert "vllm" in tool_provider._router._providers
 
-    def test_list_providers(self) -> None:
+    @pytest.mark.asyncio
+    async def test_list_providers(self) -> None:
         """List returns all registered provider names."""
         tool_provider = AdapterLlmToolProvider()
-        tool_provider.register_provider("a", _make_mock_provider("a"))
-        tool_provider.register_provider("b", _make_mock_provider("b"))
+        await tool_provider.register_provider("a", _make_mock_provider("a"))
+        await tool_provider.register_provider("b", _make_mock_provider("b"))
         assert tool_provider.list_providers() == ["a", "b"]
 
 
@@ -57,7 +59,7 @@ class TestAdapterLlmToolProviderAccess:
         """Returns registered OpenAI provider."""
         tool_provider = AdapterLlmToolProvider()
         mock = _make_mock_provider("openai")
-        tool_provider.register_provider("openai", mock)
+        await tool_provider.register_provider("openai", mock)
         provider = await tool_provider.get_openai_provider()
         assert provider is mock
 
@@ -66,7 +68,7 @@ class TestAdapterLlmToolProviderAccess:
         """Returns registered Ollama provider."""
         tool_provider = AdapterLlmToolProvider()
         mock = _make_mock_provider("ollama")
-        tool_provider.register_provider("ollama", mock)
+        await tool_provider.register_provider("ollama", mock)
         provider = await tool_provider.get_ollama_provider()
         assert provider is mock
 
@@ -75,7 +77,7 @@ class TestAdapterLlmToolProviderAccess:
         """Returns registered Gemini provider."""
         tool_provider = AdapterLlmToolProvider()
         mock = _make_mock_provider("gemini")
-        tool_provider.register_provider("gemini", mock)
+        await tool_provider.register_provider("gemini", mock)
         provider = await tool_provider.get_gemini_provider()
         assert provider is mock
 
@@ -84,7 +86,7 @@ class TestAdapterLlmToolProviderAccess:
         """Returns registered Claude provider."""
         tool_provider = AdapterLlmToolProvider()
         mock = _make_mock_provider("claude")
-        tool_provider.register_provider("claude", mock)
+        await tool_provider.register_provider("claude", mock)
         provider = await tool_provider.get_claude_provider()
         assert provider is mock
 
@@ -95,11 +97,12 @@ class TestAdapterLlmToolProviderAccess:
         with pytest.raises(KeyError, match="not registered"):
             await tool_provider.get_openai_provider()
 
-    def test_get_provider_by_name(self) -> None:
+    @pytest.mark.asyncio
+    async def test_get_provider_by_name(self) -> None:
         """Get provider by arbitrary name."""
         tool_provider = AdapterLlmToolProvider()
         mock = _make_mock_provider("custom")
-        tool_provider.register_provider("custom", mock)
+        await tool_provider.register_provider("custom", mock)
         assert tool_provider.get_provider_by_name("custom") is mock
 
     def test_get_provider_by_name_missing(self) -> None:
@@ -118,7 +121,7 @@ class TestAdapterLlmToolProviderLifecycle:
         tool_provider = AdapterLlmToolProvider()
         providers = [_make_mock_provider(f"p{i}") for i in range(3)]
         for i, p in enumerate(providers):
-            tool_provider.register_provider(f"p{i}", p)
+            await tool_provider.register_provider(f"p{i}", p)
 
         await tool_provider.close_all()
 
@@ -131,10 +134,10 @@ class TestAdapterLlmToolProviderLifecycle:
         tool_provider = AdapterLlmToolProvider()
         failing = _make_mock_provider("failing")
         failing.close = AsyncMock(side_effect=RuntimeError("close failed"))
-        tool_provider.register_provider("failing", failing)
+        await tool_provider.register_provider("failing", failing)
 
         working = _make_mock_provider("working")
-        tool_provider.register_provider("working", working)
+        await tool_provider.register_provider("working", working)
 
         # Should not raise
         await tool_provider.close_all()

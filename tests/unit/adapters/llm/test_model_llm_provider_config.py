@@ -5,10 +5,12 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.adapters.llm.model_llm_provider_config import (
     ModelLlmProviderConfig,
 )
+from omnibase_spi.protocols.types.protocol_llm_types import ProtocolProviderConfig
 
 
 class TestModelLlmProviderConfig:
@@ -83,17 +85,17 @@ class TestModelLlmProviderConfig:
     def test_frozen_model(self) -> None:
         """Model is immutable."""
         config = ModelLlmProviderConfig(provider_name="test")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             config.provider_name = "other"  # type: ignore[misc]
 
     def test_timeout_bounds(self) -> None:
         """Connection timeout has valid bounds."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelLlmProviderConfig(
                 provider_name="test",
                 connection_timeout=0,
             )
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelLlmProviderConfig(
                 provider_name="test",
                 connection_timeout=601,
@@ -101,7 +103,7 @@ class TestModelLlmProviderConfig:
 
     def test_invalid_provider_type_rejected(self) -> None:
         """Invalid provider_type values are rejected by Pydantic validation."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelLlmProviderConfig(
                 provider_name="test",
                 provider_type="invalid",  # type: ignore[arg-type]
@@ -126,6 +128,7 @@ class TestModelLlmProviderConfig:
             base_url="http://localhost:8000",
             default_model="test-model",
         )
+        assert isinstance(config, ProtocolProviderConfig)
         assert isinstance(config.provider_name, str)
         assert isinstance(config.base_url, str)
         assert isinstance(config.default_model, str)

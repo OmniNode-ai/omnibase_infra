@@ -5,10 +5,12 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.adapters.llm.model_llm_adapter_request import (
     ModelLlmAdapterRequest,
 )
+from omnibase_spi.protocols.types.protocol_llm_types import ProtocolLLMRequest
 
 
 class TestModelLlmAdapterRequest:
@@ -45,12 +47,12 @@ class TestModelLlmAdapterRequest:
             prompt="Hello",
             model_name="test",
         )
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             req.prompt = "Changed"  # type: ignore[misc]
 
     def test_empty_prompt_rejected(self) -> None:
         """Empty prompt is rejected."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelLlmAdapterRequest(
                 prompt="",
                 model_name="test",
@@ -58,13 +60,13 @@ class TestModelLlmAdapterRequest:
 
     def test_temperature_bounds(self) -> None:
         """Temperature must be 0.0 to 2.0."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelLlmAdapterRequest(
                 prompt="Hello",
                 model_name="test",
                 temperature=-0.1,
             )
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ModelLlmAdapterRequest(
                 prompt="Hello",
                 model_name="test",
@@ -96,6 +98,7 @@ class TestModelLlmAdapterRequest:
             max_tokens=100,
             temperature=0.5,
         )
+        assert isinstance(req, ProtocolLLMRequest)
         assert isinstance(req.prompt, str)
         assert isinstance(req.model_name, str)
         assert isinstance(req.parameters, dict)

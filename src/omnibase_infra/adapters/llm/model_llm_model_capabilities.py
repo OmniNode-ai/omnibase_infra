@@ -26,7 +26,7 @@ class ModelLlmModelCapabilities(BaseModel):
         supports_streaming: Whether the model supports streaming responses.
         supports_function_calling: Whether tool/function calling is supported.
         max_context_length: Maximum context window size in tokens.
-        supported_modalities: Input/output modalities (e.g. ['text'], ['text', 'vision']).
+        supported_modalities: Input/output modalities as immutable tuple (e.g. ('text',), ('text', 'vision')).
         cost_per_1k_input_tokens: Cost per 1000 input tokens in USD (0.0 for local).
         cost_per_1k_output_tokens: Cost per 1000 output tokens in USD (0.0 for local).
 
@@ -62,8 +62,8 @@ class ModelLlmModelCapabilities(BaseModel):
         ge=1,
         description="Maximum context length in tokens.",
     )
-    supported_modalities: list[str] = Field(
-        default_factory=lambda: ["text"],
+    supported_modalities: tuple[str, ...] = Field(
+        default_factory=lambda: ("text",),
         description="Supported input/output modalities.",
     )
     cost_per_1k_input_tokens: float = Field(

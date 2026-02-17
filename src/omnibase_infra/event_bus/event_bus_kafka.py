@@ -362,6 +362,7 @@ class EventBusKafka(
         # State flags
         self._started = False
         self._shutdown = False
+        self._closing = False
 
         # Background consumer tasks
         self._consumer_tasks: dict[str, asyncio.Task[None]] = {}
@@ -524,6 +525,7 @@ class EventBusKafka(
 
                 self._started = True
                 self._shutdown = False
+                self._closing = False
 
                 # Reset circuit breaker on success
                 async with self._circuit_breaker_lock:
@@ -667,8 +669,13 @@ class EventBusKafka(
             if self._shutdown:
                 # Already shutting down or shutdown
                 return
+            self._closing = True
             self._shutdown = True
             self._started = False
+
+        # Cancel circuit breaker active recovery timer to prevent it from
+        # outliving the EventBusKafka instance (inherited from MixinAsyncCircuitBreaker)
+        await self.cancel_active_recovery()
 
         # Cancel all consumer tasks (outside main lock to avoid deadlock)
         tasks_to_cancel = []
@@ -793,7 +800,10 @@ class EventBusKafka(
 
         Raises:
             InfraConnectionError: If the producer cannot be recreated.
+            InfraTimeoutError: If the producer recreation times out.
         """
+        assert self._producer_lock.locked(), "Must be called under _producer_lock"
+
         if self._producer is not None:
             return
 
@@ -827,6 +837,40 @@ class EventBusKafka(
                     "correlation_id": str(correlation_id),
                 },
             )
+
+        except TimeoutError as e:
+            # Clean up the failed producer
+            if self._producer is not None:
+                try:
+                    await self._producer.stop()
+                except Exception as cleanup_err:
+                    logger.warning(
+                        "Cleanup failed for Kafka producer stop during recreation: %s",
+                        cleanup_err,
+                        exc_info=True,
+                    )
+            self._producer = None
+
+            logger.warning(
+                "Kafka producer recreation timed out: %s",
+                e,
+                extra={
+                    "environment": self._environment,
+                    "correlation_id": str(correlation_id),
+                    "error": str(e),
+                },
+            )
+            timeout_ctx = ModelTimeoutErrorContext(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="recreate_producer_timeout",
+                target_name=f"kafka.{self._environment}",
+                correlation_id=correlation_id,
+                timeout_seconds=self._timeout_seconds,
+            )
+            raise InfraTimeoutError(
+                "Producer recreation timed out",
+                context=timeout_ctx,
+            ) from e
 
         except Exception as e:
             # Clean up the failed producer
@@ -883,14 +927,40 @@ class EventBusKafka(
         last_exception: Exception | None = None
 
         for attempt in range(self._max_retry_attempts + 1):
+            if self._closing:
+                context = ModelInfraErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="publish",
+                    target_name=f"kafka.{topic}",
+                    correlation_id=headers.correlation_id,
+                )
+                raise InfraUnavailableError(
+                    "Kafka event bus is shutting down",
+                    context=context,
+                    topic=topic,
+                )
+
             try:
-                # Thread-safe producer access - acquire lock to check and use producer
+                # Acquire lock only for producer check and reference capture,
+                # then release before network I/O to avoid serializing all publishes.
                 async with self._producer_lock:
                     # Lazily recreate producer if it was destroyed by a previous
                     # timeout but the bus is still logically started.
                     await self._ensure_producer(headers.correlation_id)
 
-                    if self._producer is None:
+                    producer = self._producer
+                    if producer is None:
+                        if not self._started:
+                            raise InfraUnavailableError(
+                                "Kafka event bus is shutting down",
+                                context=ModelInfraErrorContext(
+                                    transport_type=EnumInfraTransportType.KAFKA,
+                                    operation="publish",
+                                    target_name=f"kafka.{topic}",
+                                    correlation_id=headers.correlation_id,
+                                ),
+                                topic=topic,
+                            )
                         raise InfraConnectionError(
                             "Kafka producer not initialized",
                             context=ModelInfraErrorContext(
@@ -901,12 +971,13 @@ class EventBusKafka(
                             ),
                         )
 
-                    future = await self._producer.send(
-                        topic,
-                        value=value,
-                        key=key,
-                        headers=kafka_headers,
-                    )
+                # Send outside lock to allow concurrent publishes
+                future = await producer.send(
+                    topic,
+                    value=value,
+                    key=key,
+                    headers=kafka_headers,
+                )
 
                 # Wait for completion outside lock to allow other operations
                 record_metadata = await asyncio.wait_for(

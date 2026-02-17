@@ -35,6 +35,7 @@ from omnibase_infra.adapters.llm.model_llm_model_capabilities import (
 from omnibase_infra.adapters.llm.model_llm_provider_config import (
     ModelLlmProviderConfig,
 )
+from omnibase_infra.errors import InfraUnavailableError
 
 
 def _mock_provider(
@@ -78,8 +79,8 @@ class TestMultiProviderRouting:
     async def test_router_selects_first_available(self) -> None:
         """Router selects the first available provider."""
         router = AdapterModelRouter()
-        router.register_provider("vllm", _mock_provider("vllm"))
-        router.register_provider("ollama", _mock_provider("ollama"))
+        await router.register_provider("vllm", _mock_provider("vllm"))
+        await router.register_provider("ollama", _mock_provider("ollama"))
 
         request = ModelLlmAdapterRequest(
             prompt="Hello",
@@ -95,8 +96,8 @@ class TestMultiProviderRouting:
         router = AdapterModelRouter()
         p1 = _mock_provider("p1", response_text="from-p1")
         p2 = _mock_provider("p2", response_text="from-p2")
-        router.register_provider("p1", p1)
-        router.register_provider("p2", p2)
+        await router.register_provider("p1", p1)
+        await router.register_provider("p2", p2)
 
         request = ModelLlmAdapterRequest(
             prompt="Hello",
@@ -122,10 +123,10 @@ class TestFailoverBehavior:
         failing.generate_async = AsyncMock(
             side_effect=ConnectionError("Connection refused")
         )
-        router.register_provider("failing", failing)
+        await router.register_provider("failing", failing)
 
         backup = _mock_provider("backup", response_text="backup response")
-        router.register_provider("backup", backup)
+        await router.register_provider("backup", backup)
 
         request = ModelLlmAdapterRequest(
             prompt="Hello",
@@ -140,10 +141,10 @@ class TestFailoverBehavior:
         router = AdapterModelRouter()
 
         down = _mock_provider("down", available=False)
-        router.register_provider("down", down)
+        await router.register_provider("down", down)
 
         up = _mock_provider("up", response_text="up response")
-        router.register_provider("up", up)
+        await router.register_provider("up", up)
 
         request = ModelLlmAdapterRequest(
             prompt="Hello",
@@ -155,7 +156,7 @@ class TestFailoverBehavior:
 
     @pytest.mark.asyncio
     async def test_all_providers_down_error(self) -> None:
-        """RuntimeError when all providers fail."""
+        """InfraUnavailableError when all providers fail."""
         router = AdapterModelRouter()
 
         for name in ["p1", "p2", "p3"]:
@@ -163,13 +164,13 @@ class TestFailoverBehavior:
             failing.generate_async = AsyncMock(
                 side_effect=TimeoutError(f"{name} timed out")
             )
-            router.register_provider(name, failing)
+            await router.register_provider(name, failing)
 
         request = ModelLlmAdapterRequest(
             prompt="Hello",
             model_name="test-model",
         )
-        with pytest.raises(RuntimeError, match="All LLM providers failed"):
+        with pytest.raises(InfraUnavailableError, match="All LLM providers failed"):
             await router.generate(request)
 
 
@@ -180,8 +181,8 @@ class TestToolProviderIntegration:
     async def test_tool_provider_router_integration(self) -> None:
         """Tool provider's router includes all registered providers."""
         tool_provider = AdapterLlmToolProvider()
-        tool_provider.register_provider("vllm", _mock_provider("vllm"))
-        tool_provider.register_provider("ollama", _mock_provider("ollama"))
+        await tool_provider.register_provider("vllm", _mock_provider("vllm"))
+        await tool_provider.register_provider("ollama", _mock_provider("ollama"))
 
         router = await tool_provider.get_model_router()
         available = await router.get_available_providers()
@@ -195,8 +196,8 @@ class TestToolProviderIntegration:
         openai_mock = _mock_provider("openai")
         ollama_mock = _mock_provider("ollama")
 
-        tool_provider.register_provider("openai", openai_mock)
-        tool_provider.register_provider("ollama", ollama_mock)
+        await tool_provider.register_provider("openai", openai_mock)
+        await tool_provider.register_provider("ollama", ollama_mock)
 
         openai = await tool_provider.get_openai_provider()
         assert openai is openai_mock
@@ -209,7 +210,7 @@ class TestToolProviderIntegration:
         """End-to-end: register providers, get router, generate response."""
         tool_provider = AdapterLlmToolProvider()
         vllm = _mock_provider("vllm", response_text="ONEX architecture overview")
-        tool_provider.register_provider("vllm", vllm)
+        await tool_provider.register_provider("vllm", vllm)
 
         router = await tool_provider.get_model_router()
         request = ModelLlmAdapterRequest(
@@ -228,7 +229,7 @@ class TestToolProviderIntegration:
         tool_provider = AdapterLlmToolProvider()
         providers = [_mock_provider(f"p{i}") for i in range(3)]
         for i, p in enumerate(providers):
-            tool_provider.register_provider(f"p{i}", p)
+            await tool_provider.register_provider(f"p{i}", p)
 
         await tool_provider.close_all()
         for p in providers:
