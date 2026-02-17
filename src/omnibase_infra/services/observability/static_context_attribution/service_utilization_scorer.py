@@ -51,6 +51,9 @@ _MAX_LEVENSHTEIN_COMPARISONS = 5_000
 # Regex to split text into sentence-like fragments
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n(?:\s*\n)+|\n(?=[-*#|>])")
 
+# Regex to detect markdown table separator lines (e.g., "|---|---|")
+_TABLE_SEPARATOR = re.compile(r"^[\|\-\s:]+$")
+
 
 def _normalize_whitespace(text: str) -> str:
     """Collapse whitespace sequences to single spaces and strip.
@@ -86,7 +89,7 @@ def _extract_fragments(content: str) -> list[str]:
         if (
             len(normalized) >= _MIN_FRAGMENT_LENGTH
             and not normalized.startswith("#")
-            and not re.match(r"^[\|\-\s:]+$", normalized)
+            and not _TABLE_SEPARATOR.match(normalized)
         ):
             fragments.append(normalized)
 
