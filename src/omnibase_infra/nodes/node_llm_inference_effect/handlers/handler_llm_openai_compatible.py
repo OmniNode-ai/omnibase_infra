@@ -980,24 +980,36 @@ def _parse_usage(raw_usage: JsonType) -> ModelLlmUsage:
 
     tokens_input = _safe_int(raw_usage.get("prompt_tokens", 0), 0)
     tokens_output = _safe_int(raw_usage.get("completion_tokens", 0), 0)
-    tokens_total = _safe_int_or_none(raw_usage.get("total_tokens"))
+    tokens_total_raw = _safe_int_or_none(raw_usage.get("total_tokens"))
 
-    # If the provider total doesn't match the sum, let ModelLlmUsage
-    # auto-compute it.  Some providers include cached/reasoning tokens
-    # in total_tokens which makes it exceed prompt + completion.
+    # If the provider total doesn't match the sum, use the computed sum
+    # instead.  Some providers include cached/reasoning tokens in
+    # total_tokens which makes it exceed prompt + completion.
+    # Pass tokens_total=None so ModelLlmUsage auto-computes the sum.
     # The raw provider data is preserved in raw_provider_usage for auditing.
     expected = tokens_input + tokens_output
-    if tokens_total is not None and tokens_total != expected:
-        tokens_total = None
+    if tokens_total_raw is not None and tokens_total_raw != expected:
+        logger.debug(
+            "Provider tokens_total (%d) differs from prompt+completion (%d); "
+            "using computed sum",
+            tokens_total_raw,
+            expected,
+        )
+        tokens_total: int | None = None  # ModelLlmUsage will auto-compute
+    else:
+        tokens_total = tokens_total_raw
 
     # Only mark as API-reported when at least one token counter is positive.
     # A usage dict with all-zero values (e.g. some providers return
     # {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
     # is semantically equivalent to missing usage data.
+    # Check is based on tokens_input/tokens_output (always available) and
+    # the raw provider total (to catch edge cases where the provider
+    # reports only total_tokens).
     has_usage = (
         tokens_input > 0
         or tokens_output > 0
-        or (tokens_total is not None and tokens_total > 0)
+        or (tokens_total_raw is not None and tokens_total_raw > 0)
     )
 
     return ModelLlmUsage(

@@ -105,28 +105,14 @@ _CONSECUTIVE_TIMEOUT_LOG_INTERVAL: int = 5
 # =============================================================================
 
 
-# Pre-compiled pattern/replacement pairs for credential masking in DSN
-# query strings and non-standard formats that urlparse may not detect.
-#
-# These patterns fire only as a **fallback** when urlparse does not detect
-# a password (e.g., password passed as a query parameter or in a
-# non-standard format).  The :secret@ pattern could theoretically match
-# non-credential text in a user:port@ scenario, but since it only runs
-# when urlparse failed to find any password, the false-positive risk is
-# acceptable for this defense-in-depth masking layer.
-_DSN_PASSWORD_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+# Pre-compiled pattern for credential masking in DSN query strings.
+# Fires only as a **fallback** when urlparse does not detect a password
+# (e.g., password passed as a query parameter).
+_DSN_QUERY_PASSWORD_PATTERN: tuple[re.Pattern[str], str] = (
     # password=value, pwd=value, passwd=value in query params (key=value&...)
     # Groups: (1) key=, (2) value  ->  replacement preserves key, masks value
-    (
-        re.compile(r"((?:password|passwd|pwd)\s*=\s*)([^&\s]+)", re.IGNORECASE),
-        r"\g<1>***",
-    ),
-    # :secret@ pattern in netloc that urlparse missed
-    # Groups: (1) ':', (2) secret, (3) '@'  ->  replacement preserves : and @
-    (
-        re.compile(r"(:)([^:@/]+)(@)"),
-        r"\g<1>***\g<3>",
-    ),
+    re.compile(r"((?:password|passwd|pwd)\s*=\s*)([^&\s]+)", re.IGNORECASE),
+    r"\g<1>***",
 )
 
 
@@ -134,10 +120,16 @@ def mask_dsn_password(dsn: str) -> str:
     """Mask password in a PostgreSQL DSN for safe logging.
 
     First attempts structured masking via ``urlparse``. If ``urlparse``
-    does not detect a password (e.g., password passed as a query parameter
-    or in a non-standard format), falls back to regex-based masking of
-    common credential patterns (``password=``, ``pwd=``, ``passwd=``,
-    ``:secret@``).
+    does not detect a password in the netloc (e.g., password passed as a
+    query parameter or in a non-standard format), falls back to
+    regex-based masking of common query-string credential patterns
+    (``password=``, ``pwd=``, ``passwd=``).
+
+    The previous regex fallback for ``:secret@`` in the netloc has been
+    removed because it could false-positive on DSNs without passwords
+    (e.g., matching port numbers or other non-credential components).
+    Instead, ``urlparse`` is the sole mechanism for detecting and masking
+    netloc-embedded passwords.
 
     Args:
         dsn: PostgreSQL connection string.
@@ -175,18 +167,18 @@ def mask_dsn_password(dsn: str) -> str:
                 )
             )
         else:
-            # urlparse did not detect a password.  Apply regex fallback to
-            # catch password=<value>, pwd=<value>, passwd=<value> in query
-            # strings, and :secret@ patterns in the netloc.
-            masked = dsn
-            for pattern, replacement in _DSN_PASSWORD_PATTERNS:
-                masked = pattern.sub(replacement, masked)
+            # urlparse did not detect a password in the netloc.  Apply
+            # regex fallback only for query-string credential patterns
+            # (password=, pwd=, passwd=).  The previous :secret@ regex
+            # was removed to avoid false-positives on non-credential
+            # components (e.g., user:port@host in unusual formats).
+            pattern, replacement = _DSN_QUERY_PASSWORD_PATTERN
+            masked = pattern.sub(replacement, dsn)
 
     except (ValueError, AttributeError):
         # Even on parse failure, attempt regex masking on the raw string
-        masked = dsn
-        for pattern, replacement in _DSN_PASSWORD_PATTERNS:
-            masked = pattern.sub(replacement, masked)
+        pattern, replacement = _DSN_QUERY_PASSWORD_PATTERN
+        masked = pattern.sub(replacement, dsn)
     except Exception:
         logger.warning(
             "Unexpected error masking DSN password; returning placeholder to prevent credential leak",
@@ -234,7 +226,7 @@ class ConsumerMetrics:
         self.messages_skipped: int = 0
         self.batches_processed: int = 0
         self.aggregations_written: int = 0
-        self.commit_failures: int = 0
+        self.consecutive_commit_failures: int = 0
         self.last_poll_at: datetime | None = None
         self.last_successful_write_at: datetime | None = None
         self.last_commit_failure_at: datetime | None = None
@@ -279,15 +271,15 @@ class ConsumerMetrics:
             self.last_poll_at = datetime.now(UTC)
 
     async def record_commit_failure(self) -> None:
-        """Record an offset commit failure."""
+        """Record a consecutive offset commit failure."""
         async with self._lock:
-            self.commit_failures += 1
+            self.consecutive_commit_failures += 1
             self.last_commit_failure_at = datetime.now(UTC)
 
-    async def reset_commit_failures(self) -> None:
+    async def reset_consecutive_commit_failures(self) -> None:
         """Reset consecutive commit failure counter after successful commit."""
         async with self._lock:
-            self.commit_failures = 0
+            self.consecutive_commit_failures = 0
 
     async def snapshot(self) -> dict[str, object]:
         """Get a snapshot of current metrics."""
@@ -299,7 +291,7 @@ class ConsumerMetrics:
                 "messages_skipped": self.messages_skipped,
                 "batches_processed": self.batches_processed,
                 "aggregations_written": self.aggregations_written,
-                "commit_failures": self.commit_failures,
+                "consecutive_commit_failures": self.consecutive_commit_failures,
                 "last_poll_at": (
                     self.last_poll_at.isoformat() if self.last_poll_at else None
                 ),
@@ -850,7 +842,7 @@ class ServiceLlmCostAggregator:
 
         try:
             await self._consumer.commit(commit_map)
-            await self.metrics.reset_commit_failures()
+            await self.metrics.reset_consecutive_commit_failures()
 
         except KafkaError as exc:
             await self.metrics.record_commit_failure()
@@ -859,7 +851,7 @@ class ServiceLlmCostAggregator:
             is_fatal = error_name in _FATAL_COMMIT_ERROR_NAMES
 
             metrics_snapshot = await self.metrics.snapshot()
-            commit_failures = metrics_snapshot.get("commit_failures", 0)
+            commit_failures = metrics_snapshot.get("consecutive_commit_failures", 0)
 
             if is_fatal:
                 # Fatal: consumer group membership is stale.  Log at ERROR
@@ -876,11 +868,11 @@ class ServiceLlmCostAggregator:
                 raise
             if isinstance(commit_failures, int) and commit_failures >= 5:
                 logger.exception(
-                    "Persistent commit failures detected",
+                    "Persistent consecutive commit failures detected",
                     extra={
                         "consumer_id": self._consumer_id,
                         "correlation_id": str(correlation_id),
-                        "commit_failures": commit_failures,
+                        "consecutive_commit_failures": commit_failures,
                     },
                 )
             else:

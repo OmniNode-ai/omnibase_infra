@@ -1887,15 +1887,41 @@ class EventBusKafka(
         valid_priorities = ("low", "normal", "high", "critical")
         priority = priority_str if priority_str in valid_priorities else "normal"
 
-        # Parse integer fields with fallback defaults
+        # Parse integer fields with fallback defaults.
+        # Kafka headers are byte strings; malformed values (e.g. "abc", "1.5")
+        # must not crash the consume loop, so each int() call is guarded.
         retry_count_str = headers_dict.get("retry_count")
-        retry_count = int(retry_count_str) if retry_count_str else 0
+        retry_count = 0
+        if retry_count_str:
+            try:
+                retry_count = int(retry_count_str)
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Malformed retry_count header %r, defaulting to 0",
+                    retry_count_str,
+                )
 
         max_retries_str = headers_dict.get("max_retries")
-        max_retries = int(max_retries_str) if max_retries_str else 3
+        max_retries = 3
+        if max_retries_str:
+            try:
+                max_retries = int(max_retries_str)
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Malformed max_retries header %r, defaulting to 3",
+                    max_retries_str,
+                )
 
         ttl_seconds_str = headers_dict.get("ttl_seconds")
-        ttl_seconds = int(ttl_seconds_str) if ttl_seconds_str else None
+        ttl_seconds: int | None = None
+        if ttl_seconds_str:
+            try:
+                ttl_seconds = int(ttl_seconds_str)
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Malformed ttl_seconds header %r, defaulting to None",
+                    ttl_seconds_str,
+                )
 
         return ModelEventHeaders(
             content_type=headers_dict.get("content_type", "application/json"),

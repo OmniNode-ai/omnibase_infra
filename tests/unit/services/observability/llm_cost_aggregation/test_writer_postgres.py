@@ -271,8 +271,9 @@ class TestDeduplication:
     def test_duplicate_detection(
         self, writer: WriterLlmCostAggregationPostgres
     ) -> None:
-        """Duplicate event IDs are detected."""
+        """Duplicate event IDs are detected after _mark_seen."""
         assert writer._is_duplicate("event-1") is False
+        writer._mark_seen("event-1")
         assert writer._is_duplicate("event-1") is True
 
     @pytest.mark.unit
@@ -280,29 +281,29 @@ class TestDeduplication:
         self, writer: WriterLlmCostAggregationPostgres
     ) -> None:
         """Different event IDs are not duplicates."""
-        assert writer._is_duplicate("event-1") is False
+        writer._mark_seen("event-1")
         assert writer._is_duplicate("event-2") is False
 
     @pytest.mark.unit
-    def test_cache_eviction(self, writer: WriterLlmCostAggregationPostgres) -> None:
+    def test_cache_eviction(
+        self,
+        writer: WriterLlmCostAggregationPostgres,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Cache evicts oldest entries when exceeding max size."""
-        # Temporarily lower the max size for testing
-        import omnibase_infra.services.observability.llm_cost_aggregation.writer_postgres as mod
+        monkeypatch.setattr(
+            "omnibase_infra.services.observability.llm_cost_aggregation.writer_postgres._MAX_DEDUP_CACHE_SIZE",
+            5,
+        )
 
-        original_max = mod._MAX_DEDUP_CACHE_SIZE
-        mod._MAX_DEDUP_CACHE_SIZE = 5
+        for i in range(10):
+            writer._mark_seen(f"event-{i}")
 
-        try:
-            for i in range(10):
-                writer._is_duplicate(f"event-{i}")
+        # Oldest entries should be evicted
+        assert len(writer._dedup_cache) == 5
 
-            # Oldest entries should be evicted
-            assert len(writer._dedup_cache) == 5
-
-            # First entries should be evicted (not found)
-            assert writer._is_duplicate("event-0") is False  # Re-added after eviction
-        finally:
-            mod._MAX_DEDUP_CACHE_SIZE = original_max
+        # First entries should be evicted (not found)
+        assert writer._is_duplicate("event-0") is False
 
 
 # =============================================================================
@@ -511,8 +512,8 @@ class TestWriterCallMetrics:
         """Returns 0 when all events are filtered as duplicates."""
         event = {**sample_event, "input_hash": "sha256-already-seen"}
 
-        # Pre-populate dedup cache
-        writer._is_duplicate("sha256-already-seen")
+        # Pre-populate dedup cache (mark as already persisted)
+        writer._mark_seen("sha256-already-seen")
 
         result = await writer.write_call_metrics([event])
         assert result == 0

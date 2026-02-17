@@ -240,9 +240,9 @@ def apply_instance_discriminator(group_id: str, instance_id: str | None) -> str:
     The suffix is **idempotent**: if ``group_id`` already ends with
     ``.__i.{instance_id}``, the suffix is not appended again.
 
-    When ``instance_id`` is None or empty, the group ID is returned unchanged.
-    This preserves single-container behavior where consumer group sharing
-    (for load balancing) is desirable.
+    When ``instance_id`` is None, empty, or contains only whitespace, the
+    group ID is returned unchanged.  This preserves single-container behavior
+    where consumer group sharing (for load balancing) is desirable.
 
     Args:
         group_id: Base consumer group ID (from ``compute_consumer_group_id``
@@ -253,10 +253,7 @@ def apply_instance_discriminator(group_id: str, instance_id: str | None) -> str:
 
     Returns:
         The group ID with instance discriminator appended, or the original
-        group ID if ``instance_id`` is None or empty.
-
-    Raises:
-        ValueError: If ``instance_id`` contains only whitespace after stripping.
+        group ID if ``instance_id`` is None, empty, or whitespace-only.
 
     Example:
         >>> apply_instance_discriminator("dev.svc.node.consume.v1", "container-1")
@@ -285,12 +282,12 @@ def apply_instance_discriminator(group_id: str, instance_id: str | None) -> str:
     .. versionadded:: 0.3.1
         Created as part of OMN-2251.
     """
-    if instance_id is None or instance_id == "":
+    # Treat None, empty string, and whitespace-only identically: no
+    # discrimination applied.  Stripping first unifies "" and "  " behavior.
+    if instance_id is None or not instance_id.strip():
         return group_id
 
     stripped = instance_id.strip()
-    if not stripped:
-        raise ValueError(f"instance_id contains only whitespace: {instance_id!r}")
 
     # Normalize instance_id for Kafka safety
     normalized = normalize_kafka_identifier(stripped)

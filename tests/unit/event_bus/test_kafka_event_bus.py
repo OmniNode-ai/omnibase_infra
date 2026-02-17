@@ -1328,7 +1328,6 @@ class TestKafkaEventBusConsumerGroupId:
         self, mock_producer: AsyncMock
     ) -> None:
         """Test whitespace-only group_id raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
@@ -1346,7 +1345,6 @@ class TestKafkaEventBusConsumerGroupId:
     @pytest.mark.asyncio
     async def test_empty_group_id_raises_error(self, mock_producer: AsyncMock) -> None:
         """Test empty group_id raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with patch(
             "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
@@ -1696,14 +1694,15 @@ class TestKafkaEventBusInstanceDiscriminator:
             assert call_kwargs.kwargs["group_id"] == "my-group.__i.c1.__t.events"
 
     @pytest.mark.asyncio
-    async def test_whitespace_only_instance_id_raises_protocol_configuration_error(
+    async def test_whitespace_only_instance_id_treated_as_empty(
         self, mock_producer: AsyncMock, mock_consumer: AsyncMock
     ) -> None:
-        """Test that whitespace-only instance_id raises ProtocolConfigurationError.
+        """Test that whitespace-only instance_id is treated as empty (no discrimination).
 
-        apply_instance_discriminator() raises ValueError for whitespace-only
-        IDs, but EventBusKafka should normalize this into a
-        ProtocolConfigurationError with proper error context.
+        apply_instance_discriminator() treats whitespace-only the same as empty
+        string: silently returns the group_id unchanged. The consumer should
+        start normally with the base group_id + topic suffix (no instance
+        discriminator segment).
         """
         consumer_cls = MagicMock(return_value=mock_consumer)
         with (
@@ -1722,8 +1721,11 @@ class TestKafkaEventBusInstanceDiscriminator:
             )
             event_bus = EventBusKafka(config=config)
 
-            with pytest.raises(ProtocolConfigurationError, match="KAFKA_INSTANCE_ID"):
-                await event_bus._start_consumer_for_topic("events", "my-group")
+            await event_bus._start_consumer_for_topic("events", "my-group")
+
+            # Whitespace-only instance_id means no .__i. segment; only topic suffix
+            call_kwargs = consumer_cls.call_args_list[-1]
+            assert call_kwargs.kwargs["group_id"] == "my-group.__t.events"
 
     @pytest.mark.asyncio
     async def test_effective_group_id_enforces_max_length(
@@ -2009,7 +2011,6 @@ enable_auto_commit: false
 
     def test_from_yaml_file_not_found(self, tmp_path: Path) -> None:
         """Test from_yaml() raises ProtocolConfigurationError for missing file."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         missing_file = tmp_path / "nonexistent.yaml"
 
@@ -2020,7 +2021,6 @@ enable_auto_commit: false
 
     def test_from_yaml_invalid_yaml_syntax(self, tmp_path: Path) -> None:
         """Test from_yaml() raises ProtocolConfigurationError for invalid YAML."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         config_file = tmp_path / "invalid.yaml"
         config_file.write_text("invalid: yaml: syntax: [")
@@ -2030,7 +2030,6 @@ enable_auto_commit: false
 
     def test_from_yaml_non_dict_content(self, tmp_path: Path) -> None:
         """Test from_yaml() raises ProtocolConfigurationError for non-dict YAML."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         config_file = tmp_path / "list.yaml"
         config_file.write_text("- item1\n- item2\n")
@@ -2647,7 +2646,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test empty topic name raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="cannot be empty"):
             event_bus._validate_topic_name("", correlation_id)
@@ -2656,7 +2654,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test topic name exceeding 255 chars raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         topic = "a" * 256
         with pytest.raises(
@@ -2668,7 +2665,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test reserved topic name '.' raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="reserved"):
             event_bus._validate_topic_name(".", correlation_id)
@@ -2677,7 +2673,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test reserved topic name '..' raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="reserved"):
             event_bus._validate_topic_name("..", correlation_id)
@@ -2686,7 +2681,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test topic name with space raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
             event_bus._validate_topic_name("my topic", correlation_id)
@@ -2695,7 +2689,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test topic name with @ symbol raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
             event_bus._validate_topic_name("topic@name", correlation_id)
@@ -2704,7 +2697,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test topic name with special characters raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         invalid_topics = [
             "topic#name",
@@ -2729,7 +2721,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test topic name with unicode characters raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
             event_bus._validate_topic_name("topic\u00e9name", correlation_id)
@@ -2738,7 +2729,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test topic name with newline raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
             event_bus._validate_topic_name("topic\nname", correlation_id)
@@ -2747,7 +2737,6 @@ class TestKafkaEventBusTopicValidation:
         self, event_bus: EventBusKafka, correlation_id: UUID
     ) -> None:
         """Test topic name with tab raises ProtocolConfigurationError."""
-        from omnibase_infra.errors import ProtocolConfigurationError
 
         with pytest.raises(ProtocolConfigurationError, match="invalid characters"):
             event_bus._validate_topic_name("topic\tname", correlation_id)

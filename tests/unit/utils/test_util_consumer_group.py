@@ -1188,11 +1188,11 @@ class TestApplyInstanceDiscriminator:
         result = apply_instance_discriminator(group_id, "my container")
         assert result == "dev.svc.node.consume.v1.__i.my_container"
 
-    def test_whitespace_only_instance_id_raises_value_error(self) -> None:
-        """Test that whitespace-only instance_id raises ValueError."""
+    def test_whitespace_only_instance_id_returns_unchanged(self) -> None:
+        """Test that whitespace-only instance_id is treated like empty string."""
         group_id = "dev.svc.node.consume.v1"
-        with pytest.raises(ValueError, match="whitespace"):
-            apply_instance_discriminator(group_id, "   ")
+        result = apply_instance_discriminator(group_id, "   ")
+        assert result == group_id
 
     def test_deterministic_output(self) -> None:
         """Test that same inputs produce same output."""

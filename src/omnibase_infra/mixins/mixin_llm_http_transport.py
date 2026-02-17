@@ -64,6 +64,7 @@ import hashlib
 import hmac
 import json as json_module
 import logging
+import math
 import os
 import socket
 from ipaddress import IPv4Address, IPv4Network, ip_address
@@ -957,6 +958,19 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
         except (ValueError, OverflowError):
             logger.debug(
                 "Could not parse Retry-After header, using default backoff",
+                extra={
+                    "retry_after_raw": retry_after_raw,
+                    "target": self._llm_target_name,
+                },
+            )
+            return 1.0
+
+        # Guard against NaN/Inf which would cause asyncio.sleep() to raise
+        # ValueError.  float() happily parses 'nan', 'inf', and '-inf'.
+        if not math.isfinite(retry_after):
+            logger.debug(
+                "Non-finite Retry-After value (%s), using default backoff",
+                retry_after,
                 extra={
                     "retry_after_raw": retry_after_raw,
                     "target": self._llm_target_name,

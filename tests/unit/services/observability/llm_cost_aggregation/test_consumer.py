@@ -118,7 +118,7 @@ class TestConsumerMetrics:
         assert metrics.messages_skipped == 0
         assert metrics.batches_processed == 0
         assert metrics.aggregations_written == 0
-        assert metrics.commit_failures == 0
+        assert metrics.consecutive_commit_failures == 0
         assert metrics.last_poll_at is None
         assert metrics.last_successful_write_at is None
         assert metrics.last_commit_failure_at is None
@@ -170,7 +170,7 @@ class TestConsumerMetrics:
         assert snap["messages_skipped"] == 1
         assert snap["batches_processed"] == 0
         assert snap["aggregations_written"] == 0
-        assert snap["commit_failures"] == 0
+        assert snap["consecutive_commit_failures"] == 0
         assert snap["started_at"] is not None
         assert snap["last_poll_at"] is not None
         assert snap["last_successful_write_at"] is not None
@@ -198,11 +198,11 @@ class TestConsumerMetrics:
         metrics = ConsumerMetrics()
         await metrics.record_commit_failure()
         await metrics.record_commit_failure()
-        assert metrics.commit_failures == 2
+        assert metrics.consecutive_commit_failures == 2
         assert metrics.last_commit_failure_at is not None
 
-        await metrics.reset_commit_failures()
-        assert metrics.commit_failures == 0
+        await metrics.reset_consecutive_commit_failures()
+        assert metrics.consecutive_commit_failures == 0
 
     @pytest.mark.asyncio
     async def test_record_aggregations(self) -> None:

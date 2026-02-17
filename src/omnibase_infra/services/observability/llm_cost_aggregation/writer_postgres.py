@@ -152,9 +152,14 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         Uses an LRU-style bounded cache. If the cache exceeds
         ``_MAX_DEDUP_CACHE_SIZE``, the oldest entries are evicted.
 
+        This method only **checks** the cache; it does NOT add the event ID.
+        Callers must explicitly call ``_mark_seen`` after successful
+        persistence to avoid marking events as "seen" before they are
+        actually written to the database.
+
         Precondition:
-            **Caller must hold** ``_dedup_lock``.  This method reads and
-            writes ``_dedup_cache`` without acquiring the lock internally.
+            **Caller must hold** ``_dedup_lock``.  This method reads
+            ``_dedup_cache`` without acquiring the lock internally.
             This is a deliberate design choice: callers
             (``write_call_metrics`` and ``write_cost_aggregates``) batch
             multiple ``_is_duplicate`` calls under a single lock acquisition
@@ -173,14 +178,27 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
             self._dedup_cache.move_to_end(event_id)
             return True
 
-        # Add to cache
+        return False
+
+    def _mark_seen(self, event_id: str) -> None:
+        """Record an event ID as successfully persisted.
+
+        Adds the event ID to the bounded LRU dedup cache. This must be
+        called only AFTER the corresponding database write has committed,
+        so that a failed write does not prevent retries.
+
+        Precondition:
+            **Caller must hold** ``_dedup_lock``.  See ``_is_duplicate``
+            docstring for rationale.
+
+        Args:
+            event_id: Unique event identifier to mark as seen.
+        """
         self._dedup_cache[event_id] = True
 
         # Evict oldest if over capacity
         while len(self._dedup_cache) > _MAX_DEDUP_CACHE_SIZE:
             self._dedup_cache.popitem(last=False)
-
-        return False
 
     async def write_call_metrics(
         self,
@@ -218,12 +236,18 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         # its own dedup state. This intentionally doubles the cache entries per
         # event but keeps the two write paths decoupled -- a failure in one
         # does not affect dedup tracking in the other.
-        unique_events: list[dict[str, object]] = []
+        #
+        # NOTE: _is_duplicate() only checks the cache; it does NOT add entries.
+        # Events are marked as seen via _mark_seen() only AFTER successful
+        # database persistence to prevent data loss on write failures.
+        unique_events: list[tuple[str, dict[str, object]]] = []
+        seen_in_batch: set[str] = set()
         async with self._dedup_lock:
             for event in events:
                 event_id = _derive_stable_dedup_key(event)
-                if not self._is_duplicate(event_id):
-                    unique_events.append(event)
+                if not self._is_duplicate(event_id) and event_id not in seen_in_batch:
+                    unique_events.append((event_id, event))
+                    seen_in_batch.add(event_id)
 
         if not unique_events:
             logger.debug(
@@ -236,6 +260,10 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
             return 0
 
         written = 0
+        # Track dedup keys for events that were successfully persisted.
+        # We accumulate them here and add to the dedup cache only after
+        # the outer transaction commits.
+        persisted_dedup_keys: list[str] = []
         try:
             async with self._pool.acquire() as conn:
                 async with conn.transaction():
@@ -252,7 +280,7 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                         f"SET LOCAL statement_timeout = '{int(timeout_ms)}'"
                     )
 
-                    for event in unique_events:
+                    for event_id, event in unique_events:
                         try:
                             # Use a SAVEPOINT so a per-row error does not
                             # abort the entire transaction.  asyncpg's nested
@@ -292,7 +320,11 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                     str(event.get("reporting_source", ""))[:255]
                                     or None,
                                 )
+                            # SAVEPOINT released -- row is persisted within the
+                            # outer transaction. Record the dedup key for
+                            # post-commit cache insertion.
                             written += 1
+                            persisted_dedup_keys.append(event_id)
                         except Exception:
                             logger.warning(
                                 "Failed to insert call metric row, skipping",
@@ -302,6 +334,12 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                     "model_id": event.get("model_id"),
                                 },
                             )
+
+            # Outer transaction committed successfully. Now mark persisted
+            # events in the dedup cache so they are skipped on replay.
+            async with self._dedup_lock:
+                for dedup_key in persisted_dedup_keys:
+                    self._mark_seen(dedup_key)
 
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
@@ -371,19 +409,32 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
         # consumes two cache slots (_MAX_DEDUP_CACHE_SIZE bounds total entries,
         # not per-event count), which is an acceptable trade-off to keep the
         # two write paths independently idempotent.
+        #
+        # NOTE: _is_duplicate() only checks the cache; it does NOT add entries.
+        # Events are marked as seen via _mark_seen() only AFTER successful
+        # database persistence to prevent data loss on write failures.
         unique_events: list[dict[str, object]] = []
+        agg_dedup_keys: list[str] = []
+        seen_in_batch: set[str] = set()
         async with self._dedup_lock:
             for event in events:
                 event_id = _derive_stable_dedup_key(event)
                 dedup_key = f"agg:{event_id}"
-                if not self._is_duplicate(dedup_key):
+                if not self._is_duplicate(dedup_key) and dedup_key not in seen_in_batch:
                     unique_events.append(event)
+                    agg_dedup_keys.append(dedup_key)
+                    seen_in_batch.add(dedup_key)
 
         if not unique_events:
             return 0
 
-        # Build aggregation rows from events
-        agg_rows = _build_aggregation_rows(unique_events)
+        # Build aggregation rows from events, then pre-aggregate rows
+        # sharing the same (aggregation_key, window) composite key. Without
+        # pre-aggregation, the SQL ON CONFLICT DO UPDATE clause computes
+        # weighted averages against stale intermediate values when the same
+        # key appears multiple times in the batch.
+        raw_agg_rows = _build_aggregation_rows(unique_events)
+        agg_rows = _pre_aggregate_rows(raw_agg_rows)
 
         if not agg_rows:
             return 0
@@ -447,6 +498,12 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
                                     "window": row.get("window"),
                                 },
                             )
+
+            # Outer transaction committed successfully. Now mark persisted
+            # events in the dedup cache so they are skipped on replay.
+            async with self._dedup_lock:
+                for dedup_key in agg_dedup_keys:
+                    self._mark_seen(dedup_key)
 
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
@@ -622,6 +679,79 @@ def _build_aggregation_rows(
                 )
 
     return rows
+
+
+def _pre_aggregate_rows(
+    rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Pre-aggregate rows sharing the same (aggregation_key, window).
+
+    When a single batch contains multiple events that produce identical
+    aggregation keys (e.g., two calls to the same model in one batch),
+    ``_build_aggregation_rows`` emits separate rows for each. Sending
+    these as sequential INSERT ... ON CONFLICT DO UPDATE statements
+    within the same transaction causes the weighted average formula
+    to operate on intermediate (already-updated) values rather than
+    the pre-batch baseline.
+
+    This function merges duplicate composite keys in Python before
+    hitting the database, producing at most one row per
+    ``(aggregation_key, window)`` pair. Metrics are summed additively
+    and ``estimated_coverage_pct`` is computed as a proper weighted
+    average over the merged call counts.
+
+    Args:
+        rows: Aggregation rows from ``_build_aggregation_rows``.
+
+    Returns:
+        Deduplicated list of aggregation rows, one per composite key.
+    """
+    if not rows:
+        return []
+
+    merged: dict[tuple[str, str], dict[str, object]] = {}
+
+    for row in rows:
+        key = (str(row["aggregation_key"]), str(row["window"]))
+
+        if key not in merged:
+            # First occurrence -- shallow-copy to avoid mutating the input.
+            merged[key] = dict(row)
+        else:
+            existing = merged[key]
+            existing_cost = existing["total_cost_usd"]
+            row_cost = row["total_cost_usd"]
+            assert isinstance(existing_cost, Decimal)
+            assert isinstance(row_cost, Decimal)
+            existing["total_cost_usd"] = existing_cost + row_cost
+
+            existing_tokens = existing["total_tokens"]
+            row_tokens = row["total_tokens"]
+            assert isinstance(existing_tokens, int)
+            assert isinstance(row_tokens, int)
+            existing["total_tokens"] = existing_tokens + row_tokens
+
+            existing_count = existing["call_count"]
+            row_count = row["call_count"]
+            assert isinstance(existing_count, int)
+            assert isinstance(row_count, int)
+
+            # Weighted average of estimated_coverage_pct
+            existing_pct = existing["estimated_coverage_pct"]
+            row_pct = row["estimated_coverage_pct"]
+            assert isinstance(existing_pct, Decimal)
+            assert isinstance(row_pct, Decimal)
+
+            total_count = existing_count + row_count
+            if total_count > 0:
+                existing["estimated_coverage_pct"] = (
+                    existing_pct * existing_count + row_pct * row_count
+                ) / total_count
+            # else: keep existing pct (both counts are 0, degenerate case)
+
+            existing["call_count"] = total_count
+
+    return list(merged.values())
 
 
 def _safe_uuid(value: object) -> UUID | None:

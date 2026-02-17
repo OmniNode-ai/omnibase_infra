@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from datetime import UTC, datetime
 from typing import ClassVar, cast
@@ -414,10 +415,14 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
                 type(tokens_output).__name__,
             )
         resolved_input = (
-            round(tokens_input) if isinstance(tokens_input, (int, float)) else 0
+            round(tokens_input)
+            if isinstance(tokens_input, (int, float)) and math.isfinite(tokens_input)
+            else 0
         )
         resolved_output = (
-            round(tokens_output) if isinstance(tokens_output, (int, float)) else 0
+            round(tokens_output)
+            if isinstance(tokens_output, (int, float)) and math.isfinite(tokens_output)
+            else 0
         )
         # Determine provenance: treat as API-reported only when at least
         # one resolved counter is positive.
