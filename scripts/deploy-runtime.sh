@@ -75,6 +75,9 @@ PRINT_COMPOSE_CMD=false
 # moved here as a backup. On success the backup is removed; on failure
 # cleanup_on_exit() restores it.
 FORCE_BACKUP_DIR=""
+# Set to true only when ALL deployment phases complete successfully.
+# Used by cleanup_on_exit to determine if the --force backup can be safely removed.
+DEPLOYMENT_COMPLETE=false
 
 # =============================================================================
 # Logging
@@ -553,15 +556,15 @@ cleanup_on_exit() {
     fi
 
     # If a --force backup exists, decide whether to restore it or clean it up
-    # based on how far the deployment progressed.
+    # based on whether the full deployment completed successfully.
     if [[ -n "${FORCE_BACKUP_DIR}" && -d "${FORCE_BACKUP_DIR}" ]]; then
         # Derive the original deployment directory from the backup path.
         # Backup convention: {deploy_target}.bak -> restore to {deploy_target}
         local original_dir="${FORCE_BACKUP_DIR%.bak}"
-        if [[ -n "${DEPLOY_DIR_TO_CLEANUP}" ]]; then
-            # Pre-registry failure: the new deployment is partial and not yet
-            # recorded in registry.json. Remove it and restore the backup so
-            # the previous working deployment is not lost.
+        if [[ "${DEPLOYMENT_COMPLETE}" != "true" ]]; then
+            # Deployment did not complete -- restore previous working deployment.
+            # This covers both pre-registry failures (rsync/sanity) and
+            # post-registry failures (build/restart/verify/prune).
             log_warn "Restoring previous deployment from backup: ${FORCE_BACKUP_DIR}"
             rm -rf "${original_dir}" 2>/dev/null || true
             if ! mv "${FORCE_BACKUP_DIR}" "${original_dir}" 2>/dev/null; then
@@ -573,8 +576,7 @@ cleanup_on_exit() {
                 log_error "================================================================="
             fi
         else
-            # Post-registry: the new deployment is complete and registered.
-            # The backup is stale -- just clean it up.
+            # Full deployment succeeded -- backup is stale, clean it up.
             log_info "Cleaning up stale backup: ${FORCE_BACKUP_DIR}"
             rm -rf "${FORCE_BACKUP_DIR}" 2>/dev/null || true
         fi
@@ -1369,10 +1371,14 @@ main() {
     # Phase 14: Prune old deployments
     prune_old_deployments
 
-    # All phases completed successfully. Remove the --force backup (if any)
-    # since the new deployment is fully built and running. This is intentionally
-    # placed AFTER build and restart so that cleanup_on_exit can still restore
-    # the backup if Docker build or container restart fails.
+    # All phases completed successfully. Mark deployment as complete so that
+    # cleanup_on_exit knows the backup can be safely removed rather than restored.
+    DEPLOYMENT_COMPLETE=true
+
+    # Remove the --force backup (if any) since the new deployment is fully
+    # built and running. cleanup_on_exit would also handle this (since
+    # DEPLOYMENT_COMPLETE=true), but explicit cleanup here keeps the success
+    # path self-documenting.
     if [[ -n "${FORCE_BACKUP_DIR}" && -d "${FORCE_BACKUP_DIR}" ]]; then
         log_info "Removing previous deployment backup: ${FORCE_BACKUP_DIR}"
         rm -rf "${FORCE_BACKUP_DIR}"
