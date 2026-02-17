@@ -71,6 +71,10 @@ DEPLOY_DIR_TO_CLEANUP=""
 # Default is hardcoded and safe; any changes must comply with ^[a-zA-Z0-9_-]+$ (see parse_args).
 COMPOSE_PROFILE="runtime"
 PRINT_COMPOSE_CMD=false
+# When --force overwrites an existing deployment, the previous directory is
+# moved here as a backup. On success the backup is removed; on failure
+# cleanup_on_exit() restores it.
+FORCE_BACKUP_DIR=""
 
 # =============================================================================
 # Logging
@@ -548,6 +552,18 @@ cleanup_on_exit() {
         fi
     fi
 
+    # If a --force backup exists, restore it so the previous working
+    # deployment is not lost after a failed overwrite.
+    if [[ -n "${FORCE_BACKUP_DIR}" && -d "${FORCE_BACKUP_DIR}" ]]; then
+        # Derive the original deployment directory from the backup path.
+        # Backup convention: {deploy_target}.bak -> restore to {deploy_target}
+        local original_dir="${FORCE_BACKUP_DIR%.bak}"
+        log_warn "Restoring previous deployment from backup: ${FORCE_BACKUP_DIR}"
+        # Remove the (possibly partial) new deployment first
+        rm -rf "${original_dir}" 2>/dev/null || true
+        mv "${FORCE_BACKUP_DIR}" "${original_dir}" 2>/dev/null || true
+    fi
+
     # Release concurrency lock
     rm -rf "${LOCK_DIR}" 2>/dev/null || true
 }
@@ -641,6 +657,8 @@ prune_old_deployments() {
 
 guard_existing_deployment() {
     # Refuse to overwrite an existing deployment directory unless --force is set.
+    # When --force is active, the existing directory is moved to a .bak backup
+    # so it can be restored if the new deployment fails.
     local deploy_target="$1"
 
     if [[ -d "${deploy_target}" ]]; then
@@ -649,6 +667,20 @@ guard_existing_deployment() {
             log_warn "OVERWRITING existing deployment at:"
             log_warn "  ${deploy_target}"
             log_warn "====================================================="
+
+            # Back up the existing deployment so cleanup_on_exit can restore
+            # it if the new deployment fails partway through.
+            local backup_dir="${deploy_target}.bak"
+
+            # Remove any leftover backup from a previous failed --force deploy
+            if [[ -d "${backup_dir}" ]]; then
+                log_warn "Removing stale backup: ${backup_dir}"
+                rm -rf "${backup_dir}"
+            fi
+
+            log_info "Backing up existing deployment to: ${backup_dir}"
+            mv "${deploy_target}" "${backup_dir}"
+            FORCE_BACKUP_DIR="${backup_dir}"
         else
             log_error "Deployment directory already exists:"
             log_error "  ${deploy_target}"
@@ -1230,10 +1262,12 @@ main() {
     fi
 
     # Validate git SHA format for VCS_REF image labeling.
-    if [[ ! "${git_sha}" =~ ^[0-9a-f]+$ ]]; then
-        log_error "Invalid git SHA format: '${git_sha}'"
-        log_error "Expected lowercase hex string. Is the git repository corrupted?"
-        exit 1
+    # Accept short (7+) or full (40) hex SHAs. read_git_sha uses --short=12
+    # but other inputs (e.g., CI injection) may vary.
+    if [[ ! "${git_sha}" =~ ^[0-9a-f]{7,40}$ ]]; then
+        log_warn "Could not read valid git SHA (got: '${git_sha}')."
+        log_warn "The VCS_REF Docker label may be inaccurate."
+        git_sha="unknown"
     fi
 
     log_info "Version: ${version}"
@@ -1290,6 +1324,14 @@ main() {
 
     # Registry now points to this deployment -- disable partial cleanup
     DEPLOY_DIR_TO_CLEANUP=""
+
+    # The new deployment is now the active deployment. Remove the --force
+    # backup (if any) since we no longer need to restore it on failure.
+    if [[ -n "${FORCE_BACKUP_DIR}" && -d "${FORCE_BACKUP_DIR}" ]]; then
+        log_info "Removing previous deployment backup: ${FORCE_BACKUP_DIR}"
+        rm -rf "${FORCE_BACKUP_DIR}"
+        FORCE_BACKUP_DIR=""
+    fi
 
     # Phase 10: Build
     build_images "${deploy_target}" "${compose_project}" "${git_sha}"
