@@ -256,6 +256,7 @@ class ServiceLlmEndpointHealth:
 
         # Shared HTTP client (created lazily, closed on stop)
         self._http_client: httpx.AsyncClient | None = None
+        self._client_lock = asyncio.Lock()
 
         # Background task handle
         self._probe_task: asyncio.Task[None] | None = None
@@ -522,22 +523,27 @@ class ServiceLlmEndpointHealth:
                 circuit_state=_parse_circuit_state(cb_state, "closed"),
             )
 
-    def _get_http_client(self) -> httpx.AsyncClient:
+    async def _get_http_client(self) -> httpx.AsyncClient:
         """Return the shared HTTP client, creating it lazily if needed.
 
         This allows ``probe_all`` to work both in background-loop mode
         (where ``start``/``stop`` manage the lifecycle) and in one-shot
         mode (where ``probe_all`` is called directly).
 
+        An ``asyncio.Lock`` protects the check-then-create logic so that
+        concurrent coroutines from ``asyncio.gather`` in ``probe_all``
+        cannot race and create duplicate ``httpx.AsyncClient`` instances.
+
         Returns:
             A shared ``httpx.AsyncClient`` configured with the probe
             timeout from the service config.
         """
-        if self._http_client is None or self._http_client.is_closed:
-            self._http_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(self._config.probe_timeout_seconds),
-            )
-        return self._http_client
+        async with self._client_lock:
+            if self._http_client is None or self._http_client.is_closed:
+                self._http_client = httpx.AsyncClient(
+                    timeout=httpx.Timeout(self._config.probe_timeout_seconds),
+                )
+            return self._http_client
 
     async def _http_probe(self, base_url: str) -> tuple[bool, str]:
         """Perform the HTTP probe against an endpoint.
@@ -554,7 +560,7 @@ class ServiceLlmEndpointHealth:
             success and *error* is an empty string, or ``False`` with
             a human-readable error description.
         """
-        client = self._get_http_client()
+        client = await self._get_http_client()
         primary_error: str = ""
 
         # Primary probe: /health
