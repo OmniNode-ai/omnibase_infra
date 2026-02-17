@@ -561,7 +561,14 @@ cleanup_on_exit() {
         log_warn "Restoring previous deployment from backup: ${FORCE_BACKUP_DIR}"
         # Remove the (possibly partial) new deployment first
         rm -rf "${original_dir}" 2>/dev/null || true
-        mv "${FORCE_BACKUP_DIR}" "${original_dir}" 2>/dev/null || true
+        if ! mv "${FORCE_BACKUP_DIR}" "${original_dir}" 2>/dev/null; then
+            log_error "================================================================="
+            log_error "CRITICAL: Failed to restore previous deployment from backup!"
+            log_error "Backup location: ${FORCE_BACKUP_DIR}"
+            log_error "Expected restore target: ${original_dir}"
+            log_error "Manual recovery required: mv '${FORCE_BACKUP_DIR}' '${original_dir}'"
+            log_error "================================================================="
+        fi
     fi
 
     # Release concurrency lock
@@ -679,7 +686,11 @@ guard_existing_deployment() {
             fi
 
             log_info "Backing up existing deployment to: ${backup_dir}"
-            mv "${deploy_target}" "${backup_dir}"
+            if ! mv "${deploy_target}" "${backup_dir}"; then
+                log_error "Failed to back up existing deployment."
+                log_error "Cannot proceed with --force: unable to move '${deploy_target}' to '${backup_dir}'"
+                exit 1
+            fi
             FORCE_BACKUP_DIR="${backup_dir}"
         else
             log_error "Deployment directory already exists:"
@@ -1264,6 +1275,8 @@ main() {
     # Validate git SHA format for VCS_REF image labeling.
     # Accept short (7+) or full (40) hex SHAs. read_git_sha uses --short=12
     # but other inputs (e.g., CI injection) may vary.
+    # Normalize to lowercase first -- some CI systems produce uppercase hex.
+    git_sha=$(echo "${git_sha}" | tr '[:upper:]' '[:lower:]')
     if [[ ! "${git_sha}" =~ ^[0-9a-f]{7,40}$ ]]; then
         log_warn "Could not read valid git SHA (got: '${git_sha}')."
         log_warn "The VCS_REF Docker label may be inaccurate."

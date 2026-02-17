@@ -161,7 +161,7 @@ RUN uv pip freeze | grep -v '^\(-e\|@\)' > /tmp/constraints.txt
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --constraint /tmp/constraints.txt \
-    # Version must be compatible with constraints in requirements-frozen.txt (generated from uv.lock)
+    # Version must be compatible with constraints in /tmp/constraints.txt (generated from uv pip freeze)
     omniintelligence==0.2.3
 
 # ============================================================================
