@@ -73,6 +73,7 @@ class ConfigLlmCostAggregation(BaseSettings):
 
     # PostgreSQL connection
     postgres_dsn: str = Field(
+        repr=False,
         description=(
             "PostgreSQL connection string. Set via "
             "OMNIBASE_INFRA_LLM_COST_POSTGRES_DSN env var."

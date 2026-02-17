@@ -63,6 +63,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import threading
 import time
 from datetime import UTC, datetime
@@ -912,6 +913,8 @@ def _safe_int(value: JsonType, default: int = 0) -> int:
     if isinstance(value, int):
         return value
     if isinstance(value, float):
+        if not math.isfinite(value):
+            return default
         return int(value)
     if isinstance(value, str):
         try:
@@ -942,6 +945,8 @@ def _safe_int_or_none(value: JsonType) -> int | None:
     if isinstance(value, int):
         return value
     if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
         return int(value)
     if isinstance(value, str):
         try:
