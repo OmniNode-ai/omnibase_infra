@@ -1948,7 +1948,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.25.0,<2.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<6.0.0" },
     { name = "omnibase-core", specifier = ">=0.18.0,<0.19.0" },
-    { name = "omnibase-spi", specifier = ">=0.9.0,<0.10.0" },
+    { name = "omnibase-spi", specifier = ">=0.10.0,<0.11.0" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-instrumentation", specifier = ">=0.48b0,<0.49" },
@@ -1998,16 +1998,16 @@ dev = [
 
 [[package]]
 name = "omnibase-spi"
-version = "0.9.0"
+version = "0.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "omnibase-core" },
     { name = "pydantic" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/75/a5/d4f8b6d2a6aef51aa57914c4d52eb509d0f52afa0dfa7c8adaa60b578b1d/omnibase_spi-0.9.0.tar.gz", hash = "sha256:20a459844dcc102a372f3df5f1f786a87c7f94eccedf8d46f4ea28014db8d6be", size = 485046, upload-time = "2026-02-16T13:20:41.599Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/78/9c/8cb2094abfea4ef30c03dffc5d54987c1e5086ecde34514a0ee73450dec7/omnibase_spi-0.10.0.tar.gz", hash = "sha256:124b979163be545f17e5584cf0e1ebe08bf0fef19b20485ca0fb0ac323344b1e", size = 489283, upload-time = "2026-02-18T14:07:27.807Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/06/2b01dca65f2e42949dbde0647704bbda7d1d0a3135648c2ee530f66ffe03/omnibase_spi-0.9.0-py3-none-any.whl", hash = "sha256:9af33734ee976f1e7a0703d1e74acd84c289880e1859ed8ce7befe9466787158", size = 698836, upload-time = "2026-02-16T13:20:39.863Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/4c/8fa813672521ff0ac444bb5f455be34ef217fbf0c4a4c3888669650b49b9/omnibase_spi-0.10.0-py3-none-any.whl", hash = "sha256:54e37a4395bac3792c4bf158f748c578b29c17e6b9970e32d6eb47bbf3c7592e", size = 708023, upload-time = "2026-02-18T14:07:26.02Z" },
 ]
 
 [[package]]

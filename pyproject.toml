@@ -31,8 +31,8 @@ dependencies = [
     #
     # omnibase-core v0.18.0: Version bump for SPI 0.9.0 compatibility
     "omnibase-core>=0.18.0,<0.19.0",
-    # omnibase-spi v0.9.0: LLM cost tracking contracts (OMN-2235)
-    "omnibase-spi>=0.9.0,<0.10.0",
+    # omnibase-spi v0.10.0: enrichment contracts (ProtocolContextEnrichment, ContractEnrichmentResult) (OMN-2260)
+    "omnibase-spi>=0.10.0,<0.11.0",
 
     # ============================================================================
     # External Dependency Security Guidance
