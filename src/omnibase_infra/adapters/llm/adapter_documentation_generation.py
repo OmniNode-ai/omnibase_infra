@@ -255,7 +255,8 @@ class AdapterDocumentationGeneration:
 
         Raises:
             ValueError: If ``task_type`` is not one of the valid task types
-                (``"docstring"``, ``"readme"``, ``"api_doc"``).
+                (``"docstring"``, ``"readme"``, ``"api_doc"``), or if
+                ``source`` is empty or contains only whitespace.
             RuntimeHostError: Propagated from ``HandlerLlmOpenaiCompatible``
                 on connection failures, timeouts, or authentication errors.
         """
@@ -265,9 +266,14 @@ class AdapterDocumentationGeneration:
                 f"Invalid task_type {task_type!r}. Must be one of: {valid}"
             )
 
-        start = time.perf_counter()
-
         source_stripped = source.strip()
+        if not source_stripped:
+            raise ValueError(
+                "source must not be empty or whitespace-only; "
+                "provide the code or text to document."
+            )
+
+        start = time.perf_counter()
         if len(source_stripped) > _MAX_SOURCE_CHARS:
             logger.debug(
                 "Truncating source from %d to %d chars to fit context window.",

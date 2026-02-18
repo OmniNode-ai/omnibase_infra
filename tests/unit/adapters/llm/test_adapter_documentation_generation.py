@@ -200,6 +200,51 @@ class TestAdapterDocumentationGenerationInvalidTaskType:
 
 
 # ---------------------------------------------------------------------------
+# generate() -- invalid source
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterDocumentationGenerationInvalidSource:
+    """Tests for generate() with empty or whitespace-only source."""
+
+    @pytest.mark.asyncio
+    async def test_empty_source_raises_value_error(self) -> None:
+        """generate() raises ValueError when source is an empty string."""
+        adapter = _make_adapter()
+
+        with pytest.raises(ValueError, match="source"):
+            await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source="")
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_source_raises_value_error(self) -> None:
+        """generate() raises ValueError when source is whitespace-only."""
+        adapter = _make_adapter()
+
+        with pytest.raises(ValueError, match="source"):
+            await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source="   ")
+
+    @pytest.mark.asyncio
+    async def test_newline_only_source_raises_value_error(self) -> None:
+        """generate() raises ValueError when source contains only newlines."""
+        adapter = _make_adapter()
+
+        with pytest.raises(ValueError, match="source"):
+            await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source="\n\n\t\n")
+
+    @pytest.mark.asyncio
+    async def test_empty_source_does_not_call_llm(self) -> None:
+        """generate() raises before calling the LLM handler for empty source."""
+        adapter = _make_adapter()
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))
+
+        with pytest.raises(ValueError):
+            await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source="")
+
+        adapter._handler.handle.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
 # Attribution
 # ---------------------------------------------------------------------------
 
