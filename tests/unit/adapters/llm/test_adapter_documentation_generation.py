@@ -608,6 +608,16 @@ class TestAdapterDocumentationGenerationConstructorValidation:
             )
             assert adapter._temperature == t
 
+    def test_empty_base_url_raises_value_error(self) -> None:
+        """Explicit base_url='' raises ValueError at construction time."""
+        with pytest.raises(ValueError, match="base_url"):
+            AdapterDocumentationGeneration(base_url="")
+
+    def test_empty_base_url_error_message_is_clear(self) -> None:
+        """ValueError for empty base_url contains a helpful message."""
+        with pytest.raises(ValueError, match="non-empty string"):
+            AdapterDocumentationGeneration(base_url="")
+
 
 # ---------------------------------------------------------------------------
 # close()

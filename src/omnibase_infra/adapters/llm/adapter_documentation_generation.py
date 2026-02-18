@@ -124,7 +124,9 @@ Generate a README section for the following code or module. Include:
 
 ## Source
 
+```python
 {source}
+```
 """
 
 _API_DOC_TEMPLATE: str = """\
@@ -192,14 +194,20 @@ class AdapterDocumentationGeneration:
             api_key: Optional Bearer token for authenticated endpoints.
 
         Raises:
-            ValueError: If ``max_tokens`` is not in [1, 32768] or
-                ``temperature`` is not in [0.0, 2.0].
+            ValueError: If ``max_tokens`` is not in [1, 32768],
+                ``temperature`` is not in [0.0, 2.0], or ``base_url``
+                resolves to an empty string.
         """
         if max_tokens <= 0 or max_tokens > 32_768:
             raise ValueError(f"max_tokens must be in [1, 32768], got {max_tokens}")
         if not (0.0 <= temperature <= 2.0):
             raise ValueError(f"temperature must be in [0.0, 2.0], got {temperature}")
 
+        if base_url is not None and not base_url:
+            raise ValueError(
+                "base_url must be a non-empty string; got an empty string. "
+                "Provide a valid URL or set the LLM_QWEN_72B_URL environment variable."
+            )
         self._base_url: str = base_url or os.environ.get(
             "LLM_QWEN_72B_URL", "http://localhost:8100"
         )
