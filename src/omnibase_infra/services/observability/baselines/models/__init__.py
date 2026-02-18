@@ -21,6 +21,9 @@ from omnibase_infra.services.observability.baselines.models.model_baselines_brea
 from omnibase_infra.services.observability.baselines.models.model_baselines_comparison_row import (
     ModelBaselinesComparisonRow,
 )
+from omnibase_infra.services.observability.baselines.models.model_baselines_snapshot_event import (
+    ModelBaselinesSnapshotEvent,
+)
 from omnibase_infra.services.observability.baselines.models.model_baselines_trend_row import (
     ModelBaselinesTrendRow,
 )
@@ -32,5 +35,6 @@ __all__: list[str] = [
     "ModelBaselinesBreakdownRow",
     "ModelBaselinesComparisonRow",
     "ModelBaselinesTrendRow",
+    "ModelBaselinesSnapshotEvent",
     "ModelBatchComputeBaselinesResult",
 ]

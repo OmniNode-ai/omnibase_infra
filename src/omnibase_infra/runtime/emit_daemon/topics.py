@@ -18,6 +18,8 @@ TOPIC_PHASE_METRICS = "onex.evt.omniclaude.phase-metrics.v1"
 TOPIC_NOTIFICATION_BLOCKED = "onex.evt.omniclaude.notification-blocked.v1"
 TOPIC_NOTIFICATION_COMPLETED = "onex.evt.omniclaude.notification-completed.v1"
 
+TOPIC_BASELINES_COMPUTED = "onex.evt.omnibase-infra.baselines-computed.v1"
+
 PHASE_METRICS_REGISTRATION = ModelEventRegistration(
     event_type="phase.metrics",
     topic_template=TOPIC_PHASE_METRICS,
@@ -26,15 +28,26 @@ PHASE_METRICS_REGISTRATION = ModelEventRegistration(
     schema_version="1.0.0",
 )
 
+BASELINES_COMPUTED_REGISTRATION = ModelEventRegistration(
+    event_type="omnibase-infra.baselines.computed",
+    topic_template=TOPIC_BASELINES_COMPUTED,
+    partition_key_field="snapshot_id",
+    required_fields=("snapshot_id", "contract_version", "computed_at_utc"),
+    schema_version="1.0.0",
+)
+
 # All known event registrations for omnibase_infra.
 # Add new registrations to this tuple. CLI stamp/verify and startup
 # validation all use this list as the canonical source of truth.
 ALL_EVENT_REGISTRATIONS: tuple[ModelEventRegistration, ...] = (
     PHASE_METRICS_REGISTRATION,
+    BASELINES_COMPUTED_REGISTRATION,
 )
 
 __all__: list[str] = [
     "ALL_EVENT_REGISTRATIONS",
+    "BASELINES_COMPUTED_REGISTRATION",
+    "TOPIC_BASELINES_COMPUTED",
     "TOPIC_PHASE_METRICS",
     "TOPIC_NOTIFICATION_BLOCKED",
     "TOPIC_NOTIFICATION_COMPLETED",

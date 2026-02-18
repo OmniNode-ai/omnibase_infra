@@ -56,17 +56,41 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import asyncpg
 
+from omnibase_infra.runtime.emit_daemon.event_registry import EventRegistry
+from omnibase_infra.runtime.emit_daemon.topics import (
+    BASELINES_COMPUTED_REGISTRATION,
+    TOPIC_BASELINES_COMPUTED,
+)
+from omnibase_infra.services.observability.baselines.models.model_baselines_breakdown_row import (
+    ModelBaselinesBreakdownRow,
+)
+from omnibase_infra.services.observability.baselines.models.model_baselines_comparison_row import (
+    ModelBaselinesComparisonRow,
+)
+from omnibase_infra.services.observability.baselines.models.model_baselines_snapshot_event import (
+    ModelBaselinesSnapshotEvent,
+)
+from omnibase_infra.services.observability.baselines.models.model_baselines_trend_row import (
+    ModelBaselinesTrendRow,
+)
 from omnibase_infra.services.observability.baselines.models.model_batch_compute_baselines_result import (
     ModelBatchComputeBaselinesResult,
 )
 from omnibase_infra.utils.util_db_transaction import set_statement_timeout
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
+if TYPE_CHECKING:
+    from omnibase_infra.protocols import ProtocolEventBusLike
+
 logger = logging.getLogger(__name__)
+
+_EMIT_REGISTRY = EventRegistry()
+_EMIT_REGISTRY.register(BASELINES_COMPUTED_REGISTRATION)
 
 # Default batch size for processing routing decisions
 DEFAULT_BATCH_SIZE: int = 500
@@ -104,6 +128,7 @@ class ServiceBatchComputeBaselines:
         pool: asyncpg.Pool,
         batch_size: int = DEFAULT_BATCH_SIZE,
         query_timeout: float = DEFAULT_QUERY_TIMEOUT,
+        event_bus: ProtocolEventBusLike | None = None,
     ) -> None:
         """Initialize batch computation engine.
 
@@ -111,10 +136,14 @@ class ServiceBatchComputeBaselines:
             pool: asyncpg connection pool (lifecycle managed externally).
             batch_size: Row limit per phase.
             query_timeout: Query timeout in seconds.
+            event_bus: Optional event bus for emitting the baselines-computed
+                snapshot event. When None, no event is emitted (e.g. during
+                migrations or offline batch runs). Lifecycle managed externally.
         """
         self._pool = pool
         self._batch_size = batch_size
         self._query_timeout = query_timeout
+        self._event_bus = event_bus
 
     async def compute_and_persist(
         self,
@@ -211,7 +240,144 @@ class ServiceBatchComputeBaselines:
             },
         )
 
+        if self._event_bus is not None:
+            await self._emit_snapshot(
+                correlation_id=effective_correlation_id,
+                computed_at=completed_at,
+                started_at=started_at,
+            )
+
         return result
+
+    async def _emit_snapshot(
+        self,
+        correlation_id: UUID,
+        computed_at: datetime,
+        started_at: datetime,
+    ) -> None:
+        """Read back the computed rows and emit a baselines-computed snapshot event.
+
+        Best-effort: logs a warning on failure but does not raise, because the
+        DB write already committed successfully before this is called.
+
+        Args:
+            correlation_id: Correlation ID for tracing.
+            computed_at: When the batch computation completed.
+            started_at: When the batch computation started (used as window_start).
+        """
+        assert self._event_bus is not None  # guarded by caller
+
+        try:
+            snapshot_id = uuid4()
+
+            comparisons = await self._read_comparisons()
+            trend = await self._read_trend()
+            breakdown = await self._read_breakdown()
+
+            window_start = started_at if comparisons or trend else None
+            window_end = computed_at if comparisons or trend else None
+
+            snapshot = ModelBaselinesSnapshotEvent(
+                snapshot_id=snapshot_id,
+                contract_version=1,
+                computed_at_utc=computed_at,
+                window_start_utc=window_start,
+                window_end_utc=window_end,
+                comparisons=comparisons,
+                trend=trend,
+                breakdown=breakdown,
+            )
+
+            payload = _EMIT_REGISTRY.inject_metadata(
+                event_type=BASELINES_COMPUTED_REGISTRATION.event_type,
+                payload=snapshot.model_dump(mode="json"),
+                correlation_id=str(correlation_id),
+            )
+
+            from omnibase_core.models.events.model_event_envelope import (
+                ModelEventEnvelope,
+            )
+
+            envelope: ModelEventEnvelope[dict[str, object]] = ModelEventEnvelope(
+                payload=payload,
+                correlation_id=correlation_id,
+                source_tool="ServiceBatchComputeBaselines",
+            )
+
+            await self._event_bus.publish_envelope(envelope, TOPIC_BASELINES_COMPUTED)
+
+            logger.info(
+                "Emitted baselines-computed snapshot event",
+                extra={
+                    "snapshot_id": str(snapshot_id),
+                    "correlation_id": str(correlation_id),
+                    "comparisons": len(comparisons),
+                    "trend": len(trend),
+                    "breakdown": len(breakdown),
+                    "topic": TOPIC_BASELINES_COMPUTED,
+                },
+            )
+
+        except Exception as e:
+            safe_msg = sanitize_error_message(e)
+            logger.warning(
+                "Failed to emit baselines-computed snapshot event (non-fatal): %s",
+                safe_msg,
+                extra={"correlation_id": str(correlation_id)},
+            )
+
+    async def _read_comparisons(self) -> list[ModelBaselinesComparisonRow]:
+        """Read back rows from baselines_comparisons, ordered by date descending."""
+        sql = """
+            SELECT
+                id, comparison_date, period_label,
+                treatment_sessions, treatment_success_rate,
+                treatment_avg_latency_ms, treatment_avg_cost_tokens,
+                treatment_total_tokens,
+                control_sessions, control_success_rate,
+                control_avg_latency_ms, control_avg_cost_tokens,
+                control_total_tokens,
+                roi_pct, latency_improvement_pct, cost_improvement_pct,
+                sample_size, computed_at, created_at, updated_at
+            FROM baselines_comparisons
+            ORDER BY comparison_date DESC
+            LIMIT $1
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(sql, self._batch_size)
+        return [ModelBaselinesComparisonRow(**dict(row)) for row in rows]
+
+    async def _read_trend(self) -> list[ModelBaselinesTrendRow]:
+        """Read back rows from baselines_trend, ordered by date descending."""
+        sql = """
+            SELECT
+                id, trend_date, cohort,
+                session_count, success_rate,
+                avg_latency_ms, avg_cost_tokens,
+                roi_pct, computed_at, created_at
+            FROM baselines_trend
+            ORDER BY trend_date DESC, cohort
+            LIMIT $1
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(sql, self._batch_size)
+        return [ModelBaselinesTrendRow(**dict(row)) for row in rows]
+
+    async def _read_breakdown(self) -> list[ModelBaselinesBreakdownRow]:
+        """Read back rows from baselines_breakdown, ordered by roi_pct descending."""
+        sql = """
+            SELECT
+                id, pattern_id, pattern_label,
+                treatment_success_rate, control_success_rate,
+                roi_pct, sample_count, treatment_count, control_count,
+                confidence, computed_at, created_at, updated_at
+            FROM baselines_breakdown
+            ORDER BY roi_pct DESC NULLS LAST
+            LIMIT $1
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(sql, self._batch_size)
+        return [ModelBaselinesBreakdownRow(**dict(row)) for row in rows]
 
     async def _compute_comparisons(self, correlation_id: UUID) -> int:
         """Derive daily treatment vs control comparison rows.

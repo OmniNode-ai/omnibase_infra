@@ -1,6 +1,18 @@
 {
   "elements": [
     {
+      "element_sha256": "a8ca055177955c8d5a04dccc3c4c781b154f1a1a8820bda69f158495cd55df06",
+      "event_type": "omnibase-infra.baselines.computed",
+      "partition_key_field": "snapshot_id",
+      "required_fields": [
+        "computed_at_utc",
+        "contract_version",
+        "snapshot_id"
+      ],
+      "schema_version": "1.0.0",
+      "topic_template": "onex.evt.omnibase-infra.baselines-computed.v1"
+    },
+    {
       "element_sha256": "5f0a1364493205061b169c7318bf8d6086345f4ed07b945f67d14792ca7550e7",
       "event_type": "phase.metrics",
       "partition_key_field": "run_id",
@@ -12,6 +24,6 @@
       "topic_template": "onex.evt.omniclaude.phase-metrics.v1"
     }
   ],
-  "fingerprint_sha256": "e636a4b1f255698a34651079f6317a8369569cfae2d0bbd496efb3cfee53175d",
+  "fingerprint_sha256": "3e91db98eff520ccab844380bddeb68a83c0721c86d80618ea16fae0800b81bb",
   "version": 1
 }
