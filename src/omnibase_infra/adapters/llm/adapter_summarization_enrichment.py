@@ -156,6 +156,7 @@ class AdapterSummarizationEnrichment:
         summary_max_tokens: int = _SUMMARY_MAX_TOKENS,
         temperature: float = _DEFAULT_TEMPERATURE,
         api_key: str | None = None,
+        transport_name: str = "qwen-72b-summarization",
     ) -> None:
         """Initialize the adapter.
 
@@ -166,10 +167,25 @@ class AdapterSummarizationEnrichment:
             model: Model identifier string sent in inference requests.
             token_threshold: Minimum token count to trigger summarization.
                 Contexts below this threshold are returned as-is.
+                Must be >= 0; raises ``ValueError`` if negative.
             summary_max_tokens: Maximum tokens for the summary completion.
             temperature: Sampling temperature.
             api_key: Optional Bearer token for authenticated endpoints.
+            transport_name: Label used by ``TransportHolderLlmHttp`` for
+                tracing and logging.  Defaults to ``"qwen-72b-summarization"``.
+                Override when pointing ``base_url`` at a different model
+                endpoint so that traces and logs reflect the actual target
+                (e.g. ``"qwen-14b-summarization"`` for the Mac Mini endpoint).
         """
+        if token_threshold < 0:
+            raise ValueError(f"token_threshold must be >= 0, got {token_threshold}")
+        if summary_max_tokens <= 0:
+            raise ValueError(
+                f"summary_max_tokens must be > 0, got {summary_max_tokens}"
+            )
+        if not (0.0 <= temperature <= 2.0):
+            raise ValueError(f"temperature must be in [0.0, 2.0], got {temperature}")
+
         self._base_url: str = base_url or os.environ.get(
             "LLM_QWEN_72B_URL", "http://localhost:8100"
         )
@@ -179,8 +195,11 @@ class AdapterSummarizationEnrichment:
         self._temperature: float = temperature
         self._api_key: str | None = api_key
 
+        # transport_name is configurable so callers pointing at a non-default
+        # endpoint get accurate labels in traces and logs instead of the
+        # hardcoded "qwen-72b-summarization" default.
         self._transport = TransportHolderLlmHttp(
-            target_name="qwen-72b-summarization",
+            target_name=transport_name,
             max_timeout_seconds=180.0,
         )
         self._handler = HandlerLlmOpenaiCompatible(self._transport)
@@ -208,9 +227,17 @@ class AdapterSummarizationEnrichment:
         returned as-is without an LLM call.
 
         Args:
-            prompt: The user prompt or query.  Provided for interface
-                compatibility; the summarization is context-driven and does
-                not directly incorporate the prompt into the LLM request.
+            prompt: The user prompt or query.  Accepted for interface
+                compatibility with ``ProtocolContextEnrichment`` but
+                intentionally not used in the LLM request.  Summarization
+                derives its instruction entirely from the built-in
+                ``_USER_PROMPT_TEMPLATE`` / ``_SYSTEM_PROMPT`` pair; the
+                caller-provided prompt is not forwarded to the model.
+                Rationale: the summarization task is fully self-contained —
+                it needs only the context text and a target token budget, not
+                a task-specific query.  Passing a caller prompt would risk
+                conflating the summarization objective with an unrelated
+                retrieval question.
             context: Raw context material to potentially summarize.
 
         Returns:
@@ -257,13 +284,29 @@ class AdapterSummarizationEnrichment:
             )
 
         # Context exceeds threshold -- call Qwen-72B for summarization.
-        # Use str.replace() instead of str.format() so that curly braces in
-        # context_stripped (e.g. JSON objects, Python dicts, YAML, code blocks)
-        # are treated as literal characters and never interpreted as format
-        # placeholders, which would raise KeyError / ValueError at runtime.
-        user_message = _USER_PROMPT_TEMPLATE.replace(
-            "{target_tokens}", str(self._summary_max_tokens)
-        ).replace("{context}", context_stripped)
+        # NOTE: The caller-supplied `prompt` argument is intentionally not used
+        # here.  The LLM request is built solely from _USER_PROMPT_TEMPLATE and
+        # _SYSTEM_PROMPT, which fully specify the summarization task without
+        # reference to a retrieval query.  See enrich() docstring for rationale.
+        # Build the prompt in two separate passes to avoid second-pass
+        # substitution collisions:
+        #   1. Replace {target_tokens} first (safe: value is always a plain
+        #      integer string with no curly braces).
+        #   2. Insert context_stripped by splitting on the literal placeholder
+        #      and joining with the value.  This means context_stripped is
+        #      NEVER passed to str.replace(), so a context that contains the
+        #      literal string "{context}" cannot cause self-referential
+        #      substitution or a corrupted prompt.
+        prompt_with_tokens = _USER_PROMPT_TEMPLATE.replace(
+            "{target_tokens}", str(self._summary_max_tokens), 1
+        )
+        parts = prompt_with_tokens.split("{context}", 1)
+        if len(parts) == 2:
+            user_message = parts[0] + context_stripped + parts[1]
+        else:
+            # Fallback: placeholder was absent (should never happen with the
+            # module-level template, but degrade gracefully).
+            user_message = prompt_with_tokens + "\n\n" + context_stripped
 
         request = ModelLlmInferenceRequest(
             base_url=self._base_url,

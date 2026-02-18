@@ -573,6 +573,132 @@ class TestAdapterSummarizationEnrichmentCurlyBraces:
 
 
 # ---------------------------------------------------------------------------
+# enrich() -- context containing template placeholder strings (regression)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterSummarizationEnrichmentPlaceholderStrings:
+    """Regression: context containing literal placeholder strings must be safe.
+
+    The second-pass substitution logic must not expand a context that itself
+    contains the literal strings ``{context}`` or ``{target_tokens}``.  If
+    ``str.replace()`` were applied to the already-substituted prompt a second
+    time, the literal placeholder appearing inside the context value could be
+    expanded, corrupting the prompt or causing a KeyError/ValueError.
+    """
+
+    @pytest.mark.asyncio
+    async def test_context_with_literal_context_placeholder_does_not_raise(
+        self,
+    ) -> None:
+        """enrich() must not raise when context contains the literal '{context}'."""
+        adapter = _make_adapter(token_threshold=0)  # force LLM path
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("Summary.")
+        )
+
+        # Build a context that contains the exact placeholder string used in
+        # _USER_PROMPT_TEMPLATE.  If second-pass substitution is not guarded,
+        # this would cause the placeholder to be expanded recursively.
+        context_with_placeholder = "The template uses {context} as a placeholder. " * (
+            (_TOKEN_THRESHOLD * _CHARS_PER_TOKEN)
+            // len("The template uses {context} as a placeholder. ")
+            + 2
+        )
+
+        # Must not raise and must return a valid result.
+        result = await adapter.enrich(prompt="Q", context=context_with_placeholder)
+
+        assert isinstance(result, ContractEnrichmentResult)
+        assert result.enrichment_type == "summarization"
+
+    @pytest.mark.asyncio
+    async def test_context_with_literal_target_tokens_placeholder_does_not_raise(
+        self,
+    ) -> None:
+        """enrich() must not raise when context contains '{target_tokens}'."""
+        adapter = _make_adapter(token_threshold=0)  # force LLM path
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("Summary.")
+        )
+
+        context_with_placeholder = "Set {target_tokens} to control output length. " * (
+            (_TOKEN_THRESHOLD * _CHARS_PER_TOKEN)
+            // len("Set {target_tokens} to control output length. ")
+            + 2
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context_with_placeholder)
+
+        assert isinstance(result, ContractEnrichmentResult)
+        assert result.enrichment_type == "summarization"
+
+    @pytest.mark.asyncio
+    async def test_context_placeholders_appear_verbatim_in_user_message(
+        self,
+    ) -> None:
+        """Literal '{context}' and '{target_tokens}' in context are forwarded
+        unchanged into the user message sent to the LLM handler.
+        """
+        adapter = _make_adapter(token_threshold=0)
+        captured_requests: list[object] = []
+
+        async def capturing_handle(request: object) -> MagicMock:
+            captured_requests.append(request)
+            return _make_llm_response("Brief.")
+
+        adapter._handler.handle = capturing_handle  # type: ignore[method-assign]
+
+        placeholder_fragment = "Use {context} and {target_tokens} here. "
+        repeat_count = (_TOKEN_THRESHOLD * _CHARS_PER_TOKEN) // len(
+            placeholder_fragment
+        ) + 2
+        context = (placeholder_fragment * repeat_count).strip()
+
+        await adapter.enrich(prompt="Q", context=context)
+
+        assert len(captured_requests) == 1
+        messages = getattr(captured_requests[0], "messages", ())
+        assert len(messages) == 1
+        user_content: str = messages[0]["content"]
+        # The literal placeholder strings must appear inside the user message
+        # exactly as they were in the original context (not expanded).
+        assert "{context}" in user_content
+        assert "{target_tokens}" in user_content
+
+
+# ---------------------------------------------------------------------------
+# Constructor validation -- negative token_threshold
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterSummarizationEnrichmentConstructorValidation:
+    """Tests for constructor parameter validation."""
+
+    def test_negative_token_threshold_raises_value_error(self) -> None:
+        """Constructing with token_threshold=-1 must raise ValueError."""
+        with pytest.raises(ValueError, match="token_threshold"):
+            AdapterSummarizationEnrichment(
+                base_url="http://localhost:8100",
+                token_threshold=-1,
+            )
+
+    def test_zero_token_threshold_does_not_raise(self) -> None:
+        """token_threshold=0 is valid (every non-empty context triggers LLM)."""
+        adapter = AdapterSummarizationEnrichment(
+            base_url="http://localhost:8100",
+            token_threshold=0,
+        )
+        # Replace mocks so tests don't depend on live HTTP.
+        adapter._transport = MagicMock()
+        adapter._transport.close = AsyncMock()
+        adapter._handler = AsyncMock()
+        assert adapter._token_threshold == 0
+
+
+# ---------------------------------------------------------------------------
 # close()
 # ---------------------------------------------------------------------------
 
