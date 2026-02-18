@@ -166,7 +166,7 @@ class AdapterSummarizationEnrichment:
                 ``http://localhost:8100``.
             model: Model identifier string sent in inference requests.
             token_threshold: Minimum token count to trigger summarization.
-                Contexts below this threshold are returned as-is.
+                Contexts with fewer than this many tokens are returned as-is.
                 Must be >= 0; raises ``ValueError`` if negative.
             summary_max_tokens: Maximum tokens for the summary completion.
             temperature: Sampling temperature.
@@ -182,6 +182,10 @@ class AdapterSummarizationEnrichment:
         if summary_max_tokens <= 0:
             raise ValueError(
                 f"summary_max_tokens must be > 0, got {summary_max_tokens}"
+            )
+        if summary_max_tokens > 32_768:
+            raise ValueError(
+                f"summary_max_tokens must be <= 32768, got {summary_max_tokens}"
             )
         if not (0.0 <= temperature <= 2.0):
             raise ValueError(f"temperature must be in [0.0, 2.0], got {temperature}")
@@ -262,10 +266,10 @@ class AdapterSummarizationEnrichment:
         original_token_count = _estimate_tokens(context_stripped)
 
         # Pass-through: context is below threshold -- no LLM call needed.
-        if original_token_count <= self._token_threshold:
+        if original_token_count < self._token_threshold:
             latency_ms = (time.perf_counter() - start) * 1000
             logger.debug(
-                "Context below threshold (%d <= %d tokens); pass-through. latency_ms=%.1f",
+                "Context below threshold (%d < %d tokens); pass-through. latency_ms=%.1f",
                 original_token_count,
                 self._token_threshold,
                 latency_ms,
