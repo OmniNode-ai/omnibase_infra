@@ -8,7 +8,7 @@ that use mock handlers, these tests verify the loader works correctly with
 production handler implementations.
 
 Test Coverage:
-- Loading real handlers (HttpRestHandler, HandlerDb, HandlerVault, HandlerConsul)
+- Loading real handlers (HttpRestHandler, HandlerDb, HandlerInfisical, HandlerConsul)
 - Protocol compliance validation for real handlers
 - Directory-based discovery with real handler contracts
 - Glob pattern-based discovery with real handler contracts
@@ -21,13 +21,14 @@ Related:
 Note:
     These tests create temporary handler contract YAML files that point to
     real handler classes. They do NOT require external infrastructure (database,
-    vault, consul) because they only test handler loading, not handler execution.
+    infisical, consul) because they only test handler loading, not handler execution.
 """
 
 from __future__ import annotations
 
 import importlib
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 from uuid import UUID
 
@@ -48,14 +49,21 @@ from omnibase_infra.runtime.handler_plugin_loader import (
 # Real handler class paths from omnibase_infra.handlers
 REAL_HANDLER_HTTP_CLASS = "omnibase_infra.handlers.handler_http.HandlerHttpRest"
 REAL_HANDLER_DB_CLASS = "omnibase_infra.handlers.handler_db.HandlerDb"
-REAL_HANDLER_VAULT_CLASS = "omnibase_infra.handlers.handler_vault.HandlerVault"
+REAL_HANDLER_INFISICAL_CLASS = (
+    "omnibase_infra.handlers.handler_infisical.HandlerInfisical"
+)
 REAL_HANDLER_CONSUL_CLASS = "omnibase_infra.handlers.handler_consul.HandlerConsul"
 
 # All real handlers for parametrized tests
 REAL_HANDLERS = [
     ("http.rest.handler", REAL_HANDLER_HTTP_CLASS, "effect", ["http", "rest"]),
     ("db.postgres.handler", REAL_HANDLER_DB_CLASS, "effect", ["database", "postgres"]),
-    ("vault.secrets.handler", REAL_HANDLER_VAULT_CLASS, "effect", ["vault", "secrets"]),
+    (
+        "infisical.secrets.handler",
+        REAL_HANDLER_INFISICAL_CLASS,
+        "effect",
+        ["infisical", "secrets"],
+    ),
     (
         "consul.service.handler",
         REAL_HANDLER_CONSUL_CLASS,
@@ -140,8 +148,8 @@ def all_real_handlers_directory(tmp_path: Path) -> Path:
         |   |-- handler_contract.yaml  (HttpRestHandler)
         |-- db/
         |   |-- handler_contract.yaml  (HandlerDb)
-        |-- vault/
-        |   |-- handler_contract.yaml  (HandlerVault)
+        |-- infisical/
+        |   |-- handler_contract.yaml  (HandlerInfisical)
         |-- consul/
         |   |-- handler_contract.yaml  (HandlerConsul)
 
@@ -259,7 +267,7 @@ class TestLoadFromContractWithRealHandlers:
     @pytest.mark.parametrize(
         ("handler_name", "handler_class", "handler_type", "tags"),
         REAL_HANDLERS,
-        ids=["http", "db", "vault", "consul"],
+        ids=["http", "db", "infisical", "consul"],
     )
     def test_load_all_real_handlers_parametrized(
         self,
@@ -448,10 +456,10 @@ class TestProtocolComplianceOfRealHandlers:
         [
             REAL_HANDLER_HTTP_CLASS,
             REAL_HANDLER_DB_CLASS,
-            REAL_HANDLER_VAULT_CLASS,
+            REAL_HANDLER_INFISICAL_CLASS,
             REAL_HANDLER_CONSUL_CLASS,
         ],
-        ids=["http", "db", "vault", "consul"],
+        ids=["http", "db", "infisical", "consul"],
     )
     def test_real_handler_has_handler_type_property(
         self, handler_class_path: str
@@ -465,10 +473,10 @@ class TestProtocolComplianceOfRealHandlers:
         [
             REAL_HANDLER_HTTP_CLASS,
             REAL_HANDLER_DB_CLASS,
-            REAL_HANDLER_VAULT_CLASS,
+            REAL_HANDLER_INFISICAL_CLASS,
             REAL_HANDLER_CONSUL_CLASS,
         ],
-        ids=["http", "db", "vault", "consul"],
+        ids=["http", "db", "infisical", "consul"],
     )
     def test_real_handler_has_initialize_method(self, handler_class_path: str) -> None:
         """Verify real handlers have async initialize() method."""
@@ -481,10 +489,10 @@ class TestProtocolComplianceOfRealHandlers:
         [
             REAL_HANDLER_HTTP_CLASS,
             REAL_HANDLER_DB_CLASS,
-            REAL_HANDLER_VAULT_CLASS,
+            REAL_HANDLER_INFISICAL_CLASS,
             REAL_HANDLER_CONSUL_CLASS,
         ],
-        ids=["http", "db", "vault", "consul"],
+        ids=["http", "db", "infisical", "consul"],
     )
     def test_real_handler_has_shutdown_method(self, handler_class_path: str) -> None:
         """Verify real handlers have async shutdown() method."""
@@ -497,10 +505,10 @@ class TestProtocolComplianceOfRealHandlers:
         [
             REAL_HANDLER_HTTP_CLASS,
             REAL_HANDLER_DB_CLASS,
-            REAL_HANDLER_VAULT_CLASS,
+            REAL_HANDLER_INFISICAL_CLASS,
             REAL_HANDLER_CONSUL_CLASS,
         ],
-        ids=["http", "db", "vault", "consul"],
+        ids=["http", "db", "infisical", "consul"],
     )
     def test_real_handler_has_execute_method(self, handler_class_path: str) -> None:
         """Verify real handlers have async execute() method."""
@@ -513,10 +521,10 @@ class TestProtocolComplianceOfRealHandlers:
         [
             REAL_HANDLER_HTTP_CLASS,
             REAL_HANDLER_DB_CLASS,
-            REAL_HANDLER_VAULT_CLASS,
+            REAL_HANDLER_INFISICAL_CLASS,
             REAL_HANDLER_CONSUL_CLASS,
         ],
-        ids=["http", "db", "vault", "consul"],
+        ids=["http", "db", "infisical", "consul"],
     )
     def test_real_handler_has_describe_method(self, handler_class_path: str) -> None:
         """Verify real handlers have describe() method."""
@@ -529,10 +537,10 @@ class TestProtocolComplianceOfRealHandlers:
         [
             REAL_HANDLER_HTTP_CLASS,
             REAL_HANDLER_DB_CLASS,
-            REAL_HANDLER_VAULT_CLASS,
+            REAL_HANDLER_INFISICAL_CLASS,
             REAL_HANDLER_CONSUL_CLASS,
         ],
-        ids=["http", "db", "vault", "consul"],
+        ids=["http", "db", "infisical", "consul"],
     )
     def test_real_handler_passes_full_protocol_validation(
         self, loader: HandlerPluginLoader, handler_class_path: str
@@ -563,7 +571,7 @@ class TestProtocolComplianceOfRealHandlers:
         """
         module_path, class_name = class_path.rsplit(".", 1)
         module = importlib.import_module(module_path)
-        return getattr(module, class_name)
+        return cast("type", getattr(module, class_name))
 
 
 class TestRealHandlerInstantiation:
@@ -579,7 +587,7 @@ class TestRealHandlerInstantiation:
     @pytest.mark.parametrize(
         ("handler_name", "handler_class", "handler_type", "tags"),
         REAL_HANDLERS,
-        ids=["http", "db", "vault", "consul"],
+        ids=["http", "db", "infisical", "consul"],
     )
     def test_loaded_handler_can_be_instantiated(
         self,
