@@ -505,6 +505,74 @@ class TestAdapterSummarizationEnrichmentEmptyLlmResponse:
 
 
 # ---------------------------------------------------------------------------
+# enrich() -- context containing curly braces (regression for str.format bug)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterSummarizationEnrichmentCurlyBraces:
+    """Regression tests: context with literal curly braces must not crash.
+
+    Prior to the fix, _USER_PROMPT_TEMPLATE.format(..., context=context_stripped)
+    would raise KeyError or ValueError when context_stripped contained bare
+    '{' / '}' characters (e.g. JSON objects, Python dicts, YAML, code blocks).
+    """
+
+    @pytest.mark.asyncio
+    async def test_json_context_above_threshold_does_not_raise(self) -> None:
+        """enrich() must not raise when context contains JSON-like curly braces."""
+        adapter = _make_adapter(token_threshold=0)  # force LLM path for any input
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("A concise summary.")
+        )
+
+        # Build a context that (a) contains JSON-like curly braces and
+        # (b) exceeds a realistic threshold so the summarization branch is hit.
+        json_fragment = '{"key": "value", "data": [1, 2, 3], "nested": {"x": true}}'
+        # Repeat until the character count clearly exceeds the default threshold.
+        repeat_count = (_TOKEN_THRESHOLD * _CHARS_PER_TOKEN) // len(json_fragment) + 2
+        context_with_braces = (json_fragment + " ") * repeat_count
+
+        # Must not raise KeyError / ValueError
+        result = await adapter.enrich(prompt="Summarize.", context=context_with_braces)
+
+        assert isinstance(result, ContractEnrichmentResult)
+        assert result.enrichment_type == "summarization"
+
+    @pytest.mark.asyncio
+    async def test_json_context_user_message_contains_context_verbatim(self) -> None:
+        """The user message passed to the LLM handler must contain the raw context.
+
+        Verifies that the curly-brace content is forwarded literally, not
+        mangled by a str.format() placeholder expansion.
+        """
+        adapter = _make_adapter(token_threshold=0)  # force LLM path
+        captured_requests: list[object] = []
+
+        async def capturing_handle(request: object) -> MagicMock:
+            captured_requests.append(request)
+            return _make_llm_response("Brief.")
+
+        adapter._handler.handle = capturing_handle  # type: ignore[method-assign]
+
+        json_fragment = '{"key": "value", "list": [1, 2, 3]}'
+        repeat_count = (_TOKEN_THRESHOLD * _CHARS_PER_TOKEN) // len(json_fragment) + 2
+        context_with_braces = (json_fragment + " ") * repeat_count
+        context_stripped = context_with_braces.strip()
+
+        await adapter.enrich(prompt="Q", context=context_with_braces)
+
+        assert len(captured_requests) == 1
+        request = captured_requests[0]
+        # The ModelLlmInferenceRequest stores messages as a tuple of dicts.
+        messages = getattr(request, "messages", ())
+        assert len(messages) == 1
+        user_content: str = messages[0]["content"]
+        # The stripped context must appear verbatim inside the constructed prompt.
+        assert context_stripped in user_content
+
+
+# ---------------------------------------------------------------------------
 # close()
 # ---------------------------------------------------------------------------
 

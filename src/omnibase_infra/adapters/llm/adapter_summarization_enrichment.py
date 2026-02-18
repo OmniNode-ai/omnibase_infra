@@ -257,10 +257,13 @@ class AdapterSummarizationEnrichment:
             )
 
         # Context exceeds threshold -- call Qwen-72B for summarization.
-        user_message = _USER_PROMPT_TEMPLATE.format(
-            target_tokens=self._summary_max_tokens,
-            context=context_stripped,
-        )
+        # Use str.replace() instead of str.format() so that curly braces in
+        # context_stripped (e.g. JSON objects, Python dicts, YAML, code blocks)
+        # are treated as literal characters and never interpreted as format
+        # placeholders, which would raise KeyError / ValueError at runtime.
+        user_message = _USER_PROMPT_TEMPLATE.replace(
+            "{target_tokens}", str(self._summary_max_tokens)
+        ).replace("{context}", context_stripped)
 
         request = ModelLlmInferenceRequest(
             base_url=self._base_url,
