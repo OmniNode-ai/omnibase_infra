@@ -12,6 +12,9 @@ Related Tickets:
     - OMN-2319: Implement SPI LLM protocol adapters
 """
 
+from omnibase_infra.adapters.llm.adapter_code_analysis_enrichment import (
+    AdapterCodeAnalysisEnrichment,
+)
 from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
     AdapterLlmProviderOpenai,
 )
@@ -39,6 +42,7 @@ __all__: list[str] = [
     "AdapterLlmProviderOpenai",
     "AdapterLlmToolProvider",
     "AdapterModelRouter",
+    "AdapterCodeAnalysisEnrichment",
     "ModelLlmAdapterRequest",
     "ModelLlmAdapterResponse",
     "ModelLlmHealthResponse",
