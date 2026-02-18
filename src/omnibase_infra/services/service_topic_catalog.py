@@ -60,6 +60,9 @@ _SCAN_BUDGET_SECONDS = 5.0
 # CAS retry configuration
 _CAS_MAX_RETRIES = 3
 _CAS_RETRY_DELAYS = (0.1, 0.2, 0.4)  # seconds per attempt
+assert len(_CAS_RETRY_DELAYS) >= _CAS_MAX_RETRIES - 1, (
+    "CAS_RETRY_DELAYS must have at least CAS_MAX_RETRIES-1 entries"
+)
 
 # Consul KV key constants
 _KV_CATALOG_VERSION = "onex/catalog/version"
@@ -113,7 +116,6 @@ class ServiceTopicCatalog:
         >>> service = ServiceTopicCatalog(container=container, consul_handler=handler)
         >>> response = await service.build_catalog(
         ...     correlation_id=uuid4(),
-        ...     client_id="my-node",
         ... )
         >>> print(response.catalog_version, len(response.topics))
     """
@@ -156,7 +158,6 @@ class ServiceTopicCatalog:
     async def build_catalog(
         self,
         correlation_id: UUID,
-        client_id: str,
         include_inactive: bool = False,
         topic_pattern: str | None = None,
     ) -> ModelTopicCatalogResponse:
@@ -176,7 +177,6 @@ class ServiceTopicCatalog:
 
         Args:
             correlation_id: Correlation ID for tracing.
-            client_id: Identifier of the requesting client.
             include_inactive: Include topics with no publishers/subscribers.
             topic_pattern: Optional fnmatch glob to filter topic suffixes.
 
@@ -410,6 +410,7 @@ class ServiceTopicCatalog:
             for entry in subscribe_entries + publish_entries:
                 raw_suffix = entry.get("topic_suffix") or entry.get("topic")
                 if isinstance(raw_suffix, str) and raw_suffix:
+                    # Intentional last-write-wins: publish_entries override subscribe_entries for the same suffix
                     enrichment_by_suffix[raw_suffix] = entry
 
             for suffix in publish_topics:
@@ -553,14 +554,14 @@ class ServiceTopicCatalog:
     async def _kv_get_raw(self, key: str, correlation_id: UUID) -> str | None:
         """Get raw string value from Consul KV via HandlerConsul's mixin method.
 
-        Delegates to MixinConsulTopicIndex._kv_get_raw which is already defined
+        Delegates to MixinConsulTopicIndex.kv_get_raw which is already defined
         on HandlerConsul.
         """
         if self._consul_handler is None:
             return None
         try:
-            # HandlerConsul inherits _kv_get_raw from MixinConsulTopicIndex
-            return await self._consul_handler._kv_get_raw(key, correlation_id)
+            # HandlerConsul inherits kv_get_raw from MixinConsulTopicIndex
+            return await self._consul_handler.kv_get_raw(key, correlation_id)
         except Exception:
             logger.debug(
                 "KV get failed for key %r",
@@ -578,31 +579,18 @@ class ServiceTopicCatalog:
     ) -> bool:
         """Put value to Consul KV with CAS check.
 
-        Uses the underlying consul client via HandlerConsul's _execute_with_retry
-        to perform a CAS write.
+        Delegates to HandlerConsul.kv_put_raw_with_cas, which routes through the
+        handler's retry machinery and circuit breaker.
 
         Returns:
             True if the write succeeded (CAS matched), False on CAS conflict.
         """
         if self._consul_handler is None:
             return False
-
-        consul_client = self._consul_handler._client
-        if consul_client is None:
-            return False
-
-        executor = getattr(self._consul_handler, "_executor", None)
-        loop = asyncio.get_running_loop()
-
-        def _put() -> bool:
-            result: bool = consul_client.kv.put(key, value, cas=cas)
-            return result
-
         try:
-            if executor is not None:
-                return await loop.run_in_executor(executor, _put)
-            else:
-                return await loop.run_in_executor(None, _put)
+            return await self._consul_handler.kv_put_raw_with_cas(
+                key, value, cas, correlation_id
+            )
         except Exception:
             logger.debug(
                 "CAS put failed for key %r",
@@ -618,49 +606,19 @@ class ServiceTopicCatalog:
     ) -> tuple[str | None, int]:
         """Get value and ModifyIndex for a KV key (needed for CAS writes).
 
+        Delegates to HandlerConsul.kv_get_with_modify_index, which routes through
+        the handler's retry machinery and circuit breaker.
+
         Returns:
             Tuple of (value_string_or_None, modify_index).
             modify_index is 0 if the key is absent (CAS=0 means create-only).
         """
         if self._consul_handler is None:
             return None, 0
-
-        consul_client = self._consul_handler._client
-        if consul_client is None:
-            return None, 0
-
-        executor = getattr(self._consul_handler, "_executor", None)
-        loop = asyncio.get_running_loop()
-
-        def _get() -> tuple[int, dict[str, object] | None]:
-            index: int
-            data: dict[str, object] | None
-            index, data = consul_client.kv.get(key, recurse=False)
-            return index, data
-
         try:
-            if executor is not None:
-                raw_result = await loop.run_in_executor(executor, _get)
-            else:
-                raw_result = await loop.run_in_executor(None, _get)
-
-            _, data = raw_result
-
-            if data is None:
-                return None, 0
-
-            raw_value = data.get("Value")
-            modify_index = data.get("ModifyIndex", 0)
-
-            if isinstance(raw_value, bytes):
-                value_str: str | None = raw_value.decode("utf-8")
-            elif isinstance(raw_value, str):
-                value_str = raw_value
-            else:
-                value_str = None
-
-            return value_str, int(modify_index) if isinstance(modify_index, int) else 0
-
+            return await self._consul_handler.kv_get_with_modify_index(
+                key, correlation_id
+            )
         except Exception:
             logger.debug(
                 "KV get with modify index failed for key %r",
@@ -676,55 +634,17 @@ class ServiceTopicCatalog:
     ) -> list[dict[str, object]] | None:
         """Perform recursive Consul KV get under a prefix.
 
+        Delegates to HandlerConsul.kv_get_recurse, which routes through the
+        handler's retry machinery and circuit breaker.
+
         Returns:
-            List of dicts with ``key`` and ``value`` fields, or None on error.
+            List of dicts with ``key``, ``value``, and ``modify_index`` fields,
+            or None on error.
         """
         if self._consul_handler is None:
             return None
-
-        consul_client = self._consul_handler._client
-        if consul_client is None:
-            return None
-
-        executor = getattr(self._consul_handler, "_executor", None)
-        loop = asyncio.get_running_loop()
-
-        def _get_recurse() -> tuple[int, list[dict[str, object]] | None]:
-            index: int
-            raw_data: list[dict[str, object]] | None
-            index, raw_data = consul_client.kv.get(prefix, recurse=True)
-            return index, raw_data
-
         try:
-            if executor is not None:
-                raw_result = await loop.run_in_executor(executor, _get_recurse)
-            else:
-                raw_result = await loop.run_in_executor(None, _get_recurse)
-
-            _, data = raw_result
-
-            if data is None:
-                return []
-
-            items: list[dict[str, object]] = []
-            for item in data:
-                raw_key = item.get("Key")
-                raw_value = item.get("Value")
-                if isinstance(raw_value, bytes):
-                    decoded: str | None = raw_value.decode("utf-8")
-                elif isinstance(raw_value, str):
-                    decoded = raw_value
-                else:
-                    decoded = None
-                items.append(
-                    {
-                        "key": raw_key if isinstance(raw_key, str) else "",
-                        "value": decoded,
-                        "modify_index": item.get("ModifyIndex", 0),
-                    }
-                )
-            return items
-
+            return await self._consul_handler.kv_get_recurse(prefix, correlation_id)
         except Exception:
             logger.debug(
                 "KV recurse get failed for prefix %r",

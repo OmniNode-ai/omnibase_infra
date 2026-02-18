@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -60,9 +59,9 @@ def _make_consul_handler(
     handler._client = MagicMock()
     handler._executor = None  # use default executor
     if kv_get_raw_side_effect is not None:
-        handler._kv_get_raw = AsyncMock(side_effect=kv_get_raw_side_effect)
+        handler.kv_get_raw = AsyncMock(side_effect=kv_get_raw_side_effect)
     else:
-        handler._kv_get_raw = AsyncMock(return_value=kv_get_raw_return)
+        handler.kv_get_raw = AsyncMock(return_value=kv_get_raw_return)
     return handler
 
 
@@ -83,7 +82,6 @@ class TestServiceTopicCatalogNoHandler:
 
         response = await service.build_catalog(
             correlation_id=correlation_id,
-            client_id="test-client",
         )
 
         assert isinstance(response, ModelTopicCatalogResponse)
@@ -332,7 +330,7 @@ class TestBuildCatalogHappyPath:
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
-        handler._kv_get_raw = AsyncMock(return_value="1")
+        handler.kv_get_raw = AsyncMock(return_value="1")
 
         service = _make_service(consul_handler=handler)
 
@@ -346,7 +344,6 @@ class TestBuildCatalogHappyPath:
 
         response = await service.build_catalog(
             correlation_id=uuid4(),
-            client_id="test-client",
         )
 
         assert len(response.topics) == 1
@@ -372,7 +369,7 @@ class TestBuildCatalogHappyPath:
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
-        handler._kv_get_raw = AsyncMock(return_value="1")
+        handler.kv_get_raw = AsyncMock(return_value="1")
 
         service = _make_service(consul_handler=handler)
         service._kv_get_recurse = AsyncMock(return_value=kv_items)  # type: ignore[method-assign]
@@ -384,7 +381,6 @@ class TestBuildCatalogHappyPath:
 
         response = await service.build_catalog(
             correlation_id=uuid4(),
-            client_id="test-client",
         )
 
         assert len(response.topics) == 1
@@ -407,7 +403,7 @@ class TestBuildCatalogHappyPath:
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
-        handler._kv_get_raw = AsyncMock(return_value="2")
+        handler.kv_get_raw = AsyncMock(return_value="2")
 
         service = _make_service(consul_handler=handler)
         service._kv_get_recurse = AsyncMock(return_value=kv_items)  # type: ignore[method-assign]
@@ -419,7 +415,6 @@ class TestBuildCatalogHappyPath:
 
         response = await service.build_catalog(
             correlation_id=uuid4(),
-            client_id="test-client",
         )
 
         assert len(response.topics) == 1
@@ -447,7 +442,7 @@ class TestBuildCatalogHappyPath:
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
-        handler._kv_get_raw = AsyncMock(return_value="1")
+        handler.kv_get_raw = AsyncMock(return_value="1")
 
         service = _make_service(consul_handler=handler)
         service._kv_get_recurse = AsyncMock(return_value=kv_items)  # type: ignore[method-assign]
@@ -459,7 +454,6 @@ class TestBuildCatalogHappyPath:
 
         response = await service.build_catalog(
             correlation_id=uuid4(),
-            client_id="test-client",
         )
 
         assert len(response.topics) == 1
@@ -483,7 +477,7 @@ class TestBuildCatalogCache:
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
-        handler._kv_get_raw = AsyncMock(return_value="3")
+        handler.kv_get_raw = AsyncMock(return_value="3")
 
         service = _make_service(consul_handler=handler)
 
@@ -518,9 +512,9 @@ class TestBuildCatalogCache:
 
         cid = uuid4()
         # First call - should scan
-        await service.build_catalog(correlation_id=cid, client_id="test")
+        await service.build_catalog(correlation_id=cid)
         # Second call - should hit cache
-        await service.build_catalog(correlation_id=cid, client_id="test")
+        await service.build_catalog(correlation_id=cid)
 
         assert scan_count == 1
 
@@ -530,7 +524,7 @@ class TestBuildCatalogCache:
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
-        handler._kv_get_raw = AsyncMock(return_value="1")
+        handler.kv_get_raw = AsyncMock(return_value="1")
 
         service = _make_service(consul_handler=handler)
 
@@ -554,8 +548,8 @@ class TestBuildCatalogCache:
 
         service.get_catalog_version = _mock_version  # type: ignore[assignment]
 
-        await service.build_catalog(correlation_id=uuid4(), client_id="test")
-        await service.build_catalog(correlation_id=uuid4(), client_id="test")
+        await service.build_catalog(correlation_id=uuid4())
+        await service.build_catalog(correlation_id=uuid4())
 
         assert scan_count == 2
 
@@ -565,7 +559,7 @@ class TestBuildCatalogCache:
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
-        handler._kv_get_raw = AsyncMock(return_value=None)  # version absent
+        handler.kv_get_raw = AsyncMock(return_value=None)  # version absent
 
         service = _make_service(consul_handler=handler)
 
@@ -583,8 +577,8 @@ class TestBuildCatalogCache:
 
         service.get_catalog_version = _mock_version  # type: ignore[assignment]
 
-        await service.build_catalog(correlation_id=uuid4(), client_id="test")
-        await service.build_catalog(correlation_id=uuid4(), client_id="test")
+        await service.build_catalog(correlation_id=uuid4())
+        await service.build_catalog(correlation_id=uuid4())
 
         assert scan_count == 2
 
@@ -604,7 +598,7 @@ class TestBuildCatalogTimeout:
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
-        handler._kv_get_raw = AsyncMock(return_value="1")
+        handler.kv_get_raw = AsyncMock(return_value="1")
 
         service = _make_service(consul_handler=handler)
 
@@ -625,7 +619,6 @@ class TestBuildCatalogTimeout:
         ):
             response = await service.build_catalog(
                 correlation_id=uuid4(),
-                client_id="test-client",
             )
 
         assert "consul_scan_timeout" in response.warnings
@@ -642,7 +635,7 @@ class TestBuildCatalogFiltering:
     """Tests for topic_pattern and include_inactive filters."""
 
     def _kv_items_two_topics(self) -> list[dict[str, object]]:
-        """Build KV items for two topics - one with subscribers, one without."""
+        """Build KV items for two topics - one subscribed, one published."""
         return [
             {
                 "key": "onex/nodes/node-aaa/event_bus/subscribe_topics",
@@ -664,7 +657,7 @@ class TestBuildCatalogFiltering:
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
-        handler._kv_get_raw = AsyncMock(return_value="1")
+        handler.kv_get_raw = AsyncMock(return_value="1")
 
         service = _make_service(consul_handler=handler)
         service._kv_get_recurse = AsyncMock(return_value=self._kv_items_two_topics())  # type: ignore[method-assign]
@@ -676,7 +669,6 @@ class TestBuildCatalogFiltering:
 
         response = await service.build_catalog(
             correlation_id=uuid4(),
-            client_id="test",
             include_inactive=False,
         )
         # Both topics have participants, both should appear
@@ -688,7 +680,7 @@ class TestBuildCatalogFiltering:
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
-        handler._kv_get_raw = AsyncMock(return_value="1")
+        handler.kv_get_raw = AsyncMock(return_value="1")
 
         service = _make_service(consul_handler=handler)
         service._kv_get_recurse = AsyncMock(return_value=self._kv_items_two_topics())  # type: ignore[method-assign]
@@ -701,7 +693,6 @@ class TestBuildCatalogFiltering:
         # Only match registration topic
         response = await service.build_catalog(
             correlation_id=uuid4(),
-            client_id="test",
             topic_pattern="onex.evt.platform.node-registration.*",
         )
 
@@ -714,7 +705,7 @@ class TestBuildCatalogFiltering:
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
-        handler._kv_get_raw = AsyncMock(return_value="1")
+        handler.kv_get_raw = AsyncMock(return_value="1")
 
         service = _make_service(consul_handler=handler)
         service._kv_get_recurse = AsyncMock(return_value=self._kv_items_two_topics())  # type: ignore[method-assign]
@@ -726,7 +717,6 @@ class TestBuildCatalogFiltering:
 
         response = await service.build_catalog(
             correlation_id=uuid4(),
-            client_id="test",
             topic_pattern="onex.cmd.*",  # Doesn't match evt topics
         )
 
@@ -773,7 +763,7 @@ class TestKVPrecedenceRules:
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
-        handler._kv_get_raw = AsyncMock(return_value="1")
+        handler.kv_get_raw = AsyncMock(return_value="1")
 
         service = _make_service(consul_handler=handler)
         service._kv_get_recurse = AsyncMock(return_value=kv_items)  # type: ignore[method-assign]
@@ -785,7 +775,6 @@ class TestKVPrecedenceRules:
 
         response = await service.build_catalog(
             correlation_id=uuid4(),
-            client_id="test",
         )
 
         assert len(response.topics) == 1
@@ -813,7 +802,7 @@ class TestKVPrecedenceRules:
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
-        handler._kv_get_raw = AsyncMock(return_value="1")
+        handler.kv_get_raw = AsyncMock(return_value="1")
 
         service = _make_service(consul_handler=handler)
         service._kv_get_recurse = AsyncMock(return_value=kv_items)  # type: ignore[method-assign]
@@ -825,7 +814,6 @@ class TestKVPrecedenceRules:
 
         response = await service.build_catalog(
             correlation_id=uuid4(),
-            client_id="test",
         )
 
         # Should still have the publish topic entry
@@ -849,7 +837,7 @@ class TestConsulKVUnavailable:
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
-        handler._kv_get_raw = AsyncMock(return_value="1")
+        handler.kv_get_raw = AsyncMock(return_value="1")
 
         service = _make_service(consul_handler=handler)
         service._kv_get_recurse = AsyncMock(return_value=None)  # type: ignore[method-assign]
@@ -861,7 +849,6 @@ class TestConsulKVUnavailable:
 
         response = await service.build_catalog(
             correlation_id=uuid4(),
-            client_id="test",
         )
 
         assert "consul_kv_unavailable" in response.warnings
