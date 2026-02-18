@@ -258,6 +258,50 @@ class TestServiceBatchComputeEffectivenessMetrics:
         assert result.has_errors is False
 
     @pytest.mark.asyncio
+    async def test_compute_and_persist_partial_failure_notifies_successful_phases(
+        self, mock_pool: MagicMock, mock_notifier: AsyncMock
+    ) -> None:
+        """Notifier is called with only successful phase tables when Phase 1 fails.
+
+        When Phase 1 (injection_effectiveness INSERT) raises an error but
+        Phases 2 and 3 succeed, the result should have has_errors=True while
+        latency_rows > 0 and pattern_rows > 0. The notifier must be called
+        exactly once, with tables_affected containing only latency_breakdowns
+        and pattern_hit_rates (not injection_effectiveness).
+        """
+        conn = mock_pool._test_conn
+        phase_count = 0
+
+        async def execute_side_effect(sql, *args, **kwargs):
+            nonlocal phase_count
+            if "SET LOCAL" in str(sql):
+                return "SET"
+            phase_count += 1
+            if phase_count == 1:
+                raise RuntimeError("Phase 1 DB error")
+            if phase_count == 2:
+                return "INSERT 0 6"
+            return "INSERT 0 4"
+
+        conn.execute = AsyncMock(side_effect=execute_side_effect)
+        conn.fetchrow = AsyncMock(return_value=None)
+
+        batch = ServiceBatchComputeEffectivenessMetrics(
+            mock_pool, notifier=mock_notifier
+        )
+        result = await batch.compute_and_persist()
+
+        assert result.has_errors is True
+        assert result.latency_rows > 0
+        assert result.pattern_rows > 0
+
+        mock_notifier.notify.assert_awaited_once()
+        call_kwargs = mock_notifier.notify.call_args.kwargs
+        assert "injection_effectiveness" not in call_kwargs["tables_affected"]
+        assert "latency_breakdowns" in call_kwargs["tables_affected"]
+        assert "pattern_hit_rates" in call_kwargs["tables_affected"]
+
+    @pytest.mark.asyncio
     async def test_compute_pattern_hit_rates_handles_null_confidence(
         self, mock_pool: MagicMock
     ) -> None:
