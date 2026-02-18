@@ -23,7 +23,7 @@ from omnibase_infra.services.observability.injection_effectiveness.models.model_
 )
 from omnibase_infra.services.observability.injection_effectiveness.service_batch_compute_effectiveness import (
     ServiceBatchComputeEffectivenessMetrics,
-    _parse_execute_count,
+    parse_execute_count,
 )
 
 
@@ -88,25 +88,25 @@ class TestModelBatchComputeResult:
 
 
 class TestParseExecuteCount:
-    """Tests for _parse_execute_count utility."""
+    """Tests for parse_execute_count utility."""
 
     def test_parse_insert_result(self) -> None:
-        assert _parse_execute_count("INSERT 0 42") == 42
+        assert parse_execute_count("INSERT 0 42") == 42
 
     def test_parse_update_result(self) -> None:
-        assert _parse_execute_count("UPDATE 15") == 15
+        assert parse_execute_count("UPDATE 15") == 15
 
     def test_parse_zero_rows(self) -> None:
-        assert _parse_execute_count("INSERT 0 0") == 0
+        assert parse_execute_count("INSERT 0 0") == 0
 
     def test_parse_empty_string(self) -> None:
-        assert _parse_execute_count("") == 0
+        assert parse_execute_count("") == 0
 
     def test_parse_invalid_string(self) -> None:
-        assert _parse_execute_count("not a valid result") == 0
+        assert parse_execute_count("not a valid result") == 0
 
     def test_parse_none_returns_zero(self) -> None:
-        assert _parse_execute_count(None) == 0  # type: ignore[arg-type]
+        assert parse_execute_count(None) == 0  # type: ignore[arg-type]
 
 
 class TestServiceBatchComputeEffectivenessMetrics:

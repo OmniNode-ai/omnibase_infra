@@ -292,6 +292,7 @@ class ServiceBatchComputeEffectivenessMetrics:
                 rd.correlation_id AS session_id,
                 rd.correlation_id,
                 CASE
+                    WHEN rd.confidence_score IS NULL THEN NULL
                     WHEN rd.confidence_score >= 0.8 THEN 'treatment'
                     ELSE 'control'
                 END AS cohort,
@@ -339,7 +340,7 @@ class ServiceBatchComputeEffectivenessMetrics:
                 result: str = await conn.execute(sql, self._batch_size)
 
         # asyncpg execute returns "INSERT 0 N" string
-        count = _parse_execute_count(result)
+        count = parse_execute_count(result)
 
         logger.debug(
             "Computed injection_effectiveness rows",
@@ -424,7 +425,7 @@ class ServiceBatchComputeEffectivenessMetrics:
 
                 result: str = await conn.execute(sql, self._batch_size)
 
-        count = _parse_execute_count(result)
+        count = parse_execute_count(result)
 
         logger.debug(
             "Computed latency_breakdowns rows",
@@ -528,7 +529,7 @@ class ServiceBatchComputeEffectivenessMetrics:
 
                 result: str = await conn.execute(sql, self._batch_size)
 
-        count = _parse_execute_count(result)
+        count = parse_execute_count(result)
 
         if count == self._batch_size:
             logger.warning(
@@ -549,7 +550,7 @@ class ServiceBatchComputeEffectivenessMetrics:
         return count
 
 
-def _parse_execute_count(result: str) -> int:
+def parse_execute_count(result: str) -> int:
     """Parse row count from an asyncpg ``execute()`` result string.
 
     asyncpg's ``execute()`` returns status strings such as ``"INSERT 0 42"``
@@ -582,4 +583,5 @@ __all__ = [
     "ServiceBatchComputeEffectivenessMetrics",
     "DEFAULT_BATCH_SIZE",
     "DEFAULT_QUERY_TIMEOUT",
+    "parse_execute_count",
 ]

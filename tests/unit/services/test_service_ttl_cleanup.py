@@ -473,26 +473,6 @@ class TestSQLQueries:
         assert "ctid" in sql
         assert "LIMIT" in sql
 
-    @pytest.mark.asyncio
-    async def test_execute_passes_query_timeout(
-        self,
-        mock_pool: MagicMock,
-        mock_conn: AsyncMock,
-    ) -> None:
-        """DELETE execution should use the configured query_timeout_seconds."""
-        config = ConfigTTLCleanup(
-            postgres_dsn="postgresql://postgres:test@localhost:5432/test_db",
-            query_timeout_seconds=45.0,
-            table_ttl_columns={"agent_actions": "created_at"},
-        )
-        service = ServiceTTLCleanup(pool=mock_pool, config=config)
-
-        mock_conn.execute.return_value = "DELETE 0"
-        await service.cleanup_once()
-
-        call_kwargs = mock_conn.execute.call_args.kwargs
-        assert call_kwargs.get("timeout") == 45.0
-
 
 # =============================================================================
 # Circuit Breaker Tests
@@ -592,6 +572,37 @@ class TestCircuitBreaker:
         errors_dict = dict(result.errors)
         assert "agent_actions" in errors_dict
         assert "InfraUnavailableError" in errors_dict["agent_actions"]
+
+
+# =============================================================================
+# Execution Tests
+# =============================================================================
+
+
+class TestExecution:
+    """Test runtime execution behavior of cleanup_once."""
+
+    pytestmark = pytest.mark.unit
+
+    @pytest.mark.asyncio
+    async def test_execute_passes_query_timeout(
+        self,
+        mock_pool: MagicMock,
+        mock_conn: AsyncMock,
+    ) -> None:
+        """DELETE execution should use the configured query_timeout_seconds."""
+        config = ConfigTTLCleanup(
+            postgres_dsn="postgresql://postgres:test@localhost:5432/test_db",
+            query_timeout_seconds=45.0,
+            table_ttl_columns={"agent_actions": "created_at"},
+        )
+        service = ServiceTTLCleanup(pool=mock_pool, config=config)
+
+        mock_conn.execute.return_value = "DELETE 0"
+        await service.cleanup_once()
+
+        call_kwargs = mock_conn.execute.call_args.kwargs
+        assert call_kwargs.get("timeout") == 45.0
 
 
 # =============================================================================
@@ -839,6 +850,7 @@ __all__ = [
     "TestCleanupOnceWithRows",
     "TestSQLQueries",
     "TestCircuitBreaker",
+    "TestExecution",
     "TestErrorHandling",
     "TestGracefulShutdown",
     "TestHealthStatus",
