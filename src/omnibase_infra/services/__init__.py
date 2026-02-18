@@ -18,6 +18,7 @@ Exports:
     ServiceSnapshot: Generic snapshot service for point-in-time state capture
     ServiceTimeoutEmitter: Emitter for timeout events with markers
     ServiceTimeoutScanner: Scanner for querying overdue registration entities
+    ServiceTopicCatalog: Topic catalog with KV precedence and caching (OMN-2311)
     StoreSnapshotInMemory: In-memory snapshot store for testing
     StoreSnapshotPostgres: PostgreSQL snapshot store for production
     TimeoutEmitter: Alias for ServiceTimeoutEmitter
@@ -63,6 +64,7 @@ from omnibase_infra.services.service_timeout_scanner import (
     ModelTimeoutQueryResult,
     ServiceTimeoutScanner,
 )
+from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
 
 # Session services (moved from omniclaude in OMN-1526)
 from omnibase_infra.services.session import (
@@ -113,6 +115,8 @@ __all__ = [
     # LLM endpoint health checker (OMN-2255)
     "ServiceLlmEndpointHealth",
     "TOPIC_LLM_ENDPOINT_HEALTH",
+    # Topic catalog service (OMN-2311)
+    "ServiceTopicCatalog",
     # Contract publisher service (OMN-1752)
     "ContractPublisherError",
     "ContractPublishingInfraError",

@@ -941,7 +941,7 @@ class TestKVStorageFormat:
         )
 
         # Read raw value from KV
-        raw_value = await topic_index_mixin._kv_get_raw(
+        raw_value = await topic_index_mixin.kv_get_raw(
             f"onex/nodes/{node_id}/event_bus/subscribe_topics",
             correlation_id,
         )
@@ -973,7 +973,7 @@ class TestKVStorageFormat:
             )
 
         # Read raw value from KV
-        raw_value = await topic_index_mixin._kv_get_raw(
+        raw_value = await topic_index_mixin.kv_get_raw(
             f"onex/topics/{topic}/subscribers",
             correlation_id,
         )
