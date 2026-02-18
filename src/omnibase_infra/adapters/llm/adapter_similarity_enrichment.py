@@ -113,25 +113,31 @@ class AdapterSimilarityEnrichment:
 
         Args:
             embedding_base_url: Base URL of the GTE-Qwen2 embedding endpoint.
-                Defaults to the ``LLM_EMBEDDING_URL`` environment variable,
-                falling back to ``http://localhost:8002``.
+                Defaults to the ``LLM_EMBEDDING_URL`` environment variable.
+                Required -- raises ``ValueError`` when unset.
             embedding_model: Model identifier sent in embedding requests.
             qdrant_url: Base URL of the Qdrant instance.  Defaults to the
-                ``QDRANT_URL`` environment variable, falling back to
-                ``http://localhost:6333``.
+                ``QDRANT_URL`` environment variable.
+                Required -- raises ``ValueError`` when unset.
             qdrant_collection: Name of the Qdrant collection to query.
             top_k: Maximum number of similar results to return.
             score_threshold: Optional minimum similarity score filter applied
                 by Qdrant before results are returned.  ``None`` disables the
                 threshold (all results up to ``top_k`` are returned).
         """
-        self._embedding_base_url: str = embedding_base_url or os.environ.get(
-            "LLM_EMBEDDING_URL", "http://localhost:8002"
-        )
+        _embedding_base_url = embedding_base_url or os.environ.get("LLM_EMBEDDING_URL")
+        if not _embedding_base_url:
+            raise ValueError(
+                "embedding_base_url is required. Set LLM_EMBEDDING_URL environment variable."
+            )
+        self._embedding_base_url: str = _embedding_base_url
         self._embedding_model: str = embedding_model
-        self._qdrant_url: str = qdrant_url or os.environ.get(
-            "QDRANT_URL", "http://localhost:6333"
-        )
+        _qdrant_url = qdrant_url or os.environ.get("QDRANT_URL")
+        if not _qdrant_url:
+            raise ValueError(
+                "qdrant_url is required. Set QDRANT_URL environment variable."
+            )
+        self._qdrant_url: str = _qdrant_url
         self._qdrant_collection: str = qdrant_collection
         self._top_k: int = top_k
         self._score_threshold: float | None = score_threshold
@@ -204,7 +210,8 @@ class AdapterSimilarityEnrichment:
 
         # Step 2: Ensure Qdrant is initialized (lazy).
         await self._ensure_qdrant_initialized()
-        assert self._qdrant_handler is not None
+        if self._qdrant_handler is None:
+            raise RuntimeError("Qdrant handler failed to initialize")
 
         # Step 3: Query Qdrant for similar vectors.
         search_results = await self._qdrant_handler.query_similar(
@@ -262,16 +269,27 @@ class AdapterSimilarityEnrichment:
         )
 
     async def close(self) -> None:
-        """Close the embedding HTTP transport client."""
-        await self._embedding_handler._close_http_client()
+        """Close resources held by this adapter.
+
+        HandlerEmbeddingOpenaiCompatible manages its HTTP transport lifecycle
+        internally via MixinLlmHttpTransport and does not expose a public
+        close interface.  The underlying httpx client is short-lived and
+        closed after each request, so no explicit teardown is required here.
+        """
 
     async def _ensure_qdrant_initialized(self) -> None:
         """Lazily initialize HandlerQdrant on the first call.
 
-        Creates a lightweight ``ModelONEXContainer`` for HandlerQdrant interface
+        Creates a minimal ``ModelONEXContainer`` for HandlerQdrant interface
         compliance.  HandlerQdrant stores the container reference but never
-        accesses services during vector operations -- the connection config is
-        passed to ``initialize()`` directly.
+        resolves services from it during ``initialize()`` or ``query_similar()``.
+        The connection config is passed directly to ``initialize()``.
+
+        This is confirmed by ``HandlerQdrant.__init__`` (handler_qdrant.py
+        lines 122-135): ``self._container = container`` is assigned but only
+        retained for future DI-based service resolution.  All current operations
+        (``initialize``, ``query_similar``, et al.) use ``self._client`` and
+        ``self._config`` exclusively.
         """
         if self._qdrant_handler is not None:
             return
@@ -300,11 +318,7 @@ def _format_results_markdown(
         # Include payload metadata if present.
         if result.metadata:
             for key, schema_value in result.metadata.items():
-                value = (
-                    schema_value.to_value()
-                    if hasattr(schema_value, "to_value")
-                    else schema_value
-                )
+                value = str(schema_value)
                 lines.append(f"- **{key}**: {value}")
         lines.append("")
     return "\n".join(lines).rstrip()
