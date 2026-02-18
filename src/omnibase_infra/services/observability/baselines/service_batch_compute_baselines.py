@@ -377,7 +377,7 @@ class ServiceBatchComputeBaselines:
                     sql, self._batch_size, TREATMENT_CONFIDENCE_THRESHOLD
                 )
 
-        count = _parse_execute_count(result)
+        count = parse_execute_count(result)
         logger.debug(
             "Computed baselines_comparisons rows",
             extra={
@@ -489,7 +489,7 @@ class ServiceBatchComputeBaselines:
                     sql, self._batch_size, TREATMENT_CONFIDENCE_THRESHOLD
                 )
 
-        count = _parse_execute_count(result)
+        count = parse_execute_count(result)
         logger.debug(
             "Computed baselines_trend rows",
             extra={
@@ -610,7 +610,7 @@ class ServiceBatchComputeBaselines:
                     sql, self._batch_size, TREATMENT_CONFIDENCE_THRESHOLD
                 )
 
-        count = _parse_execute_count(result)
+        count = parse_execute_count(result)
 
         if count == self._batch_size:
             logger.warning(
@@ -631,7 +631,7 @@ class ServiceBatchComputeBaselines:
         return count
 
 
-def _parse_execute_count(result: str) -> int:
+def parse_execute_count(result: str) -> int:
     """Parse row count from an asyncpg ``execute()`` result string.
 
     asyncpg's ``execute()`` returns status strings such as ``"INSERT 0 42"``
@@ -665,5 +665,5 @@ __all__: list[str] = [
     "DEFAULT_BATCH_SIZE",
     "DEFAULT_QUERY_TIMEOUT",
     "TREATMENT_CONFIDENCE_THRESHOLD",
-    "_parse_execute_count",
+    "parse_execute_count",
 ]
