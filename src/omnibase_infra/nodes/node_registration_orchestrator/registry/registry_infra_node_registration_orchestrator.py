@@ -248,6 +248,7 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.projectors import ProjectionReaderRegistration
     from omnibase_infra.runtime import ProjectorShell
+    from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
 
 
 class RegistryInfraNodeRegistrationOrchestrator:
@@ -285,6 +286,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
         reducer: RegistrationReducerService,
         projector: ProjectorShell | None = None,
         _consul_handler: HandlerConsul | None = None,
+        catalog_service: ServiceTopicCatalog | None = None,
         *,
         require_heartbeat_handler: bool = True,
     ) -> ServiceHandlerRegistry:
@@ -324,6 +326,9 @@ class RegistryInfraNodeRegistrationOrchestrator:
             projector: Projector for state persistence. Required for
                 HandlerNodeHeartbeat to persist heartbeat timestamps.
             consul_handler: Optional Consul handler for service registration.
+            catalog_service: Optional ServiceTopicCatalog for topic catalog queries.
+                Required for HandlerTopicCatalogQuery. When absent, the handler is
+                not registered and topic catalog queries will not be handled.
             require_heartbeat_handler: If True (default), raises ProtocolConfigurationError
                 when projector is None. Set to False only for testing scenarios where
                 heartbeat functionality is intentionally disabled. This creates a
@@ -427,6 +432,9 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 "projection_reader": projection_reader,
                 "reducer": reducer,
             },
+            "HandlerTopicCatalogQuery": {
+                "catalog_service": catalog_service,
+            },
         }
 
         registry = ServiceHandlerRegistry()
@@ -445,6 +453,16 @@ class RegistryInfraNodeRegistrationOrchestrator:
                         "This creates a contract.yaml mismatch (4 handlers defined, only 3 registered). "
                         "Heartbeat events (ModelNodeHeartbeatEvent) will NOT be handled. "
                         "This configuration is intended for testing only."
+                    )
+                    continue
+
+            # Special handling for HandlerTopicCatalogQuery - requires catalog_service
+            if handler_class_name == "HandlerTopicCatalogQuery":
+                if catalog_service is None:
+                    logger.info(
+                        "HandlerTopicCatalogQuery NOT registered: catalog_service not provided. "
+                        "Topic catalog query events (ModelTopicCatalogQuery) will NOT be handled. "
+                        "Provide a ServiceTopicCatalog instance to enable catalog queries."
                     )
                     continue
 

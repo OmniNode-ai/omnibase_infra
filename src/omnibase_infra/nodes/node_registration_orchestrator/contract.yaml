@@ -65,6 +65,7 @@ event_bus:
     - "onex.intent.platform.runtime-tick.v1"
     - "onex.cmd.platform.node-registration-acked.v1"
     - "onex.evt.platform.node-heartbeat.v1"
+    - "onex.cmd.platform.topic-catalog-query.v1"
   publish_topics:
     - "onex.evt.platform.node-registration-result.v1"
     - "onex.evt.platform.node-registration-initiated.v1"
@@ -74,6 +75,8 @@ event_bus:
     - "onex.evt.platform.node-registration-ack-received.v1"
     - "onex.evt.platform.node-became-active.v1"
     - "onex.evt.platform.node-liveness-expired.v1"
+    - "onex.evt.platform.topic-catalog-response.v1"
+    - "onex.evt.platform.topic-catalog-changed.v1"
 input_model:
   name: "ModelOrchestratorInput"
   module: "omnibase_infra.nodes.node_registration_orchestrator.models"
@@ -286,6 +289,15 @@ consumed_events:
     event_type: "NodeHeartbeatEvent"
     description: "Periodic heartbeat from active nodes for liveness tracking"
     direct_handler: true
+  # OMN-2313: Topic catalog query for dashboard consumers
+  # Clients publish a query on topic-catalog-query; runtime responds with a full
+  # catalog snapshot on topic-catalog-response. HandlerTopicCatalogQuery processes
+  # these requests via ServiceTopicCatalog.build_catalog().
+  - topic: "onex.cmd.platform.topic-catalog-query.v1"
+    event_type: "TopicCatalogQuery"
+    message_category: "COMMAND"
+    description: "Request for a topic catalog snapshot from dashboard or other consumers"
+    direct_handler: true
 # Handler Routing Configuration
 # ==============================
 # Declarative mapping of consumed events to handler implementations.
@@ -397,6 +409,20 @@ handler_routing:
       output_events: []
       direct_handler: true
       description: "Updates node liveness tracking via heartbeat"
+    # ModelTopicCatalogQuery -> HandlerTopicCatalogQuery
+    # Topic catalog request-response - dashboard publishes a query; runtime
+    # responds with a full catalog snapshot via ServiceTopicCatalog.
+    - event_model:
+        name: "ModelTopicCatalogQuery"
+        module: "omnibase_infra.models.catalog.model_topic_catalog_query"
+      handler:
+        name: "HandlerTopicCatalogQuery"
+        module: "omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_topic_catalog_query"
+      message_category: "COMMAND"
+      output_events:
+        - "ModelTopicCatalogResponse"
+      direct_handler: true
+      description: "Returns topic catalog snapshot in response to a catalog query"
   # Handler initialization configuration
   # All handlers share the same projection reader dependency
   handler_dependencies:
@@ -409,6 +435,12 @@ handler_routing:
 published_events:
   - topic: "onex.evt.platform.node-registration-result.v1"
     event_type: "NodeRegistrationResultEvent"
+  - topic: "onex.evt.platform.topic-catalog-response.v1"
+    event_type: "TopicCatalogResponse"
+    description: "Full catalog snapshot in response to a TopicCatalogQuery"
+  - topic: "onex.evt.platform.topic-catalog-changed.v1"
+    event_type: "TopicCatalogChanged"
+    description: "Notification published when the topic catalog version changes"
   - topic: "onex.evt.platform.node-registration-initiated.v1"
     event_type: "NodeRegistrationInitiated"
   - topic: "onex.evt.platform.node-registration-accepted.v1"

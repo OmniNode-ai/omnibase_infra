@@ -50,10 +50,14 @@ from omnibase_infra.nodes.node_registration_orchestrator.dispatchers.dispatcher_
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers.dispatcher_runtime_tick import (
     DispatcherRuntimeTick,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.dispatchers.dispatcher_topic_catalog_query import (
+    DispatcherTopicCatalogQuery,
+)
 
 __all__: list[str] = [
     "DispatcherNodeHeartbeat",
     "DispatcherNodeIntrospected",
     "DispatcherNodeRegistrationAcked",
     "DispatcherRuntimeTick",
+    "DispatcherTopicCatalogQuery",
 ]

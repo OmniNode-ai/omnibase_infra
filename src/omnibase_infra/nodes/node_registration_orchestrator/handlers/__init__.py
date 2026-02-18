@@ -46,6 +46,9 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_r
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_runtime_tick import (
     HandlerRuntimeTick,
 )
+from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_topic_catalog_query import (
+    HandlerTopicCatalogQuery,
+)
 
 __all__: list[str] = [
     "DEFAULT_LIVENESS_INTERVAL_SECONDS",
@@ -54,5 +57,6 @@ __all__: list[str] = [
     "HandlerNodeIntrospected",
     "HandlerNodeRegistrationAcked",
     "HandlerRuntimeTick",
+    "HandlerTopicCatalogQuery",
     "get_liveness_interval_seconds",
 ]
