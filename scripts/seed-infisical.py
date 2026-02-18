@@ -258,6 +258,13 @@ def _do_seed(
     """
     from uuid import UUID
 
+    # Direct import of AdapterInfisical is intentional here.
+    # This script is a write-path bootstrap admin tool, not application runtime
+    # code. HandlerInfisical is read-only (get_secret / list_secrets / batch);
+    # no write-capable handler exists. Seeding Infisical requires create_secret()
+    # and update_secret(), which are only available on the adapter directly.
+    # Bootstrap admin scripts are an explicitly permitted exception to the
+    # no-direct-import rule documented in adapter_infisical.py.
     try:
         from pydantic import SecretStr
 
@@ -386,6 +393,7 @@ def _do_export(*, reveal: bool = False) -> bool:
     """
     from uuid import UUID
 
+    # Direct import of AdapterInfisical is intentional here (see _do_seed comment).
     try:
         from pydantic import SecretStr
 

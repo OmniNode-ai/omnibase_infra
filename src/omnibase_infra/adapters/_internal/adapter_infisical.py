@@ -9,7 +9,11 @@ Those cross-cutting concerns belong to ``HandlerInfisical``.
 Architecture Rule (OMN-2286):
     This adapter lives in ``_internal/`` and MUST NOT be imported directly
     by application code. All access goes through ``HandlerInfisical``.
-    Only handler code and tests may import this module.
+    Only handler code, tests, and bootstrap admin scripts may import this
+    module directly. Bootstrap admin scripts (e.g. ``scripts/seed-infisical.py``)
+    are an explicit exception because they require write operations
+    (``create_secret``, ``update_secret``) that ``HandlerInfisical`` intentionally
+    does not expose.
 
 Circuit Breaking:
     This adapter deliberately omits circuit-breaking logic. Per the

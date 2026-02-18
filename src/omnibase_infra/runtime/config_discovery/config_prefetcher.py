@@ -24,8 +24,6 @@ Design Decisions:
 
 .. versionchanged:: 0.10.1
     ``ModelPrefetchResult`` renamed from ``PrefetchResult``.
-    Class ``ConfigPrefetcher`` renamed to ``ConfigPrefetcher``.
-    Dataclass ``PrefetchResult`` renamed to ``ModelPrefetchResult``.
 """
 
 from __future__ import annotations

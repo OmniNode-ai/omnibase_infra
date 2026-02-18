@@ -736,6 +736,7 @@ class HandlerInfisical(
 
     def get_secret_sync(
         self,
+        *,
         secret_name: str,
         project_id: str | None = None,
         environment_slug: str | None = None,
