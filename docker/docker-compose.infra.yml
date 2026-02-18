@@ -340,6 +340,11 @@ services:
       ONEX_INPUT_TOPIC: ${ONEX_INPUT_TOPIC:-requests}
       ONEX_OUTPUT_TOPIC: ${ONEX_OUTPUT_TOPIC:-responses}
       ONEX_GROUP_ID: ${ONEX_GROUP_ID:-onex-runtime-main}
+      # OMN-2342: Gate intelligence introspection/heartbeat publishing to this
+      # container only. Workers and effects containers inherit x-runtime-env but
+      # do NOT set this flag, so they process intelligence events without
+      # starting duplicate heartbeat loops for the same deterministic node IDs.
+      OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: "true"
     ports:
       - "${RUNTIME_MAIN_PORT:-8085}:8085"
     stop_grace_period: 90s
