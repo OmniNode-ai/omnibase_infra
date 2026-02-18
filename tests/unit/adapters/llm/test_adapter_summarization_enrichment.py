@@ -217,6 +217,51 @@ class TestAdapterSummarizationEnrichmentPassThrough:
 
 
 # ---------------------------------------------------------------------------
+# enrich() -- token_threshold=0 edge case
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterSummarizationEnrichmentZeroThreshold:
+    """Tests for adapter constructed with token_threshold=0.
+
+    When token_threshold=0, every non-empty context has a token count > 0
+    and therefore always exceeds the threshold, forcing the LLM path.
+    """
+
+    @pytest.mark.asyncio
+    async def test_zero_threshold_takes_llm_path(self) -> None:
+        """With token_threshold=0, a short context must take the LLM path."""
+        adapter = _make_adapter(token_threshold=0, model="qwen2.5-72b")
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("Tiny summary.")
+        )
+        # 5 tokens worth of context (20 chars at 4 chars/token).
+        context = "x" * (5 * _CHARS_PER_TOKEN)
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        # LLM handler must have been called.
+        adapter._handler.handle.assert_awaited_once()  # type: ignore[attr-defined]
+        # model_used must be the LLM model, NOT the passthrough sentinel.
+        assert result.model_used == "qwen2.5-72b"
+        assert result.model_used != _PASSTHROUGH_MODEL
+
+    @pytest.mark.asyncio
+    async def test_zero_threshold_summary_returned(self) -> None:
+        """With token_threshold=0, the LLM summary is used as the result."""
+        adapter = _make_adapter(token_threshold=0)
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("Tiny summary.")
+        )
+        context = "x" * (5 * _CHARS_PER_TOKEN)
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.summary_markdown == "Tiny summary."
+
+
+# ---------------------------------------------------------------------------
 # enrich() -- above threshold (LLM call, successful summarization)
 # ---------------------------------------------------------------------------
 

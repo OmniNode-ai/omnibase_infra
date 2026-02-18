@@ -221,7 +221,8 @@ class AdapterSummarizationEnrichment:
             - ``token_count``: Estimated token count of the output
             - ``relevance_score``: 0.80 for successful summarization,
               1.0 for pass-through or net-guard bypass
-            - ``model_used``: Model identifier (empty string for pass-through)
+            - ``model_used``: Model identifier, or ``"passthrough"`` sentinel
+              when context is below threshold and no LLM was invoked
             - ``prompt_version``: Template version (``"v1.0"``)
             - ``latency_ms``: End-to-end wall time in milliseconds
 
