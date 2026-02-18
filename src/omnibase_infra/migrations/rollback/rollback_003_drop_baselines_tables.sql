@@ -4,6 +4,6 @@
 -- Date: 2026-02-18
 -- Ticket: OMN-2305
 
-DROP TABLE IF EXISTS baselines_breakdown;
-DROP TABLE IF EXISTS baselines_trend;
-DROP TABLE IF EXISTS baselines_comparisons;
+DROP TABLE IF EXISTS baselines_breakdown CASCADE;
+DROP TABLE IF EXISTS baselines_trend CASCADE;
+DROP TABLE IF EXISTS baselines_comparisons CASCADE;

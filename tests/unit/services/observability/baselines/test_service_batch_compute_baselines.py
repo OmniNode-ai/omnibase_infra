@@ -351,3 +351,29 @@ class TestServiceBatchComputeBaselines:
         assert "comparisons" in raw_payload
         assert "trend" in raw_payload
         assert "breakdown" in raw_payload
+
+    @pytest.mark.asyncio
+    async def test_emit_snapshot_skipped_when_all_phases_fail(
+        self, mock_pool: MagicMock
+    ) -> None:
+        """publish_envelope is NOT called when all phases fail and total_rows == 0."""
+        conn = mock_pool._test_conn
+
+        async def execute_side_effect(sql: str, *args: object, **kwargs: object) -> str:
+            if "SET LOCAL" in str(sql):
+                return "SET"
+            raise RuntimeError("DB unavailable")
+
+        conn.execute = AsyncMock(side_effect=execute_side_effect)
+
+        mock_event_bus = AsyncMock()
+        mock_event_bus.publish_envelope = AsyncMock()
+
+        batch = ServiceBatchComputeBaselines(
+            mock_pool, batch_size=100, event_bus=mock_event_bus
+        )
+        result = await batch.compute_and_persist()
+
+        assert result.total_rows == 0
+        assert result.has_errors is True
+        mock_event_bus.publish_envelope.assert_not_called()

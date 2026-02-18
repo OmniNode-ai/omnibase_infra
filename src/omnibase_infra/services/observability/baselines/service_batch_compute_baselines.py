@@ -242,11 +242,21 @@ class ServiceBatchComputeBaselines:
         )
 
         if self._event_bus is not None:
-            await self._emit_snapshot(
-                correlation_id=effective_correlation_id,
-                computed_at=completed_at,
-                started_at=started_at,
-            )
+            total_rows = result.total_rows
+            if total_rows == 0:
+                logger.warning(
+                    "Skipping baselines snapshot emit: no rows written in any phase",
+                    extra={
+                        "correlation_id": str(effective_correlation_id),
+                        "has_errors": result.has_errors,
+                    },
+                )
+            else:
+                await self._emit_snapshot(
+                    correlation_id=effective_correlation_id,
+                    computed_at=completed_at,
+                    started_at=started_at,
+                )
 
         return result
 
@@ -790,8 +800,11 @@ class ServiceBatchComputeBaselines:
             logger.warning(
                 "baselines_breakdown phase returned exactly batch_size rows; "
                 "some agents may have been truncated. "
-                "Increase batch_size if more than %d distinct agents exist.",
+                "Breakdown truncated to %d of at least %d agents "
+                "(true distinct agent count may be higher). "
+                "Increase batch_size if more agents should be included.",
                 self._batch_size,
+                self._batch_size + 1,
                 extra={"correlation_id": str(correlation_id)},
             )
 

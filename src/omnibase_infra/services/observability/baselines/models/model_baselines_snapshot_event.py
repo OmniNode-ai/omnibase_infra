@@ -10,7 +10,7 @@ The omnidash consumer projects this snapshot into the local
 ``omnidash_analytics`` read-model, replacing the previous snapshot.
 
 Contract stability:
-    - ``snapshot_id`` is a UUID generated at emit time; stable per batch run.
+    - ``snapshot_id`` is a UUID generated fresh at each emit call.
     - ``contract_version`` is incremented only on breaking schema changes.
 
 Related Tickets:
@@ -40,10 +40,9 @@ class ModelBaselinesSnapshotEvent(BaseModel):
     """Full baselines snapshot emitted after each batch computation.
 
     Consumers should replace their local projection on receipt.
-    ``snapshot_id`` is stable across retries of the same batch run.
 
     Attributes:
-        snapshot_id: UUID identifying this specific computation run.
+        snapshot_id: UUID generated fresh at emit time for this specific snapshot.
         contract_version: Schema version (bump only on breaking changes).
         computed_at_utc: When the batch computation completed.
         window_start_utc: Earliest data point in the computation window.
