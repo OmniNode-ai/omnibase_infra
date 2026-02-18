@@ -743,9 +743,9 @@ class TestModelSchemaManifest:
         with pytest.raises(Exception):
             OMNIBASE_INFRA_SCHEMA_MANIFEST.owner_service = "hacked"  # type: ignore[misc]
 
-    def test_canonical_manifest_has_16_tables(self) -> None:
-        """Canonical manifest declares 16 tables."""
-        assert len(OMNIBASE_INFRA_SCHEMA_MANIFEST.tables) == 16
+    def test_canonical_manifest_has_19_tables(self) -> None:
+        """Canonical manifest declares 19 tables."""
+        assert len(OMNIBASE_INFRA_SCHEMA_MANIFEST.tables) == 19
 
     def test_canonical_manifest_tables_are_sorted(self) -> None:
         """Tables in canonical manifest are alphabetically sorted."""
