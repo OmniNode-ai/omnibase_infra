@@ -16,6 +16,7 @@ Related Tickets:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -199,7 +200,10 @@ async def test_handler_malformed_payload_returns_warning() -> None:
         source="test",
     )
 
-    output = await handler.handle(envelope)
+    # Cast to expected type to satisfy mypy; the wrong payload type is intentional
+    # to test the handler's isinstance guard.
+    typed_envelope = cast("ModelEventEnvelope[ModelTopicCatalogQuery]", envelope)
+    output = await handler.handle(typed_envelope)
 
     assert len(output.events) == 1
     response = output.events[0]

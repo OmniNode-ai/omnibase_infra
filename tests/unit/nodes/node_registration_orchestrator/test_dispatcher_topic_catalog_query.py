@@ -61,7 +61,7 @@ def _make_handler(
     else:
         from omnibase_core.enums import EnumNodeKind
 
-        handler_output = ModelHandlerOutput(
+        handler_output: ModelHandlerOutput[object] = ModelHandlerOutput(
             input_envelope_id=uuid4(),
             correlation_id=uuid4(),
             handler_id="handler-topic-catalog-query",
@@ -265,7 +265,7 @@ async def test_dispatcher_result_has_valid_timestamps() -> None:
     assert result.started_at is not None
     assert result.completed_at is not None
     assert result.completed_at >= result.started_at
-    assert result.duration_ms >= 0.0
+    assert (result.duration_ms or 0.0) >= 0.0
 
 
 # ---------------------------------------------------------------------------
