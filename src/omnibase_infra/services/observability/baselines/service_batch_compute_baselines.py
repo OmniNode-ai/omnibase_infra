@@ -62,8 +62,6 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
 from omnibase_infra.runtime.emit_daemon.event_registry import EventRegistry
 from omnibase_infra.runtime.emit_daemon.topics import (
     BASELINES_COMPUTED_REGISTRATION,
@@ -269,14 +267,7 @@ class ServiceBatchComputeBaselines:
             started_at: When the batch computation started (used as window_start).
         """
         if self._event_bus is None:
-            raise InfraUnavailableError(
-                "_emit_snapshot called with no event_bus configured",
-                context=ModelInfraErrorContext.with_correlation(
-                    correlation_id=correlation_id,
-                    transport_type=EnumInfraTransportType.KAFKA,
-                    operation="_emit_snapshot",
-                ),
-            )
+            return
 
         try:
             snapshot_id = uuid4()
@@ -688,6 +679,12 @@ class ServiceBatchComputeBaselines:
             batch_size, agents beyond the cap are silently skipped.
             A warning is logged when the result count equals batch_size.
 
+            **Alphabetical truncation bias**: The inner CTE uses
+            ``ORDER BY selected_agent`` before ``LIMIT $1``. This means
+            the hard cap excludes agents whose names sort alphabetically
+            last, not agents with the fewest sessions. High-traffic agents
+            may be silently excluded if their names sort late.
+
         Args:
             correlation_id: Correlation ID for tracing.
 
@@ -724,6 +721,7 @@ class ServiceBatchComputeBaselines:
                 ) action_stats ON TRUE
                 WHERE rd.selected_agent IS NOT NULL
                     AND rd.correlation_id IS NOT NULL
+                    AND rd.created_at >= NOW() - INTERVAL '90 days'
             ),
             agent_agg AS (
                 SELECT

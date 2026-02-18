@@ -50,8 +50,7 @@ class ModelBatchComputeBaselinesResult(BaseModel):
         default_factory=lambda: datetime.now(UTC),
         description="When the computation started.",
     )
-    completed_at: datetime | None = Field(
-        default=None,
+    completed_at: datetime = Field(
         description="When the computation completed.",
     )
 

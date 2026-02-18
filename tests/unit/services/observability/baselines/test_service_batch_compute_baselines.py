@@ -19,6 +19,10 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.services.observability.baselines.models.model_baselines_snapshot_event import (
+    ModelBaselinesSnapshotEvent,
+)
 from omnibase_infra.services.observability.baselines.models.model_batch_compute_baselines_result import (
     ModelBatchComputeBaselinesResult,
 )
@@ -60,42 +64,47 @@ class TestModelBatchComputeBaselinesResult:
     """Tests for ModelBatchComputeBaselinesResult Pydantic model."""
 
     def test_total_rows_sums_all(self) -> None:
+        now = datetime.now(UTC)
         result = ModelBatchComputeBaselinesResult(
             comparisons_rows=10,
             trend_rows=20,
             breakdown_rows=5,
+            completed_at=now,
         )
         assert result.total_rows == 35
 
     def test_total_rows_default_zero(self) -> None:
-        result = ModelBatchComputeBaselinesResult()
+        now = datetime.now(UTC)
+        result = ModelBatchComputeBaselinesResult(completed_at=now)
         assert result.total_rows == 0
 
     def test_has_errors_false_when_empty(self) -> None:
-        result = ModelBatchComputeBaselinesResult()
+        now = datetime.now(UTC)
+        result = ModelBatchComputeBaselinesResult(completed_at=now)
         assert result.has_errors is False
 
     def test_has_errors_true_when_errors_present(self) -> None:
-        result = ModelBatchComputeBaselinesResult(errors=("phase 1 failed",))
+        now = datetime.now(UTC)
+        result = ModelBatchComputeBaselinesResult(
+            errors=("phase 1 failed",), completed_at=now
+        )
         assert result.has_errors is True
 
     def test_default_started_at_is_utc(self) -> None:
-        result = ModelBatchComputeBaselinesResult()
-        # started_at should be a recent timestamp
         now = datetime.now(UTC)
+        result = ModelBatchComputeBaselinesResult(completed_at=now)
+        # started_at should be a recent timestamp
         delta = abs((now - result.started_at).total_seconds())
         assert delta < 5.0
 
-    def test_completed_at_defaults_none(self) -> None:
-        result = ModelBatchComputeBaselinesResult()
-        assert result.completed_at is None
-
     def test_all_rows_and_errors(self) -> None:
+        now = datetime.now(UTC)
         result = ModelBatchComputeBaselinesResult(
             comparisons_rows=3,
             trend_rows=14,
             breakdown_rows=7,
             errors=("phase 2 failed",),
+            completed_at=now,
         )
         assert result.total_rows == 24
         assert result.has_errors is True
@@ -155,7 +164,7 @@ class TestServiceBatchComputeBaselines:
         assert result.breakdown_rows == 3
         assert result.total_rows == 24
         assert result.has_errors is False
-        assert result.completed_at is not None
+        assert result.completed_at >= result.started_at
 
     @pytest.mark.asyncio
     async def test_compute_and_persist_phase_failure_is_isolated(
@@ -249,7 +258,7 @@ class TestServiceBatchComputeBaselines:
         batch = ServiceBatchComputeBaselines(mock_pool, batch_size=100)
         result = await batch.compute_and_persist()
 
-        assert result.started_at <= result.completed_at  # type: ignore[operator]
+        assert result.started_at <= result.completed_at
 
     @pytest.mark.asyncio
     async def test_breakdown_batch_size_warning_logged(
@@ -299,3 +308,46 @@ class TestServiceBatchComputeBaselines:
 
         assert result.total_rows == 0
         assert result.has_errors is False
+
+    @pytest.mark.asyncio
+    async def test_event_bus_publish_envelope_called_with_snapshot(
+        self, mock_pool: MagicMock
+    ) -> None:
+        """publish_envelope is called on the event_bus with a ModelBaselinesSnapshotEvent payload."""
+        conn = mock_pool._test_conn
+
+        async def execute_side_effect(sql: str, *args: object, **kwargs: object) -> str:
+            if "SET LOCAL" in str(sql):
+                return "SET"
+            if "INSERT INTO baselines_comparisons" in str(sql):
+                return "INSERT 0 2"
+            if "INSERT INTO baselines_trend" in str(sql):
+                return "INSERT 0 4"
+            if "INSERT INTO baselines_breakdown" in str(sql):
+                return "INSERT 0 1"
+            return "INSERT 0 0"
+
+        conn.execute = AsyncMock(side_effect=execute_side_effect)
+        # _emit_snapshot reads back rows via conn.fetch; return empty lists
+        conn.fetch = AsyncMock(return_value=[])
+
+        mock_event_bus = AsyncMock()
+        mock_event_bus.publish_envelope = AsyncMock()
+
+        batch = ServiceBatchComputeBaselines(
+            mock_pool, batch_size=100, event_bus=mock_event_bus
+        )
+        await batch.compute_and_persist()
+
+        mock_event_bus.publish_envelope.assert_called_once()
+        call_args = mock_event_bus.publish_envelope.call_args
+        envelope = call_args.args[0]
+        assert isinstance(envelope, ModelEventEnvelope)
+        # The payload is a dict (model_dump result injected with metadata);
+        # deserialise to verify it carries a valid ModelBaselinesSnapshotEvent shape.
+        raw_payload: dict[str, object] = envelope.payload
+        assert "snapshot_id" in raw_payload
+        assert "computed_at_utc" in raw_payload
+        assert "comparisons" in raw_payload
+        assert "trend" in raw_payload
+        assert "breakdown" in raw_payload
