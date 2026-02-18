@@ -134,11 +134,14 @@ class TestConfigPrefetcher:
         assert "POSTGRES_DSN" in result.resolved
         assert result.resolved["POSTGRES_DSN"].get_secret_value() == "from-env"
         # Handler should NOT have been called for POSTGRES_DSN
-        for call in handler.get_secret_sync.call_args_list:
-            assert (
-                call.kwargs.get("secret_name") != "POSTGRES_DSN"
-                or call.args[0] != "POSTGRES_DSN"
-            )
+        postgres_dsn_calls = [
+            call
+            for call in handler.get_secret_sync.call_args_list
+            if call.kwargs.get("secret_name") == "POSTGRES_DSN"
+        ]
+        assert len(postgres_dsn_calls) == 0, (
+            "POSTGRES_DSN should not be fetched from Infisical when present in env"
+        )
 
     def test_prefetch_env_dependencies(self) -> None:
         """Should prefetch explicit env dependencies."""
@@ -246,6 +249,30 @@ class TestConfigPrefetcher:
         applied = prefetcher.apply_to_environment(result)
         assert applied == 0
         assert os.environ.get("EXISTING_KEY") == "original"
+
+    def test_prefetch_missing_required_env_dep_raises_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing env-dep key with infisical_required=True must go to errors."""
+        # Ensure the key is absent from the process environment
+        monkeypatch.delenv("MISSING_ENV_DEP_KEY", raising=False)
+
+        # Handler returns None — key is not in Infisical either
+        handler = self._make_handler(secrets={})
+        prefetcher = ConfigPrefetcher(handler=handler, infisical_required=True)
+        reqs = self._make_requirements(
+            env_deps=[("MISSING_ENV_DEP_KEY", "/test/contract.yaml")]
+        )
+
+        result = prefetcher.prefetch(reqs)
+
+        assert "MISSING_ENV_DEP_KEY" in result.errors, (
+            "Key missing from both env and Infisical must appear in errors when "
+            "infisical_required=True"
+        )
+        assert "MISSING_ENV_DEP_KEY" not in result.missing, (
+            "Key must not be in missing when infisical_required=True"
+        )
 
     def test_empty_requirements(self) -> None:
         """Should handle empty requirements gracefully."""

@@ -248,6 +248,11 @@ class ConfigPrefetcher:
                 value = self._fetch_key(key, env_spec)
                 if value is not None:
                     result.resolved[key] = value
+                elif self._infisical_required:
+                    result.errors[key] = (
+                        f"Required env dependency key {key} not found at"
+                        f" {env_spec.infisical_folder}"
+                    )
                 else:
                     result.missing.append(key)
 

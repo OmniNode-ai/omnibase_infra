@@ -134,8 +134,18 @@ def _extract_requirements(
     result: list[dict[str, str]] = []
     seen: set[str] = set()
 
-    # Build specs from transport types
+    # Build specs from transport types, excluding bootstrap-only transports.
+    # Bootstrap transports (e.g. INFISICAL) must come from the environment,
+    # not from Infisical itself -- seeding their keys into Infisical would
+    # create a circular dependency (Infisical needs those credentials to start).
     for transport in reqs.transport_types:
+        if transport in transport_map._BOOTSTRAP_TRANSPORTS:
+            logger.debug(
+                "Skipping bootstrap transport %s in seed (credentials come "
+                "from env, not Infisical)",
+                transport.value,
+            )
+            continue
         spec = transport_map.shared_spec(transport)
         for key in spec.keys:
             if key not in seen:
@@ -195,7 +205,7 @@ def _print_diff_summary(
         if create_missing:
             action = "CREATE"
         if set_values and has_value:
-            action = "OVERWRITE" if overwrite_existing else "SET"
+            action = "OVERWRITE" if overwrite_existing else "SET (if new)"
         elif set_values and not has_value:
             action = "CREATE (no value)"
 

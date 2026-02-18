@@ -2578,6 +2578,12 @@ class RuntimeHostProcess:
                     )
                     break
 
+            # Track any inline adapter created below so we can shut it down
+            # after prefetch, regardless of success or failure.
+            # NOTE: typed as object to avoid a forward reference -- AdapterInfisical
+            # is imported lazily inside the conditional block below.
+            _inline_adapter: object = None
+
             if handler is None:
                 # Build a lightweight adapter from env vars.  This avoids
                 # depending on the handler registry which may not contain
@@ -2613,8 +2619,8 @@ class RuntimeHostProcess:
                     project_id=_UUID(project_id),
                     environment_slug=env_slug,
                 )
-                adapter = AdapterInfisical(adapter_config)
-                adapter.initialize()
+                _inline_adapter = AdapterInfisical(adapter_config)
+                _inline_adapter.initialize()
 
                 # Wrap the adapter in a thin shim that satisfies
                 # ProtocolSecretResolver (get_secret_sync).
@@ -2644,40 +2650,51 @@ class RuntimeHostProcess:
                         except Exception:
                             return None
 
-                handler = AdapterSecretResolver(adapter, adapter_config)
+                handler = AdapterSecretResolver(_inline_adapter, adapter_config)
                 logger.info("Built lightweight Infisical adapter for config prefetch")
 
-            # Step 3: Prefetch through the handler
-            service_slug = self._node_identity.service
-            infisical_required = os.environ.get("INFISICAL_REQUIRED", "").lower() in (
-                "true",
-                "1",
-                "yes",
-            )
+            try:
+                # Step 3: Prefetch through the handler
+                service_slug = self._node_identity.service
+                infisical_required = os.environ.get(
+                    "INFISICAL_REQUIRED", ""
+                ).lower() in (
+                    "true",
+                    "1",
+                    "yes",
+                )
 
-            prefetcher = ConfigPrefetcher(
-                handler=handler,
-                service_slug=service_slug,
-                infisical_required=infisical_required,
-            )
-            result = prefetcher.prefetch(requirements)
+                prefetcher = ConfigPrefetcher(
+                    handler=handler,
+                    service_slug=service_slug,
+                    infisical_required=infisical_required,
+                )
+                result = prefetcher.prefetch(requirements)
 
-            # Step 4: Apply to environment
-            applied = prefetcher.apply_to_environment(result)
+                # Step 4: Apply to environment
+                applied = prefetcher.apply_to_environment(result)
 
-            logger.info(
-                "Config prefetch complete",
-                extra={
-                    "resolved": result.success_count,
-                    "missing": len(result.missing),
-                    "errors": len(result.errors),
-                    "applied_to_env": applied,
-                },
-            )
+                logger.info(
+                    "Config prefetch complete",
+                    extra={
+                        "resolved": result.success_count,
+                        "missing": len(result.missing),
+                        "errors": len(result.errors),
+                        "applied_to_env": applied,
+                    },
+                )
 
-            if result.errors:
-                for key, err in result.errors.items():
-                    logger.warning("Config prefetch error for %s: %s", key, err)
+                if result.errors:
+                    for key, err in result.errors.items():
+                        logger.warning("Config prefetch error for %s: %s", key, err)
+            finally:
+                # Always shut down the inline adapter to release SDK resources.
+                # Adapters found in the handler registry manage their own lifecycle
+                # and must NOT be shut down here.
+                # Use hasattr to avoid a mypy error on the intentionally-broad
+                # 'object' annotation used to sidestep the lazy import.
+                if _inline_adapter is not None and hasattr(_inline_adapter, "shutdown"):
+                    _inline_adapter.shutdown()  # type: ignore[union-attr]
 
         except Exception as exc:
             # Prefetch failures are non-fatal.
