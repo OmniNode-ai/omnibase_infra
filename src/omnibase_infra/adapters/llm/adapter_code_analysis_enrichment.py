@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Code analysis enrichment handler for ProtocolContextEnrichment.
+"""Code analysis enrichment adapter for ProtocolContextEnrichment.
 
 Reads git diff of modified files, calls the Coder-14B LLM to analyze
 changes, and returns a ContractEnrichmentResult with structured markdown
@@ -15,7 +15,7 @@ Architecture:
 
 Git Diff Strategy:
     The ``context`` parameter is treated as the raw git diff text to analyze.
-    When empty, the handler falls back to running ``git diff HEAD`` in the
+    When empty, the adapter falls back to running ``git diff HEAD`` in the
     current working directory.  The ``prompt`` parameter provides the user
     query context so the LLM can focus its analysis on relevant aspects.
 
@@ -115,11 +115,11 @@ Produce a Markdown report with these sections:
 """
 
 
-class HandlerCodeAnalysisEnrichment:
-    """Context enrichment handler that analyzes git diffs via Coder-14B.
+class AdapterCodeAnalysisEnrichment:
+    """Context enrichment adapter that analyzes git diffs via Coder-14B.
 
     Implements ``ProtocolContextEnrichment``.  The ``context`` parameter
-    is treated as raw git diff text.  When empty, the handler runs
+    is treated as raw git diff text.  When empty, the adapter runs
     ``git diff HEAD`` in the current working directory as a fallback.
 
     Attributes:
@@ -127,8 +127,8 @@ class HandlerCodeAnalysisEnrichment:
         handler_category: ``EFFECT`` -- performs external I/O (git + LLM HTTP).
 
     Example:
-        >>> handler = HandlerCodeAnalysisEnrichment()
-        >>> result = await handler.enrich(
+        >>> adapter = AdapterCodeAnalysisEnrichment()
+        >>> result = await adapter.enrich(
         ...     prompt="What functions were affected?",
         ...     context="diff --git a/foo.py ...",
         ... )
@@ -143,7 +143,7 @@ class HandlerCodeAnalysisEnrichment:
         temperature: float = _DEFAULT_TEMPERATURE,
         api_key: str | None = None,
     ) -> None:
-        """Initialize the handler.
+        """Initialize the adapter.
 
         Args:
             base_url: Base URL of the Coder-14B endpoint.  Defaults to the
@@ -342,8 +342,9 @@ class HandlerCodeAnalysisEnrichment:
                 await proc.wait()
             raise
         except OSError as exc:
-            logger.debug("git diff HEAD failed (OSError): %s", exc)
+            # Sanitize to avoid logging file paths or sensitive OS error details.
+            logger.debug("git diff HEAD failed (OSError): %s", str(exc)[:100])
             return ""
 
 
-__all__: list[str] = ["HandlerCodeAnalysisEnrichment"]
+__all__: list[str] = ["AdapterCodeAnalysisEnrichment"]

@@ -19,8 +19,8 @@ from omnibase_infra.adapters.llm.adapter_llm_tool_provider import (
     AdapterLlmToolProvider,
 )
 from omnibase_infra.adapters.llm.adapter_model_router import AdapterModelRouter
-from omnibase_infra.adapters.llm.handler_code_analysis_enrichment import (
-    HandlerCodeAnalysisEnrichment,
+from omnibase_infra.adapters.llm.adapter_code_analysis_enrichment import (
+    AdapterCodeAnalysisEnrichment,
 )
 from omnibase_infra.adapters.llm.model_llm_adapter_request import (
     ModelLlmAdapterRequest,
@@ -42,7 +42,7 @@ __all__: list[str] = [
     "AdapterLlmProviderOpenai",
     "AdapterLlmToolProvider",
     "AdapterModelRouter",
-    "HandlerCodeAnalysisEnrichment",
+    "AdapterCodeAnalysisEnrichment",
     "ModelLlmAdapterRequest",
     "ModelLlmAdapterResponse",
     "ModelLlmHealthResponse",

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Unit tests for HandlerCodeAnalysisEnrichment.
+"""Unit tests for AdapterCodeAnalysisEnrichment.
 
 Covers:
 - handler_type / handler_category properties
@@ -21,10 +21,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from omnibase_infra.adapters.llm.handler_code_analysis_enrichment import (
+from omnibase_infra.adapters.llm.adapter_code_analysis_enrichment import (
     _MAX_DIFF_CHARS,
     _PROMPT_VERSION,
-    HandlerCodeAnalysisEnrichment,
+    AdapterCodeAnalysisEnrichment,
 )
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_spi.contracts.enrichment.contract_enrichment_result import (
@@ -36,18 +36,18 @@ from omnibase_spi.contracts.enrichment.contract_enrichment_result import (
 # ---------------------------------------------------------------------------
 
 
-def _make_handler(**kwargs: object) -> HandlerCodeAnalysisEnrichment:
-    """Build a HandlerCodeAnalysisEnrichment with a mocked transport."""
-    handler = HandlerCodeAnalysisEnrichment(
+def _make_adapter(**kwargs: object) -> AdapterCodeAnalysisEnrichment:
+    """Build an AdapterCodeAnalysisEnrichment with a mocked transport."""
+    adapter = AdapterCodeAnalysisEnrichment(
         base_url="http://localhost:8000",
         **kwargs,  # type: ignore[arg-type]
     )
     # Replace the real transport and inner handler with mocks so tests do not
     # make actual HTTP calls.
-    handler._transport = MagicMock()
-    handler._transport.close = AsyncMock()
-    handler._handler = AsyncMock()
-    return handler
+    adapter._transport = MagicMock()
+    adapter._transport.close = AsyncMock()
+    adapter._handler = AsyncMock()
+    return adapter
 
 
 def _make_llm_response(generated_text: str) -> MagicMock:
@@ -63,16 +63,16 @@ def _make_llm_response(generated_text: str) -> MagicMock:
 
 
 @pytest.mark.unit
-class TestHandlerCodeAnalysisEnrichmentProperties:
+class TestAdapterCodeAnalysisEnrichmentProperties:
     """Tests for classification properties."""
 
     def test_handler_type(self) -> None:
-        handler = _make_handler()
-        assert handler.handler_type is EnumHandlerType.INFRA_HANDLER
+        adapter = _make_adapter()
+        assert adapter.handler_type is EnumHandlerType.INFRA_HANDLER
 
     def test_handler_category(self) -> None:
-        handler = _make_handler()
-        assert handler.handler_category is EnumHandlerTypeCategory.EFFECT
+        adapter = _make_adapter()
+        assert adapter.handler_category is EnumHandlerTypeCategory.EFFECT
 
 
 # ---------------------------------------------------------------------------
@@ -81,19 +81,19 @@ class TestHandlerCodeAnalysisEnrichmentProperties:
 
 
 @pytest.mark.unit
-class TestHandlerCodeAnalysisEnrichmentEnrich:
+class TestAdapterCodeAnalysisEnrichmentEnrich:
     """Tests for the enrich() method."""
 
     @pytest.mark.asyncio
     async def test_enrich_with_provided_diff(self) -> None:
         """When context is non-empty, enrich() uses it as the diff."""
-        handler = _make_handler()
+        adapter = _make_adapter()
         diff = "diff --git a/foo.py b/foo.py\n+def bar():\n+    pass\n"
-        handler._handler.handle = AsyncMock(
+        adapter._handler.handle = AsyncMock(
             return_value=_make_llm_response("## Analysis\n\nfunction bar added")
         )
 
-        result = await handler.enrich(
+        result = await adapter.enrich(
             prompt="What changed?",
             context=diff,
         )
@@ -108,34 +108,26 @@ class TestHandlerCodeAnalysisEnrichmentEnrich:
         assert result.latency_ms >= 0.0
 
         # LLM handler must have been called once.
-        handler._handler.handle.assert_awaited_once()
+        adapter._handler.handle.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_enrich_context_whitespace_triggers_git_fallback(self) -> None:
         """Whitespace-only context triggers git diff fallback."""
-        handler = _make_handler()
+        adapter = _make_adapter()
         git_diff_output = "diff --git a/bar.py b/bar.py\n-old\n+new\n"
-        handler._handler.handle = AsyncMock(
+        adapter._handler.handle = AsyncMock(
             return_value=_make_llm_response("## Analysis\n\nrelevant changes")
         )
 
-        with patch.object(
-            HandlerCodeAnalysisEnrichment,
-            "_read_git_diff",
-            new_callable=lambda: lambda *a, **kw: asyncio.coroutine(
-                lambda: git_diff_output
-            )(),
+        with patch(
+            "omnibase_infra.adapters.llm.adapter_code_analysis_enrichment"
+            ".AdapterCodeAnalysisEnrichment._read_git_diff",
+            new=AsyncMock(return_value=git_diff_output),
         ):
-            # Use a proper AsyncMock for the static method patch.
-            with patch(
-                "omnibase_infra.adapters.llm.handler_code_analysis_enrichment"
-                ".HandlerCodeAnalysisEnrichment._read_git_diff",
-                new=AsyncMock(return_value=git_diff_output),
-            ):
-                result = await handler.enrich(
-                    prompt="What changed?",
-                    context="   ",
-                )
+            result = await adapter.enrich(
+                prompt="What changed?",
+                context="   ",
+            )
 
         assert result.enrichment_type == "code_analysis"
         assert "relevant changes" in result.summary_markdown
@@ -143,18 +135,18 @@ class TestHandlerCodeAnalysisEnrichmentEnrich:
     @pytest.mark.asyncio
     async def test_enrich_empty_context_uses_git_diff(self) -> None:
         """Empty context triggers git diff fallback and returns analysis."""
-        handler = _make_handler()
+        adapter = _make_adapter()
         git_diff_output = "diff --git a/x.py b/x.py\n+x = 1\n"
-        handler._handler.handle = AsyncMock(
+        adapter._handler.handle = AsyncMock(
             return_value=_make_llm_response("## Analysis\n\nAdded constant x")
         )
 
         with patch(
-            "omnibase_infra.adapters.llm.handler_code_analysis_enrichment"
-            ".HandlerCodeAnalysisEnrichment._read_git_diff",
+            "omnibase_infra.adapters.llm.adapter_code_analysis_enrichment"
+            ".AdapterCodeAnalysisEnrichment._read_git_diff",
             new=AsyncMock(return_value=git_diff_output),
         ):
-            result = await handler.enrich(prompt="Changes?", context="")
+            result = await adapter.enrich(prompt="Changes?", context="")
 
         assert result.relevance_score == pytest.approx(0.85)
         assert "Added constant x" in result.summary_markdown
@@ -162,56 +154,56 @@ class TestHandlerCodeAnalysisEnrichmentEnrich:
     @pytest.mark.asyncio
     async def test_enrich_no_diff_returns_empty_result(self) -> None:
         """When no diff is available, returns low-relevance empty result."""
-        handler = _make_handler()
+        adapter = _make_adapter()
 
         with patch(
-            "omnibase_infra.adapters.llm.handler_code_analysis_enrichment"
-            ".HandlerCodeAnalysisEnrichment._read_git_diff",
+            "omnibase_infra.adapters.llm.adapter_code_analysis_enrichment"
+            ".AdapterCodeAnalysisEnrichment._read_git_diff",
             new=AsyncMock(return_value=""),
         ):
-            result = await handler.enrich(prompt="What changed?", context="")
+            result = await adapter.enrich(prompt="What changed?", context="")
 
         assert result.relevance_score == pytest.approx(0.0)
         assert result.token_count == 0
         assert "No Changes Detected" in result.summary_markdown
         # LLM handler must NOT have been called.
-        handler._handler.handle.assert_not_awaited()
+        adapter._handler.handle.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_enrich_llm_returns_empty_text(self) -> None:
         """When LLM returns None/empty text, summary is a fallback message."""
-        handler = _make_handler()
+        adapter = _make_adapter()
         diff = "diff --git a/z.py b/z.py\n+z = 0\n"
-        handler._handler.handle = AsyncMock(return_value=_make_llm_response(""))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(""))
 
-        result = await handler.enrich(prompt="Changes?", context=diff)
+        result = await adapter.enrich(prompt="Changes?", context=diff)
 
         assert "Analysis Unavailable" in result.summary_markdown
 
     @pytest.mark.asyncio
     async def test_enrich_llm_returns_none_text(self) -> None:
         """When LLM response generated_text is None, fallback message is used."""
-        handler = _make_handler()
+        adapter = _make_adapter()
         diff = "diff --git a/z.py b/z.py\n+z = 0\n"
-        handler._handler.handle = AsyncMock(return_value=_make_llm_response(None))  # type: ignore[arg-type]
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(None))  # type: ignore[arg-type]
 
-        result = await handler.enrich(prompt="Changes?", context=diff)
+        result = await adapter.enrich(prompt="Changes?", context=diff)
 
         assert "Analysis Unavailable" in result.summary_markdown
 
     @pytest.mark.asyncio
     async def test_enrich_diff_truncated_at_max_chars(self) -> None:
         """Diffs longer than _MAX_DIFF_CHARS are truncated."""
-        handler = _make_handler()
+        adapter = _make_adapter()
         long_diff = "+" + "x" * (_MAX_DIFF_CHARS + 5000)
-        handler._handler.handle = AsyncMock(
+        adapter._handler.handle = AsyncMock(
             return_value=_make_llm_response("## Analysis\n\ntruncated diff analyzed")
         )
 
-        await handler.enrich(prompt="Changes?", context=long_diff)
+        await adapter.enrich(prompt="Changes?", context=long_diff)
 
         # Verify the handler was called and the user message content is within bounds.
-        call_args = handler._handler.handle.call_args
+        call_args = adapter._handler.handle.call_args
         request = call_args[0][0]
         user_msg_content = request.messages[0]["content"]
         # The diff portion in the message should be truncated.
@@ -220,11 +212,11 @@ class TestHandlerCodeAnalysisEnrichmentEnrich:
     @pytest.mark.asyncio
     async def test_enrich_token_count_is_estimated(self) -> None:
         """Token count is estimated as len(summary) // 4."""
-        handler = _make_handler()
+        adapter = _make_adapter()
         summary = "A" * 400  # 400 chars => 100 tokens
-        handler._handler.handle = AsyncMock(return_value=_make_llm_response(summary))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(summary))
 
-        result = await handler.enrich(
+        result = await adapter.enrich(
             prompt="Q", context="diff --git a/x.py b/x.py\n+pass\n"
         )
 
@@ -233,12 +225,12 @@ class TestHandlerCodeAnalysisEnrichmentEnrich:
     @pytest.mark.asyncio
     async def test_enrich_result_schema_version_default(self) -> None:
         """schema_version defaults to '1.0'."""
-        handler = _make_handler()
-        handler._handler.handle = AsyncMock(
+        adapter = _make_adapter()
+        adapter._handler.handle = AsyncMock(
             return_value=_make_llm_response("## Analysis\n\nsome analysis")
         )
 
-        result = await handler.enrich(
+        result = await adapter.enrich(
             prompt="Q", context="diff --git a/x.py b/x.py\n+pass\n"
         )
 
@@ -251,15 +243,15 @@ class TestHandlerCodeAnalysisEnrichmentEnrich:
 
 
 @pytest.mark.unit
-class TestHandlerCodeAnalysisEnrichmentClose:
+class TestAdapterCodeAnalysisEnrichmentClose:
     """Tests for the close() method."""
 
     @pytest.mark.asyncio
     async def test_close_calls_transport_close(self) -> None:
         """close() delegates to the transport's close() method."""
-        handler = _make_handler()
-        await handler.close()
-        handler._transport.close.assert_awaited_once()
+        adapter = _make_adapter()
+        await adapter.close()
+        adapter._transport.close.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +261,7 @@ class TestHandlerCodeAnalysisEnrichmentClose:
 
 @pytest.mark.unit
 class TestReadGitDiff:
-    """Tests for HandlerCodeAnalysisEnrichment._read_git_diff()."""
+    """Tests for AdapterCodeAnalysisEnrichment._read_git_diff()."""
 
     @pytest.mark.asyncio
     async def test_returns_diff_on_success(self) -> None:
@@ -283,7 +275,7 @@ class TestReadGitDiff:
             "asyncio.create_subprocess_exec",
             return_value=mock_proc,
         ):
-            result = await HandlerCodeAnalysisEnrichment._read_git_diff(".")
+            result = await AdapterCodeAnalysisEnrichment._read_git_diff(".")
 
         assert result == diff_bytes.decode()
 
@@ -297,7 +289,7 @@ class TestReadGitDiff:
         )
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            result = await HandlerCodeAnalysisEnrichment._read_git_diff(".")
+            result = await AdapterCodeAnalysisEnrichment._read_git_diff(".")
 
         assert result == ""
 
@@ -311,7 +303,7 @@ class TestReadGitDiff:
         mock_proc.communicate = AsyncMock(side_effect=TimeoutError("timeout"))
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            result = await HandlerCodeAnalysisEnrichment._read_git_diff(".")
+            result = await AdapterCodeAnalysisEnrichment._read_git_diff(".")
 
         assert result == ""
         mock_proc.kill.assert_called_once()
@@ -323,7 +315,7 @@ class TestReadGitDiff:
             "asyncio.create_subprocess_exec",
             side_effect=OSError("git not found"),
         ):
-            result = await HandlerCodeAnalysisEnrichment._read_git_diff(".")
+            result = await AdapterCodeAnalysisEnrichment._read_git_diff(".")
 
         assert result == ""
 
@@ -338,7 +330,7 @@ class TestReadGitDiff:
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             with pytest.raises(asyncio.CancelledError):
-                await HandlerCodeAnalysisEnrichment._read_git_diff(".")
+                await AdapterCodeAnalysisEnrichment._read_git_diff(".")
 
         mock_proc.kill.assert_called_once()
 
@@ -350,7 +342,7 @@ class TestReadGitDiff:
 
 @pytest.mark.unit
 class TestProtocolContextEnrichmentCompliance:
-    """Verify HandlerCodeAnalysisEnrichment satisfies ProtocolContextEnrichment."""
+    """Verify AdapterCodeAnalysisEnrichment satisfies ProtocolContextEnrichment."""
 
     def test_isinstance_check(self) -> None:
         """isinstance() against ProtocolContextEnrichment is True."""
@@ -358,10 +350,10 @@ class TestProtocolContextEnrichmentCompliance:
             ProtocolContextEnrichment,
         )
 
-        handler = _make_handler()
-        assert isinstance(handler, ProtocolContextEnrichment)
+        adapter = _make_adapter()
+        assert isinstance(adapter, ProtocolContextEnrichment)
 
     def test_has_enrich_method(self) -> None:
-        """enrich() is callable on the handler."""
-        handler = _make_handler()
-        assert callable(getattr(handler, "enrich", None))
+        """enrich() is callable on the adapter."""
+        adapter = _make_adapter()
+        assert callable(getattr(adapter, "enrich", None))
