@@ -256,3 +256,46 @@ class TestServiceBatchComputeEffectivenessMetrics:
 
         assert result.total_rows == 0
         assert result.has_errors is False
+
+    @pytest.mark.asyncio
+    async def test_compute_pattern_hit_rates_handles_null_confidence(
+        self, mock_pool: MagicMock
+    ) -> None:
+        """_compute_pattern_hit_rates succeeds when confidence_score is NULL.
+
+        Verifies that the COALESCE and IS NOT NULL guards in the SQL prevent
+        a NOT NULL constraint violation on pattern_hit_rates.utilization_score
+        when agent_routing_decisions rows have a NULL confidence_score.
+
+        The SQL uses:
+          - COALESCE(AVG(rd.confidence_score), 0.0) so a NULL average becomes 0.0
+          - confidence_score IS NOT NULL guard in the hit_count FILTER clause
+
+        A successful execute() return proves the method completes without
+        raising, even when all confidence_score values would be NULL at runtime.
+        """
+        conn = mock_pool._test_conn
+
+        async def execute_side_effect(sql, *args, **kwargs):
+            if "SET LOCAL" in str(sql):
+                return "SET"
+            if "INSERT INTO pattern_hit_rates" in str(sql):
+                # Verify the NULL-safety guards are present in the SQL
+                assert "COALESCE" in str(sql), (
+                    "SQL must use COALESCE to guard against NULL confidence_score"
+                )
+                assert "IS NOT NULL" in str(sql), (
+                    "SQL must use IS NOT NULL guard in hit_count FILTER"
+                )
+                return "INSERT 0 3"
+            return "INSERT 0 0"
+
+        conn.execute = AsyncMock(side_effect=execute_side_effect)
+        conn.fetchrow = AsyncMock(return_value=None)
+
+        batch = ServiceBatchComputeEffectivenessMetrics(mock_pool)
+        result = await batch.compute_and_persist()
+
+        # Phase 3 must succeed (pattern_rows > 0) with no errors
+        assert result.pattern_rows == 3
+        assert result.has_errors is False

@@ -477,14 +477,28 @@ class ServiceBatchComputeEffectivenessMetrics:
             SELECT
                 md5(rd.selected_agent)::uuid AS pattern_id,
                 'batch_derived' AS utilization_method,
-                -- utilization_score: average confidence for this agent
-                AVG(rd.confidence_score) AS utilization_score,
-                -- hit_count: routing decisions with high confidence
-                COUNT(*) FILTER (WHERE rd.confidence_score >= 0.7)
-                    AS hit_count,
-                -- miss_count: routing decisions with low confidence
-                COUNT(*) FILTER (WHERE rd.confidence_score < 0.7)
-                    AS miss_count,
+                -- utilization_score: average confidence for this agent.
+                -- COALESCE guards against NULL when all confidence_score
+                -- values for an agent are NULL (column is nullable per
+                -- migration 021). pattern_hit_rates.utilization_score is
+                -- REAL NOT NULL, so a bare AVG returning NULL would cause
+                -- a constraint violation.
+                COALESCE(AVG(rd.confidence_score), 0.0) AS utilization_score,
+                -- hit_count: routing decisions with high confidence.
+                -- IS NOT NULL guard required: SQL NULL comparisons return
+                -- UNKNOWN, so rows with NULL confidence_score would be
+                -- silently excluded from both hit and miss counts.
+                COUNT(*) FILTER (
+                    WHERE rd.confidence_score >= 0.7
+                        AND rd.confidence_score IS NOT NULL
+                ) AS hit_count,
+                -- miss_count: routing decisions with low confidence.
+                -- NULL confidence is treated as a miss so that
+                -- hit_count + miss_count == sample_count always holds.
+                COUNT(*) FILTER (
+                    WHERE rd.confidence_score < 0.7
+                        OR rd.confidence_score IS NULL
+                ) AS miss_count,
                 -- sample_count: total decisions for this agent
                 COUNT(*) AS sample_count,
                 MIN(rd.created_at) AS created_at,

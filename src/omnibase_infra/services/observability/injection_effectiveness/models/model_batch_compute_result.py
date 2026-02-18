@@ -31,13 +31,13 @@ class ModelBatchComputeResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     effectiveness_rows: int = Field(
-        default=0, description="Rows written to injection_effectiveness"
+        default=0, ge=0, description="Rows written to injection_effectiveness"
     )
     latency_rows: int = Field(
-        default=0, description="Rows written to latency_breakdowns"
+        default=0, ge=0, description="Rows written to latency_breakdowns"
     )
     pattern_rows: int = Field(
-        default=0, description="Rows written to pattern_hit_rates"
+        default=0, ge=0, description="Rows written to pattern_hit_rates"
     )
     errors: tuple[str, ...] = Field(
         default_factory=tuple, description="Error messages from failed phases"
