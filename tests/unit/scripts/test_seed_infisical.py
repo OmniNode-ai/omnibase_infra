@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -372,6 +372,36 @@ class TestDoSeed:
         assert errors == 0
         mock_adapter.create_secret.assert_not_called()
         mock_adapter.update_secret.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # (e) Error path: create_secret raises, error_count increments
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    def test_do_seed_increments_error_count_when_create_secret_raises(self) -> None:
+        """Should increment error_count and not created_count when create_secret raises."""
+        from importlib import import_module
+
+        seed = import_module("seed-infisical")
+
+        mock_adapter = _make_mock_adapter(existing_secret=None)
+        mock_adapter.create_secret.side_effect = RuntimeError("connection refused")
+
+        created, updated, skipped, errors = self._run_do_seed(
+            seed,
+            requirements=[_SAMPLE_REQUIREMENT],
+            env_values={"POSTGRES_DSN": "postgresql://test"},
+            create_missing=True,
+            set_values=True,
+            overwrite_existing=False,
+            mock_adapter=mock_adapter,
+        )
+
+        assert errors == 1
+        assert created == 0
+        assert updated == 0
+        assert skipped == 0
+        mock_adapter.create_secret.assert_called_once()
 
     # ------------------------------------------------------------------
     # Extra: multiple requirements -- verify per-key routing is independent

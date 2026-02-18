@@ -120,6 +120,10 @@ x-runtime-env: &runtime-env
   INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
   INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET:-}
   INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
+  # Opt-in strict mode: when set to a non-empty value, missing Infisical keys
+  # are treated as fatal errors rather than silent fallbacks. Leave empty
+  # (the default) to allow standard environment variable resolution as fallback.
+  INFISICAL_REQUIRED: ${INFISICAL_REQUIRED:-}
   # --- Fallback values (used when Infisical is not configured) ---
   CONSUL_HOST: ${CONSUL_HOST:-consul}
   CONSUL_PORT: ${CONSUL_PORT:-8500}
