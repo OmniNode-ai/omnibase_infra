@@ -110,6 +110,10 @@ from omnibase_infra.runtime.runtime_contract_config_loader import (
 from omnibase_infra.runtime.util_wiring import wire_default_handlers
 from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
 from omnibase_infra.utils.util_env_parsing import parse_env_float
+from omnibase_infra.utils.util_error_sanitization import (
+    sanitize_error_message,
+    sanitize_error_string,
+)
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -1206,6 +1210,18 @@ class RuntimeHostProcess:
         # - Call initialize() on each handler instance with config
         # - Store the handler instance in self._handlers for routing
         await self._populate_handlers_from_registry()
+
+        # Step 4.05: Config prefetch from Infisical (OMN-2287)
+        # Opt-in: only runs when INFISICAL_ADDR is set in the environment.
+        # Extracts config requirements from discovered contracts, resolves
+        # Infisical paths via TransportConfigMap, and prefetches values
+        # through HandlerInfisical. Prefetched values are applied to the
+        # process environment so downstream steps can read them.
+        #
+        # NOTE: This MUST run after Step 4 (_populate_handlers_from_registry)
+        # because it searches self._handlers for a HandlerInfisical instance.
+        # Handlers are not available until the registry has been populated.
+        await self._prefetch_config_from_infisical()
 
         # Step 4.1: FAIL-FAST validation - runtime MUST have at least one handler
         # A runtime with no handlers cannot process any events and is misconfigured.
@@ -2501,6 +2517,195 @@ class RuntimeHostProcess:
                         self._materialized_resources.resources.keys()
                     ),
                 },
+            )
+
+    async def _prefetch_config_from_infisical(self) -> None:
+        """Prefetch configuration values from Infisical (OMN-2287).
+
+        Opt-in: Only runs when ``INFISICAL_ADDR`` is set in the environment.
+        This allows the bootstrap sequence to populate config before handlers
+        initialize, without requiring Infisical for local development.
+
+        Steps:
+            1. Check ``INFISICAL_ADDR`` env var (opt-in gate)
+            2. Extract config requirements from discovered contracts
+            3. Build transport specs via ``TransportConfigMap``
+            4. Prefetch values through ``HandlerInfisical``
+            5. Apply resolved values to process environment
+
+        Errors are logged but do NOT block startup (graceful degradation).
+        """
+        infisical_addr = os.environ.get("INFISICAL_ADDR", "")
+        if not infisical_addr:
+            logger.debug("INFISICAL_ADDR not set, skipping config prefetch")
+            return
+
+        # Resolve which contract paths to scan.  When the caller did not
+        # provide explicit paths, fall back to auto-discovery: scan the
+        # entire ``omnibase_infra`` package tree for ``contract.yaml``
+        # files.  This fallback is gated strictly on ``INFISICAL_ADDR``
+        # being set (already checked above) so local development without
+        # Infisical is never affected.
+        effective_contract_paths: list[Path] = list(self._contract_paths)
+        if not effective_contract_paths:
+            package_root = Path(__file__).parent.parent
+            logger.debug(
+                "No contract_paths configured; auto-discovering contracts under %s",
+                package_root,
+            )
+            effective_contract_paths = [package_root]
+
+        try:
+            from omnibase_infra.runtime.config_discovery.config_prefetcher import (
+                ConfigPrefetcher,
+            )
+            from omnibase_infra.runtime.config_discovery.contract_config_extractor import (
+                ContractConfigExtractor,
+            )
+
+            # Step 1: Extract config requirements from contracts
+            extractor = ContractConfigExtractor()
+            requirements = extractor.extract_from_paths(effective_contract_paths)
+
+            if not requirements.requirements:
+                logger.info(
+                    "No config requirements found in contracts, skipping prefetch"
+                )
+                return
+
+            # Step 2: Get or create a ProtocolSecretResolver
+            # First, try to find an already-initialized HandlerInfisical in the
+            # handler registry. If not found (typical case -- HandlerInfisical
+            # is not contract-declared), construct a HandlerInfisical directly
+            # from env vars so the prefetch is not a no-op.
+            from omnibase_infra.runtime.config_discovery.models import (
+                ProtocolSecretResolver,
+            )
+
+            handler: ProtocolSecretResolver | None = None
+            for h in self._handlers.values():
+                if isinstance(h, ProtocolSecretResolver):
+                    handler = h
+                    logger.debug(
+                        "Found ProtocolSecretResolver in handler registry: %s",
+                        type(h).__name__,
+                    )
+                    break
+
+            # Track any inline handler created below so we can shut it down
+            # after prefetch, regardless of success or failure.
+            # HandlerInfisical is not contract-declared in the typical case,
+            # so we construct one directly from env vars when not found in the
+            # handler registry. HandlerInfisical is the correct public API --
+            # AdapterInfisical lives in _internal/ and must not be imported here.
+            from omnibase_infra.handlers.handler_infisical import HandlerInfisical
+
+            _inline_handler: HandlerInfisical | None = None
+
+            # Load credentials unconditionally so they are always defined for
+            # the type checker. These are only meaningful when handler is None
+            # (i.e. when we construct an inline HandlerInfisical below), but
+            # initialising them here avoids potential UnboundLocalError if the
+            # control flow ever changes, and keeps mypy/pyright happy.
+            client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
+            client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")
+            project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
+            env_slug = os.environ.get("INFISICAL_ENVIRONMENT", "prod")
+
+            if handler is None:
+                # Build a HandlerInfisical from env vars.  This avoids
+                # depending on the handler registry which may not contain
+                # HandlerInfisical if it is not contract-declared.
+                if not client_id or not client_secret or not project_id:
+                    logger.info(
+                        "Infisical credentials not fully configured "
+                        "(INFISICAL_CLIENT_ID, INFISICAL_CLIENT_SECRET, "
+                        "INFISICAL_PROJECT_ID required), skipping config prefetch"
+                    )
+                    return
+
+                from omnibase_core.container import ModelONEXContainer as _Container
+
+                # Use the existing container if available, otherwise create a
+                # minimal one solely for HandlerInfisical initialization.
+                _handler_container = (
+                    self._container if self._container is not None else _Container()
+                )
+                _inline_handler = HandlerInfisical(_handler_container)
+
+            try:
+                if _inline_handler is not None:
+                    await _inline_handler.initialize(
+                        {
+                            "host": infisical_addr,
+                            "client_id": client_id,
+                            "client_secret": client_secret,
+                            "project_id": project_id,
+                            "environment_slug": env_slug,
+                        }
+                    )
+                    handler = _inline_handler
+                    logger.info("Built HandlerInfisical for config prefetch")
+
+                # Step 3: Prefetch through the handler
+                # At this point handler is guaranteed non-None: if the original
+                # handler was None and credentials were missing we returned early
+                # above; if credentials were present _inline_handler was built and
+                # assigned to handler inside the if-block above.
+                assert handler is not None
+
+                service_slug = self._node_identity.service
+                infisical_required = os.environ.get(
+                    "INFISICAL_REQUIRED", ""
+                ).lower() in (
+                    "true",
+                    "1",
+                    "yes",
+                )
+
+                prefetcher = ConfigPrefetcher(
+                    handler=handler,
+                    service_slug=service_slug,
+                    infisical_required=infisical_required,
+                )
+                result = prefetcher.prefetch(requirements)
+
+                # Step 4: Apply to environment
+                applied = prefetcher.apply_to_environment(result)
+
+                logger.info(
+                    "Config prefetch complete",
+                    extra={
+                        "resolved": result.success_count,
+                        "missing": len(result.missing),
+                        "errors": len(result.errors),
+                        "applied_to_env": applied,
+                    },
+                )
+
+                if result.errors:
+                    for key, err in result.errors.items():
+                        logger.warning(
+                            "Config prefetch error for %s: %s",
+                            key,
+                            sanitize_error_string(err),
+                        )
+            finally:
+                # Always shut down the inline handler to release SDK resources.
+                # Handlers found in the handler registry manage their own lifecycle
+                # and must NOT be shut down here.
+                if _inline_handler is not None:
+                    await _inline_handler.shutdown()
+
+        except Exception as exc:
+            # Prefetch failures are non-fatal.
+            # Sanitize the error to avoid leaking secrets (e.g. connection
+            # strings embedded in exception messages).  Do NOT use
+            # exc_info=True here because the full traceback may contain
+            # locals with secret values.
+            logger.warning(
+                "Config prefetch failed (non-fatal): %s",
+                sanitize_error_message(exc),
             )
 
     async def _resolve_handler_dependencies(

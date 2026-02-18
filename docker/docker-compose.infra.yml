@@ -20,6 +20,10 @@
 #   # Full stack (all services)
 #   docker compose -f docker/docker-compose.infra.yml --profile full up -d
 #
+#   # Bootstrap mode (ordered startup with Infisical seed)
+#   # Prefer using scripts/bootstrap-infisical.sh instead for the full sequence.
+#   docker compose -f docker/docker-compose.infra.yml --profile bootstrap up -d
+#
 #   # Build runtime and start
 #   docker compose -f docker/docker-compose.infra.yml --profile runtime up -d --build
 #
@@ -35,6 +39,7 @@
 #   - consul: HashiCorp Consul for service discovery
 #   - secrets: Infisical for secrets management
 #   - full: All services (infrastructure + runtime + consul + secrets)
+#   - bootstrap: Infrastructure + secrets (for bootstrap-infisical.sh sequence)
 #
 # External Ports:
 #   Infrastructure:
@@ -85,48 +90,47 @@ x-runtime-base: &runtime-base
       reservations:
         cpus: '0.25'
         memory: 128M
-# Runtime environment variables
+# Runtime environment variables (OMN-2287: slimmed for Infisical bootstrap)
+# When INFISICAL_ADDR is set, the runtime prefetches most config from Infisical.
+# Only bootstrap-essential vars remain here; all others come from Infisical.
 x-runtime-env: &runtime-env
-  # Kafka/Redpanda - use internal service name
-  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
-  # PostgreSQL - DSN-based configuration (OMN-2065)
-  # NOTE: If OMNIBASE_INFRA_DB_URL is unset, falls back to constructing DSN from POSTGRES_PASSWORD.
-  # POSTGRES_PASSWORD must be set (enforced by :? on the postgres service) for the fallback to work.
-  # WARNING: The fallback DSN uses nested variable expansion (requires recent Compose v2).
-  # Docker Compose cannot URL-encode variables, so the fallback path REQUIRES passwords
-  # containing only hex-safe characters (e.g., generated via `openssl rand -hex 32`).
-  # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
-  # shell-special characters ($, `, \, !), the expansion WILL produce a malformed DSN.
-  # RECOMMENDED: Always set OMNIBASE_INFRA_DB_URL explicitly in .env.
-  # NOTE: The fallback below hardcodes `postgres:5432` (the Compose service name, not POSTGRES_HOST).
-  # POSTGRES_HOST/POSTGRES_PORT are NOT used in the fallback — set OMNIBASE_INFRA_DB_URL directly.
-  # Requires Docker Compose v2.20+ for nested ${...} expansion (see header comment).
-  OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for DB URL fallback}@postgres:5432/omnibase_infra}
-  # Retained for agent-actions-consumer (DSN fallback) and session storage (pydantic-settings prefix).
-  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  # --- Bootstrap essentials (always needed) ---
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
-  # Consul - use internal service name
-  CONSUL_HOST: ${CONSUL_HOST:-consul}
-  CONSUL_PORT: ${CONSUL_PORT:-8500}
-  CONSUL_SCHEME: ${CONSUL_SCHEME:-http}
-  # Infisical - Secrets Management (optional, via secrets profile)
-  INFISICAL_ADDR: ${INFISICAL_ADDR:-http://infisical:8080}
-  # Valkey (Redis-compatible cache)
-  VALKEY_HOST: ${VALKEY_HOST:-valkey}
-  VALKEY_PORT: ${VALKEY_PORT:-6379}
-  # SECURITY: Set VALKEY_PASSWORD in .env for production. Default is for local dev only.
-  VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
-  # ONEX Runtime
+  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for DB URL fallback}@postgres:5432/omnibase_infra}
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+  ONEX_CONTRACTS_DIR: /app/contracts
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-development}
-  ONEX_CONTRACTS_DIR: /app/contracts
-  # OpenTelemetry
-  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4317}
-  OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omninode-runtime}
-  OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-otlp}
-  OTEL_METRICS_EXPORTER: ${OTEL_METRICS_EXPORTER:-otlp}
+  # --- Infisical config prefetch (OMN-2287) ---
+  # When INFISICAL_ADDR is set, runtime prefetches transport config from Infisical
+  # before handler initialization. Remaining keys (Consul, Valkey, OTEL, etc.)
+  # are resolved from Infisical at startup rather than being hardcoded here.
+  #
+  # INTENTIONALLY opt-in: INFISICAL_ADDR defaults to empty string, which
+  # disables config prefetch. Services fall back to standard environment
+  # variable resolution when this is unset.
+  #
+  # MIGRATION NOTE: If your deployment previously relied on the Infisical
+  # service container bundled in this compose file (docker-compose.infra.yml),
+  # you must explicitly set INFISICAL_ADDR=http://infisical:8080 in your
+  # .env file to restore the prior behaviour. The empty default is intentional
+  # to avoid breaking deployments that do not use Infisical.
+  INFISICAL_ADDR: ${INFISICAL_ADDR:-}
+  INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
+  INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET:-}
+  INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
+  # Opt-in strict mode: when set to a non-empty value, missing Infisical keys
+  # are treated as fatal errors rather than silent fallbacks. Leave empty
+  # (the default) to allow standard environment variable resolution as fallback.
+  INFISICAL_REQUIRED: ${INFISICAL_REQUIRED:-}
+  # --- Fallback values (used when Infisical is not configured) ---
+  CONSUL_HOST: ${CONSUL_HOST:-consul}
+  CONSUL_PORT: ${CONSUL_PORT:-8500}
+  VALKEY_HOST: ${VALKEY_HOST:-valkey}
+  VALKEY_PORT: ${VALKEY_PORT:-6379}
+  VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
   # OmniIntelligence domain plugin
-  # Falls back to constructing DSN from POSTGRES_PASSWORD (same caveats as OMNIBASE_INFRA_DB_URL above).
   OMNIINTELLIGENCE_DB_URL: ${OMNIINTELLIGENCE_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for intelligence DB URL fallback}@postgres:5432/omniintelligence}
 # ==========================================================================
 # Services
@@ -287,7 +291,7 @@ services:
   infisical:
     image: infisical/infisical:v0.146.0-postgres
     container_name: omnibase-infra-infisical
-    profiles: ["secrets", "full"]
+    profiles: ["secrets", "full", "bootstrap"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -296,15 +300,17 @@ services:
     environment:
       DB_CONNECTION_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for Infisical DB}@postgres:5432/infisical_db
       # Redis URL for Infisical's cache backend (Valkey is Redis-compatible)
-      # NOTE: Default includes the dev password matching VALKEY_PASSWORD default.
-      # If you change VALKEY_PASSWORD, update INFISICAL_REDIS_URL to match.
-      # See docker/.env.example for details.
-      REDIS_URL: ${INFISICAL_REDIS_URL:-redis://:valkey-dev-password@valkey:6379}
-      # SECURITY: Set INFISICAL_ENCRYPTION_KEY and INFISICAL_AUTH_SECRET in .env
-      # for production. Defaults below are for local development only.
+      # NOTE: Uses VALKEY_PASSWORD variable interpolation so changing
+      # VALKEY_PASSWORD automatically updates this URL.
+      # Requires Docker Compose v2.20+ for nested variable expansion.
+      REDIS_URL: ${INFISICAL_REDIS_URL:-redis://:${VALKEY_PASSWORD:-valkey-dev-password}@valkey:6379}
+      # SECURITY: INFISICAL_ENCRYPTION_KEY and INFISICAL_AUTH_SECRET must be set
+      # in .env (or environment). There are no inline defaults -- the service will
+      # refuse to start without them to prevent running with known-insecure keys.
       # Generate with: openssl rand -hex 16 (encryption) / openssl rand -hex 32 (auth)
-      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef}
-      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2}
+      # Development defaults are provided in docker/.env.example.
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:?INFISICAL_ENCRYPTION_KEY must be set in .env}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:?INFISICAL_AUTH_SECRET must be set in .env}
       SITE_URL: ${INFISICAL_SITE_URL:-http://localhost:8880}
       TELEMETRY_ENABLED: "false"
     ports:

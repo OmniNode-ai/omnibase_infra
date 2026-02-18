@@ -19,8 +19,9 @@
 9. [Infrastructure Patterns](#infrastructure-patterns)
 10. [Pydantic Model Standards](#pydantic-model-standards)
 11. [Testing and CI](#testing-and-ci)
-12. [Agent-Driven Development](#agent-driven-development)
-13. [Common Pitfalls](#common-pitfalls)
+12. [Contract-Driven Config Discovery](#contract-driven-config-discovery)
+13. [Agent-Driven Development](#agent-driven-development)
+14. [Common Pitfalls](#common-pitfalls)
 
 ---
 
@@ -89,7 +90,7 @@ pre-commit run --all-files                    # All hooks
 
 ## Architecture: Four-Node Pattern
 
-```
+```text
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
 │   EFFECT    │───▶│   COMPUTE   │───▶│   REDUCER   │───▶│ORCHESTRATOR │
 │ External I/O│    │  Transform  │    │  FSM State  │    │  Workflow   │
@@ -154,7 +155,7 @@ class NodeRegistrationOrchestrator(NodeOrchestrator):
 
 ### Canonical Node Directory Structure
 
-```
+```text
 nodes/<node_name>/
 ├── __init__.py           # Public exports
 ├── contract.yaml         # ONEX contract (REQUIRED)
@@ -326,7 +327,7 @@ Examples:
 
 ### Error Hierarchy
 
-```
+```text
 ModelOnexError (omnibase_core)
 └── RuntimeHostError (base infrastructure error)
     ├── ProtocolConfigurationError
@@ -531,7 +532,7 @@ def __bool__(self) -> bool:
 
 ### Test Directory Structure
 
-```
+```text
 tests/
 ├── conftest.py              # Root conftest with shared fixtures
 ├── helpers/                 # Test helper utilities
@@ -591,6 +592,69 @@ uv run pytest tests/ -n 0 -xvs
 | `event_bus` | In-memory event bus with cleanup |
 | `cleanup_consul_test_services` | Cleans Consul test registrations |
 | `cleanup_postgres_test_projections` | Cleans PostgreSQL test rows |
+
+---
+
+## Contract-Driven Config Discovery
+
+Part of OMN-2287: Infisical-backed configuration management.
+
+### Overview
+
+The config discovery system extracts configuration requirements from ONEX
+contract YAML files and resolves them from Infisical at runtime. It scans
+three Pydantic-backed contract fields:
+
+1. `metadata.transport_type` -- the transport type declared in metadata
+2. `handler_routing.handlers[].handler_type` -- handler-level transport types
+3. `dependencies[].type == "environment"` -- explicit env var dependencies
+
+### Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `TransportConfigMap` | `runtime/config_discovery/transport_config_map.py` | Maps transport types to Infisical paths |
+| `ContractConfigExtractor` | `runtime/config_discovery/contract_config_extractor.py` | Scans contracts for config requirements |
+| `ConfigPrefetcher` | `runtime/config_discovery/config_prefetcher.py` | Prefetches values through HandlerInfisical |
+| `ModelTransportConfigSpec` | `runtime/config_discovery/models/model_transport_config_spec.py` | Spec for transport config in Infisical |
+| `ModelConfigRequirements` | `runtime/config_discovery/models/model_config_requirements.py` | Aggregated requirements from contracts |
+
+### Infisical Path Convention
+
+```text
+Shared:      /shared/<transport>/KEY
+Per-service: /services/<service>/<transport>/KEY
+```
+
+### Bootstrap Sequence
+
+```text
+Step 1: PostgreSQL starts (POSTGRES_PASSWORD from .env)
+Step 2: Valkey starts
+Step 3: Infisical starts (depends_on: postgres + valkey healthy)
+Step 4: Identity provisioning (first-time only)
+Step 5: Seed runs (populates Infisical from contracts + .env values)
+Step 6: Runtime services start (prefetch from Infisical)
+```
+
+### Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/bootstrap-infisical.sh` | Orchestrates the full bootstrap sequence |
+| `scripts/seed-infisical.py` | Populates Infisical from contracts (safe by default, `--dry-run`) |
+| `scripts/setup-infisical-identity.sh` | Creates machine identities (runtime=read-only, admin=read-write) |
+
+### Opt-In Behavior
+
+Config prefetch is **opt-in**: it only runs when `INFISICAL_ADDR` is set in the
+environment. Without it, the runtime falls back to standard environment variable
+resolution. This means local development works without Infisical.
+
+### .env Reduction
+
+The `.env.example` has been reduced from ~660 lines to ~30 lines (bootstrap-only).
+The full pre-Infisical config is preserved in `docs/env-example-full.txt`.
 
 ---
 
