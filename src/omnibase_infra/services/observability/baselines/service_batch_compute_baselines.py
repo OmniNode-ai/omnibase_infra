@@ -61,6 +61,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.runtime.emit_daemon.event_registry import EventRegistry
 from omnibase_infra.runtime.emit_daemon.topics import (
     BASELINES_COMPUTED_REGISTRATION,
@@ -292,10 +293,6 @@ class ServiceBatchComputeBaselines:
                 event_type=BASELINES_COMPUTED_REGISTRATION.event_type,
                 payload=snapshot.model_dump(mode="json"),
                 correlation_id=str(correlation_id),
-            )
-
-            from omnibase_core.models.events.model_event_envelope import (
-                ModelEventEnvelope,
             )
 
             envelope: ModelEventEnvelope[dict[str, object]] = ModelEventEnvelope(
