@@ -198,10 +198,14 @@ class TestConfigPrefetcher:
 
         result = prefetcher.prefetch(reqs)
 
-        # Required keys missing should be in errors (not just missing)
-        # Note: spec.required defaults to False in specs_for_transports
-        # so they go to missing, not errors
+        # When infisical_required=True, ConfigPrefetcher passes required=True
+        # to specs_for_transports(), which sets spec.required=True on all
+        # returned specs. The condition ``self._infisical_required and
+        # spec.required`` therefore fires for every missing transport key,
+        # routing them to result.errors rather than result.missing.
         assert result.failure_count > 0
+        assert len(result.errors) > 0
+        assert len(result.missing) == 0
 
     def test_handler_without_get_secret_sync(self) -> None:
         """Should handle handler without get_secret_sync method."""

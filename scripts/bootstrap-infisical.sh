@@ -136,11 +136,16 @@ log_step "1" "Start PostgreSQL (POSTGRES_PASSWORD from .env)"
 run_cmd $COMPOSE_CMD -f "${COMPOSE_FILE}" up -d postgres
 if [[ "${DRY_RUN}" != "true" ]]; then
     log_info "Waiting for PostgreSQL to be healthy..."
-    $COMPOSE_CMD -f "${COMPOSE_FILE}" exec postgres pg_isready -U "${POSTGRES_USER:-postgres}" -d "$POSTGRES_DB" --timeout=30 || {
-        # Wait and retry
-        sleep 5
-        $COMPOSE_CMD -f "${COMPOSE_FILE}" exec postgres pg_isready -U "${POSTGRES_USER:-postgres}" -d "$POSTGRES_DB" --timeout=30
-    }
+    pg_max_attempts=30
+    pg_attempt=0
+    until $COMPOSE_CMD -f "${COMPOSE_FILE}" exec postgres pg_isready -U "${POSTGRES_USER:-postgres}" -d "$POSTGRES_DB" --timeout=2 2>/dev/null; do
+        pg_attempt=$((pg_attempt + 1))
+        if [[ $pg_attempt -ge $pg_max_attempts ]]; then
+            log_error "PostgreSQL failed to become healthy after ${pg_max_attempts} attempts"
+            exit 1
+        fi
+        sleep 2
+    done
     log_info "PostgreSQL is healthy"
 fi
 

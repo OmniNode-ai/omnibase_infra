@@ -420,3 +420,135 @@ class TestDoSeed:
         assert updated == 1
         assert skipped == 0
         assert errors == 0
+
+
+class TestDoExport:
+    """Unit tests for _do_export() -- the --export/--reveal path."""
+
+    # ------------------------------------------------------------------
+    # Internal helper: run _do_export with mocked adapter and credentials.
+    # ------------------------------------------------------------------
+
+    def _run_do_export(
+        self,
+        seed: object,
+        *,
+        reveal: bool = False,
+        mock_adapter: MagicMock | None = None,
+        list_secrets_side_effect: object = None,
+    ) -> bool:
+        """Invoke ``_do_export`` with fully mocked Infisical infrastructure.
+
+        All dynamic imports inside ``_do_export`` are patched so no real
+        adapter or Infisical connection is needed.
+        """
+        if mock_adapter is None:
+            mock_adapter = MagicMock()
+            mock_adapter.initialize.return_value = None
+            mock_adapter.shutdown.return_value = None
+            if list_secrets_side_effect is not None:
+                mock_adapter.list_secrets.side_effect = list_secrets_side_effect
+            else:
+                mock_adapter.list_secrets.return_value = []
+
+        adapter_cls_mock = MagicMock(return_value=mock_adapter)
+        config_cls_mock = MagicMock()
+        secret_str_mock = MagicMock(side_effect=lambda v: v)
+
+        with (
+            patch.dict("os.environ", _VALID_ENV),
+            patch.dict(
+                "sys.modules",
+                {
+                    "pydantic": MagicMock(SecretStr=secret_str_mock),
+                    "omnibase_infra.adapters._internal.adapter_infisical": MagicMock(
+                        AdapterInfisical=adapter_cls_mock
+                    ),
+                    "omnibase_infra.adapters.models.model_infisical_config": MagicMock(
+                        ModelInfisicalAdapterConfig=config_cls_mock
+                    ),
+                },
+            ),
+        ):
+            return seed._do_export(reveal=reveal)  # type: ignore[attr-defined]
+
+    # ------------------------------------------------------------------
+    # (a) Success with masked output (reveal=False, default)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    def test_do_export_masked_output(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Should print key=**** for each secret when reveal=False."""
+        from importlib import import_module
+
+        seed = import_module("seed-infisical")
+
+        # Build two fake secret objects with .key and .value attributes.
+        secret_a = MagicMock()
+        secret_a.key = "POSTGRES_DSN"
+
+        secret_b = MagicMock()
+        secret_b.key = "REDIS_URL"
+
+        mock_adapter = MagicMock()
+        mock_adapter.initialize.return_value = None
+        mock_adapter.shutdown.return_value = None
+        mock_adapter.list_secrets.return_value = [secret_a, secret_b]
+
+        ok = self._run_do_export(seed, reveal=False, mock_adapter=mock_adapter)
+
+        assert ok is True
+        captured = capsys.readouterr()
+        assert "POSTGRES_DSN=****" in captured.out
+        assert "REDIS_URL=****" in captured.out
+        # No actual values should appear in stdout when masked
+        assert "get_secret_value" not in captured.out
+
+    # ------------------------------------------------------------------
+    # (b) Success with revealed values (reveal=True)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    def test_do_export_revealed_output(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Should print key=value in plaintext when reveal=True."""
+        from importlib import import_module
+
+        seed = import_module("seed-infisical")
+
+        secret_a = MagicMock()
+        secret_a.key = "POSTGRES_DSN"
+        secret_a.value.get_secret_value.return_value = "postgresql://localhost/test"
+
+        mock_adapter = MagicMock()
+        mock_adapter.initialize.return_value = None
+        mock_adapter.shutdown.return_value = None
+        mock_adapter.list_secrets.return_value = [secret_a]
+
+        ok = self._run_do_export(seed, reveal=True, mock_adapter=mock_adapter)
+
+        assert ok is True
+        captured = capsys.readouterr()
+        assert "POSTGRES_DSN=postgresql://localhost/test" in captured.out
+        # Warning must go to stderr, not stdout
+        assert "WARNING" in captured.err
+
+    # ------------------------------------------------------------------
+    # (c) Failure when list_secrets raises
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    def test_do_export_returns_false_on_list_secrets_error(self) -> None:
+        """Should return False when list_secrets raises an exception."""
+        from importlib import import_module
+
+        seed = import_module("seed-infisical")
+
+        ok = self._run_do_export(
+            seed,
+            reveal=False,
+            list_secrets_side_effect=RuntimeError("connection refused"),
+        )
+
+        assert ok is False
