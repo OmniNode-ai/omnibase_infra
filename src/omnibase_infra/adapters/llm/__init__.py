@@ -15,6 +15,9 @@ Related Tickets:
 from omnibase_infra.adapters.llm.adapter_code_analysis_enrichment import (
     AdapterCodeAnalysisEnrichment,
 )
+from omnibase_infra.adapters.llm.adapter_documentation_generation import (
+    AdapterDocumentationGeneration,
+)
 from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
     AdapterLlmProviderOpenai,
 )
@@ -49,6 +52,7 @@ __all__: list[str] = [
     "AdapterLlmToolProvider",
     "AdapterModelRouter",
     "AdapterCodeAnalysisEnrichment",
+    "AdapterDocumentationGeneration",
     "AdapterSimilarityEnrichment",
     "AdapterSummarizationEnrichment",
     "ModelLlmAdapterRequest",
