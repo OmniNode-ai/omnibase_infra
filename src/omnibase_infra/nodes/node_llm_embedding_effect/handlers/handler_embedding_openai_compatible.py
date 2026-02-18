@@ -91,6 +91,25 @@ class HandlerEmbeddingOpenaiCompatible(MixinLlmHttpTransport):
         """Behavioral classification: side-effecting I/O."""
         return EnumHandlerTypeCategory.EFFECT
 
+    async def close(self) -> None:
+        """Close the underlying HTTP client and release its resources.
+
+        Delegates to ``MixinLlmHttpTransport._close_http_client()``, which
+        gracefully shuts down the ``httpx.AsyncClient`` (draining in-flight
+        requests and releasing connection pool resources).
+
+        This method is idempotent: calling it on an already-closed handler
+        has no effect because the mixin guards against double-close.
+
+        Returns:
+            None
+
+        Raises:
+            Exception: Any exception raised by the underlying
+                ``httpx.AsyncClient.aclose()`` is propagated to the caller.
+        """
+        await self._close_http_client()
+
     async def execute(
         self, request: ModelLlmEmbeddingRequest
     ) -> ModelLlmEmbeddingResponse:
