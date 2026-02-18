@@ -1,0 +1,739 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+"""Unit tests for AdapterSummarizationEnrichment.
+
+Covers:
+- handler_type / handler_category properties
+- enrich() when context is below token threshold (pass-through, no LLM call)
+- enrich() when context exceeds threshold (LLM called, summary returned)
+- enrich() net token guard (summary >= original tokens -> raw context returned)
+- enrich() when LLM returns empty/None text (pass-through with raw context)
+- token estimation helper (_estimate_tokens)
+- protocol compliance with ProtocolContextEnrichment
+- close() propagates to transport
+"""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from omnibase_infra.adapters.llm.adapter_summarization_enrichment import (
+    _CHARS_PER_TOKEN,
+    _EMPTY_CONTEXT_SUMMARY,
+    _PASSTHROUGH_MODEL,
+    _PROMPT_VERSION,
+    _TOKEN_THRESHOLD,
+    AdapterSummarizationEnrichment,
+    _estimate_tokens,
+)
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_spi.contracts.enrichment.contract_enrichment_result import (
+    ContractEnrichmentResult,
+)
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_adapter(**kwargs: object) -> AdapterSummarizationEnrichment:
+    """Build an AdapterSummarizationEnrichment with a mocked transport."""
+    adapter = AdapterSummarizationEnrichment(
+        base_url="http://localhost:8100",
+        **kwargs,  # type: ignore[arg-type]
+    )
+    # Replace transport and handler with mocks to avoid HTTP calls.
+    adapter._transport = MagicMock()
+    adapter._transport.close = AsyncMock()
+    adapter._handler = AsyncMock()
+    return adapter
+
+
+def _make_llm_response(generated_text: str | None) -> MagicMock:
+    """Build a minimal ModelLlmInferenceResponse mock."""
+    resp = MagicMock()
+    resp.generated_text = generated_text
+    return resp
+
+
+def _context_above_threshold(extra_chars: int = 1000) -> str:
+    """Return a context string that exceeds _TOKEN_THRESHOLD tokens."""
+    # _TOKEN_THRESHOLD tokens * _CHARS_PER_TOKEN chars each = minimum chars needed.
+    min_chars = (_TOKEN_THRESHOLD + 1) * _CHARS_PER_TOKEN + extra_chars
+    return "x" * min_chars
+
+
+def _context_below_threshold() -> str:
+    """Return a context string well below _TOKEN_THRESHOLD tokens."""
+    # Half the threshold in tokens -> safe margin.
+    target_chars = (_TOKEN_THRESHOLD // 2) * _CHARS_PER_TOKEN
+    return "x" * target_chars
+
+
+# ---------------------------------------------------------------------------
+# _estimate_tokens
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestEstimateTokens:
+    """Tests for the _estimate_tokens helper."""
+
+    def test_empty_string_returns_zero(self) -> None:
+        assert _estimate_tokens("") == 0
+
+    def test_chars_per_token_boundary(self) -> None:
+        # Exactly _CHARS_PER_TOKEN chars => 1 token.
+        text = "a" * _CHARS_PER_TOKEN
+        assert _estimate_tokens(text) == 1
+
+    def test_double_chars_per_token(self) -> None:
+        text = "a" * (2 * _CHARS_PER_TOKEN)
+        assert _estimate_tokens(text) == 2
+
+    def test_non_multiple(self) -> None:
+        # 7 chars with _CHARS_PER_TOKEN=4 => 7 // 4 = 1
+        assert _estimate_tokens("a" * 7) == 7 // _CHARS_PER_TOKEN
+
+
+# ---------------------------------------------------------------------------
+# Properties
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterSummarizationEnrichmentProperties:
+    """Tests for classification properties."""
+
+    def test_handler_type(self) -> None:
+        adapter = _make_adapter()
+        assert adapter.handler_type is EnumHandlerType.INFRA_HANDLER
+
+    def test_handler_category(self) -> None:
+        adapter = _make_adapter()
+        assert adapter.handler_category is EnumHandlerTypeCategory.EFFECT
+
+
+# ---------------------------------------------------------------------------
+# enrich() -- below threshold (pass-through)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterSummarizationEnrichmentPassThrough:
+    """Tests for pass-through behavior when context is below threshold."""
+
+    @pytest.mark.asyncio
+    async def test_below_threshold_no_llm_call(self) -> None:
+        """Context below threshold: LLM handler is NOT called."""
+        adapter = _make_adapter()
+        context = _context_below_threshold()
+
+        result = await adapter.enrich(prompt="Summarize.", context=context)
+
+        adapter._handler.handle.assert_not_awaited()  # type: ignore[attr-defined]
+        assert isinstance(result, ContractEnrichmentResult)
+        assert result.enrichment_type == "summarization"
+
+    @pytest.mark.asyncio
+    async def test_below_threshold_returns_raw_context(self) -> None:
+        """Context below threshold: summary_markdown equals stripped context."""
+        adapter = _make_adapter()
+        context = "Short context."
+
+        result = await adapter.enrich(prompt="Summarize.", context=context)
+
+        assert result.summary_markdown == "Short context."
+
+    @pytest.mark.asyncio
+    async def test_below_threshold_relevance_score_is_one(self) -> None:
+        """Pass-through result has relevance_score == 1.0."""
+        adapter = _make_adapter()
+        context = _context_below_threshold()
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.relevance_score == pytest.approx(1.0)
+
+    @pytest.mark.asyncio
+    async def test_below_threshold_model_used_is_passthrough(self) -> None:
+        """Pass-through result has model_used == 'passthrough' (no LLM involved)."""
+        adapter = _make_adapter()
+        context = _context_below_threshold()
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.model_used == _PASSTHROUGH_MODEL
+
+    @pytest.mark.asyncio
+    async def test_empty_context_is_pass_through(self) -> None:
+        """Empty context (0 tokens) is well below threshold -- pass-through."""
+        adapter = _make_adapter()
+
+        result = await adapter.enrich(prompt="Q", context="")
+
+        adapter._handler.handle.assert_not_awaited()  # type: ignore[attr-defined]
+        assert result.summary_markdown == _EMPTY_CONTEXT_SUMMARY
+        assert result.token_count == 0
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_context_is_pass_through(self) -> None:
+        """Whitespace-only context strips to empty -- pass-through."""
+        adapter = _make_adapter()
+
+        result = await adapter.enrich(prompt="Q", context="   \n\t  ")
+
+        adapter._handler.handle.assert_not_awaited()  # type: ignore[attr-defined]
+        assert result.summary_markdown == _EMPTY_CONTEXT_SUMMARY
+
+    @pytest.mark.asyncio
+    async def test_prompt_version_is_set(self) -> None:
+        """prompt_version matches the module constant."""
+        adapter = _make_adapter()
+
+        result = await adapter.enrich(prompt="Q", context="short")
+
+        assert result.prompt_version == _PROMPT_VERSION
+
+    @pytest.mark.asyncio
+    async def test_schema_version_default(self) -> None:
+        """schema_version defaults to '1.0'."""
+        adapter = _make_adapter()
+
+        result = await adapter.enrich(prompt="Q", context="short")
+
+        assert result.schema_version == "1.0"
+
+    @pytest.mark.asyncio
+    async def test_latency_ms_is_nonnegative(self) -> None:
+        """latency_ms is always >= 0."""
+        adapter = _make_adapter()
+
+        result = await adapter.enrich(prompt="Q", context="short")
+
+        assert result.latency_ms >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# enrich() -- token_threshold=0 edge case
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterSummarizationEnrichmentZeroThreshold:
+    """Tests for adapter constructed with token_threshold=0.
+
+    When token_threshold=0, every non-empty context has a token count > 0
+    and therefore always exceeds the threshold, forcing the LLM path.
+    """
+
+    @pytest.mark.asyncio
+    async def test_zero_threshold_takes_llm_path(self) -> None:
+        """With token_threshold=0, a short context must take the LLM path."""
+        adapter = _make_adapter(token_threshold=0, model="qwen2.5-72b")
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("Tiny summary.")
+        )
+        # 5 tokens worth of context (20 chars at 4 chars/token).
+        context = "x" * (5 * _CHARS_PER_TOKEN)
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        # LLM handler must have been called.
+        adapter._handler.handle.assert_awaited_once()  # type: ignore[attr-defined]
+        # model_used must be the LLM model, NOT the passthrough sentinel.
+        assert result.model_used == "qwen2.5-72b"
+        assert result.model_used != _PASSTHROUGH_MODEL
+
+    @pytest.mark.asyncio
+    async def test_zero_threshold_summary_returned(self) -> None:
+        """With token_threshold=0, the LLM summary is used as the result."""
+        adapter = _make_adapter(token_threshold=0)
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("Tiny summary.")
+        )
+        context = "x" * (5 * _CHARS_PER_TOKEN)
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.summary_markdown == "Tiny summary."
+
+
+# ---------------------------------------------------------------------------
+# enrich() -- above threshold (LLM call, successful summarization)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterSummarizationEnrichmentSummarize:
+    """Tests for summarization path (context exceeds threshold)."""
+
+    @pytest.mark.asyncio
+    async def test_above_threshold_calls_llm(self) -> None:
+        """When context exceeds threshold, the LLM handler IS called."""
+        adapter = _make_adapter()
+        context = _context_above_threshold()
+        # Summary is short -- net guard does NOT fire.
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("## Summary\n\nBrief summary.")
+        )
+
+        result = await adapter.enrich(prompt="Summarize.", context=context)
+
+        adapter._handler.handle.assert_awaited_once()
+        assert result.summary_markdown == "## Summary\n\nBrief summary."
+
+    @pytest.mark.asyncio
+    async def test_above_threshold_enrichment_type_is_summarization(self) -> None:
+        """Successful summarization has enrichment_type='summarization'."""
+        adapter = _make_adapter()
+        context = _context_above_threshold()
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("Short summary.")
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.enrichment_type == "summarization"
+
+    @pytest.mark.asyncio
+    async def test_above_threshold_relevance_score_is_0_80(self) -> None:
+        """Successful summarization has relevance_score == 0.80."""
+        adapter = _make_adapter()
+        context = _context_above_threshold()
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("Short summary.")
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.relevance_score == pytest.approx(0.80)
+
+    @pytest.mark.asyncio
+    async def test_above_threshold_model_used_is_set(self) -> None:
+        """Successful summarization has model_used set to the configured model."""
+        adapter = _make_adapter(model="qwen2.5-72b")
+        context = _context_above_threshold()
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("Short summary.")
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.model_used == "qwen2.5-72b"
+
+    @pytest.mark.asyncio
+    async def test_above_threshold_token_count_is_summary_tokens(self) -> None:
+        """token_count reflects the summary length, not the original."""
+        adapter = _make_adapter()
+        context = _context_above_threshold()
+        summary = "A" * (8 * _CHARS_PER_TOKEN)  # 8 tokens
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response(summary)
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.token_count == 8
+
+    @pytest.mark.asyncio
+    async def test_above_threshold_latency_ms_is_nonnegative(self) -> None:
+        """latency_ms is >= 0 on the summarization path."""
+        adapter = _make_adapter()
+        context = _context_above_threshold()
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("Short.")
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.latency_ms >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# enrich() -- net token guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterSummarizationEnrichmentNetTokenGuard:
+    """Tests for the net token guard (summary >= original -> discard)."""
+
+    @pytest.mark.asyncio
+    async def test_net_guard_fires_when_summary_equals_original(self) -> None:
+        """Guard fires when summary token count equals original token count."""
+        adapter = _make_adapter()
+        context = _context_above_threshold()
+        original_tokens = _estimate_tokens(context.strip())
+        # Make summary exactly as long as original.
+        inflated_summary = "y" * (original_tokens * _CHARS_PER_TOKEN)
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response(inflated_summary)
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        # Should return raw context, not the summary.
+        assert result.summary_markdown == context.strip()
+        assert result.token_count == original_tokens
+
+    @pytest.mark.asyncio
+    async def test_net_guard_fires_when_summary_longer_than_original(self) -> None:
+        """Guard fires when summary token count > original token count."""
+        adapter = _make_adapter()
+        context = _context_above_threshold()
+        original_tokens = _estimate_tokens(context.strip())
+        # Make summary 20% longer.
+        inflated_summary = "y" * (int(original_tokens * 1.2) * _CHARS_PER_TOKEN)
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response(inflated_summary)
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.summary_markdown == context.strip()
+
+    @pytest.mark.asyncio
+    async def test_net_guard_relevance_score_is_one(self) -> None:
+        """Net guard bypass yields relevance_score == 1.0."""
+        adapter = _make_adapter()
+        context = _context_above_threshold()
+        original_tokens = _estimate_tokens(context.strip())
+        inflated_summary = "y" * (original_tokens * _CHARS_PER_TOKEN)
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response(inflated_summary)
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.relevance_score == pytest.approx(1.0)
+
+    @pytest.mark.asyncio
+    async def test_net_guard_model_used_is_set(self) -> None:
+        """model_used is set even when net guard fires (LLM was called)."""
+        adapter = _make_adapter(model="qwen2.5-72b")
+        context = _context_above_threshold()
+        original_tokens = _estimate_tokens(context.strip())
+        inflated_summary = "y" * (original_tokens * _CHARS_PER_TOKEN)
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response(inflated_summary)
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.model_used == "qwen2.5-72b"
+
+    @pytest.mark.asyncio
+    async def test_net_guard_does_not_fire_for_shorter_summary(self) -> None:
+        """Guard does NOT fire when summary is shorter than original."""
+        adapter = _make_adapter()
+        context = _context_above_threshold()
+        # Summary is much shorter -- guard should not fire.
+        short_summary = "Brief."
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response(short_summary)
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.summary_markdown == short_summary
+        assert result.relevance_score == pytest.approx(0.80)
+
+
+# ---------------------------------------------------------------------------
+# enrich() -- empty / None LLM response
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterSummarizationEnrichmentEmptyLlmResponse:
+    """Tests for behavior when LLM returns empty or None text."""
+
+    @pytest.mark.asyncio
+    async def test_empty_llm_response_returns_raw_context(self) -> None:
+        """When LLM returns empty string, raw context is returned."""
+        adapter = _make_adapter()
+        context = _context_above_threshold()
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("")
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.summary_markdown == context.strip()
+
+    @pytest.mark.asyncio
+    async def test_none_llm_response_returns_raw_context(self) -> None:
+        """When LLM returns None, raw context is returned."""
+        adapter = _make_adapter()
+        context = _context_above_threshold()
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response(None)
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.summary_markdown == context.strip()
+
+    @pytest.mark.asyncio
+    async def test_empty_llm_response_relevance_score_is_one(self) -> None:
+        """Empty LLM response fall-back has relevance_score == 1.0."""
+        adapter = _make_adapter()
+        context = _context_above_threshold()
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("")
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.relevance_score == pytest.approx(1.0)
+
+    @pytest.mark.asyncio
+    async def test_empty_llm_response_model_used_is_set(self) -> None:
+        """model_used is set even on empty LLM response."""
+        adapter = _make_adapter(model="qwen2.5-72b")
+        context = _context_above_threshold()
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("")
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context)
+
+        assert result.model_used == "qwen2.5-72b"
+
+
+# ---------------------------------------------------------------------------
+# enrich() -- context containing curly braces (regression for str.format bug)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterSummarizationEnrichmentCurlyBraces:
+    """Regression tests: context with literal curly braces must not crash.
+
+    Prior to the fix, _USER_PROMPT_TEMPLATE.format(..., context=context_stripped)
+    would raise KeyError or ValueError when context_stripped contained bare
+    '{' / '}' characters (e.g. JSON objects, Python dicts, YAML, code blocks).
+    """
+
+    @pytest.mark.asyncio
+    async def test_json_context_above_threshold_does_not_raise(self) -> None:
+        """enrich() must not raise when context contains JSON-like curly braces."""
+        adapter = _make_adapter(token_threshold=0)  # force LLM path for any input
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("A concise summary.")
+        )
+
+        # Build a context that (a) contains JSON-like curly braces and
+        # (b) exceeds a realistic threshold so the summarization branch is hit.
+        json_fragment = '{"key": "value", "data": [1, 2, 3], "nested": {"x": true}}'
+        # Repeat until the character count clearly exceeds the default threshold.
+        repeat_count = (_TOKEN_THRESHOLD * _CHARS_PER_TOKEN) // len(json_fragment) + 2
+        context_with_braces = (json_fragment + " ") * repeat_count
+
+        # Must not raise KeyError / ValueError
+        result = await adapter.enrich(prompt="Summarize.", context=context_with_braces)
+
+        assert isinstance(result, ContractEnrichmentResult)
+        assert result.enrichment_type == "summarization"
+
+    @pytest.mark.asyncio
+    async def test_json_context_user_message_contains_context_verbatim(self) -> None:
+        """The user message passed to the LLM handler must contain the raw context.
+
+        Verifies that the curly-brace content is forwarded literally, not
+        mangled by a str.format() placeholder expansion.
+        """
+        adapter = _make_adapter(token_threshold=0)  # force LLM path
+        captured_requests: list[object] = []
+
+        async def capturing_handle(request: object) -> MagicMock:
+            captured_requests.append(request)
+            return _make_llm_response("Brief.")
+
+        adapter._handler.handle = capturing_handle  # type: ignore[method-assign]
+
+        json_fragment = '{"key": "value", "list": [1, 2, 3]}'
+        repeat_count = (_TOKEN_THRESHOLD * _CHARS_PER_TOKEN) // len(json_fragment) + 2
+        context_with_braces = (json_fragment + " ") * repeat_count
+        context_stripped = context_with_braces.strip()
+
+        await adapter.enrich(prompt="Q", context=context_with_braces)
+
+        assert len(captured_requests) == 1
+        request = captured_requests[0]
+        # The ModelLlmInferenceRequest stores messages as a tuple of dicts.
+        messages = getattr(request, "messages", ())
+        assert len(messages) == 1
+        user_content: str = messages[0]["content"]
+        # The stripped context must appear verbatim inside the constructed prompt.
+        assert context_stripped in user_content
+
+
+# ---------------------------------------------------------------------------
+# enrich() -- context containing template placeholder strings (regression)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterSummarizationEnrichmentPlaceholderStrings:
+    """Regression: context containing literal placeholder strings must be safe.
+
+    The second-pass substitution logic must not expand a context that itself
+    contains the literal strings ``{context}`` or ``{target_tokens}``.  If
+    ``str.replace()`` were applied to the already-substituted prompt a second
+    time, the literal placeholder appearing inside the context value could be
+    expanded, corrupting the prompt or causing a KeyError/ValueError.
+    """
+
+    @pytest.mark.asyncio
+    async def test_context_with_literal_context_placeholder_does_not_raise(
+        self,
+    ) -> None:
+        """enrich() must not raise when context contains the literal '{context}'."""
+        adapter = _make_adapter(token_threshold=0)  # force LLM path
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("Summary.")
+        )
+
+        # Build a context that contains the exact placeholder string used in
+        # _USER_PROMPT_TEMPLATE.  If second-pass substitution is not guarded,
+        # this would cause the placeholder to be expanded recursively.
+        context_with_placeholder = "The template uses {context} as a placeholder. " * (
+            (_TOKEN_THRESHOLD * _CHARS_PER_TOKEN)
+            // len("The template uses {context} as a placeholder. ")
+            + 2
+        )
+
+        # Must not raise and must return a valid result.
+        result = await adapter.enrich(prompt="Q", context=context_with_placeholder)
+
+        assert isinstance(result, ContractEnrichmentResult)
+        assert result.enrichment_type == "summarization"
+
+    @pytest.mark.asyncio
+    async def test_context_with_literal_target_tokens_placeholder_does_not_raise(
+        self,
+    ) -> None:
+        """enrich() must not raise when context contains '{target_tokens}'."""
+        adapter = _make_adapter(token_threshold=0)  # force LLM path
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("Summary.")
+        )
+
+        context_with_placeholder = "Set {target_tokens} to control output length. " * (
+            (_TOKEN_THRESHOLD * _CHARS_PER_TOKEN)
+            // len("Set {target_tokens} to control output length. ")
+            + 2
+        )
+
+        result = await adapter.enrich(prompt="Q", context=context_with_placeholder)
+
+        assert isinstance(result, ContractEnrichmentResult)
+        assert result.enrichment_type == "summarization"
+
+    @pytest.mark.asyncio
+    async def test_context_placeholders_appear_verbatim_in_user_message(
+        self,
+    ) -> None:
+        """Literal '{context}' and '{target_tokens}' in context are forwarded
+        unchanged into the user message sent to the LLM handler.
+        """
+        adapter = _make_adapter(token_threshold=0)
+        captured_requests: list[object] = []
+
+        async def capturing_handle(request: object) -> MagicMock:
+            captured_requests.append(request)
+            return _make_llm_response("Brief.")
+
+        adapter._handler.handle = capturing_handle  # type: ignore[method-assign]
+
+        placeholder_fragment = "Use {context} and {target_tokens} here. "
+        repeat_count = (_TOKEN_THRESHOLD * _CHARS_PER_TOKEN) // len(
+            placeholder_fragment
+        ) + 2
+        context = (placeholder_fragment * repeat_count).strip()
+
+        await adapter.enrich(prompt="Q", context=context)
+
+        assert len(captured_requests) == 1
+        messages = getattr(captured_requests[0], "messages", ())
+        assert len(messages) == 1
+        user_content: str = messages[0]["content"]
+        # The literal placeholder strings must appear inside the user message
+        # exactly as they were in the original context (not expanded).
+        assert "{context}" in user_content
+        assert "{target_tokens}" in user_content
+
+
+# ---------------------------------------------------------------------------
+# Constructor validation -- negative token_threshold
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterSummarizationEnrichmentConstructorValidation:
+    """Tests for constructor parameter validation."""
+
+    def test_negative_token_threshold_raises_value_error(self) -> None:
+        """Constructing with token_threshold=-1 must raise ValueError."""
+        with pytest.raises(ValueError, match="token_threshold"):
+            AdapterSummarizationEnrichment(
+                base_url="http://localhost:8100",
+                token_threshold=-1,
+            )
+
+    def test_zero_token_threshold_does_not_raise(self) -> None:
+        """token_threshold=0 is valid (every non-empty context triggers LLM)."""
+        adapter = AdapterSummarizationEnrichment(
+            base_url="http://localhost:8100",
+            token_threshold=0,
+        )
+        # Replace mocks so tests don't depend on live HTTP.
+        adapter._transport = MagicMock()
+        adapter._transport.close = AsyncMock()
+        adapter._handler = AsyncMock()
+        assert adapter._token_threshold == 0
+
+
+# ---------------------------------------------------------------------------
+# close()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterSummarizationEnrichmentClose:
+    """Tests for the close() method."""
+
+    @pytest.mark.asyncio
+    async def test_close_calls_transport_close(self) -> None:
+        """close() delegates to the transport's close() method."""
+        adapter = _make_adapter()
+        await adapter.close()
+        adapter._transport.close.assert_awaited_once()  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# Protocol compliance
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestProtocolContextEnrichmentCompliance:
+    """Verify AdapterSummarizationEnrichment satisfies ProtocolContextEnrichment."""
+
+    def test_isinstance_check(self) -> None:
+        """isinstance() against ProtocolContextEnrichment is True."""
+        from omnibase_spi.protocols.intelligence.protocol_context_enrichment import (
+            ProtocolContextEnrichment,
+        )
+
+        adapter = _make_adapter()
+        assert isinstance(adapter, ProtocolContextEnrichment)
+
+    def test_has_enrich_method(self) -> None:
+        """enrich() is callable on the adapter."""
+        adapter = _make_adapter()
+        assert callable(getattr(adapter, "enrich", None))
