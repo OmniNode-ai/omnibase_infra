@@ -140,23 +140,23 @@ class ServiceBatchComputeEffectivenessMetrics:
             error messages, and start/completion timestamps.
 
         Raises:
-            Exception: Can be raised from several sources outside the
-                per-phase try/except blocks:
+            asyncio.CancelledError: If the coroutine is cancelled during
+                execution. ``asyncio.CancelledError`` is a ``BaseException``
+                (not ``Exception``) and is not caught by any of the
+                per-phase ``except Exception`` blocks, nor by the notifier's
+                internal ``except Exception`` handler, so it propagates
+                unconditionally.
 
-                * ``asyncpg.PostgresError`` or ``OSError`` if pool
-                  acquisition fails (e.g., pool exhausted, connection
-                  refused). Pool acquisition occurs inside each phase's
-                  ``async with self._pool.acquire()`` block, which is
-                  **inside** the per-phase try/except, so these are
-                  captured as phase errors rather than raised.
-                * Any exception raised by
-                  ``ServiceEffectivenessInvalidationNotifier.notify``
-                  that is not suppressed internally by the notifier.
-                  The notifier is called **after** all phases complete,
-                  outside any try/except, so notifier failures propagate
-                  to the caller.
-                * ``asyncio.CancelledError`` if the coroutine is
-                  cancelled during execution.
+                Note:
+                    Pool acquisition errors (``asyncpg.PostgresError``,
+                    ``OSError``) occur inside each phase's
+                    ``async with self._pool.acquire()`` block, which is
+                    **inside** the per-phase try/except, so these are
+                    captured as phase errors rather than raised.
+
+                    The notifier unconditionally suppresses all
+                    ``Exception`` subclasses internally, so notifier
+                    failures never propagate to the caller.
 
                 Phase-level errors (per-phase SQL failures) are captured
                 in ``result.errors`` and do not raise.
@@ -323,10 +323,11 @@ class ServiceBatchComputeEffectivenessMetrics:
                 FROM agent_actions aa
                 WHERE aa.correlation_id = rd.correlation_id
             ) action_stats ON TRUE
-            WHERE NOT EXISTS (
-                SELECT 1 FROM injection_effectiveness ie
-                WHERE ie.session_id = rd.correlation_id
-            )
+            WHERE rd.correlation_id IS NOT NULL
+                AND NOT EXISTS (
+                    SELECT 1 FROM injection_effectiveness ie
+                    WHERE ie.session_id = rd.correlation_id
+                )
             ORDER BY rd.created_at DESC
             LIMIT $1
             ON CONFLICT (session_id) DO NOTHING
@@ -405,7 +406,8 @@ class ServiceBatchComputeEffectivenessMetrics:
                 ORDER BY sub.created_at DESC
                 LIMIT 1
             ) rd ON TRUE
-            WHERE aa.duration_ms IS NOT NULL
+            WHERE aa.correlation_id IS NOT NULL
+                AND aa.duration_ms IS NOT NULL
                 AND aa.duration_ms > 0
                 AND NOT EXISTS (
                     SELECT 1 FROM latency_breakdowns lb
@@ -488,6 +490,7 @@ class ServiceBatchComputeEffectivenessMetrics:
                 MIN(rd.created_at) AS created_at,
                 NOW() AS updated_at
             FROM agent_routing_decisions rd
+            WHERE rd.selected_agent IS NOT NULL
             GROUP BY rd.selected_agent
             ORDER BY rd.selected_agent
             LIMIT $1

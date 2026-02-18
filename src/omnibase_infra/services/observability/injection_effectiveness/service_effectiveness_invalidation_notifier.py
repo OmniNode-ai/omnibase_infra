@@ -120,8 +120,13 @@ class ServiceEffectivenessInvalidationNotifier:
                 UUID is generated if not provided.
 
         Raises:
-            This method never raises. All exceptions from Kafka
-            serialization or publishing are caught internally.
+            asyncio.CancelledError: ``asyncio.CancelledError`` is a
+                ``BaseException`` (not an ``Exception`` subclass) and is
+                not caught by the internal ``except Exception`` handler.
+                It will propagate to allow proper async task cancellation.
+                All other exceptions (``Exception`` subclasses) from Kafka
+                serialization or publishing are caught internally and
+                never propagate.
         """
         if rows_written <= 0:
             return

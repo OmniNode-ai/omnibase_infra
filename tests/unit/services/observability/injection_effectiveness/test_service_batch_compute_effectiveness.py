@@ -105,6 +105,9 @@ class TestParseExecuteCount:
     def test_parse_invalid_string(self) -> None:
         assert _parse_execute_count("not a valid result") == 0
 
+    def test_parse_none_returns_zero(self) -> None:
+        assert _parse_execute_count(None) == 0  # type: ignore[arg-type]
+
 
 class TestServiceBatchComputeEffectivenessMetrics:
     """Tests for ServiceBatchComputeEffectivenessMetrics."""
