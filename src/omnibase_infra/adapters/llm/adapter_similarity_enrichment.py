@@ -300,7 +300,11 @@ def _format_results_markdown(
         # Include payload metadata if present.
         if result.metadata:
             for key, schema_value in result.metadata.items():
-                value = schema_value.to_value() if hasattr(schema_value, "to_value") else schema_value
+                value = (
+                    schema_value.to_value()
+                    if hasattr(schema_value, "to_value")
+                    else schema_value
+                )
                 lines.append(f"- **{key}**: {value}")
         lines.append("")
     return "\n".join(lines).rstrip()

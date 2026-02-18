@@ -43,7 +43,9 @@ def _make_embedding_response(vector: list[float] | None = None) -> MagicMock:
     return resp
 
 
-def _make_search_result(result_id: str, score: float, metadata: dict[str, object] | None = None) -> MagicMock:
+def _make_search_result(
+    result_id: str, score: float, metadata: dict[str, object] | None = None
+) -> MagicMock:
     """Build a minimal ModelVectorSearchResult mock."""
     result = MagicMock()
     result.id = result_id
@@ -148,9 +150,7 @@ class TestAdapterSimilarityEnrichmentEnrich:
         )
 
         mock_qdrant = AsyncMock()
-        mock_qdrant.query_similar = AsyncMock(
-            return_value=_make_search_results([])
-        )
+        mock_qdrant.query_similar = AsyncMock(return_value=_make_search_results([]))
         adapter._qdrant_handler = mock_qdrant
 
         result = await adapter.enrich(
@@ -359,9 +359,7 @@ class TestAdapterSimilarityEnrichmentQdrantInit:
         assert adapter._qdrant_handler is None
 
         mock_handler = AsyncMock()
-        mock_handler.query_similar = AsyncMock(
-            return_value=_make_search_results([])
-        )
+        mock_handler.query_similar = AsyncMock(return_value=_make_search_results([]))
 
         with patch(
             "omnibase_infra.adapters.llm.adapter_similarity_enrichment.HandlerQdrant",
@@ -382,9 +380,7 @@ class TestAdapterSimilarityEnrichmentQdrantInit:
         )
 
         mock_qdrant = AsyncMock()
-        mock_qdrant.query_similar = AsyncMock(
-            return_value=_make_search_results([])
-        )
+        mock_qdrant.query_similar = AsyncMock(return_value=_make_search_results([]))
         # Pre-set the handler so _ensure_qdrant_initialized is a no-op.
         adapter._qdrant_handler = mock_qdrant
 
