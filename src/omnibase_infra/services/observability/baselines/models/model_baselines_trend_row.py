@@ -2,8 +2,20 @@
 # Copyright (c) 2026 OmniNode Team
 """Row model for the baselines_trend table.
 
-Represents a single (cohort, date) time-series data point for trend analysis.
-Used by the /api/baselines/trend endpoint.
+Represents a single ``(cohort, date)`` time-series data point for trend
+analysis.  Used by the ``/api/baselines/trend`` endpoint.
+
+Each row carries metrics for exactly one cohort (``'treatment'`` or
+``'control'``) on exactly one calendar day.  The dashboard assembles trend
+charts by pairing the treatment and control rows that share the same
+``trend_date``: together they form a single time-series data point showing
+whether the treatment cohort outperforms the control cohort on that day.
+
+``from_attributes=True`` is set on the model config so that instances can be
+constructed directly from asyncpg ``Record`` objects returned by the
+repository layer, without an intermediate ``dict`` conversion.
+``extra="forbid"`` causes a ``ValidationError`` if any unexpected column
+appears in the query result.
 
 Related Tickets:
     - OMN-2305: Create baselines tables and populate treatment/control comparisons

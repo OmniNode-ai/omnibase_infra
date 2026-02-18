@@ -2,8 +2,16 @@
 # Copyright (c) 2026 OmniNode Team
 """Result model for the baselines batch computation pipeline.
 
-Tracks per-table row counts and any phase errors from a single
-ServiceBatchComputeBaselines.compute_and_persist() run.
+This module defines ``ModelBatchComputeBaselinesResult``, the primary output
+container returned by ``ServiceBatchComputeBaselines.compute_and_persist()``.
+It captures row counts written to each of the three baselines tables
+(``baselines_comparisons``, ``baselines_trend``, ``baselines_breakdown``) and
+any error messages emitted by phases that failed non-fatally, allowing
+downstream callers to inspect partial-success runs without catching exceptions.
+
+The model is immutable (``frozen=True``) and ORM-compatible
+(``from_attributes=True``) so it can be constructed directly from database
+row mappings in tests and integration fixtures.
 
 Related Tickets:
     - OMN-2305: Create baselines tables and populate treatment/control comparisons
@@ -32,7 +40,7 @@ class ModelBatchComputeBaselinesResult(BaseModel):
         completed_at: When the computation completed.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     comparisons_rows: int = Field(
         default=0, ge=0, description="Rows written to baselines_comparisons."

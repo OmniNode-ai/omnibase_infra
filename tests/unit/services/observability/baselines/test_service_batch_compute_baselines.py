@@ -20,6 +20,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.runtime.emit_daemon.topics import TOPIC_BASELINES_COMPUTED
 from omnibase_infra.services.observability.baselines.models.model_baselines_snapshot_event import (
     ModelBaselinesSnapshotEvent,
 )
@@ -351,6 +352,9 @@ class TestServiceBatchComputeBaselines:
         assert "comparisons" in raw_payload
         assert "trend" in raw_payload
         assert "breakdown" in raw_payload
+        # Verify the topic argument passed to publish_envelope.
+        topic = call_args.args[1]
+        assert topic == TOPIC_BASELINES_COMPUTED
 
     @pytest.mark.asyncio
     async def test_emit_snapshot_skipped_when_all_phases_fail(

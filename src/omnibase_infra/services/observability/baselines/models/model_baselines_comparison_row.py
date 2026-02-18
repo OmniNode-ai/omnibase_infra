@@ -4,7 +4,13 @@
 
 Represents a single daily A/B comparison between treatment and control groups.
 Used as both the DB row representation and the API response model for
-/api/baselines/comparisons and /api/baselines/summary.
+``/api/baselines/comparisons`` and ``/api/baselines/summary``.
+
+``from_attributes=True`` is set on the model config so that instances can be
+constructed directly from asyncpg ``Record`` objects (or any ORM row) returned
+by the repository layer — no intermediate ``dict`` conversion is required.
+``extra="forbid"`` ensures that any unexpected column returned by a query
+raises a ``ValidationError`` immediately rather than silently being dropped.
 
 Related Tickets:
     - OMN-2305: Create baselines tables and populate treatment/control comparisons

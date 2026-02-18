@@ -9,9 +9,12 @@ This model is the stable contract emitted to
 The omnidash consumer projects this snapshot into the local
 ``omnidash_analytics`` read-model, replacing the previous snapshot.
 
-Contract stability:
-    - ``snapshot_id`` is a UUID generated fresh at each emit call.
-    - ``contract_version`` is incremented only on breaking schema changes.
+Schema strictness:
+    This model uses ``extra="forbid"``.  Any payload field that is not
+    declared in the class will raise a ``ValidationError`` at parse time.
+    Consumers must match the exact schema; ``contract_version`` is
+    incremented only on breaking schema changes, and ``snapshot_id`` is
+    a UUID generated fresh at each emit call.
 
 Related Tickets:
     - OMN-2305: Create baselines tables and populate treatment/control comparisons
@@ -41,6 +44,12 @@ class ModelBaselinesSnapshotEvent(BaseModel):
 
     Consumers should replace their local projection on receipt.
 
+    Note:
+        ``extra="forbid"`` is set on this model.  Consumers must send only
+        the fields declared below; any additional field will raise a
+        ``ValidationError``.  ``from_attributes=True`` allows construction
+        from ORM objects or asyncpg Record-like mappings.
+
     Attributes:
         snapshot_id: UUID generated fresh at emit time for this specific snapshot.
         contract_version: Schema version (bump only on breaking changes).
@@ -52,7 +61,7 @@ class ModelBaselinesSnapshotEvent(BaseModel):
         breakdown: Per-pattern treatment vs control breakdown rows.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     snapshot_id: UUID = Field(
         description="UUID identifying this specific computation run.",

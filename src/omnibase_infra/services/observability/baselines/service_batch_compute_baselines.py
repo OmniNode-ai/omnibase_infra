@@ -56,12 +56,12 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import asyncpg
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.emit_daemon.event_registry import EventRegistry
 from omnibase_infra.runtime.emit_daemon.topics import (
     BASELINES_COMPUTED_REGISTRATION,
@@ -84,9 +84,6 @@ from omnibase_infra.services.observability.baselines.models.model_batch_compute_
 )
 from omnibase_infra.utils.util_db_transaction import set_statement_timeout
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
-
-if TYPE_CHECKING:
-    from omnibase_infra.protocols import ProtocolEventBusLike
 
 logger = logging.getLogger(__name__)
 
@@ -695,6 +692,10 @@ class ServiceBatchComputeBaselines:
             last, not agents with the fewest sessions. High-traffic agents
             may be silently excluded if their names sort late.
 
+            **Time window**: Only agent_routing_decisions rows from the
+            past 90 days are included, filtered inside the agent_sessions
+            CTE via ``rd.created_at >= NOW() - INTERVAL '90 days'``.
+
         Args:
             correlation_id: Correlation ID for tracing.
 
@@ -731,6 +732,7 @@ class ServiceBatchComputeBaselines:
                 ) action_stats ON TRUE
                 WHERE rd.selected_agent IS NOT NULL
                     AND rd.correlation_id IS NOT NULL
+                    -- Time window: restrict to past 90 days, consistent with comparisons and trend phases.
                     AND rd.created_at >= NOW() - INTERVAL '90 days'
             ),
             agent_agg AS (
@@ -764,7 +766,8 @@ class ServiceBatchComputeBaselines:
                 sample_count,
                 treatment_count,
                 control_count,
-                -- Confidence: set when sample_count >= 20
+                -- Confidence proxy: treatment_success_rate when sample_count >= 20; NULL below threshold.
+                -- Not a statistical confidence interval.
                 CASE
                     WHEN sample_count >= 20
                         AND treatment_success_rate IS NOT NULL
