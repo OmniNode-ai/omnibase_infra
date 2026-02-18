@@ -22,6 +22,9 @@ from omnibase_infra.adapters.llm.adapter_llm_tool_provider import (
     AdapterLlmToolProvider,
 )
 from omnibase_infra.adapters.llm.adapter_model_router import AdapterModelRouter
+from omnibase_infra.adapters.llm.adapter_similarity_enrichment import (
+    AdapterSimilarityEnrichment,
+)
 from omnibase_infra.adapters.llm.adapter_summarization_enrichment import (
     AdapterSummarizationEnrichment,
 )
@@ -46,6 +49,7 @@ __all__: list[str] = [
     "AdapterLlmToolProvider",
     "AdapterModelRouter",
     "AdapterCodeAnalysisEnrichment",
+    "AdapterSimilarityEnrichment",
     "AdapterSummarizationEnrichment",
     "ModelLlmAdapterRequest",
     "ModelLlmAdapterResponse",
