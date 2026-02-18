@@ -395,7 +395,7 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
             conditions.append(
                 qdrant_models.FieldCondition(
                     key=field,
-                    range=qdrant_models.Range(**range_params),  # type: ignore[arg-type]
+                    range=qdrant_models.Range(**range_params),
                 )
             )
         elif operator == EnumVectorFilterOperator.IN:
@@ -1045,7 +1045,7 @@ class HandlerQdrant(MixinAsyncCircuitBreaker, ProtocolVectorStoreHandler):
                 last_error=f"Health check failed: {type(e).__name__}",
             )
 
-    async def describe(self) -> ModelVectorHandlerMetadata:  # type: ignore[override]
+    async def describe(self) -> ModelVectorHandlerMetadata:
         """Return handler metadata and capabilities.
 
         Returns:
