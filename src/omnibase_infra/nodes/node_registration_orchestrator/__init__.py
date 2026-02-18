@@ -49,6 +49,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.dispatchers import (
     DispatcherNodeIntrospected,
     DispatcherNodeRegistrationAcked,
     DispatcherRuntimeTick,
+    DispatcherTopicCatalogQuery,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.models import (
     ModelIntentExecutionResult,
@@ -87,6 +88,7 @@ __all__: list[str] = [
     "DispatcherNodeIntrospected",
     "DispatcherNodeRegistrationAcked",
     "DispatcherRuntimeTick",
+    "DispatcherTopicCatalogQuery",
     "ModelIntentExecutionResult",
     # Models
     "ModelOrchestratorConfig",

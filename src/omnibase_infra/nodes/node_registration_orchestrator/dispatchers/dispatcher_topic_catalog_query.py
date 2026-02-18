@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -208,8 +208,6 @@ class DispatcherTopicCatalogQuery(MixinAsyncCircuitBreaker):
                         correlation_id=correlation_id,
                         output_events=[],
                     )
-
-            payload = cast("ModelTopicCatalogQuery", payload)
 
             now = datetime.now(UTC)
 
