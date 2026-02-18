@@ -220,7 +220,7 @@ jobs:
       # Pin to specific version for reproducible builds (avoid @master for stability)
       # See: https://github.com/aquasecurity/trivy-action/releases
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@v0.33.1
+        uses: aquasecurity/trivy-action@0.34.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ steps.repo.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: 'sarif'
