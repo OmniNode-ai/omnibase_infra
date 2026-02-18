@@ -2634,6 +2634,12 @@ class RuntimeHostProcess:
                     logger.info("Built HandlerInfisical for config prefetch")
 
                 # Step 3: Prefetch through the handler
+                # At this point handler is guaranteed non-None: if the original
+                # handler was None and credentials were missing we returned early
+                # above; if credentials were present _inline_handler was built and
+                # assigned to handler inside the if-block above.
+                assert handler is not None
+
                 service_slug = self._node_identity.service
                 infisical_required = os.environ.get(
                     "INFISICAL_REQUIRED", ""
