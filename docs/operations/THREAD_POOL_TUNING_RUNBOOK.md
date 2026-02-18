@@ -424,5 +424,5 @@ Total = Thread Memory + Queue Memory + Base Memory
 - [Circuit Breaker Thread Safety](../architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md)
 - [Validation Performance Notes](../validation/performance_notes.md)
 - [Circuit Breaker Comparison](../analysis/CIRCUIT_BREAKER_COMPARISON.md)
-- [HandlerVault Source](../../src/omnibase_infra/handlers/handler_vault.py)
-- [Configuration Model](../../src/omnibase_infra/handlers/models/vault/model_vault_handler_config.py)
+- [HandlerInfisical Source](../../src/omnibase_infra/handlers/handler_infisical.py)
+- [Configuration Model](../../src/omnibase_infra/handlers/models/infisical/model_infisical_handler_config.py)

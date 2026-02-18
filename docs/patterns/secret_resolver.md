@@ -867,7 +867,7 @@ This is intentional - the resolver is a low-level primitive used by nodes and ha
 
 - [`docs/patterns/security_patterns.md`](./security_patterns.md) - Secret management guidelines, Vault integration
 - [`docs/patterns/error_handling_patterns.md`](./error_handling_patterns.md) - Error context and sanitization
-- [`src/omnibase_infra/handlers/handler_vault.py`](../../src/omnibase_infra/handlers/handler_vault.py) - Vault handler implementation
+- [`src/omnibase_infra/handlers/handler_infisical.py`](../../src/omnibase_infra/handlers/handler_infisical.py) - Infisical handler implementation
 - [`src/omnibase_infra/errors/error_infra.py`](../../src/omnibase_infra/errors/error_infra.py) - `SecretResolutionError` definition
 
 ## API Reference
