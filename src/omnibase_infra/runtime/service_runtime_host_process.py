@@ -2613,19 +2613,21 @@ class RuntimeHostProcess:
                     self._container if self._container is not None else _Container()
                 )
                 _inline_handler = HandlerInfisical(_handler_container)
-                await _inline_handler.initialize(
-                    {
-                        "host": infisical_addr,
-                        "client_id": client_id,
-                        "client_secret": client_secret,
-                        "project_id": project_id,
-                        "environment_slug": env_slug,
-                    }
-                )
-                handler = _inline_handler
-                logger.info("Built HandlerInfisical for config prefetch")
 
             try:
+                if _inline_handler is not None:
+                    await _inline_handler.initialize(
+                        {
+                            "host": infisical_addr,
+                            "client_id": client_id,
+                            "client_secret": client_secret,
+                            "project_id": project_id,
+                            "environment_slug": env_slug,
+                        }
+                    )
+                    handler = _inline_handler
+                    logger.info("Built HandlerInfisical for config prefetch")
+
                 # Step 3: Prefetch through the handler
                 service_slug = self._node_identity.service
                 infisical_required = os.environ.get(

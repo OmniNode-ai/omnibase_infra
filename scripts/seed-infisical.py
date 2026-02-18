@@ -274,6 +274,7 @@ def _do_seed(
         from omnibase_infra.adapters.models.model_infisical_config import (
             ModelInfisicalAdapterConfig,
         )
+        from omnibase_infra.errors import InfraConnectionError, InfraUnavailableError
     except ImportError:
         logger.exception("Cannot import Infisical adapter")
         return 0, 0, 0, len(requirements)
@@ -331,6 +332,12 @@ def _do_seed(
                         secret_name=key,
                         secret_path=folder,
                     )
+                except (InfraConnectionError, InfraUnavailableError):
+                    # Connection/availability failures are not "key not found" --
+                    # re-raise so the outer handler can fail fast with a clear
+                    # message instead of treating every key as missing and
+                    # generating a cascade of misleading create_secret() errors.
+                    raise
                 except Exception as exc:
                     logger.debug("Key check failed for %s at %s: %s", key, folder, exc)
 

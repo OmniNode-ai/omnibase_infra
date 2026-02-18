@@ -15,8 +15,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from omnibase_infra.enums import EnumInfraTransportType
-
-pytestmark = pytest.mark.integration
 from omnibase_infra.runtime.config_discovery.config_prefetcher import (
     ConfigPrefetcher,
 )
@@ -27,6 +25,8 @@ from omnibase_infra.runtime.config_discovery.transport_config_map import (
     TransportConfigMap,
 )
 from tests.helpers.path_utils import find_project_root
+
+pytestmark = pytest.mark.integration
 
 _REPO_ROOT = find_project_root(Path(__file__).resolve().parent)
 NODES_DIR = _REPO_ROOT / "src" / "omnibase_infra" / "nodes"
