@@ -152,8 +152,17 @@ log_step "2" "Start Valkey (Redis-compatible cache)"
 run_cmd $COMPOSE_CMD -f "${COMPOSE_FILE}" up -d valkey
 if [[ "${DRY_RUN}" != "true" ]]; then
     log_info "Waiting for Valkey to be healthy..."
-    sleep 3
-    log_info "Valkey started"
+    valkey_max_attempts=20
+    valkey_attempt=0
+    until $COMPOSE_CMD -f "${COMPOSE_FILE}" exec valkey valkey-cli ping 2>/dev/null | grep -q PONG; do
+        valkey_attempt=$((valkey_attempt + 1))
+        if [[ $valkey_attempt -ge $valkey_max_attempts ]]; then
+            log_error "Valkey failed to become healthy after ${valkey_max_attempts} attempts"
+            exit 1
+        fi
+        sleep 1
+    done
+    log_info "Valkey is healthy"
 fi
 
 # ============================================================================

@@ -398,3 +398,187 @@ class TestAdapterInfisicalExtractSecretValue:
         mock_result = MagicMock()
         mock_result.secretValue = ""
         assert adapter._extract_secret_value(mock_result) == ""
+
+
+class TestAdapterInfisicalCreateSecret:
+    """Test create_secret() write-path operation."""
+
+    def test_create_secret_not_initialized(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test create_secret raises SecretResolutionError when not initialized."""
+        adapter = AdapterInfisical(adapter_config)
+        with pytest.raises(SecretResolutionError, match="not initialized"):
+            adapter.create_secret("NEW_KEY", "new-value")
+
+    def test_create_secret_success(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test successful secret creation with mock SDK."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        adapter.create_secret("MY_KEY", "my-value")
+
+        mock_client.secrets.create_secret_by_name.assert_called_once_with(
+            secret_name="MY_KEY",  # noqa: S106
+            project_id=str(adapter_config.project_id),
+            environment_slug=adapter_config.environment_slug,
+            secret_path=adapter_config.secret_path,
+            secret_value="my-value",  # noqa: S106
+        )
+
+    def test_create_secret_with_overrides(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test create_secret uses parameter overrides over adapter defaults."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        adapter.create_secret(
+            "KEY",
+            "value",
+            project_id="override-proj",
+            environment_slug="prod",
+            secret_path="/prod/secrets/",  # noqa: S106
+        )
+
+        mock_client.secrets.create_secret_by_name.assert_called_once_with(
+            secret_name="KEY",  # noqa: S106
+            project_id="override-proj",
+            environment_slug="prod",
+            secret_path="/prod/secrets/",  # noqa: S106
+            secret_value="value",  # noqa: S106
+        )
+
+    def test_create_secret_sdk_failure_wraps_to_infra_connection_error(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test SDK failure is wrapped as InfraConnectionError."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        mock_client.secrets.create_secret_by_name.side_effect = RuntimeError(
+            "SDK internal error"
+        )
+
+        with pytest.raises(InfraConnectionError, match="Failed to create secret"):
+            adapter.create_secret("KEY", "value")
+
+    def test_create_secret_empty_value(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test that empty string is a valid secret value for create_secret."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        # Should not raise; empty string is a legitimate value
+        adapter.create_secret("EMPTY_KEY", "")
+
+        mock_client.secrets.create_secret_by_name.assert_called_once_with(
+            secret_name="EMPTY_KEY",  # noqa: S106
+            project_id=str(adapter_config.project_id),
+            environment_slug=adapter_config.environment_slug,
+            secret_path=adapter_config.secret_path,
+            secret_value="",
+        )
+
+
+class TestAdapterInfisicalUpdateSecret:
+    """Test update_secret() write-path operation."""
+
+    def test_update_secret_not_initialized(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test update_secret raises SecretResolutionError when not initialized."""
+        adapter = AdapterInfisical(adapter_config)
+        with pytest.raises(SecretResolutionError, match="not initialized"):
+            adapter.update_secret("EXISTING_KEY", "new-value")
+
+    def test_update_secret_success(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test successful secret update with mock SDK."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        adapter.update_secret("MY_KEY", "updated-value")
+
+        mock_client.secrets.update_secret_by_name.assert_called_once_with(
+            current_secret_name="MY_KEY",  # noqa: S106
+            project_id=str(adapter_config.project_id),
+            environment_slug=adapter_config.environment_slug,
+            secret_path=adapter_config.secret_path,
+            secret_value="updated-value",  # noqa: S106
+        )
+
+    def test_update_secret_with_overrides(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test update_secret uses parameter overrides over adapter defaults."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        adapter.update_secret(
+            "KEY",
+            "value",
+            project_id="override-proj",
+            environment_slug="staging",
+            secret_path="/staging/secrets/",  # noqa: S106
+        )
+
+        mock_client.secrets.update_secret_by_name.assert_called_once_with(
+            current_secret_name="KEY",  # noqa: S106
+            project_id="override-proj",
+            environment_slug="staging",
+            secret_path="/staging/secrets/",  # noqa: S106
+            secret_value="value",  # noqa: S106
+        )
+
+    def test_update_secret_sdk_failure_wraps_to_infra_connection_error(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test SDK failure is wrapped as InfraConnectionError."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        mock_client.secrets.update_secret_by_name.side_effect = RuntimeError(
+            "SDK internal error"
+        )
+
+        with pytest.raises(InfraConnectionError, match="Failed to update secret"):
+            adapter.update_secret("KEY", "value")
+
+    def test_update_secret_empty_value(
+        self, adapter_config: ModelInfisicalAdapterConfig
+    ) -> None:
+        """Test that empty string is a valid updated value for update_secret."""
+        adapter = AdapterInfisical(adapter_config)
+        mock_client = MagicMock()
+        adapter._client = mock_client
+        adapter._authenticated = True
+
+        # Should not raise; empty string is a legitimate value
+        adapter.update_secret("KEY", "")
+
+        mock_client.secrets.update_secret_by_name.assert_called_once_with(
+            current_secret_name="KEY",  # noqa: S106
+            project_id=str(adapter_config.project_id),
+            environment_slug=adapter_config.environment_slug,
+            secret_path=adapter_config.secret_path,
+            secret_value="",
+        )

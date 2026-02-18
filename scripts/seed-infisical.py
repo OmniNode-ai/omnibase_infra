@@ -275,6 +275,7 @@ def _do_seed(
             ModelInfisicalAdapterConfig,
         )
         from omnibase_infra.errors import InfraConnectionError, InfraUnavailableError
+        from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
     except ImportError:
         logger.exception("Cannot import Infisical adapter")
         return 0, 0, 0, len(requirements)
@@ -382,7 +383,9 @@ def _do_seed(
                     skipped += 1
 
             except Exception as exc:
-                logger.warning("Error processing %s: %s", key, exc)
+                logger.warning(
+                    "Error processing %s: %s", key, sanitize_error_message(exc)
+                )
                 error_count += 1
     finally:
         adapter.shutdown()
@@ -503,21 +506,28 @@ def main() -> int:
     )
     parser.add_argument(
         "--dry-run",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Show what would be done without writing (default: true)",
+        help=(
+            "Show what would be done without writing (default: true). "
+            "--no-dry-run is equivalent to --execute."
+        ),
     )
     parser.add_argument(
         "--execute",
         action="store_true",
         default=False,
-        help="Actually write to Infisical (overrides --dry-run)",
+        help="Actually write to Infisical (equivalent to --no-dry-run)",
     )
     parser.add_argument(
         "--import-env",
         type=Path,
         default=None,
-        help="Import values from a .env file",
+        help=(
+            "Import values from a .env file. "
+            "When --set-values is active and --import-env is not provided, "
+            "values are sourced from the current process environment."
+        ),
     )
     parser.add_argument(
         "--export",
@@ -568,6 +578,14 @@ def main() -> int:
     else:
         # Use current environment
         env_values = dict(os.environ)
+        if args.set_values and (args.execute or not args.dry_run):
+            logger.warning(
+                "WARNING: --import-env was not provided. With --set-values active, "
+                "secret values will be sourced from the current process environment. "
+                "This may write sensitive variables that happen to be set in the "
+                "shell. Use --import-env <file> to restrict the value source to a "
+                "known .env file."
+            )
 
     # Always show diff summary
     _print_diff_summary(
@@ -579,7 +597,8 @@ def main() -> int:
     )
 
     # Execute or dry-run
-    if args.execute:
+    # --execute and --no-dry-run are equivalent; either triggers a live write.
+    if args.execute or not args.dry_run:
         logger.info("Executing seed operation...")
         try:
             created, updated, skipped, error_count = _do_seed(

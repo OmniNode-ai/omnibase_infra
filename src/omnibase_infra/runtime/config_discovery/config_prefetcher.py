@@ -124,7 +124,8 @@ class ConfigPrefetcher:
                 handler layer.
             service_slug: Optional service name for per-service paths.
                 If empty, shared paths are used.
-            infisical_required: If True, missing keys cause errors.
+            infisical_required: If True, missing keys for both transport-based
+                config and explicit env dependencies cause errors.
                 If False (default), missing keys are logged as warnings.
         """
         self._handler = handler
@@ -183,10 +184,16 @@ class ConfigPrefetcher:
         """
         result = ModelPrefetchResult()
 
-        # Build specs from discovered transport types
+        # Build specs from discovered transport types.
+        # When infisical_required=True, mark specs as required so that missing
+        # transport-based keys are routed to result.errors rather than
+        # result.missing. Without this, the spec.required flag would always be
+        # False (the default), and the ``elif self._infisical_required and
+        # spec.required`` guard on line ~224 would never fire for transport keys.
         specs = self._transport_map.specs_for_transports(
             list(requirements.transport_types),
             service_slug=self._service_slug,
+            required=self._infisical_required,
         )
         result.specs_attempted = len(specs)
 

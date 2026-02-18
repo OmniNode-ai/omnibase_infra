@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -14,6 +14,41 @@ import pytest
 # to sys.path and use importlib.import_module("seed-infisical") instead.
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "scripts"
 sys.path.insert(0, str(_SCRIPTS_DIR))
+
+
+# ---------------------------------------------------------------------------
+# Shared fixtures and helpers for _do_seed tests
+# ---------------------------------------------------------------------------
+
+_VALID_ENV = {
+    "INFISICAL_ADDR": "http://localhost:8880",
+    "INFISICAL_CLIENT_ID": "test-client-id",
+    "INFISICAL_CLIENT_SECRET": "test-client-secret",
+    "INFISICAL_PROJECT_ID": "00000000-0000-0000-0000-000000000001",
+}
+
+_SAMPLE_REQUIREMENT: dict[str, str] = {
+    "key": "POSTGRES_DSN",
+    "transport_type": "db",
+    "folder": "/shared/db/",
+    "source": "transport",
+}
+
+
+def _make_mock_adapter(*, existing_secret: MagicMock | None = None) -> MagicMock:
+    """Return a fresh AdapterInfisical mock.
+
+    Args:
+        existing_secret: The value returned by ``get_secret``. Pass ``None``
+            to simulate a key that does not exist in Infisical.
+    """
+    adapter = MagicMock()
+    adapter.get_secret.return_value = existing_secret
+    adapter.create_secret.return_value = None
+    adapter.update_secret.return_value = None
+    adapter.initialize.return_value = None
+    adapter.shutdown.return_value = None
+    return adapter
 
 
 class TestParseEnvFile:
@@ -158,3 +193,230 @@ class TestMainEntryPoint:
         ):
             result = seed.main()
             assert result == 0
+
+
+class TestDoSeed:
+    """Unit tests for _do_seed() -- the actual Infisical write path."""
+
+    # ------------------------------------------------------------------
+    # Internal helper: run _do_seed with mocked adapter and credentials.
+    # ------------------------------------------------------------------
+
+    def _run_do_seed(
+        self,
+        seed: object,
+        *,
+        requirements: list[dict[str, str]],
+        env_values: dict[str, str],
+        create_missing: bool = True,
+        set_values: bool = False,
+        overwrite_existing: bool = False,
+        mock_adapter: MagicMock | None = None,
+    ) -> tuple[int, int, int, int]:
+        """Invoke ``_do_seed`` with fully mocked Infisical infrastructure.
+
+        All dynamic imports inside ``_do_seed`` are patched so no real adapter
+        or Infisical connection is needed.
+        """
+        if mock_adapter is None:
+            mock_adapter = _make_mock_adapter()
+
+        adapter_cls_mock = MagicMock(return_value=mock_adapter)
+        config_cls_mock = MagicMock()
+        secret_str_mock = MagicMock(side_effect=lambda v: v)
+
+        # _do_seed imports these inside the function body; patch them.
+        with (
+            patch.dict("os.environ", _VALID_ENV),
+            patch.dict(
+                "sys.modules",
+                {
+                    "pydantic": MagicMock(SecretStr=secret_str_mock),
+                    "omnibase_infra.adapters._internal.adapter_infisical": MagicMock(
+                        AdapterInfisical=adapter_cls_mock
+                    ),
+                    "omnibase_infra.adapters.models.model_infisical_config": MagicMock(
+                        ModelInfisicalAdapterConfig=config_cls_mock
+                    ),
+                    "omnibase_infra.errors": MagicMock(
+                        InfraConnectionError=Exception,
+                        InfraUnavailableError=Exception,
+                    ),
+                    "omnibase_infra.utils.util_error_sanitization": MagicMock(
+                        sanitize_error_message=str
+                    ),
+                },
+            ),
+        ):
+            return seed._do_seed(  # type: ignore[attr-defined]
+                requirements,
+                env_values,
+                create_missing=create_missing,
+                set_values=set_values,
+                overwrite_existing=overwrite_existing,
+            )
+
+    # ------------------------------------------------------------------
+    # (a) Create path: key is missing in Infisical and create_missing=True
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    def test_do_seed_creates_missing_key(self) -> None:
+        """Should call create_secret when key does not exist and create_missing=True."""
+        from importlib import import_module
+
+        seed = import_module("seed-infisical")
+
+        mock_adapter = _make_mock_adapter(existing_secret=None)
+        created, updated, skipped, errors = self._run_do_seed(
+            seed,
+            requirements=[_SAMPLE_REQUIREMENT],
+            env_values={"POSTGRES_DSN": "postgresql://test"},
+            create_missing=True,
+            set_values=True,
+            overwrite_existing=False,
+            mock_adapter=mock_adapter,
+        )
+
+        assert created == 1
+        assert updated == 0
+        assert skipped == 0
+        assert errors == 0
+        mock_adapter.create_secret.assert_called_once()
+
+    # ------------------------------------------------------------------
+    # (b) Update path: key exists and overwrite_existing=True
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    def test_do_seed_updates_existing_key_when_overwrite_true(self) -> None:
+        """Should call update_secret when key already exists and overwrite_existing=True."""
+        from importlib import import_module
+
+        seed = import_module("seed-infisical")
+
+        existing = MagicMock()  # simulate an existing secret object
+        mock_adapter = _make_mock_adapter(existing_secret=existing)
+        created, updated, skipped, errors = self._run_do_seed(
+            seed,
+            requirements=[_SAMPLE_REQUIREMENT],
+            env_values={"POSTGRES_DSN": "postgresql://test"},
+            create_missing=True,
+            set_values=True,
+            overwrite_existing=True,
+            mock_adapter=mock_adapter,
+        )
+
+        assert created == 0
+        assert updated == 1
+        assert skipped == 0
+        assert errors == 0
+        mock_adapter.update_secret.assert_called_once()
+        mock_adapter.create_secret.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # (c) Skip path: key exists and overwrite_existing=False
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    def test_do_seed_skips_existing_key_when_overwrite_false(self) -> None:
+        """Should skip key that already exists when overwrite_existing=False."""
+        from importlib import import_module
+
+        seed = import_module("seed-infisical")
+
+        existing = MagicMock()
+        mock_adapter = _make_mock_adapter(existing_secret=existing)
+        created, updated, skipped, errors = self._run_do_seed(
+            seed,
+            requirements=[_SAMPLE_REQUIREMENT],
+            env_values={"POSTGRES_DSN": "postgresql://test"},
+            create_missing=True,
+            set_values=True,
+            overwrite_existing=False,
+            mock_adapter=mock_adapter,
+        )
+
+        assert created == 0
+        assert updated == 0
+        assert skipped == 1
+        assert errors == 0
+        mock_adapter.create_secret.assert_not_called()
+        mock_adapter.update_secret.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # (d) Skip path: key missing and create_missing=False
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    def test_do_seed_skips_missing_key_when_create_missing_false(self) -> None:
+        """Should skip key that does not exist when create_missing=False."""
+        from importlib import import_module
+
+        seed = import_module("seed-infisical")
+
+        mock_adapter = _make_mock_adapter(existing_secret=None)
+        created, updated, skipped, errors = self._run_do_seed(
+            seed,
+            requirements=[_SAMPLE_REQUIREMENT],
+            env_values={"POSTGRES_DSN": "postgresql://test"},
+            create_missing=False,
+            set_values=False,
+            overwrite_existing=False,
+            mock_adapter=mock_adapter,
+        )
+
+        assert created == 0
+        assert updated == 0
+        assert skipped == 1
+        assert errors == 0
+        mock_adapter.create_secret.assert_not_called()
+        mock_adapter.update_secret.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # Extra: multiple requirements -- verify per-key routing is independent
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    def test_do_seed_handles_multiple_requirements_independently(self) -> None:
+        """Should route each requirement independently through create/update/skip."""
+        from importlib import import_module
+
+        seed = import_module("seed-infisical")
+
+        existing = MagicMock()
+
+        # First call (POSTGRES_DSN) -- key does not exist.
+        # Second call (REDIS_URL)    -- key exists.
+        mock_adapter = _make_mock_adapter()
+        mock_adapter.get_secret.side_effect = [None, existing]
+
+        requirements = [
+            {
+                "key": "POSTGRES_DSN",
+                "folder": "/shared/db/",
+                "transport_type": "db",
+                "source": "transport",
+            },
+            {
+                "key": "REDIS_URL",
+                "folder": "/shared/cache/",
+                "transport_type": "cache",
+                "source": "transport",
+            },
+        ]
+        created, updated, skipped, errors = self._run_do_seed(
+            seed,
+            requirements=requirements,
+            env_values={},
+            create_missing=True,
+            set_values=False,
+            overwrite_existing=True,
+            mock_adapter=mock_adapter,
+        )
+
+        # POSTGRES_DSN: missing → create; REDIS_URL: exists + overwrite → update
+        assert created == 1
+        assert updated == 1
+        assert skipped == 0
+        assert errors == 0

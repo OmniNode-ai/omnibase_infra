@@ -2588,14 +2588,20 @@ class RuntimeHostProcess:
 
             _inline_handler: HandlerInfisical | None = None
 
+            # Load credentials unconditionally so they are always defined for
+            # the type checker. These are only meaningful when handler is None
+            # (i.e. when we construct an inline HandlerInfisical below), but
+            # initialising them here avoids potential UnboundLocalError if the
+            # control flow ever changes, and keeps mypy/pyright happy.
+            client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
+            client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")
+            project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
+            env_slug = os.environ.get("INFISICAL_ENVIRONMENT", "prod")
+
             if handler is None:
                 # Build a HandlerInfisical from env vars.  This avoids
                 # depending on the handler registry which may not contain
                 # HandlerInfisical if it is not contract-declared.
-                client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
-                client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")
-                project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
-
                 if not client_id or not client_secret or not project_id:
                     logger.info(
                         "Infisical credentials not fully configured "
@@ -2606,7 +2612,6 @@ class RuntimeHostProcess:
 
                 from omnibase_core.container import ModelONEXContainer as _Container
 
-                env_slug = os.environ.get("INFISICAL_ENVIRONMENT", "prod")
                 # Use the existing container if available, otherwise create a
                 # minimal one solely for HandlerInfisical initialization.
                 _handler_container = (
