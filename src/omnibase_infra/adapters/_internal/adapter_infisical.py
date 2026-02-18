@@ -391,6 +391,120 @@ class AdapterInfisical:
 
         return batch_result
 
+    def create_secret(
+        self,
+        secret_name: str,
+        secret_value: str,
+        *,
+        project_id: str | None = None,
+        environment_slug: str | None = None,
+        secret_path: str | None = None,
+    ) -> None:
+        """Create a new secret in Infisical.
+
+        Args:
+            secret_name: The secret key/name to create.
+            secret_value: The value to store (may be an empty string).
+            project_id: Override default project ID.
+            environment_slug: Override default environment slug.
+            secret_path: Override default secret path.
+
+        Raises:
+            SecretResolutionError: If client is not initialized.
+            InfraConnectionError: If the SDK call fails.
+        """
+        if self._client is None or not self._authenticated:
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="create_secret",
+                target_name="infisical-adapter",
+            )
+            raise SecretResolutionError(
+                "Infisical adapter not initialized. Call initialize() first.",
+                context=ctx,
+            )
+
+        effective_project = project_id or str(self._config.project_id)
+        effective_env = environment_slug or self._config.environment_slug
+        effective_path = secret_path or self._config.secret_path
+
+        try:
+            self._client.secrets.create_secret_by_name(  # type: ignore[attr-defined]
+                secret_name=secret_name,
+                project_id=effective_project,
+                environment_slug=effective_env,
+                secret_path=effective_path,
+                secret_value=secret_value,
+            )
+        except Exception as e:
+            sanitized_path = sanitize_secret_path(effective_path)
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="create_secret",
+                target_name="infisical-adapter",
+            )
+            raise InfraConnectionError(
+                f"Failed to create secret in Infisical (path={sanitized_path})",
+                context=ctx,
+            ) from e
+
+    def update_secret(
+        self,
+        secret_name: str,
+        secret_value: str,
+        *,
+        project_id: str | None = None,
+        environment_slug: str | None = None,
+        secret_path: str | None = None,
+    ) -> None:
+        """Update an existing secret in Infisical.
+
+        Args:
+            secret_name: The secret key/name to update.
+            secret_value: The new value to store (may be an empty string).
+            project_id: Override default project ID.
+            environment_slug: Override default environment slug.
+            secret_path: Override default secret path.
+
+        Raises:
+            SecretResolutionError: If client is not initialized.
+            InfraConnectionError: If the SDK call fails.
+        """
+        if self._client is None or not self._authenticated:
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="update_secret",
+                target_name="infisical-adapter",
+            )
+            raise SecretResolutionError(
+                "Infisical adapter not initialized. Call initialize() first.",
+                context=ctx,
+            )
+
+        effective_project = project_id or str(self._config.project_id)
+        effective_env = environment_slug or self._config.environment_slug
+        effective_path = secret_path or self._config.secret_path
+
+        try:
+            self._client.secrets.update_secret_by_name(  # type: ignore[attr-defined]
+                current_secret_name=secret_name,
+                project_id=effective_project,
+                environment_slug=effective_env,
+                secret_path=effective_path,
+                secret_value=secret_value,
+            )
+        except Exception as e:
+            sanitized_path = sanitize_secret_path(effective_path)
+            ctx = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.INFISICAL,
+                operation="update_secret",
+                target_name="infisical-adapter",
+            )
+            raise InfraConnectionError(
+                f"Failed to update secret in Infisical (path={sanitized_path})",
+                context=ctx,
+            ) from e
+
     def shutdown(self) -> None:
         """Release SDK client resources."""
         self._client = None

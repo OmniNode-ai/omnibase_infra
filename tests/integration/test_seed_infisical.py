@@ -16,6 +16,8 @@ import pytest
 
 from tests.helpers.path_utils import find_project_root
 
+pytestmark = pytest.mark.integration
+
 _REPO_ROOT = find_project_root(Path(__file__).resolve().parent)
 SCRIPTS_DIR = _REPO_ROOT / "scripts"
 NODES_DIR = _REPO_ROOT / "src" / "omnibase_infra" / "nodes"

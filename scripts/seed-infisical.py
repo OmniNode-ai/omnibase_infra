@@ -139,7 +139,7 @@ def _extract_requirements(
     # not from Infisical itself -- seeding their keys into Infisical would
     # create a circular dependency (Infisical needs those credentials to start).
     for transport in reqs.transport_types:
-        if transport in transport_map._BOOTSTRAP_TRANSPORTS:
+        if transport_map.is_bootstrap_transport(transport):
             logger.debug(
                 "Skipping bootstrap transport %s in seed (credentials come "
                 "from env, not Infisical)",
@@ -309,70 +309,68 @@ def _do_seed(
     skipped = 0
     error_count = 0
 
-    for req in requirements:
-        key = req["key"]
-        folder = req["folder"]
-        has_value = key in env_values
-        secret_value = env_values.get(key, "") if set_values else ""
+    try:
+        for req in requirements:
+            key = req["key"]
+            folder = req["folder"]
+            has_value = key in env_values
+            secret_value = env_values.get(key, "") if set_values else ""
 
-        try:
-            # Check if key exists
-            existing = None
             try:
-                existing = adapter.get_secret(
-                    secret_name=key,
-                    secret_path=folder,
-                )
+                # Check if key exists
+                existing = None
+                try:
+                    existing = adapter.get_secret(
+                        secret_name=key,
+                        secret_path=folder,
+                    )
+                except Exception as exc:
+                    logger.debug("Key check failed for %s at %s: %s", key, folder, exc)
+
+                if existing is not None and not overwrite_existing:
+                    skipped += 1
+                    logger.debug("Key %s already exists at %s, skipping", key, folder)
+                    continue
+
+                if existing is not None and overwrite_existing:
+                    # Update existing secret
+                    adapter.update_secret(
+                        secret_name=key,
+                        secret_path=folder,
+                        secret_value=secret_value,
+                    )
+                    updated += 1
+                    logger.info(
+                        "Updated secret: %s at %s (value %s)",
+                        key,
+                        folder,
+                        "from .env" if has_value and set_values else "empty",
+                    )
+
+                elif create_missing and existing is None:
+                    # Create new secret
+                    adapter.create_secret(
+                        secret_name=key,
+                        secret_path=folder,
+                        secret_value=secret_value,
+                    )
+                    created += 1
+                    logger.info(
+                        "Created secret: %s at %s (value %s)",
+                        key,
+                        folder,
+                        "from .env" if has_value and set_values else "empty",
+                    )
+
+                else:
+                    skipped += 1
+
             except Exception as exc:
-                logger.debug("Key check failed for %s at %s: %s", key, folder, exc)
+                logger.warning("Error processing %s: %s", key, exc)
+                error_count += 1
+    finally:
+        adapter.shutdown()
 
-            if existing is not None and not overwrite_existing:
-                skipped += 1
-                logger.debug("Key %s already exists at %s, skipping", key, folder)
-                continue
-
-            if existing is not None and overwrite_existing:
-                # Update existing secret via Infisical SDK
-                adapter._client.secrets.update_secret_by_name(  # type: ignore[union-attr]
-                    current_secret_name=key,
-                    secret_path=folder,
-                    environment_slug=adapter._config.environment_slug,
-                    project_id=str(adapter._config.project_id),
-                    secret_value=secret_value,
-                )
-                updated += 1
-                logger.info(
-                    "Updated secret: %s at %s (value %s)",
-                    key,
-                    folder,
-                    "from .env" if has_value and set_values else "empty",
-                )
-
-            elif create_missing and existing is None:
-                # Create new secret via Infisical SDK
-                adapter._client.secrets.create_secret_by_name(  # type: ignore[union-attr]
-                    secret_name=key,
-                    secret_path=folder,
-                    environment_slug=adapter._config.environment_slug,
-                    project_id=str(adapter._config.project_id),
-                    secret_value=secret_value,
-                )
-                created += 1
-                logger.info(
-                    "Created secret: %s at %s (value %s)",
-                    key,
-                    folder,
-                    "from .env" if has_value and set_values else "empty",
-                )
-
-            else:
-                skipped += 1
-
-        except Exception as exc:
-            logger.warning("Error processing %s: %s", key, exc)
-            error_count += 1
-
-    adapter.shutdown()
     return created, updated, skipped, error_count
 
 

@@ -133,6 +133,22 @@ class TransportConfigMap:
         {EnumInfraTransportType.INFISICAL}
     )
 
+    def is_bootstrap_transport(self, transport: EnumInfraTransportType) -> bool:
+        """Return True if this transport's credentials come from the environment.
+
+        Bootstrap transports (e.g. ``INFISICAL``) must be resolved from the
+        environment (e.g. ``.env`` file), never from Infisical itself.
+        Fetching their credentials from Infisical would create a circular
+        dependency because Infisical needs those credentials to start.
+
+        Args:
+            transport: The transport type to check.
+
+        Returns:
+            ``True`` if the transport is bootstrap-only, ``False`` otherwise.
+        """
+        return transport in self._BOOTSTRAP_TRANSPORTS
+
     @staticmethod
     def _transport_slug(transport: EnumInfraTransportType) -> str:
         """Convert transport type to folder slug.

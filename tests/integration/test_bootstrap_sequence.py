@@ -15,6 +15,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from omnibase_infra.enums import EnumInfraTransportType
+
+pytestmark = pytest.mark.integration
 from omnibase_infra.runtime.config_discovery.config_prefetcher import (
     ConfigPrefetcher,
 )

@@ -2562,7 +2562,7 @@ class RuntimeHostProcess:
             # Step 2: Get or create a ProtocolSecretResolver
             # First, try to find an already-initialized HandlerInfisical in the
             # handler registry. If not found (typical case -- HandlerInfisical
-            # is not contract-declared), build a lightweight adapter directly
+            # is not contract-declared), construct a HandlerInfisical directly
             # from env vars so the prefetch is not a no-op.
             from omnibase_infra.runtime.config_discovery.models import (
                 ProtocolSecretResolver,
@@ -2578,14 +2578,18 @@ class RuntimeHostProcess:
                     )
                     break
 
-            # Track any inline adapter created below so we can shut it down
+            # Track any inline handler created below so we can shut it down
             # after prefetch, regardless of success or failure.
-            # NOTE: typed as object to avoid a forward reference -- AdapterInfisical
-            # is imported lazily inside the conditional block below.
-            _inline_adapter: object = None
+            # HandlerInfisical is not contract-declared in the typical case,
+            # so we construct one directly from env vars when not found in the
+            # handler registry. HandlerInfisical is the correct public API --
+            # AdapterInfisical lives in _internal/ and must not be imported here.
+            from omnibase_infra.handlers.handler_infisical import HandlerInfisical
+
+            _inline_handler: HandlerInfisical | None = None
 
             if handler is None:
-                # Build a lightweight adapter from env vars.  This avoids
+                # Build a HandlerInfisical from env vars.  This avoids
                 # depending on the handler registry which may not contain
                 # HandlerInfisical if it is not contract-declared.
                 client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
@@ -2600,58 +2604,26 @@ class RuntimeHostProcess:
                     )
                     return
 
-                from uuid import UUID as _UUID
-
-                from pydantic import SecretStr as _SecretStr
-
-                from omnibase_infra.adapters._internal.adapter_infisical import (
-                    AdapterInfisical,
-                )
-                from omnibase_infra.adapters.models.model_infisical_config import (
-                    ModelInfisicalAdapterConfig,
-                )
+                from omnibase_core.container import ModelONEXContainer as _Container
 
                 env_slug = os.environ.get("INFISICAL_ENVIRONMENT", "prod")
-                adapter_config = ModelInfisicalAdapterConfig(
-                    host=infisical_addr,
-                    client_id=_SecretStr(client_id),
-                    client_secret=_SecretStr(client_secret),
-                    project_id=_UUID(project_id),
-                    environment_slug=env_slug,
+                # Use the existing container if available, otherwise create a
+                # minimal one solely for HandlerInfisical initialization.
+                _handler_container = (
+                    self._container if self._container is not None else _Container()
                 )
-                _inline_adapter = AdapterInfisical(adapter_config)
-                _inline_adapter.initialize()
-
-                # Wrap the adapter in a thin shim that satisfies
-                # ProtocolSecretResolver (get_secret_sync).
-                class AdapterSecretResolver:
-                    """Thin shim adapting AdapterInfisical to ProtocolSecretResolver."""
-
-                    def __init__(
-                        self,
-                        _adapter: AdapterInfisical,
-                        _config: ModelInfisicalAdapterConfig,
-                    ) -> None:
-                        self._adapter = _adapter
-                        self._config = _config
-
-                    def get_secret_sync(
-                        self,
-                        *,
-                        secret_name: str,
-                        secret_path: str,
-                    ) -> _SecretStr | None:
-                        try:
-                            result = self._adapter.get_secret(
-                                secret_name=secret_name,
-                                secret_path=secret_path,
-                            )
-                            return result.value
-                        except Exception:
-                            return None
-
-                handler = AdapterSecretResolver(_inline_adapter, adapter_config)
-                logger.info("Built lightweight Infisical adapter for config prefetch")
+                _inline_handler = HandlerInfisical(_handler_container)
+                await _inline_handler.initialize(
+                    {
+                        "host": infisical_addr,
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                        "project_id": project_id,
+                        "environment_slug": env_slug,
+                    }
+                )
+                handler = _inline_handler
+                logger.info("Built HandlerInfisical for config prefetch")
 
             try:
                 # Step 3: Prefetch through the handler
@@ -2688,13 +2660,11 @@ class RuntimeHostProcess:
                     for key, err in result.errors.items():
                         logger.warning("Config prefetch error for %s: %s", key, err)
             finally:
-                # Always shut down the inline adapter to release SDK resources.
-                # Adapters found in the handler registry manage their own lifecycle
+                # Always shut down the inline handler to release SDK resources.
+                # Handlers found in the handler registry manage their own lifecycle
                 # and must NOT be shut down here.
-                # Use hasattr to avoid a mypy error on the intentionally-broad
-                # 'object' annotation used to sidestep the lazy import.
-                if _inline_adapter is not None and hasattr(_inline_adapter, "shutdown"):
-                    _inline_adapter.shutdown()  # type: ignore[union-attr]
+                if _inline_handler is not None:
+                    await _inline_handler.shutdown()
 
         except Exception as exc:
             # Prefetch failures are non-fatal.
