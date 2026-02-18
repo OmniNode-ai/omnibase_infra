@@ -334,9 +334,11 @@ def _do_seed(
                     )
                 except (InfraConnectionError, InfraUnavailableError):
                     # Connection/availability failures are not "key not found" --
-                    # re-raise so the outer handler can fail fast with a clear
-                    # message instead of treating every key as missing and
-                    # generating a cascade of misleading create_secret() errors.
+                    # re-raise to the per-key except block which logs a warning
+                    # and increments error_count. All remaining keys are still
+                    # attempted (no short-circuit), but this prevents treating
+                    # every key as missing and cascading into spurious
+                    # create_secret() errors when Infisical is unreachable.
                     raise
                 except Exception as exc:
                     logger.debug("Key check failed for %s at %s: %s", key, folder, exc)
