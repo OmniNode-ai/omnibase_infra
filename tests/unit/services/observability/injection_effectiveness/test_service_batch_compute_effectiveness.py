@@ -16,6 +16,8 @@ from uuid import uuid4
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from omnibase_infra.services.observability.injection_effectiveness.models.model_batch_compute_result import (
     ModelBatchComputeResult,
 )
@@ -122,11 +124,13 @@ class TestServiceBatchComputeEffectivenessMetrics:
         async def execute_side_effect(sql, *args, **kwargs):
             if "SET LOCAL" in str(sql):
                 return "SET"
-            if "injection_effectiveness" in str(sql):
+            if "INSERT INTO injection_effectiveness" in str(sql):
                 return "INSERT 0 10"
-            if "latency_breakdowns" in str(sql):
+            if "INSERT INTO latency_breakdowns" in str(sql):
                 return "INSERT 0 5"
-            return "INSERT 0 3"
+            if "INSERT INTO pattern_hit_rates" in str(sql):
+                return "INSERT 0 3"
+            return "INSERT 0 0"
 
         conn.execute = AsyncMock(side_effect=execute_side_effect)
         conn.fetchrow = AsyncMock(return_value=None)
@@ -150,11 +154,13 @@ class TestServiceBatchComputeEffectivenessMetrics:
         async def execute_side_effect(sql, *args, **kwargs):
             if "SET LOCAL" in str(sql):
                 return "SET"
-            if "injection_effectiveness" in str(sql):
+            if "INSERT INTO injection_effectiveness" in str(sql):
                 return "INSERT 0 5"
-            if "latency_breakdowns" in str(sql):
+            if "INSERT INTO latency_breakdowns" in str(sql):
                 return "INSERT 0 3"
-            return "INSERT 0 2"
+            if "INSERT INTO pattern_hit_rates" in str(sql):
+                return "INSERT 0 2"
+            return "INSERT 0 0"
 
         conn.execute = AsyncMock(side_effect=execute_side_effect)
         conn.fetchrow = AsyncMock(return_value=None)

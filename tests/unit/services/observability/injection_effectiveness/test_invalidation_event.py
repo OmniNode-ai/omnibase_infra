@@ -15,6 +15,8 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+pytestmark = pytest.mark.unit
+
 from omnibase_infra.services.observability.injection_effectiveness.models.model_invalidation_event import (
     ModelEffectivenessInvalidationEvent,
 )
@@ -88,6 +90,15 @@ class TestModelEffectivenessInvalidationEvent:
             ModelEffectivenessInvalidationEvent(
                 tables_affected=(),
                 rows_written=0,
+                source="batch_compute",
+            )
+
+    def test_empty_tables_rejected_with_nonzero_rows(self) -> None:
+        """tables_affected min_length constraint applies regardless of rows_written."""
+        with pytest.raises(ValidationError):
+            ModelEffectivenessInvalidationEvent(
+                tables_affected=(),
+                rows_written=5,
                 source="batch_compute",
             )
 

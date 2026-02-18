@@ -28,7 +28,7 @@ class ModelBatchComputeResult(BaseModel):
         completed_at: Computation end timestamp.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     effectiveness_rows: int = Field(
         default=0, description="Rows written to injection_effectiveness"

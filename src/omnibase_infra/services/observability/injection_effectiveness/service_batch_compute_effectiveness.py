@@ -140,9 +140,26 @@ class ServiceBatchComputeEffectivenessMetrics:
             error messages, and start/completion timestamps.
 
         Raises:
-            Exception: Only if pool acquisition or the notifier fails
-                outside the per-phase try/except blocks. Phase-level
-                errors are captured in the result, not raised.
+            Exception: Can be raised from several sources outside the
+                per-phase try/except blocks:
+
+                * ``asyncpg.PostgresError`` or ``OSError`` if pool
+                  acquisition fails (e.g., pool exhausted, connection
+                  refused). Pool acquisition occurs inside each phase's
+                  ``async with self._pool.acquire()`` block, which is
+                  **inside** the per-phase try/except, so these are
+                  captured as phase errors rather than raised.
+                * Any exception raised by
+                  ``ServiceEffectivenessInvalidationNotifier.notify``
+                  that is not suppressed internally by the notifier.
+                  The notifier is called **after** all phases complete,
+                  outside any try/except, so notifier failures propagate
+                  to the caller.
+                * ``asyncio.CancelledError`` if the coroutine is
+                  cancelled during execution.
+
+                Phase-level errors (per-phase SQL failures) are captured
+                in ``result.errors`` and do not raise.
         """
         effective_correlation_id = correlation_id or uuid4()
         started_at = datetime.now(UTC)
@@ -427,11 +444,24 @@ class ServiceBatchComputeEffectivenessMetrics:
         string using ``md5(selected_agent)::uuid`` in SQL, which requires
         no extensions and produces consistent UUIDs across environments.
 
+        Note:
+            **Hard cap, not true batching**: Unlike ``_compute_effectiveness``
+            and ``_compute_latency_breakdowns``, this phase groups by
+            ``selected_agent`` before applying ``LIMIT $1``. There is no
+            cursor or offset mechanism. If the number of distinct agents in
+            ``agent_routing_decisions`` exceeds ``batch_size``, only the
+            first ``batch_size`` agents (ordered alphabetically by name) are
+            processed. Agents beyond the cap are silently skipped until the
+            next run -- but since the ordering and cap are deterministic, the
+            same agents are skipped every run. A warning is logged when the
+            result count equals ``batch_size`` to surface this condition.
+
         Args:
             correlation_id: Correlation ID for tracing.
 
         Returns:
-            Number of rows written.
+            Number of rows written. If this equals ``batch_size``, some
+            agents may have been truncated (see Note above).
         """
         # Deterministic pattern_id via md5(selected_agent)::uuid.  This is a
         # pure-SQL approach that requires no extensions and guarantees the same
@@ -483,6 +513,15 @@ class ServiceBatchComputeEffectivenessMetrics:
 
         count = _parse_execute_count(result)
 
+        if count == self._batch_size:
+            logger.warning(
+                "pattern_hit_rates phase returned exactly batch_size rows; "
+                "some agents may have been truncated. "
+                "Increase batch_size if more than %d distinct agents exist.",
+                self._batch_size,
+                extra={"correlation_id": str(correlation_id)},
+            )
+
         logger.debug(
             "Computed pattern_hit_rates rows",
             extra={
@@ -500,13 +539,21 @@ def _parse_execute_count(result: str) -> int:
     or ``"UPDATE 42"``. This helper extracts the trailing integer which
     represents the number of affected rows.
 
+    Note:
+        Although the parameter is annotated as ``str``, asyncpg's return
+        type is effectively ``Any``. A ``None`` or non-string value is
+        handled defensively and treated as ``0`` rows.
+
     Args:
         result: Status string returned by ``asyncpg.Connection.execute()``.
+            May be ``None`` or a non-string value in practice.
 
     Returns:
         Number of affected rows parsed from the last token, or ``0`` if
-        the string is empty or not parseable.
+        the value is ``None``, not a string, empty, or not parseable.
     """
+    if result is None or not isinstance(result, str):
+        return 0
     try:
         parts = result.split()
         return int(parts[-1])

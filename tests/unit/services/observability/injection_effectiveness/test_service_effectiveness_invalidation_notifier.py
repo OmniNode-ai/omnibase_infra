@@ -15,6 +15,8 @@ from uuid import uuid4
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 from omnibase_infra.event_bus.topic_constants import (
     TOPIC_EFFECTIVENESS_INVALIDATION,
 )
