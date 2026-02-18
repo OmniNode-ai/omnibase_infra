@@ -534,6 +534,17 @@ Consumer: omniintelligence cost aggregation pipeline
 Payload: ContractLlmCallMetrics (per-call token counts, cost, latency)
 """
 
+# Effectiveness data invalidation events (OMN-2303)
+TOPIC_EFFECTIVENESS_INVALIDATION: Final[str] = (
+    "onex.evt.omnibase-infra.effectiveness-data-changed.v1"
+)
+"""Effectiveness data invalidation events for dashboard refresh.
+
+Producer: WriterInjectionEffectivenessPostgres, ServiceBatchComputeEffectivenessMetrics
+Consumer: Dashboard WebSocket servers, API caches
+Payload: ModelEffectivenessInvalidationEvent (tables_affected, rows_written, source)
+"""
+
 # Agent status events
 TOPIC_AGENT_STATUS: Final[str] = "onex.evt.agent.status.v1"
 """Agent status events for real-time agent visibility.
@@ -564,6 +575,8 @@ __all__ = [
     "ENV_PATTERN",
     # Agent Status Topics
     "TOPIC_AGENT_STATUS",
+    # Effectiveness Invalidation Topics
+    "TOPIC_EFFECTIVENESS_INVALIDATION",
     # LLM Call Metrics Topics
     "TOPIC_LLM_CALL_COMPLETED",
     # Wiring Health Topics

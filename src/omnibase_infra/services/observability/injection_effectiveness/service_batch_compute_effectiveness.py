@@ -1,0 +1,587 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+"""Batch computation for effectiveness metrics from existing observability data.
+
+Derives injection effectiveness metrics from the existing ``agent_actions``
+and ``agent_routing_decisions`` tables, populating the three effectiveness
+measurement tables (``injection_effectiveness``, ``latency_breakdowns``,
+``pattern_hit_rates``).
+
+This module bridges the gap when the Kafka pipeline is not yet producing
+events: it computes effectiveness metrics from data that already exists
+in the database, seeding the effectiveness tables with real measurements.
+
+Design Decisions:
+    - Read from agent_actions + agent_routing_decisions (already populated)
+    - Write to injection_effectiveness, latency_breakdowns, pattern_hit_rates
+    - Idempotent: Uses ON CONFLICT to avoid duplicates on re-runs
+    - Batched: Processes in configurable batch sizes for memory efficiency
+    - Pool injection: asyncpg.Pool injected, lifecycle managed externally
+    - Correlation-aware: Joins on correlation_id to link actions to routing
+
+Metrics Derivation Logic:
+    - **injection_effectiveness**: One row per unique correlation_id from
+      agent_routing_decisions. Utilization derived from action success rates.
+      Agent match fields are NULL until expected-agent tracking is available.
+    - **latency_breakdowns**: One row per agent_action with total duration_ms.
+      Sub-component latencies (routing, retrieval, injection) are NULL
+      because individual timing is not yet instrumented.
+    - **pattern_hit_rates**: Aggregated from routing decisions grouped by
+      selected_agent, treating agent selection as the "pattern".
+
+Related Tickets:
+    - OMN-2303: Activate effectiveness consumer and populate measurement tables
+
+Example:
+    >>> import asyncpg
+    >>> from omnibase_infra.services.observability.injection_effectiveness.service_batch_compute_effectiveness import (
+    ...     ServiceBatchComputeEffectivenessMetrics,
+    ... )
+    >>>
+    >>> pool = await asyncpg.create_pool(dsn="postgresql://...")
+    >>> batch = ServiceBatchComputeEffectivenessMetrics(pool)
+    >>> result = await batch.compute_and_persist()
+    >>> print(f"Wrote {result.effectiveness_rows} effectiveness rows")
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
+
+import asyncpg
+
+from omnibase_infra.services.observability.injection_effectiveness.models.model_batch_compute_result import (
+    ModelBatchComputeResult,
+)
+from omnibase_infra.services.observability.injection_effectiveness.service_effectiveness_invalidation_notifier import (
+    ServiceEffectivenessInvalidationNotifier,
+)
+from omnibase_infra.utils.util_db_transaction import set_statement_timeout
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+
+logger = logging.getLogger(__name__)
+
+# Default batch size for processing routing decisions
+DEFAULT_BATCH_SIZE: int = 500
+
+# Default query timeout in seconds
+DEFAULT_QUERY_TIMEOUT: float = 60.0
+
+
+class ServiceBatchComputeEffectivenessMetrics:
+    """Batch computation engine for effectiveness metrics.
+
+    Reads existing data from agent_actions and agent_routing_decisions
+    tables and derives effectiveness metrics for the three measurement
+    tables.
+
+    The computation is idempotent: running it multiple times produces
+    the same result due to ON CONFLICT handling in all INSERT statements.
+
+    Attributes:
+        _pool: Injected asyncpg connection pool.
+        _batch_size: Number of routing decisions to process per batch.
+        _query_timeout: Query timeout in seconds.
+        _notifier: Optional notifier for invalidation events.
+
+    Example:
+        >>> pool = await asyncpg.create_pool(dsn="postgresql://...")
+        >>> batch = ServiceBatchComputeEffectivenessMetrics(pool, batch_size=200)
+        >>> result = await batch.compute_and_persist()
+    """
+
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        query_timeout: float = DEFAULT_QUERY_TIMEOUT,
+        notifier: ServiceEffectivenessInvalidationNotifier | None = None,
+    ) -> None:
+        """Initialize batch computation engine.
+
+        Args:
+            pool: asyncpg connection pool (lifecycle managed externally).
+            batch_size: Routing decisions to process per batch.
+            query_timeout: Query timeout in seconds.
+            notifier: Optional notifier for publishing invalidation events
+                after successful writes.
+        """
+        self._pool = pool
+        self._batch_size = batch_size
+        self._query_timeout = query_timeout
+        self._notifier = notifier
+
+    async def compute_and_persist(
+        self,
+        correlation_id: UUID | None = None,
+    ) -> ModelBatchComputeResult:
+        """Run the full batch computation pipeline.
+
+        Executes three computation phases sequentially:
+            1. Derive injection_effectiveness rows from routing decisions
+            2. Derive latency_breakdowns from agent action durations
+            3. Derive pattern_hit_rates from agent selection patterns
+
+        All writes are idempotent (ON CONFLICT DO NOTHING / DO UPDATE).
+        Individual phase failures are caught and recorded in the result's
+        ``errors`` tuple rather than raised, so subsequent phases still run.
+
+        If a notifier was provided and rows were written, publishes an
+        invalidation event listing the affected tables.
+
+        Args:
+            correlation_id: Optional correlation ID for tracing. A new
+                UUID is generated if not provided.
+
+        Returns:
+            ModelBatchComputeResult with per-table row counts, any phase
+            error messages, and start/completion timestamps.
+
+        Raises:
+            asyncio.CancelledError: If the coroutine is cancelled during
+                execution. ``asyncio.CancelledError`` is a ``BaseException``
+                (not ``Exception``) and is not caught by any of the
+                per-phase ``except Exception`` blocks, nor by the notifier's
+                internal ``except Exception`` handler, so it propagates
+                unconditionally.
+
+                Note:
+                    Pool acquisition errors (``asyncpg.PostgresError``,
+                    ``OSError``) occur inside each phase's
+                    ``async with self._pool.acquire()`` block, which is
+                    **inside** the per-phase try/except, so these are
+                    captured as phase errors rather than raised.
+
+                    The notifier unconditionally suppresses all
+                    ``Exception`` subclasses internally, so notifier
+                    failures never propagate to the caller.
+
+                Phase-level errors (per-phase SQL failures) are captured
+                in ``result.errors`` and do not raise.
+        """
+        effective_correlation_id = correlation_id or uuid4()
+        started_at = datetime.now(UTC)
+        errors: list[str] = []
+
+        logger.info(
+            "Starting batch effectiveness computation",
+            extra={
+                "correlation_id": str(effective_correlation_id),
+                "batch_size": self._batch_size,
+            },
+        )
+
+        # Phase 1: injection_effectiveness from routing decisions
+        effectiveness_rows = 0
+        try:
+            effectiveness_rows = await self._compute_effectiveness(
+                effective_correlation_id
+            )
+        except Exception as e:
+            safe_msg = sanitize_error_message(e)
+            msg = f"Phase 1 (injection_effectiveness) failed: {safe_msg}"
+            logger.exception(
+                msg, extra={"correlation_id": str(effective_correlation_id)}
+            )
+            errors.append(msg)
+
+        # Phase 2: latency_breakdowns from agent action durations
+        latency_rows = 0
+        try:
+            latency_rows = await self._compute_latency_breakdowns(
+                effective_correlation_id
+            )
+        except Exception as e:
+            safe_msg = sanitize_error_message(e)
+            msg = f"Phase 2 (latency_breakdowns) failed: {safe_msg}"
+            logger.exception(
+                msg, extra={"correlation_id": str(effective_correlation_id)}
+            )
+            errors.append(msg)
+
+        # Phase 3: pattern_hit_rates from agent selection patterns
+        pattern_rows = 0
+        try:
+            pattern_rows = await self._compute_pattern_hit_rates(
+                effective_correlation_id
+            )
+        except Exception as e:
+            safe_msg = sanitize_error_message(e)
+            msg = f"Phase 3 (pattern_hit_rates) failed: {safe_msg}"
+            logger.exception(
+                msg, extra={"correlation_id": str(effective_correlation_id)}
+            )
+            errors.append(msg)
+
+        completed_at = datetime.now(UTC)
+
+        result = ModelBatchComputeResult(
+            effectiveness_rows=effectiveness_rows,
+            latency_rows=latency_rows,
+            pattern_rows=pattern_rows,
+            errors=tuple(errors),
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+
+        logger.info(
+            "Batch effectiveness computation completed",
+            extra={
+                "correlation_id": str(effective_correlation_id),
+                "effectiveness_rows": effectiveness_rows,
+                "latency_rows": latency_rows,
+                "pattern_rows": pattern_rows,
+                "total_rows": result.total_rows,
+                "has_errors": result.has_errors,
+                "duration_seconds": (completed_at - started_at).total_seconds(),
+            },
+        )
+
+        # Emit invalidation event if rows were written
+        if result.total_rows > 0 and self._notifier is not None:
+            tables: list[str] = []
+            if effectiveness_rows > 0:
+                tables.append("injection_effectiveness")
+            if latency_rows > 0:
+                tables.append("latency_breakdowns")
+            if pattern_rows > 0:
+                tables.append("pattern_hit_rates")
+
+            await self._notifier.notify(
+                tables_affected=tuple(tables),
+                rows_written=result.total_rows,
+                source="batch_compute",
+                correlation_id=effective_correlation_id,
+            )
+
+        return result
+
+    async def _compute_effectiveness(self, correlation_id: UUID) -> int:
+        """Derive injection_effectiveness rows from routing decisions.
+
+        Each unique correlation_id in agent_routing_decisions becomes one
+        row in injection_effectiveness. The utilization_score is derived
+        from the action success rate for that correlation. Agent match
+        fields (expected_agent, agent_match_score) are NULL until
+        expected-agent tracking is implemented.
+
+        Args:
+            correlation_id: Correlation ID for tracing.
+
+        Returns:
+            Number of rows written.
+        """
+        # This query:
+        # 1. Iterates agent_routing_decisions rows, deduplicating by session_id
+        #    via ON CONFLICT DO NOTHING (no GROUP BY; one row per routing decision)
+        # 2. LATERAL JOINs with agent_actions to compute action success rates
+        # 3. Derives utilization_score from completed/total action ratio
+        # 4. Sets agent_match_score and expected_agent to NULL (not yet tracked)
+        # 5. Computes user_visible_latency_ms from MAX(duration_ms)
+        sql = """
+            INSERT INTO injection_effectiveness (
+                session_id, correlation_id, cohort,
+                utilization_score, utilization_method,
+                agent_match_score, expected_agent, actual_agent,
+                user_visible_latency_ms,
+                created_at, updated_at
+            )
+            SELECT
+                rd.correlation_id AS session_id,
+                rd.correlation_id,
+                CASE
+                    WHEN rd.confidence_score IS NULL THEN NULL
+                    WHEN rd.confidence_score >= 0.8 THEN 'treatment'
+                    ELSE 'control'
+                END AS cohort,
+                -- utilization_score: ratio of completed actions to total actions
+                COALESCE(
+                    CAST(action_stats.completed_count AS FLOAT)
+                    / NULLIF(action_stats.total_count, 0),
+                    0.0
+                ) AS utilization_score,
+                'batch_derived' AS utilization_method,
+                -- agent_match_score: NULL until expected-agent tracking
+                -- is implemented; without a true expected agent the
+                -- match score is meaningless.
+                NULL AS agent_match_score,
+                -- expected_agent: NULL because the true expected agent
+                -- is not available in routing decisions data.
+                NULL AS expected_agent,
+                rd.selected_agent AS actual_agent,
+                -- user_visible_latency: max action duration
+                action_stats.max_duration_ms AS user_visible_latency_ms,
+                rd.created_at,
+                NOW() AS updated_at
+            FROM agent_routing_decisions rd
+            LEFT JOIN LATERAL (
+                SELECT
+                    COUNT(*) AS total_count,
+                    COUNT(*) FILTER (WHERE aa.status = 'completed') AS completed_count,
+                    MAX(aa.duration_ms) AS max_duration_ms
+                FROM agent_actions aa
+                WHERE aa.correlation_id = rd.correlation_id
+            ) action_stats ON TRUE
+            WHERE rd.correlation_id IS NOT NULL
+                AND NOT EXISTS (
+                    SELECT 1 FROM injection_effectiveness ie
+                    WHERE ie.session_id = rd.correlation_id
+                )
+            ORDER BY rd.created_at DESC
+            LIMIT $1
+            ON CONFLICT (session_id) DO NOTHING
+        """
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await set_statement_timeout(conn, self._query_timeout * 1000)
+
+                result: str = await conn.execute(sql, self._batch_size)
+
+        # asyncpg execute returns "INSERT 0 N" string
+        count = parse_execute_count(result)
+
+        logger.debug(
+            "Computed injection_effectiveness rows",
+            extra={
+                "correlation_id": str(correlation_id),
+                "rows_written": count,
+            },
+        )
+        return count
+
+    async def _compute_latency_breakdowns(self, correlation_id: UUID) -> int:
+        """Derive latency_breakdowns from agent action durations.
+
+        Each agent_action with a duration_ms value becomes a row in
+        latency_breakdowns, using the action's correlation_id as session_id
+        and the action id as prompt_id.
+
+        Note:
+            Sub-component latencies (routing_latency_ms, retrieval_latency_ms,
+            injection_latency_ms) are set to NULL. These are **synthetic NULL
+            estimates** -- not based on real measurements. Only
+            ``user_latency_ms`` (sourced from ``agent_actions.duration_ms``)
+            reflects an actual measured value. The sub-component columns will
+            remain NULL until per-stage instrumentation is implemented.
+
+        Args:
+            correlation_id: Correlation ID for tracing.
+
+        Returns:
+            Number of rows written.
+        """
+        sql = """
+            INSERT INTO latency_breakdowns (
+                session_id, prompt_id, cohort, cache_hit,
+                routing_latency_ms, retrieval_latency_ms, injection_latency_ms,
+                user_latency_ms, emitted_at, created_at
+            )
+            SELECT
+                aa.correlation_id AS session_id,
+                aa.id AS prompt_id,
+                -- Derive cohort from routing confidence if available
+                CASE
+                    WHEN rd.confidence_score >= 0.8 THEN 'treatment'
+                    WHEN rd.confidence_score IS NOT NULL THEN 'control'
+                    ELSE NULL
+                END AS cohort,
+                FALSE AS cache_hit,
+                -- Synthetic estimates - not based on real measurements.
+                -- Sub-component latencies (routing, retrieval, injection)
+                -- are NULL placeholders until instrumentation is
+                -- implemented. Only total user_latency_ms (from
+                -- agent_actions.duration_ms) reflects a real measurement.
+                NULL AS routing_latency_ms,
+                NULL AS retrieval_latency_ms,
+                NULL AS injection_latency_ms,
+                COALESCE(aa.duration_ms, 0) AS user_latency_ms,
+                aa.created_at AS emitted_at,
+                NOW() AS created_at
+            FROM agent_actions aa
+            LEFT JOIN LATERAL (
+                SELECT sub.confidence_score
+                FROM agent_routing_decisions sub
+                WHERE sub.correlation_id = aa.correlation_id
+                ORDER BY sub.created_at DESC
+                LIMIT 1
+            ) rd ON TRUE
+            WHERE aa.correlation_id IS NOT NULL
+                AND aa.duration_ms IS NOT NULL
+                AND aa.duration_ms > 0
+                AND NOT EXISTS (
+                    SELECT 1 FROM latency_breakdowns lb
+                    WHERE lb.session_id = aa.correlation_id
+                        AND lb.prompt_id = aa.id
+                )
+            ORDER BY aa.created_at DESC
+            LIMIT $1
+            ON CONFLICT (session_id, prompt_id) DO NOTHING
+        """
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await set_statement_timeout(conn, self._query_timeout * 1000)
+
+                result: str = await conn.execute(sql, self._batch_size)
+
+        count = parse_execute_count(result)
+
+        logger.debug(
+            "Computed latency_breakdowns rows",
+            extra={
+                "correlation_id": str(correlation_id),
+                "rows_written": count,
+            },
+        )
+        return count
+
+    async def _compute_pattern_hit_rates(self, correlation_id: UUID) -> int:
+        """Derive pattern_hit_rates from agent selection patterns.
+
+        Treats each unique per-agent selection as a "pattern" and
+        computes hit rates based on how often that routing pattern led
+        to successful actions.
+
+        The pattern_id is derived deterministically from the selected_agent
+        string using ``md5(selected_agent)::uuid`` in SQL, which requires
+        no extensions and produces consistent UUIDs across environments.
+
+        Note:
+            **Hard cap, not true batching**: Unlike ``_compute_effectiveness``
+            and ``_compute_latency_breakdowns``, this phase groups by
+            ``selected_agent`` before applying ``LIMIT $1``. There is no
+            cursor or offset mechanism. If the number of distinct agents in
+            ``agent_routing_decisions`` exceeds ``batch_size``, only the
+            first ``batch_size`` agents (ordered alphabetically by name) are
+            processed. Agents beyond the cap are silently skipped until the
+            next run -- but since the ordering and cap are deterministic, the
+            same agents are skipped every run. A warning is logged when the
+            result count equals ``batch_size`` to surface this condition.
+
+        Args:
+            correlation_id: Correlation ID for tracing.
+
+        Returns:
+            Number of rows written. If this equals ``batch_size``, some
+            agents may have been truncated (see Note above).
+        """
+        # Deterministic pattern_id via md5(selected_agent)::uuid.  This is a
+        # pure-SQL approach that requires no extensions and guarantees the same
+        # agent name always produces the same UUID across all environments.
+        sql = """
+            INSERT INTO pattern_hit_rates (
+                pattern_id, utilization_method, utilization_score,
+                hit_count, miss_count, sample_count,
+                created_at, updated_at
+            )
+            SELECT
+                md5(rd.selected_agent)::uuid AS pattern_id,
+                'batch_derived' AS utilization_method,
+                -- utilization_score: average confidence for this agent.
+                -- COALESCE guards against NULL when all confidence_score
+                -- values for an agent are NULL (column is nullable per
+                -- migration 021). pattern_hit_rates.utilization_score is
+                -- REAL NOT NULL, so a bare AVG returning NULL would cause
+                -- a constraint violation.
+                COALESCE(AVG(rd.confidence_score), 0.0) AS utilization_score,
+                -- hit_count: routing decisions with high confidence.
+                -- IS NOT NULL guard required: SQL NULL comparisons return
+                -- UNKNOWN, so rows with NULL confidence_score would be
+                -- silently excluded from both hit and miss counts.
+                COUNT(*) FILTER (
+                    WHERE rd.confidence_score >= 0.7
+                        AND rd.confidence_score IS NOT NULL
+                ) AS hit_count,
+                -- miss_count: routing decisions with low confidence.
+                -- NULL confidence is treated as a miss so that
+                -- hit_count + miss_count == sample_count always holds.
+                COUNT(*) FILTER (
+                    WHERE rd.confidence_score < 0.7
+                        OR rd.confidence_score IS NULL
+                ) AS miss_count,
+                -- sample_count: total decisions for this agent
+                COUNT(*) AS sample_count,
+                MIN(rd.created_at) AS created_at,
+                NOW() AS updated_at
+            FROM agent_routing_decisions rd
+            WHERE rd.selected_agent IS NOT NULL
+            GROUP BY rd.selected_agent
+            ORDER BY rd.selected_agent
+            LIMIT $1
+            ON CONFLICT (pattern_id, utilization_method) DO UPDATE SET
+                -- Counts are full snapshots (not accumulated), so the
+                -- score must also be a snapshot to stay consistent.
+                utilization_score = EXCLUDED.utilization_score,
+                hit_count = EXCLUDED.hit_count,
+                miss_count = EXCLUDED.miss_count,
+                sample_count = EXCLUDED.sample_count,
+                confidence = CASE
+                    WHEN EXCLUDED.sample_count >= 20
+                    THEN EXCLUDED.utilization_score
+                    ELSE NULL
+                END,
+                updated_at = NOW()
+        """
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await set_statement_timeout(conn, self._query_timeout * 1000)
+
+                result: str = await conn.execute(sql, self._batch_size)
+
+        count = parse_execute_count(result)
+
+        if count == self._batch_size:
+            logger.warning(
+                "pattern_hit_rates phase returned exactly batch_size rows; "
+                "some agents may have been truncated. "
+                "Increase batch_size if more than %d distinct agents exist.",
+                self._batch_size,
+                extra={"correlation_id": str(correlation_id)},
+            )
+
+        logger.debug(
+            "Computed pattern_hit_rates rows",
+            extra={
+                "correlation_id": str(correlation_id),
+                "rows_written": count,
+            },
+        )
+        return count
+
+
+def parse_execute_count(result: str) -> int:
+    """Parse row count from an asyncpg ``execute()`` result string.
+
+    asyncpg's ``execute()`` returns status strings such as ``"INSERT 0 42"``
+    or ``"UPDATE 42"``. This helper extracts the trailing integer which
+    represents the number of affected rows.
+
+    Note:
+        Although the parameter is annotated as ``str``, asyncpg's return
+        type is effectively ``Any``. A ``None`` or non-string value is
+        handled defensively and treated as ``0`` rows.
+
+    Args:
+        result: Status string returned by ``asyncpg.Connection.execute()``.
+            May be ``None`` or a non-string value in practice.
+
+    Returns:
+        Number of affected rows parsed from the last token, or ``0`` if
+        the value is ``None``, not a string, empty, or not parseable.
+    """
+    if result is None or not isinstance(result, str):
+        return 0
+    try:
+        parts = result.split()
+        return int(parts[-1])
+    except (IndexError, ValueError):
+        return 0
+
+
+__all__ = [
+    "ServiceBatchComputeEffectivenessMetrics",
+    "DEFAULT_BATCH_SIZE",
+    "DEFAULT_QUERY_TIMEOUT",
+    "parse_execute_count",
+]

@@ -17,8 +17,9 @@ Example:
     ...     correlation_id=uuid4(),
     ...     started_at=datetime.now(UTC),
     ...     completed_at=datetime.now(UTC),
-    ...     tables_cleaned=tuple(
-    ...         {"agent_actions": 150, "agent_routing_decisions": 0}.items()
+    ...     tables_cleaned=(
+    ...         ("agent_actions", 150),
+    ...         ("agent_routing_decisions", 0),
     ...     ),
     ...     total_rows_deleted=150,
     ...     duration_ms=1234,
@@ -51,7 +52,7 @@ class ModelTTLCleanupResult(BaseModel):
         ...     correlation_id=uuid4(),
         ...     started_at=datetime.now(UTC),
         ...     completed_at=datetime.now(UTC),
-        ...     tables_cleaned=tuple({"agent_actions": 500}.items()),
+        ...     tables_cleaned=(("agent_actions", 500),),
         ...     total_rows_deleted=500,
         ...     duration_ms=2345,
         ... )

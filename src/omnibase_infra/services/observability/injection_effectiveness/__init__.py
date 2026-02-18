@@ -33,6 +33,9 @@ Example:
     >>> await consumer.run()
 """
 
+from omnibase_infra.event_bus.topic_constants import (
+    TOPIC_EFFECTIVENESS_INVALIDATION,
+)
 from omnibase_infra.services.observability.injection_effectiveness.config import (
     ConfigInjectionEffectivenessConsumer,
 )
@@ -51,6 +54,7 @@ from omnibase_infra.services.observability.injection_effectiveness.ledger_sink_p
 from omnibase_infra.services.observability.injection_effectiveness.models import (
     ModelAgentMatchEvent,
     ModelContextUtilizationEvent,
+    ModelEffectivenessInvalidationEvent,
     ModelInjectionEffectivenessQuery,
     ModelInjectionEffectivenessQueryResult,
     ModelInjectionEffectivenessRow,
@@ -59,25 +63,38 @@ from omnibase_infra.services.observability.injection_effectiveness.models import
     ModelPatternHitRateRow,
     ModelPatternUtilization,
 )
+from omnibase_infra.services.observability.injection_effectiveness.models.model_batch_compute_result import (
+    ModelBatchComputeResult,
+)
 from omnibase_infra.services.observability.injection_effectiveness.protocol_reader import (
     ProtocolInjectionEffectivenessReader,
 )
 from omnibase_infra.services.observability.injection_effectiveness.reader_postgres import (
     ReaderInjectionEffectivenessPostgres,
 )
+from omnibase_infra.services.observability.injection_effectiveness.service_batch_compute_effectiveness import (
+    ServiceBatchComputeEffectivenessMetrics,
+)
+from omnibase_infra.services.observability.injection_effectiveness.service_effectiveness_invalidation_notifier import (
+    ServiceEffectivenessInvalidationNotifier,
+)
 from omnibase_infra.services.observability.injection_effectiveness.writer_postgres import (
     WriterInjectionEffectivenessPostgres,
 )
 
 __all__ = [
+    "ModelBatchComputeResult",
+    "ServiceBatchComputeEffectivenessMetrics",
     "ConfigInjectionEffectivenessConsumer",
     "ConsumerMetrics",
+    "ServiceEffectivenessInvalidationNotifier",
     "EnumHealthStatus",
     "InjectionEffectivenessConsumer",
     "LedgerEntryDict",
     "LedgerSinkInjectionEffectivenessPostgres",
     "ModelAgentMatchEvent",
     "ModelContextUtilizationEvent",
+    "ModelEffectivenessInvalidationEvent",
     "ModelInjectionEffectivenessQuery",
     "ModelInjectionEffectivenessQueryResult",
     "ModelInjectionEffectivenessRow",
@@ -87,6 +104,7 @@ __all__ = [
     "ModelPatternUtilization",
     "ProtocolInjectionEffectivenessReader",
     "ReaderInjectionEffectivenessPostgres",
+    "TOPIC_EFFECTIVENESS_INVALIDATION",
     "TOPIC_TO_MODEL",
     "TOPIC_TO_WRITER_METHOD",
     "WriterInjectionEffectivenessPostgres",
