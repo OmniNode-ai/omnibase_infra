@@ -23,8 +23,8 @@ Error Handling:
     - Malformed query payload: log warning, return empty response with
       ``warnings=("invalid_query_payload",)``
     - Consul unavailable: ``ServiceTopicCatalog`` already returns partial
-      success with ``warnings=("consul_unavailable",)`` or
-      ``warnings=("no_consul_handler",)``
+      success with ``warnings=("no_consul_handler",)`` or
+      ``warnings=("consul_scan_timeout",)``
     - Unexpected exception: log error, return empty response with
       ``warnings=("internal_error",)``
 
