@@ -116,7 +116,10 @@ CREATE TABLE IF NOT EXISTS baselines_trend (
     created_at                  TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
 
     -- Idempotency: one row per cohort per day
-    CONSTRAINT uk_baselines_trend_date_cohort UNIQUE (trend_date, cohort)
+    CONSTRAINT uk_baselines_trend_date_cohort UNIQUE (trend_date, cohort),
+
+    -- Enforce valid cohort values
+    CONSTRAINT chk_baselines_trend_cohort CHECK (cohort IN ('treatment', 'control'))
 );
 
 -- =============================================================================

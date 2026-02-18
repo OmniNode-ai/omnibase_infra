@@ -62,6 +62,8 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraUnavailableError, ModelInfraErrorContext
 from omnibase_infra.runtime.emit_daemon.event_registry import EventRegistry
 from omnibase_infra.runtime.emit_daemon.topics import (
     BASELINES_COMPUTED_REGISTRATION,
@@ -266,7 +268,15 @@ class ServiceBatchComputeBaselines:
             computed_at: When the batch computation completed.
             started_at: When the batch computation started (used as window_start).
         """
-        assert self._event_bus is not None  # guarded by caller
+        if self._event_bus is None:
+            raise InfraUnavailableError(
+                "_emit_snapshot called with no event_bus configured",
+                context=ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="_emit_snapshot",
+                ),
+            )
 
         try:
             snapshot_id = uuid4()
@@ -341,6 +351,7 @@ class ServiceBatchComputeBaselines:
             LIMIT $1
         """
         async with self._pool.acquire() as conn:
+            await set_statement_timeout(conn, self._query_timeout * 1000)
             rows = await conn.fetch(sql, self._batch_size)
         return [ModelBaselinesComparisonRow(**dict(row)) for row in rows]
 
@@ -357,6 +368,7 @@ class ServiceBatchComputeBaselines:
             LIMIT $1
         """
         async with self._pool.acquire() as conn:
+            await set_statement_timeout(conn, self._query_timeout * 1000)
             rows = await conn.fetch(sql, self._batch_size)
         return [ModelBaselinesTrendRow(**dict(row)) for row in rows]
 
@@ -373,6 +385,7 @@ class ServiceBatchComputeBaselines:
             LIMIT $1
         """
         async with self._pool.acquire() as conn:
+            await set_statement_timeout(conn, self._query_timeout * 1000)
             rows = await conn.fetch(sql, self._batch_size)
         return [ModelBaselinesBreakdownRow(**dict(row)) for row in rows]
 

@@ -12,7 +12,6 @@ The omnidash consumer projects this snapshot into the local
 Contract stability:
     - ``snapshot_id`` is a UUID generated at emit time; stable per batch run.
     - ``contract_version`` is incremented only on breaking schema changes.
-    - Consumers must tolerate unknown extra fields (forward compatibility).
 
 Related Tickets:
     - OMN-2305: Create baselines tables and populate treatment/control comparisons
