@@ -72,7 +72,7 @@ _KV_NODES_PREFIX = "onex/nodes/"
 _DEFAULT_PARTITIONS = 1
 
 
-class TopicInfo:
+class ModelTopicInfo:
     """Internal mutable accumulator for per-topic catalog data.
 
     Not part of the public API. Converted to ModelTopicCatalogEntry at the end
@@ -202,26 +202,35 @@ class ServiceTopicCatalog:
             # Re-apply caller-specific filters and return a fresh response
             return self._filter_response(
                 cached,
+                correlation_id=correlation_id,
                 include_inactive=include_inactive,
                 topic_pattern=topic_pattern,
             )
 
         # Steps 3-9: full rebuild with timeout budget
+        # Only the network I/O (KV fetch) is wrapped in the timeout; processing
+        # of whatever was fetched always runs so partial results are preserved.
+        raw_kv_items: list[dict[str, object]] = []
         try:
-            topics, scan_warnings, node_count = await asyncio.wait_for(
-                self._build_topics_from_kv(correlation_id),
+            fetched = await asyncio.wait_for(
+                self._kv_get_recurse(_KV_NODES_PREFIX, correlation_id),
                 timeout=_SCAN_BUDGET_SECONDS,
             )
+            if fetched is not None:
+                raw_kv_items = fetched
+            else:
+                warnings.append("consul_kv_unavailable")
         except TimeoutError:
             logger.warning(
                 "Consul KV scan exceeded %ss budget, returning partial results",
                 _SCAN_BUDGET_SECONDS,
                 extra={"correlation_id": str(correlation_id)},
             )
-            topics = {}
-            scan_warnings = ["consul_scan_timeout"]
-            node_count = 0
+            warnings.append("consul_scan_timeout")
 
+        topics, scan_warnings, node_count = self._process_raw_kv_items(
+            raw_kv_items, correlation_id
+        )
         warnings.extend(scan_warnings)
 
         # Step 6: build entries
@@ -258,6 +267,7 @@ class ServiceTopicCatalog:
 
         return self._filter_response(
             full_response,
+            correlation_id=correlation_id,
             include_inactive=include_inactive,
             topic_pattern=topic_pattern,
         )
@@ -327,24 +337,37 @@ class ServiceTopicCatalog:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _build_topics_from_kv(
+    def _process_raw_kv_items(
         self,
+        raw_items: list[dict[str, object]],
         correlation_id: UUID,
-    ) -> tuple[dict[str, TopicInfo], list[str], int]:
-        """Perform recursive Consul KV scan and build topic map.
+    ) -> tuple[dict[str, ModelTopicInfo], list[str], int]:
+        """Process a list of raw Consul KV items into a topic map.
+
+        This is pure CPU work with no I/O; it is intentionally synchronous so
+        that it always runs to completion regardless of any prior timeout on the
+        network fetch.
+
+        Args:
+            raw_items: Items returned by ``_kv_get_recurse`` (may be empty when
+                the fetch timed out or returned nothing). Each dict must contain
+                at least ``"key"`` (``str``) and ``"value"`` (``str | None``).
+            correlation_id: Correlation ID forwarded to ``_parse_json_list`` for
+                logging and warning token generation.
 
         Returns:
-            Tuple of (topic_map, warnings, node_count).
-            topic_map keys are topic suffixes; values are TopicInfo instances.
+            Three-element tuple ``(topic_map, warnings, node_count)`` where:
+
+            - ``topic_map`` maps each topic suffix (``str``) to a
+              ``ModelTopicInfo`` accumulator holding publisher/subscriber node
+              IDs plus enrichment data (description, partitions, tags).
+            - ``warnings`` is a list of string tokens describing any non-fatal
+              issues encountered during processing (e.g.
+              ``"consul_kv_max_keys_reached"``, ``"invalid_json_at:<key>"``).
+            - ``node_count`` is the number of distinct node IDs discovered in
+              the KV data.
         """
         warnings: list[str] = []
-
-        # Recursive get of all onex/nodes/ keys
-        raw_items = await self._kv_get_recurse(_KV_NODES_PREFIX, correlation_id)
-
-        if raw_items is None:
-            warnings.append("consul_kv_unavailable")
-            return {}, warnings, 0
 
         if len(raw_items) >= _MAX_KV_KEYS:
             warnings.append("consul_kv_max_keys_reached")
@@ -381,8 +404,8 @@ class ServiceTopicCatalog:
 
         node_count = len(node_data)
 
-        # Cross-reference: build topic -> TopicInfo
-        topic_map: dict[str, TopicInfo] = {}
+        # Cross-reference: build topic -> ModelTopicInfo
+        topic_map: dict[str, ModelTopicInfo] = {}
 
         for node_id, data in node_data.items():
             # Authoritative: subscribe_topics and publish_topics arrays
@@ -415,7 +438,7 @@ class ServiceTopicCatalog:
 
             for suffix in publish_topics:
                 if suffix not in topic_map:
-                    topic_map[suffix] = TopicInfo()
+                    topic_map[suffix] = ModelTopicInfo()
                 topic_map[suffix].publishers.add(node_id)
                 self._apply_enrichment(
                     topic_map[suffix], enrichment_by_suffix.get(suffix)
@@ -423,7 +446,7 @@ class ServiceTopicCatalog:
 
             for suffix in subscribe_topics:
                 if suffix not in topic_map:
-                    topic_map[suffix] = TopicInfo()
+                    topic_map[suffix] = ModelTopicInfo()
                 topic_map[suffix].subscribers.add(node_id)
                 self._apply_enrichment(
                     topic_map[suffix], enrichment_by_suffix.get(suffix)
@@ -433,13 +456,22 @@ class ServiceTopicCatalog:
 
     def _apply_enrichment(
         self,
-        topic_info: TopicInfo,
+        topic_info: ModelTopicInfo,
         entry: dict[str, object] | None,
     ) -> None:
         """Merge enrichment entry data into topic_info (in-place, non-destructive).
 
         Only fills in fields that are currently at their default values so that
-        the first enrichment entry wins for each field.
+        the first enrichment entry wins for each field. Fields already set by an
+        earlier enrichment pass are left unchanged.
+
+        Args:
+            topic_info: Mutable accumulator for a single topic. Modified in-place.
+            entry: Optional enrichment dict parsed from a ``subscribe_entries`` or
+                ``publish_entries`` KV value. When ``None`` this method is a no-op.
+
+        Returns:
+            None. All updates are applied directly to ``topic_info``.
         """
         if entry is None:
             return
@@ -468,7 +500,24 @@ class ServiceTopicCatalog:
         correlation_id: UUID,
         warnings: list[str],
     ) -> str:
-        """Resolve topic suffix to Kafka topic name, falling back to suffix on error."""
+        """Resolve topic suffix to Kafka topic name, falling back to suffix on error.
+
+        Calls ``TopicResolver.resolve`` and suppresses ``TopicResolutionError`` so
+        that a single unresolvable topic does not abort the entire catalog build.
+        An ``"unresolvable_topic:<suffix>"`` warning is appended when resolution
+        fails.
+
+        Args:
+            topic_suffix: Raw topic suffix string from the Consul KV node array
+                (e.g. ``"my.service.events.v1"``).
+            correlation_id: Correlation ID forwarded to the resolver for tracing.
+            warnings: Mutable list that receives an error token when resolution
+                fails. Modified in-place.
+
+        Returns:
+            Fully-qualified Kafka topic name on success, or ``topic_suffix``
+            unchanged when ``TopicResolutionError`` is raised.
+        """
         try:
             return self._topic_resolver.resolve(
                 topic_suffix, correlation_id=correlation_id
@@ -486,7 +535,25 @@ class ServiceTopicCatalog:
     ) -> list[object]:
         """Parse a JSON value that is expected to be a list.
 
-        Returns an empty list on parse failure (partial success).
+        Implements partial-success semantics: any parse failure is recorded as a
+        warning and an empty list is returned rather than propagating an exception.
+        A ``DEBUG``-level log entry is emitted for every skipped key to aid
+        diagnosis without polluting production logs.
+
+        Args:
+            value: Raw string value retrieved from Consul KV, or ``None`` when
+                the key had no value (Consul returns ``null`` for empty keys).
+            key: The Consul KV key path used only for logging and the warning
+                token (e.g. ``"onex/nodes/my-node/event_bus/subscribe_topics"``).
+            correlation_id: Correlation ID included in the log record for
+                distributed tracing.
+            warnings: Mutable list that receives an ``"invalid_json_at:<key>"``
+                token when parsing fails. Modified in-place.
+
+        Returns:
+            Parsed list of JSON values when the value is a valid JSON array.
+            Empty list when ``value`` is ``None``, not a JSON array, or
+            malformed JSON.
         """
         if value is None:
             return []
@@ -507,10 +574,32 @@ class ServiceTopicCatalog:
     def _filter_response(
         self,
         source: ModelTopicCatalogResponse,
+        correlation_id: UUID,
         include_inactive: bool,
         topic_pattern: str | None,
     ) -> ModelTopicCatalogResponse:
-        """Apply caller-specific filters and return a new response object."""
+        """Apply caller-specific filters and return a new response object.
+
+        Creates a new ``ModelTopicCatalogResponse`` from ``source``, optionally
+        removing inactive topics (those with no publishers and no subscribers) and
+        restricting results to topics whose ``topic_suffix`` matches a shell-style
+        glob pattern. All other fields (``catalog_version``, ``node_count``,
+        ``generated_at``, ``warnings``, ``schema_version``) are copied verbatim.
+
+        Args:
+            source: Fully-built catalog response to filter (typically the cached
+                full-catalog object).
+            correlation_id: Correlation ID written into the returned response for
+                the caller's trace context.
+            include_inactive: When ``False`` (default), topics where
+                ``ModelTopicCatalogEntry.is_active`` is ``False`` are excluded.
+            topic_pattern: Optional :func:`fnmatch.fnmatch` glob matched against
+                each entry's ``topic_suffix``. ``None`` disables pattern filtering.
+
+        Returns:
+            A new ``ModelTopicCatalogResponse`` containing only the entries that
+            pass both the active-status and pattern filters.
+        """
         topics = source.topics
 
         # Filter by active status
@@ -522,7 +611,7 @@ class ServiceTopicCatalog:
             topics = tuple(t for t in topics if fnmatch(t.topic_suffix, topic_pattern))
 
         return ModelTopicCatalogResponse(
-            correlation_id=source.correlation_id,
+            correlation_id=correlation_id,
             topics=topics,
             catalog_version=source.catalog_version,
             node_count=source.node_count,
@@ -537,7 +626,23 @@ class ServiceTopicCatalog:
         catalog_version: int,
         warnings: list[str],
     ) -> ModelTopicCatalogResponse:
-        """Return an empty catalog response."""
+        """Return an empty catalog response with zero topics.
+
+        Used as a fast-path return when no Consul handler is configured or when
+        the handler cannot be reached. The ``generated_at`` timestamp reflects
+        the time of the call so that callers can detect stale responses by age.
+
+        Args:
+            correlation_id: Correlation ID written into the returned response.
+            catalog_version: Version value to embed (typically ``0`` when the
+                version key is absent or the handler is unavailable).
+            warnings: List of warning tokens accumulated before the early return
+                (e.g. ``["no_consul_handler"]``). Copied into the response tuple.
+
+        Returns:
+            A ``ModelTopicCatalogResponse`` with an empty ``topics`` tuple,
+            ``node_count`` of ``0``, and the supplied ``warnings``.
+        """
         return ModelTopicCatalogResponse(
             correlation_id=correlation_id,
             topics=(),
@@ -554,8 +659,20 @@ class ServiceTopicCatalog:
     async def _kv_get_raw(self, key: str, correlation_id: UUID) -> str | None:
         """Get raw string value from Consul KV via HandlerConsul's mixin method.
 
-        Delegates to MixinConsulTopicIndex.kv_get_raw which is already defined
-        on HandlerConsul.
+        Delegates to ``MixinConsulTopicIndex.kv_get_raw`` which is already defined
+        on ``HandlerConsul``. Any exception from the handler is caught and logged
+        at ``DEBUG`` level so that a single KV failure does not abort a broader
+        operation.
+
+        Args:
+            key: Fully-qualified Consul KV key path
+                (e.g. ``"onex/catalog/version"``).
+            correlation_id: Correlation ID included in the log record for
+                distributed tracing.
+
+        Returns:
+            Decoded string value of the key, or ``None`` when the key is absent,
+            the handler is unavailable, or any exception is raised.
         """
         if self._consul_handler is None:
             return None
@@ -577,13 +694,29 @@ class ServiceTopicCatalog:
         cas: int,
         correlation_id: UUID,
     ) -> bool:
-        """Put value to Consul KV with CAS check.
+        """Put value to Consul KV with a check-and-set (CAS) guard.
 
-        Delegates to HandlerConsul.kv_put_raw_with_cas, which routes through the
-        handler's retry machinery and circuit breaker.
+        Delegates to ``HandlerConsul.kv_put_raw_with_cas``, which routes through
+        the handler's retry machinery and circuit breaker. Any exception from the
+        handler is caught and logged at ``DEBUG`` level; the caller receives
+        ``False`` and should treat this identically to a CAS conflict.
+
+        Args:
+            key: Fully-qualified Consul KV key path to write
+                (e.g. ``"onex/catalog/version"``).
+            value: String value to store. The caller is responsible for encoding
+                (e.g. converting an integer to its decimal string representation).
+            cas: Consul ``ModifyIndex`` obtained from a prior
+                ``_kv_get_with_modify_index`` call. Pass ``0`` to create a key
+                only when it does not yet exist.
+            correlation_id: Correlation ID included in the log record for
+                distributed tracing.
 
         Returns:
-            True if the write succeeded (CAS matched), False on CAS conflict.
+            ``True`` when the write was accepted (CAS index matched the current
+            ``ModifyIndex`` in Consul). ``False`` when the CAS check failed
+            (another writer modified the key first), the handler is unavailable,
+            or any exception is raised.
         """
         if self._consul_handler is None:
             return False
@@ -604,14 +737,26 @@ class ServiceTopicCatalog:
         key: str,
         correlation_id: UUID,
     ) -> tuple[str | None, int]:
-        """Get value and ModifyIndex for a KV key (needed for CAS writes).
+        """Get value and ModifyIndex for a KV key (required for CAS writes).
 
-        Delegates to HandlerConsul.kv_get_with_modify_index, which routes through
-        the handler's retry machinery and circuit breaker.
+        Delegates to ``HandlerConsul.kv_get_with_modify_index``, which routes
+        through the handler's retry machinery and circuit breaker. Any exception
+        from the handler is caught and logged at ``DEBUG`` level; the caller
+        receives ``(None, 0)`` and should treat this as a key-absent condition.
+
+        Args:
+            key: Fully-qualified Consul KV key path
+                (e.g. ``"onex/catalog/version"``).
+            correlation_id: Correlation ID included in the log record for
+                distributed tracing.
 
         Returns:
-            Tuple of (value_string_or_None, modify_index).
-            modify_index is 0 if the key is absent (CAS=0 means create-only).
+            Two-element tuple ``(value, modify_index)`` where ``value`` is the
+            decoded string value of the key (or ``None`` when absent) and
+            ``modify_index`` is the Consul ``ModifyIndex`` at the time of the
+            read. A ``modify_index`` of ``0`` signals that the key does not exist
+            yet; passing ``cas=0`` to a subsequent CAS write creates the key only
+            if it is still absent.
         """
         if self._consul_handler is None:
             return None, 0
@@ -632,14 +777,25 @@ class ServiceTopicCatalog:
         prefix: str,
         correlation_id: UUID,
     ) -> list[dict[str, object]] | None:
-        """Perform recursive Consul KV get under a prefix.
+        """Perform a recursive Consul KV get for all keys under a prefix.
 
-        Delegates to HandlerConsul.kv_get_recurse, which routes through the
-        handler's retry machinery and circuit breaker.
+        Delegates to ``HandlerConsul.kv_get_recurse``, which routes through the
+        handler's retry machinery and circuit breaker. Any exception from the
+        handler is caught and logged at ``DEBUG`` level.
+
+        Args:
+            prefix: Consul KV key prefix to scan recursively
+                (e.g. ``"onex/nodes/"``). All keys that begin with this string
+                are returned.
+            correlation_id: Correlation ID included in the log record for
+                distributed tracing.
 
         Returns:
-            List of dicts with ``key``, ``value``, and ``modify_index`` fields,
-            or None on error.
+            List of dicts, each containing at least ``"key"`` (``str``),
+            ``"value"`` (``str | None``), and ``"modify_index"`` (``int``) fields,
+            representing every KV entry under the prefix. Returns ``None`` when
+            the handler is unavailable, the prefix does not exist, or any
+            exception is raised.
         """
         if self._consul_handler is None:
             return None
@@ -654,10 +810,25 @@ class ServiceTopicCatalog:
             return None
 
     async def _try_cas_increment(self, correlation_id: UUID) -> int:
-        """Single CAS increment attempt.
+        """Attempt a single check-and-set increment of the catalog version key.
+
+        Reads the current value and ``ModifyIndex`` of ``onex/catalog/version``
+        via ``_kv_get_with_modify_index``, computes ``new_version = current + 1``
+        (defaulting to ``1`` when the key is absent or its value is not a valid
+        integer), then writes ``new_version`` back using ``_kv_put_raw_with_cas``.
+
+        If the CAS write fails (another writer incremented the key between the
+        read and write), the method returns ``-1`` immediately. The caller
+        (``increment_version``) is responsible for retrying.
+
+        Args:
+            correlation_id: Correlation ID forwarded to all underlying KV helpers
+                for distributed tracing.
 
         Returns:
-            New version on success, -1 on CAS conflict or error.
+            The newly written version integer (>= 1) when the CAS write succeeds.
+            ``-1`` when the CAS check fails (concurrent modification) or any
+            underlying KV helper returns an error sentinel.
         """
         current_str, modify_index = await self._kv_get_with_modify_index(
             _KV_CATALOG_VERSION, correlation_id
