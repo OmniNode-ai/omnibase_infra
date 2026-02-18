@@ -44,6 +44,12 @@ from omnibase_core.models.vector import (
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.errors import (
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
 )
 from omnibase_infra.handlers.handler_qdrant import HandlerQdrant
 from omnibase_infra.nodes.node_llm_embedding_effect.handlers.handler_embedding_openai_compatible import (
@@ -115,11 +121,11 @@ class AdapterSimilarityEnrichment:
         Args:
             embedding_base_url: Base URL of the GTE-Qwen2 embedding endpoint.
                 Defaults to the ``LLM_EMBEDDING_URL`` environment variable.
-                Required -- raises ``ValueError`` when unset.
+                Required -- raises ``ProtocolConfigurationError`` when unset.
             embedding_model: Model identifier sent in embedding requests.
             qdrant_url: Base URL of the Qdrant instance.  Defaults to the
                 ``QDRANT_URL`` environment variable.
-                Required -- raises ``ValueError`` when unset.
+                Required -- raises ``ProtocolConfigurationError`` when unset.
             qdrant_collection: Name of the Qdrant collection to query.
             top_k: Maximum number of similar results to return.
             score_threshold: Optional minimum similarity score filter applied
@@ -128,15 +134,23 @@ class AdapterSimilarityEnrichment:
         """
         _embedding_base_url = embedding_base_url or os.environ.get("LLM_EMBEDDING_URL")
         if not _embedding_base_url:
-            raise ValueError(
-                "embedding_base_url is required. Set LLM_EMBEDDING_URL environment variable."
+            raise ProtocolConfigurationError(
+                "embedding_base_url is required. Set LLM_EMBEDDING_URL environment variable.",
+                context=ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="adapter_init",
+                ),
             )
         self._embedding_base_url: str = _embedding_base_url
         self._embedding_model: str = embedding_model
         _qdrant_url = qdrant_url or os.environ.get("QDRANT_URL")
         if not _qdrant_url:
-            raise ValueError(
-                "qdrant_url is required. Set QDRANT_URL environment variable."
+            raise ProtocolConfigurationError(
+                "qdrant_url is required. Set QDRANT_URL environment variable.",
+                context=ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.QDRANT,
+                    operation="adapter_init",
+                ),
             )
         self._qdrant_url: str = _qdrant_url
         self._qdrant_collection: str = qdrant_collection
@@ -153,12 +167,25 @@ class AdapterSimilarityEnrichment:
 
     @property
     def handler_type(self) -> EnumHandlerType:
-        """Architectural role: INFRA_HANDLER."""
+        """Return the architectural role of this handler.
+
+        Returns:
+            ``EnumHandlerType.INFRA_HANDLER`` -- this adapter operates at the
+            infrastructure layer, coordinating HTTP embedding and Qdrant
+            similarity search without owning any node-level business logic.
+        """
         return EnumHandlerType.INFRA_HANDLER
 
     @property
     def handler_category(self) -> EnumHandlerTypeCategory:
-        """Behavioral classification: EFFECT (embedding HTTP + Qdrant query)."""
+        """Return the behavioral classification of this handler.
+
+        Returns:
+            ``EnumHandlerTypeCategory.EFFECT`` -- this adapter performs
+            external I/O (HTTP request to the embedding endpoint and a
+            gRPC/HTTP query to Qdrant) and therefore has observable
+            side-effects beyond pure computation.
+        """
         return EnumHandlerTypeCategory.EFFECT
 
     async def enrich(
@@ -214,7 +241,13 @@ class AdapterSimilarityEnrichment:
         # Step 2: Ensure Qdrant is initialized (lazy).
         await self._ensure_qdrant_initialized()
         if self._qdrant_handler is None:
-            raise RuntimeError("Qdrant handler failed to initialize")
+            raise InfraUnavailableError(
+                "Qdrant handler failed to initialize",
+                context=ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.QDRANT,
+                    operation="ensure_qdrant_initialized",
+                ),
+            )
 
         # Step 3: Query Qdrant for similar vectors.
         search_results = await self._qdrant_handler.query_similar(
@@ -272,17 +305,16 @@ class AdapterSimilarityEnrichment:
         )
 
     async def close(self) -> None:
-        """Close the adapter and release resources from both handlers.
+        """Close both handlers, guaranteeing embedding handler close even if Qdrant close fails.
 
         Closes ``HandlerQdrant`` (if it was ever initialized) and
-        ``HandlerEmbeddingOpenaiCompatible`` in that order.  The Qdrant
-        handler is guarded by a ``None`` check because it is lazily
-        initialized -- callers that never triggered ``enrich()`` will
-        not have an active Qdrant connection to close.
+        ``HandlerEmbeddingOpenaiCompatible``.  The Qdrant handler is guarded
+        by a ``None`` check because it is lazily initialized -- callers that
+        never triggered ``enrich()`` will not have an active Qdrant connection
+        to close.
 
-        The embedding handler is always closed unconditionally because it
-        is created eagerly in ``__init__`` and may hold an open HTTP
-        client session.
+        The embedding handler is always closed via ``try/finally`` to ensure
+        its HTTP client session is released even if Qdrant teardown raises.
 
         Returns:
             None
@@ -290,13 +322,17 @@ class AdapterSimilarityEnrichment:
         Raises:
             Exception: Any exception raised by the underlying handler
                 ``close()`` implementations is propagated to the caller.
-                Both handlers are closed sequentially; an error in Qdrant
-                teardown will prevent the embedding handler from being
-                closed.
+                The embedding handler close is guaranteed via ``try/finally``
+                regardless of whether the Qdrant close succeeds or fails.
         """
         if self._qdrant_handler is not None:
-            await self._qdrant_handler.close()
-        await self._embedding_handler.close()
+            try:
+                await self._qdrant_handler.close()
+            finally:
+                if self._embedding_handler is not None:
+                    await self._embedding_handler.close()
+        elif self._embedding_handler is not None:
+            await self._embedding_handler.close()
 
     async def _ensure_qdrant_initialized(self) -> None:
         """Lazily initialize HandlerQdrant on the first call (thread-safe via asyncio.Lock).
@@ -331,6 +367,9 @@ class AdapterSimilarityEnrichment:
             Exception: Any other exception raised by
                 ``HandlerQdrant.initialize()`` is propagated to the caller.
         """
+        # Double-checked locking: asyncio.Lock in Python 3.10+ is safe to construct
+        # without a running event loop, and the second check inside the lock prevents
+        # double-initialization when multiple coroutines race to the outer None check.
         async with self._qdrant_init_lock:
             if self._qdrant_handler is not None:
                 return

@@ -14,6 +14,7 @@ Covers:
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -389,6 +390,30 @@ class TestAdapterSimilarityEnrichmentQdrantInit:
 
         # initialize() should never be called since _qdrant_handler was pre-set.
         mock_qdrant.initialize.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_qdrant_initialized_only_once_under_concurrent_calls(self) -> None:
+        """_ensure_qdrant_initialized is called only once even when two coroutines call enrich() simultaneously."""
+        adapter = _make_adapter()
+        adapter._embedding_handler.execute = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_embedding_response()
+        )
+
+        mock_handler = AsyncMock()
+        mock_handler.initialize = AsyncMock()
+        mock_handler.query_similar = AsyncMock(return_value=_make_search_results([]))
+
+        with patch(
+            "omnibase_infra.adapters.llm.adapter_similarity_enrichment.HandlerQdrant",
+            return_value=mock_handler,
+        ):
+            await asyncio.gather(
+                adapter.enrich(prompt="Concurrent call 1", context=""),
+                adapter.enrich(prompt="Concurrent call 2", context=""),
+            )
+
+        # HandlerQdrant.initialize must be called exactly once despite two concurrent callers.
+        mock_handler.initialize.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
