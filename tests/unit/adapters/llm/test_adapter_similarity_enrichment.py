@@ -316,7 +316,7 @@ class TestAdapterSimilarityEnrichmentEnrich:
             await adapter.enrich(prompt="Test", context="")
 
     @pytest.mark.asyncio
-    async def test_enrich_score_scores_in_result_markdown(self) -> None:
+    async def test_enrich_scores_in_result_markdown(self) -> None:
         """Scores are included in the Markdown output."""
         adapter = _make_adapter()
         adapter._embedding_handler.execute = AsyncMock(  # type: ignore[method-assign]

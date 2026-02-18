@@ -31,6 +31,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -147,6 +148,8 @@ class AdapterSimilarityEnrichment:
         )
         # Qdrant handler is lazily initialized on first use.
         self._qdrant_handler: HandlerQdrant | None = None
+        # Lock to prevent double-initialization under concurrent asyncio.gather() calls.
+        self._qdrant_init_lock: asyncio.Lock = asyncio.Lock()
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -269,16 +272,34 @@ class AdapterSimilarityEnrichment:
         )
 
     async def close(self) -> None:
-        """Close resources held by this adapter.
+        """Close the adapter and release resources from both handlers.
 
-        HandlerEmbeddingOpenaiCompatible manages its HTTP transport lifecycle
-        internally via MixinLlmHttpTransport and does not expose a public
-        close interface.  The underlying httpx client is short-lived and
-        closed after each request, so no explicit teardown is required here.
+        Closes ``HandlerQdrant`` (if it was ever initialized) and
+        ``HandlerEmbeddingOpenaiCompatible`` in that order.  The Qdrant
+        handler is guarded by a ``None`` check because it is lazily
+        initialized -- callers that never triggered ``enrich()`` will
+        not have an active Qdrant connection to close.
+
+        The embedding handler is always closed unconditionally because it
+        is created eagerly in ``__init__`` and may hold an open HTTP
+        client session.
+
+        Returns:
+            None
+
+        Raises:
+            Exception: Any exception raised by the underlying handler
+                ``close()`` implementations is propagated to the caller.
+                Both handlers are closed sequentially; an error in Qdrant
+                teardown will prevent the embedding handler from being
+                closed.
         """
+        if self._qdrant_handler is not None:
+            await self._qdrant_handler.close()
+        await self._embedding_handler.close()
 
     async def _ensure_qdrant_initialized(self) -> None:
-        """Lazily initialize HandlerQdrant on the first call.
+        """Lazily initialize HandlerQdrant on the first call (thread-safe via asyncio.Lock).
 
         Creates a minimal ``ModelONEXContainer`` for HandlerQdrant interface
         compliance.  HandlerQdrant stores the container reference but never
@@ -290,15 +311,35 @@ class AdapterSimilarityEnrichment:
         retained for future DI-based service resolution.  All current operations
         (``initialize``, ``query_similar``, et al.) use ``self._client`` and
         ``self._config`` exclusively.
-        """
-        if self._qdrant_handler is not None:
-            return
 
-        container = ModelONEXContainer()
-        handler = HandlerQdrant(container)
-        config = ModelVectorConnectionConfig(url=self._qdrant_url)
-        await handler.initialize(config)
-        self._qdrant_handler = handler
+        Thread safety:
+            ``_qdrant_init_lock`` (an ``asyncio.Lock``) serializes concurrent
+            callers.  Without the lock, two ``asyncio.gather()`` tasks could
+            both evaluate ``self._qdrant_handler is not None`` as ``False``
+            simultaneously, leading to double-initialization and a leaked
+            Qdrant connection.  The check-then-act sequence is performed
+            atomically while the lock is held, so only the first caller
+            creates the handler; all subsequent callers return immediately.
+
+        Returns:
+            None.  On return, ``self._qdrant_handler`` is guaranteed to be
+            a fully initialized ``HandlerQdrant`` instance.
+
+        Raises:
+            InfraConnectionError: If ``HandlerQdrant.initialize()`` cannot
+                reach the configured Qdrant URL.
+            Exception: Any other exception raised by
+                ``HandlerQdrant.initialize()`` is propagated to the caller.
+        """
+        async with self._qdrant_init_lock:
+            if self._qdrant_handler is not None:
+                return
+
+            container = ModelONEXContainer()
+            handler = HandlerQdrant(container)
+            config = ModelVectorConnectionConfig(url=self._qdrant_url)
+            await handler.initialize(config)
+            self._qdrant_handler = handler
 
 
 def _format_results_markdown(
