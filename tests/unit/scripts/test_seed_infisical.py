@@ -438,9 +438,9 @@ class TestDoSeed:
         created, updated, skipped, errors = self._run_do_seed(
             seed,
             requirements=requirements,
-            env_values={},
+            env_values={"REDIS_URL": "redis://localhost:6379"},
             create_missing=True,
-            set_values=False,
+            set_values=True,
             overwrite_existing=True,
             mock_adapter=mock_adapter,
         )

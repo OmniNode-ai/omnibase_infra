@@ -24,15 +24,20 @@ Design Decisions:
 
 .. versionchanged:: 0.10.1
     ``ModelPrefetchResult`` renamed from ``PrefetchResult``.
+
+.. versionchanged:: 0.10.2
+    ``ModelPrefetchResult`` converted from ``@dataclass`` to a frozen Pydantic
+    ``BaseModel`` (``ConfigDict(frozen=True, extra="forbid")``).  The
+    ``missing`` field type changed from ``list[str]`` to ``tuple[str, ...]``
+    to satisfy immutability requirements.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass, field
 
-from pydantic import SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from omnibase_infra.runtime.config_discovery.models.model_config_requirements import (
     ModelConfigRequirements,
@@ -56,8 +61,7 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ModelPrefetchResult:
+class ModelPrefetchResult(BaseModel):
     """Result of a config prefetch operation.
 
     Attributes:
@@ -70,10 +74,12 @@ class ModelPrefetchResult:
             the prefetch operation.
     """
 
-    resolved: dict[str, SecretStr] = field(default_factory=dict)
-    missing: list[str] = field(default_factory=list)
-    errors: dict[str, str] = field(default_factory=dict)
-    specs_attempted: int = 0
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    resolved: dict[str, SecretStr] = Field(default_factory=dict)
+    missing: tuple[str, ...] = Field(default_factory=tuple)
+    errors: dict[str, str] = Field(default_factory=dict)
+    specs_attempted: int = Field(default=0)
 
     @property
     def success_count(self) -> int:
@@ -182,20 +188,24 @@ class ConfigPrefetcher:
             No exceptions are raised; all errors are captured in the result
             object or logged as warnings.
         """
-        result = ModelPrefetchResult()
+        # Local mutable accumulators — ModelPrefetchResult is frozen, so all
+        # accumulation happens here and the immutable model is built at the end.
+        resolved: dict[str, SecretStr] = {}
+        missing: list[str] = []
+        errors: dict[str, str] = {}
 
         # Build specs from discovered transport types.
         # When infisical_required=True, mark specs as required so that missing
-        # transport-based keys are routed to result.errors rather than
-        # result.missing. Without this, the spec.required flag would always be
-        # False (the default), and the ``elif self._infisical_required and
-        # spec.required`` guard on line ~224 would never fire for transport keys.
+        # transport-based keys are routed to errors rather than missing.
+        # Without this, the spec.required flag would always be False (the
+        # default), and the ``elif self._infisical_required and spec.required``
+        # guard below would never fire for transport keys.
         specs = self._transport_map.specs_for_transports(
             list(requirements.transport_types),
             service_slug=self._service_slug,
             required=self._infisical_required,
         )
-        result.specs_attempted = len(specs)
+        specs_attempted = len(specs)
 
         # Also include any explicit environment dependencies as
         # individual key fetches from the runtime folder
@@ -222,18 +232,18 @@ class ConfigPrefetcher:
                         "Key %s already in environment, skipping prefetch",
                         key,
                     )
-                    result.resolved[key] = SecretStr(os.environ[key])
+                    resolved[key] = SecretStr(os.environ[key])
                     continue
 
                 value = self._fetch_key(key, spec)
                 if value is not None:
-                    result.resolved[key] = value
+                    resolved[key] = value
                 elif self._infisical_required and spec.required:
-                    result.errors[key] = (
+                    errors[key] = (
                         f"Required key {key} not found at {spec.infisical_folder}"
                     )
                 else:
-                    result.missing.append(key)
+                    missing.append(key)
 
         # Fetch explicit environment dependencies
         if env_keys:
@@ -247,19 +257,26 @@ class ConfigPrefetcher:
             )
             for key in env_keys:
                 if key in os.environ:
-                    result.resolved[key] = SecretStr(os.environ[key])
+                    resolved[key] = SecretStr(os.environ[key])
                     continue
 
                 value = self._fetch_key(key, env_spec)
                 if value is not None:
-                    result.resolved[key] = value
+                    resolved[key] = value
                 elif self._infisical_required:
-                    result.errors[key] = (
+                    errors[key] = (
                         f"Required env dependency key {key} not found at"
                         f" {env_spec.infisical_folder}"
                     )
                 else:
-                    result.missing.append(key)
+                    missing.append(key)
+
+        result = ModelPrefetchResult(
+            resolved=resolved,
+            missing=tuple(missing),
+            errors=errors,
+            specs_attempted=specs_attempted,
+        )
 
         logger.info(
             "Prefetch complete: %d resolved, %d missing, %d errors",

@@ -52,7 +52,7 @@ class TestBootstrapSequence:
 
         # Step 2: Build transport specs
         tcm = TransportConfigMap()
-        specs = tcm.specs_for_transports(reqs.transport_types)
+        specs = tcm.specs_for_transports(list(reqs.transport_types))
         assert len(specs) > 0, "Should generate specs for discovered transports"
 
         # Step 3: Prefetch with mock handler

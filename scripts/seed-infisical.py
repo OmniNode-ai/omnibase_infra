@@ -97,13 +97,20 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
         # 2. Detect whether the value is quoted (before removing quotes).
         # 3. If quoted, strip the outer quotes -- inline comments inside
         #    quoted strings are preserved as literal text.
-        # 4. If NOT quoted, strip inline comments (text after ' #').
+        # 4. If NOT quoted, strip inline comments (text after ' #' or '#'
+        #    not at position 0 of the value portion).
         value = value.strip()
         is_quoted = len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"')
         if is_quoted:
             value = value[1:-1]
-        if " #" in value and not is_quoted:
-            value = value.split(" #")[0].strip()
+        if not is_quoted:
+            # Strip inline comment starting with ' #' (space-hash) or bare '#'
+            # anywhere except at position 0 (which would make the whole value a
+            # comment-like token, e.g. a hex colour "#AABBCC").
+            if " #" in value:
+                value = value.split(" #")[0].strip()
+            elif "#" in value and not value.startswith("#"):
+                value = value.split("#")[0].strip()
         if key:
             values[key] = value
 
@@ -113,11 +120,11 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
 
 def _extract_requirements(
     contracts_dir: Path,
-) -> tuple[list[dict[str, str]], list[str]]:
+) -> tuple[list[dict[str, str]], tuple[str, ...]]:
     """Extract config requirements from contracts.
 
     Returns:
-        Tuple of (requirements_list, errors_list) where each requirement
+        Tuple of (requirements_list, errors_tuple) where each requirement
         is a dict with keys: key, transport_type, folder, source.
     """
     from omnibase_infra.runtime.config_discovery.contract_config_extractor import (
@@ -191,6 +198,8 @@ def _print_diff_summary(
     )
     if overwrite_existing:
         print("Mode: OVERWRITE (existing keys will be overwritten)")
+    else:
+        print("Mode: SKIP existing (overwrite-existing is off)")
     print()
 
     for req in sorted(requirements, key=lambda r: r["key"]):
@@ -199,15 +208,17 @@ def _print_diff_summary(
         has_value = key in env_values
 
         # Determine the action label based on flags.
-        # When overwrite_existing is active, existing keys are tagged
-        # OVERWRITE instead of SKIP so the user sees the intent clearly.
-        action = "OVERWRITE" if overwrite_existing else "SKIP"
-        if create_missing:
-            action = "CREATE"
+        # When overwrite_existing=False, existing keys are tagged
+        # "SKIP (would overwrite)" to make the no-op intent visible.
+        # When overwrite_existing=True, they are tagged "OVERWRITE".
         if set_values and has_value:
-            action = "OVERWRITE" if overwrite_existing else "SET (if new)"
+            action = "OVERWRITE" if overwrite_existing else "SKIP (would overwrite)"
         elif set_values and not has_value:
             action = "CREATE (no value)"
+        elif create_missing:
+            action = "CREATE"
+        else:
+            action = "SKIP (would overwrite)" if not overwrite_existing else "OVERWRITE"
 
         value_indicator = " (has .env value)" if has_value else ""
         print(f"  [{action:>16s}] {folder}{key}{value_indicator}")
@@ -265,6 +276,14 @@ def _do_seed(
     # and update_secret(), which are only available on the adapter directly.
     # Bootstrap admin scripts are an explicitly permitted exception to the
     # no-direct-import rule documented in adapter_infisical.py.
+    # Import sanitize_error_message first so it is available for all subsequent
+    # exception logging in this function, including the adapter import block.
+    try:
+        from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+    except ImportError as exc:
+        logger.exception("Cannot import sanitize_error_message: %s", type(exc).__name__)
+        return 0, 0, 0, len(requirements)
+
     try:
         from pydantic import SecretStr
 
@@ -275,9 +294,10 @@ def _do_seed(
             ModelInfisicalAdapterConfig,
         )
         from omnibase_infra.errors import InfraConnectionError, InfraUnavailableError
-        from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
-    except ImportError:
-        logger.exception("Cannot import Infisical adapter")
+    except ImportError as exc:
+        logger.exception(
+            "Cannot import Infisical adapter: %s", sanitize_error_message(exc)
+        )
         return 0, 0, 0, len(requirements)
 
     # Build adapter config from environment
@@ -291,15 +311,17 @@ def _do_seed(
     # Validate project_id is a valid UUID
     try:
         project_uuid = UUID(project_id)
-    except ValueError:
+    except ValueError as exc:
         logger.exception(
             "INFISICAL_PROJECT_ID is not a valid UUID: '%s'. "
-            "Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+            "Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx -- %s",
             project_id,
+            sanitize_error_message(exc),
         )
         return 0, 0, 0, len(requirements)
 
     # Initialize the adapter -- errors must propagate so main() can exit(1).
+    # Use sanitized logging to avoid leaking client_secret from the call stack.
     try:
         config = ModelInfisicalAdapterConfig(
             host=infisical_addr,
@@ -309,8 +331,11 @@ def _do_seed(
         )
         adapter = AdapterInfisical(config)
         adapter.initialize()
-    except Exception:
-        logger.exception("Failed to initialize Infisical adapter")
+    except Exception as exc:
+        logger.exception(
+            "Failed to initialize Infisical adapter: %s",
+            sanitize_error_message(exc),
+        )
         raise
 
     created = 0
@@ -342,7 +367,12 @@ def _do_seed(
                     # create_secret() errors when Infisical is unreachable.
                     raise
                 except Exception as exc:
-                    logger.debug("Key check failed for %s at %s: %s", key, folder, exc)
+                    logger.debug(
+                        "Key check failed for %s at %s: %s",
+                        key,
+                        folder,
+                        sanitize_error_message(exc),
+                    )
 
                 if existing is not None and not overwrite_existing:
                     skipped += 1
@@ -350,7 +380,19 @@ def _do_seed(
                     continue
 
                 if existing is not None and overwrite_existing:
-                    # Update existing secret
+                    # Guard: if value is empty and set_values is False, skip
+                    # rather than overwrite an existing secret with blank.
+                    if not secret_value and not set_values:
+                        skipped += 1
+                        logger.debug(
+                            "Key %s at %s: skipping overwrite -- resolved value is "
+                            "empty and --set-values is off",
+                            key,
+                            folder,
+                        )
+                        continue
+                    # Update existing secret -- counter increments only after the
+                    # adapter call succeeds (exception would exit via except block).
                     adapter.update_secret(
                         secret_name=key,
                         secret_path=folder,
@@ -415,8 +457,9 @@ def _do_export(*, reveal: bool = False) -> bool:
         from omnibase_infra.adapters.models.model_infisical_config import (
             ModelInfisicalAdapterConfig,
         )
-    except ImportError:
-        logger.exception("Cannot import Infisical adapter")
+        from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+    except ImportError as exc:
+        logger.exception("Cannot import Infisical adapter: %s", type(exc).__name__)
         return False
 
     try:
@@ -429,15 +472,17 @@ def _do_export(*, reveal: bool = False) -> bool:
     # Validate project_id is a valid UUID
     try:
         project_uuid = UUID(project_id)
-    except ValueError:
+    except ValueError as exc:
         logger.exception(
             "INFISICAL_PROJECT_ID is not a valid UUID: '%s'. "
-            "Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+            "Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx -- %s",
             project_id,
+            sanitize_error_message(exc),
         )
         return False
 
     # Initialize the adapter -- errors must propagate so main() can exit(1).
+    # Use sanitized logging to avoid leaking client_secret from the call stack.
     try:
         config = ModelInfisicalAdapterConfig(
             host=infisical_addr,
@@ -447,8 +492,11 @@ def _do_export(*, reveal: bool = False) -> bool:
         )
         adapter = AdapterInfisical(config)
         adapter.initialize()
-    except Exception:
-        logger.exception("Failed to initialize Infisical adapter for export")
+    except Exception as exc:
+        logger.exception(
+            "Failed to initialize Infisical adapter for export: %s",
+            sanitize_error_message(exc),
+        )
         raise
 
     try:
@@ -467,8 +515,10 @@ def _do_export(*, reveal: bool = False) -> bool:
             for secret in secrets:
                 print(f"{secret.key}=****")
         return True
-    except Exception:
-        logger.exception("Failed to list secrets from Infisical")
+    except Exception as exc:
+        logger.exception(
+            "Failed to list secrets from Infisical: %s", sanitize_error_message(exc)
+        )
         return False
     finally:
         adapter.shutdown()
@@ -548,8 +598,17 @@ def main() -> int:
     if args.export:
         try:
             ok = _do_export(reveal=args.reveal)
-        except Exception:
-            logger.exception("Export failed with unhandled error")
+        except Exception as exc:
+            # Sanitize to avoid leaking adapter credentials from the call stack.
+            try:
+                from omnibase_infra.utils.util_error_sanitization import (
+                    sanitize_error_message,
+                )
+
+                _msg = sanitize_error_message(exc)
+            except ImportError:
+                _msg = type(exc).__name__
+            logger.exception("Export failed with unhandled error: %s", _msg)
             return 1
         return 0 if ok else 1
 
@@ -557,8 +616,11 @@ def main() -> int:
     logger.info("Scanning contracts in %s", args.contracts_dir)
     try:
         requirements, errors = _extract_requirements(args.contracts_dir)
-    except Exception:
-        logger.exception("Failed to extract config requirements from contracts")
+    except Exception as exc:
+        logger.exception(
+            "Failed to extract config requirements from contracts: %s",
+            type(exc).__name__,
+        )
         return 1
 
     if errors:
@@ -608,8 +670,17 @@ def main() -> int:
                 set_values=args.set_values,
                 overwrite_existing=args.overwrite_existing,
             )
-        except Exception:
-            logger.exception("Seed operation failed with unhandled error")
+        except Exception as exc:
+            # Sanitize to avoid leaking adapter credentials from the call stack.
+            try:
+                from omnibase_infra.utils.util_error_sanitization import (
+                    sanitize_error_message,
+                )
+
+                _msg = sanitize_error_message(exc)
+            except ImportError:
+                _msg = type(exc).__name__
+            logger.exception("Seed operation failed with unhandled error: %s", _msg)
             return 1
         logger.info(
             "Seed complete: %d created, %d updated, %d skipped, %d errors",

@@ -110,7 +110,10 @@ from omnibase_infra.runtime.runtime_contract_config_loader import (
 from omnibase_infra.runtime.util_wiring import wire_default_handlers
 from omnibase_infra.utils.util_consumer_group import compute_consumer_group_id
 from omnibase_infra.utils.util_env_parsing import parse_env_float
-from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+from omnibase_infra.utils.util_error_sanitization import (
+    sanitize_error_message,
+    sanitize_error_string,
+)
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -2537,9 +2540,20 @@ class RuntimeHostProcess:
             logger.debug("INFISICAL_ADDR not set, skipping config prefetch")
             return
 
-        if not self._contract_paths:
-            logger.debug("No contract_paths configured, skipping config prefetch")
-            return
+        # Resolve which contract paths to scan.  When the caller did not
+        # provide explicit paths, fall back to auto-discovery: scan the
+        # entire ``omnibase_infra`` package tree for ``contract.yaml``
+        # files.  This fallback is gated strictly on ``INFISICAL_ADDR``
+        # being set (already checked above) so local development without
+        # Infisical is never affected.
+        effective_contract_paths: list[Path] = list(self._contract_paths)
+        if not effective_contract_paths:
+            package_root = Path(__file__).parent.parent
+            logger.debug(
+                "No contract_paths configured; auto-discovering contracts under %s",
+                package_root,
+            )
+            effective_contract_paths = [package_root]
 
         try:
             from omnibase_infra.runtime.config_discovery.config_prefetcher import (
@@ -2551,7 +2565,7 @@ class RuntimeHostProcess:
 
             # Step 1: Extract config requirements from contracts
             extractor = ContractConfigExtractor()
-            requirements = extractor.extract_from_paths(self._contract_paths)
+            requirements = extractor.extract_from_paths(effective_contract_paths)
 
             if not requirements.requirements:
                 logger.info(
@@ -2671,7 +2685,11 @@ class RuntimeHostProcess:
 
                 if result.errors:
                     for key, err in result.errors.items():
-                        logger.warning("Config prefetch error for %s: %s", key, err)
+                        logger.warning(
+                            "Config prefetch error for %s: %s",
+                            key,
+                            sanitize_error_string(err),
+                        )
             finally:
                 # Always shut down the inline handler to release SDK resources.
                 # Handlers found in the handler registry manage their own lifecycle

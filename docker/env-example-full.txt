@@ -325,11 +325,11 @@ POSTGRES_PASSWORD=__REPLACE_WITH_SECURE_PASSWORD__
 #   - 16 bytes (128-bit AES): 32 hex characters, generate with: openssl rand -hex 16
 #   - 32 bytes (256-bit AES): 64 hex characters, generate with: openssl rand -hex 32
 # Recommended: Use 256-bit (openssl rand -hex 32) for strongest encryption.
-INFISICAL_ENCRYPTION_KEY=CHANGE_ME_generate_with_openssl_rand_hex_32
+INFISICAL_ENCRYPTION_KEY=<REPLACE_BEFORE_USE_openssl_rand_hex_32>
 
 # REQUIRED for secrets profile - JWT signing secret
 # Generate with: openssl rand -hex 32
-INFISICAL_AUTH_SECRET=CHANGE_ME_generate_with_openssl_rand_hex_32
+INFISICAL_AUTH_SECRET=<REPLACE_BEFORE_USE_openssl_rand_hex_32>
 
 # Site URL for Infisical web interface
 # Default is localhost, update for production deployments

@@ -169,9 +169,9 @@ class TestConfigPrefetcher:
 
         # Verify the handler was called with per-service path
         calls = handler.get_secret_sync.call_args_list
-        if calls:
-            paths = [c.kwargs.get("secret_path", "") for c in calls]
-            assert any("/services/my-service/" in p for p in paths)
+        assert len(calls) > 0, "Expected get_secret_sync to be called"
+        paths = [c.kwargs.get("secret_path", "") for c in calls]
+        assert any("/services/my-service/" in p for p in paths)
 
     def test_prefetch_handler_error(self) -> None:
         """Should handle handler errors gracefully."""

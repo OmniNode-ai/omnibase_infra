@@ -189,7 +189,7 @@ log_info "Checking container status..."
 docker compose -f "$COMPOSE_FILE" ps runtime
 
 log_info "Testing health endpoint..."
-if curl -sf http://localhost:8085/health >/dev/null 2>&1; then
+if curl -sf --max-time 10 --connect-timeout 5 http://localhost:8085/health >/dev/null 2>&1; then
     log_success "Health endpoint responding"
 else
     log_error "Health endpoint not responding"

@@ -10,11 +10,15 @@ Path Convention:
     Shared:      ``/shared/<transport>/KEY``
     Per-service: ``/services/<service>/<transport>/KEY``
 
+The ``<transport>`` segment is the enum value of ``EnumInfraTransportType``,
+not its name.  For example, ``DATABASE`` has value ``"db"``, so its shared
+path is ``/shared/db/KEY``.
+
 Multiple instances of the same transport are handled via service namespacing.
 For example, two PostgreSQL connections (one for the main runtime, one for
 intelligence) would live at:
-    ``/services/omnibase-runtime/database/POSTGRES_DSN``
-    ``/services/omniintelligence/database/POSTGRES_DSN``
+    ``/services/omnibase-runtime/db/POSTGRES_DSN``
+    ``/services/omniintelligence/db/POSTGRES_DSN``
 
 .. versionadded:: 0.10.0
     Created as part of OMN-2287.
@@ -104,20 +108,27 @@ class TransportConfigMap:
     This class provides the canonical mapping between ONEX transport types
     and their Infisical storage layout. It is stateless and deterministic.
 
+    Note:
+        Naming convention: CLAUDE.md defines ``Service<Name>`` for service
+        classes.  This class predates that convention and is named
+        ``TransportConfigMap`` rather than ``ServiceTransportConfigMap``.
+        Renaming it would break imports across tests, scripts, and runtime
+        modules; the name is intentionally left unchanged here.
+
     Usage::
 
         tcm = TransportConfigMap()
 
-        # Shared config for database
+        # Shared config for database (slug "db" from EnumInfraTransportType.DATABASE.value)
         spec = tcm.shared_spec(EnumInfraTransportType.DATABASE)
-        # -> folder=/shared/database/, keys=(POSTGRES_DSN, ...)
+        # -> folder=/shared/db/, keys=(POSTGRES_DSN, ...)
 
         # Per-service config
         spec = tcm.service_spec(
             EnumInfraTransportType.DATABASE,
             service_slug="omnibase-runtime",
         )
-        # -> folder=/services/omnibase-runtime/database/, keys=(POSTGRES_DSN, ...)
+        # -> folder=/services/omnibase-runtime/db/, keys=(POSTGRES_DSN, ...)
 
         # All specs for a list of transport types
         specs = tcm.specs_for_transports(
