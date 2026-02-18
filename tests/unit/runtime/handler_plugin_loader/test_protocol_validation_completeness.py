@@ -252,14 +252,13 @@ class TestProtocolValidationAgainstRealHandlers:
     REAL_HANDLERS = [
         "omnibase_infra.handlers.handler_http.HandlerHttpRest",
         "omnibase_infra.handlers.handler_db.HandlerDb",
-        "omnibase_infra.handlers.handler_vault.HandlerVault",
         "omnibase_infra.handlers.handler_consul.HandlerConsul",
     ]
 
     @pytest.mark.parametrize(
         "handler_class_path",
         REAL_HANDLERS,
-        ids=["http", "db", "vault", "consul"],
+        ids=["http", "db", "consul"],
     )
     def test_real_handlers_pass_validation(self, handler_class_path: str) -> None:
         """Verify all real handlers pass protocol validation.
@@ -288,7 +287,7 @@ class TestProtocolValidationAgainstRealHandlers:
     @pytest.mark.parametrize(
         "handler_class_path",
         REAL_HANDLERS,
-        ids=["http", "db", "vault", "consul"],
+        ids=["http", "db", "consul"],
     )
     def test_real_handlers_have_all_required_methods(
         self, handler_class_path: str

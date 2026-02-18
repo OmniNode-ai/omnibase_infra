@@ -148,7 +148,6 @@ from omnibase_infra.errors.error_schema_fingerprint import (
     SchemaFingerprintMismatchError,
     SchemaFingerprintMissingError,
 )
-from omnibase_infra.errors.error_vault import InfraVaultError
 from omnibase_infra.errors.repository import (
     RepositoryContractError,
     RepositoryError,
@@ -192,7 +191,6 @@ __all__: list[str] = [
     "InfraRequestRejectedError",
     "InfraTimeoutError",
     "InfraUnavailableError",
-    "InfraVaultError",
     # Message type registry errors
     "MessageTypeRegistryError",
     # Configuration models

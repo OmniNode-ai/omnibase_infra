@@ -496,29 +496,6 @@ class TestSanitizeUrl:
 class TestErrorClassSanitization:
     """Tests verifying error classes sanitize paths correctly."""
 
-    def test_infra_vault_error_sanitizes_secret_path(self) -> None:
-        """InfraVaultError should sanitize secret_path in extra_context."""
-        from omnibase_infra.enums import EnumInfraTransportType
-        from omnibase_infra.errors import InfraVaultError, ModelInfraErrorContext
-
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
-            operation="read_secret",
-            target_name="vault-primary",
-        )
-
-        error = InfraVaultError(
-            "Failed to read secret",
-            context=context,
-            secret_path="secret/data/myapp/database/credentials",  # noqa: S106
-        )
-
-        # The error should have sanitized secret_path
-        error_str = str(error)
-        # Full path should not be in the string representation
-        assert "myapp" not in error_str or "***" in error_str
-        assert "database/credentials" not in error_str
-
     def test_infra_consul_error_sanitizes_consul_key(self) -> None:
         """InfraConsulError should sanitize consul_key in extra_context."""
         from omnibase_infra.enums import EnumInfraTransportType

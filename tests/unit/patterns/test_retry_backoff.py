@@ -11,7 +11,7 @@ Tests cover:
 - Retryable errors trigger retry logic
 
 These tests validate the retry patterns documented in CLAUDE.md and
-implemented across handlers like HandlerVault and HandlerConsul.
+implemented across handlers like HandlerConsul.
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ import pytest
 from pydantic import ValidationError
 
 from omnibase_infra.handlers.models.consul import ModelConsulRetryConfig
-from omnibase_infra.handlers.models.vault import ModelVaultRetryConfig
 
 T = TypeVar("T")
 
@@ -109,7 +108,7 @@ class RetryExecutor:
     """Executes operations with retry and exponential backoff.
 
     This is a minimal implementation for testing the retry pattern.
-    Production handlers (HandlerVault, HandlerConsul) have more features.
+    Production handlers (HandlerConsul) have more features.
     """
 
     def __init__(
@@ -214,78 +213,6 @@ class RetryExecutor:
 # ---------------------------------------------------------------------------
 # Retry Config Model Tests
 # ---------------------------------------------------------------------------
-
-
-class TestVaultRetryConfig:
-    """Test ModelVaultRetryConfig validation and defaults."""
-
-    def test_default_config(self) -> None:
-        """Test default configuration values."""
-        config = ModelVaultRetryConfig()
-        assert config.max_attempts == 3
-        assert config.initial_backoff_seconds == 0.1
-        assert config.max_backoff_seconds == 10.0
-        assert config.exponential_base == 2.0
-
-    def test_custom_config(self) -> None:
-        """Test custom configuration values are accepted."""
-        config = ModelVaultRetryConfig(
-            max_attempts=5,
-            initial_backoff_seconds=0.5,
-            max_backoff_seconds=30.0,
-            exponential_base=3.0,
-        )
-        assert config.max_attempts == 5
-        assert config.initial_backoff_seconds == 0.5
-        assert config.max_backoff_seconds == 30.0
-        assert config.exponential_base == 3.0
-
-    def test_max_attempts_bounds(self) -> None:
-        """Test max_attempts validation bounds (1-10)."""
-        # Valid minimum
-        config = ModelVaultRetryConfig(max_attempts=1)
-        assert config.max_attempts == 1
-
-        # Valid maximum
-        config = ModelVaultRetryConfig(max_attempts=10)
-        assert config.max_attempts == 10
-
-        # Below minimum
-        with pytest.raises(ValidationError) as exc_info:
-            ModelVaultRetryConfig(max_attempts=0)
-        assert "max_attempts" in str(exc_info.value)
-
-        # Above maximum
-        with pytest.raises(ValidationError) as exc_info:
-            ModelVaultRetryConfig(max_attempts=11)
-        assert "max_attempts" in str(exc_info.value)
-
-    def test_exponential_base_bounds(self) -> None:
-        """Test exponential_base validation bounds (1.5-4.0)."""
-        # Valid minimum
-        config = ModelVaultRetryConfig(exponential_base=1.5)
-        assert config.exponential_base == 1.5
-
-        # Valid maximum
-        config = ModelVaultRetryConfig(exponential_base=4.0)
-        assert config.exponential_base == 4.0
-
-        # Below minimum
-        with pytest.raises(ValidationError) as exc_info:
-            ModelVaultRetryConfig(exponential_base=1.0)
-        assert "exponential_base" in str(exc_info.value)
-
-        # Above maximum
-        with pytest.raises(ValidationError) as exc_info:
-            ModelVaultRetryConfig(exponential_base=5.0)
-        assert "exponential_base" in str(exc_info.value)
-
-    def test_config_is_frozen(self) -> None:
-        """Test config is immutable (frozen)."""
-        config = ModelVaultRetryConfig()
-
-        with pytest.raises(ValidationError):
-            config.max_attempts = 5  # type: ignore[misc]
 
 
 class TestConsulRetryConfig:
@@ -631,43 +558,6 @@ class TestRetryWithRealConfig:
     """Integration tests using actual config models."""
 
     @pytest.mark.asyncio
-    async def test_vault_retry_config_integration(self) -> None:
-        """Test retry behavior with ModelVaultRetryConfig values.
-
-        Uses minimum valid bounds from the config model:
-        - initial_backoff_seconds: >= 0.01
-        - max_backoff_seconds: >= 1.0
-        """
-        config = ModelVaultRetryConfig(
-            max_attempts=3,
-            initial_backoff_seconds=0.1,  # Minimum is 0.01
-            max_backoff_seconds=1.0,  # Minimum is 1.0
-            exponential_base=2.0,
-        )
-
-        executor = RetryExecutor(
-            max_attempts=config.max_attempts,
-            initial_delay=config.initial_backoff_seconds,
-            max_delay=config.max_backoff_seconds,
-            exponential_base=config.exponential_base,
-            jitter_factor=0.0,  # Disable jitter for deterministic test
-        )
-
-        # Verify the config is correctly applied to executor
-        assert executor.max_attempts == 3
-        assert executor.initial_delay == 0.1
-        assert executor.max_delay == 1.0
-        assert executor.exponential_base == 2.0
-
-        # Verify exponential backoff calculation with config values
-        # Attempt 0: 0.1 * 2^0 = 0.1
-        # Attempt 1: 0.1 * 2^1 = 0.2
-        # Attempt 2: 0.1 * 2^2 = 0.4
-        assert executor.calculate_delay(0) == pytest.approx(0.1, rel=0.01)
-        assert executor.calculate_delay(1) == pytest.approx(0.2, rel=0.01)
-        assert executor.calculate_delay(2) == pytest.approx(0.4, rel=0.01)
-
-    @pytest.mark.asyncio
     async def test_consul_retry_config_integration(self) -> None:
         """Test retry behavior with ModelConsulRetryConfig values.
 
@@ -707,7 +597,6 @@ class TestRetryWithRealConfig:
 
 
 __all__: list[str] = [
-    "TestVaultRetryConfig",
     "TestConsulRetryConfig",
     "TestExponentialBackoffCalculation",
     "TestJitterRandomization",

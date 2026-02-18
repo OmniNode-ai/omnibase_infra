@@ -5,7 +5,7 @@ Unit tests for HandlerBootstrapSource hardcoded handler registration.
 
 Tests the HandlerBootstrapSource functionality including:
 - Protocol compliance with ProtocolContractSource
-- Bootstrap handler discovery (consul, db, http, mcp, vault)
+- Bootstrap handler discovery (consul, db, http, mcp)
 - ModelHandlerDescriptor validation for all bootstrap handlers
 - Graceful mode behavior (API consistency)
 - Idempotency of discover_handlers() calls
@@ -50,7 +50,6 @@ EXPECTED_HANDLER_IDS = frozenset(
         "proto.db",
         "proto.http",
         "proto.mcp",
-        "proto.vault",
     }
 )
 
@@ -61,12 +60,12 @@ EXPECTED_HANDLER_KIND = "effect"
 EXPECTED_VERSION = "1.0.0"
 
 # Expected count of bootstrap handlers
-EXPECTED_HANDLER_COUNT = 5
+EXPECTED_HANDLER_COUNT = 4
 
 # Performance threshold: 20ms allows for contract YAML file I/O during handler
 # discovery. Pre-OMN-1282 threshold was 10ms when no contract files were loaded.
 # Current overhead comes from:
-# - Reading handler_contract.yaml for each bootstrap handler (5 handlers)
+# - Reading handler_contract.yaml for each bootstrap handler (4 handlers)
 # - YAML parsing via yaml.safe_load()
 # - Path resolution and symlink handling
 # - CI environment disk I/O variance
@@ -181,15 +180,14 @@ class TestHandlerBootstrapSourceDiscovery:
         assert hasattr(result, "validation_errors")
 
     @pytest.mark.asyncio
-    async def test_discovers_exactly_five_handlers(self) -> None:
-        """discover_handlers() should return exactly 5 bootstrap handlers.
+    async def test_discovers_exactly_four_handlers(self) -> None:
+        """discover_handlers() should return exactly 4 bootstrap handlers.
 
         The bootstrap handlers are:
         - bootstrap.consul: HashiCorp Consul service discovery
         - bootstrap.db: PostgreSQL database operations
         - bootstrap.http: HTTP REST protocol
         - bootstrap.mcp: Model Context Protocol for AI agent integration
-        - bootstrap.vault: HashiCorp Vault secret management
         """
         source = HandlerBootstrapSource()
 
@@ -205,7 +203,7 @@ class TestHandlerBootstrapSourceDiscovery:
         """All discovered handlers should have expected handler_id values.
 
         Handler IDs must follow the pattern "bootstrap.<service_name>" where
-        service_name is one of: consul, db, http, mcp, vault.
+        service_name is one of: consul, db, http, mcp.
         """
         source = HandlerBootstrapSource()
 
@@ -287,7 +285,6 @@ class TestHandlerBootstrapSourceDiscovery:
             "proto.consul": "contracts/handlers/consul/handler_contract.yaml",
             "proto.db": "contracts/handlers/db/handler_contract.yaml",
             "proto.http": "contracts/handlers/http/handler_contract.yaml",
-            "proto.vault": "contracts/handlers/vault/handler_contract.yaml",
             "proto.mcp": "src/omnibase_infra/contracts/handlers/mcp/handler_contract.yaml",
         }
 
@@ -519,24 +516,6 @@ class TestHandlerBootstrapSourceDescriptors:
         descriptor = http_descriptors[0]
         assert descriptor.name == "HTTP Handler"
         assert "http" in descriptor.description.lower()
-        assert descriptor.handler_kind == "effect"
-
-    @pytest.mark.asyncio
-    async def test_vault_handler_descriptor_content(self) -> None:
-        """Verify the Vault handler descriptor has expected content."""
-        source = HandlerBootstrapSource()
-
-        result = await source.discover_handlers()
-
-        vault_descriptors = [
-            d for d in result.descriptors if d.handler_id == "proto.vault"
-        ]
-
-        assert len(vault_descriptors) == 1, "Should have exactly one Vault handler"
-
-        descriptor = vault_descriptors[0]
-        assert descriptor.name == "Vault Handler"
-        assert "vault" in descriptor.description.lower()
         assert descriptor.handler_kind == "effect"
 
     @pytest.mark.asyncio

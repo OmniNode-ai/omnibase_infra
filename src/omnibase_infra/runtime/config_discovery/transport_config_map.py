@@ -95,10 +95,6 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
     ),
     EnumInfraTransportType.INMEMORY: (),
     EnumInfraTransportType.RUNTIME: (),
-    EnumInfraTransportType.VAULT: (
-        "VAULT_ADDR",
-        "VAULT_TOKEN",
-    ),
 }
 
 

@@ -949,19 +949,17 @@ class TestBindingConfigResolverEnvOverrides:
                 assert result.enabled is False, f"Failed for falsy value '{val}'"
 
 
-class TestBindingConfigResolverVaultSource:
-    """Vault-based config resolution tests."""
+class TestBindingConfigResolverSecretSource:
+    """Infisical-based config resolution tests."""
 
-    def test_vault_config_resolution(self) -> None:
-        """Resolve config from Vault via SecretResolver."""
+    def test_infisical_config_resolution(self) -> None:
+        """Resolve config from Infisical via SecretResolver."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create mock SecretResolver
             mock_resolver = MagicMock()
-            mock_secret = MagicMock()
-            mock_secret.get_secret_value.return_value = json.dumps(
+            mock_resolver._read_infisical_secret_sync.return_value = json.dumps(
                 {"timeout_ms": 60000, "priority": 100}
             )
-            mock_resolver.get_secret.return_value = mock_secret
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -974,22 +972,20 @@ class TestBindingConfigResolverVaultSource:
             ):
                 result = resolver.resolve(
                     handler_type="db",
-                    config_ref="vault:secret/data/handlers/db",
+                    config_ref="infisical:secret/data/handlers/db",
                 )
 
             assert result.timeout_ms == 60000
             assert result.priority == 100
-            mock_resolver.get_secret.assert_called_once()
+            mock_resolver._read_infisical_secret_sync.assert_called_once()
 
-    def test_vault_with_fragment(self) -> None:
-        """Resolve specific field from Vault secret."""
+    def test_infisical_with_fragment(self) -> None:
+        """Resolve specific field from Infisical secret."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_resolver = MagicMock()
-            mock_secret = MagicMock()
-            mock_secret.get_secret_value.return_value = json.dumps(
+            mock_resolver._read_infisical_secret_sync.return_value = json.dumps(
                 {"timeout_ms": 70000}
             )
-            mock_resolver.get_secret.return_value = mock_secret
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -1002,16 +998,16 @@ class TestBindingConfigResolverVaultSource:
             ):
                 result = resolver.resolve(
                     handler_type="db",
-                    config_ref="vault:secret/data/handlers/db#config",
+                    config_ref="infisical:secret/data/handlers/db#config",
                 )
 
             assert result.timeout_ms == 70000
             # Verify fragment was passed
-            call_args = mock_resolver.get_secret.call_args
+            call_args = mock_resolver._read_infisical_secret_sync.call_args
             assert "config" in call_args[0][0]
 
-    def test_vault_resolver_not_configured(self) -> None:
-        """Error when vault: used but no SecretResolver registered in container."""
+    def test_infisical_resolver_not_configured(self) -> None:
+        """Error when infisical: used but no SecretResolver registered in container."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -1022,16 +1018,18 @@ class TestBindingConfigResolverVaultSource:
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 resolver.resolve(
                     handler_type="db",
-                    config_ref="vault:secret/data/db",
+                    config_ref="infisical:secret/data/db",
                 )
 
             assert "secretresolver" in str(exc_info.value).lower()
 
-    def test_vault_secret_not_found(self) -> None:
-        """Handle missing Vault secret."""
+    def test_infisical_secret_not_found(self) -> None:
+        """Handle missing Infisical secret."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_resolver = MagicMock()
-            mock_resolver.get_secret.return_value = None  # Secret not found
+            mock_resolver._read_infisical_secret_sync.return_value = (
+                None  # Secret not found
+            )
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -1045,18 +1043,18 @@ class TestBindingConfigResolverVaultSource:
                 with pytest.raises(ProtocolConfigurationError) as exc_info:
                     resolver.resolve(
                         handler_type="db",
-                        config_ref="vault:secret/data/missing",
+                        config_ref="infisical:secret/data/missing",
                     )
 
             assert "not found" in str(exc_info.value).lower()
 
-    def test_vault_secret_exception(self) -> None:
+    def test_infisical_secret_exception(self) -> None:
         """Handle exception from SecretResolver."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_resolver = MagicMock()
             # Use SecretResolutionError (specific exception) instead of generic Exception
-            mock_resolver.get_secret.side_effect = SecretResolutionError(
-                "Vault connection failed"
+            mock_resolver._read_infisical_secret_sync.side_effect = (
+                SecretResolutionError("Infisical connection failed")
             )
 
             config = ModelBindingConfigResolverConfig(
@@ -1071,18 +1069,16 @@ class TestBindingConfigResolverVaultSource:
                 with pytest.raises(ProtocolConfigurationError) as exc_info:
                     resolver.resolve(
                         handler_type="db",
-                        config_ref="vault:secret/data/db",
+                        config_ref="infisical:secret/data/db",
                     )
 
-            assert "vault" in str(exc_info.value).lower()
+            assert "infisical" in str(exc_info.value).lower()
 
-    def test_vault_inline_reference_resolution(self) -> None:
-        """Resolve vault: references within config values."""
+    def test_infisical_inline_reference_resolution(self) -> None:
+        """Resolve infisical: references within config values."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_resolver = MagicMock()
-            mock_secret = MagicMock()
-            mock_secret.get_secret_value.return_value = "secret_value"
-            mock_resolver.get_secret.return_value = mock_secret
+            mock_resolver._read_infisical_secret_sync.return_value = "secret_value"
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -1093,12 +1089,12 @@ class TestBindingConfigResolverVaultSource:
             with patch.object(
                 resolver, "_get_secret_resolver", return_value=mock_resolver
             ):
-                # Config with vault reference in a value
+                # Config with infisical reference in a value
                 result = resolver.resolve(
                     handler_type="db",
                     inline_config={
                         "timeout_ms": 5000,
-                        "config": {"password": "vault:secret/db#password"},
+                        "config": {"password": "infisical:secret/db#password"},
                     },
                 )
 
@@ -1115,20 +1111,20 @@ class TestBindingConfigResolverVaultSource:
             # Create container without SecretResolver registered
             resolver, _container = create_resolver(config, secret_resolver=None)
 
-            # Config with vault reference - should raise because no SecretResolver
+            # Config with infisical reference - should raise because no SecretResolver
             with pytest.raises(ProtocolConfigurationError) as exc_info:
                 resolver.resolve(
                     handler_type="db",
                     inline_config={
                         "timeout_ms": 5000,
-                        "config": {"password": "vault:secret/db#password"},
+                        "config": {"password": "infisical:secret/db#password"},
                     },
                 )
 
             assert "secretresolver" in str(exc_info.value).lower()
 
     def test_fail_on_secret_error_false_skips_when_resolver_absent(self) -> None:
-        """Skip vault resolution when fail_on_secret_error=False and SecretResolver absent."""
+        """Skip infisical resolution when fail_on_secret_error=False and SecretResolver absent."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -1137,19 +1133,19 @@ class TestBindingConfigResolverVaultSource:
             # Create container without SecretResolver registered
             resolver, _container = create_resolver(config, secret_resolver=None)
 
-            # Config with vault reference - should NOT raise, just return config unchanged
+            # Config with infisical reference - should NOT raise, just return config unchanged
             result = resolver.resolve(
                 handler_type="db",
                 inline_config={
                     "timeout_ms": 5000,
-                    "config": {"password": "vault:secret/db#password"},
+                    "config": {"password": "infisical:secret/db#password"},
                 },
             )
 
-            # Config returned with original vault reference (not resolved)
+            # Config returned with original infisical reference (not resolved)
             assert result.timeout_ms == 5000
             assert result.config is not None
-            assert result.config.get("password") == "vault:secret/db#password"
+            assert result.config.get("password") == "infisical:secret/db#password"
 
     @pytest.mark.asyncio
     async def test_fail_on_secret_error_true_raises_async_when_resolver_absent(
@@ -1168,7 +1164,7 @@ class TestBindingConfigResolverVaultSource:
                     handler_type="db",
                     inline_config={
                         "timeout_ms": 5000,
-                        "config": {"password": "vault:secret/db#password"},
+                        "config": {"password": "infisical:secret/db#password"},
                     },
                 )
 
@@ -1178,7 +1174,7 @@ class TestBindingConfigResolverVaultSource:
     async def test_fail_on_secret_error_false_skips_async_when_resolver_absent(
         self,
     ) -> None:
-        """Async: Skip vault resolution when fail_on_secret_error=False and SecretResolver absent."""
+        """Async: Skip infisical resolution when fail_on_secret_error=False and SecretResolver absent."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -1190,13 +1186,13 @@ class TestBindingConfigResolverVaultSource:
                 handler_type="db",
                 inline_config={
                     "timeout_ms": 5000,
-                    "config": {"password": "vault:secret/db#password"},
+                    "config": {"password": "infisical:secret/db#password"},
                 },
             )
 
             assert result.timeout_ms == 5000
             assert result.config is not None
-            assert result.config.get("password") == "vault:secret/db#password"
+            assert result.config.get("password") == "infisical:secret/db#password"
 
 
 class TestBindingConfigResolverCaching:
@@ -1497,20 +1493,22 @@ class TestBindingConfigResolverAsync:
             assert stats.hits >= 1
 
     @pytest.mark.asyncio
-    async def test_async_vault_resolution(self) -> None:
-        """Async Vault resolution works correctly."""
+    async def test_async_infisical_resolution(self) -> None:
+        """Async Infisical resolution works correctly."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_resolver = MagicMock()
-            mock_secret = MagicMock()
-            mock_secret.get_secret_value.return_value = json.dumps(
-                {"timeout_ms": 60000}
-            )
 
             # Mock async method
-            async def mock_get_secret_async(name: str, required: bool = True) -> object:
-                return mock_secret
+            async def mock_read_infisical_secret_async(
+                name: str,
+                logical_name: str | None = None,
+                correlation_id: object = None,
+            ) -> str:
+                return json.dumps({"timeout_ms": 60000})
 
-            mock_resolver.get_secret_async = mock_get_secret_async
+            mock_resolver._read_infisical_secret_async = (
+                mock_read_infisical_secret_async
+            )
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -1523,7 +1521,7 @@ class TestBindingConfigResolverAsync:
             ):
                 result = await resolver.resolve_async(
                     handler_type="db",
-                    config_ref="vault:secret/data/db",
+                    config_ref="infisical:secret/data/db",
                 )
 
             assert result.timeout_ms == 60000
@@ -1938,23 +1936,23 @@ class TestModelConfigRef:
         assert result.config_ref.scheme == EnumConfigRefScheme.ENV
         assert result.config_ref.path == "DB_CONFIG"
 
-    def test_parse_vault(self) -> None:
-        """Parse vault:path."""
-        result = ModelConfigRef.parse("vault:secret/data/db")
+    def test_parse_infisical(self) -> None:
+        """Parse infisical:path."""
+        result = ModelConfigRef.parse("infisical:secret/data/db")
 
         assert result.success
         assert result.config_ref is not None
-        assert result.config_ref.scheme == EnumConfigRefScheme.VAULT
+        assert result.config_ref.scheme == EnumConfigRefScheme.INFISICAL
         assert result.config_ref.path == "secret/data/db"
         assert result.config_ref.fragment is None
 
-    def test_parse_vault_with_fragment(self) -> None:
-        """Parse vault:path#field."""
-        result = ModelConfigRef.parse("vault:secret/data/db#password")
+    def test_parse_infisical_with_fragment(self) -> None:
+        """Parse infisical:path#field."""
+        result = ModelConfigRef.parse("infisical:secret/data/db#password")
 
         assert result.success
         assert result.config_ref is not None
-        assert result.config_ref.scheme == EnumConfigRefScheme.VAULT
+        assert result.config_ref.scheme == EnumConfigRefScheme.INFISICAL
         assert result.config_ref.path == "secret/data/db"
         assert result.config_ref.fragment == "password"
 
@@ -2029,9 +2027,9 @@ class TestModelConfigRef:
         assert result.success
         assert result.config_ref.to_uri() == original
 
-    def test_to_uri_roundtrip_vault_with_fragment(self) -> None:
-        """parse() and to_uri() are inverse operations for vault with fragment."""
-        original = "vault:secret/db#password"
+    def test_to_uri_roundtrip_infisical_with_fragment(self) -> None:
+        """parse() and to_uri() are inverse operations for infisical with fragment."""
+        original = "infisical:secret/db#password"
         result = ModelConfigRef.parse(original)
 
         assert result.success
@@ -2242,18 +2240,16 @@ class TestBindingConfigResolverInlinePrecedence:
 class TestBindingConfigResolverRecursionDepth:
     """Tests for recursion depth limits in nested config resolution."""
 
-    def test_resolve_vault_refs_depth_limit(self) -> None:
+    def test_resolve_infisical_refs_depth_limit(self) -> None:
         """Deeply nested configs hit recursion limit.
 
-        Tests that _resolve_vault_refs raises ProtocolConfigurationError
+        Tests that _resolve_infisical_refs raises ProtocolConfigurationError
         when nesting exceeds _MAX_NESTED_CONFIG_DEPTH (20).
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create mock SecretResolver
             mock_resolver = MagicMock()
-            mock_secret = MagicMock()
-            mock_secret.get_secret_value.return_value = "secret_value"
-            mock_resolver.get_secret.return_value = mock_secret
+            mock_resolver._read_infisical_secret_sync.return_value = "secret_value"
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -2265,16 +2261,16 @@ class TestBindingConfigResolverRecursionDepth:
                 resolver, "_get_secret_resolver", return_value=mock_resolver
             ):
                 # Create deeply nested config (21 levels deep to exceed limit of 20)
-                nested: dict[str, object] = {"value": "vault:secret/test"}
+                nested: dict[str, object] = {"value": "infisical:secret/test"}
                 for _ in range(21):
                     nested = {"nested": nested}
 
                 with pytest.raises(ProtocolConfigurationError) as exc_info:
-                    resolver._resolve_vault_refs(nested, uuid4(), depth=0)
+                    resolver._resolve_infisical_refs(nested, uuid4(), depth=0)
 
                 assert "nesting exceeds maximum depth" in str(exc_info.value).lower()
 
-    def test_resolve_vault_refs_at_depth_limit_succeeds(self) -> None:
+    def test_resolve_infisical_refs_at_depth_limit_succeeds(self) -> None:
         """Config at exactly the depth limit succeeds.
 
         Tests that configs with nesting at exactly _MAX_NESTED_CONFIG_DEPTH (20)
@@ -2283,9 +2279,7 @@ class TestBindingConfigResolverRecursionDepth:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create mock SecretResolver
             mock_resolver = MagicMock()
-            mock_secret = MagicMock()
-            mock_secret.get_secret_value.return_value = "resolved_secret"
-            mock_resolver.get_secret.return_value = mock_secret
+            mock_resolver._read_infisical_secret_sync.return_value = "resolved_secret"
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -2297,34 +2291,38 @@ class TestBindingConfigResolverRecursionDepth:
                 resolver, "_get_secret_resolver", return_value=mock_resolver
             ):
                 # Create config at exactly 20 levels deep (should succeed)
-                nested: dict[str, object] = {"value": "vault:secret/test"}
+                nested: dict[str, object] = {"value": "infisical:secret/test"}
                 for _ in range(20):
                     nested = {"nested": nested}
 
                 # Should not raise - at the limit, not exceeding it
-                result = resolver._resolve_vault_refs(nested, uuid4(), depth=0)
+                result = resolver._resolve_infisical_refs(nested, uuid4(), depth=0)
 
                 # Verify the nested structure was processed
                 assert result is not None
                 assert "nested" in result
 
     @pytest.mark.asyncio
-    async def test_resolve_vault_refs_async_depth_limit(self) -> None:
-        """Async vault ref resolution also respects depth limit.
+    async def test_resolve_infisical_refs_async_depth_limit(self) -> None:
+        """Async infisical ref resolution also respects depth limit.
 
-        Tests that _resolve_vault_refs_async raises ProtocolConfigurationError
+        Tests that _resolve_infisical_refs_async raises ProtocolConfigurationError
         when nesting exceeds _MAX_NESTED_CONFIG_DEPTH (20).
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create mock SecretResolver with async support
             mock_resolver = MagicMock()
-            mock_secret = MagicMock()
-            mock_secret.get_secret_value.return_value = "secret_value"
 
-            async def mock_get_secret_async(name: str, required: bool = True) -> object:
-                return mock_secret
+            async def mock_read_infisical_secret_async(
+                name: str,
+                logical_name: str | None = None,
+                correlation_id: object = None,
+            ) -> str:
+                return "secret_value"
 
-            mock_resolver.get_secret_async = mock_get_secret_async
+            mock_resolver._read_infisical_secret_async = (
+                mock_read_infisical_secret_async
+            )
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -2336,12 +2334,14 @@ class TestBindingConfigResolverRecursionDepth:
                 resolver, "_get_secret_resolver", return_value=mock_resolver
             ):
                 # Create deeply nested config (21 levels deep to exceed limit of 20)
-                nested: dict[str, object] = {"value": "vault:secret/test"}
+                nested: dict[str, object] = {"value": "infisical:secret/test"}
                 for _ in range(21):
                     nested = {"nested": nested}
 
                 with pytest.raises(ProtocolConfigurationError) as exc_info:
-                    await resolver._resolve_vault_refs_async(nested, uuid4(), depth=0)
+                    await resolver._resolve_infisical_refs_async(
+                        nested, uuid4(), depth=0
+                    )
 
                 assert "nesting exceeds maximum depth" in str(exc_info.value).lower()
 
@@ -3180,9 +3180,9 @@ class TestAsyncKeyLockCleanupOnEviction:
 
 
 class TestVaultReferencesInLists:
-    """Tests for vault reference resolution inside list values.
+    """Tests for infisical reference resolution inside list values.
 
-    These tests verify that vault: references inside list values are properly
+    These tests verify that infisical: references inside list values are properly
     resolved, including nested lists and mixed structures.
 
     Related:
@@ -3191,13 +3191,11 @@ class TestVaultReferencesInLists:
     """
 
     def test_vault_refs_in_simple_list(self) -> None:
-        """Test resolving vault references in a simple list."""
+        """Test resolving infisical references in a simple list."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create mock SecretResolver
             mock_resolver = MagicMock()
-            mock_secret = MagicMock()
-            mock_secret.get_secret_value.return_value = "resolved_secret"
-            mock_resolver.get_secret.return_value = mock_secret
+            mock_resolver._read_infisical_secret_sync.return_value = "resolved_secret"
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -3208,16 +3206,16 @@ class TestVaultReferencesInLists:
             with patch.object(
                 resolver, "_get_secret_resolver", return_value=mock_resolver
             ):
-                # Config with vault refs in a list
+                # Config with infisical refs in a list
                 test_config: dict[str, object] = {
                     "secrets": [
-                        "vault:secret/key1",
-                        "vault:secret/key2#field",
+                        "infisical:secret/key1",
+                        "infisical:secret/key2#field",
                         "plain_value",
                     ]
                 }
 
-                result = resolver._resolve_vault_refs(test_config, uuid4())
+                result = resolver._resolve_infisical_refs(test_config, uuid4())
 
                 # Verify list items were resolved
                 assert isinstance(result["secrets"], list)
@@ -3227,12 +3225,10 @@ class TestVaultReferencesInLists:
                 assert secrets_list[2] == "plain_value"
 
     def test_vault_refs_in_nested_list(self) -> None:
-        """Test resolving vault references in nested lists."""
+        """Test resolving infisical references in nested lists."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_resolver = MagicMock()
-            mock_secret = MagicMock()
-            mock_secret.get_secret_value.return_value = "nested_secret"
-            mock_resolver.get_secret.return_value = mock_secret
+            mock_resolver._read_infisical_secret_sync.return_value = "nested_secret"
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -3242,15 +3238,15 @@ class TestVaultReferencesInLists:
             with patch.object(
                 resolver, "_get_secret_resolver", return_value=mock_resolver
             ):
-                # Config with vault refs in nested list
+                # Config with infisical refs in nested list
                 test_config: dict[str, object] = {
                     "nested": [
-                        ["vault:secret/nested1", "plain"],
-                        ["vault:secret/nested2"],
+                        ["infisical:secret/nested1", "plain"],
+                        ["infisical:secret/nested2"],
                     ]
                 }
 
-                result = resolver._resolve_vault_refs(test_config, uuid4())
+                result = resolver._resolve_infisical_refs(test_config, uuid4())
 
                 nested = result["nested"]
                 assert isinstance(nested, list)
@@ -3259,12 +3255,10 @@ class TestVaultReferencesInLists:
                 assert nested[1][0] == "nested_secret"
 
     def test_vault_refs_in_list_with_dict_items(self) -> None:
-        """Test resolving vault references in list containing dictionaries."""
+        """Test resolving infisical references in list containing dictionaries."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_resolver = MagicMock()
-            mock_secret = MagicMock()
-            mock_secret.get_secret_value.return_value = "dict_secret"
-            mock_resolver.get_secret.return_value = mock_secret
+            mock_resolver._read_infisical_secret_sync.return_value = "dict_secret"
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -3274,15 +3268,15 @@ class TestVaultReferencesInLists:
             with patch.object(
                 resolver, "_get_secret_resolver", return_value=mock_resolver
             ):
-                # Config with list of dicts containing vault refs
+                # Config with list of dicts containing infisical refs
                 test_config: dict[str, object] = {
                     "databases": [
-                        {"name": "db1", "password": "vault:secret/db1#password"},
-                        {"name": "db2", "password": "vault:secret/db2#password"},
+                        {"name": "db1", "password": "infisical:secret/db1#password"},
+                        {"name": "db2", "password": "infisical:secret/db2#password"},
                     ]
                 }
 
-                result = resolver._resolve_vault_refs(test_config, uuid4())
+                result = resolver._resolve_infisical_refs(test_config, uuid4())
 
                 databases = result["databases"]
                 assert isinstance(databases, list)
@@ -3292,37 +3286,43 @@ class TestVaultReferencesInLists:
                 assert databases[1]["password"] == "dict_secret"
 
     def test_has_vault_references_in_list(self) -> None:
-        """Test _has_vault_references detects vault refs in lists."""
+        """Test _has_infisical_references detects infisical refs in lists."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
             )
             resolver, _container = create_resolver(config)
 
-            # Config with vault ref in list
-            with_ref: dict[str, object] = {"items": ["vault:secret/test"]}
-            assert resolver._has_vault_references(with_ref) is True
+            # Config with infisical ref in list
+            with_ref: dict[str, object] = {"items": ["infisical:secret/test"]}
+            assert resolver._has_infisical_references(with_ref) is True
 
-            # Config with nested vault ref in list
-            nested_ref: dict[str, object] = {"items": [{"key": "vault:secret/nested"}]}
-            assert resolver._has_vault_references(nested_ref) is True
+            # Config with nested infisical ref in list
+            nested_ref: dict[str, object] = {
+                "items": [{"key": "infisical:secret/nested"}]
+            }
+            assert resolver._has_infisical_references(nested_ref) is True
 
-            # Config without vault refs
+            # Config without infisical refs
             without_ref: dict[str, object] = {"items": ["plain", "values"]}
-            assert resolver._has_vault_references(without_ref) is False
+            assert resolver._has_infisical_references(without_ref) is False
 
     @pytest.mark.asyncio
     async def test_vault_refs_in_list_async(self) -> None:
-        """Test async resolution of vault references in lists."""
+        """Test async resolution of infisical references in lists."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_resolver = MagicMock()
-            mock_secret = MagicMock()
-            mock_secret.get_secret_value.return_value = "async_secret"
 
-            async def mock_get_secret_async(name: str, required: bool = True) -> object:
-                return mock_secret
+            async def mock_read_infisical_secret_async(
+                name: str,
+                logical_name: str | None = None,
+                correlation_id: object = None,
+            ) -> str:
+                return "async_secret"
 
-            mock_resolver.get_secret_async = mock_get_secret_async
+            mock_resolver._read_infisical_secret_async = (
+                mock_read_infisical_secret_async
+            )
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -3334,12 +3334,14 @@ class TestVaultReferencesInLists:
             ):
                 test_config: dict[str, object] = {
                     "api_keys": [
-                        "vault:secret/key1",
-                        "vault:secret/key2",
+                        "infisical:secret/key1",
+                        "infisical:secret/key2",
                     ]
                 }
 
-                result = await resolver._resolve_vault_refs_async(test_config, uuid4())
+                result = await resolver._resolve_infisical_refs_async(
+                    test_config, uuid4()
+                )
 
                 api_keys = result["api_keys"]
                 assert isinstance(api_keys, list)
@@ -3347,11 +3349,13 @@ class TestVaultReferencesInLists:
                 assert api_keys[1] == "async_secret"
 
     def test_vault_ref_resolution_failure_in_list(self) -> None:
-        """Test vault reference resolution failure in list with fail_on_secret_error."""
+        """Test infisical reference resolution failure in list with fail_on_secret_error."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_resolver = MagicMock()
             # Use SecretResolutionError (specific exception) instead of generic Exception
-            mock_resolver.get_secret.side_effect = SecretResolutionError("Vault error")
+            mock_resolver._read_infisical_secret_sync.side_effect = (
+                SecretResolutionError("Infisical error")
+            )
 
             config = ModelBindingConfigResolverConfig(
                 config_dir=Path(tmpdir),
@@ -3362,10 +3366,12 @@ class TestVaultReferencesInLists:
             with patch.object(
                 resolver, "_get_secret_resolver", return_value=mock_resolver
             ):
-                test_config: dict[str, object] = {"secrets": ["vault:secret/will_fail"]}
+                test_config: dict[str, object] = {
+                    "secrets": ["infisical:secret/will_fail"]
+                }
 
                 with pytest.raises(ProtocolConfigurationError) as exc_info:
-                    resolver._resolve_vault_refs(test_config, uuid4())
+                    resolver._resolve_infisical_refs(test_config, uuid4())
 
                 assert "list index" in str(exc_info.value).lower()
 
@@ -3386,14 +3392,14 @@ class TestVaultReferencesInLists:
                 resolver, "_get_secret_resolver", return_value=mock_resolver
             ):
                 # Create deeply nested list (21 levels to exceed limit)
-                nested: list[object] = ["vault:secret/deep"]
+                nested: list[object] = ["infisical:secret/deep"]
                 for _ in range(21):
                     nested = [nested]
 
                 test_config: dict[str, object] = {"deep_list": nested}
 
                 with pytest.raises(ProtocolConfigurationError) as exc_info:
-                    resolver._resolve_vault_refs(test_config, uuid4())
+                    resolver._resolve_infisical_refs(test_config, uuid4())
 
                 assert "nesting exceeds maximum depth" in str(exc_info.value).lower()
 
@@ -3639,7 +3645,7 @@ __all__: list[str] = [
     "TestBindingConfigResolverFileSource",
     "TestBindingConfigResolverEnvSource",
     "TestBindingConfigResolverEnvOverrides",
-    "TestBindingConfigResolverVaultSource",
+    "TestBindingConfigResolverSecretSource",
     "TestBindingConfigResolverCaching",
     "TestBindingConfigResolverAsync",
     "TestBindingConfigResolverThreadSafety",

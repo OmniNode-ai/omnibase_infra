@@ -68,11 +68,8 @@ if TYPE_CHECKING:
     from omnibase_infra.handlers.models.model_consul_retry_config import (
         ModelConsulRetryConfig,
     )
-    from omnibase_infra.handlers.models.model_vault_retry_config import (
-        ModelVaultRetryConfig,
-    )
 
-    RetryConfigType = ModelConsulRetryConfig | ModelVaultRetryConfig
+    RetryConfigType = ModelConsulRetryConfig
 
 T = TypeVar("T")
 

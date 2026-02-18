@@ -216,7 +216,6 @@ _HANDLER_TYPE_CONSUL = "consul"
 _HANDLER_TYPE_DATABASE = "db"
 _HANDLER_TYPE_HTTP = "http"
 _HANDLER_TYPE_MCP = "mcp"
-_HANDLER_TYPE_VAULT = "vault"
 
 # Bootstrap handler definitions.
 #
@@ -272,16 +271,6 @@ _BOOTSTRAP_HANDLER_DEFINITIONS: list[BootstrapEffectDefinition] = [
         "input_model": "omnibase_infra.models.types.JsonDict",
         "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
         "contract_path": "contracts/handlers/http/handler_contract.yaml",
-    },
-    {
-        "handler_id": handler_identity(_HANDLER_TYPE_VAULT),
-        "name": "Vault Handler",
-        "description": "HashiCorp Vault secret management handler",
-        "handler_kind": "effect",
-        "handler_class": "omnibase_infra.handlers.handler_vault.HandlerVault",
-        "input_model": "omnibase_infra.models.types.JsonDict",
-        "output_model": "omnibase_core.models.dispatch.ModelHandlerOutput",
-        "contract_path": "contracts/handlers/vault/handler_contract.yaml",
     },
     {
         "handler_id": handler_identity(_HANDLER_TYPE_MCP),

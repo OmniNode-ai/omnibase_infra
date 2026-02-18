@@ -41,7 +41,7 @@ class ModelBindingConfigResolverConfig(BaseModel):
     multiple configuration sources with priority-based resolution.
 
     Supported config_ref Schemes:
-        - vault: - Vault secrets (e.g., vault:secret/data/db#password)
+        - infisical: - Infisical secrets (e.g., infisical:path/to/secret#field)
         - env: - Environment variables (e.g., env:DB_CONFIG_JSON)
         - file: - File-based configuration (e.g., file:configs/db.yaml)
 
@@ -170,7 +170,7 @@ class ModelBindingConfigResolverConfig(BaseModel):
 
     # Allowed config_ref schemes (for security)
     allowed_schemes: frozenset[str] = Field(
-        default=frozenset({"file", "env", "vault", "infisical"}),
+        default=frozenset({"file", "env", "infisical"}),
         description="Set of allowed config_ref URI schemes for security. "
         "Only these schemes can be used in config_ref values.",
     )
@@ -180,7 +180,7 @@ class ModelBindingConfigResolverConfig(BaseModel):
     fail_on_secret_error: bool = Field(
         default=False,
         description="If True, raise ProtocolConfigurationError when a secret "
-        "reference (vault: or infisical:) fails to resolve. If False, log an "
+        "reference (infisical:) fails to resolve. If False, log an "
         "error and keep the original placeholder value (which may be insecure). "
         "Set to True in production to prevent silent security fallbacks.",
     )
@@ -316,7 +316,7 @@ class ModelBindingConfigResolverConfig(BaseModel):
             raise ValueError(msg)
 
         # Known valid schemes
-        valid_schemes = {"file", "env", "vault", "infisical"}
+        valid_schemes = {"file", "env", "infisical"}
         unknown_schemes = value - valid_schemes
 
         if unknown_schemes:

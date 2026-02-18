@@ -481,15 +481,6 @@ class TestInfraConnectionError:
         error = InfraConnectionError("Consul connection failed", context=context)
         assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
 
-    def test_error_code_mapping_vault_transport(self) -> None:
-        """Test VAULT transport uses SERVICE_UNAVAILABLE."""
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
-            target_name="vault-server",
-        )
-        error = InfraConnectionError("Vault connection failed", context=context)
-        assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
-
     def test_error_code_mapping_valkey_transport(self) -> None:
         """Test VALKEY transport uses SERVICE_UNAVAILABLE."""
         context = ModelInfraErrorContext(
@@ -554,7 +545,6 @@ class TestInfraConnectionErrorTransportMapping:
         service_transports = [
             EnumInfraTransportType.KAFKA,
             EnumInfraTransportType.CONSUL,
-            EnumInfraTransportType.VAULT,
             EnumInfraTransportType.VALKEY,
         ]
         for transport in service_transports:
@@ -594,7 +584,6 @@ class TestInfraConnectionErrorTransportMapping:
             (EnumInfraTransportType.GRPC, EnumCoreErrorCode.NETWORK_ERROR),
             (EnumInfraTransportType.KAFKA, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
             (EnumInfraTransportType.CONSUL, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
-            (EnumInfraTransportType.VAULT, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
             (EnumInfraTransportType.VALKEY, EnumCoreErrorCode.SERVICE_UNAVAILABLE),
         ]
         for transport, expected_code in test_cases:
@@ -938,7 +927,7 @@ class TestStructuredFieldsComprehensive:
         """Test that all errors support transport_type via context model."""
         transport_types = [
             EnumInfraTransportType.HTTP,
-            EnumInfraTransportType.VAULT,
+            EnumInfraTransportType.INFISICAL,
             EnumInfraTransportType.DATABASE,
             EnumInfraTransportType.KAFKA,
             EnumInfraTransportType.CONSUL,
@@ -955,7 +944,7 @@ class TestStructuredFieldsComprehensive:
             SecretResolutionError(
                 "test",
                 context=ModelInfraErrorContext(
-                    transport_type=EnumInfraTransportType.VAULT
+                    transport_type=EnumInfraTransportType.INFISICAL
                 ),
             ),
             InfraConnectionError(
@@ -1341,7 +1330,7 @@ class TestContextSerialization:
         """Test roundtrip serialization: model -> dict -> model."""
         correlation_id = uuid4()
         original = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
+            transport_type=EnumInfraTransportType.INFISICAL,
             operation="get_secret",
             target_name="secrets/database",
             correlation_id=correlation_id,
@@ -1451,7 +1440,6 @@ class TestContextSerialization:
         """Test that all transport types serialize correctly."""
         transport_types = [
             EnumInfraTransportType.HTTP,
-            EnumInfraTransportType.VAULT,
             EnumInfraTransportType.DATABASE,
             EnumInfraTransportType.KAFKA,
             EnumInfraTransportType.CONSUL,

@@ -74,7 +74,6 @@ from omnibase_infra.runtime.handler_registry import (
     HANDLER_TYPE_HTTP,
     HANDLER_TYPE_KAFKA,
     HANDLER_TYPE_VALKEY,
-    HANDLER_TYPE_VAULT,
     RegistryError,
     RegistryEventBusBinding,
     RegistryProtocolBinding,
@@ -312,7 +311,6 @@ __all__: list[str] = [
     "HANDLER_TYPE_HTTP",
     "HANDLER_TYPE_KAFKA",
     "HANDLER_TYPE_VALKEY",
-    "HANDLER_TYPE_VAULT",
     # Envelope validation
     "PAYLOAD_REQUIRED_OPERATIONS",
     # Chain-aware dispatch (OMN-951)

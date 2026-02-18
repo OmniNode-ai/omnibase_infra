@@ -213,9 +213,9 @@ class SecretResolutionError(RuntimeHostError):
 
     Example:
         >>> context = ModelInfraErrorContext(
-        ...     transport_type=EnumInfraTransportType.VAULT,
+        ...     transport_type=EnumInfraTransportType.INFISICAL,
         ...     operation="get_secret",
-        ...     target_name="vault-primary",
+        ...     target_name="infisical-primary",
         ... )
         >>> # Use generic description, not the actual path
         >>> raise SecretResolutionError(
@@ -255,7 +255,7 @@ class InfraConnectionError(RuntimeHostError):
     in the context:
         - DATABASE -> DATABASE_CONNECTION_ERROR
         - HTTP, GRPC -> NETWORK_ERROR
-        - KAFKA, CONSUL, VAULT, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP -> SERVICE_UNAVAILABLE
+        - KAFKA, CONSUL, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP -> SERVICE_UNAVAILABLE
         - None (no context) -> SERVICE_UNAVAILABLE
 
     Example:
@@ -298,7 +298,6 @@ class InfraConnectionError(RuntimeHostError):
         EnumInfraTransportType.GRPC: EnumCoreErrorCode.NETWORK_ERROR,
         EnumInfraTransportType.KAFKA: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.CONSUL: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
-        EnumInfraTransportType.VAULT: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.INFISICAL: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.VALKEY: EnumCoreErrorCode.SERVICE_UNAVAILABLE,
         EnumInfraTransportType.RUNTIME: EnumCoreErrorCode.OPERATION_FAILED,
@@ -323,7 +322,7 @@ class InfraConnectionError(RuntimeHostError):
             Appropriate EnumCoreErrorCode for the transport type:
                 - DATABASE -> DATABASE_CONNECTION_ERROR
                 - HTTP, GRPC -> NETWORK_ERROR
-                - KAFKA, CONSUL, VAULT, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP, None -> SERVICE_UNAVAILABLE
+                - KAFKA, CONSUL, INFISICAL, VALKEY, FILESYSTEM, QDRANT, GRAPH, MCP, None -> SERVICE_UNAVAILABLE
         """
         if context is None:
             return cls._TRANSPORT_ERROR_CODE_MAP[None]
@@ -449,12 +448,12 @@ class InfraAuthenticationError(RuntimeHostError):
 
     Example:
         >>> context = ModelInfraErrorContext(
-        ...     transport_type=EnumInfraTransportType.VAULT,
+        ...     transport_type=EnumInfraTransportType.INFISICAL,
         ...     operation="authenticate",
-        ...     target_name="vault-primary",
+        ...     target_name="infisical-primary",
         ... )
         >>> raise InfraAuthenticationError(
-        ...     "Invalid Vault token",
+        ...     "Invalid Infisical token",
         ...     context=context,
         ...     auth_method="token",
         ... )

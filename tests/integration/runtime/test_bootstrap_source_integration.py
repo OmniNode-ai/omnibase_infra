@@ -42,7 +42,6 @@ from omnibase_infra.runtime.handler_registry import (
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_HTTP,
     HANDLER_TYPE_MCP,
-    HANDLER_TYPE_VAULT,
     RegistryProtocolBinding,
     get_handler_registry,
 )
@@ -181,7 +180,6 @@ class TestBootstrapSourceRuntimeIntegration:
             assert registry.is_registered(HANDLER_TYPE_DATABASE)
             assert registry.is_registered(HANDLER_TYPE_HTTP)
             assert registry.is_registered(HANDLER_TYPE_MCP)
-            assert registry.is_registered(HANDLER_TYPE_VAULT)
 
         finally:
             await process.stop()
@@ -232,7 +230,6 @@ class TestBootstrapSourceRuntimeIntegration:
                     HANDLER_TYPE_DATABASE,
                     HANDLER_TYPE_HTTP,
                     HANDLER_TYPE_MCP,
-                    HANDLER_TYPE_VAULT,
                 }
 
                 # Check that bootstrap handlers were registered

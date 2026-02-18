@@ -40,7 +40,6 @@ class CapabilityInferenceRules:
         "postgres.": "postgres.storage",
         "consul.": "consul.registration",
         "kafka.": "kafka.messaging",
-        "vault.": "vault.secrets",
         "valkey.": "valkey.caching",
         "http.": "http.transport",
     }

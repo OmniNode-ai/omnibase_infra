@@ -85,10 +85,6 @@ PAYLOAD_REQUIRED_OPERATIONS: frozenset[str] = frozenset(
         # Consul operations
         "consul.kv_put",
         "consul.register",
-        # Vault operations
-        "vault.write",
-        "vault.encrypt",
-        "vault.decrypt",
     }
 )
 

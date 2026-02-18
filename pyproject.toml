@@ -67,7 +67,6 @@ dependencies = [
     "redis>=6.0.0,<7.0.0",  # For Redis/Valkey integration (redis-py 6.x required by omnibase_core)
     "aiokafka>=0.11.0,<0.12.0",  # For Kafka tools (async Python client)
     "confluent-kafka>=2.12.0,<3.0.0",  # For Kafka integration (C-based high-performance client)
-    "hvac>=2.1.0,<3.0.0",  # For Vault adapter tools
     "infisicalsdk>=1.0.15,<2.0.0",  # For Infisical secret management (OMN-2286)
 
     # Vector and graph database dependencies (for Qdrant and Memgraph handlers)
