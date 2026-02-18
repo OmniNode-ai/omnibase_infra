@@ -459,7 +459,9 @@ class RegistryInfraNodeRegistrationOrchestrator:
                     # Skip heartbeat handler if no projector (require_heartbeat_handler=False)
                     logger.warning(
                         "HandlerNodeHeartbeat NOT registered: require_heartbeat_handler=False. "
-                        "This creates a contract.yaml mismatch (4 handlers defined, only 3 registered). "
+                        "This creates a contract.yaml mismatch (5 handlers defined, only 3 registered "
+                        "when catalog_service is also absent, or only 4 registered when catalog_service "
+                        "is present). "
                         "Heartbeat events (ModelNodeHeartbeatEvent) will NOT be handled. "
                         "This configuration is intended for testing only."
                     )

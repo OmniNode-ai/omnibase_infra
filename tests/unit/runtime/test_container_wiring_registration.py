@@ -909,3 +909,128 @@ class TestGetHandlerNodeRegistrationAckedFromContainerValidation:
             match="Container service_registry is None",
         ):
             await get_handler_node_registration_acked_from_container(mock_container)
+
+
+class TestWireRegistrationWithCatalogService:
+    """Tests for the catalog-service-present branch in wiring functions.
+
+    These tests verify that HandlerTopicCatalogQuery and the topic-catalog-query
+    dispatcher route are registered when a ServiceTopicCatalog is available in
+    the container.
+    """
+
+    @pytest.mark.asyncio
+    async def test_wire_registration_handlers_registers_handler_topic_catalog_query(
+        self,
+    ) -> None:
+        """wire_registration_handlers registers HandlerTopicCatalogQuery when ServiceTopicCatalog is present."""
+        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+            HandlerTopicCatalogQuery,
+        )
+        from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
+
+        mock_catalog_service = MagicMock(spec=ServiceTopicCatalog)
+
+        # resolve_service returns the catalog when asked for ServiceTopicCatalog,
+        # raises for anything else (simulates only catalog registered at this point).
+        async def resolve_side_effect(interface: type) -> object:
+            if interface is ServiceTopicCatalog:
+                return mock_catalog_service
+            from omnibase_infra.errors import ServiceResolutionError
+
+            raise ServiceResolutionError(f"Not registered: {interface}")
+
+        registered_interfaces: list[type] = []
+
+        async def capture_register(interface: type, **kwargs: object) -> None:
+            registered_interfaces.append(interface)
+
+        mock_registry = MagicMock()
+        mock_registry.register_instance = AsyncMock(side_effect=capture_register)
+        mock_registry.resolve_service = AsyncMock(side_effect=resolve_side_effect)
+
+        mock_container = MagicMock()
+        mock_container.service_registry = mock_registry
+
+        mock_pool = MagicMock()
+
+        summary = await wire_registration_handlers(mock_container, mock_pool)
+
+        # HandlerTopicCatalogQuery must appear in the services list
+        assert "HandlerTopicCatalogQuery" in summary["services"]
+        # And in the registered interfaces
+        assert HandlerTopicCatalogQuery in registered_interfaces
+
+    @pytest.mark.asyncio
+    async def test_wire_registration_dispatchers_registers_topic_catalog_query_route(
+        self,
+    ) -> None:
+        """wire_registration_dispatchers registers the topic-catalog-query route when handler is present."""
+        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+            HandlerNodeIntrospected,
+            HandlerNodeRegistrationAcked,
+            HandlerRuntimeTick,
+            HandlerTopicCatalogQuery,
+        )
+        from omnibase_infra.nodes.node_registration_orchestrator.wiring import (
+            ROUTE_ID_TOPIC_CATALOG_QUERY,
+        )
+        from omnibase_infra.protocols.protocol_node_heartbeat import (
+            ProtocolNodeHeartbeat,
+        )
+
+        mock_catalog_handler = MagicMock(spec=HandlerTopicCatalogQuery)
+
+        async def resolve_side_effect(interface: type) -> object:
+            if interface is HandlerTopicCatalogQuery:
+                return mock_catalog_handler
+            if interface is HandlerNodeIntrospected:
+                return MagicMock(spec=HandlerNodeIntrospected)
+            if interface is HandlerRuntimeTick:
+                return MagicMock(spec=HandlerRuntimeTick)
+            if interface is HandlerNodeRegistrationAcked:
+                return MagicMock(spec=HandlerNodeRegistrationAcked)
+            if interface is ProtocolNodeHeartbeat:
+                from omnibase_infra.errors import ServiceResolutionError
+
+                raise ServiceResolutionError("Not registered")
+            from omnibase_infra.errors import ServiceResolutionError
+
+            raise ServiceResolutionError(f"Not registered: {interface}")
+
+        mock_registry = MagicMock()
+        mock_registry.resolve_service = AsyncMock(side_effect=resolve_side_effect)
+
+        mock_container = MagicMock()
+        mock_container.service_registry = mock_registry
+
+        # Capture dispatcher and route registrations
+        registered_dispatcher_ids: list[str] = []
+        registered_route_ids: list[str] = []
+
+        def register_dispatcher(
+            dispatcher_id: str, dispatcher: object, **kwargs: object
+        ) -> None:
+            registered_dispatcher_ids.append(dispatcher_id)
+
+        def register_route(route: object) -> None:
+            registered_route_ids.append(route.route_id)  # type: ignore[union-attr]
+
+        mock_engine = MagicMock()
+        mock_engine.register_dispatcher = MagicMock(side_effect=register_dispatcher)
+        mock_engine.register_route = MagicMock(side_effect=register_route)
+
+        from omnibase_infra.runtime.util_container_wiring import (
+            wire_registration_dispatchers,
+        )
+
+        summary = await wire_registration_dispatchers(mock_container, mock_engine)
+
+        # The topic-catalog-query route must be present in the summary and registered
+        assert ROUTE_ID_TOPIC_CATALOG_QUERY in summary["routes"]
+        assert ROUTE_ID_TOPIC_CATALOG_QUERY in registered_route_ids
+        # The dispatcher must have been registered with the engine
+        assert (
+            "dispatcher.registration.topic-catalog-query" in registered_dispatcher_ids
+        )
+        assert "dispatcher.registration.topic-catalog-query" in summary["dispatchers"]

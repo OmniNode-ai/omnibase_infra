@@ -159,6 +159,9 @@ async def test_dispatcher_accepts_dict_envelope() -> None:
     result = await dispatcher.handle(dict_envelope)
 
     assert result.status == EnumDispatchStatus.SUCCESS
+    # Handler must have been called - ensures dict deserialization reached the handler
+    # rather than silently falling through to INVALID_MESSAGE before dispatch.
+    handler.handle.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
