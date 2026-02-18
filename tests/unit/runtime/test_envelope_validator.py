@@ -52,7 +52,6 @@ def mock_registry() -> RegistryProtocolBinding:
     registry.register("db", MockHandler)  # type: ignore[arg-type]
     registry.register("kafka", MockHandler)  # type: ignore[arg-type]
     registry.register("consul", MockHandler)  # type: ignore[arg-type]
-    registry.register("vault", MockHandler)  # type: ignore[arg-type]
 
     return registry
 
@@ -144,7 +143,7 @@ class TestHandlerPrefixValidation:
         registered_prefixes = context["registered_prefixes"]
         assert isinstance(registered_prefixes, list)
         # Verify all mock registry prefixes are included
-        expected_prefixes = {"http", "db", "kafka", "consul", "vault"}
+        expected_prefixes = {"http", "db", "kafka", "consul"}
         assert set(registered_prefixes) == expected_prefixes
 
     def test_valid_http_prefix_passes(
@@ -197,9 +196,6 @@ class TestPayloadValidation:
             "kafka.produce",
             "consul.kv_put",
             "consul.register",
-            "vault.write",
-            "vault.encrypt",
-            "vault.decrypt",
         ],
     )
     def test_payload_required_operations_without_payload_raises_error(
@@ -225,9 +221,6 @@ class TestPayloadValidation:
             "kafka.produce",
             "consul.kv_put",
             "consul.register",
-            "vault.write",
-            "vault.encrypt",
-            "vault.decrypt",
         ],
     )
     def test_payload_required_operations_with_empty_dict_raises_error(
@@ -252,9 +245,6 @@ class TestPayloadValidation:
             "kafka.produce",
             "consul.kv_put",
             "consul.register",
-            "vault.write",
-            "vault.encrypt",
-            "vault.decrypt",
         ],
     )
     def test_payload_required_operations_with_payload_passes(
@@ -275,7 +265,6 @@ class TestPayloadValidation:
             "http.delete",
             "kafka.consume",
             "consul.kv_get",
-            "vault.read",
         ],
     )
     def test_operations_without_payload_requirement_pass(
@@ -297,9 +286,6 @@ class TestPayloadValidation:
             "kafka.produce",
             "consul.kv_put",
             "consul.register",
-            "vault.write",
-            "vault.encrypt",
-            "vault.decrypt",
         }
         assert expected == PAYLOAD_REQUIRED_OPERATIONS
 

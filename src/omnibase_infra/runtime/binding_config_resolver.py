@@ -7,7 +7,7 @@ from multiple sources with proper priority ordering (highest to lowest):
 
     1. Environment variables (HANDLER_{TYPE}_{FIELD}) - **highest priority**, always wins
     2. Inline config (passed directly to resolve()) - overrides config_ref values
-    3. Config reference (file:, env:, vault:, infisical:) - **base configuration** (lowest priority)
+    3. Config reference (file:, env:, infisical:) - **base configuration** (lowest priority)
 
 Resolution Process:
     The resolver builds the final configuration by layering sources from lowest to highest
@@ -21,7 +21,7 @@ Resolution Process:
     and environment variables can override both for operational flexibility.
 
 Important: config_ref Schemes are Mutually Exclusive
-    The config_ref schemes (file:, env:, vault:, infisical:) are **mutually exclusive** - only ONE
+    The config_ref schemes (file:, env:, infisical:) are **mutually exclusive** - only ONE
     config_ref can be provided per resolution call. The scheme determines WHERE to load
     the base configuration from, not a priority ordering between schemes.
 
@@ -32,9 +32,6 @@ Important: config_ref Schemes are Mutually Exclusive
 
         # OR load from environment variable
         resolver.resolve(handler_type="db", config_ref="env:DB_CONFIG_JSON")
-
-        # OR load from Vault
-        resolver.resolve(handler_type="db", config_ref="vault:secret/data/db")
 
     Invalid usage (would use only ONE, ignoring others)::
 
@@ -73,11 +70,7 @@ Example:
             inline_config={"pool_size": 10, "timeout_ms": 5000}
         )
 
-        # Resolve from file reference
-        binding = resolver.resolve(
-            handler_type="vault",
-            config_ref="file:configs/vault.yaml"
-        )
+
 
     With environment overrides::
 
@@ -197,7 +190,7 @@ def _split_path_and_fragment(path: str) -> tuple[str, str | None]:
     """Split a path into path and optional fragment at '#'.
 
     This is a common helper used by both BindingConfigResolver and SecretResolver
-    to parse vault paths that may contain a fragment identifier (e.g., "path#field").
+    to parse paths that may contain a fragment identifier (e.g., "path#field").
 
     Args:
         path: The path string, optionally containing a '#' separator.
@@ -225,10 +218,10 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
     Resolution Order:
         1. Check cache (if enabled and not expired)
-        2. Parse config_ref if present (file:, env:, vault:, infisical:)
+        2. Parse config_ref if present (file:, env:, infisical:)
         3. Load base config from ref, then merge inline_config (inline takes precedence)
         4. Apply environment variable overrides (highest priority)
-        5. Resolve any vault: and infisical: references in config values
+        5. Resolve any infisical: references in config values
         6. Validate and construct ModelBindingConfig
 
     Thread Safety:
@@ -323,7 +316,6 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         #     -> _resolve_config() [no lock needed directly]
         #       -> _load_from_file() [updates _file_loads]
         #       -> _load_from_env() [updates _env_loads]
-        #       -> _resolve_vault_refs() [updates _secret_loads]
         #       -> _load_from_infisical() [updates _infisical_loads]
         #     -> _cache_config() [updates _misses, _lru_evictions]
         #
@@ -412,7 +404,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
                 SecretResolver
             )
         except (ImportError, KeyError, AttributeError):
-            # SecretResolver is optional - if not registered, vault: schemes won't work
+            # SecretResolver is optional - if not registered, infisical: schemes won't work
             # ImportError: SecretResolver module not available
             # KeyError: SecretResolver not registered in service registry
             # AttributeError: service_registry missing resolve_service method (test mocks)
@@ -443,11 +435,10 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             5. Validate and construct ModelBindingConfig
 
         Args:
-            handler_type: Handler type identifier (e.g., "db", "vault", "consul").
+            handler_type: Handler type identifier (e.g., "db", "consul").
             config_ref: Optional reference to external configuration.
-                Supported schemes: file:, env:, vault:, infisical: (mutually exclusive - use only ONE)
-                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password,
-                    infisical:secret/path#field
+                Supported schemes: file:, env:, infisical: (mutually exclusive - use only ONE)
+                Examples: file:configs/db.yaml, env:DB_CONFIG, infisical:secret/path#field
             inline_config: Optional inline configuration dictionary.
                 Takes precedence over config_ref for overlapping keys.
             correlation_id: Optional correlation ID for error tracking.
@@ -567,7 +558,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             same handler type while allowing parallel fetches for different types.
 
         Args:
-            handler_type: Handler type identifier (e.g., "db", "vault", "consul").
+            handler_type: Handler type identifier (e.g., "db", "consul").
             config_ref: Optional reference to external configuration.
                 Supported schemes: file:, env:, vault:, infisical: (mutually exclusive - use only ONE)
             inline_config: Optional inline configuration dictionary.
@@ -1051,8 +1042,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             merged_config, handler_type, correlation_id
         )
 
-        # Resolve any vault: and infisical: references in the config
-        merged_config = self._resolve_vault_refs(merged_config, correlation_id)
+        # Resolve any infisical: references in the config
         merged_config = self._resolve_infisical_refs(merged_config, correlation_id)
 
         # Validate and construct the final config
@@ -1099,10 +1089,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             merged_config, handler_type, correlation_id
         )
 
-        # Resolve any vault: and infisical: references in the config (async)
-        merged_config = await self._resolve_vault_refs_async(
-            merged_config, correlation_id
-        )
+        # Resolve any infisical: references in the config (async)
         merged_config = await self._resolve_infisical_refs_async(
             merged_config, correlation_id
         )
@@ -1118,9 +1105,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         """Load configuration from a config_ref.
 
         Args:
-            config_ref: Configuration reference using scheme format (file:, env:, vault:, infisical:).
-                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password,
-                    infisical:secret/path#field
+            config_ref: Configuration reference using scheme format (file:, env:, infisical:).
+                Examples: file:configs/db.yaml, env:DB_CONFIG, infisical:secret/path#field
             correlation_id: Correlation ID for error tracking.
 
         Returns:
@@ -1181,8 +1167,6 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             return self._load_from_file(Path(ref.path), correlation_id)
         elif ref.scheme == EnumConfigRefScheme.ENV:
             return self._load_from_env(ref.path, correlation_id)
-        elif ref.scheme == EnumConfigRefScheme.VAULT:
-            return self._load_from_vault(ref.path, ref.fragment, correlation_id)
         elif ref.scheme == EnumConfigRefScheme.INFISICAL:
             return self._load_from_infisical(ref.path, ref.fragment, correlation_id)
         else:
@@ -1205,9 +1189,8 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         """Load configuration from a config_ref asynchronously.
 
         Args:
-            config_ref: Configuration reference using scheme format (file:, env:, vault:, infisical:).
-                Examples: file:configs/db.yaml, env:DB_CONFIG, vault:secret/data/db#password,
-                    infisical:secret/path#field
+            config_ref: Configuration reference using scheme format (file:, env:, infisical:).
+                Examples: file:configs/db.yaml, env:DB_CONFIG, infisical:secret/path#field
             correlation_id: Correlation ID for error tracking.
 
         Returns:
@@ -1271,10 +1254,6 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         elif ref.scheme == EnumConfigRefScheme.ENV:
             # Env var access is fast, no need for thread
             return self._load_from_env(ref.path, correlation_id)
-        elif ref.scheme == EnumConfigRefScheme.VAULT:
-            return await self._load_from_vault_async(
-                ref.path, ref.fragment, correlation_id
-            )
         elif ref.scheme == EnumConfigRefScheme.INFISICAL:
             return await self._load_from_infisical_async(
                 ref.path, ref.fragment, correlation_id
@@ -1667,230 +1646,6 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
 
         return data
 
-    def _load_from_vault(
-        self,
-        vault_path: str,
-        fragment: str | None,
-        correlation_id: UUID,
-    ) -> dict[str, object]:
-        """Load config from Vault secret.
-
-        Args:
-            vault_path: Vault secret path.
-            fragment: Optional field within the secret.
-            correlation_id: Correlation ID for error tracking.
-
-        Returns:
-            Loaded configuration dictionary.
-
-        Raises:
-            ProtocolConfigurationError: If Vault is not configured or secret cannot be read.
-        """
-        secret_resolver = self._get_secret_resolver()
-        if secret_resolver is None:
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="load_from_vault",
-                target_name="binding_config_resolver",
-            )
-            raise ProtocolConfigurationError(
-                "Vault scheme used but no SecretResolver configured",
-                context=context,
-            )
-
-        # Build logical name for secret resolver
-        logical_name = vault_path
-        if fragment:
-            logical_name = f"{vault_path}#{fragment}"
-
-        try:
-            secret = secret_resolver.get_secret(logical_name, required=True)
-        except (SecretResolutionError, NotImplementedError) as e:
-            # SecretResolutionError: secret not found or resolution failed
-            # NotImplementedError: Vault integration not yet implemented
-            # SECURITY: Log at DEBUG level only - exception may contain vault paths
-            logger.debug(
-                "Vault configuration retrieval failed (correlation_id=%s): %s",
-                correlation_id,
-                e,
-                extra={"correlation_id": str(correlation_id)},
-            )
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="load_from_vault",
-                target_name="binding_config_resolver",
-            )
-            # SECURITY: Do NOT chain original exception (from e) - it may
-            # contain vault paths in its message.
-            raise ProtocolConfigurationError(
-                f"Failed to retrieve configuration from Vault. "
-                f"correlation_id={correlation_id}",
-                context=context,
-            )
-
-        if secret is None:
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="load_from_vault",
-                target_name="binding_config_resolver",
-            )
-            raise ProtocolConfigurationError(
-                "Vault secret not found",
-                context=context,
-            )
-
-        # Parse secret value as JSON or YAML
-        secret_value = secret.get_secret_value()
-        data: object = None
-        try:
-            data = json.loads(secret_value)
-        except json.JSONDecodeError:
-            try:
-                data = yaml.safe_load(secret_value)
-            except yaml.YAMLError:
-                context = ModelInfraErrorContext.with_correlation(
-                    correlation_id=correlation_id,
-                    transport_type=EnumInfraTransportType.VAULT,
-                    operation="load_from_vault",
-                    target_name="binding_config_resolver",
-                )
-                raise ProtocolConfigurationError(
-                    "Vault secret contains invalid JSON/YAML",
-                    context=context,
-                )
-
-        if not isinstance(data, dict):
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="load_from_vault",
-                target_name="binding_config_resolver",
-            )
-            raise ProtocolConfigurationError(
-                "Vault secret must contain a dictionary",
-                context=context,
-            )
-
-        with self._lock:
-            self._secret_loads += 1
-
-        return data
-
-    async def _load_from_vault_async(
-        self,
-        vault_path: str,
-        fragment: str | None,
-        correlation_id: UUID,
-    ) -> dict[str, object]:
-        """Load config from Vault secret asynchronously.
-
-        Args:
-            vault_path: Vault secret path.
-            fragment: Optional field within the secret.
-            correlation_id: Correlation ID for error tracking.
-
-        Returns:
-            Loaded configuration dictionary.
-
-        Raises:
-            ProtocolConfigurationError: If Vault is not configured or secret cannot be read.
-        """
-        secret_resolver = self._get_secret_resolver()
-        if secret_resolver is None:
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="load_from_vault_async",
-                target_name="binding_config_resolver",
-            )
-            raise ProtocolConfigurationError(
-                "Vault scheme used but no SecretResolver configured",
-                context=context,
-            )
-
-        # Build logical name for secret resolver
-        logical_name = vault_path
-        if fragment:
-            logical_name = f"{vault_path}#{fragment}"
-
-        try:
-            secret = await secret_resolver.get_secret_async(logical_name, required=True)
-        except (SecretResolutionError, NotImplementedError) as e:
-            # SecretResolutionError: secret not found or resolution failed
-            # NotImplementedError: Vault integration not yet implemented
-            # SECURITY: Log at DEBUG level only - exception may contain vault paths
-            logger.debug(
-                "Vault configuration retrieval failed async (correlation_id=%s): %s",
-                correlation_id,
-                e,
-                extra={"correlation_id": str(correlation_id)},
-            )
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="load_from_vault_async",
-                target_name="binding_config_resolver",
-            )
-            # SECURITY: Do NOT chain original exception (from e) - it may
-            # contain vault paths in its message.
-            raise ProtocolConfigurationError(
-                f"Failed to retrieve configuration from Vault. "
-                f"correlation_id={correlation_id}",
-                context=context,
-            )
-
-        if secret is None:
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="load_from_vault_async",
-                target_name="binding_config_resolver",
-            )
-            raise ProtocolConfigurationError(
-                "Vault secret not found",
-                context=context,
-            )
-
-        # Parse secret value as JSON or YAML
-        secret_value = secret.get_secret_value()
-        data: object = None
-        try:
-            data = json.loads(secret_value)
-        except json.JSONDecodeError:
-            try:
-                data = yaml.safe_load(secret_value)
-            except yaml.YAMLError:
-                context = ModelInfraErrorContext.with_correlation(
-                    correlation_id=correlation_id,
-                    transport_type=EnumInfraTransportType.VAULT,
-                    operation="load_from_vault_async",
-                    target_name="binding_config_resolver",
-                )
-                raise ProtocolConfigurationError(
-                    "Vault secret contains invalid JSON/YAML",
-                    context=context,
-                )
-
-        if not isinstance(data, dict):
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="load_from_vault_async",
-                target_name="binding_config_resolver",
-            )
-            raise ProtocolConfigurationError(
-                "Vault secret must contain a dictionary",
-                context=context,
-            )
-
-        with self._lock:
-            self._secret_loads += 1
-
-        return data
-
     def _load_from_infisical(
         self,
         infisical_path: str,
@@ -2130,83 +1885,6 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
         """
         return self._secret_resolver
 
-    def _parse_vault_reference(self, value: str) -> tuple[str, str | None]:
-        """Parse a vault: reference string into path and optional fragment.
-
-        Extracts the vault path and optional fragment from a vault reference.
-        The fragment is specified after a '#' character in the reference.
-
-        Args:
-            value: The vault reference string (e.g., "vault:secret/path#field").
-
-        Returns:
-            Tuple of (vault_path, fragment) where fragment may be None.
-            The vault_path has the "vault:" prefix removed.
-
-        Example:
-            >>> self._parse_vault_reference("vault:secret/data/db#password")
-            ("secret/data/db", "password")
-            >>> self._parse_vault_reference("vault:secret/data/config")
-            ("secret/data/config", None)
-        """
-        vault_path = value[6:]  # Remove "vault:" prefix
-        return _split_path_and_fragment(vault_path)
-
-    def _has_vault_references(self, config: dict[str, object], depth: int = 0) -> bool:
-        """Check if config contains any vault: references (including nested dicts and lists).
-
-        Recursively scans the configuration dictionary to detect any string
-        values that start with "vault:".
-
-        Args:
-            config: Configuration dictionary to check.
-            depth: Current recursion depth (default 0). Returns False if
-                depth exceeds ``_MAX_NESTED_CONFIG_DEPTH`` to prevent
-                stack overflow on pathological inputs.
-
-        Returns:
-            True if any vault: references are found, False otherwise.
-        """
-        if depth > _MAX_NESTED_CONFIG_DEPTH:
-            return False
-        for value in config.values():
-            if isinstance(value, str) and value.startswith("vault:"):
-                return True
-            if isinstance(value, dict):
-                if self._has_vault_references(value, depth=depth + 1):
-                    return True
-            if isinstance(value, list):
-                if self._has_vault_references_in_list(value, depth=depth + 1):
-                    return True
-        return False
-
-    def _has_vault_references_in_list(
-        self, items: list[object], depth: int = 0
-    ) -> bool:
-        """Check if a list contains any vault: references (including nested structures).
-
-        Args:
-            items: List to check for vault references.
-            depth: Current recursion depth (default 0). Returns False if
-                depth exceeds ``_MAX_NESTED_CONFIG_DEPTH`` to prevent
-                stack overflow on pathological inputs.
-
-        Returns:
-            True if any vault: references are found, False otherwise.
-        """
-        if depth > _MAX_NESTED_CONFIG_DEPTH:
-            return False
-        for item in items:
-            if isinstance(item, str) and item.startswith("vault:"):
-                return True
-            if isinstance(item, dict):
-                if self._has_vault_references(item, depth=depth + 1):
-                    return True
-            if isinstance(item, list):
-                if self._has_vault_references_in_list(item, depth=depth + 1):
-                    return True
-        return False
-
     def _apply_env_overrides(
         self,
         config: dict[str, object],
@@ -2439,507 +2117,6 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
             },
         )
 
-    def _resolve_vault_refs(
-        self,
-        config: dict[str, object],
-        correlation_id: UUID,
-        depth: int = 0,
-    ) -> dict[str, object]:
-        """Resolve any vault: references in config values.
-
-        Scans all string values for vault: prefix and resolves them
-        using the SecretResolver.
-
-        Args:
-            config: Configuration dictionary.
-            correlation_id: Correlation ID for error tracking.
-            depth: Current recursion depth (default 0).
-
-        Returns:
-            Configuration with vault references resolved.
-
-        Raises:
-            ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_secret_error is True and a vault reference fails.
-        """
-        if depth > _MAX_NESTED_CONFIG_DEPTH:
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="resolve_vault_refs",
-                target_name="binding_config_resolver",
-            )
-            raise ProtocolConfigurationError(
-                f"Configuration nesting exceeds maximum depth of {_MAX_NESTED_CONFIG_DEPTH}",
-                context=context,
-            )
-
-        secret_resolver = self._get_secret_resolver()
-        if secret_resolver is None:
-            # Check if there are vault references that need resolution
-            # If fail_on_secret_error is True and vault refs exist, this is a security issue
-            if self._config.fail_on_secret_error and self._has_vault_references(config):
-                context = ModelInfraErrorContext.with_correlation(
-                    correlation_id=correlation_id,
-                    transport_type=EnumInfraTransportType.RUNTIME,
-                    operation="resolve_vault_refs",
-                    target_name="binding_config_resolver",
-                )
-                raise ProtocolConfigurationError(
-                    "Config contains vault: references but no SecretResolver is configured",
-                    context=context,
-                )
-            return config
-
-        result: dict[str, object] = {}
-        for key, value in config.items():
-            if isinstance(value, str) and value.startswith("vault:"):
-                # Parse vault reference using helper method
-                vault_path, fragment = self._parse_vault_reference(value)
-                logical_name = f"{vault_path}#{fragment}" if fragment else vault_path
-
-                try:
-                    secret = secret_resolver.get_secret(logical_name, required=False)
-                    if secret is not None:
-                        result[key] = secret.get_secret_value()
-                    else:
-                        # Secret not found - check fail_on_secret_error
-                        if self._config.fail_on_secret_error:
-                            logger.error(
-                                "Vault secret not found for config key '%s'",
-                                key,
-                                extra={
-                                    "correlation_id": str(correlation_id),
-                                    "config_key": key,
-                                },
-                            )
-                            context = ModelInfraErrorContext.with_correlation(
-                                correlation_id=correlation_id,
-                                transport_type=EnumInfraTransportType.VAULT,
-                                operation="resolve_vault_refs",
-                                target_name="binding_config_resolver",
-                            )
-                            raise ProtocolConfigurationError(
-                                f"Vault secret not found for config key '{key}'",
-                                context=context,
-                            )
-                        result[key] = value  # Keep original if not found
-                except (SecretResolutionError, NotImplementedError) as e:
-                    # SecretResolutionError: secret not found or resolution failed
-                    # NotImplementedError: Vault integration not yet implemented
-                    # SECURITY: Log at DEBUG level only - exception may contain vault paths
-                    # Use DEBUG to capture details for troubleshooting without exposing
-                    # sensitive paths in production logs
-                    logger.debug(
-                        "Vault resolution failed for config key '%s' "
-                        "(correlation_id=%s): %s",
-                        key,
-                        correlation_id,
-                        e,
-                        extra={
-                            "correlation_id": str(correlation_id),
-                            "config_key": key,
-                        },
-                    )
-                    # Respect fail_on_secret_error config option
-                    if self._config.fail_on_secret_error:
-                        context = ModelInfraErrorContext.with_correlation(
-                            correlation_id=correlation_id,
-                            transport_type=EnumInfraTransportType.VAULT,
-                            operation="resolve_vault_refs",
-                            target_name="binding_config_resolver",
-                        )
-                        # SECURITY: Do NOT chain original exception (from e) - it may
-                        # contain vault paths in its message. Original error is logged
-                        # at DEBUG level above for troubleshooting.
-                        raise ProtocolConfigurationError(
-                            f"Failed to resolve Vault secret reference for config key "
-                            f"'{key}'. correlation_id={correlation_id}",
-                            context=context,
-                        )
-                    # Keep original on error (may be insecure - logged above)
-                    result[key] = value
-            elif isinstance(value, dict):
-                # Recursively resolve nested dicts
-                result[key] = self._resolve_vault_refs(value, correlation_id, depth + 1)
-            elif isinstance(value, list):
-                # Recursively resolve vault references in list items
-                result[key] = self._resolve_vault_refs_in_list(
-                    value, secret_resolver, correlation_id, depth + 1
-                )
-            else:
-                result[key] = value
-
-        return result
-
-    def _resolve_vault_refs_in_list(
-        self,
-        items: list[object],
-        secret_resolver: SecretResolver,
-        correlation_id: UUID,
-        depth: int,
-    ) -> list[object]:
-        """Resolve vault: references within a list.
-
-        Processes each item in the list, resolving any vault: references found
-        in strings, nested dicts, or nested lists.
-
-        Args:
-            items: List of items to process.
-            secret_resolver: SecretResolver instance for vault lookups.
-            correlation_id: Correlation ID for error tracking.
-            depth: Current recursion depth.
-
-        Returns:
-            List with vault references resolved.
-
-        Raises:
-            ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_secret_error is True and a vault reference fails.
-        """
-        if depth > _MAX_NESTED_CONFIG_DEPTH:
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="resolve_vault_refs_in_list",
-                target_name="binding_config_resolver",
-            )
-            raise ProtocolConfigurationError(
-                f"Configuration nesting exceeds maximum depth of {_MAX_NESTED_CONFIG_DEPTH}",
-                context=context,
-            )
-
-        result: list[object] = []
-        for i, item in enumerate(items):
-            if isinstance(item, str) and item.startswith("vault:"):
-                # Parse vault reference using helper method
-                vault_path, fragment = self._parse_vault_reference(item)
-                logical_name = f"{vault_path}#{fragment}" if fragment else vault_path
-
-                try:
-                    secret = secret_resolver.get_secret(logical_name, required=False)
-                    if secret is not None:
-                        result.append(secret.get_secret_value())
-                    else:
-                        # Secret not found - check fail_on_secret_error
-                        if self._config.fail_on_secret_error:
-                            logger.error(
-                                "Vault secret not found at list index %d",
-                                i,
-                                extra={
-                                    "correlation_id": str(correlation_id),
-                                    "list_index": i,
-                                },
-                            )
-                            context = ModelInfraErrorContext.with_correlation(
-                                correlation_id=correlation_id,
-                                transport_type=EnumInfraTransportType.VAULT,
-                                operation="resolve_vault_refs_in_list",
-                                target_name="binding_config_resolver",
-                            )
-                            raise ProtocolConfigurationError(
-                                f"Vault secret not found at list index {i}",
-                                context=context,
-                            )
-                        result.append(item)  # Keep original if not found
-                except (SecretResolutionError, NotImplementedError) as e:
-                    # SecretResolutionError: secret not found or resolution failed
-                    # NotImplementedError: Vault integration not yet implemented
-                    # SECURITY: Log at DEBUG level only - exception may contain vault paths
-                    # Do not log vault_path - reveals secret structure
-                    logger.debug(
-                        "Vault resolution failed at list index %d "
-                        "(correlation_id=%s): %s",
-                        i,
-                        correlation_id,
-                        e,
-                        extra={
-                            "correlation_id": str(correlation_id),
-                            "list_index": i,
-                        },
-                    )
-                    if self._config.fail_on_secret_error:
-                        context = ModelInfraErrorContext.with_correlation(
-                            correlation_id=correlation_id,
-                            transport_type=EnumInfraTransportType.VAULT,
-                            operation="resolve_vault_refs_in_list",
-                            target_name="binding_config_resolver",
-                        )
-                        # SECURITY: Do NOT chain original exception (from e) - it may
-                        # contain vault paths in its message.
-                        raise ProtocolConfigurationError(
-                            f"Failed to resolve Vault secret reference at list index {i}. "
-                            f"correlation_id={correlation_id}",
-                            context=context,
-                        )
-                    result.append(item)
-            elif isinstance(item, dict):
-                result.append(self._resolve_vault_refs(item, correlation_id, depth + 1))
-            elif isinstance(item, list):
-                result.append(
-                    self._resolve_vault_refs_in_list(
-                        item, secret_resolver, correlation_id, depth + 1
-                    )
-                )
-            else:
-                result.append(item)
-
-        return result
-
-    async def _resolve_vault_refs_async(
-        self,
-        config: dict[str, object],
-        correlation_id: UUID,
-        depth: int = 0,
-    ) -> dict[str, object]:
-        """Resolve any vault: references in config values asynchronously.
-
-        Args:
-            config: Configuration dictionary.
-            correlation_id: Correlation ID for error tracking.
-            depth: Current recursion depth (default 0).
-
-        Returns:
-            Configuration with vault references resolved.
-
-        Raises:
-            ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_secret_error is True and a vault reference fails.
-        """
-        if depth > _MAX_NESTED_CONFIG_DEPTH:
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="resolve_vault_refs_async",
-                target_name="binding_config_resolver",
-            )
-            raise ProtocolConfigurationError(
-                f"Configuration nesting exceeds maximum depth of {_MAX_NESTED_CONFIG_DEPTH}",
-                context=context,
-            )
-
-        secret_resolver = self._get_secret_resolver()
-        if secret_resolver is None:
-            # Check if there are vault references that need resolution
-            # If fail_on_secret_error is True and vault refs exist, this is a security issue
-            if self._config.fail_on_secret_error and self._has_vault_references(config):
-                context = ModelInfraErrorContext.with_correlation(
-                    correlation_id=correlation_id,
-                    transport_type=EnumInfraTransportType.RUNTIME,
-                    operation="resolve_vault_refs_async",
-                    target_name="binding_config_resolver",
-                )
-                raise ProtocolConfigurationError(
-                    "Config contains vault: references but no SecretResolver is configured",
-                    context=context,
-                )
-            return config
-
-        result: dict[str, object] = {}
-        for key, value in config.items():
-            if isinstance(value, str) and value.startswith("vault:"):
-                # Parse vault reference using helper method
-                vault_path, fragment = self._parse_vault_reference(value)
-                logical_name = f"{vault_path}#{fragment}" if fragment else vault_path
-
-                try:
-                    secret = await secret_resolver.get_secret_async(
-                        logical_name, required=False
-                    )
-                    if secret is not None:
-                        result[key] = secret.get_secret_value()
-                    else:
-                        # Secret not found - check fail_on_secret_error
-                        if self._config.fail_on_secret_error:
-                            logger.error(
-                                "Vault secret not found for config key '%s'",
-                                key,
-                                extra={
-                                    "correlation_id": str(correlation_id),
-                                    "config_key": key,
-                                },
-                            )
-                            context = ModelInfraErrorContext.with_correlation(
-                                correlation_id=correlation_id,
-                                transport_type=EnumInfraTransportType.VAULT,
-                                operation="resolve_vault_refs_async",
-                                target_name="binding_config_resolver",
-                            )
-                            raise ProtocolConfigurationError(
-                                f"Vault secret not found for config key '{key}'",
-                                context=context,
-                            )
-                        result[key] = value  # Keep original if not found
-                except (SecretResolutionError, NotImplementedError) as e:
-                    # SecretResolutionError: secret not found or resolution failed
-                    # NotImplementedError: Vault integration not yet implemented
-                    # SECURITY: Log at DEBUG level only - exception may contain vault paths
-                    # Use DEBUG to capture details for troubleshooting without exposing
-                    # sensitive paths in production logs
-                    logger.debug(
-                        "Vault resolution failed for config key '%s' "
-                        "(correlation_id=%s): %s",
-                        key,
-                        correlation_id,
-                        e,
-                        extra={
-                            "correlation_id": str(correlation_id),
-                            "config_key": key,
-                        },
-                    )
-                    # Respect fail_on_secret_error config option
-                    if self._config.fail_on_secret_error:
-                        context = ModelInfraErrorContext.with_correlation(
-                            correlation_id=correlation_id,
-                            transport_type=EnumInfraTransportType.VAULT,
-                            operation="resolve_vault_refs_async",
-                            target_name="binding_config_resolver",
-                        )
-                        # SECURITY: Do NOT chain original exception (from e) - it may
-                        # contain vault paths in its message. Original error is logged
-                        # at DEBUG level above for troubleshooting.
-                        raise ProtocolConfigurationError(
-                            f"Failed to resolve Vault secret reference for config key "
-                            f"'{key}'. correlation_id={correlation_id}",
-                            context=context,
-                        )
-                    # Keep original on error (may be insecure - logged above)
-                    result[key] = value
-            elif isinstance(value, dict):
-                # Recursively resolve nested dicts
-                result[key] = await self._resolve_vault_refs_async(
-                    value, correlation_id, depth + 1
-                )
-            elif isinstance(value, list):
-                # Recursively resolve vault references in list items
-                result[key] = await self._resolve_vault_refs_in_list_async(
-                    value, secret_resolver, correlation_id, depth + 1
-                )
-            else:
-                result[key] = value
-
-        return result
-
-    async def _resolve_vault_refs_in_list_async(
-        self,
-        items: list[object],
-        secret_resolver: SecretResolver,
-        correlation_id: UUID,
-        depth: int,
-    ) -> list[object]:
-        """Resolve vault: references within a list asynchronously.
-
-        Processes each item in the list, resolving any vault: references found
-        in strings, nested dicts, or nested lists.
-
-        Args:
-            items: List of items to process.
-            secret_resolver: SecretResolver instance for vault lookups.
-            correlation_id: Correlation ID for error tracking.
-            depth: Current recursion depth.
-
-        Returns:
-            List with vault references resolved.
-
-        Raises:
-            ProtocolConfigurationError: If recursion depth exceeds maximum,
-                or if fail_on_secret_error is True and a vault reference fails.
-        """
-        if depth > _MAX_NESTED_CONFIG_DEPTH:
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
-                transport_type=EnumInfraTransportType.RUNTIME,
-                operation="resolve_vault_refs_in_list_async",
-                target_name="binding_config_resolver",
-            )
-            raise ProtocolConfigurationError(
-                f"Configuration nesting exceeds maximum depth of {_MAX_NESTED_CONFIG_DEPTH}",
-                context=context,
-            )
-
-        result: list[object] = []
-        for i, item in enumerate(items):
-            if isinstance(item, str) and item.startswith("vault:"):
-                # Parse vault reference using helper method
-                vault_path, fragment = self._parse_vault_reference(item)
-                logical_name = f"{vault_path}#{fragment}" if fragment else vault_path
-
-                try:
-                    secret = await secret_resolver.get_secret_async(
-                        logical_name, required=False
-                    )
-                    if secret is not None:
-                        result.append(secret.get_secret_value())
-                    else:
-                        # Secret not found - check fail_on_secret_error
-                        if self._config.fail_on_secret_error:
-                            logger.error(
-                                "Vault secret not found at list index %d",
-                                i,
-                                extra={
-                                    "correlation_id": str(correlation_id),
-                                    "list_index": i,
-                                },
-                            )
-                            context = ModelInfraErrorContext.with_correlation(
-                                correlation_id=correlation_id,
-                                transport_type=EnumInfraTransportType.VAULT,
-                                operation="resolve_vault_refs_in_list_async",
-                                target_name="binding_config_resolver",
-                            )
-                            raise ProtocolConfigurationError(
-                                f"Vault secret not found at list index {i}",
-                                context=context,
-                            )
-                        result.append(item)  # Keep original if not found
-                except (SecretResolutionError, NotImplementedError) as e:
-                    # SecretResolutionError: secret not found or resolution failed
-                    # NotImplementedError: Vault integration not yet implemented
-                    # SECURITY: Log at DEBUG level only - exception may contain vault paths
-                    # Do not log vault_path - reveals secret structure
-                    logger.debug(
-                        "Vault resolution failed at list index %d "
-                        "(correlation_id=%s): %s",
-                        i,
-                        correlation_id,
-                        e,
-                        extra={
-                            "correlation_id": str(correlation_id),
-                            "list_index": i,
-                        },
-                    )
-                    if self._config.fail_on_secret_error:
-                        context = ModelInfraErrorContext.with_correlation(
-                            correlation_id=correlation_id,
-                            transport_type=EnumInfraTransportType.VAULT,
-                            operation="resolve_vault_refs_in_list_async",
-                            target_name="binding_config_resolver",
-                        )
-                        # SECURITY: Do NOT chain original exception (from e) - it may
-                        # contain vault paths in its message.
-                        raise ProtocolConfigurationError(
-                            f"Failed to resolve Vault secret reference at list index {i}. "
-                            f"correlation_id={correlation_id}",
-                            context=context,
-                        )
-                    result.append(item)
-            elif isinstance(item, dict):
-                result.append(
-                    await self._resolve_vault_refs_async(
-                        item, correlation_id, depth + 1
-                    )
-                )
-            elif isinstance(item, list):
-                result.append(
-                    await self._resolve_vault_refs_in_list_async(
-                        item, secret_resolver, correlation_id, depth + 1
-                    )
-                )
-            else:
-                result.append(item)
-
-        return result
-
     def _resolve_infisical_refs(
         self,
         config: dict[str, object],
@@ -2948,7 +2125,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
     ) -> dict[str, object]:
         """Resolve any infisical: references in config values.
 
-        Mirrors ``_resolve_vault_refs`` but for the ``infisical:`` scheme.
+        Resolves ``infisical:`` references in config values.
         Scans all string values for the ``infisical:`` prefix and resolves
         them through the SecretResolver.
 
@@ -3249,7 +2426,7 @@ class BindingConfigResolver:  # ONEX_EXCLUDE: method_count - follows SecretResol
           (e.g., ``/project/env/secret-name``).
         - **field**: Optional JSON field to extract from the secret value.
 
-        This mirrors ``_parse_vault_reference`` for the ``infisical:`` scheme.
+        Parses infisical: reference strings.
 
         Args:
             value: The infisical reference string

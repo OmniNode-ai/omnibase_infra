@@ -3,29 +3,22 @@
 """Centralized secret resolution for ONEX infrastructure.
 
 SecretResolver provides a unified interface for accessing secrets from multiple sources:
-- Vault (via HandlerVault for KV v2 secrets engine)
+- Infisical (via HandlerInfisical for secret management, OMN-2286)
 - Environment variables
 - File-based secrets (K8s /run/secrets)
 
 Design Philosophy:
 - Dumb and deterministic: resolves and caches, does not discover or mutate
 - Explicit mappings preferred, convention fallback optional
-- Bootstrap secrets (Vault token/addr) always from env
-- Vault is treated as an injected dependency, SecretResolver owns mapping + caching + policy
 
 Example:
-    Bootstrap phase (env-only for Vault credentials)::
+    Initialize resolver with Infisical handler::
 
-        vault_token = os.environ.get("VAULT_TOKEN")
-        vault_addr = os.environ.get("VAULT_ADDR")
-
-    Initialize resolver with Vault handler::
-
-        vault_handler = HandlerVault()
-        await vault_handler.initialize({...})
+        infisical_handler = HandlerInfisical()
+        await infisical_handler.initialize({...})
 
         config = ModelSecretResolverConfig(mappings=[...])
-        resolver = SecretResolver(config=config, vault_handler=vault_handler)
+        resolver = SecretResolver(config=config, infisical_handler=infisical_handler)
 
     Resolve secrets with correlation ID for tracing::
 
@@ -42,7 +35,7 @@ Example:
     Get resolution metrics::
 
         metrics = resolver.get_resolution_metrics()
-        # ModelSecretResolverMetrics(success_counts={"env": 5, "vault": 3}, ...)
+        # ModelSecretResolverMetrics(success_counts={"env": 5, "infisical": 3}, ...)
 
 Security Considerations:
     - Secret values are wrapped in SecretStr to prevent accidental logging
@@ -51,8 +44,6 @@ Security Considerations:
     - Error messages are sanitized to exclude secret values
     - File paths are never logged (prevents information disclosure)
     - Path traversal attacks are blocked for file-based secrets
-    - Bootstrap secrets bypass normal resolution to prevent circular dependencies
-    - Vault paths are never logged (could reveal secret structure)
 
 Memory Handling:
     Raw secret values (plain strings) are briefly held in local variables during
@@ -67,44 +58,10 @@ Memory Handling:
     The brief exposure window is minimized by immediately wrapping values in SecretStr
     after retrieval and never storing raw strings in instance attributes.
 
-Vault Integration:
-    Vault secrets are resolved via HandlerVault (KV v2 secrets engine only).
-
-    Path Format: "mount_point/path/to/secret#field"
-        - mount_point: The secrets engine mount (e.g., "secret")
-        - path: The secret path within the mount (e.g., "myapp/db")
-        - field: Optional specific field to extract (e.g., "password")
-
-    Examples:
-        - "secret/myapp/db#password" -> Reads "password" field from secret at myapp/db
-        - "secret/myapp/db" -> Reads first field value from secret
-
-    Type Handling:
-        All Vault values are converted to strings. This is intentional because
-        SecretResolver returns SecretStr values (which only wrap strings) for
-        security. Non-string Vault values are converted via Python's str():
-
-        - Integers: 123 -> "123"
-        - Booleans: True -> "True"
-        - Lists/Dicts: Python repr (NOT JSON)
-
-        Best Practice: Store secrets as strings in Vault. For structured data,
-        store as JSON strings and parse after resolution.
-
-    Graceful Degradation:
-        - If vault_handler is None: Returns None with a warning log
-        - Vault errors are wrapped in SecretResolutionError with correlation ID
-
-    Error Handling:
-        - InfraAuthenticationError: Auth failures (403)
-        - InfraTimeoutError: Request timeouts
-        - InfraUnavailableError: Circuit breaker open
-        - SecretResolutionError: Other Vault errors (sanitized message)
-
 Observability (OMN-1374):
     SecretResolver includes built-in metrics tracking:
 
-    - Resolution latency by source type (env, file, vault, cache)
+    - Resolution latency by source type (env, file, infisical, cache)
     - Cache hit/miss rates (via get_cache_stats())
     - Resolution success/failure counts by source type
 
@@ -165,7 +122,6 @@ from omnibase_infra.utils.correlation import generate_correlation_id
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
     from omnibase_infra.handlers.handler_infisical import HandlerInfisical
-    from omnibase_infra.handlers.handler_vault import HandlerVault
 
 
 logger = logging.getLogger(__name__)
@@ -277,7 +233,7 @@ class ProtocolSecretResolverMetrics(Protocol):
         """Record latency for a secret resolution operation.
 
         Args:
-            source_type: Source type (env, file, vault, cache)
+            source_type: Source type (env, file, infisical, cache)
             latency_ms: Time in milliseconds for the operation
         """
         ...
@@ -294,7 +250,7 @@ class ProtocolSecretResolverMetrics(Protocol):
         """Record a successful resolution.
 
         Args:
-            source_type: Source type (env, file, vault)
+            source_type: Source type (env, file, infisical)
         """
         ...
 
@@ -302,7 +258,7 @@ class ProtocolSecretResolverMetrics(Protocol):
         """Record a resolution failure.
 
         Args:
-            source_type: Source type (env, file, vault)
+            source_type: Source type (env, file, infisical)
         """
         ...
 
@@ -380,9 +336,7 @@ class SecretResolver:
                potentially resolving the same secret twice in rare cases.
 
         Bootstrap Secret Isolation:
-            Bootstrap secrets (vault.token, vault.addr, vault.ca_cert) are
-            resolved exclusively from environment variables, never from Vault
-            or files. This prevents circular dependencies during Vault init.
+            Bootstrap secrets are resolved exclusively from environment variables.
             The resolution path is isolated from regular secrets, and cache
             writes are always protected by ``_lock`` in both sync and async
             contexts.
@@ -406,7 +360,6 @@ class SecretResolver:
     def __init__(
         self,
         config: ModelSecretResolverConfig,
-        vault_handler: HandlerVault | None = None,
         infisical_handler: HandlerInfisical | None = None,
         metrics_collector: ProtocolSecretResolverMetrics | None = None,
     ) -> None:
@@ -414,7 +367,6 @@ class SecretResolver:
 
         Args:
             config: Resolver configuration with mappings and TTLs
-            vault_handler: Optional Vault handler for Vault-sourced secrets
             infisical_handler: Optional HandlerInfisical for Infisical-sourced
                 secrets (OMN-2286).
             metrics_collector: Optional external metrics collector for observability
@@ -428,7 +380,6 @@ class SecretResolver:
             and testing scenarios.
         """
         self._config = config
-        self._vault_handler = vault_handler
         self._infisical_handler = infisical_handler
         self._metrics_collector = metrics_collector
         self._cache: dict[str, ModelCachedSecret] = {}
@@ -483,7 +434,7 @@ class SecretResolver:
         injection pattern while the regular constructor remains available for
         standalone use and testing scenarios.
 
-        The factory attempts to resolve optional dependencies (HandlerVault,
+        The factory attempts to resolve optional dependencies (HandlerInfisical,
         metrics collector) from the container's service registry. If a dependency
         is not registered, the resolver is created without it - this allows
         graceful degradation when optional services are unavailable.
@@ -495,7 +446,7 @@ class SecretResolver:
             - ``config`` (required): Resolver configuration with secret mappings
 
         Args:
-            container: ONEX dependency injection container. May have HandlerVault
+            container: ONEX dependency injection container. May have HandlerInfisical
                 and/or ProtocolSecretResolverMetrics registered in its service
                 registry. These are resolved if available but not required.
             config: Resolver configuration specifying secret mappings, default TTL,
@@ -522,8 +473,8 @@ class SecretResolver:
                         ModelSecretMapping(
                             logical_name="database.password",
                             source=ModelSecretSourceSpec(
-                                source_type=SecretSourceType.VAULT,
-                                path="secret/myapp/db#password",
+                                source_type="infisical",
+                                source_path="DB_PASSWORD",
                             ),
                         ),
                     ],
@@ -532,13 +483,13 @@ class SecretResolver:
                 password = await resolver.get_secret_async("database.password")
 
         Example (Container Without Optional Services):
-            If HandlerVault is not registered, Vault-sourced secrets will fail
-            at resolution time (not at factory creation)::
+            If HandlerInfisical is not registered, Infisical-sourced secrets will
+            fall back to env/file sources::
 
                 container = ModelONEXContainer()
-                # No wire_infrastructure_services() call - no Vault handler
+                # No wire_infrastructure_services() call
                 resolver = await SecretResolver.from_container(container, config)
-                # Works for env/file secrets, fails for Vault secrets
+                # Works for env/file secrets
 
         Note:
             **Why config is a required parameter:**
@@ -557,10 +508,8 @@ class SecretResolver:
         See Also:
             - :meth:`__init__`: Direct constructor for standalone usage
             - :class:`ModelSecretResolverConfig`: Configuration model
-            - :class:`HandlerVault`: Vault handler for Vault-sourced secrets
+            - :class:`HandlerInfisical`: Infisical handler for secret management
         """
-        from omnibase_infra.handlers.handler_vault import HandlerVault
-
         correlation_id = generate_correlation_id()
 
         # Validate container has service_registry
@@ -578,26 +527,8 @@ class SecretResolver:
             )
 
         # Try to resolve optional dependencies from container
-        vault_handler: HandlerVault | None = None
         infisical_handler: HandlerInfisical | None = None
         metrics_collector: ProtocolSecretResolverMetrics | None = None
-
-        # Attempt to resolve HandlerVault (optional)
-        try:
-            vault_handler = await container.service_registry.resolve_service(
-                HandlerVault
-            )
-            logger.debug(
-                "Resolved HandlerVault from container",
-                extra={"correlation_id": str(correlation_id)},
-            )
-        except Exception as e:
-            # HandlerVault not registered - this is acceptable
-            logger.debug(
-                "HandlerVault not available in container, Vault secrets disabled: %s",
-                type(e).__name__,
-                extra={"correlation_id": str(correlation_id)},
-            )
 
         # Attempt to resolve HandlerInfisical (optional)
         try:
@@ -640,7 +571,6 @@ class SecretResolver:
 
         return cls(
             config=config,
-            vault_handler=vault_handler,
             infisical_handler=infisical_handler,
             metrics_collector=metrics_collector,
         )
@@ -1158,7 +1088,7 @@ class SecretResolver:
 
         Args:
             logical_name: The secret's logical name
-            source_type: Source type (env, file, vault, cache)
+            source_type: Source type (env, file, infisical, cache)
             correlation_id: Correlation ID for tracing
             start_time: Optional start time from time.monotonic() for latency calc
         """
@@ -1231,7 +1161,7 @@ class SecretResolver:
 
         Args:
             logical_name: The secret's logical name
-            source_type: Source type (env, file, vault, unknown)
+            source_type: Source type (env, file, infisical, unknown)
             correlation_id: Correlation ID for tracing
             reason: Failure reason (not_found, handler_not_configured, etc.)
         """
@@ -1362,12 +1292,11 @@ class SecretResolver:
         """Check if a logical name is a bootstrap secret.
 
         Bootstrap secrets are resolved ONLY from environment variables, never from
-        Vault or files. This ensures they're available before Vault is initialized.
+        external secret stores or files.
 
         Security:
-            Bootstrap secrets (vault.token, vault.addr, vault.ca_cert) are needed
-            to initialize the Vault connection. They MUST come from env vars to
-            avoid a circular dependency.
+            Bootstrap secrets are always resolved from environment variables to
+            avoid circular dependencies.
 
         Args:
             logical_name: The logical name to check
@@ -1387,7 +1316,7 @@ class SecretResolver:
 
         Security:
             Bootstrap secrets are isolated from the normal resolution chain.
-            They are ALWAYS resolved from environment variables only (never vault/file).
+            They are ALWAYS resolved from environment variables only.
             If an explicit mapping exists for an env source, that mapping is honored.
             Otherwise, convention-based naming (logical_name -> ENV_VAR) is used.
 
@@ -1398,17 +1327,14 @@ class SecretResolver:
             SecretStr if found, None if env var is not set
         """
         # First, check for explicit env var mapping (same priority as normal secrets)
-        # This ensures that explicit mappings like:
-        #   {"vault.token": ModelSecretSourceSpec(source_type="env", source_path="MY_VAULT_TOKEN")}
-        # are respected for bootstrap secrets.
         if logical_name in self._mappings:
             mapping = self._mappings[logical_name]
             if mapping.source_type == "env":
                 # Use the explicitly mapped env var name
                 env_var = mapping.source_path
             else:
-                # Non-env mappings (vault/file) are invalid for bootstrap secrets
-                # by design - they must come from env to avoid circular dependency.
+                # Non-env mappings are invalid for bootstrap secrets
+                # by design - they must come from env.
                 # Fall back to convention for the env var name.
                 env_var = self._logical_name_to_env_var(logical_name)
         else:
@@ -1432,9 +1358,8 @@ class SecretResolver:
             directly without additional locking.
 
         Security:
-            Bootstrap secrets (vault.token, vault.addr, etc.) are resolved directly
-            from environment variables, bypassing the normal source chain. This
-            prevents circular dependencies when initializing Vault.
+            Bootstrap secrets are resolved directly from environment variables,
+            bypassing the normal source chain.
 
         Args:
             logical_name: The logical name to resolve
@@ -1447,7 +1372,7 @@ class SecretResolver:
         start_time = time.monotonic()
 
         # SECURITY: Bootstrap secrets bypass normal resolution
-        # They must come from env vars to avoid circular dependency with Vault
+        # They must come from env vars
         if self._is_bootstrap_secret(logical_name):
             secret = self._resolve_bootstrap_secret_value(logical_name)
             if secret is not None:
@@ -1471,26 +1396,6 @@ class SecretResolver:
             value = os.environ.get(source.source_path)
         elif source.source_type == "file":
             value = self._read_file_secret(source.source_path, logical_name)
-        elif source.source_type == "vault":
-            if self._vault_handler is None:
-                logger.warning(
-                    "Vault handler not configured for secret: %s",
-                    logical_name,
-                    extra={
-                        "logical_name": logical_name,
-                        "correlation_id": str(effective_correlation_id),
-                    },
-                )
-                self._record_resolution_failure(
-                    logical_name,
-                    "vault",
-                    effective_correlation_id,
-                    "handler_not_configured",
-                )
-                return None
-            value = self._read_vault_secret_sync(
-                source.source_path, logical_name, effective_correlation_id
-            )
         elif source.source_type == "infisical":
             if self._infisical_handler is None:
                 logger.warning(
@@ -1537,9 +1442,8 @@ class SecretResolver:
             thread-safe access from both sync and async contexts.
 
         Security:
-            Bootstrap secrets (vault.token, vault.addr, etc.) are resolved directly
-            from environment variables, bypassing the normal source chain. This
-            prevents circular dependencies when initializing Vault.
+            Bootstrap secrets are resolved directly from environment variables,
+            bypassing the normal source chain.
 
         Args:
             logical_name: The logical name to resolve
@@ -1552,7 +1456,7 @@ class SecretResolver:
         start_time = time.monotonic()
 
         # SECURITY: Bootstrap secrets bypass normal resolution
-        # They must come from env vars to avoid circular dependency with Vault
+        # They must come from env vars
         if self._is_bootstrap_secret(logical_name):
             # Resolve value (no cache write in _resolve_bootstrap_secret_value)
             secret = self._resolve_bootstrap_secret_value(logical_name)
@@ -1583,26 +1487,6 @@ class SecretResolver:
         elif source.source_type == "file":
             value = await asyncio.to_thread(
                 self._read_file_secret, source.source_path, logical_name
-            )
-        elif source.source_type == "vault":
-            if self._vault_handler is None:
-                logger.warning(
-                    "Vault handler not configured for secret: %s",
-                    logical_name,
-                    extra={
-                        "logical_name": logical_name,
-                        "correlation_id": str(effective_correlation_id),
-                    },
-                )
-                self._record_resolution_failure(
-                    logical_name,
-                    "vault",
-                    effective_correlation_id,
-                    "handler_not_configured",
-                )
-                return None
-            value = await self._read_vault_secret_async(
-                source.source_path, logical_name, effective_correlation_id
             )
         elif source.source_type == "infisical":
             if self._infisical_handler is None:
@@ -1793,300 +1677,6 @@ class SecretResolver:
                 extra={"logical_name": logical_name, "error_type": type(e).__name__},
             )
             return None
-
-    def _read_vault_secret_sync(
-        self, path: str, logical_name: str = "", correlation_id: UUID | None = None
-    ) -> str | None:
-        """Read secret from Vault synchronously.
-
-        This method wraps the async Vault handler for synchronous contexts.
-        It creates a new event loop if one is not running, otherwise raises
-        an error (cannot nest event loops).
-
-        Path format: "mount/path#field" or "mount/path" (returns first field value)
-
-        Security:
-            - This method never logs Vault paths (could reveal secret structure)
-            - Secret values are never logged at any level
-            - Error messages are sanitized to include only logical names
-
-        Args:
-            path: Vault path with optional field specifier
-            logical_name: The logical name being resolved (for error context only)
-            correlation_id: Optional correlation ID for tracing
-
-        Returns:
-            Secret value or None if not found
-
-        Raises:
-            SecretResolutionError: On Vault communication failures or if called
-                from within an async context (cannot nest event loops)
-            InfraAuthenticationError: If authentication fails
-            InfraTimeoutError: If the request times out
-            InfraUnavailableError: If Vault is unavailable (circuit breaker open)
-        """
-        if self._vault_handler is None:
-            return None
-
-        effective_correlation_id = correlation_id or uuid4()
-
-        # Check if we're already in an async context
-        try:
-            asyncio.get_running_loop()
-            # We're in an async context - cannot use asyncio.run()
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=effective_correlation_id,
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="read_secret_sync",
-                target_name="secret_resolver",
-            )
-            raise SecretResolutionError(
-                f"Cannot resolve Vault secret synchronously from async context: "
-                f"{logical_name}. Use get_secret_async() instead.",
-                context=context,
-                logical_name=logical_name,
-            )
-        except RuntimeError:
-            # No running event loop - safe to use asyncio.run()
-            pass
-
-        # Run the async method in a new event loop
-        return asyncio.run(
-            self._read_vault_secret_async(path, logical_name, effective_correlation_id)
-        )
-
-    async def _read_vault_secret_async(
-        self, path: str, logical_name: str = "", correlation_id: UUID | None = None
-    ) -> str | None:
-        """Read secret from Vault asynchronously.
-
-        Path format: "mount/path#field" or "mount/path" (returns first field value)
-
-        Examples:
-            "secret/myapp/db#password" -> mount="secret", path="myapp/db", field="password"
-            "secret/myapp/db" -> mount="secret", path="myapp/db", field=None (first value)
-
-        Type Handling:
-            All Vault values are converted to strings via ``str()``. This is intentional
-            because SecretResolver returns ``SecretStr`` values, which only wrap strings.
-            Non-string Vault values (integers, booleans, dicts) are converted as follows:
-
-            - Integers: ``123`` -> ``"123"``
-            - Booleans: ``True`` -> ``"True"``
-            - Lists/Dicts: Python repr (NOT JSON) - avoid storing complex types
-
-            Best Practice: Store secrets as strings in Vault. If you need structured
-            data, store it as a JSON string and parse after resolution.
-
-        Security:
-            - This method never logs Vault paths (could reveal secret structure)
-            - Secret values are never logged at any level
-            - Error messages are sanitized to include only logical names
-
-        Args:
-            path: Vault path with optional field specifier (mount/path#field)
-            logical_name: The logical name being resolved (for error context only)
-            correlation_id: Optional correlation ID for tracing
-
-        Returns:
-            Secret value as string, or None if not found
-
-        Raises:
-            SecretResolutionError: On Vault communication failures
-            InfraAuthenticationError: If authentication fails
-            InfraTimeoutError: If the request times out
-            InfraUnavailableError: If Vault is unavailable (circuit breaker open)
-        """
-        if self._vault_handler is None:
-            return None
-
-        effective_correlation_id = correlation_id or uuid4()
-
-        # Parse path into mount_point, vault_path, and optional field
-        mount_point, vault_path, field = self._parse_vault_path_components(path)
-
-        # Create envelope for vault.read_secret operation
-        envelope: JsonType = {
-            "operation": "vault.read_secret",
-            "payload": {
-                "path": vault_path,
-                "mount_point": mount_point,
-            },
-            "correlation_id": str(effective_correlation_id),
-        }
-
-        try:
-            result = await self._vault_handler.execute(
-                cast("dict[str, object]", envelope)
-            )
-
-            # Extract secret data from handler response
-            # Response format: {"status": "success", "payload": {"data": {...}, "metadata": {...}}}
-            result_dict = result.result
-            if not isinstance(result_dict, dict):
-                logger.warning(
-                    "Unexpected Vault response format for secret: %s",
-                    logical_name,
-                    extra={
-                        "logical_name": logical_name,
-                        "correlation_id": str(effective_correlation_id),
-                    },
-                )
-                return None
-
-            status = result_dict.get("status")
-            if status != "success":
-                logger.debug(
-                    "Vault returned non-success status for secret: %s",
-                    logical_name,
-                    extra={
-                        "logical_name": logical_name,
-                        "correlation_id": str(effective_correlation_id),
-                    },
-                )
-                return None
-
-            payload = result_dict.get("payload", {})
-            if not isinstance(payload, dict):
-                return None
-
-            secret_data = payload.get("data", {})
-            if not isinstance(secret_data, dict) or not secret_data:
-                logger.debug(
-                    "No secret data found in Vault for: %s",
-                    logical_name,
-                    extra={
-                        "logical_name": logical_name,
-                        "correlation_id": str(effective_correlation_id),
-                    },
-                )
-                return None
-
-            # Extract the specific field or first value
-            if field:
-                value = secret_data.get(field)
-                if value is None:
-                    logger.debug(
-                        "Field not found in Vault secret: %s",
-                        logical_name,
-                        extra={
-                            "logical_name": logical_name,
-                            "correlation_id": str(effective_correlation_id),
-                        },
-                    )
-                    return None
-            else:
-                # No field specified - return first value
-                value = next(iter(secret_data.values()), None)
-
-            if value is None:
-                return None
-
-            # SECURITY: String conversion is INTENTIONAL for SecretStr compatibility.
-            #
-            # SecretStr (from Pydantic) only wraps string values to prevent accidental
-            # logging of secrets. Since SecretResolver returns SecretStr, all Vault
-            # values must be converted to strings.
-            #
-            # Type conversion behavior:
-            #   - Strings: returned as-is
-            #   - Integers: "123" (str representation)
-            #   - Booleans: "True" or "False" (Python str representation)
-            #   - Lists/Dicts: Python repr (NOT JSON) - avoid storing complex types
-            #
-            # Best Practice: Store secrets as strings in Vault. If you need structured
-            # data, store it as a JSON string and parse after resolution.
-            return str(value)
-
-        except InfraAuthenticationError:
-            # Re-raise auth errors directly - they have proper context
-            raise
-        except InfraTimeoutError:
-            # Re-raise timeout errors directly - they have proper context
-            raise
-        except InfraUnavailableError:
-            # Re-raise unavailable errors (circuit breaker open)
-            raise
-        except Exception as e:
-            # Wrap other errors in SecretResolutionError with sanitized message
-            context = ModelInfraErrorContext.with_correlation(
-                correlation_id=effective_correlation_id,
-                transport_type=EnumInfraTransportType.VAULT,
-                operation="read_secret",
-                target_name="secret_resolver",
-            )
-            raise SecretResolutionError(
-                f"Failed to resolve secret from Vault: {logical_name}",
-                context=context,
-                logical_name=logical_name,
-            ) from e
-
-    def _parse_vault_path(self, path: str) -> tuple[str, str | None]:
-        """Parse Vault path into path and optional field.
-
-        Examples:
-            "secret/data/db#password" -> ("secret/data/db", "password")
-            "secret/data/db" -> ("secret/data/db", None)
-
-        Args:
-            path: Vault path with optional field specifier
-
-        Returns:
-            Tuple of (vault_path, field_name or None)
-        """
-        if "#" in path:
-            vault_path, field = path.rsplit("#", 1)
-            return vault_path, field
-        return path, None
-
-    def _parse_vault_path_components(self, path: str) -> tuple[str, str, str | None]:
-        """Parse Vault path into mount_point, path, and optional field.
-
-        The path format is: "mount_point/path/to/secret#field"
-
-        For KV v2 secrets engine, the path convention is:
-            - mount_point: The secrets engine mount (e.g., "secret")
-            - path: The secret path within the mount (e.g., "myapp/db")
-            - field: Optional specific field to extract (e.g., "password")
-
-        Examples:
-            "secret/myapp/db#password" -> ("secret", "myapp/db", "password")
-            "secret/myapp/db" -> ("secret", "myapp/db", None)
-            "kv/prod/config#api_key" -> ("kv", "prod/config", "api_key")
-            "secret#password" -> ("secret", "", "password")  # Edge case - unusual format
-
-        Args:
-            path: Full Vault path with optional field specifier
-
-        Returns:
-            Tuple of (mount_point, vault_path, field_name or None)
-        """
-        # First extract field if present
-        if "#" in path:
-            path_without_field, field = path.rsplit("#", 1)
-        else:
-            path_without_field = path
-            field = None
-
-        # Split into mount_point and rest of path
-        # First component is always the mount_point
-        parts = path_without_field.split("/", 1)
-        if len(parts) == 1:
-            # Edge case: No slash in path - entire path is treated as mount_point
-            # with empty vault_path. This format (e.g., "secret#field") is unusual
-            # and may not be supported by Vault's KV v2 engine which expects
-            # paths like "mount/path". Log a warning to alert operators.
-            logger.warning(
-                "Unusual Vault path format detected. "
-                "Expected 'mount/path#field' format with at least one '/' separator. "
-                "Empty path segment may not work with Vault KV v2.",
-            )
-            return parts[0], "", field
-
-        mount_point = parts[0]
-        vault_path = parts[1]
-
-        return mount_point, vault_path, field
 
     def _read_infisical_secret_sync(
         self, path: str, logical_name: str = "", correlation_id: UUID | None = None
@@ -2295,7 +1885,6 @@ class SecretResolver:
         ttl_defaults = {
             "env": self._config.default_ttl_env_seconds,
             "file": self._config.default_ttl_file_seconds,
-            "vault": self._config.default_ttl_vault_seconds,
         }
         return ttl_defaults.get(source_type, self._config.default_ttl_env_seconds)
 
@@ -2318,12 +1907,6 @@ class SecretResolver:
             # Show directory but mask filename
             path = Path(source.source_path)
             return f"file:{path.parent}/***"
-        elif source.source_type == "vault":
-            # Show mount but mask the rest
-            parts = source.source_path.split("/")
-            if len(parts) > 2:
-                return f"vault:{parts[0]}/{parts[1]}/***"
-            return "vault:***"
         return "***"
 
 

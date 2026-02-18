@@ -151,7 +151,6 @@ from omnibase_infra.runtime.handler_registry import (
     HANDLER_TYPE_HTTP,
     HANDLER_TYPE_INTENT,
     HANDLER_TYPE_MCP,
-    HANDLER_TYPE_VAULT,
     RegistryEventBusBinding,
     RegistryProtocolBinding,
     get_event_bus_registry,
@@ -177,7 +176,6 @@ _HANDLER_CONTRACT_PATHS: dict[str, Path] = {
     HANDLER_TYPE_HTTP: _HANDLERS_BASE / "http" / "contract.yaml",
     HANDLER_TYPE_INTENT: _HANDLERS_BASE / "intent" / "contract.yaml",
     HANDLER_TYPE_MCP: _HANDLERS_BASE / "mcp" / "contract.yaml",
-    HANDLER_TYPE_VAULT: _HANDLERS_BASE / "vault" / "contract.yaml",
 }
 
 # Known event bus kinds that can be wired via this module.

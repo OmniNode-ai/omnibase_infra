@@ -94,9 +94,6 @@ Operations are routed by extracting the prefix before the first dot."""
 HANDLER_TYPE_KAFKA: str = "kafka"
 """Kafka message broker protocol handler type."""
 
-HANDLER_TYPE_VAULT: str = "vault"
-"""HashiCorp Vault secret management protocol handler type."""
-
 HANDLER_TYPE_CONSUL: str = "consul"
 """HashiCorp Consul service discovery protocol handler type."""
 
@@ -313,7 +310,6 @@ __all__: list[str] = [
     "HANDLER_TYPE_KAFKA",
     "HANDLER_TYPE_MCP",
     "HANDLER_TYPE_VALKEY",
-    "HANDLER_TYPE_VAULT",
     # Error class
     "RegistryError",
     # Registry classes

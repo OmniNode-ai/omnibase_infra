@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2025 OmniNode Team
-"""Unit tests for InfraVaultError and InfraConsulError.
+"""Unit tests for InfraConsulError.
 
-These tests validate the service-specific infrastructure error classes
-that extend InfraConnectionError for Vault and Consul operations.
+These tests validate the service-specific infrastructure error class
+that extends InfraConnectionError for Consul operations.
 
 Tests cover:
     - Basic instantiation with message only
     - Inheritance from InfraConnectionError
     - Context model usage with appropriate transport types
-    - Service-specific parameters (secret_path, consul_key, service_name)
+    - Service-specific parameters (consul_key, service_name)
     - Error chaining with `raise ... from e` pattern
-    - Error code mapping for VAULT and CONSUL transports
+    - Error code mapping for CONSUL transport
     - Extra context passthrough via kwargs
 """
 
@@ -25,193 +25,9 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraConsulError,
-    InfraVaultError,
     ModelInfraErrorContext,
 )
 from omnibase_infra.errors.error_infra import RuntimeHostError
-
-
-class TestInfraVaultError:
-    """Tests for InfraVaultError class."""
-
-    def test_basic_instantiation(self) -> None:
-        """Test InfraVaultError can be instantiated with message only."""
-        error = InfraVaultError("Vault connection failed")
-        assert "Vault connection failed" in str(error)
-
-    def test_inherits_from_infra_connection_error(self) -> None:
-        """Test InfraVaultError inherits from InfraConnectionError."""
-        error = InfraVaultError("Test error")
-        assert isinstance(error, InfraConnectionError)
-
-    def test_inherits_from_runtime_host_error(self) -> None:
-        """Test InfraVaultError inherits from RuntimeHostError."""
-        error = InfraVaultError("Test error")
-        assert isinstance(error, RuntimeHostError)
-
-    def test_inherits_from_model_onex_error(self) -> None:
-        """Test InfraVaultError inherits from ModelOnexError."""
-        error = InfraVaultError("Test error")
-        assert isinstance(error, ModelOnexError)
-        assert isinstance(error, Exception)
-
-    def test_with_context_model(self) -> None:
-        """Test InfraVaultError with ModelInfraErrorContext."""
-        correlation_id = uuid4()
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
-            operation="read_secret",
-            target_name="vault-primary",
-            correlation_id=correlation_id,
-        )
-        error = InfraVaultError(
-            "Failed to read secret from Vault",
-            context=context,
-        )
-        assert error.model.correlation_id == correlation_id
-        assert error.model.context["transport_type"] == EnumInfraTransportType.VAULT
-        assert error.model.context["operation"] == "read_secret"
-        assert error.model.context["target_name"] == "vault-primary"
-
-    def test_with_secret_path_parameter(self) -> None:
-        """Test InfraVaultError with secret_path parameter.
-
-        Note: Secret paths are sanitized to prevent exposure of infrastructure details.
-        """
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
-            operation="read_secret",
-            target_name="vault-primary",
-        )
-        error = InfraVaultError(
-            "Failed to read secret from Vault",
-            context=context,
-            secret_path="secret/data/database/credentials",  # noqa: S106
-        )
-        # Path is sanitized to mask sensitive segments
-        sanitized_path = error.model.context["secret_path"]
-        assert sanitized_path == "secret/***/***"
-        # Negative assertions: prove sensitive data is actually removed
-        assert "data" not in sanitized_path
-        assert "database" not in sanitized_path
-        assert "credentials" not in sanitized_path
-
-    def test_secret_path_included_in_extra_context(self) -> None:
-        """Test that sanitized secret_path is added to extra_context."""
-        error = InfraVaultError(
-            "Secret not found",
-            secret_path="secret/data/api-key",  # noqa: S106
-        )
-        # Path is sanitized to mask sensitive segments
-        sanitized_path = error.model.context["secret_path"]
-        assert sanitized_path == "secret/***/***"
-        # Negative assertions: prove sensitive data is actually removed
-        assert "data" not in sanitized_path
-        assert "api-key" not in sanitized_path
-
-    def test_with_extra_context_kwargs(self) -> None:
-        """Test InfraVaultError with additional extra_context kwargs."""
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
-            operation="renew_token",
-            target_name="vault-primary",
-        )
-        error = InfraVaultError(
-            "Vault token renewal failed",
-            context=context,
-            retry_count=3,
-            host="vault.example.com",
-            port=8200,
-        )
-        assert error.model.context["retry_count"] == 3
-        assert error.model.context["host"] == "vault.example.com"
-        assert error.model.context["port"] == 8200
-
-    def test_error_chaining(self) -> None:
-        """Test error chaining with 'raise ... from e' pattern."""
-        original_error = ConnectionError("Connection refused")
-        try:
-            raise InfraVaultError("Vault connection failed") from original_error
-        except InfraVaultError as e:
-            assert e.__cause__ == original_error
-            assert isinstance(e.__cause__, ConnectionError)
-
-    def test_error_chaining_preserves_context(self) -> None:
-        """Test that context is preserved when chaining errors."""
-        correlation_id = uuid4()
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
-            operation="initialize_client",
-            target_name="vault-primary",
-            correlation_id=correlation_id,
-        )
-        original_error = OSError("Network unreachable")
-        try:
-            raise InfraVaultError(
-                "Failed to initialize Vault client",
-                context=context,
-                host="vault.example.com",
-                port=8200,
-            ) from original_error
-        except InfraVaultError as e:
-            assert e.__cause__ == original_error
-            assert e.model.correlation_id == correlation_id
-            assert e.model.context["transport_type"] == EnumInfraTransportType.VAULT
-            assert e.model.context["host"] == "vault.example.com"
-
-    def test_error_code_is_service_unavailable_for_vault_transport(self) -> None:
-        """Test that VAULT transport uses SERVICE_UNAVAILABLE error code."""
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
-            target_name="vault-server",
-        )
-        error = InfraVaultError("Vault connection failed", context=context)
-        assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
-
-    def test_error_code_without_context(self) -> None:
-        """Test error code when no context is provided."""
-        error = InfraVaultError("Vault error")
-        # Without context, defaults to SERVICE_UNAVAILABLE
-        assert error.model.error_code == EnumCoreErrorCode.SERVICE_UNAVAILABLE
-
-    def test_correlation_id_auto_generated(self) -> None:
-        """Test that correlation_id is auto-generated when not provided."""
-        from uuid import UUID
-
-        error = InfraVaultError("Vault error")
-        assert error.model.correlation_id is not None
-        assert isinstance(error.model.correlation_id, UUID)
-
-    def test_secret_path_with_other_extra_context(self) -> None:
-        """Test that sanitized secret_path combines correctly with other extra_context."""
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
-            operation="get_secret",
-        )
-        error = InfraVaultError(
-            "Secret retrieval failed",
-            context=context,
-            secret_path="secret/data/db/password",  # noqa: S106
-            vault_namespace="production",
-            retry_count=2,
-        )
-        # Path is sanitized to mask sensitive segments
-        sanitized_path = error.model.context["secret_path"]
-        assert sanitized_path == "secret/***/***"
-        # Negative assertions: prove sensitive data is actually removed
-        assert "data" not in sanitized_path
-        assert "db" not in sanitized_path
-        assert "password" not in sanitized_path
-        assert error.model.context["vault_namespace"] == "production"
-        assert error.model.context["retry_count"] == 2
-
-    def test_secret_path_none_not_added_to_context(self) -> None:
-        """Test that None secret_path is not added to context."""
-        error = InfraVaultError(
-            "Vault error",
-            secret_path=None,
-        )
-        assert "secret_path" not in error.model.context
 
 
 class TestInfraConsulError:
@@ -459,16 +275,7 @@ class TestInfraConsulError:
 
 
 class TestServiceErrorsInheritanceChain:
-    """Test inheritance chain for both service-specific error classes."""
-
-    def test_vault_error_full_inheritance_chain(self) -> None:
-        """Test InfraVaultError has correct full inheritance chain."""
-        error = InfraVaultError("test")
-        assert isinstance(error, InfraVaultError)
-        assert isinstance(error, InfraConnectionError)
-        assert isinstance(error, RuntimeHostError)
-        assert isinstance(error, ModelOnexError)
-        assert isinstance(error, Exception)
+    """Test inheritance chain for service-specific error classes."""
 
     def test_consul_error_full_inheritance_chain(self) -> None:
         """Test InfraConsulError has correct full inheritance chain."""
@@ -481,7 +288,7 @@ class TestServiceErrorsInheritanceChain:
 
     @pytest.mark.parametrize(
         "error_class",
-        [InfraVaultError, InfraConsulError],
+        [InfraConsulError],
     )
     def test_service_errors_are_infra_connection_errors(
         self, error_class: type[InfraConnectionError]
@@ -493,7 +300,6 @@ class TestServiceErrorsInheritanceChain:
     @pytest.mark.parametrize(
         ("error_class", "transport_type"),
         [
-            (InfraVaultError, EnumInfraTransportType.VAULT),
             (InfraConsulError, EnumInfraTransportType.CONSUL),
         ],
     )
@@ -514,24 +320,6 @@ class TestServiceErrorsInheritanceChain:
 class TestServiceErrorsMultiLevelChaining:
     """Test multi-level error chaining for service-specific errors."""
 
-    def test_vault_error_multi_level_chaining(self) -> None:
-        """Test error chaining through multiple levels with InfraVaultError."""
-        root_error = OSError("Network unreachable")
-        try:
-            try:
-                try:
-                    raise root_error
-                except OSError as e:
-                    raise ConnectionError("Connection layer error") from e
-            except ConnectionError as e:
-                raise InfraVaultError("Vault unavailable") from e
-        except InfraVaultError as final:
-            # Verify immediate cause
-            assert isinstance(final.__cause__, ConnectionError)
-            # Verify root cause through chain
-            assert isinstance(final.__cause__.__cause__, OSError)
-            assert final.__cause__.__cause__ is root_error
-
     def test_consul_error_multi_level_chaining(self) -> None:
         """Test error chaining through multiple levels with InfraConsulError."""
         root_error = OSError("Network unreachable")
@@ -550,74 +338,9 @@ class TestServiceErrorsMultiLevelChaining:
             assert isinstance(final.__cause__.__cause__, OSError)
             assert final.__cause__.__cause__ is root_error
 
-    def test_correlation_id_propagates_through_service_error_chain(self) -> None:
-        """Test correlation_id preserved through service error chaining."""
-        correlation_id = uuid4()
-        context = ModelInfraErrorContext(correlation_id=correlation_id)
-
-        try:
-            try:
-                raise InfraVaultError("Vault connection failed", context=context)
-            except InfraVaultError as e:
-                # Propagate correlation ID to new error
-                new_context = ModelInfraErrorContext(
-                    correlation_id=e.model.correlation_id,
-                    transport_type=EnumInfraTransportType.CONSUL,
-                )
-                raise InfraConsulError(
-                    "Consul fallback failed", context=new_context
-                ) from e
-        except InfraConsulError as final:
-            # Same correlation ID throughout the chain
-            assert final.model.correlation_id == correlation_id
-            assert final.__cause__ is not None
-            assert isinstance(final.__cause__, InfraVaultError)
-
 
 class TestServiceErrorsRealWorldScenarios:
     """Test real-world usage scenarios for service-specific errors."""
-
-    def test_vault_secret_read_failure(self) -> None:
-        """Test realistic Vault secret read failure scenario."""
-        correlation_id = uuid4()
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
-            operation="read_secret",
-            target_name="vault-primary",
-            correlation_id=correlation_id,
-        )
-        error = InfraVaultError(
-            "Failed to read secret from Vault after 3 retries",
-            context=context,
-            secret_path="secret/data/database/credentials",  # noqa: S106
-            retry_count=3,
-            vault_address="https://vault.example.com:8200",
-        )
-        # Path is sanitized to mask sensitive segments
-        sanitized_path = error.model.context["secret_path"]
-        assert sanitized_path == "secret/***/***"
-        # Negative assertions: prove sensitive data is actually removed
-        assert "data" not in sanitized_path
-        assert "database" not in sanitized_path
-        assert "credentials" not in sanitized_path
-        assert error.model.context["retry_count"] == 3
-        assert error.model.context["vault_address"] == "https://vault.example.com:8200"
-
-    def test_vault_token_renewal_failure(self) -> None:
-        """Test realistic Vault token renewal failure scenario."""
-        context = ModelInfraErrorContext(
-            transport_type=EnumInfraTransportType.VAULT,
-            operation="renew_token",
-            target_name="vault-primary",
-        )
-        error = InfraVaultError(
-            "Vault token renewal failed",
-            context=context,
-            token_ttl_remaining=0,
-            renewal_attempts=5,
-        )
-        assert error.model.context["token_ttl_remaining"] == 0
-        assert error.model.context["renewal_attempts"] == 5
 
     def test_consul_service_registration_failure(self) -> None:
         """Test realistic Consul service registration failure scenario."""

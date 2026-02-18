@@ -35,8 +35,7 @@ class ModelBindingConfig(BaseModel):
             - "file:configs/handler.yaml" - File path (preferred format)
             - "file:/absolute/path/config.yaml" - Absolute file path
             - "env:CONFIG_VAR" - Load from environment variable
-            - "vault:secret/data/path" - Load from Vault secret
-            - "vault:secret/data/path#field" - Load specific field from Vault secret
+            - "infisical:secret/path" - Load from Infisical secret
             Note: file:// prefix is also supported for backwards compatibility.
         config: Inline configuration dictionary. If both config_ref and config
             are provided, config takes precedence for overlapping keys.
@@ -67,7 +66,7 @@ class ModelBindingConfig(BaseModel):
         ...,
         min_length=1,
         max_length=64,
-        description="Handler type identifier (e.g., 'vault', 'db', 'consul'). "
+        description="Handler type identifier (e.g., 'infisical', 'db', 'consul'). "
         "Must be non-empty and match a registered handler implementation.",
     )
 
@@ -98,7 +97,7 @@ class ModelBindingConfig(BaseModel):
         min_length=1,
         max_length=512,
         description="Reference to external configuration. "
-        "Supported schemes: file: (including file://), env:, vault:",
+        "Supported schemes: file: (including file://), env:, infisical:",
     )
 
     config: dict[str, JsonType] | None = Field(
@@ -147,7 +146,7 @@ class ModelBindingConfig(BaseModel):
             return v
 
         # Use "file:" to accept both "file://path" and shorthand "file:path" formats
-        supported_schemes = ("file:", "env:", "vault:")
+        supported_schemes = ("file:", "env:", "infisical:")
         if not any(v.startswith(scheme) for scheme in supported_schemes):
             raise ValueError(
                 f"config_ref must start with one of {supported_schemes}, got: {v!r}"

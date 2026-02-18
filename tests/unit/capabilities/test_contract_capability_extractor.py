@@ -852,7 +852,6 @@ class TestTagUnion:
             "postgres.query",
             "consul.register",
             "kafka.send",
-            "vault.read",
         ]:
             event = MagicMock()
             event.event_pattern = pattern
@@ -865,7 +864,6 @@ class TestTagUnion:
         assert "postgres.storage" in result.capability_tags
         assert "consul.registration" in result.capability_tags
         assert "kafka.messaging" in result.capability_tags
-        assert "vault.secrets" in result.capability_tags
 
 
 # =============================================================================

@@ -8,7 +8,7 @@ handlers are loaded from descriptor-based definitions.
 
 Test Coverage:
 - HandlerBootstrapSource.discover_handlers() is called during runtime bootstrap
-- Core 5 handlers (consul, db, http, mcp, vault) are loaded from bootstrap source
+- Core 4 handlers (consul, db, http, mcp) are loaded from bootstrap source
 - Bootstrap handlers are registered before contract-based or default handlers
 - Bootstrap handlers are available after RuntimeHostProcess.start()
 
@@ -42,7 +42,6 @@ from omnibase_infra.runtime.handler_registry import (
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_HTTP,
     HANDLER_TYPE_MCP,
-    HANDLER_TYPE_VAULT,
     RegistryProtocolBinding,
     get_handler_registry,
 )
@@ -69,24 +68,24 @@ class TestHandlerBootstrapSourceDiscovery:
 
     @pytest.mark.asyncio
     async def test_discover_handlers_returns_five_descriptors(self) -> None:
-        """HandlerBootstrapSource.discover_handlers() returns 5 handler descriptors.
+        """HandlerBootstrapSource.discover_handlers() returns 4 handler descriptors.
 
         Verifies:
         1. discover_handlers() returns ModelContractDiscoveryResult
-        2. Result contains exactly 5 descriptors (consul, db, http, mcp, vault)
+        2. Result contains exactly 4 descriptors (consul, db, http, mcp)
         3. No validation errors (hardcoded handlers are pre-validated)
         """
         source = HandlerBootstrapSource()
         result = await source.discover_handlers()
 
-        assert len(result.descriptors) == 5
+        assert len(result.descriptors) == 4
         assert len(result.validation_errors) == 0
 
     @pytest.mark.asyncio
     async def test_discover_handlers_includes_core_handlers(self) -> None:
-        """HandlerBootstrapSource includes consul, db, http, mcp, vault handlers.
+        """HandlerBootstrapSource includes consul, db, http, mcp handlers.
 
-        Verifies that all five core infrastructure handlers are present
+        Verifies that all four core infrastructure handlers are present
         in the discovery result.
         """
         source = HandlerBootstrapSource()
@@ -98,7 +97,6 @@ class TestHandlerBootstrapSourceDiscovery:
             "proto.db",
             "proto.http",
             "proto.mcp",
-            "proto.vault",
         }
 
         assert handler_ids == expected_ids
@@ -159,7 +157,7 @@ class TestBootstrapSourceRuntimeIntegration:
 
         Verifies:
         1. RuntimeHostProcess.start() registers bootstrap handlers
-        2. All 5 core handlers (consul, db, http, mcp, vault) are in registry
+        2. All 4 core handlers (consul, db, http, mcp) are in registry
         """
         event_bus = EventBusInmemory()
         process = RuntimeHostProcess(
@@ -181,7 +179,6 @@ class TestBootstrapSourceRuntimeIntegration:
             assert registry.is_registered(HANDLER_TYPE_DATABASE)
             assert registry.is_registered(HANDLER_TYPE_HTTP)
             assert registry.is_registered(HANDLER_TYPE_MCP)
-            assert registry.is_registered(HANDLER_TYPE_VAULT)
 
         finally:
             await process.stop()
@@ -226,13 +223,12 @@ class TestBootstrapSourceRuntimeIntegration:
                 await process.start()
 
                 # Bootstrap handlers should be registered first
-                # (consul, db, http, mcp, vault in some order)
+                # (consul, db, http, mcp in some order)
                 bootstrap_handlers = {
                     HANDLER_TYPE_CONSUL,
                     HANDLER_TYPE_DATABASE,
                     HANDLER_TYPE_HTTP,
                     HANDLER_TYPE_MCP,
-                    HANDLER_TYPE_VAULT,
                 }
 
                 # Check that bootstrap handlers were registered
@@ -415,7 +411,7 @@ class TestBootstrapSourceErrorHandling:
                     # Process should still start
                     assert process.is_running
 
-                    # Other handlers should be registered (db, http, vault)
+                    # Other handlers should be registered (db, http, mcp)
                     registry = get_handler_registry()
                     # At least some handlers should be registered
                     registered = registry.list_protocols()

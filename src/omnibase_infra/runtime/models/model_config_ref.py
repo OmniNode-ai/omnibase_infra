@@ -18,12 +18,7 @@ Supported Reference Formats:
         env:HANDLER_CONFIG_JSON                # JSON config in env var
         env:DATABASE_CONFIG_YAML               # YAML config in env var
 
-    Vault secret references::
-
-        vault:secret/data/handlers/db#config   # Specific field from secret
-        vault:secret/data/handlers/db          # Whole secret as JSON/YAML
-
-    Infisical secret references (OMN-2286)::
+    Infisical secret references::
 
         infisical:project/env/path#field       # Specific field from secret
         infisical:project/env/path             # Whole secret as JSON/YAML
@@ -51,8 +46,8 @@ Example:
     Scheme: EnumConfigRefScheme.FILE
     Path: configs/db.yaml
     >>>
-    >>> # Parse a vault reference with fragment
-    >>> result = ModelConfigRef.parse("vault:secret/db#password")
+    >>> # Parse an infisical reference with fragment
+    >>> result = ModelConfigRef.parse("infisical:secret/db#password")
     >>> if result:
     ...     print(f"Fragment: {result.config_ref.fragment}")
     Fragment: password
@@ -61,7 +56,7 @@ Example:
     >>> result = ModelConfigRef.parse("unknown:path")
     >>> if not result:
     ...     print(f"Error: {result.error_message}")
-    Error: Unknown scheme 'unknown'. Supported: file, env, vault
+    Error: Unknown scheme 'unknown'. Supported: file, env, infisical
 
 .. versionadded:: 0.8.0
     Initial implementation for OMN-765.
@@ -92,9 +87,9 @@ class ModelConfigRef(BaseModel):
     Use the `parse()` classmethod to create instances from raw strings.
 
     Attributes:
-        scheme: The configuration source type (file, env, vault).
-        path: The path portion after the scheme (file path, env var name, or vault path).
-        fragment: Optional fragment identifier (for vault:path#field references).
+        scheme: The configuration source type (file, env, infisical).
+        path: The path portion after the scheme (file path, env var name, or infisical path).
+        fragment: Optional fragment identifier (for infisical:path#field references).
 
     Examples:
         >>> ref = ModelConfigRef(
@@ -105,12 +100,12 @@ class ModelConfigRef(BaseModel):
         'file:configs/db.yaml'
         >>>
         >>> ref = ModelConfigRef(
-        ...     scheme=EnumConfigRefScheme.VAULT,
+        ...     scheme=EnumConfigRefScheme.INFISICAL,
         ...     path="secret/data/db",
         ...     fragment="password"
         ... )
         >>> ref.to_uri()
-        'vault:secret/data/db#password'
+        'infisical:secret/data/db#password'
     """
 
     model_config = ConfigDict(
@@ -122,18 +117,18 @@ class ModelConfigRef(BaseModel):
 
     scheme: EnumConfigRefScheme = Field(
         ...,
-        description="The configuration source type (file, env, vault).",
+        description="The configuration source type (file, env, infisical).",
     )
     path: str = Field(
         ...,
         min_length=1,
         description="The path portion after the scheme. For file: a filesystem path, "
-        "for env: an environment variable name, for vault: a vault path.",
+        "for env: an environment variable name, for infisical: an infisical path.",
     )
     fragment: str | None = Field(
         default=None,
-        description="Optional fragment identifier for vault references (vault:path#field). "
-        "Used to extract a specific field from a vault secret.",
+        description="Optional fragment identifier for infisical references (infisical:path#field). "
+        "Used to extract a specific field from an infisical secret.",
     )
 
     @field_validator("path")
@@ -178,8 +173,8 @@ class ModelConfigRef(BaseModel):
                 - file:/absolute/path (absolute path)
                 - file://path (also supported for backwards compatibility)
                 - env:VAR_NAME (environment variable)
-                - vault:path/to/secret (whole vault secret)
-                - vault:path/to/secret#field (specific vault field)
+                - infisical:path/to/secret (whole infisical secret)
+                - infisical:path/to/secret#field (specific infisical field)
 
         Returns:
             ModelConfigRefParseResult with success=True and config_ref set on success,
@@ -244,11 +239,8 @@ class ModelConfigRef(BaseModel):
         elif scheme == EnumConfigRefScheme.ENV:
             # env:VAR_NAME - no special handling needed
             pass
-        elif scheme == EnumConfigRefScheme.VAULT:
-            # vault:path#fragment - handled below
-            pass
         elif scheme == EnumConfigRefScheme.INFISICAL:
-            # infisical:path#fragment - handled below (same as vault)
+            # infisical:path#fragment - handled below
             pass
 
         # Handle empty path after scheme
@@ -258,12 +250,9 @@ class ModelConfigRef(BaseModel):
                 error_message=f"Missing path after scheme '{scheme_str}:'",
             )
 
-        # Extract fragment for vault and infisical references
+        # Extract fragment for infisical references
         fragment: str | None = None
-        if (
-            scheme in (EnumConfigRefScheme.VAULT, EnumConfigRefScheme.INFISICAL)
-            and "#" in path_part
-        ):
+        if scheme == EnumConfigRefScheme.INFISICAL and "#" in path_part:
             hash_idx = path_part.rfind("#")
             fragment = path_part[hash_idx + 1 :]
             path_part = path_part[:hash_idx]
@@ -319,12 +308,12 @@ class ModelConfigRef(BaseModel):
             'file:configs/db.yaml'
             >>>
             >>> ref = ModelConfigRef(
-            ...     scheme=EnumConfigRefScheme.VAULT,
+            ...     scheme=EnumConfigRefScheme.INFISICAL,
             ...     path="secret/db",
             ...     fragment="password"
             ... )
             >>> ref.to_uri()
-            'vault:secret/db#password'
+            'infisical:secret/db#password'
         """
         uri = f"{self.scheme.value}:{self.path}"
         if self.fragment is not None:

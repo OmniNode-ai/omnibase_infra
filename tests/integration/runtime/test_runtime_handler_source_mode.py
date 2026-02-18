@@ -52,7 +52,6 @@ from omnibase_infra.runtime.handler_registry import (
     HANDLER_TYPE_DATABASE,
     HANDLER_TYPE_HTTP,
     HANDLER_TYPE_MCP,
-    HANDLER_TYPE_VAULT,
     RegistryProtocolBinding,
     get_handler_registry,
 )
@@ -219,7 +218,6 @@ class TestBootstrapModeLoadsOnlyBootstrapHandlers:
             assert registry.is_registered(HANDLER_TYPE_DATABASE)
             assert registry.is_registered(HANDLER_TYPE_HTTP)
             assert registry.is_registered(HANDLER_TYPE_MCP)
-            assert registry.is_registered(HANDLER_TYPE_VAULT)
 
         finally:
             await process.stop()
@@ -279,7 +277,6 @@ class TestBootstrapModeLoadsOnlyBootstrapHandlers:
                 assert registry.is_registered(HANDLER_TYPE_DATABASE)
                 assert registry.is_registered(HANDLER_TYPE_HTTP)
                 assert registry.is_registered(HANDLER_TYPE_MCP)
-                assert registry.is_registered(HANDLER_TYPE_VAULT)
 
             finally:
                 await process.stop()
@@ -453,7 +450,7 @@ class TestHybridModeContractFirstBootstrapFallback:
                 # Bootstrap handlers should be registered (as fallback)
                 assert registry.is_registered(HANDLER_TYPE_CONSUL)
                 assert registry.is_registered(HANDLER_TYPE_DATABASE)
-                assert registry.is_registered(HANDLER_TYPE_VAULT)
+                assert registry.is_registered(HANDLER_TYPE_MCP)
 
             finally:
                 await process.stop()
@@ -504,7 +501,6 @@ class TestHybridModeContractFirstBootstrapFallback:
             assert registry.is_registered(HANDLER_TYPE_DATABASE)
             assert registry.is_registered(HANDLER_TYPE_HTTP)
             assert registry.is_registered(HANDLER_TYPE_MCP)
-            assert registry.is_registered(HANDLER_TYPE_VAULT)
 
         finally:
             await process.stop()
@@ -703,7 +699,6 @@ class TestHybridModeBootstrapOverride:
             "proto.db",
             "proto.http",
             "proto.mcp",
-            "proto.vault",
         }
         assert expected_bootstrap_ids.issubset(handler_ids), (
             "All bootstrap handlers should be included when contract source is empty"
@@ -1066,11 +1061,11 @@ class TestHandlerResolutionLogging:
                     "Expected log message with descriptor_count field"
                 )
 
-                # Verify count is reasonable (bootstrap has 5 handlers)
+                # Verify count is reasonable (bootstrap has 4 handlers)
                 for record in descriptor_count_logs:
                     count = record.__dict__.get("descriptor_count", 0)
-                    assert count >= 5, (
-                        f"Expected at least 5 bootstrap handlers, got {count}"
+                    assert count >= 4, (
+                        f"Expected at least 4 bootstrap handlers, got {count}"
                     )
 
             finally:
@@ -1342,7 +1337,7 @@ class TestHandlerSourceResolverIntegration:
             - resolve_handlers() is called
 
         Then:
-            - Returns 5 bootstrap handler descriptors
+            - Returns 4 bootstrap handler descriptors
         """
         bootstrap_source = HandlerBootstrapSource()
 
@@ -1358,8 +1353,8 @@ class TestHandlerSourceResolverIntegration:
 
         result = await resolver.resolve_handlers()
 
-        # Should have 5 bootstrap handlers
-        assert len(result.descriptors) == 5
+        # Should have 4 bootstrap handlers
+        assert len(result.descriptors) == 4
         assert len(result.validation_errors) == 0
 
         # Verify handler IDs
@@ -1369,7 +1364,6 @@ class TestHandlerSourceResolverIntegration:
             "proto.db",
             "proto.http",
             "proto.mcp",
-            "proto.vault",
         }
         assert handler_ids == expected_ids
 

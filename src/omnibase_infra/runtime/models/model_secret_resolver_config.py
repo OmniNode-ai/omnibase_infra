@@ -22,7 +22,7 @@ class ModelSecretResolverConfig(BaseModel):
     multiple secret sources with priority-based resolution.
 
     Source Priority Order:
-        1. Vault (if configured) - for production secrets
+        1. Infisical (if configured) - for production secrets (OMN-2286)
         2. Environment variables - for local development
         3. File-based secrets - for Kubernetes deployments
 
@@ -30,7 +30,6 @@ class ModelSecretResolverConfig(BaseModel):
         mappings: Explicit mappings from logical names to source specs.
         default_ttl_env_seconds: Default TTL for environment variable secrets.
         default_ttl_file_seconds: Default TTL for file-based secrets.
-        default_ttl_vault_seconds: Default TTL for Vault secrets.
         enable_convention_fallback: Enable automatic source discovery by convention.
         convention_env_prefix: Prefix for environment variable convention lookup.
         bootstrap_secrets: Secrets resolved directly from env (never through chain).
@@ -38,7 +37,6 @@ class ModelSecretResolverConfig(BaseModel):
 
     Example:
         >>> config = ModelSecretResolverConfig(
-        ...     default_ttl_vault_seconds=60,
         ...     enable_convention_fallback=True,
         ...     convention_env_prefix="ONEX_",
         ... )
@@ -69,11 +67,6 @@ class ModelSecretResolverConfig(BaseModel):
         ge=0,
         description="Default TTL for file-based secrets (24 hours).",
     )
-    default_ttl_vault_seconds: int = Field(
-        default=300,
-        ge=0,
-        description="Default TTL for Vault secrets (5 minutes).",
-    )
 
     # Convention fallback when no explicit mapping exists
     enable_convention_fallback: bool = Field(
@@ -89,9 +82,9 @@ class ModelSecretResolverConfig(BaseModel):
 
     # Bootstrap secrets (always resolved from env, never through resolver chain)
     bootstrap_secrets: list[str] = Field(
-        default_factory=lambda: ["vault.token", "vault.addr", "vault.ca_cert"],
+        default_factory=list,
         description="Secrets that are always resolved directly from environment variables, "
-        "never through the resolver chain. Used for Vault bootstrap credentials.",
+        "never through the resolver chain.",
     )
 
     # File-based secrets directory (K8s secrets volume mount)

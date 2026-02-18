@@ -32,12 +32,6 @@ class TestInferFromIntentTypes:
         result = rules.infer_from_intent_types(["kafka.produce", "kafka.consume"])
         assert result == ["kafka.messaging"]
 
-    def test_vault_intent_pattern(self) -> None:
-        """vault.* intents should infer vault.secrets tag."""
-        rules = CapabilityInferenceRules()
-        result = rules.infer_from_intent_types(["vault.read", "vault.write"])
-        assert result == ["vault.secrets"]
-
     def test_valkey_intent_pattern(self) -> None:
         """valkey.* intents should infer valkey.caching tag."""
         rules = CapabilityInferenceRules()
@@ -64,7 +58,6 @@ class TestInferFromIntentTypes:
                 "postgres.upsert",
                 "consul.register",
                 "kafka.produce",
-                "vault.read",
                 "valkey.get",
                 "http.post",
             ]
@@ -75,7 +68,6 @@ class TestInferFromIntentTypes:
             "kafka.messaging",
             "postgres.storage",
             "valkey.caching",
-            "vault.secrets",
         ]
         assert result == expected
 
@@ -466,7 +458,6 @@ class TestInferAll:
                 "postgres.upsert",
                 "consul.register",
                 "kafka.produce",
-                "vault.read",
                 "valkey.get",
                 "http.post",
             ],
@@ -485,7 +476,6 @@ class TestInferAll:
                 "postgres.storage",
                 "consul.registration",
                 "kafka.messaging",
-                "vault.secrets",
                 "valkey.caching",
                 "http.transport",
                 # Protocols
@@ -520,7 +510,7 @@ class TestDeterminism:
         """All output lists must be sorted."""
         rules = CapabilityInferenceRules()
         result = rules.infer_all(
-            intent_types=["vault.read", "kafka.produce", "postgres.upsert"],
+            intent_types=["kafka.produce", "postgres.upsert"],
             protocols=["ProtocolEventBus", "ProtocolReducer"],
             node_type="orchestrator",
         )
@@ -540,7 +530,7 @@ class TestDeterminism:
         """Multiple runs with same input should produce identical results."""
         rules = CapabilityInferenceRules()
         inputs = {
-            "intent_types": ["vault.read", "http.post", "consul.register"],
+            "intent_types": ["http.post", "consul.register"],
             "protocols": ["ProtocolCacheAdapter", "ProtocolReducer"],
             "node_type": "reducer",
         }
@@ -857,7 +847,6 @@ class TestDefaultConstants:
         assert "postgres." in patterns
         assert "consul." in patterns
         assert "kafka." in patterns
-        assert "vault." in patterns
         assert "valkey." in patterns
         assert "http." in patterns
 
@@ -886,7 +875,6 @@ class TestDefaultConstants:
         assert patterns["postgres."] == "postgres.storage"
         assert patterns["consul."] == "consul.registration"
         assert patterns["kafka."] == "kafka.messaging"
-        assert patterns["vault."] == "vault.secrets"
         assert patterns["valkey."] == "valkey.caching"
         assert patterns["http."] == "http.transport"
 

@@ -34,9 +34,6 @@ class TestResolveTransport:
     def test_resolve_consul(self) -> None:
         assert _resolve_transport("consul") == EnumInfraTransportType.CONSUL
 
-    def test_resolve_vault(self) -> None:
-        assert _resolve_transport("vault") == EnumInfraTransportType.VAULT
-
     def test_resolve_infisical(self) -> None:
         assert _resolve_transport("infisical") == EnumInfraTransportType.INFISICAL
 

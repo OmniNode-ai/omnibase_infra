@@ -37,9 +37,6 @@ from omnibase_infra.handlers.models.http.model_http_post_payload import (
     ModelHttpPostPayload,
 )
 from omnibase_infra.handlers.models.model_db_query_payload import ModelDbQueryPayload
-from omnibase_infra.handlers.models.vault.model_vault_secret_payload import (
-    ModelVaultSecretPayload,
-)
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
@@ -110,7 +107,6 @@ class TestJsonTypeRecursionRegression:
         assert ModelHealthCheckResult is not None
         assert ModelDbQueryPayload is not None
         assert ModelHttpPostPayload is not None
-        assert ModelVaultSecretPayload is not None
 
         # Verify we can access model fields (triggers schema resolution)
         assert "config" in ModelNodeCapabilities.model_fields

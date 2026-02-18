@@ -144,7 +144,6 @@ def test_known_handlers_includes_all_expected_types() -> None:
         HANDLER_TYPE_HTTP,
         HANDLER_TYPE_INTENT,
         HANDLER_TYPE_MCP,
-        HANDLER_TYPE_VAULT,
     )
     from omnibase_infra.runtime.util_wiring import _HANDLER_CONTRACT_PATHS
 
@@ -155,7 +154,6 @@ def test_known_handlers_includes_all_expected_types() -> None:
         HANDLER_TYPE_HTTP,
         HANDLER_TYPE_INTENT,
         HANDLER_TYPE_MCP,
-        HANDLER_TYPE_VAULT,
     ]
 
     for handler_type in expected_handlers:

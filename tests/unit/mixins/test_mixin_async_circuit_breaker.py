@@ -738,7 +738,6 @@ class TestMixinAsyncCircuitBreakerFromConfig:
             EnumInfraTransportType.DATABASE,
             EnumInfraTransportType.KAFKA,
             EnumInfraTransportType.CONSUL,
-            EnumInfraTransportType.VAULT,
             EnumInfraTransportType.VALKEY,
             EnumInfraTransportType.GRPC,
             EnumInfraTransportType.RUNTIME,

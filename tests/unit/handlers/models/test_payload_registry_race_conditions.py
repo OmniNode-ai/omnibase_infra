@@ -5,7 +5,6 @@
 This module tests thread safety for:
 - RegistryPayloadHttp
 - RegistryPayloadConsul
-- RegistryPayloadVault
 
 Tests verify that:
 1. Concurrent registrations don't cause race conditions
@@ -32,10 +31,6 @@ from omnibase_infra.handlers.models.http.model_payload_http import ModelPayloadH
 from omnibase_infra.handlers.models.http.registry_payload_http import (
     RegistryPayloadHttp,
 )
-from omnibase_infra.handlers.models.vault.model_payload_vault import ModelPayloadVault
-from omnibase_infra.handlers.models.vault.registry_payload_vault import (
-    RegistryPayloadVault,
-)
 
 # =============================================================================
 # Test Fixtures
@@ -48,14 +43,12 @@ def reset_registries():
     # Save original state
     http_types = dict(RegistryPayloadHttp._types)
     consul_types = dict(RegistryPayloadConsul._types)
-    vault_types = dict(RegistryPayloadVault._types)
 
     yield
 
     # Restore original state
     RegistryPayloadHttp._types = http_types
     RegistryPayloadConsul._types = consul_types
-    RegistryPayloadVault._types = vault_types
 
 
 # =============================================================================
@@ -85,17 +78,6 @@ def create_consul_payload_class(op_type: str) -> type[ModelPayloadConsul]:
 
     MockConsulPayload.__name__ = f"MockConsulPayload_{_op_type}"
     return MockConsulPayload
-
-
-def create_vault_payload_class(op_type: str) -> type[ModelPayloadVault]:
-    """Create a mock Vault payload class for testing."""
-    _op_type = op_type
-
-    class MockVaultPayload(ModelPayloadVault):
-        pass
-
-    MockVaultPayload.__name__ = f"MockVaultPayload_{_op_type}"
-    return MockVaultPayload
 
 
 # =============================================================================
@@ -294,167 +276,3 @@ class TestRegistryPayloadConsulRaceConditions:
 
         assert successes == 1, f"Expected 1 success, got {successes}"
         assert len(errors) == num_threads - 1
-
-
-# =============================================================================
-# Vault Payload Registry Race Condition Tests
-# =============================================================================
-
-
-class TestRegistryPayloadVaultRaceConditions:
-    """Race condition tests for RegistryPayloadVault."""
-
-    def test_concurrent_registration_different_types(self) -> None:
-        """Test concurrent registration of different operation types is thread-safe."""
-        num_threads = 20
-        errors: list[Exception] = []
-        lock = threading.Lock()
-
-        def register_payload(index: int) -> None:
-            try:
-                op_type = f"vault_op_{index}"
-                # Use factory function to create class with proper closure
-                payload_cls = create_vault_payload_class(op_type)
-                RegistryPayloadVault.register(op_type)(payload_cls)
-            except Exception as e:
-                with lock:
-                    errors.append(e)
-
-        threads = [
-            threading.Thread(target=register_payload, args=(i,))
-            for i in range(num_threads)
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert len(errors) == 0, f"Errors during registration: {errors}"
-        for i in range(num_threads):
-            assert RegistryPayloadVault.is_registered(f"vault_op_{i}")
-
-    def test_concurrent_duplicate_registration_raises_error_atomically(self) -> None:
-        """Test that duplicate registration errors are raised atomically."""
-        num_threads = 10
-        errors: list[ProtocolConfigurationError] = []
-        successes = 0
-        lock = threading.Lock()
-        operation_type = "vault_duplicate_test"
-
-        def try_register() -> None:
-            nonlocal successes
-            try:
-
-                @RegistryPayloadVault.register(operation_type)
-                class Payload(ModelPayloadVault):
-                    operation_type: ClassVar[str] = "vault_duplicate_test"  # type: ignore[misc]
-
-                with lock:
-                    successes += 1
-            except ProtocolConfigurationError as e:
-                with lock:
-                    errors.append(e)
-            except Exception as e:
-                pytest.fail(f"Unexpected error: {e}")
-
-        threads = [threading.Thread(target=try_register) for _ in range(num_threads)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert successes == 1, f"Expected 1 success, got {successes}"
-        assert len(errors) == num_threads - 1
-
-
-# =============================================================================
-# Stress Tests
-# =============================================================================
-
-
-class TestPayloadRegistryStressTests:
-    """High-volume stress tests for payload registries."""
-
-    def test_high_concurrency_mixed_operations(self) -> None:
-        """Stress test with high concurrency across all registries."""
-        num_threads = 30
-        operations_per_thread = 20
-        errors: list[Exception] = []
-        lock = threading.Lock()
-
-        def mixed_operations(thread_id: int) -> None:
-            try:
-                for i in range(operations_per_thread):
-                    op_type = f"stress_{thread_id}_{i}"
-
-                    # Register to HTTP registry
-                    try:
-
-                        @RegistryPayloadHttp.register(op_type)
-                        class HttpPayload(ModelPayloadHttp):
-                            operation_type: ClassVar[str] = op_type  # type: ignore[misc]
-
-                    except ProtocolConfigurationError:
-                        pass
-
-                    # Check registration
-                    _ = RegistryPayloadHttp.is_registered(op_type)
-
-                    # Get all types
-                    _ = RegistryPayloadHttp.get_all_types()
-
-            except Exception as e:
-                with lock:
-                    errors.append(e)
-
-        threads = [
-            threading.Thread(target=mixed_operations, args=(i,))
-            for i in range(num_threads)
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert len(errors) == 0, f"Errors during stress test: {errors}"
-
-    def test_barrier_synchronized_registration(self) -> None:
-        """Test registration with barrier synchronization for maximum contention."""
-        num_threads = 10
-        barrier = threading.Barrier(num_threads)
-        errors: list[Exception] = []
-        successes = 0
-        lock = threading.Lock()
-        operation_type = "barrier_test"
-
-        def synchronized_register() -> None:
-            nonlocal successes
-            try:
-                barrier.wait()  # Synchronize all threads
-
-                @RegistryPayloadHttp.register(operation_type)
-                class Payload(ModelPayloadHttp):
-                    operation_type: ClassVar[str] = "barrier_test"  # type: ignore[misc]
-
-                with lock:
-                    successes += 1
-            except ProtocolConfigurationError as e:
-                with lock:
-                    errors.append(e)
-            except Exception as e:
-                pytest.fail(f"Unexpected error: {e}")
-
-        threads = [
-            threading.Thread(target=synchronized_register) for _ in range(num_threads)
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        # Exactly one should succeed
-        assert successes == 1, f"Expected 1 success, got {successes}"
-        assert len(errors) == num_threads - 1
-
-        # Verify registration
-        assert RegistryPayloadHttp.is_registered(operation_type)

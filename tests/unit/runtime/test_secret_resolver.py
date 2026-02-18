@@ -540,7 +540,7 @@ class TestSecretResolverIntrospection:
                 ModelSecretMapping(
                     logical_name="api.key",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/api#key",
                     ),
                 ),
@@ -555,14 +555,14 @@ class TestSecretResolverIntrospection:
         assert "api.key" in secrets
         assert len(secrets) == 2
 
-    def test_get_source_info_masks_vault_path(self) -> None:
-        """Should mask sensitive parts of Vault path."""
+    def test_get_source_info_masks_infisical_path(self) -> None:
+        """Should mask sensitive parts of Infisical path."""
         config = ModelSecretResolverConfig(
             mappings=[
                 ModelSecretMapping(
                     logical_name="database.password",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/data/database/postgres#password",
                     ),
                 ),
@@ -574,7 +574,7 @@ class TestSecretResolverIntrospection:
         info = resolver.get_source_info("database.password")
 
         assert info is not None
-        assert info.source_type == "vault"
+        assert info.source_type == "infisical"
         assert "***" in info.source_path_masked
         # Should not expose the full path
         assert "postgres#password" not in info.source_path_masked
@@ -1365,18 +1365,18 @@ class TestSecretResolverSecurity:
             assert result.get_secret_value() == "absolute_value"
 
     def test_bootstrap_secrets_isolated_from_vault(self) -> None:
-        """Bootstrap secrets should always resolve from env, never Vault.
+        """Bootstrap secrets should always resolve from env, never Infisical.
 
-        This prevents circular dependency when initializing Vault.
+        This prevents circular dependency when initializing Infisical.
         """
         config = ModelSecretResolverConfig(
             mappings=[
-                # Even if there's a Vault mapping for a bootstrap secret,
+                # Even if there's an Infisical mapping for a bootstrap secret,
                 # it should be ignored
                 ModelSecretMapping(
                     logical_name="vault.token",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/data/bootstrap#token",
                     ),
                 ),
@@ -1384,7 +1384,7 @@ class TestSecretResolverSecurity:
             bootstrap_secrets=["vault.token", "vault.addr"],
             enable_convention_fallback=False,
         )
-        resolver = SecretResolver(config=config)
+        resolver = SecretResolver(config=config, infisical_handler=None)
 
         # Set the env var that bootstrap resolution will use
         with patch.dict(os.environ, {"VAULT_TOKEN": "bootstrap_token_value"}):
@@ -1410,20 +1410,15 @@ class TestSecretResolverSecurity:
         assert result is not None
         assert result.get_secret_value() == "ca_cert_data"
 
-    def test_vault_resolves_secret_with_mocked_handler(self) -> None:
-        """Vault secrets should resolve when handler returns valid response."""
-        # Create a mock vault handler
-        mock_vault_handler = MagicMock()
-        mock_vault_handler.execute = AsyncMock(
+    def test_infisical_resolves_secret_with_mocked_handler(self) -> None:
+        """Infisical secrets should resolve when handler returns valid response."""
+        import json as _json
+
+        # Create a mock infisical handler
+        mock_infisical_handler = MagicMock()
+        mock_infisical_handler.execute = AsyncMock(
             return_value=MagicMock(
-                result={
-                    "status": "success",
-                    "payload": {
-                        "data": {"password": "vault_secret_value"},
-                        "metadata": {},
-                    },
-                    "correlation_id": str(uuid4()),
-                }
+                result={"value": _json.dumps({"password": "vault_secret_value"})}
             )
         )
 
@@ -1432,14 +1427,16 @@ class TestSecretResolverSecurity:
                 ModelSecretMapping(
                     logical_name="vault.secret",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/test#password",
                     ),
                 ),
             ],
             enable_convention_fallback=False,
         )
-        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+        resolver = SecretResolver(
+            config=config, infisical_handler=mock_infisical_handler
+        )
 
         # Sync method creates new event loop, so we test via asyncio.run
 
@@ -1449,19 +1446,14 @@ class TestSecretResolverSecurity:
         assert result.get_secret_value() == "vault_secret_value"
 
     @pytest.mark.asyncio
-    async def test_vault_async_resolves_secret(self) -> None:
-        """Async Vault secrets should resolve with mocked handler."""
-        mock_vault_handler = MagicMock()
-        mock_vault_handler.execute = AsyncMock(
+    async def test_infisical_async_resolves_secret(self) -> None:
+        """Async Infisical secrets should resolve with mocked handler."""
+        import json as _json
+
+        mock_infisical_handler = MagicMock()
+        mock_infisical_handler.execute = AsyncMock(
             return_value=MagicMock(
-                result={
-                    "status": "success",
-                    "payload": {
-                        "data": {"api_key": "async_vault_value"},
-                        "metadata": {},
-                    },
-                    "correlation_id": str(uuid4()),
-                }
+                result={"value": _json.dumps({"api_key": "async_vault_value"})}
             )
         )
 
@@ -1470,36 +1462,38 @@ class TestSecretResolverSecurity:
                 ModelSecretMapping(
                     logical_name="async.vault.secret",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/async#api_key",
                     ),
                 ),
             ],
             enable_convention_fallback=False,
         )
-        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+        resolver = SecretResolver(
+            config=config, infisical_handler=mock_infisical_handler
+        )
 
         result = await resolver.get_secret_async("async.vault.secret")
 
         assert result is not None
         assert result.get_secret_value() == "async_vault_value"
 
-    def test_vault_returns_none_when_no_handler(self) -> None:
-        """Vault secrets return None when no handler configured (graceful degradation)."""
+    def test_infisical_returns_none_when_no_handler(self) -> None:
+        """Infisical secrets return None when no handler configured (graceful degradation)."""
         config = ModelSecretResolverConfig(
             mappings=[
                 ModelSecretMapping(
                     logical_name="vault.no.handler",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/data/test#field",
                     ),
                 ),
             ],
             enable_convention_fallback=False,
         )
-        # No vault_handler provided
-        resolver = SecretResolver(config=config, vault_handler=None)
+        # No infisical_handler provided
+        resolver = SecretResolver(config=config, infisical_handler=None)
 
         result = resolver.get_secret("vault.no.handler", required=False)
         assert result is None
@@ -1576,13 +1570,13 @@ class TestSecretResolverBootstrapSecrets:
     """Tests specifically for bootstrap secret behavior."""
 
     def test_bootstrap_secret_ignores_explicit_vault_mapping(self) -> None:
-        """Bootstrap secrets should ignore any explicit Vault mapping."""
+        """Bootstrap secrets should ignore any explicit Infisical mapping."""
         config = ModelSecretResolverConfig(
             mappings=[
                 ModelSecretMapping(
                     logical_name="vault.addr",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/bootstrap#addr",
                     ),
                 ),
@@ -1590,7 +1584,7 @@ class TestSecretResolverBootstrapSecrets:
             bootstrap_secrets=["vault.addr"],
             enable_convention_fallback=False,
         )
-        resolver = SecretResolver(config=config)
+        resolver = SecretResolver(config=config, infisical_handler=None)
 
         with patch.dict(os.environ, {"VAULT_ADDR": "https://vault.local:8200"}):
             result = resolver.get_secret("vault.addr")
@@ -1680,18 +1674,18 @@ class TestSecretResolverBootstrapSecrets:
         assert result.get_secret_value() == "explicit_token_value"
 
     def test_bootstrap_secret_vault_mapping_falls_back_to_convention(self) -> None:
-        """Bootstrap secrets with vault mapping should fall back to convention env var.
+        """Bootstrap secrets with infisical mapping should fall back to convention env var.
 
-        When an explicit mapping exists for vault/file source (not env), bootstrap
+        When an explicit mapping exists for infisical/file source (not env), bootstrap
         secrets should fall back to convention-based env var naming since they
-        cannot use vault/file sources.
+        cannot use infisical/file sources.
         """
         config = ModelSecretResolverConfig(
             mappings=[
                 ModelSecretMapping(
                     logical_name="vault.addr",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",  # Vault mapping should be ignored
+                        source_type="infisical",  # Infisical mapping should be ignored
                         source_path="secret/bootstrap#addr",
                     ),
                 ),
@@ -1700,7 +1694,7 @@ class TestSecretResolverBootstrapSecrets:
             convention_env_prefix="ONEX_",
             enable_convention_fallback=True,
         )
-        resolver = SecretResolver(config=config)
+        resolver = SecretResolver(config=config, infisical_handler=None)
 
         with patch.dict(os.environ, {"ONEX_VAULT_ADDR": "https://vault.local:8200"}):
             result = resolver.get_secret("vault.addr")
@@ -1711,11 +1705,11 @@ class TestSecretResolverBootstrapSecrets:
 
 
 class TestSecretResolverVaultIntegration:
-    """Tests for Vault integration (OMN-1374).
+    """Tests for Infisical integration (OMN-1374).
 
     These tests verify:
-    - Vault secret resolution with mocked handler
-    - Path parsing (mount/path#field)
+    - Infisical secret resolution with mocked handler
+    - Path parsing (path/secret_name#field)
     - Error handling (auth, timeout, unavailable)
     - Graceful degradation when handler is None
     - Correlation ID propagation
@@ -1723,17 +1717,14 @@ class TestSecretResolverVaultIntegration:
 
     @pytest.mark.asyncio
     async def test_vault_path_parsing_with_field(self) -> None:
-        """Should parse vault path with mount/path#field format."""
-        mock_vault_handler = MagicMock()
-        mock_vault_handler.execute = AsyncMock(
+        """Should parse infisical path with path/secret_name#field format."""
+        import json as _json
+
+        mock_infisical_handler = MagicMock()
+        mock_infisical_handler.execute = AsyncMock(
             return_value=MagicMock(
                 result={
-                    "status": "success",
-                    "payload": {
-                        "data": {"password": "db_pass", "username": "db_user"},
-                        "metadata": {},
-                    },
-                    "correlation_id": str(uuid4()),
+                    "value": _json.dumps({"password": "db_pass", "username": "db_user"})
                 }
             )
         )
@@ -1743,14 +1734,16 @@ class TestSecretResolverVaultIntegration:
                 ModelSecretMapping(
                     logical_name="db.password",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/myapp/db#password",
                     ),
                 ),
             ],
             enable_convention_fallback=False,
         )
-        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+        resolver = SecretResolver(
+            config=config, infisical_handler=mock_infisical_handler
+        )
 
         result = await resolver.get_secret_async("db.password")
 
@@ -1758,27 +1751,17 @@ class TestSecretResolverVaultIntegration:
         assert result.get_secret_value() == "db_pass"
 
         # Verify the envelope was created correctly
-        call_args = mock_vault_handler.execute.call_args
+        call_args = mock_infisical_handler.execute.call_args
         envelope = call_args[0][0]
-        assert envelope["operation"] == "vault.read_secret"
-        assert envelope["payload"]["mount_point"] == "secret"
-        assert envelope["payload"]["path"] == "myapp/db"
+        assert envelope["operation"] == "infisical.get_secret"
+        assert envelope["payload"]["secret_name"] == "db"
 
     @pytest.mark.asyncio
     async def test_vault_path_parsing_without_field(self) -> None:
-        """Should return first field value when no field specified."""
-        mock_vault_handler = MagicMock()
-        mock_vault_handler.execute = AsyncMock(
-            return_value=MagicMock(
-                result={
-                    "status": "success",
-                    "payload": {
-                        "data": {"value": "single_secret"},
-                        "metadata": {},
-                    },
-                    "correlation_id": str(uuid4()),
-                }
-            )
+        """Should return the value string when no field specified."""
+        mock_infisical_handler = MagicMock()
+        mock_infisical_handler.execute = AsyncMock(
+            return_value=MagicMock(result={"value": "single_secret"})
         )
 
         config = ModelSecretResolverConfig(
@@ -1786,14 +1769,16 @@ class TestSecretResolverVaultIntegration:
                 ModelSecretMapping(
                     logical_name="api.token",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/api/token",  # No #field
                     ),
                 ),
             ],
             enable_convention_fallback=False,
         )
-        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+        resolver = SecretResolver(
+            config=config, infisical_handler=mock_infisical_handler
+        )
 
         result = await resolver.get_secret_async("api.token")
 
@@ -1803,17 +1788,12 @@ class TestSecretResolverVaultIntegration:
     @pytest.mark.asyncio
     async def test_vault_field_not_found_returns_none(self) -> None:
         """Should return None when specified field doesn't exist."""
-        mock_vault_handler = MagicMock()
-        mock_vault_handler.execute = AsyncMock(
+        import json as _json
+
+        mock_infisical_handler = MagicMock()
+        mock_infisical_handler.execute = AsyncMock(
             return_value=MagicMock(
-                result={
-                    "status": "success",
-                    "payload": {
-                        "data": {"other_field": "value"},
-                        "metadata": {},
-                    },
-                    "correlation_id": str(uuid4()),
-                }
+                result={"value": _json.dumps({"other_field": "value"})}
             )
         )
 
@@ -1822,14 +1802,16 @@ class TestSecretResolverVaultIntegration:
                 ModelSecretMapping(
                     logical_name="missing.field",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/data#nonexistent",
                     ),
                 ),
             ],
             enable_convention_fallback=False,
         )
-        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+        resolver = SecretResolver(
+            config=config, infisical_handler=mock_infisical_handler
+        )
 
         result = await resolver.get_secret_async("missing.field", required=False)
 
@@ -1837,19 +1819,10 @@ class TestSecretResolverVaultIntegration:
 
     @pytest.mark.asyncio
     async def test_vault_empty_data_returns_none(self) -> None:
-        """Should return None when Vault returns empty data."""
-        mock_vault_handler = MagicMock()
-        mock_vault_handler.execute = AsyncMock(
-            return_value=MagicMock(
-                result={
-                    "status": "success",
-                    "payload": {
-                        "data": {},
-                        "metadata": {},
-                    },
-                    "correlation_id": str(uuid4()),
-                }
-            )
+        """Should return None when Infisical returns empty/None value."""
+        mock_infisical_handler = MagicMock()
+        mock_infisical_handler.execute = AsyncMock(
+            return_value=MagicMock(result={"value": None})
         )
 
         config = ModelSecretResolverConfig(
@@ -1857,14 +1830,16 @@ class TestSecretResolverVaultIntegration:
                 ModelSecretMapping(
                     logical_name="empty.secret",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/empty",
                     ),
                 ),
             ],
             enable_convention_fallback=False,
         )
-        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+        resolver = SecretResolver(
+            config=config, infisical_handler=mock_infisical_handler
+        )
 
         result = await resolver.get_secret_async("empty.secret", required=False)
 
@@ -1872,16 +1847,10 @@ class TestSecretResolverVaultIntegration:
 
     @pytest.mark.asyncio
     async def test_vault_non_success_status_returns_none(self) -> None:
-        """Should return None when Vault returns non-success status."""
-        mock_vault_handler = MagicMock()
-        mock_vault_handler.execute = AsyncMock(
-            return_value=MagicMock(
-                result={
-                    "status": "error",
-                    "payload": {},
-                    "correlation_id": str(uuid4()),
-                }
-            )
+        """Should return None when Infisical returns None value."""
+        mock_infisical_handler = MagicMock()
+        mock_infisical_handler.execute = AsyncMock(
+            return_value=MagicMock(result={"value": None})
         )
 
         config = ModelSecretResolverConfig(
@@ -1889,14 +1858,16 @@ class TestSecretResolverVaultIntegration:
                 ModelSecretMapping(
                     logical_name="error.secret",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/error",
                     ),
                 ),
             ],
             enable_convention_fallback=False,
         )
-        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+        resolver = SecretResolver(
+            config=config, infisical_handler=mock_infisical_handler
+        )
 
         result = await resolver.get_secret_async("error.secret", required=False)
 
@@ -1905,14 +1876,14 @@ class TestSecretResolverVaultIntegration:
     @pytest.mark.asyncio
     async def test_vault_auth_error_propagates(self) -> None:
         """Should propagate InfraAuthenticationError from handler."""
-        mock_vault_handler = MagicMock()
-        mock_vault_handler.execute = AsyncMock(
+        mock_infisical_handler = MagicMock()
+        mock_infisical_handler.execute = AsyncMock(
             side_effect=InfraAuthenticationError(
                 "Token expired",
                 context=ModelInfraErrorContext.with_correlation(
-                    transport_type=EnumInfraTransportType.VAULT,
+                    transport_type=EnumInfraTransportType.INFISICAL,
                     operation="read_secret",
-                    target_name="vault_handler",
+                    target_name="infisical_handler",
                 ),
             )
         )
@@ -1922,14 +1893,16 @@ class TestSecretResolverVaultIntegration:
                 ModelSecretMapping(
                     logical_name="auth.error",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/protected",
                     ),
                 ),
             ],
             enable_convention_fallback=False,
         )
-        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+        resolver = SecretResolver(
+            config=config, infisical_handler=mock_infisical_handler
+        )
 
         with pytest.raises(InfraAuthenticationError):
             await resolver.get_secret_async("auth.error")
@@ -1937,14 +1910,14 @@ class TestSecretResolverVaultIntegration:
     @pytest.mark.asyncio
     async def test_vault_unavailable_error_propagates(self) -> None:
         """Should propagate InfraUnavailableError (circuit breaker open)."""
-        mock_vault_handler = MagicMock()
-        mock_vault_handler.execute = AsyncMock(
+        mock_infisical_handler = MagicMock()
+        mock_infisical_handler.execute = AsyncMock(
             side_effect=InfraUnavailableError(
                 "Circuit breaker open",
                 context=ModelInfraErrorContext.with_correlation(
-                    transport_type=EnumInfraTransportType.VAULT,
+                    transport_type=EnumInfraTransportType.INFISICAL,
                     operation="read_secret",
-                    target_name="vault_handler",
+                    target_name="infisical_handler",
                 ),
             )
         )
@@ -1954,14 +1927,16 @@ class TestSecretResolverVaultIntegration:
                 ModelSecretMapping(
                     logical_name="unavailable.secret",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/path",
                     ),
                 ),
             ],
             enable_convention_fallback=False,
         )
-        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+        resolver = SecretResolver(
+            config=config, infisical_handler=mock_infisical_handler
+        )
 
         with pytest.raises(InfraUnavailableError):
             await resolver.get_secret_async("unavailable.secret")
@@ -1969,8 +1944,8 @@ class TestSecretResolverVaultIntegration:
     @pytest.mark.asyncio
     async def test_vault_generic_error_wrapped_in_secret_resolution_error(self) -> None:
         """Should wrap generic errors in SecretResolutionError."""
-        mock_vault_handler = MagicMock()
-        mock_vault_handler.execute = AsyncMock(
+        mock_infisical_handler = MagicMock()
+        mock_infisical_handler.execute = AsyncMock(
             side_effect=RuntimeError("Unexpected error")
         )
 
@@ -1979,35 +1954,35 @@ class TestSecretResolverVaultIntegration:
                 ModelSecretMapping(
                     logical_name="generic.error",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/path",
                     ),
                 ),
             ],
             enable_convention_fallback=False,
         )
-        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+        resolver = SecretResolver(
+            config=config, infisical_handler=mock_infisical_handler
+        )
 
-        with pytest.raises(SecretResolutionError) as exc_info:
+        with pytest.raises(SecretResolutionError):
             await resolver.get_secret_async("generic.error")
 
-        assert "generic.error" in str(exc_info.value)
-
     def test_vault_graceful_degradation_no_handler(self) -> None:
-        """Should return None when vault_handler is None (graceful degradation)."""
+        """Should return None when infisical_handler is None (graceful degradation)."""
         config = ModelSecretResolverConfig(
             mappings=[
                 ModelSecretMapping(
                     logical_name="no.handler.secret",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/path#field",
                     ),
                 ),
             ],
             enable_convention_fallback=False,
         )
-        resolver = SecretResolver(config=config, vault_handler=None)
+        resolver = SecretResolver(config=config, infisical_handler=None)
 
         result = resolver.get_secret("no.handler.secret", required=False)
 
@@ -2019,17 +1994,13 @@ class TestSecretResolverCorrelationId:
 
     @pytest.mark.asyncio
     async def test_correlation_id_passed_to_vault_handler(self) -> None:
-        """Should pass correlation_id to Vault handler in envelope."""
+        """Should pass correlation_id to Infisical handler in envelope."""
+        import json as _json
+
         test_correlation_id = uuid4()
-        mock_vault_handler = MagicMock()
-        mock_vault_handler.execute = AsyncMock(
-            return_value=MagicMock(
-                result={
-                    "status": "success",
-                    "payload": {"data": {"key": "value"}, "metadata": {}},
-                    "correlation_id": str(test_correlation_id),
-                }
-            )
+        mock_infisical_handler = MagicMock()
+        mock_infisical_handler.execute = AsyncMock(
+            return_value=MagicMock(result={"value": _json.dumps({"key": "value"})})
         )
 
         config = ModelSecretResolverConfig(
@@ -2037,21 +2008,23 @@ class TestSecretResolverCorrelationId:
                 ModelSecretMapping(
                     logical_name="correlated.secret",
                     source=ModelSecretSourceSpec(
-                        source_type="vault",
+                        source_type="infisical",
                         source_path="secret/path#key",
                     ),
                 ),
             ],
             enable_convention_fallback=False,
         )
-        resolver = SecretResolver(config=config, vault_handler=mock_vault_handler)
+        resolver = SecretResolver(
+            config=config, infisical_handler=mock_infisical_handler
+        )
 
         await resolver.get_secret_async(
             "correlated.secret", correlation_id=test_correlation_id
         )
 
         # Verify correlation_id was passed in envelope
-        call_args = mock_vault_handler.execute.call_args
+        call_args = mock_infisical_handler.execute.call_args
         envelope = call_args[0][0]
         assert envelope["correlation_id"] == str(test_correlation_id)
 

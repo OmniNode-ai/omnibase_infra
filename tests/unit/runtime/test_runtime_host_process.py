@@ -700,7 +700,6 @@ class TestRuntimeHostProcessLifecycle:
             HANDLER_TYPE_CONSUL,
             HANDLER_TYPE_DATABASE,
             HANDLER_TYPE_HTTP,
-            HANDLER_TYPE_VAULT,
             get_handler_registry,
         )
 
@@ -713,7 +712,6 @@ class TestRuntimeHostProcessLifecycle:
             assert registry.is_registered(HANDLER_TYPE_CONSUL)
             assert registry.is_registered(HANDLER_TYPE_DATABASE)
             assert registry.is_registered(HANDLER_TYPE_HTTP)
-            assert registry.is_registered(HANDLER_TYPE_VAULT)
         finally:
             await process.stop()
 

@@ -30,17 +30,6 @@ Consul Models:
     ModelConsulDeregisterPayload: Payload for consul.deregister result
     ConsulPayload: Discriminated union of all Consul payload types
 
-Vault Models:
-    ModelVaultHandlerPayload: Payload containing Vault operation results
-    ModelVaultHandlerResponse: Full Vault handler response envelope
-    EnumVaultOperationType: Discriminator enum for Vault operation types
-    ModelVaultSecretPayload: Payload for vault.read_secret result
-    ModelVaultWritePayload: Payload for vault.write_secret result
-    ModelVaultDeletePayload: Payload for vault.delete_secret result
-    ModelVaultListPayload: Payload for vault.list_secrets result
-    ModelVaultRenewTokenPayload: Payload for vault.renew_token result
-    VaultPayload: Discriminated union of all Vault payload types
-
 Qdrant Models:
     ModelQdrantHandlerPayload: Payload containing Qdrant operation results
     ModelQdrantHandlerResponse: Full Qdrant handler response envelope
@@ -208,19 +197,6 @@ from omnibase_infra.handlers.models.model_slack_alert_payload import ModelSlackA
 from omnibase_infra.handlers.models.model_slack_alert_result import (
     ModelSlackAlertResult,
 )
-from omnibase_infra.handlers.models.model_vault_handler_response import (
-    ModelVaultHandlerResponse,
-)
-from omnibase_infra.handlers.models.vault import (
-    EnumVaultOperationType,
-    ModelVaultDeletePayload,
-    ModelVaultHandlerPayload,
-    ModelVaultListPayload,
-    ModelVaultRenewTokenPayload,
-    ModelVaultSecretPayload,
-    ModelVaultWritePayload,
-    VaultPayload,
-)
 
 __all__: list[str] = [
     "ConsulPayload",
@@ -228,8 +204,6 @@ __all__: list[str] = [
     "EnumConsulOperationType",
     # HTTP payload types (discriminated union)
     "EnumHttpOperationType",
-    # Vault payload types (discriminated union)
-    "EnumVaultOperationType",
     "HttpPayload",
     "ModelConsulDeregisterPayload",
     # Consul wrapper models
@@ -261,16 +235,6 @@ __all__: list[str] = [
     # Qdrant wrapper models
     "ModelQdrantHandlerResponse",
     "ModelRetryState",
-    # Vault models
-    "ModelVaultDeletePayload",
-    # Vault wrapper models
-    "ModelVaultHandlerPayload",
-    "ModelVaultHandlerResponse",
-    "ModelVaultListPayload",
-    "ModelVaultRenewTokenPayload",
-    "ModelVaultSecretPayload",
-    "ModelVaultWritePayload",
-    "VaultPayload",
     # Filesystem models
     "ModelFileSystemConfig",
     "ModelReadFilePayload",

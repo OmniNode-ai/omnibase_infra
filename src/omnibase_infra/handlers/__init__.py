@@ -12,7 +12,6 @@ Handlers are responsible for:
 Available Handlers:
 - HandlerHttpRest: HTTP/REST protocol handler (MVP: GET, POST only)
 - HandlerDb: PostgreSQL database handler (MVP: query, execute only)
-- HandlerVault: HashiCorp Vault secret management handler (MVP: KV v2 secrets)
 - HandlerConsul: HashiCorp Consul service discovery handler (MVP: KV, service registration)
 - HandlerMCP: Model Context Protocol handler for AI agent tool integration
 - HandlerFileSystem: Filesystem handler with path whitelisting and size limits
@@ -52,7 +51,6 @@ from omnibase_infra.handlers.handler_manifest_persistence import (
 from omnibase_infra.handlers.handler_mcp import HandlerMCP
 from omnibase_infra.handlers.handler_qdrant import HandlerQdrant
 from omnibase_infra.handlers.handler_slack_webhook import HandlerSlackWebhook
-from omnibase_infra.handlers.handler_vault import HandlerVault
 from omnibase_infra.handlers.models import (
     ModelConsulHandlerPayload,
     ModelConsulHandlerResponse,
@@ -81,7 +79,6 @@ __all__: list[str] = [
     "HandlerMCP",
     "HandlerQdrant",
     "HandlerSlackWebhook",
-    "HandlerVault",
     "ModelConsulHandlerPayload",
     "ModelConsulHandlerResponse",
     "ModelDbDescribeResponse",
