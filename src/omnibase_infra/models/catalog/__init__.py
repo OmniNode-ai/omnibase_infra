@@ -18,6 +18,7 @@ from omnibase_infra.models.catalog.catalog_warning_codes import (
     INTERNAL_ERROR,
     INVALID_QUERY_PAYLOAD,
     PARTIAL_NODE_DATA,
+    UNRESOLVABLE_TOPIC_PREFIX,
     VERSION_UNKNOWN,
 )
 from omnibase_infra.models.catalog.model_topic_catalog_changed import (
@@ -40,6 +41,7 @@ __all__: list[str] = [
     "INTERNAL_ERROR",
     "INVALID_QUERY_PAYLOAD",
     "PARTIAL_NODE_DATA",
+    "UNRESOLVABLE_TOPIC_PREFIX",
     "VERSION_UNKNOWN",
     "ModelTopicCatalogChanged",
     "ModelTopicCatalogEntry",

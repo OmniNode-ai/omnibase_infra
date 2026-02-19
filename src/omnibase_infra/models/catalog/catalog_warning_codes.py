@@ -61,7 +61,9 @@ from __future__ import annotations
 # Warning code constants
 # ---------------------------------------------------------------------------
 
-#: Consul connection failure during catalog build (no handler configured, or KV scan returned None).
+#: Consul connection failure during catalog build (no handler configured, or KV scan returned
+#: None — including when ``_kv_get_recurse`` returns ``None`` due to an exception caught
+#: internally in the handler rather than a transport or availability error visible to the caller).
 CONSUL_UNAVAILABLE: str = "consul_unavailable"
 
 #: 5-second scan budget exceeded; partial results returned.
@@ -83,6 +85,13 @@ PARTIAL_NODE_DATA: str = "partial_node_data"
 VERSION_UNKNOWN: str = "version_unknown"
 
 
+#: Prefix for dynamic warning tokens emitted when a topic suffix cannot be resolved
+#: to a Kafka topic name.  The full token is ``f"{UNRESOLVABLE_TOPIC_PREFIX}{suffix}"``.
+#: Consumers that need to detect unresolvable topics should match against this prefix
+#: rather than hard-coding the literal string ``"unresolvable_topic:"``.
+UNRESOLVABLE_TOPIC_PREFIX: str = "unresolvable_topic:"
+
+
 __all__: list[str] = [
     "CONSUL_UNAVAILABLE",
     "CONSUL_SCAN_TIMEOUT",
@@ -91,4 +100,5 @@ __all__: list[str] = [
     "INVALID_QUERY_PAYLOAD",
     "PARTIAL_NODE_DATA",
     "VERSION_UNKNOWN",
+    "UNRESOLVABLE_TOPIC_PREFIX",
 ]

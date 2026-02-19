@@ -43,6 +43,7 @@ from omnibase_infra.models.catalog.catalog_warning_codes import (
     CONSUL_SCAN_TIMEOUT,
     CONSUL_UNAVAILABLE,
     PARTIAL_NODE_DATA,
+    UNRESOLVABLE_TOPIC_PREFIX,
     VERSION_UNKNOWN,
 )
 from omnibase_infra.models.catalog.model_topic_catalog_entry import (
@@ -557,7 +558,7 @@ class ServiceTopicCatalog:
                 topic_suffix, correlation_id=correlation_id
             )
         except TopicResolutionError:
-            warnings.append(f"unresolvable_topic:{topic_suffix}")
+            warnings.append(f"{UNRESOLVABLE_TOPIC_PREFIX}{topic_suffix}")
             return topic_suffix
 
     def _parse_json_list(

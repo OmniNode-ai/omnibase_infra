@@ -918,6 +918,32 @@ class TestOMN2312WarningCodes:
         assert VERSION_UNKNOWN in response.warnings
 
     @pytest.mark.asyncio
+    async def test_consul_unavailable_without_version_unknown(self) -> None:
+        """CONSUL_UNAVAILABLE can be emitted alone when catalog_version is valid (>= 0).
+
+        This proves the two codes are independent: when _kv_get_recurse returns None
+        (e.g. due to an exception caught internally in the handler) but the version
+        key was successfully read as a positive integer, CONSUL_UNAVAILABLE is emitted
+        without VERSION_UNKNOWN coexisting.
+        """
+        handler = MagicMock()
+        handler._client = MagicMock()
+        handler._executor = None
+
+        service = _make_service(consul_handler=handler)
+        service._kv_get_recurse = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+        async def _v(cid: object) -> int:
+            return 7  # Valid positive version — VERSION_UNKNOWN must NOT be emitted
+
+        service.get_catalog_version = _v  # type: ignore[assignment]
+
+        response = await service.build_catalog(correlation_id=uuid4())
+
+        assert CONSUL_UNAVAILABLE in response.warnings
+        assert VERSION_UNKNOWN not in response.warnings
+
+    @pytest.mark.asyncio
     async def test_consul_scan_timeout_when_kv_scan_exceeds_budget(self) -> None:
         """CONSUL_SCAN_TIMEOUT emitted when KV scan exceeds budget."""
         handler = MagicMock()
