@@ -95,7 +95,7 @@ class TestServiceTopicCatalogNoHandler:
 
         assert isinstance(response, ModelTopicCatalogResponse)
         assert response.topics == ()
-        assert "consul_unavailable" in response.warnings
+        assert CONSUL_UNAVAILABLE in response.warnings
         assert response.catalog_version == 0
 
     @pytest.mark.asyncio
@@ -630,7 +630,7 @@ class TestBuildCatalogTimeout:
                 correlation_id=uuid4(),
             )
 
-        assert "consul_scan_timeout" in response.warnings
+        assert CONSUL_SCAN_TIMEOUT in response.warnings
         assert response.topics == ()
 
 
@@ -860,7 +860,7 @@ class TestConsulKVUnavailable:
             correlation_id=uuid4(),
         )
 
-        assert "consul_unavailable" in response.warnings
+        assert CONSUL_UNAVAILABLE in response.warnings
         assert response.topics == ()
 
 

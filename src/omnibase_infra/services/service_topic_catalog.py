@@ -203,7 +203,11 @@ class ServiceTopicCatalog:
         # Step 1: get current catalog version
         catalog_version = await self.get_catalog_version(correlation_id)
 
-        # Emit version_unknown warning when catalog version is indeterminate
+        # Emit version_unknown warning when catalog version is indeterminate.
+        # Note: when catalog_version == -1 AND _kv_get_recurse later returns
+        # None, both VERSION_UNKNOWN and CONSUL_UNAVAILABLE will be emitted
+        # together in the same response — this is intentional, as each warning
+        # describes a distinct failure condition.
         if catalog_version == -1:
             warnings.append(VERSION_UNKNOWN)
 
@@ -374,7 +378,7 @@ class ServiceTopicCatalog:
               IDs plus enrichment data (description, partitions, tags).
             - ``warnings`` is a list of string tokens describing any non-fatal
               issues encountered during processing (e.g.
-              ``"consul_kv_max_keys_reached"``, ``"partial_node_data"``,
+              ``CONSUL_KV_MAX_KEYS_REACHED``, ``PARTIAL_NODE_DATA``,
               ``"invalid_json_at:<key>"``).
             - ``node_count`` is the number of distinct node IDs discovered in
               the KV data.
