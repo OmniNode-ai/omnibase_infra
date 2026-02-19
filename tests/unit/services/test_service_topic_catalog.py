@@ -913,6 +913,9 @@ class TestOMN2312WarningCodes:
         response = await service.build_catalog(correlation_id=uuid4())
 
         assert CONSUL_UNAVAILABLE in response.warnings
+        # catalog_version == -1 also triggers the VERSION_UNKNOWN path; both
+        # warnings are intentionally emitted together on this code path.
+        assert VERSION_UNKNOWN in response.warnings
 
     @pytest.mark.asyncio
     async def test_consul_scan_timeout_when_kv_scan_exceeds_budget(self) -> None:
