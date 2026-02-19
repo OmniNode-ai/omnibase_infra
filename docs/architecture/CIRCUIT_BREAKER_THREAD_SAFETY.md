@@ -110,9 +110,9 @@ stateDiagram-v2
 - `HALF_OPEN -> CLOSED`: First successful operation
 - `HALF_OPEN -> OPEN`: First failed operation
 
-### Lock Usage Pattern in HandlerVault
+### Lock Usage Pattern in HandlerInfisical
 
-The HandlerVault demonstrates the correct circuit breaker integration pattern:
+The HandlerInfisical demonstrates the correct circuit breaker integration pattern:
 
 #### 1. Circuit Breaker Check (Before Operation)
 ```python
@@ -166,9 +166,9 @@ When the circuit breaker blocks a request, it raises `InfraUnavailableError` wit
 
 ```python
 context = ModelInfraErrorContext(
-    transport_type=self.transport_type,  # e.g., EnumInfraTransportType.VAULT
-    operation=operation,                  # e.g., "vault.read_secret"
-    target_name=self.service_name,        # e.g., "vault.default"
+    transport_type=self.transport_type,  # e.g., EnumInfraTransportType.INFISICAL
+    operation=operation,                  # e.g., "infisical.get_secret"
+    target_name=self.service_name,        # e.g., "infisical.primary"
     correlation_id=correlation_id,        # UUID for distributed tracing
 )
 raise InfraUnavailableError(
@@ -192,7 +192,7 @@ Correlation IDs enable distributed tracing across infrastructure components:
 # Example: Propagating correlation ID
 correlation_id = self._extract_correlation_id(envelope)
 async with self._circuit_breaker_lock:
-    await self._check_circuit_breaker("vault.read_secret", correlation_id)
+    await self._check_circuit_breaker("infisical.get_secret", correlation_id)
 ```
 
 ## Test Coverage
@@ -208,9 +208,9 @@ Comprehensive unit tests verify mixin behavior:
 5. **Success Reset** - Confirms circuit closes on success
 6. **Error Context** - Validates InfraUnavailableError includes proper context
 
-### Integration Tests: `tests/unit/handlers/test_handler_vault.py`
+### Integration Tests: `tests/unit/handlers/test_handler_infisical.py`
 
-HandlerVault tests verify circuit breaker integration:
+HandlerInfisical tests verify circuit breaker integration:
 
 1. **Circuit Breaker Protection** - Verifies requests blocked when circuit open
 2. **Retry with Circuit Breaker** - Tests interaction between retry logic and circuit breaker
@@ -304,12 +304,12 @@ if not self._circuit_breaker_lock.locked():
 self._init_circuit_breaker(
     threshold=5,                    # Max failures before opening (default: 5)
     reset_timeout=60.0,             # Auto-reset timeout in seconds (default: 60.0)
-    service_name="vault.default",   # Service identifier for error context
-    transport_type=EnumInfraTransportType.VAULT,  # Transport type for error context
+    service_name="infisical.primary",          # Service identifier for error context
+    transport_type=EnumInfraTransportType.INFISICAL,  # Transport type for error context
 )
 ```
 
-### HandlerVault-Specific Configuration
+### HandlerInfisical-Specific Configuration
 
 ```python
 circuit_breaker_enabled=True                    # Enable/disable circuit breaker
@@ -334,7 +334,7 @@ circuit_breaker_reset_timeout_seconds=30.0      # Auto-reset timeout
 ## Related Documentation
 
 - **Implementation**: `src/omnibase_infra/mixins/mixin_async_circuit_breaker.py`
-- **Usage Example**: `src/omnibase_infra/handlers/handler_vault.py`
+- **Usage Example**: `src/omnibase_infra/adapters/_internal/adapter_infisical.py`
 - **Error Patterns**: `CLAUDE.md` - "Error Recovery Patterns" section
 - **Design Analysis**: `docs/analysis/CIRCUIT_BREAKER_COMPARISON.md`
 

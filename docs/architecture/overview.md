@@ -18,7 +18,7 @@ ONEX is built on three core principles:
 
 The following diagram shows the complete ONEX runtime architecture:
 
-**Diagram Description**: This ASCII diagram illustrates the complete ONEX runtime system. At the top, the Event Bus (Kafka) receives events on topics like introspection, registration, heartbeat, and commands. Events flow down to the Message Dispatch Engine, which routes them to orchestrators based on topic patterns. The Orchestrator Layer contains Registration, Workflow, and Custom orchestrators. Orchestrators route to the Handler Layer (containing HandlerNodeIntrospected and HandlerNodeAcked) and emit intents to the Reducer Layer (containing the Registration Reducer with FSM). The Reducer emits ModelIntents to the Effect Layer (Consul Effect and Postgres Effect), which interacts with external services: Consul, PostgreSQL, Vault, and Kafka.
+**Diagram Description**: This ASCII diagram illustrates the complete ONEX runtime system. At the top, the Event Bus (Kafka) receives events on topics like introspection, registration, heartbeat, and commands. Events flow down to the Message Dispatch Engine, which routes them to orchestrators based on topic patterns. The Orchestrator Layer contains Registration, Workflow, and Custom orchestrators. Orchestrators route to the Handler Layer (containing HandlerNodeIntrospected and HandlerNodeAcked) and emit intents to the Reducer Layer (containing the Registration Reducer with FSM). The Reducer emits ModelIntents to the Effect Layer (Consul Effect and Postgres Effect), which interacts with external services: Consul, PostgreSQL, Infisical, and Kafka.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -76,9 +76,9 @@ The following diagram shows the complete ONEX runtime architecture:
                       │  ┌─────────┐  ┌─────────────┐   │
                       │  │ Consul  │  │ PostgreSQL  │   │
                       │  └─────────┘  └─────────────┘   │
-                      │  ┌─────────┐  ┌─────────────┐   │
-                      │  │  Vault  │  │    Kafka    │   │
-                      │  └─────────┘  └─────────────┘   │
+                      │  ┌──────────┐  ┌─────────────┐   │
+                      │  │Infisical │  │    Kafka    │   │
+                      │  └──────────┘  └─────────────┘   │
                       └─────────────────────────────────┘
 ```
 
@@ -88,7 +88,7 @@ The following diagram shows the complete ONEX runtime architecture:
 %%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#e3f2fd'}}}%%
 flowchart TB
     accTitle: ONEX Runtime System Architecture
-    accDescr: Complete system architecture diagram showing the ONEX runtime layers. Events flow from Kafka through the Message Dispatch Engine to Orchestrators, which route to Handlers and Reducers. Reducers emit Intents that are executed by Effect nodes, which interact with external services like Consul, PostgreSQL, Vault, and Kafka.
+    accDescr: Complete system architecture diagram showing the ONEX runtime layers. Events flow from Kafka through the Message Dispatch Engine to Orchestrators, which route to Handlers and Reducers. Reducers emit Intents that are executed by Effect nodes, which interact with external services like Consul, PostgreSQL, Infisical, and Kafka.
 
     subgraph ONEX["ONEX Runtime"]
         subgraph EventBus["Event Bus (Kafka)"]
@@ -123,7 +123,7 @@ flowchart TB
     subgraph External["External Services"]
         CONSUL[(Consul)]
         PG[(PostgreSQL)]
-        VAULT[(Vault)]
+        INFISICAL[(Infisical)]
         KAFKA[(Kafka)]
     end
 
@@ -141,7 +141,7 @@ flowchart TB
 
     CONSUL_EFF --> CONSUL
     PG_EFF --> PG
-    EffectLayer --> VAULT
+    EffectLayer --> INFISICAL
     EffectLayer --> KAFKA
 ```
 
@@ -235,7 +235,7 @@ validation_rules:
 **Example Use Cases**:
 - Database operations
 - Service discovery (Consul)
-- Secret management (Vault)
+- Secret management (Infisical)
 - HTTP API calls
 
 ```yaml
@@ -718,19 +718,80 @@ flowchart TB
 | **Effects named by capability** | "registration.storage" not "postgres" ([naming guide](../reference/contracts.md#capability-naming-convention)) |
 | **Immutable state models** | Use `with_*` methods for transitions |
 
+## Node Families
+
+The 29 nodes in `omnibase_infra` are organized into 8 functional families. Each family follows the EFFECT → COMPUTE → REDUCER → ORCHESTRATOR flow where applicable.
+
+| Family | Node Count | Purpose |
+|--------|-----------|---------|
+| **Registration** | 7 | Node lifecycle: introspection, FSM state, Consul + PostgreSQL backends, contract registry |
+| **Validation Pipeline** | 5 | Pattern candidate validation: plan, execute, adjudicate, tier promotion, audit ledger |
+| **LLM** | 3 | Provider-agnostic inference, batch embeddings, A/B baseline comparison |
+| **Session Lifecycle** | 4 | Pipeline run FSM, filesystem state, authorization gate, intent graph storage |
+| **Checkpoint** | 2 | Resumable pipeline state: filesystem persistence, structural validation |
+| **Event Ledger** | 2 | Platform-wide immutable audit trail: projection compute + idempotent PostgreSQL write |
+| **RRH** | 3 | Release readiness: environment collection, 13-rule validation, artifact persistence |
+| **Auxiliary** | 1 | Slack alerting for infrastructure events |
+
+See [CURRENT_NODE_ARCHITECTURE.md](CURRENT_NODE_ARCHITECTURE.md) for the full per-node inventory with input/output models.
+
+## `src/omnibase_infra/` Package Structure
+
+The top-level package directories and their roles:
+
+```
+src/omnibase_infra/
+├── adapters/           # Protocol adapter implementations (Kafka, Consul, Infisical, HTTP)
+├── capabilities/       # Capability registry and lookup
+├── cli/                # CLI entry points and commands
+├── clients/            # HTTP/gRPC client wrappers
+├── configs/            # Configuration models and loaders
+├── contracts/          # Contract loading, validation, and registry
+├── decorators/         # Reusable function/class decorators
+├── diagnostics/        # Diagnostic tools and health reporters
+├── dlq/                # Dead-letter queue handling
+├── enums/              # Shared enumeration types
+├── errors/             # Error hierarchy (RuntimeHostError and subclasses)
+├── event_bus/          # EventBusKafka, EventBusInmemory implementations
+├── gateway/            # API gateway and routing
+├── handlers/           # Shared handler implementations (DB, HTTP, Consul, Infisical, etc.)
+├── idempotency/        # Idempotency key management
+├── infrastructure/     # Infrastructure service adapters
+├── migrations/         # Database schema migrations
+├── mixins/             # MixinAsyncCircuitBreaker and other reusable mixins
+├── models/             # Shared Pydantic models (not node-specific)
+├── nodes/              # All 29 ONEX nodes (see CURRENT_NODE_ARCHITECTURE.md)
+├── observability/      # Metrics, tracing, structured logging
+├── plugins/            # Plugin loader system (HandlerPluginLoader)
+├── projectors/         # Projection reader/writer implementations
+├── protocols/          # Protocol definitions (ProtocolHandler, etc.)
+├── runtime/            # RuntimeHostProcess, config discovery, topic provisioning
+├── schemas/            # JSON schema definitions
+├── services/           # Service layer (ServiceHealth, etc.)
+├── shared/             # Cross-cutting shared utilities
+├── sinks/              # Event sink implementations
+├── testing/            # Test fixtures and helpers
+├── topics/             # Topic naming, pattern matching, provisioning
+├── types/              # Shared type aliases
+├── utils/              # Utility functions (error sanitization, etc.)
+└── validation/         # Validation engine components
+```
+
 ## Package Layering
 
 ### ASCII Version
 
-**Diagram Description**: This ASCII diagram shows the three-layer package dependency structure. At the top, omnibase_infra contains infrastructure implementations including handlers (Consul, DB, Vault, HTTP), nodes (Registration, Effects), and runtime (Dispatchers, Loaders). It depends on omnibase_spi (middle layer), which provides Service Provider Interface protocols like ProtocolHandler, ProtocolDispatcher, and ProtocolProjectionReader. Both depend on omnibase_core (bottom layer), which provides core models and base classes including NodeEffect, NodeCompute, NodeReducer, NodeOrchestrator, ModelONEXContainer, and core enums.
+**Diagram Description**: This ASCII diagram shows the three-layer package dependency structure. At the top, omnibase_infra contains infrastructure implementations including handlers (Consul, DB, Infisical, HTTP, LLM, Slack), nodes (29 nodes across 8 families), and runtime (RuntimeHostProcess, Dispatchers, Loaders). It depends on omnibase_spi (middle layer), which provides Service Provider Interface protocols like ProtocolHandler, ProtocolDispatcher, and ProtocolProjectionReader. Both depend on omnibase_core (bottom layer), which provides core models and base classes including NodeEffect, NodeCompute, NodeReducer, NodeOrchestrator, ModelONEXContainer, and core enums.
 
 ```
 ┌─────────────────────────────────────────────────┐
 │              omnibase_infra                      │
 │   Infrastructure implementations                 │
-│   - Handlers (Consul, DB, Vault, HTTP)          │
-│   - Nodes (Registration, Effects)                │
-│   - Runtime (Dispatchers, Loaders)              │
+│   - Handlers (Consul, DB, Infisical, HTTP,      │
+│               LLM, Slack, Filesystem)           │
+│   - Nodes (29 nodes across 8 families)          │
+│   - Runtime (RuntimeHostProcess, Dispatchers,   │
+│              Topic Provisioner, Config Discovery)│
 └─────────────────────────────────────────────────┘
                       │
                       │ depends on
@@ -760,13 +821,13 @@ flowchart TB
 ```mermaid
 flowchart TB
     accTitle: ONEX Package Layering
-    accDescr: Dependency diagram showing the three-layer package architecture. omnibase_infra at the top contains infrastructure implementations including handlers for Consul, DB, Vault, and HTTP, plus nodes and runtime components. It depends on omnibase_spi which provides Service Provider Interface protocols like ProtocolHandler, ProtocolDispatcher, and ProtocolProjectionReader. Both depend on omnibase_core at the bottom which provides core models and base classes including NodeEffect, NodeCompute, NodeReducer, NodeOrchestrator, ModelONEXContainer, and core enums.
+    accDescr: Dependency diagram showing the three-layer package architecture. omnibase_infra at the top contains infrastructure implementations including handlers for Consul, DB, Infisical, HTTP, LLM, and Slack, plus 29 nodes across 8 functional families and the RuntimeHostProcess. It depends on omnibase_spi which provides Service Provider Interface protocols. Both depend on omnibase_core at the bottom which provides core models and base classes.
 
     subgraph INFRA["omnibase_infra"]
         I1[Infrastructure implementations]
-        I2["Handlers (Consul, DB, Vault, HTTP)"]
-        I3["Nodes (Registration, Effects)"]
-        I4["Runtime (Dispatchers, Loaders)"]
+        I2["Handlers (Consul, DB, Infisical, HTTP, LLM, Slack, Filesystem)"]
+        I3["Nodes (29 nodes — Registration, Validation, LLM,\nSession Lifecycle, Checkpoint, Ledger, RRH, Slack)"]
+        I4["Runtime (RuntimeHostProcess, Dispatchers, Loaders,\nTopic Provisioner, Config Discovery)"]
     end
 
     subgraph SPI["omnibase_spi"]
@@ -793,12 +854,13 @@ flowchart TB
 | Topic | Document |
 |-------|----------|
 | **Coding standards** | [CLAUDE.md](../../CLAUDE.md) - **authoritative source** for all rules |
+| **Current node inventory** | [CURRENT_NODE_ARCHITECTURE.md](CURRENT_NODE_ARCHITECTURE.md) - all 29 nodes with types, models, and functional groups |
 | Quick start | [Getting Started](../getting-started/quickstart.md) |
 | Node archetypes | [Node Archetypes Reference](../reference/node-archetypes.md) |
 | Contract format | [Contract.yaml Reference](../reference/contracts.md) |
 | **Runtime phases (detailed)** | [2-Way Registration Walkthrough](../guides/registration-example.md) - complete code examples for all 4 phases |
 | Message dispatch | [Message Dispatch Engine](MESSAGE_DISPATCH_ENGINE.md) |
-| Registration orchestrator | [Registration Orchestrator Architecture](REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md) |
+| Registration orchestrator | [Registration Workflow](REGISTRATION_WORKFLOW.md) |
 | Implementation patterns | [Pattern Documentation](../patterns/README.md) |
 | Handler protocol | [Handler Plugin Loader](../patterns/handler_plugin_loader.md) |
 

@@ -15,7 +15,7 @@ Comprehensive reference documentation for ONEX infrastructure.
 
 | Document | Description |
 |----------|-------------|
-| [Event Bus API](../api-reference/EVENT-BUS.md) | Event bus adapters, protocols, and implementation details |
+| [Event Bus Integration](../architecture/EVENT_BUS_INTEGRATION_GUIDE.md) | Event bus adapters, protocols, and implementation details |
 
 ## Authoritative Source
 

@@ -265,6 +265,7 @@ tmp/
 *_ANALYSIS.md
 *_SUMMARY.md
 *_GUIDE.md
+!docs/**/*_GUIDE.md
 TEMP_*IMPLEMENTATION*.md
 REFACTORING_EXAMPLE.py
 examples_*.py
