@@ -75,15 +75,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# Module-level markers
-# =============================================================================
-# Note: conftest.py already applies e2e marker and skipif(not ALL_INFRA_AVAILABLE)
-# to all tests in this directory. We only add e2e here for explicit clarity.
-pytestmark = [
-    pytest.mark.e2e,
-]
-
-# =============================================================================
 # Timeout constants
 # =============================================================================
 
@@ -289,12 +280,16 @@ async def _write_node_topics_to_consul(
     """
     base = f"onex/nodes/{node_id}/event_bus"
 
-    await consul_handler._kv_put_raw(  # type: ignore[attr-defined]  # HandlerConsul exposes no public KV-write API; _kv_put_raw used for test setup
+    # DELIBERATE TEST COUPLING: _kv_put_raw is private, but HandlerConsul exposes no public
+    # KV-write API for test setup. Tracked for future public API: OMN-2317.
+    await consul_handler._kv_put_raw(  # type: ignore[attr-defined]
         f"{base}/subscribe_topics",
         json.dumps(subscribe_topics),
         correlation_id,
     )
-    await consul_handler._kv_put_raw(  # type: ignore[attr-defined]  # HandlerConsul exposes no public KV-write API; _kv_put_raw used for test setup
+    # DELIBERATE TEST COUPLING: _kv_put_raw is private, but HandlerConsul exposes no public
+    # KV-write API for test setup. Tracked for future public API: OMN-2317.
+    await consul_handler._kv_put_raw(  # type: ignore[attr-defined]
         f"{base}/publish_topics",
         json.dumps(publish_topics),
         correlation_id,
@@ -320,7 +315,8 @@ async def _delete_node_from_consul(
         correlation_id: Correlation ID for tracing.
     """
     prefix = f"onex/nodes/{node_id}/event_bus/"
-    # HandlerConsul exposes no public KV-delete API; access _client directly for test cleanup.
+    # DELIBERATE TEST COUPLING: _client is private, but HandlerConsul exposes no public
+    # KV-delete API for test cleanup. Tracked for future public API: OMN-2317.
     client = consul_handler._client  # type: ignore[attr-defined]
     if client is None:
         logger.warning(
@@ -521,7 +517,9 @@ class TestMultiClientNoCrossTalk:
 
             # Assert: no cross-talk
             # Client A must have ONLY responses with correlation_a
-            assert len(received_a) >= 1, "Client A must have received its own response"
+            assert len(received_a) >= 1, (
+                "Client A must have received its own response"
+            )  # len >= 1 confirms Client A received; per-resp correlation_id check below is the real cross-talk guard
             for resp in received_a:
                 assert resp.correlation_id == correlation_a, (
                     f"Client A received a response with wrong correlation_id: "
@@ -643,6 +641,7 @@ class TestResponseDeterminism:
             response_1.node_count,
         )
 
+    @pytest.mark.serial
     async def test_topic_ordering_is_alphabetical(
         self,
         catalog_handler: HandlerTopicCatalogQuery,
@@ -830,7 +829,7 @@ class TestChangeNotificationFlow:
         test_node_id = f"e2e-test-change-notification-{uuid4().hex[:8]}"
 
         # New topics this node will register (two suffixes for ordering test)
-        # Using valid ONEX topic suffix format
+        # Synthetic test topics using onex.evt.test.* namespace
         new_topic_b = f"onex.evt.test.node-event-b-{uuid4().hex[:8]}.v1"
         new_topic_a = f"onex.evt.test.node-event-a-{uuid4().hex[:8]}.v1"
         new_topics = [new_topic_a, new_topic_b]
@@ -1002,10 +1001,7 @@ class TestChangeNotificationFlow:
                 await catalog_service.increment_version(correlation_id)
             except Exception:
                 logger.warning(
-                    "test_register_node_produces_correct_catalog_changed: "
-                    "best-effort version bump after cleanup failed "
-                    "(correlation_id=%s)",
-                    correlation_id,
+                    "Best-effort version bump failed during cleanup",
                     exc_info=True,
                 )
 
