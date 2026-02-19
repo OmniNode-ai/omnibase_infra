@@ -250,7 +250,7 @@ def _deserialize_response(raw: bytes | str) -> ModelTopicCatalogResponse | None:
             )
         ):
             return ModelTopicCatalogResponse.model_validate(data)
-    except Exception:
+    except (json.JSONDecodeError, ValueError, KeyError, TypeError):
         logger.warning(
             "_deserialize_response: failed to deserialize message",
             exc_info=True,
@@ -688,6 +688,7 @@ class TestVersionGapRecovery:
     works end-to-end.
     """
 
+    @pytest.mark.serial
     async def test_version_gap_detection_and_recovery(
         self,
         catalog_service: ServiceTopicCatalog,
