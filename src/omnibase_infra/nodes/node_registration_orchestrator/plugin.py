@@ -83,6 +83,7 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.runtime.projector_shell import ProjectorShell
     from omnibase_infra.runtime.service_intent_executor import IntentExecutor
+    from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -1348,8 +1349,33 @@ class PluginRegistration:
                     IntentEffectConsulRegister,
                 )
 
+                # Resolve ServiceTopicCatalog for CAS version increment + change notification.
+                # Optional: if not available, catalog change events are silently skipped.
+                _catalog_svc: ServiceTopicCatalog | None = None
+                try:
+                    from omnibase_infra.services.service_topic_catalog import (
+                        ServiceTopicCatalog as _STC,
+                    )
+
+                    _catalog_svc = await config.container.service_registry.resolve_service(  # type: ignore[union-attr]
+                        _STC
+                    )
+                except Exception:
+                    logger.debug(
+                        "ServiceTopicCatalog not registered; catalog change "
+                        "events will not be emitted (correlation_id=%s)",
+                        correlation_id,
+                    )
+
+                _event_bus_for_catalog = (
+                    config.event_bus  # type: ignore[arg-type]
+                    if (_catalog_svc is not None and config is not None)
+                    else None
+                )
                 consul_effect = IntentEffectConsulRegister(
                     consul_handler=self._consul_handler,
+                    catalog_service=_catalog_svc,
+                    event_bus=_event_bus_for_catalog,
                 )
                 intent_executor.register_handler(intent_type, consul_effect)
                 await self._register_effect_in_container(

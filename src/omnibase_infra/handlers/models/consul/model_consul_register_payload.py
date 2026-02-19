@@ -28,6 +28,12 @@ class ModelConsulRegisterPayload(ModelPayloadConsul):
         registered: True if the service was registered successfully.
         name: The service name.
         consul_service_id: The Consul service identifier (user-defined string).
+        topics_added: Frozenset of topic suffixes newly added to the index.
+            Empty when no event_bus_config was provided or the topic index
+            did not change.
+        topics_removed: Frozenset of topic suffixes removed from the index.
+            Empty when no event_bus_config was provided or the topic index
+            did not change.
 
     Note:
         consul_service_id is a Consul-specific identifier that is a user-defined string,
@@ -47,6 +53,20 @@ class ModelConsulRegisterPayload(ModelPayloadConsul):
     name: str = Field(description="The service name")
     consul_service_id: str = Field(
         description="The Consul service identifier (user-defined string, not a UUID)"
+    )
+    topics_added: frozenset[str] = Field(
+        default_factory=frozenset,
+        description=(
+            "Topic suffixes newly added to the reverse index during this registration. "
+            "Empty when no event_bus_config was provided or no topics changed."
+        ),
+    )
+    topics_removed: frozenset[str] = Field(
+        default_factory=frozenset,
+        description=(
+            "Topic suffixes removed from the reverse index during this registration. "
+            "Empty when no event_bus_config was provided or no topics changed."
+        ),
     )
 
 

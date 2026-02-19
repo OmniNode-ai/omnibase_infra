@@ -54,6 +54,15 @@ class ModelPayloadConsulRegister(BaseModel):
         description="Correlation ID for distributed tracing.",
     )
 
+    node_id: str | None = Field(
+        default=None,
+        description=(
+            "ONEX node identifier (string form of UUID). Required when "
+            "event_bus_config is provided so the consul handler can store "
+            "the event bus config under onex/nodes/{node_id}/event_bus/."
+        ),
+    )
+
     service_id: str = Field(
         ...,
         min_length=1,

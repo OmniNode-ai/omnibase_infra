@@ -339,7 +339,7 @@ class MixinConsulTopicIndex:
         node_id: str,
         event_bus: ModelNodeEventBusConfig,
         correlation_id: UUID,
-    ) -> None:
+    ) -> tuple[frozenset[str], frozenset[str]]:
         """Idempotent update of topic -> node_id reverse index.
 
         Computes the delta between previously registered topics and new topics,
@@ -352,6 +352,10 @@ class MixinConsulTopicIndex:
             node_id: The node identifier.
             event_bus: The resolved event bus configuration.
             correlation_id: Correlation ID for tracing.
+
+        Returns:
+            Tuple of (topics_added, topics_removed) as frozensets of topic suffix
+            strings. Both sets are empty when there is no change.
 
         Raises:
             InfraConsulError: If Consul client not initialized or operation fails.
@@ -423,6 +427,8 @@ class MixinConsulTopicIndex:
             len(topics_to_remove),
             extra={"correlation_id": str(correlation_id), "node_id": node_id},
         )
+
+        return frozenset(topics_to_add), frozenset(topics_to_remove)
 
     async def _add_subscriber_to_topic(
         self,
