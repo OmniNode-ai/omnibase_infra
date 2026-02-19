@@ -68,7 +68,14 @@ class ModelTopicCatalogChanged(BaseModel):
     catalog_version: int = Field(
         ...,
         ge=0,
-        description="New catalog version after this change.",
+        description=(
+            "New catalog version after this change. "
+            "A value of 0 with ``cas_failure=False`` represents the initial catalog "
+            "state (the first-ever catalog entry, before any increment has occurred). "
+            "A value of 0 with ``cas_failure=True`` indicates that CAS retries were "
+            "exhausted and the version was clamped to 0; consumers must inspect "
+            "``cas_failure`` to distinguish these two cases."
+        ),
     )
     topics_added: tuple[str, ...] = Field(
         default_factory=tuple,

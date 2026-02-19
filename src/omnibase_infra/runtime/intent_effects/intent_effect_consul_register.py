@@ -293,7 +293,7 @@ class IntentEffectConsulRegister:
         if self._catalog_service is None or self._event_bus is None:
             return
 
-        if not hasattr(handler_output, "result"):
+        if handler_output is None or not hasattr(handler_output, "result"):
             return
 
         # Extract delta from handler output result using typed access.
@@ -398,25 +398,19 @@ class IntentEffectConsulRegister:
                 },
             )
 
-        except RuntimeHostError as emit_err:
-            # Catalog change notification is best-effort: do not fail the
-            # registration if the notification cannot be emitted due to an
-            # infrastructure-level failure (e.g. Kafka unavailable, connection
-            # error, timeout).  Programming errors such as
-            # ``pydantic.ValidationError`` are intentionally NOT caught here
-            # so that bugs in event construction surface immediately.
-            #
-            # Propagation note: exceptions that are NOT RuntimeHostError
-            # (e.g. ``pydantic.ValidationError`` from a malformed
-            # ``ModelTopicCatalogChanged``, or any other programming error)
-            # will escape this method entirely and propagate up to the outer
-            # ``except Exception`` handler in the calling effect, where they
-            # are caught and re-raised as a generic ``RuntimeHostError`` with
-            # the message 'Failed to execute Consul registration intent'.
-            # This means a model construction bug here will be reported as a
-            # Consul registration failure, which can be misleading.  If that
-            # wrapping behaviour ever changes, this method should be updated
-            # to handle (or explicitly re-raise) non-infrastructure errors.
+        except Exception as emit_err:
+            # Catalog change notification is best-effort: ALL exceptions are
+            # swallowed here so that a notification failure never disrupts the
+            # primary Consul registration flow.  This includes infrastructure
+            # failures (e.g. Kafka unavailable, connection error, timeout) as
+            # well as programming errors (e.g. ``pydantic.ValidationError``
+            # from a malformed ``ModelTopicCatalogChanged``, ``TypeError`` from
+            # a bug in event construction, or any raw OS/transport error not yet
+            # wrapped as a ``RuntimeHostError``).  Without this broad catch,
+            # such exceptions would propagate to the outer ``execute()`` handler
+            # and be re-raised as "Failed to execute Consul registration intent",
+            # misattributing a catalog notification failure as a Consul
+            # registration failure.
             logger.warning(
                 "Failed to emit catalog changed event: %s (correlation_id=%s)",
                 sanitize_error_message(emit_err),

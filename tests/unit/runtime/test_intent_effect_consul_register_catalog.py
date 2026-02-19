@@ -398,12 +398,12 @@ class TestCatalogChangeEmission:
         mock_handler_with_delta: MagicMock,
         mock_catalog_service: MagicMock,
     ) -> None:
-        """Infrastructure emit failures are caught; Consul registration still succeeds.
+        """All emit failures are swallowed; Consul registration still succeeds.
 
-        Only RuntimeHostError subclasses (e.g. InfraUnavailableError) are
-        swallowed.  Programming errors such as pydantic.ValidationError are
-        intentionally not caught and will propagate (see
-        test_programming_error_in_emit_propagates).
+        The broad ``except Exception`` in ``_maybe_emit_catalog_changed`` means
+        that every exception — infrastructure failures (e.g. InfraUnavailableError)
+        as well as programming errors — is swallowed and logged rather than
+        propagating to disrupt the primary registration flow.
         """
         failing_bus = MagicMock()
         failing_bus.publish_envelope = AsyncMock(
@@ -421,21 +421,20 @@ class TestCatalogChangeEmission:
         await effect.execute(payload, correlation_id=uuid4())
 
     @pytest.mark.asyncio
-    async def test_programming_error_in_emit_propagates(
+    async def test_programming_error_in_emit_is_swallowed(
         self,
         mock_handler_with_delta: MagicMock,
         mock_catalog_service: MagicMock,
     ) -> None:
-        """Non-infrastructure errors from event construction are not swallowed.
+        """Programming errors from event emission are swallowed, not propagated.
 
-        The broad ``except Exception`` was narrowed to ``except RuntimeHostError``
-        so that programming errors (e.g. a bug in event construction logic that
-        raises a ``TypeError`` or ``pydantic.ValidationError``) surface immediately
-        rather than being silently logged and discarded.
-
-        A ``TypeError`` is used here as a stand-in for any non-infrastructure
-        exception (``TypeError`` is not a subclass of ``RuntimeHostError``).
-        The outer ``execute()`` handler will re-wrap it in ``RuntimeHostError``.
+        ``_maybe_emit_catalog_changed`` uses ``except Exception`` to ensure the
+        best-effort notification path never disrupts the primary registration
+        flow, regardless of the exception type.  This includes raw programming
+        errors such as ``TypeError`` that are not subclasses of
+        ``RuntimeHostError``.  Previously these would have escaped and been
+        re-wrapped by the outer ``execute()`` handler as a misleading
+        "Failed to execute Consul registration intent" error.
         """
         failing_bus = MagicMock()
         # TypeError is not a RuntimeHostError subclass — it represents a
@@ -451,10 +450,9 @@ class TestCatalogChangeEmission:
         )
 
         payload = _make_base_consul_payload()
-        # TypeError must not be silently swallowed; it propagates out wrapped
-        # in RuntimeHostError by the outer execute() exception handler.
-        with pytest.raises(RuntimeHostError):
-            await effect.execute(payload, correlation_id=uuid4())
+        # TypeError must be swallowed by the broad except Exception; the
+        # primary Consul registration should still succeed without raising.
+        await effect.execute(payload, correlation_id=uuid4())
 
     @pytest.mark.asyncio
     async def test_trigger_node_id_propagated(

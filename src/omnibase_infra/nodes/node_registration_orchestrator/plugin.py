@@ -1361,7 +1361,13 @@ class PluginRegistration:
                         _catalog_svc = await config.container.service_registry.resolve_service(
                             ServiceTopicCatalog
                         )
-                except (ContainerWiringError, ImportError) as exc:
+                except Exception as exc:  # noqa: BLE001 — intentional: optional service resolution must not crash startup
+                    # ServiceTopicCatalog is explicitly optional: any exception
+                    # during resolution (ContainerWiringError, ImportError,
+                    # KeyError, LookupError, AttributeError, or any other
+                    # unexpected error) must be silently swallowed so that the
+                    # catalog notification feature degrades gracefully rather
+                    # than crashing the entire plugin initialization.
                     logger.debug(
                         "ServiceTopicCatalog not registered; catalog change "
                         "events will not be emitted (correlation_id=%s): %s(%s)",
