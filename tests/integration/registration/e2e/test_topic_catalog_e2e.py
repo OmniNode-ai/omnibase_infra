@@ -93,6 +93,16 @@ _KAFKA_RECEIVE_TIMEOUT_S = 15.0
 _SUBSCRIPTION_READY_TIMEOUT_S = 10.0
 
 # =============================================================================
+# Run-scoped unique ID
+# =============================================================================
+
+# Module-level run ID: unique per test-runner process so concurrent workers and
+# repeated runs on a shared Kafka cluster get distinct consumer group IDs, while
+# all tests within a single run share the same suffix (important for cross-talk
+# tests that need consistent group IDs within one run).
+_RUN_ID = str(uuid4())[:8]
+
+# =============================================================================
 # Local fixtures
 # =============================================================================
 
@@ -159,7 +169,7 @@ async def second_kafka_bus() -> AsyncGenerator[EventBusKafka, None]:
 
     config = ModelKafkaEventBusConfig(
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-        environment="e2e-test-client-b",
+        environment=f"e2e-test-client-b-{_RUN_ID}",
         timeout_seconds=30,
         max_retry_attempts=3,
         circuit_breaker_threshold=5,
@@ -268,12 +278,12 @@ async def _write_node_topics_to_consul(
     """
     base = f"onex/nodes/{node_id}/event_bus"
 
-    await consul_handler._kv_put_raw(
+    await consul_handler._kv_put_raw(  # type: ignore[attr-defined]  # HandlerConsul exposes no public KV-write API; _kv_put_raw used for test setup
         f"{base}/subscribe_topics",
         json.dumps(subscribe_topics),
         correlation_id,
     )
-    await consul_handler._kv_put_raw(
+    await consul_handler._kv_put_raw(  # type: ignore[attr-defined]  # HandlerConsul exposes no public KV-write API; _kv_put_raw used for test setup
         f"{base}/publish_topics",
         json.dumps(publish_topics),
         correlation_id,
@@ -417,9 +427,12 @@ class TestMultiClientNoCrossTalk:
                     received_b.append(response)
                     got_b.set()
 
-        # Subscribe both clients with different consumer groups (different node identities)
-        identity_a = make_e2e_test_identity("catalog_client_a")
-        identity_b = make_e2e_test_identity("catalog_client_b")
+        # Subscribe both clients with different consumer groups (different node identities).
+        # _RUN_ID suffix ensures group IDs are unique across concurrent workers and
+        # repeated runs on a shared Kafka cluster while remaining consistent within
+        # a single run (so the cross-talk test uses matching IDs on both sides).
+        identity_a = make_e2e_test_identity(f"catalog_client_a_{_RUN_ID}")
+        identity_b = make_e2e_test_identity(f"catalog_client_b_{_RUN_ID}")
 
         unsub_a = await real_kafka_event_bus.subscribe(
             topic=SUFFIX_TOPIC_CATALOG_RESPONSE,
@@ -793,7 +806,7 @@ class TestChangeNotificationFlow:
         7. Compute delta: new_topics - initial_topics
         8. Build ModelTopicCatalogChanged from delta
         9. Assert: topics_added is sorted alphabetically
-        10. Assert: catalog_version incremented by exactly 1 from step 3 version
+        10. Assert: catalog_version incremented by at least 1 from step 3 version
         11. Assert: topics_added contains the new node's topic suffixes
         12. Assert: topics_removed is empty
         """
@@ -1139,6 +1152,10 @@ class TestIntegrationGoldenPath:
         assert isinstance(response, ModelTopicCatalogResponse)
         assert response.correlation_id == correlation_id
 
+        assert len(response.topics) > 0, (
+            f"filter should return at least one matching topic for pattern {pattern!r}; "
+            "got an empty result — a broken filter would pass vacuously"
+        )
         for entry in response.topics:
             assert fnmatch(entry.topic_suffix, pattern), (
                 f"Topic {entry.topic_suffix!r} does not match pattern {pattern!r}. "
