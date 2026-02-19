@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Unit tests for catalog warning code constants.
 
-Verifies that all 7 warning codes are defined as string constants with the
+Verifies that all 8 warning codes are defined as string constants with the
 exact values the DoD specifies, and that the constants are exported from both
 the module and the package __init__.
 
@@ -22,6 +22,7 @@ from omnibase_infra.models.catalog.catalog_warning_codes import (
     INTERNAL_ERROR,
     INVALID_QUERY_PAYLOAD,
     PARTIAL_NODE_DATA,
+    UNRESOLVABLE_TOPIC_PREFIX,
     VERSION_UNKNOWN,
 )
 
@@ -72,6 +73,7 @@ class TestWarningCodeValues:
             INVALID_QUERY_PAYLOAD,
             PARTIAL_NODE_DATA,
             VERSION_UNKNOWN,
+            UNRESOLVABLE_TOPIC_PREFIX,
         ):
             assert isinstance(constant, str), f"{constant!r} is not a str"
 
@@ -85,8 +87,13 @@ class TestWarningCodeValues:
             INVALID_QUERY_PAYLOAD,
             PARTIAL_NODE_DATA,
             VERSION_UNKNOWN,
+            UNRESOLVABLE_TOPIC_PREFIX,
         ]
         assert len(set(codes)) == len(codes), "Duplicate warning codes detected"
+
+    def test_unresolvable_topic_prefix_value(self) -> None:
+        """UNRESOLVABLE_TOPIC_PREFIX must equal 'unresolvable_topic:'."""
+        assert UNRESOLVABLE_TOPIC_PREFIX == "unresolvable_topic:"
 
 
 # ---------------------------------------------------------------------------
@@ -132,3 +139,8 @@ class TestWarningCodePackageExports:
         """INTERNAL_ERROR is in the catalog package namespace."""
         assert hasattr(catalog_pkg, "INTERNAL_ERROR")
         assert catalog_pkg.INTERNAL_ERROR == "internal_error"
+
+    def test_unresolvable_topic_prefix_exported_from_package(self) -> None:
+        """UNRESOLVABLE_TOPIC_PREFIX is in the catalog package namespace."""
+        assert hasattr(catalog_pkg, "UNRESOLVABLE_TOPIC_PREFIX")
+        assert catalog_pkg.UNRESOLVABLE_TOPIC_PREFIX == "unresolvable_topic:"
