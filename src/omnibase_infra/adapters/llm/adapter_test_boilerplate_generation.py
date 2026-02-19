@@ -86,6 +86,8 @@ _DEFAULT_TEMPERATURE: float = 0.1
 # Per-request timeout in seconds.  Qwen3-14B is a fast coding model;
 # 90 s gives headroom for a 2 048-token completion without exceeding the
 # transport cap of 180 s.
+# IMPORTANT: Must not exceed TransportHolderLlmHttp(max_timeout_seconds=180.0).
+# If you raise this value, update the transport cap in __init__ accordingly.
 _DEFAULT_TIMEOUT_SECONDS: float = 90.0
 
 # Delegation confidence: test generation is a well-defined coding task.
@@ -151,8 +153,8 @@ Generate a pytest test class for the following Python class. Include:
 2. A docstring on the test class explaining what is being tested
 3. At least 3 test methods: one happy path, one edge case, one error/exception case
 4. Use ``AsyncMock`` for async methods and ``MagicMock`` for sync dependencies
-5. Assertions must be specific -- use ``==``, ``is``, ``pytest.approx``, "
-   "or ``pytest.raises`` appropriately
+5. Assertions must be specific -- use ``==``, ``is``, ``pytest.approx``,
+   or ``pytest.raises`` appropriately
 
 Return only the test class code block (no surrounding file boilerplate, no markdown fences).
 

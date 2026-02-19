@@ -49,11 +49,19 @@ from omnibase_spi.contracts.delegation.contract_delegated_response import (
 # ---------------------------------------------------------------------------
 
 
-def _make_adapter(**kwargs: object) -> AdapterTestBoilerplateGeneration:
+def _make_adapter(
+    model: str = _DEFAULT_MODEL,
+    max_tokens: int = 2_048,
+    temperature: float = 0.1,
+    api_key: str | None = None,
+) -> AdapterTestBoilerplateGeneration:
     """Build an AdapterTestBoilerplateGeneration with a mocked transport."""
     adapter = AdapterTestBoilerplateGeneration(
         base_url="http://localhost:8001",
-        **kwargs,  # type: ignore[arg-type]
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        api_key=api_key,
     )
     # Replace transport and handler with mocks to avoid HTTP calls.
     adapter._transport = MagicMock()
@@ -963,7 +971,6 @@ class TestAdapterTestBoilerplateGenerationLlmException:
 
         adapter._handler.handle = failing_handle  # type: ignore[method-assign,assignment]
 
-        exc_info: pytest.ExceptionInfo[RuntimeHostError]
         with pytest.raises(RuntimeHostError) as exc_info:
             await adapter.generate(
                 task_type=TASK_TYPE_TEST_CLASS, source="class Foo: pass"
