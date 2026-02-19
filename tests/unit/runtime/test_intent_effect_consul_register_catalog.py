@@ -249,6 +249,7 @@ class TestCatalogChangeEmission:
         changed_event = call_args.args[0].payload
         assert isinstance(changed_event, ModelTopicCatalogChanged)
         assert changed_event.catalog_version == 0
+        assert changed_event.cas_failure is True
 
     @pytest.mark.asyncio
     async def test_trigger_reason_registration_for_added_only(

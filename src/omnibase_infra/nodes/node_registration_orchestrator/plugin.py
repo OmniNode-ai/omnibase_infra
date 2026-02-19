@@ -1360,11 +1360,13 @@ class PluginRegistration:
                     _catalog_svc = await config.container.service_registry.resolve_service(  # type: ignore[union-attr]
                         ServiceTopicCatalog
                     )
-                except Exception:
+                except Exception as exc:
                     logger.debug(
                         "ServiceTopicCatalog not registered; catalog change "
-                        "events will not be emitted (correlation_id=%s)",
+                        "events will not be emitted (correlation_id=%s): %s(%s)",
                         correlation_id,
+                        type(exc).__name__,
+                        exc,
                     )
 
                 _event_bus_for_catalog = (

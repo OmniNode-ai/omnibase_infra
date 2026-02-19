@@ -393,15 +393,16 @@ class IntentEffectConsulRegister:
                 SUFFIX_TOPIC_CATALOG_CHANGED,
             )
 
+            catalog_version = max(new_version, 0)
             logger.info(
                 "Emitted ModelTopicCatalogChanged: version=%d +%d -%d "
                 "(correlation_id=%s)",
-                new_version,
+                catalog_version,
                 len(topics_added),
                 len(topics_removed),
                 str(correlation_id),
                 extra={
-                    "catalog_version": new_version,
+                    "catalog_version": catalog_version,
                     "topics_added": sorted(topics_added),
                     "topics_removed": sorted(topics_removed),
                     "trigger_reason": trigger_reason,
