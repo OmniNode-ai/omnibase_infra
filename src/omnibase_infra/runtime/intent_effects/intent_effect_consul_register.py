@@ -42,6 +42,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import RuntimeHostError
@@ -61,7 +62,6 @@ from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_TOPIC_CATALOG_C
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
-    from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
     from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.handlers.models.model_consul_handler_response import (
         ModelConsulHandlerResponse,
@@ -293,7 +293,7 @@ class IntentEffectConsulRegister:
         if self._catalog_service is None or self._event_bus is None:
             return
 
-        if not isinstance(handler_output, ModelHandlerOutput):
+        if not hasattr(handler_output, "result"):
             return
 
         # Extract delta from handler output result using typed access.
