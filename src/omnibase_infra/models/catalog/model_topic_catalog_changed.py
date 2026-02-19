@@ -37,6 +37,10 @@ class ModelTopicCatalogChanged(BaseModel):
         trigger_reason: Human-readable reason for the change.
         changed_at: UTC timestamp when the change occurred.
         schema_version: Schema version for forward compatibility.
+        cas_failure: True when CAS retries were exhausted and catalog_version
+            is clamped to 0. Consumers can use this flag to distinguish a
+            genuine version-0 catalog from a CAS failure without relying on
+            log correlation.
 
     Example:
         >>> from uuid import uuid4
@@ -92,6 +96,15 @@ class ModelTopicCatalogChanged(BaseModel):
         default=1,
         ge=1,
         description="Schema version for forward compatibility.",
+    )
+    cas_failure: bool = Field(
+        default=False,
+        description=(
+            "True when the catalog version could not be incremented because CAS retries "
+            "were exhausted. When True, catalog_version is clamped to 0 and consumers "
+            "should treat this event as a best-effort notification rather than a "
+            "reliable version increment."
+        ),
     )
 
     @field_validator("changed_at")

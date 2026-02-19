@@ -22,6 +22,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_infra.handlers.models.consul.model_consul_register_payload import (
+    ModelConsulRegisterPayload,
+)
 from omnibase_infra.models.registration import (
     ModelEventBusTopicEntry,
     ModelNodeEventBusConfig,
@@ -40,8 +43,12 @@ def _make_consul_register_payload(
     topics_added: frozenset[str] = frozenset(),
     topics_removed: frozenset[str] = frozenset(),
 ) -> MagicMock:
-    """Build a mock ModelConsulHandlerOutput whose nested payload carries a delta."""
-    data_mock = MagicMock()
+    """Build a mock ModelHandlerOutput whose nested payload carries a register delta.
+
+    Uses spec=ModelConsulRegisterPayload on the data mock so that isinstance
+    checks in the typed extraction path pass correctly.
+    """
+    data_mock = MagicMock(spec=ModelConsulRegisterPayload)
     data_mock.topics_added = topics_added
     data_mock.topics_removed = topics_removed
 

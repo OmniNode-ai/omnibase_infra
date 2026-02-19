@@ -53,7 +53,12 @@ from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
+    from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+
     from omnibase_infra.handlers import HandlerConsul
+    from omnibase_infra.handlers.models.model_consul_handler_response import (
+        ModelConsulHandlerResponse,
+    )
     from omnibase_infra.protocols import ProtocolEventBusLike
     from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
 
@@ -251,7 +256,7 @@ class IntentEffectConsulRegister:
 
     async def _maybe_emit_catalog_changed(
         self,
-        handler_output: object,
+        handler_output: "ModelHandlerOutput[ModelConsulHandlerResponse]",
         node_id: str | None,
         correlation_id: UUID,
     ) -> None:
@@ -273,33 +278,31 @@ class IntentEffectConsulRegister:
 
         Args:
             handler_output: Return value from ``HandlerConsul.execute()``.
-                Expected to be a ``ModelHandlerOutput[ModelConsulHandlerResponse]``.
+                Typed as ``ModelHandlerOutput[ModelConsulHandlerResponse]``.
             node_id: Node identifier for the ``trigger_node_id`` field.
             correlation_id: Correlation ID for tracing.
         """
         if self._catalog_service is None or self._event_bus is None:
             return
 
-        # Extract delta from handler output result
+        # Extract delta from handler output result using typed access.
+        # result is ModelConsulHandlerResponse | None; payload.data is a
+        # discriminated ConsulPayload union — only ModelConsulRegisterPayload
+        # carries topics_added / topics_removed.
         topics_added: frozenset[str] = frozenset()
         topics_removed: frozenset[str] = frozenset()
 
         try:
-            # ModelHandlerOutput.result holds ModelConsulHandlerResponse
-            result = getattr(handler_output, "result", None)
+            from omnibase_infra.handlers.models.consul.model_consul_register_payload import (
+                ModelConsulRegisterPayload,
+            )
+
+            result = handler_output.result
             if result is not None:
-                response_payload = getattr(result, "payload", None)
-                if response_payload is not None:
-                    data = getattr(response_payload, "data", None)
-                    if data is not None:
-                        raw_added: object = getattr(data, "topics_added", frozenset())
-                        raw_removed: object = getattr(
-                            data, "topics_removed", frozenset()
-                        )
-                        if isinstance(raw_added, frozenset):
-                            topics_added = raw_added
-                        if isinstance(raw_removed, frozenset):
-                            topics_removed = raw_removed
+                data = result.payload.data
+                if isinstance(data, ModelConsulRegisterPayload):
+                    topics_added = data.topics_added
+                    topics_removed = data.topics_removed
         except Exception as extract_err:
             logger.warning(
                 "Failed to extract topic delta from Consul register output: %s "
@@ -372,6 +375,7 @@ class IntentEffectConsulRegister:
                 trigger_node_id=node_id,
                 trigger_reason=trigger_reason,
                 changed_at=datetime.now(UTC),
+                cas_failure=(new_version == -1),
             )
 
             change_envelope: ModelEventEnvelope[ModelTopicCatalogChanged] = (
