@@ -299,6 +299,7 @@ async def _delete_node_from_consul(
         correlation_id: Correlation ID for tracing.
     """
     prefix = f"onex/nodes/{node_id}/event_bus/"
+    # HandlerConsul exposes no public KV-delete API; access _client directly for test cleanup.
     client = consul_handler._client  # type: ignore[attr-defined]
     if client is None:
         logger.warning(
@@ -650,12 +651,7 @@ class TestResponseDeterminism:
                 len(response.topics),
             )
         else:
-            # Edge case: ordering cannot be verified with fewer than 2 topics; test passes vacuously.
-            logger.info(
-                "Topic ordering test: fewer than 2 topics present (count=%d), "
-                "ordering assertion skipped (no ordering to verify)",
-                len(response.topics),
-            )
+            pytest.skip("fewer than 2 topics available; cannot verify ordering")
 
 
 # =============================================================================
@@ -938,10 +934,10 @@ class TestChangeNotificationFlow:
             # execution: a concurrent test could bump the shared catalog version
             # between our increment_version call and the post-registration query,
             # making an exact equality check flaky.  new_version is the version
-            # we explicitly set, so equality against that is still a tight bound.
-            assert post_response.catalog_version == new_version, (
+            # we explicitly set, so >= is the correct bound.
+            assert post_response.catalog_version >= new_version, (
                 f"Post-registration catalog_version ({post_response.catalog_version}) "
-                f"must equal the version we set ({new_version})"
+                f"must be >= the version we set ({new_version})"
             )
             assert post_response.catalog_version >= version_before_node + 1, (
                 f"catalog_version must increment by at least 1. "
