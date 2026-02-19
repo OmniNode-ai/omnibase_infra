@@ -38,7 +38,11 @@ from omnibase_infra.adapters.llm.adapter_test_boilerplate_generation import (
     TASK_TYPE_TEST_MODULE,
     AdapterTestBoilerplateGeneration,
 )
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumLlmOperationType,
+)
 from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
 from omnibase_spi.contracts.delegation.contract_delegated_response import (
     ContractDelegatedResponse,
@@ -82,6 +86,7 @@ def _make_llm_response(generated_text: str | None) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationProperties:
     """Tests for classification properties."""
 
@@ -99,6 +104,7 @@ class TestAdapterTestBoilerplateGenerationProperties:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationTaskTypes:
     """Tests for generate() with each valid task_type."""
 
@@ -193,6 +199,7 @@ class TestAdapterTestBoilerplateGenerationTaskTypes:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationInvalidTaskType:
     """Tests for generate() with invalid task_type."""
 
@@ -241,6 +248,7 @@ class TestAdapterTestBoilerplateGenerationInvalidTaskType:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationInvalidSource:
     """Tests for generate() with empty or whitespace-only source."""
 
@@ -291,6 +299,7 @@ class TestAdapterTestBoilerplateGenerationInvalidSource:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationAttribution:
     """Tests for attribution fields in the response."""
 
@@ -387,6 +396,7 @@ class TestAdapterTestBoilerplateGenerationAttribution:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationStructuredJson:
     """Tests for structured_json in the response."""
 
@@ -413,6 +423,7 @@ class TestAdapterTestBoilerplateGenerationStructuredJson:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationEmptyLlmResponse:
     """Tests for behavior when LLM returns empty or None text."""
 
@@ -494,6 +505,7 @@ class TestAdapterTestBoilerplateGenerationEmptyLlmResponse:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationSourceTruncation:
     """Tests for source truncation when source exceeds _MAX_SOURCE_CHARS."""
 
@@ -548,6 +560,7 @@ class TestAdapterTestBoilerplateGenerationSourceTruncation:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationCurlyBraceSafety:
     """Regression tests: source with curly braces must not crash generate()."""
 
@@ -627,6 +640,7 @@ class TestAdapterTestBoilerplateGenerationCurlyBraceSafety:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationConstructorValidation:
     """Tests for constructor parameter validation."""
 
@@ -654,13 +668,14 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
                 max_tokens=32_769,
             )
 
-    def test_valid_max_tokens_does_not_raise(self) -> None:
+    @pytest.mark.asyncio
+    async def test_valid_max_tokens_does_not_raise(self) -> None:
         """max_tokens=1024 is valid."""
-        adapter = AdapterTestBoilerplateGeneration(
+        async with AdapterTestBoilerplateGeneration(
             base_url="http://localhost:8001",
             max_tokens=1024,
-        )
-        assert adapter._max_tokens == 1024
+        ) as adapter:
+            assert adapter._max_tokens == 1024
 
     def test_negative_temperature_raises_protocol_configuration_error(self) -> None:
         """temperature < 0.0 raises ProtocolConfigurationError."""
@@ -678,14 +693,15 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
                 temperature=2.1,
             )
 
-    def test_valid_temperature_boundary_does_not_raise(self) -> None:
+    @pytest.mark.asyncio
+    async def test_valid_temperature_boundary_does_not_raise(self) -> None:
         """temperature=0.0 and temperature=2.0 are valid boundaries."""
         for t in (0.0, 2.0):
-            adapter = AdapterTestBoilerplateGeneration(
+            async with AdapterTestBoilerplateGeneration(
                 base_url="http://localhost:8001",
                 temperature=t,
-            )
-            assert adapter._temperature == t
+            ) as adapter:
+                assert adapter._temperature == t
 
     def test_empty_base_url_raises_protocol_configuration_error(self) -> None:
         """Explicit base_url='' raises ProtocolConfigurationError at construction time."""
@@ -726,6 +742,7 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationClose:
     """Tests for the close() method."""
 
@@ -742,14 +759,13 @@ class TestAdapterTestBoilerplateGenerationClose:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationRequestConstruction:
     """Tests for the LLM request fields sent by generate()."""
 
     @pytest.mark.asyncio
     async def test_request_uses_chat_completion(self) -> None:
         """The LLM request uses CHAT_COMPLETION operation type."""
-        from omnibase_infra.enums import EnumLlmOperationType
-
         adapter = _make_adapter()
         captured_requests: list[object] = []
 
@@ -832,6 +848,7 @@ class TestAdapterTestBoilerplateGenerationRequestConstruction:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationCorrelationId:
     """Tests for the correlation_id parameter on generate()."""
 
@@ -889,6 +906,7 @@ class TestAdapterTestBoilerplateGenerationCorrelationId:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationTruncationBoundary:
     """Tests for the exact truncation boundary behaviour."""
 
@@ -944,6 +962,7 @@ class TestAdapterTestBoilerplateGenerationTruncationBoundary:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationLlmException:
     """Tests that RuntimeHostError from the LLM handler propagates out of generate()."""
 
@@ -1004,6 +1023,7 @@ class TestAdapterTestBoilerplateGenerationLlmException:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationAsyncContextManager:
     """Tests for the async context manager protocol (__aenter__ / __aexit__)."""
 

@@ -360,7 +360,6 @@ class AdapterTestBoilerplateGeneration:
             )
 
         # --- Truncate source to fit context window ---
-        start = time.perf_counter()
         if len(source_stripped) > _MAX_SOURCE_CHARS:
             logger.debug(
                 "Truncating source from %d to %d chars to fit context window.",
@@ -400,6 +399,7 @@ class AdapterTestBoilerplateGeneration:
         # Delegates to HandlerLlmOpenaiCompatible which owns retry / circuit-breaker
         # logic.  RuntimeHostError propagates unchanged so callers see the
         # original transport failure (connection refused, timeout, auth error, etc.).
+        start = time.perf_counter()
         try:
             response = await self._handler.handle(request)
         except RuntimeHostError:
