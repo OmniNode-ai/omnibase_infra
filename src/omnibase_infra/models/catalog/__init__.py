@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 OmniNode Team
+# Copyright (c) 2026 OmniNode Team
 """Topic catalog models for the ONEX platform.
 
 Provides Pydantic models for querying, responding to, and notifying about
