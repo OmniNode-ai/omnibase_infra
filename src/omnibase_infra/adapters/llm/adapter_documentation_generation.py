@@ -1,16 +1,17 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 OmniNode Team
-"""Documentation generation adapter using Qwen-72B.
+"""Documentation generation adapter using DeepSeek-R1-Distill-Qwen-32B.
 
-Generates docstrings, README sections, and API documentation using Qwen-72B
-(endpoint :8100). Returns ``ContractDelegatedResponse`` with visible
-attribution and a tracked prompt version.
+Generates docstrings, README sections, and API documentation using
+DeepSeek-R1-Distill-Qwen-32B (endpoint :8101 on .200). Returns
+``ContractDelegatedResponse`` with visible attribution and a tracked prompt
+version.
 
 Architecture:
     - Receives a ``task_type`` (docstring, readme, api_doc) and ``source``
       text to document
     - Delegates LLM inference to HandlerLlmOpenaiCompatible via
-      TransportHolderLlmHttp pointing at the Qwen-72B endpoint (:8100)
+      TransportHolderLlmHttp pointing at the DeepSeek-R1 endpoint (:8101)
     - Returns ContractDelegatedResponse with attribution metadata
 
 System Prompt Derivation:
@@ -71,14 +72,20 @@ logger = logging.getLogger(__name__)
 # Prompt version -- bump when system/user prompt template changes.
 _PROMPT_VERSION: str = "v1.0"
 
-# Default model identifier sent to the Qwen-72B endpoint.
-_DEFAULT_MODEL: str = "qwen2.5-72b"
+# Default model identifier sent to the DeepSeek-R1 endpoint.
+# Must match the model ID returned by /v1/models (full HuggingFace path).
+_DEFAULT_MODEL: str = "mlx-community/DeepSeek-R1-Distill-Qwen-32B-bf16"
 
 # Default maximum tokens for the documentation response.
 _DEFAULT_MAX_TOKENS: int = 2_048
 
 # Default temperature -- low for deterministic, high-quality documentation.
 _DEFAULT_TEMPERATURE: float = 0.2
+
+# Per-request timeout in seconds.  DeepSeek-R1-32B can take 60-120 s for a
+# 2 048-token completion; 150 s gives headroom without exceeding the transport
+# cap of 180 s.
+_DEFAULT_TIMEOUT_SECONDS: float = 150.0
 
 # Delegation confidence: documentation is a well-defined task for Qwen-72B.
 _DELEGATION_CONFIDENCE: float = 0.95
@@ -164,7 +171,7 @@ _TASK_TYPE_TEMPLATES: dict[str, str] = {
 
 
 class AdapterDocumentationGeneration:
-    """Documentation generation adapter using Qwen-72B.
+    """Documentation generation adapter using DeepSeek-R1-Distill-Qwen-32B.
 
     Generates docstrings, README sections, and API documentation from source
     code or module text.  Returns ``ContractDelegatedResponse`` with visible
@@ -195,9 +202,9 @@ class AdapterDocumentationGeneration:
         """Initialize the adapter.
 
         Args:
-            base_url: Base URL of the Qwen-72B endpoint.  Defaults to the
-                ``LLM_QWEN_72B_URL`` environment variable, falling back to
-                ``http://localhost:8100``.
+            base_url: Base URL of the DeepSeek-R1 endpoint.  Defaults to the
+                ``LLM_DEEPSEEK_R1_URL`` environment variable, falling back to
+                ``http://localhost:8101``.
             model: Model identifier string sent in inference requests.
             max_tokens: Maximum tokens for the documentation completion.
             temperature: Sampling temperature (lower = more deterministic).
@@ -234,11 +241,11 @@ class AdapterDocumentationGeneration:
             )
             raise ProtocolConfigurationError(
                 "base_url must be a non-empty string; got an empty string. "
-                "Provide a valid URL or set the LLM_QWEN_72B_URL environment variable.",
+                "Provide a valid URL or set the LLM_DEEPSEEK_R1_URL environment variable.",
                 context=context,
             )
         self._base_url: str = base_url or os.environ.get(
-            "LLM_QWEN_72B_URL", "http://localhost:8100"
+            "LLM_DEEPSEEK_R1_URL", "http://localhost:8101"
         )
         self._model: str = model
         self._max_tokens: int = max_tokens
@@ -246,7 +253,7 @@ class AdapterDocumentationGeneration:
         self._api_key: str | None = api_key
 
         self._transport = TransportHolderLlmHttp(
-            target_name="qwen-72b-documentation",
+            target_name="deepseek-r1-documentation",
             max_timeout_seconds=180.0,
         )
         self._handler = HandlerLlmOpenaiCompatible(self._transport)
@@ -358,6 +365,7 @@ class AdapterDocumentationGeneration:
             max_tokens=self._max_tokens,
             temperature=self._temperature,
             api_key=self._api_key,
+            timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
         )
 
         try:
@@ -373,9 +381,9 @@ class AdapterDocumentationGeneration:
 
         rendered = (response.generated_text or "").strip()
         if not rendered:
-            rendered = f"## Documentation Unavailable\n\nQwen-72B did not return a response for task_type={task_type!r}."
+            rendered = f"## Documentation Unavailable\n\nDeepSeek-R1 did not return a response for task_type={task_type!r}."
             logger.warning(
-                "Qwen-72B returned empty generated_text for documentation. "
+                "DeepSeek-R1 returned empty generated_text for documentation. "
                 "task_type=%s model=%s latency_ms=%.1f",
                 task_type,
                 self._model,
