@@ -405,6 +405,18 @@ class IntentEffectConsulRegister:
             # error, timeout).  Programming errors such as
             # ``pydantic.ValidationError`` are intentionally NOT caught here
             # so that bugs in event construction surface immediately.
+            #
+            # Propagation note: exceptions that are NOT RuntimeHostError
+            # (e.g. ``pydantic.ValidationError`` from a malformed
+            # ``ModelTopicCatalogChanged``, or any other programming error)
+            # will escape this method entirely and propagate up to the outer
+            # ``except Exception`` handler in the calling effect, where they
+            # are caught and re-raised as a generic ``RuntimeHostError`` with
+            # the message 'Failed to execute Consul registration intent'.
+            # This means a model construction bug here will be reported as a
+            # Consul registration failure, which can be misleading.  If that
+            # wrapping behaviour ever changes, this method should be updated
+            # to handle (or explicitly re-raise) non-infrastructure errors.
             logger.warning(
                 "Failed to emit catalog changed event: %s (correlation_id=%s)",
                 sanitize_error_message(emit_err),

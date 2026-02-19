@@ -1371,6 +1371,15 @@ class PluginRegistration:
                     )
 
                 _event_bus_for_catalog = (
+                    # type: ignore[arg-type, union-attr] — `config` is typed as
+                    # `ModelDomainPluginConfig | None` in the function signature, so
+                    # mypy emits `union-attr` because it cannot narrow the `None` branch
+                    # away.  In practice `config` is provably non-None here: the
+                    # attribute `config.container.service_registry` was already
+                    # dereferenced unconditionally at line 1360 above, which would have
+                    # raised ``AttributeError`` if `config` were None.  The `arg-type`
+                    # suppression covers the event-bus protocol type not matching the
+                    # concrete parameter type expected by ``IntentEffectConsulRegister``.
                     config.event_bus  # type: ignore[arg-type, union-attr]
                     if _catalog_svc is not None
                     else None

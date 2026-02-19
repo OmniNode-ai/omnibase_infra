@@ -365,6 +365,14 @@ class MixinConsulTopicIndex:
             nodes updating the same topic's subscriber list simultaneously, race
             conditions may occur. For MVP, this is an accepted limitation.
 
+            The non-atomic read-modify-write also affects delta correctness: the
+            (topics_added, topics_removed) tuple returned by this method is derived
+            from a snapshot of the previous state that may already be stale by the
+            time the write completes.  With OMN-2314, this delta is the direct input
+            to ``ModelTopicCatalogChanged`` events emitted downstream, so concurrent
+            registrations can produce incorrect or duplicate catalog change
+            notifications — not just inconsistent subscriber lists.
+
             For production with high concurrency, consider:
             - Using Consul transactions (txn endpoint) for atomic read-modify-write
             - Implementing optimistic locking with Consul's ModifyIndex
