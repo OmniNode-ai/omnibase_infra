@@ -38,7 +38,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
     TransportHolderLlmHttp,
@@ -253,9 +253,20 @@ class AdapterCodeReviewAnalysis:
                 "Provide a valid URL or set the LLM_CODER_FAST_URL environment variable.",
                 context=context,
             )
-        self._base_url: str = base_url or os.environ.get(
+        resolved_base_url: str = base_url or os.environ.get(
             "LLM_CODER_FAST_URL", "http://localhost:8001"
         )
+        if not resolved_base_url.strip():
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="validate_config",
+            )
+            raise ProtocolConfigurationError(
+                "base_url resolved to an empty string from environment variable "
+                "LLM_CODER_FAST_URL. Provide a valid URL or unset the variable.",
+                context=context,
+            )
+        self._base_url: str = resolved_base_url
         self._model: str = model
         self._max_tokens: int = max_tokens
         self._temperature: float = temperature
@@ -299,7 +310,8 @@ class AdapterCodeReviewAnalysis:
                 to ``_MAX_DIFF_CHARS`` characters before being sent to the
                 model.
             correlation_id: Optional correlation ID for distributed tracing.
-                Forwarded to error context only; not auto-generated.
+                Auto-generated with uuid4() if not provided.  Propagated to
+                all error contexts and debug logs for full request traceability.
 
         Returns:
             ``ContractDelegatedResponse`` with:
@@ -318,10 +330,14 @@ class AdapterCodeReviewAnalysis:
             RuntimeHostError: Propagated from ``HandlerLlmOpenaiCompatible``
                 on connection failures, timeouts, or authentication errors.
         """
+        effective_correlation_id: UUID = (
+            correlation_id if correlation_id is not None else uuid4()
+        )
+
         if review_type not in _VALID_REVIEW_TYPES:
             valid = ", ".join(sorted(_VALID_REVIEW_TYPES))
             context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
+                correlation_id=effective_correlation_id,
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="review_code",
             )
@@ -333,7 +349,7 @@ class AdapterCodeReviewAnalysis:
         diff_stripped = code_diff.strip()
         if not diff_stripped:
             context = ModelInfraErrorContext.with_correlation(
-                correlation_id=correlation_id,
+                correlation_id=effective_correlation_id,
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="review_code",
             )
