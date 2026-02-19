@@ -82,7 +82,6 @@ def _make_llm_response(generated_text: str | None) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationProperties:
     """Tests for classification properties."""
 
@@ -100,7 +99,6 @@ class TestAdapterTestBoilerplateGenerationProperties:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationTaskTypes:
     """Tests for generate() with each valid task_type."""
 
@@ -195,7 +193,6 @@ class TestAdapterTestBoilerplateGenerationTaskTypes:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationInvalidTaskType:
     """Tests for generate() with invalid task_type."""
 
@@ -244,7 +241,6 @@ class TestAdapterTestBoilerplateGenerationInvalidTaskType:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationInvalidSource:
     """Tests for generate() with empty or whitespace-only source."""
 
@@ -295,7 +291,6 @@ class TestAdapterTestBoilerplateGenerationInvalidSource:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationAttribution:
     """Tests for attribution fields in the response."""
 
@@ -392,7 +387,6 @@ class TestAdapterTestBoilerplateGenerationAttribution:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationStructuredJson:
     """Tests for structured_json in the response."""
 
@@ -419,7 +413,6 @@ class TestAdapterTestBoilerplateGenerationStructuredJson:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationEmptyLlmResponse:
     """Tests for behavior when LLM returns empty or None text."""
 
@@ -501,7 +494,6 @@ class TestAdapterTestBoilerplateGenerationEmptyLlmResponse:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationSourceTruncation:
     """Tests for source truncation when source exceeds _MAX_SOURCE_CHARS."""
 
@@ -556,7 +548,6 @@ class TestAdapterTestBoilerplateGenerationSourceTruncation:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationCurlyBraceSafety:
     """Regression tests: source with curly braces must not crash generate()."""
 
@@ -636,7 +627,6 @@ class TestAdapterTestBoilerplateGenerationCurlyBraceSafety:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationConstructorValidation:
     """Tests for constructor parameter validation."""
 
@@ -714,13 +704,28 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
         with pytest.raises(ProtocolConfigurationError, match="base_url"):
             AdapterTestBoilerplateGeneration(base_url="   ")
 
+    def test_empty_env_var_base_url_raises_protocol_configuration_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Empty string LLM_CODER_FAST_URL env var raises ProtocolConfigurationError."""
+        monkeypatch.setenv("LLM_CODER_FAST_URL", "")
+        with pytest.raises(ProtocolConfigurationError, match="base_url"):
+            AdapterTestBoilerplateGeneration(base_url=None)
+
+    def test_whitespace_env_var_base_url_raises_protocol_configuration_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Whitespace-only LLM_CODER_FAST_URL env var raises ProtocolConfigurationError."""
+        monkeypatch.setenv("LLM_CODER_FAST_URL", "   ")
+        with pytest.raises(ProtocolConfigurationError, match="base_url"):
+            AdapterTestBoilerplateGeneration(base_url=None)
+
 
 # ---------------------------------------------------------------------------
 # close()
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationClose:
     """Tests for the close() method."""
 
@@ -737,7 +742,6 @@ class TestAdapterTestBoilerplateGenerationClose:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationRequestConstruction:
     """Tests for the LLM request fields sent by generate()."""
 
@@ -828,7 +832,6 @@ class TestAdapterTestBoilerplateGenerationRequestConstruction:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationCorrelationId:
     """Tests for the correlation_id parameter on generate()."""
 
@@ -886,7 +889,6 @@ class TestAdapterTestBoilerplateGenerationCorrelationId:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationTruncationBoundary:
     """Tests for the exact truncation boundary behaviour."""
 
@@ -942,7 +944,6 @@ class TestAdapterTestBoilerplateGenerationTruncationBoundary:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 class TestAdapterTestBoilerplateGenerationLlmException:
     """Tests that RuntimeHostError from the LLM handler propagates out of generate()."""
 

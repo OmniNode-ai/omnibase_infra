@@ -265,6 +265,16 @@ class AdapterTestBoilerplateGeneration:
         self._base_url: str = base_url or os.environ.get(
             "LLM_CODER_FAST_URL", "http://localhost:8001"
         )
+        if not self._base_url.strip():
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="validate_config",
+            )
+            raise ProtocolConfigurationError(
+                "base_url resolved to an empty string. "
+                "Set LLM_CODER_FAST_URL to a valid URL or pass base_url explicitly.",
+                context=context,
+            )
         self._model: str = model
         self._max_tokens: int = max_tokens
         self._temperature: float = temperature
@@ -349,6 +359,7 @@ class AdapterTestBoilerplateGeneration:
                 context=context,
             )
 
+        # --- Truncate source to fit context window ---
         start = time.perf_counter()
         if len(source_stripped) > _MAX_SOURCE_CHARS:
             logger.debug(
@@ -361,11 +372,11 @@ class AdapterTestBoilerplateGeneration:
                 + _TRUNCATION_SENTINEL
             )
 
+        # --- Build prompt ---
+        # Inject source by splitting on the placeholder rather than str.format()
+        # to avoid KeyError when source_stripped contains curly braces
+        # (e.g. Python dicts, f-strings, JSON literals).
         template = _TASK_TYPE_TEMPLATES[task_type]
-
-        # Build user message by splitting on placeholder -- avoids str.format()
-        # issues when source_stripped itself contains curly braces (e.g. JSON,
-        # Python dicts, f-strings).
         parts = template.split("{source}", 1)
         if len(parts) == 2:
             user_message = parts[0] + source_stripped + parts[1]
@@ -385,6 +396,10 @@ class AdapterTestBoilerplateGeneration:
             timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
         )
 
+        # --- Call LLM ---
+        # Delegates to HandlerLlmOpenaiCompatible which owns retry / circuit-breaker
+        # logic.  RuntimeHostError propagates unchanged so callers see the
+        # original transport failure (connection refused, timeout, auth error, etc.).
         try:
             response = await self._handler.handle(request)
         except RuntimeHostError:
@@ -396,6 +411,9 @@ class AdapterTestBoilerplateGeneration:
 
         latency_ms = (time.perf_counter() - start) * 1000
 
+        # --- Assemble response ---
+        # Use a fallback comment block when the model returns an empty completion
+        # so callers always receive a non-empty rendered_text they can surface.
         rendered = (response.generated_text or "").strip()
         if not rendered:
             rendered = (
@@ -435,7 +453,31 @@ class AdapterTestBoilerplateGeneration:
         )
 
     async def close(self) -> None:
-        """Close the HTTP transport client."""
+        """Release the underlying aiohttp ClientSession held by the HTTP transport.
+
+        ``TransportHolderLlmHttp`` owns a long-lived ``aiohttp.ClientSession``
+        that must be explicitly closed to avoid unclosed-socket warnings and
+        resource leaks.  Call this method when the adapter is no longer needed.
+
+        Preferred usage patterns:
+
+        1. **Async context manager** (recommended)::
+
+               async with AdapterTestBoilerplateGeneration() as adapter:
+                   result = await adapter.generate(task_type="test_module", source=src)
+               # close() is called automatically on __aexit__
+
+        2. **Explicit try/finally**::
+
+               adapter = AdapterTestBoilerplateGeneration()
+               try:
+                   result = await adapter.generate(task_type="test_module", source=src)
+               finally:
+                   await adapter.close()
+
+        Note:
+            This method is idempotent -- calling it more than once is safe.
+        """
         await self._transport.close()
 
 
