@@ -43,6 +43,7 @@ from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.models.catalog.model_topic_catalog_changed import (
@@ -253,7 +254,7 @@ def _deserialize_response(raw: bytes | str) -> ModelTopicCatalogResponse | None:
             )
         ):
             return ModelTopicCatalogResponse.model_validate(data)
-    except (json.JSONDecodeError, ValueError, KeyError, TypeError):
+    except (json.JSONDecodeError, ValueError, KeyError, TypeError, ValidationError):
         logger.warning(
             "_deserialize_response: failed to deserialize message",
             exc_info=True,
@@ -1193,6 +1194,7 @@ class TestIntegrationGoldenPath:
             len(response.topics),
         )
 
+    # TODO: move to unit tests to avoid infra-gated skip — see OMN-2317
     def test_golden_path_published_to_changed_topic_suffix_exists(
         self,
     ) -> None:
