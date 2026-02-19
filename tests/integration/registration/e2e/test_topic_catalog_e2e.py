@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 OmniNode Team
+# Copyright (c) 2025 OmniNode Team
 """E2E tests for Topic Catalog multi-client routing and change notification flows.
 
 Proves Option B routing: multiple clients on a shared response topic with no
@@ -117,7 +117,7 @@ def mock_container_for_catalog() -> MagicMock:
 
 
 @pytest.fixture
-async def catalog_service(
+def catalog_service(
     real_consul_handler: HandlerConsul,
     mock_container_for_catalog: MagicMock,
 ) -> ServiceTopicCatalog:
@@ -137,7 +137,7 @@ async def catalog_service(
 
 
 @pytest.fixture
-async def catalog_handler(
+def catalog_handler(
     catalog_service: ServiceTopicCatalog,
 ) -> HandlerTopicCatalogQuery:
     """HandlerTopicCatalogQuery wired to real ServiceTopicCatalog.
@@ -247,7 +247,17 @@ def _deserialize_response(raw: bytes | str) -> ModelTopicCatalogResponse | None:
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8")
         data = json.loads(raw)
-        if isinstance(data, dict) and "correlation_id" in data and "topics" in data:
+        if isinstance(data, dict) and all(
+            k in data
+            for k in (
+                "correlation_id",
+                "topics",
+                "catalog_version",
+                "node_count",
+                "generated_at",
+                "schema_version",
+            )
+        ):
             return ModelTopicCatalogResponse.model_validate(data)
     except Exception:
         logger.warning(
@@ -559,6 +569,7 @@ class TestResponseDeterminism:
     same entries, same count).
     """
 
+    @pytest.mark.serial
     async def test_consecutive_queries_return_identical_results(
         self,
         catalog_handler: HandlerTopicCatalogQuery,
@@ -790,6 +801,7 @@ class TestChangeNotificationFlow:
     - topics_removed is empty when no topics were removed
     """
 
+    @pytest.mark.serial
     async def test_register_node_produces_correct_catalog_changed(
         self,
         catalog_service: ServiceTopicCatalog,
@@ -1175,7 +1187,7 @@ class TestIntegrationGoldenPath:
             len(response.topics),
         )
 
-    async def test_golden_path_published_to_changed_topic_suffix_exists(
+    def test_golden_path_published_to_changed_topic_suffix_exists(
         self,
     ) -> None:
         """SUFFIX_TOPIC_CATALOG_CHANGED constant has the correct format.
