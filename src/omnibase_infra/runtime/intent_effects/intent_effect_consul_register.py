@@ -44,6 +44,9 @@ from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.handlers.models.consul.model_consul_register_payload import (
+    ModelConsulRegisterPayload,
+)
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -293,10 +296,6 @@ class IntentEffectConsulRegister:
         topics_added: frozenset[str] = frozenset()
         topics_removed: frozenset[str] = frozenset()
 
-        from omnibase_infra.handlers.models.consul.model_consul_register_payload import (
-            ModelConsulRegisterPayload,
-        )
-
         result = handler_output.result
         if result is not None:
             data = result.payload.data
@@ -335,13 +334,15 @@ class IntentEffectConsulRegister:
 
             if new_version == -1:
                 # CAS retries exhausted; catalog_version will be clamped to 0
-                # (max(-1, 0)) in the emitted event. Consumers receiving
-                # catalog_version=0 cannot distinguish this from a genuine
-                # version-0 catalog without this log entry.
+                # (max(-1, 0)) in the emitted event. Consumers can distinguish
+                # this from a genuine version-0 catalog via the cas_failure=True
+                # field on the emitted ModelTopicCatalogChanged event.
                 logger.warning(
                     "CAS version increment exhausted retries; emitting "
-                    "ModelTopicCatalogChanged with catalog_version=0 "
-                    "(correlation_id=%s)",
+                    "ModelTopicCatalogChanged with catalog_version=0 and "
+                    "cas_failure=True — inspect the cas_failure field on the "
+                    "emitted event to distinguish this from a genuine "
+                    "version-0 catalog (correlation_id=%s)",
                     str(correlation_id),
                     extra={
                         "topics_added": sorted(topics_added),

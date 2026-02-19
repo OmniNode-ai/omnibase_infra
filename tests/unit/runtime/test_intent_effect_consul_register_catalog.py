@@ -211,7 +211,15 @@ class TestCatalogChangeEmission:
         mock_handler_with_delta: MagicMock,
         mock_catalog_service: MagicMock,
     ) -> None:
-        """When event_bus is None, no emission even if delta is non-empty."""
+        """When event_bus is None, no emission even if delta is non-empty.
+
+        Joint guard invariant: _maybe_emit_catalog_changed() requires BOTH
+        catalog_service and event_bus to be non-None before any catalog change
+        notification occurs (see IntentEffectConsulRegister.__init__ docstring).
+        This test exercises the event_bus=None branch; the catalog_service=None
+        branch is covered by test_no_emit_when_catalog_service_none.  Neither
+        CAS increment nor event emission should fire when either guard is absent.
+        """
         effect = IntentEffectConsulRegister(
             consul_handler=mock_handler_with_delta,
             catalog_service=mock_catalog_service,

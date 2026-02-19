@@ -34,6 +34,9 @@ class ModelPayloadConsulRegister(BaseModel):
     Attributes:
         intent_type: Discriminator literal for intent routing. Always "consul.register".
         correlation_id: Correlation ID for distributed tracing.
+        node_id: ONEX node identifier (string form of UUID). Required when
+            event_bus_config is provided so the consul handler can store the
+            event bus config under onex/nodes/{node_id}/event_bus/.
         service_id: Unique service identifier for Consul registration.
         service_name: Service name for Consul service catalog.
         tags: Service tags for filtering and categorization.

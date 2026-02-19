@@ -131,6 +131,10 @@ class ModelTopicCatalogChanged(BaseModel):
         object.__setattr__(self, "topics_removed", tuple(sorted(self.topics_removed)))
         return self
 
+    # NOTE: Ordering dependency — this validator must run AFTER sort_delta_tuples.
+    # In Pydantic v2, mode='after' validators execute in definition order (top to
+    # bottom), so sort_delta_tuples (defined above) always runs first.  Do NOT
+    # reorder these two validators without updating this comment.
     @model_validator(mode="after")
     def validate_cas_failure_implies_version_zero(self) -> ModelTopicCatalogChanged:
         """Validate that cas_failure=True requires catalog_version==0.
