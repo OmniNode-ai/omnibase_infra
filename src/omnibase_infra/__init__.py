@@ -76,7 +76,7 @@ See Also
 - Runtime kernel: omnibase_infra.runtime.service_kernel
 """
 
-__version__ = "0.6.0"
+__version__ = "0.8.0"
 
 from . import (
     enums,
