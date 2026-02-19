@@ -19,7 +19,7 @@ Infrastructure Requirements:
     - Consul: CONSUL_HOST:28500
     - Kafka/Redpanda: KAFKA_BOOTSTRAP_SERVERS (Suite 1 only)
 
-    Note: Suite 2, 3, and 4 only require Consul (no Kafka).
+    Note: Suite 2, 3, 4, and 5 only require Consul (no Kafka).
 
 Related Tickets:
     - OMN-2317: Topic Catalog multi-client no-cross-talk E2E test
