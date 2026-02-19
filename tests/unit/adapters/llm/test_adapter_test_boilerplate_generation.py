@@ -997,3 +997,61 @@ class TestAdapterTestBoilerplateGenerationLlmException:
             )
 
         assert exc_info.value is original_error
+
+
+# ---------------------------------------------------------------------------
+# Async context manager protocol
+# ---------------------------------------------------------------------------
+
+
+class TestAdapterTestBoilerplateGenerationAsyncContextManager:
+    """Tests for the async context manager protocol (__aenter__ / __aexit__)."""
+
+    @pytest.mark.asyncio
+    async def test_aenter_returns_self(self) -> None:
+        """__aenter__ returns the adapter instance itself."""
+        adapter = _make_adapter()
+        result = await adapter.__aenter__()
+        assert result is adapter
+
+    @pytest.mark.asyncio
+    async def test_aexit_calls_close(self) -> None:
+        """__aexit__ delegates to close(), which calls transport.close()."""
+        adapter = _make_adapter()
+        await adapter.__aexit__(None, None, None)
+        adapter._transport.close.assert_awaited_once()  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_async_with_block_calls_close_on_exit(self) -> None:
+        """Using 'async with' calls transport.close() when the block exits normally."""
+        adapter = _make_adapter()
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
+            return_value=_make_llm_response("def test_foo(): pass")
+        )
+
+        async with adapter as ctx:
+            assert ctx is adapter
+            result = await ctx.generate(
+                task_type=TASK_TYPE_TEST_MODULE, source="def foo(): pass"
+            )
+            assert isinstance(result, ContractDelegatedResponse)
+
+        adapter._transport.close.assert_awaited_once()  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_async_with_block_calls_close_on_exception(self) -> None:
+        """Using 'async with' calls transport.close() even when the block raises."""
+        adapter = _make_adapter()
+
+        with pytest.raises(RuntimeError, match="intentional"):
+            async with adapter:
+                raise RuntimeError("intentional")
+
+        adapter._transport.close.assert_awaited_once()  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_aexit_passes_exception_type_through(self) -> None:
+        """__aexit__ returns None (does not suppress exceptions)."""
+        adapter = _make_adapter()
+        result = await adapter.__aexit__(ValueError, ValueError("test"), None)
+        assert result is None

@@ -480,5 +480,18 @@ class AdapterTestBoilerplateGeneration:
         """
         await self._transport.close()
 
+    async def __aenter__(self) -> AdapterTestBoilerplateGeneration:
+        """Support async context manager protocol."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        """Close transport on context manager exit."""
+        await self.close()
+
 
 __all__: list[str] = ["AdapterTestBoilerplateGeneration"]
