@@ -131,5 +131,24 @@ class ModelTopicCatalogChanged(BaseModel):
         object.__setattr__(self, "topics_removed", tuple(sorted(self.topics_removed)))
         return self
 
+    @model_validator(mode="after")
+    def validate_cas_failure_implies_version_zero(self) -> ModelTopicCatalogChanged:
+        """Validate that cas_failure=True requires catalog_version==0.
+
+        When CAS retries are exhausted the catalog version is clamped to 0.
+        Allowing a non-zero catalog_version alongside cas_failure=True would
+        produce a contradictory model state.
+
+        Raises:
+            ValueError: If ``cas_failure`` is True and ``catalog_version`` is
+                not 0.
+        """
+        if self.cas_failure and self.catalog_version != 0:
+            raise ValueError(
+                f"cas_failure=True requires catalog_version==0, "
+                f"got catalog_version={self.catalog_version}"
+            )
+        return self
+
 
 __all__: list[str] = ["ModelTopicCatalogChanged"]

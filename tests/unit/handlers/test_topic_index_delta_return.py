@@ -81,7 +81,9 @@ def mock_consul_client() -> MagicMock:
     client.agent.service = MagicMock()
     client.agent.service.register = MagicMock(return_value=None)
 
-    client._test_kv_store = kv_store
+    # Expose the local kv_store dict as a plain attribute so tests can pre-populate
+    # it directly without relying on a private underscore attribute on MagicMock.
+    client.test_kv_store = kv_store
 
     return client
 
@@ -166,7 +168,7 @@ class TestUpdateTopicIndexDeltaReturn:
 
             # Pre-populate KV with same topics
             existing_topics = ["onex.evt.topic-a.v1", "onex.evt.topic-b.v1"]
-            kv_store = mock_consul_client._test_kv_store
+            kv_store = mock_consul_client.test_kv_store
             kv_store[f"onex/nodes/{node_id}/event_bus/subscribe_topics"] = (
                 json.dumps(existing_topics).encode("utf-8")
             )
@@ -199,7 +201,7 @@ class TestUpdateTopicIndexDeltaReturn:
             node_id = "test-node-change"
 
             # Pre-populate with A and B
-            kv_store = mock_consul_client._test_kv_store
+            kv_store = mock_consul_client.test_kv_store
             kv_store[f"onex/nodes/{node_id}/event_bus/subscribe_topics"] = (
                 json.dumps(
                     ["onex.evt.topic-a.v1", "onex.evt.topic-b.v1"]

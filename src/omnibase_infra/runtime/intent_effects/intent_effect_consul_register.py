@@ -122,13 +122,14 @@ class IntentEffectConsulRegister:
             consul_handler: HandlerConsul for Consul service registration.
                 Must be fully initialized with a valid Consul client.
             catalog_service: Optional ServiceTopicCatalog for CAS version
-                increment. When None, catalog version is not incremented and
-                no change notification is emitted even if the topic delta is
-                non-empty.
+                increment. When None, both the CAS version increment and the
+                change event emission are skipped entirely, even if the topic
+                delta is non-empty.
             event_bus: Optional event bus for publishing ModelTopicCatalogChanged.
-                When None, the change event is not emitted even if a version
-                increment succeeds. Both catalog_service and event_bus must be
-                non-None for change notification to be emitted.
+                When None, both the CAS version increment and the change event
+                emission are skipped entirely, even if the topic delta is
+                non-empty. Both catalog_service and event_bus must be non-None
+                for any catalog change notification to occur.
         """
         self._consul_handler = consul_handler
         self._catalog_service = catalog_service
@@ -292,26 +293,16 @@ class IntentEffectConsulRegister:
         topics_added: frozenset[str] = frozenset()
         topics_removed: frozenset[str] = frozenset()
 
-        try:
-            from omnibase_infra.handlers.models.consul.model_consul_register_payload import (
-                ModelConsulRegisterPayload,
-            )
+        from omnibase_infra.handlers.models.consul.model_consul_register_payload import (
+            ModelConsulRegisterPayload,
+        )
 
-            result = handler_output.result
-            if result is not None:
-                data = result.payload.data
-                if isinstance(data, ModelConsulRegisterPayload):
-                    topics_added = data.topics_added
-                    topics_removed = data.topics_removed
-        except Exception as extract_err:
-            logger.warning(
-                "Failed to extract topic delta from Consul register output: %s "
-                "(correlation_id=%s)",
-                sanitize_error_message(extract_err),
-                str(correlation_id),
-                extra={"error_type": type(extract_err).__name__},
-            )
-            return
+        result = handler_output.result
+        if result is not None:
+            data = result.payload.data
+            if isinstance(data, ModelConsulRegisterPayload):
+                topics_added = data.topics_added
+                topics_removed = data.topics_removed
 
         if not topics_added and not topics_removed:
             # No change - nothing to emit

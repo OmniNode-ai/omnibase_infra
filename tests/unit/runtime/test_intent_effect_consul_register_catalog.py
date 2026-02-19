@@ -45,15 +45,19 @@ def _make_consul_register_payload(
 ) -> MagicMock:
     """Build a mock ModelHandlerOutput whose nested payload carries a register delta.
 
-    Uses spec=ModelConsulRegisterPayload on the data mock so that isinstance
-    checks in the typed extraction path pass correctly.
+    Uses a real ModelConsulRegisterPayload instance so that isinstance checks in
+    the production extraction path exercise the actual model, not a mock spec.
     """
-    data_mock = MagicMock(spec=ModelConsulRegisterPayload)
-    data_mock.topics_added = topics_added
-    data_mock.topics_removed = topics_removed
+    data = ModelConsulRegisterPayload(
+        registered=True,
+        name="onex-test-service",
+        consul_service_id="onex-test-service-id",
+        topics_added=topics_added,
+        topics_removed=topics_removed,
+    )
 
     payload_mock = MagicMock()
-    payload_mock.data = data_mock
+    payload_mock.data = data
 
     result_mock = MagicMock()
     result_mock.payload = payload_mock

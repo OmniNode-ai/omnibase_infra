@@ -56,6 +56,7 @@ class ModelPayloadConsulRegister(BaseModel):
 
     node_id: str | None = Field(
         default=None,
+        min_length=1,
         description=(
             "ONEX node identifier (string form of UUID). Required when "
             "event_bus_config is provided so the consul handler can store "
