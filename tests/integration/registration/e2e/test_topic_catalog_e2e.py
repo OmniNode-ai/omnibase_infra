@@ -316,7 +316,7 @@ async def _delete_node_from_consul(
     """
     prefix = f"onex/nodes/{node_id}/event_bus/"
     # DELIBERATE TEST COUPLING: _client is private, but HandlerConsul exposes no public
-    # KV-delete API for test cleanup. Tracked for future public API: OMN-2317.
+    # KV-delete API for test cleanup (including write-API gap). Tracked for future public API: OMN-2317.
     client = consul_handler._client  # type: ignore[attr-defined]
     if client is None:
         logger.warning(
@@ -364,6 +364,7 @@ class TestMultiClientNoCrossTalk:
     isolation is per-correlation_id, not per-topic.
     """
 
+    @pytest.mark.serial
     async def test_two_clients_no_cross_talk(
         self,
         real_kafka_event_bus: EventBusKafka,
@@ -997,6 +998,7 @@ class TestChangeNotificationFlow:
                 node_id=test_node_id,
                 correlation_id=correlation_id,
             )
+            # NOTE: cleanup failure leaves stale KV keys; subsequent runs may see a polluted catalog baseline
             # Bump version to reflect the cleanup (best-effort)
             try:
                 await catalog_service.increment_version(correlation_id)
@@ -1006,6 +1008,7 @@ class TestChangeNotificationFlow:
                     exc_info=True,
                 )
 
+    @pytest.mark.serial
     async def test_change_notification_topic_suffix_format(
         self,
         catalog_handler: HandlerTopicCatalogQuery,
@@ -1075,6 +1078,7 @@ class TestIntegrationGoldenPath:
     (correlation_id pairing, catalog_version, topic suffix format).
     """
 
+    @pytest.mark.serial
     async def test_golden_path_query_response(
         self,
         catalog_handler: HandlerTopicCatalogQuery,
@@ -1140,6 +1144,7 @@ class TestIntegrationGoldenPath:
             response.warnings,
         )
 
+    @pytest.mark.serial
     async def test_golden_path_with_topic_pattern_filter(
         self,
         catalog_handler: HandlerTopicCatalogQuery,
