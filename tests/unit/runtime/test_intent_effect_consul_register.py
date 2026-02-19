@@ -189,6 +189,7 @@ class TestIntentEffectConsulRegisterExecute:
             service_id="onex-effect-123",
             service_name="onex-effect",
             tags=["onex"],
+            node_id="test-node-id",
             event_bus_config=event_bus_config,
         )
 

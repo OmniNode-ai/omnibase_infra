@@ -1361,7 +1361,7 @@ class PluginRegistration:
                         _catalog_svc = await config.container.service_registry.resolve_service(
                             ServiceTopicCatalog
                         )
-                except Exception as exc:  # noqa: BLE001 — intentional: optional service resolution must not crash startup
+                except Exception as exc:  # intentional: optional service resolution must not crash startup
                     # ServiceTopicCatalog is explicitly optional: any exception
                     # during resolution (ContainerWiringError, ImportError,
                     # KeyError, LookupError, AttributeError, or any other
