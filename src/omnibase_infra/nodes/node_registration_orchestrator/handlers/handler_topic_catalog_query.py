@@ -26,7 +26,7 @@ Error Handling:
       success with ``warnings=(CONSUL_UNAVAILABLE,)`` or
       ``warnings=(CONSUL_SCAN_TIMEOUT,)``
     - Unexpected exception: log error, return empty response with
-      ``warnings=("internal_error",)``
+      ``warnings=(INTERNAL_ERROR,)``
 
 Coroutine Safety:
     This handler is stateless and coroutine-safe for concurrent calls

@@ -25,6 +25,7 @@ import pytest
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.models.catalog.catalog_warning_codes import INTERNAL_ERROR
 from omnibase_infra.models.catalog.model_topic_catalog_query import (
     ModelTopicCatalogQuery,
 )
@@ -278,7 +279,7 @@ async def test_handler_unexpected_exception_returns_internal_error() -> None:
     assert len(output.events) == 1
     response = output.events[0]
     assert isinstance(response, ModelTopicCatalogResponse)
-    assert "internal_error" in response.warnings
+    assert INTERNAL_ERROR in response.warnings
     assert len(response.topics) == 0
 
 

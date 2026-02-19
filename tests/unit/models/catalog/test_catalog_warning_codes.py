@@ -2,7 +2,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Unit tests for catalog warning code constants.
 
-Verifies that all 5 warning codes are defined as string constants with the
+Verifies that all 7 warning codes are defined as string constants with the
 exact values the DoD specifies, and that the constants are exported from both
 the module and the package __init__.
 
@@ -16,8 +16,10 @@ import pytest
 
 import omnibase_infra.models.catalog as catalog_pkg
 from omnibase_infra.models.catalog.catalog_warning_codes import (
+    CONSUL_KV_MAX_KEYS_REACHED,
     CONSUL_SCAN_TIMEOUT,
     CONSUL_UNAVAILABLE,
+    INTERNAL_ERROR,
     INVALID_QUERY_PAYLOAD,
     PARTIAL_NODE_DATA,
     VERSION_UNKNOWN,
@@ -52,11 +54,21 @@ class TestWarningCodeValues:
         """VERSION_UNKNOWN must equal 'version_unknown'."""
         assert VERSION_UNKNOWN == "version_unknown"
 
+    def test_consul_kv_max_keys_reached_value(self) -> None:
+        """CONSUL_KV_MAX_KEYS_REACHED must equal 'consul_kv_max_keys_reached'."""
+        assert CONSUL_KV_MAX_KEYS_REACHED == "consul_kv_max_keys_reached"
+
+    def test_internal_error_value(self) -> None:
+        """INTERNAL_ERROR must equal 'internal_error'."""
+        assert INTERNAL_ERROR == "internal_error"
+
     def test_all_constants_are_strings(self) -> None:
         """All warning codes must be plain str instances."""
         for constant in (
             CONSUL_UNAVAILABLE,
             CONSUL_SCAN_TIMEOUT,
+            CONSUL_KV_MAX_KEYS_REACHED,
+            INTERNAL_ERROR,
             INVALID_QUERY_PAYLOAD,
             PARTIAL_NODE_DATA,
             VERSION_UNKNOWN,
@@ -68,6 +80,8 @@ class TestWarningCodeValues:
         codes = [
             CONSUL_UNAVAILABLE,
             CONSUL_SCAN_TIMEOUT,
+            CONSUL_KV_MAX_KEYS_REACHED,
+            INTERNAL_ERROR,
             INVALID_QUERY_PAYLOAD,
             PARTIAL_NODE_DATA,
             VERSION_UNKNOWN,
@@ -108,3 +122,13 @@ class TestWarningCodePackageExports:
         """VERSION_UNKNOWN is in the catalog package namespace."""
         assert hasattr(catalog_pkg, "VERSION_UNKNOWN")
         assert catalog_pkg.VERSION_UNKNOWN == "version_unknown"
+
+    def test_consul_kv_max_keys_reached_exported_from_package(self) -> None:
+        """CONSUL_KV_MAX_KEYS_REACHED is in the catalog package namespace."""
+        assert hasattr(catalog_pkg, "CONSUL_KV_MAX_KEYS_REACHED")
+        assert catalog_pkg.CONSUL_KV_MAX_KEYS_REACHED == "consul_kv_max_keys_reached"
+
+    def test_internal_error_exported_from_package(self) -> None:
+        """INTERNAL_ERROR is in the catalog package namespace."""
+        assert hasattr(catalog_pkg, "INTERNAL_ERROR")
+        assert catalog_pkg.INTERNAL_ERROR == "internal_error"
