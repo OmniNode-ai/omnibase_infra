@@ -5,6 +5,118 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-02-19
+
+### Added
+
+#### LLM Inference Infrastructure
+
+- **OMN-2104**: `MixinLlmHttpTransport` for structured LLM HTTP calls with sanitized response bodies, case-insensitive content-type handling, and locked client teardown (#320, #322)
+- **OMN-2107**: `HandlerLlmOpenaiCompatible` for OpenAI wire-format inference (chat completions, embeddings) against local vLLM/Ollama-compatible servers (#325)
+- **OMN-2108**: `HandlerLlmOllama` with node scaffold for Ollama-native inference (#328)
+- **OMN-2112**: `node_llm_embedding_effect` with models, handlers, node, contract, and registry for embedding extraction (#327)
+- **OMN-2105**: `ModelLlmInferenceRequest` and `ModelLlmMessage` for typed LLM request construction (#321)
+- **OMN-2106**: `ModelLlmInferenceResponse` with `text XOR tool_calls` invariant enforcement (#324)
+- **OMN-2103**: `ModelLlmShared` — shared LLM models for inference and embedding nodes (#318)
+- **OMN-2111**: Inference node assembly with contract, registry, and operation validation (#335)
+- **OMN-2255**: LLM endpoint health checker service with per-endpoint liveness probes (#352)
+- **OMN-2249**: LLM endpoint SLO profiling and load test scaffolding (#347)
+- **OMN-2250**: CIDR allowlist and HMAC request signing on LLM HTTP transport (#350)
+- **OMN-2109**: Inference handler unit tests (#331)
+- **OMN-2110**: Inference model validation tests (#334)
+- **OMN-2113**: Embedding node unit tests (#329)
+- **OMN-2114**: `MixinLlmHttpTransport` unit tests (#337)
+
+#### LLM Cost Tracking
+
+- **OMN-2238**: Token usage extraction and normalization from LLM API responses (#346)
+- **OMN-2240**: LLM cost aggregation service with per-session and per-call rollups (#348)
+- **OMN-2241**: Static context token cost attribution for system prompt overhead (#361)
+- **OMN-2239**: `ModelPricingTable` with YAML manifest and cost estimation utilities (#360)
+- **OMN-2236**: `llm_call_metrics` and `llm_cost_aggregates` database migration 031 (#343)
+- **OMN-2295**: LLM cost tracking input validation and edge case tests (#358)
+- **OMN-2318**: Integrate SPI 0.9.0 LLM cost tracking contracts (#345)
+- **OMN-2319**: SPI LLM protocol adapters for `ProtocolLlmCostTracker` and `ProtocolLlmPricingTable` (#353)
+
+#### Enrichment Handlers
+
+- **OMN-2260**: `HandlerCodeAnalysisEnrichment` for git diff analysis via Coder-14B LLM (#363)
+- **OMN-2261**: Embedding similarity enrichment handler for vector-based context relevance scoring (#366)
+- **OMN-2262**: Context summarization enrichment handler for token-efficient context compression (#367)
+- **OMN-2276**: Documentation generation handler via Qwen-72B for automated doc synthesis (#371)
+
+#### Topic Catalog
+
+- **OMN-2310**: Topic Catalog model and suffix foundation (#357)
+- **OMN-2311**: `ServiceTopicCatalog` with KV (Valkey) precedence and in-memory caching (#370)
+- **OMN-2313**: Topic catalog query handler, dispatcher, and contract wiring (#372)
+
+#### Baselines and Effectiveness Metrics
+
+- **OMN-2155**: A/B baseline comparison compute node with delta scoring (#332)
+- **OMN-2303**: Batch compute effectiveness metrics and cache invalidation notifier (#362)
+- **OMN-2305**: Baselines tables and batch compute service with Postgres persistence (#369)
+
+#### Secret Management — Infisical Backend
+
+- **OMN-2286**: Infisical secret backend: adapter, handler, and config resolution layer (#355)
+- **OMN-2287**: Contract-driven config discovery, Infisical seed script, and bootstrap orchestration (#359)
+- **OMN-2288**: Remove Vault handler; migrate all secret resolution references to Infisical (#368)
+
+#### Schema and Event Registry Integrity
+
+- **OMN-2087**: Schema fingerprint manifest with startup assertion gate (#317)
+- **OMN-2088**: Event registry fingerprint with startup assertion gate (#326)
+- **OMN-2149**: CI twins for schema and event registry fingerprint drift detection (#338)
+- **OMN-2151**: Full check catalog, artifact storage, and flake detection (#330)
+
+#### Runtime and Bootstrap
+
+- **OMN-2089**: Bootstrap attestation gate in kernel handshake phase (#336)
+- **OMN-2081**: Runtime contract routing verification tests and demo (#312)
+- **OMN-2192**: Install `omniintelligence` in runtime Docker image (#323)
+- **OMN-2233**: Stable runtime deployment script for repeatable container launches (#340)
+- **OMN-2243**: Intelligence topic provisioning; bump omniintelligence to 0.2.0 (#342)
+- **OMN-2342**: Set `OMNIINTELLIGENCE_PUBLISH_INTROSPECTION` on `omninode-runtime` only (#364)
+
+#### Demo and Test Tooling
+
+- **OMN-2297**: Demo loop assertion gate for canonical event loop validation (#349)
+- **OMN-2299**: Demo reset scoped command for safe environment reset between runs (#354)
+
+#### Error Taxonomy
+
+- **OMN-2103**: `InfraRateLimitedError` exception class added to infrastructure error hierarchy (#315)
+
+#### Registration
+
+- **OMN-996**: Implement `reduce_confirmation()` for registration reducer (#319)
+- Reducer-authoritative registration with E2E integration follow-ups (#316)
+
+### Fixed
+
+- **OMN-2251**: Consumer group instance discriminator for multi-container dev environments (#351)
+- Sanitize response bodies, case-insensitive content-type, lock client teardown in LLM transport (#322)
+
+### Changed
+
+#### Dependencies
+
+- Update `omnibase-core` from `^0.17.0` to `^0.18.0` (SPI 0.10.0 compatibility)
+- Update `omnibase-spi` from `^0.8.0` to `^0.10.0` (enrichment contracts: `ProtocolContextEnrichment`, `ContractEnrichmentResult`, LLM cost tracking protocols)
+
+#### Build Tooling
+
+- **Migrate from Poetry to uv** for all dependency management and virtual environment workflows (#341)
+  - All commands now use `uv run` (e.g., `uv run pytest`, `uv run mypy`, `uv run ruff`)
+  - `uv.lock` replaces `poetry.lock` as the canonical lockfile
+  - Deploy scripts updated for uv migration (#356)
+
+#### CI/CD
+
+- **OMN-2184**: Required status checks added to branch protection rules (#333)
+- **OMN-2160**: Extract duplicated rules from CLAUDE.md to shared config (#339)
+
 ## [0.7.0] - 2026-02-12
 
 ### Changed
