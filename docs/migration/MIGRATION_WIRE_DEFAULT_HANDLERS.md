@@ -26,7 +26,7 @@ from omnibase_infra.runtime.wiring import wire_default_handlers
 
 # Register all handlers from _KNOWN_HANDLERS dict
 summary = wire_default_handlers()
-# Result: {'handlers': ['consul', 'db', 'http', 'vault'], 'event_buses': ['inmemory']}
+# Result: {'handlers': ['consul', 'db', 'http', 'infisical'], 'event_buses': ['inmemory']}
 ```
 
 The old approach:

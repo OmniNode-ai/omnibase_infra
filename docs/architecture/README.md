@@ -35,16 +35,32 @@ Start here to understand the ONEX architecture:
 
 | Document | Description |
 |----------|-------------|
-| [Registration Orchestrator Architecture](REGISTRATION_ORCHESTRATOR_ARCHITECTURE.md) | Node registration orchestrator |
-| [Node Registration Orchestrator Protocols](NODE_REGISTRATION_ORCHESTRATOR_PROTOCOLS.md) | Registration protocol definitions |
+| [Registration Workflow](REGISTRATION_WORKFLOW.md) | Complete 2-way registration flow: all 4 nodes, FSM states, Kafka topics, intent construction, error paths, and E2E test coverage |
 | [2-Way Registration Walkthrough](../guides/registration-example.md) | Complete 4-phase flow with code examples (Phase 1: Introspection, Phase 2: Reducer, Phase 3: Effect Execution, Phase 4: Ack Flow) |
 
-## Implementation Plans
+## Configuration & Secrets
 
 | Document | Description |
 |----------|-------------|
-| [Runtime Host Implementation Plan](RUNTIME_HOST_IMPLEMENTATION_PLAN.md) | Runtime host design plan |
-| [Declarative Effect Nodes Plan](DECLARATIVE_EFFECT_NODES_PLAN.md) | Effect node implementation plan |
+| [Config Discovery](CONFIG_DISCOVERY.md) | Contract-driven config discovery: Infisical-backed prefetch, transport config map, bootstrap sequence |
+
+## Topic Catalog
+
+| Document | Description |
+|----------|-------------|
+| [Topic Catalog Architecture](TOPIC_CATALOG_ARCHITECTURE.md) | Topic catalog service architecture: discovery, validation, response channels |
+
+## LLM Infrastructure
+
+| Document | Description |
+|----------|-------------|
+| [LLM Infrastructure](LLM_INFRASTRUCTURE.md) | Multi-server LLM topology, endpoint selection, cost tracking SPI |
+
+## MCP Integration
+
+| Document | Description |
+|----------|-------------|
+| [MCP Service Architecture](MCP_SERVICE_ARCHITECTURE.md) | MCP (Model Context Protocol) service layer: tool registration, schema generation, skip_server testing |
 
 ## Resilience
 

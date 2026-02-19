@@ -75,7 +75,7 @@ See [Validator Reference](validator_reference.md#architecture_layers) for full d
 - Type definitions completeness
 - Dependency declarations
 
-**Why it matters**: Infrastructure nodes (Consul, Kafka, Vault, PostgreSQL adapters) are contract-driven. Invalid contracts prevent node initialization.
+**Why it matters**: Infrastructure nodes (Consul, Kafka, Infisical, PostgreSQL adapters) are contract-driven. Invalid contracts prevent node initialization.
 
 ### 3. Pattern Validator (HIGH Priority)
 **Purpose**: Enforce ONEX naming conventions and anti-patterns
@@ -116,7 +116,7 @@ See [Validator Reference](validator_reference.md#architecture_layers) for full d
 - Circular dependency chains
 - Import errors
 
-**Why it matters**: Infrastructure packages have complex dependencies (Consul, Kafka, Vault). Circular imports cause runtime issues that are hard to debug.
+**Why it matters**: Infrastructure packages have complex dependencies (Consul, Kafka, Infisical). Circular imports cause runtime issues that are hard to debug.
 
 ## Validation Results
 

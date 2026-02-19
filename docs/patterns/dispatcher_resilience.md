@@ -170,7 +170,7 @@ class ResilientDispatcher(MixinAsyncCircuitBreaker, ProtocolMessageDispatcher):
 | **DATABASE** | 5 | 30s | Standard durability requirements |
 | **HTTP** | 5-10 | 60s | External dependencies more variable |
 | **CONSUL** | 3 | 30s | Service discovery is critical |
-| **VAULT** | 3 | 60s | Security service, longer recovery |
+| **INFISICAL** | 3 | 60s | Secret management service, longer recovery |
 | **VALKEY** | 10 | 30s | Cache, can tolerate more failures |
 
 ## Error Handling

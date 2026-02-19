@@ -259,13 +259,16 @@ print('Node loads successfully!')
 
 ```bash
 # Run all tests
-uv run pytest
+uv run pytest tests/
 
 # Run unit tests only
-uv run pytest tests/unit/
+uv run pytest tests/ -m unit
 
-# Run with coverage
-uv run pytest --cov=omnibase_infra
+# Run with coverage (60% minimum required)
+uv run pytest tests/ --cov=omnibase_infra --cov-report=html
+
+# Parallel execution
+uv run pytest tests/ -n auto
 ```
 
 ## Running ONEX Validators
@@ -288,16 +291,50 @@ uv run python scripts/validate.py architecture
 For running with full infrastructure:
 
 ```bash
-cd docker
+# Copy and edit environment file
 cp .env.example .env
 # Edit .env with your settings
 
-# Start infrastructure services
-docker compose -f docker-compose.infra.yml up -d
+# Start infrastructure services (Kafka, PostgreSQL, Consul)
+docker compose --env-file .env -f docker/docker-compose.infra.yml up -d
+
+# Start with Consul only
+docker compose --env-file .env -f docker/docker-compose.infra.yml --profile consul up -d
+
+# Start with secrets (Infisical)
+docker compose --env-file .env -f docker/docker-compose.infra.yml --profile secrets up -d
+
+# Start runtime services
+docker compose --env-file .env -f docker/docker-compose.infra.yml --profile runtime up -d
+
+# Start everything
+docker compose --env-file .env -f docker/docker-compose.infra.yml --profile full up -d
 
 # Check service status
-docker compose -f docker-compose.infra.yml ps
+docker compose --env-file .env -f docker/docker-compose.infra.yml ps
 ```
+
+### Infisical Bootstrap (First-Time Setup)
+
+Infisical replaces the long `.env` file with centralized secret management. See
+[INFISICAL_SECRETS_GUIDE.md](../guides/INFISICAL_SECRETS_GUIDE.md) for full details.
+
+The bootstrap sequence for a fresh deployment:
+
+```bash
+# 1. Start PostgreSQL (required by Infisical)
+docker compose --env-file .env -f docker/docker-compose.infra.yml up -d
+
+# 2. Bootstrap Infisical (first-time only: creates machine identities and seeds secrets)
+bash scripts/bootstrap-infisical.sh
+
+# 3. Start runtime services (they will prefetch secrets from Infisical at startup)
+docker compose --env-file .env -f docker/docker-compose.infra.yml --profile runtime up -d
+```
+
+**Opt-in behavior**: Secret prefetch from Infisical only runs when `INFISICAL_ADDR` is set
+in `.env`. Without it, services fall back to standard environment variable resolution.
+This means local development works without Infisical.
 
 ## Project Structure
 
@@ -306,7 +343,7 @@ src/omnibase_infra/
 ├── nodes/              # ONEX nodes (Effect, Compute, Reducer, Orchestrator)
 │   ├── node_*/         # Each node has contract.yaml + node.py
 │   └── reducers/       # Reducer implementations
-├── handlers/           # Infrastructure handlers (Consul, DB, Vault, HTTP)
+├── handlers/           # Infrastructure handlers (Consul, DB, Infisical, HTTP)
 ├── models/             # Pydantic models
 ├── enums/              # Centralized enums
 ├── adapters/           # External service adapters
@@ -389,19 +426,25 @@ Only ORCHESTRATOR nodes may publish events. Handlers return `ModelHandlerOutput`
 
 ```bash
 # Development
-uv sync                          # Install dependencies
-uv run pytest                       # Run tests
-uv run ruff format .               # Format code
-uv run ruff check --fix .          # Lint and fix
+uv sync                                    # Install dependencies
+uv run pytest tests/                       # Run all tests
+uv run pytest tests/ -m unit               # Unit tests only
+uv run pytest tests/ -m integration        # Integration tests only
+uv run pytest tests/ --cov=omnibase_infra  # With coverage
+uv run pytest tests/ -n auto               # Parallel execution
+uv run ruff format .                       # Format code
+uv run ruff check --fix .                  # Lint and fix
+uv run mypy src/omnibase_infra/            # Type checking
 
 # Validation
 uv run python scripts/validate.py all      # All validators
-uv run pre-commit run --all-files          # Pre-commit hooks
+pre-commit run --all-files                 # Pre-commit hooks
 
-# Docker
-docker compose -f docker-compose.infra.yml up -d
-docker compose -f docker-compose.infra.yml logs -f
-docker compose -f docker-compose.infra.yml down
+# Docker (from repo root, not docker/)
+docker compose --env-file .env -f docker/docker-compose.infra.yml up -d
+docker compose --env-file .env -f docker/docker-compose.infra.yml --profile runtime up -d
+docker compose --env-file .env -f docker/docker-compose.infra.yml logs -f
+docker compose --env-file .env -f docker/docker-compose.infra.yml down
 ```
 
 ## Common Mistakes

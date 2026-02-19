@@ -27,14 +27,17 @@ This directory contains detailed implementation guides and best practices for ON
 - **[Utility Directory Structure](./utility_directory_structure.md)** - Distinction between `utils/` and `shared/utils/` directories
 - **[Registry clear() Policy](./registry_clear_policy.md)** - When and how to implement clear() methods for test isolation vs production safety
 - **[Mixin Dependencies](./mixin_dependencies.md)** - Mixin composition patterns, dependency requirements, and inheritance order
+- **[Async Thread Safety Pattern](./async_thread_safety_pattern.md)** - Async thread safety: lock patterns, shared state in coroutines
 
 ### Infrastructure Integration
 - **[Consul Integration](./consul_integration.md)** - HashiCorp Consul connection, health checks, service registration, security patterns
+- **[Database URL Contract](./db_url_contract.md)** - Database URL construction contract and DSN validation rules
 
 ### Security
 - **[Security Patterns](./security_patterns.md)** - Comprehensive security guide covering error sanitization, input validation, authentication, authorization, secret management, network security, and production checklists
-- **[Secret Resolver](./secret_resolver.md)** - Centralized secret resolution with caching, multiple sources (env, file, Vault), convention fallback, and migration guide
-- **[Handler Config Resolver](./binding_config_resolver.md)** - Multi-source handler configuration resolution with environment overrides, caching, and Vault integration
+- **[Security Validation Architecture](./security_validation_architecture.md)** - Security validation architecture: input validation layers and enforcement points
+- **[Secret Resolver](./secret_resolver.md)** - Centralized secret resolution with caching, multiple sources (env, file, Infisical), convention fallback, and migration guide
+- **[Handler Config Resolver](./binding_config_resolver.md)** - Multi-source handler configuration resolution with environment overrides, caching, and Infisical integration
 - **[Policy Registry Trust Model](./policy_registry_trust_model.md)** - Trust assumptions, validation boundaries, and security mitigations for policy registration
 - **[Handler Plugin Loader](./handler_plugin_loader.md)** - Contract-driven handler discovery with comprehensive security documentation for dynamic imports, threat model, and deployment checklist
 
@@ -54,7 +57,7 @@ This directory contains detailed implementation guides and best practices for ON
 | Service unavailable | [Circuit Breaker](./circuit_breaker_implementation.md) | `CircuitBreaker` |
 | Timeout | [Error Recovery](./error_recovery_patterns.md#exponential-backoff-pattern) | `InfraTimeoutError` |
 | Auth failed | [Error Recovery](./error_recovery_patterns.md#credential-refresh-pattern) | `InfraAuthenticationError` |
-| Secret not found | [Error Handling](./error_handling_patterns.md#vault-secret-retrieval-error) | `SecretResolutionError` |
+| Secret not found | [Error Handling](./error_handling_patterns.md#infisical-secret-retrieval-error) | `SecretResolutionError` |
 | Partial failure | [Retry/Compensation](./retry_backoff_compensation_strategy.md#compensation-strategy-for-partial-failures) | Saga, Outbox Pattern |
 | Operation dispatch | [Operation Routing](./operation_routing.md) | `NodeRegistryEffect` |
 | Multi-backend registration | [Operation Routing](./operation_routing.md#parallel-execution-detail) | `ModelRegistryResponse` |
@@ -86,7 +89,7 @@ This directory contains detailed implementation guides and best practices for ON
 | Implement policy allowlist | [Policy Registry Trust Model](./policy_registry_trust_model.md) | Security Mitigations |
 | Validate user input | [Security Patterns](./security_patterns.md) | Input Validation |
 | Configure TLS/SSL | [Security Patterns](./security_patterns.md) | Network Security |
-| Manage secrets with Vault | [Security Patterns](./security_patterns.md) | Secret Management |
+| Manage secrets with Infisical | [Security Patterns](./security_patterns.md) | Secret Management |
 | Centralized secret resolution | [Secret Resolver](./secret_resolver.md) | Quick Start |
 | Migrate from os.getenv | [Secret Resolver](./secret_resolver.md) | Migration Guide |
 | Configure secret caching | [Secret Resolver](./secret_resolver.md) | Caching |
@@ -118,7 +121,7 @@ This directory contains detailed implementation guides and best practices for ON
 | HTTP/GRPC | `NETWORK_ERROR` | [Error Handling](./error_handling_patterns.md#transport-aware-error-codes) |
 | KAFKA | `SERVICE_UNAVAILABLE` | [Circuit Breaker](./circuit_breaker_implementation.md#kafka-publisher-protection) |
 | CONSUL | `SERVICE_UNAVAILABLE` | [Error Handling](./error_handling_patterns.md#transport-type-mapping) |
-| VAULT | `SERVICE_UNAVAILABLE` | [Error Recovery](./error_recovery_patterns.md#credential-refresh-pattern) |
+| INFISICAL | `SERVICE_UNAVAILABLE` | [Error Recovery](./error_recovery_patterns.md#credential-refresh-pattern) |
 | VALKEY | `SERVICE_UNAVAILABLE` | [Error Recovery](./error_recovery_patterns.md#graceful-degradation-pattern) |
 
 ## Pattern Relationships
@@ -200,17 +203,17 @@ Security Patterns
     ├── Comprehensive security guide for ONEX infrastructure
     ├── Includes: Error sanitization, input validation, auth, secrets, network security
     ├── Depends on: All error patterns, Correlation ID Tracking
-    └── References: Vault, Kafka, PostgreSQL, TLS configuration
+    └── References: Infisical, Kafka, PostgreSQL, TLS configuration
 
 Secret Resolver
     ├── Centralized secret resolution with caching
-    ├── Sources: Environment variables, file-based, Vault
+    ├── Sources: Environment variables, file-based, Infisical
     ├── Depends on: Security Patterns, Error Handling
-    └── References: SecretResolver, ModelSecretResolverConfig, HandlerVault
+    └── References: SecretResolver, ModelSecretResolverConfig, HandlerInfisical
 
 Handler Config Resolver
     ├── Multi-source handler configuration resolution
-    ├── Sources: Inline config, files, environment overrides, Vault
+    ├── Sources: Inline config, files, environment overrides, Infisical
     ├── Depends on: Secret Resolver, Security Patterns, Error Handling
     └── References: BindingConfigResolver, ModelHandlerBindingConfig
 

@@ -44,7 +44,7 @@ EFFECT nodes handle **external I/O operations** - any interaction with systems o
 
 - Database operations (PostgreSQL, Qdrant)
 - Service discovery (Consul, Kubernetes, Etcd)
-- Secret management (Vault)
+- Secret management (Infisical)
 - HTTP/API calls to external services
 - File system operations
 - Message queue interactions

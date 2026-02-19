@@ -458,7 +458,7 @@ These registries in omnibase_infra implement `clear()` following this policy:
 | `RegistryCompute` | `runtime/registry_compute.py` | Public with warning |
 | `RegistryPayloadHttp` | `handlers/models/http/registry_payload_http.py` | Class-level with warning |
 | `RegistryPayloadConsul` | `handlers/models/consul/registry_payload_consul.py` | Class-level with warning |
-| `RegistryPayloadVault` | `handlers/models/vault/registry_payload_vault.py` | Class-level with warning |
+| `RegistryPayloadInfisical` | `handlers/models/infisical/` | Removed — Infisical uses `HandlerInfisical` directly |
 | `InMemoryEventBus` | `event_bus/inmemory_event_bus.py` | Async clear_event_history() |
 | `InMemoryIdempotencyStore` | `idempotency/store_inmemory.py` | Async test utility |
 

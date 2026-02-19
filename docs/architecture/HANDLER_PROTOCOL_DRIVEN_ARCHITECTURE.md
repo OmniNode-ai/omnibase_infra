@@ -100,7 +100,7 @@ The codebase has two distinct handler systems that require different treatment:
 | Aspect | Description |
 |--------|-------------|
 | **Location** | `src/omnibase_infra/handlers/handler_*.py` |
-| **Purpose** | Protocol/transport operations (HTTP, DB, Consul, Vault) |
+| **Purpose** | Protocol/transport operations (HTTP, DB, Consul, Infisical) |
 | **Wiring** | Contract-driven via `HandlerPluginLoader` (preferred) or `wire_default_handlers()` (legacy fallback) |
 | **State** | Contract-driven discovery implemented (PR #143). See [Migration Guide](../migration/MIGRATION_WIRE_DEFAULT_HANDLERS.md) |
 
@@ -108,7 +108,7 @@ The codebase has two distinct handler systems that require different treatment:
 - `HttpRestHandler` - HTTP/REST API operations
 - `HandlerDb` - PostgreSQL database operations
 - `HandlerConsul` - Service discovery
-- `HandlerVault` - Secret management
+- `HandlerInfisical` - Secret management
 
 ### Node Handlers
 
@@ -173,7 +173,7 @@ class EnumHandlerTypeCategory(str, Enum):
 | Category | Deterministic? | Side Effects? | Examples |
 |----------|----------------|---------------|----------|
 | COMPUTE | Yes | No | Validation, transformation, mapping |
-| EFFECT | N/A | Yes | DB, HTTP, Consul, Vault, Kafka, LLM calls |
+| EFFECT | N/A | Yes | DB, HTTP, Consul, Infisical, Kafka, LLM calls |
 | NONDETERMINISTIC_COMPUTE | No | No | UUID generation, `datetime.now()`, `random.choice()` |
 
 **Note**: LLM API calls are **EFFECT** (external I/O), not NONDETERMINISTIC_COMPUTE.
@@ -202,7 +202,7 @@ class ModelHandlerDescriptor(BaseModel):
 
 **When NOT to use ADAPTER tag:**
 - DB handlers (domain persistence)
-- Vault handlers (secret access)
+- Infisical handlers (secret access)
 - Consul handlers (service discovery)
 - Outbound HTTP client (business API calls)
 
@@ -221,7 +221,7 @@ All existing infrastructure handlers are **EFFECT** (none are tagged ADAPTER):
 | `handler_db` | EFFECT | No | Reads/writes domain persistence |
 | `handler_http` | EFFECT | No | External HTTP calls with business semantics |
 | `handler_consul` | EFFECT | No | Service discovery with external state |
-| `handler_vault` | EFFECT | No | Secret access (definitely not plumbing) |
+| `handler_infisical` | EFFECT | No | Secret access (definitely not plumbing) |
 
 ## Contract Architecture
 

@@ -1,972 +1,355 @@
 > **Navigation**: [Home](../index.md) > [Architecture](README.md) > Current Node Architecture
 
-# ONEX Current Node Architecture (Pre-Runtime Host Migration)
+# ONEX Current Node Architecture
 
-This document describes the current ONEX node architecture that uses a **1-container-per-node** deployment model. This is the "before" state that will be migrated to the new Runtime Host model.
-
----
-
-## 1. Overview
-
-### Current Architecture: 1 Container Per Node
-
-In the current ONEX architecture, each node runs as an **independent container** with its own:
-
-- Python runtime environment
-- Entry point (`node.py` with `if __name__ == "__main__"`)
-- Container injection setup
-- Kafka consumer/producer connections
-- Health check endpoint
-
-**Deployment Model (ASCII):**
-```
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│   Container 1   │  │   Container 2   │  │   Container 3   │
-│  ┌───────────┐  │  │  ┌───────────┐  │  │  ┌───────────┐  │
-│  │ VaultNode │  │  │  │ConsulNode │  │  │  │ KafkaNode │  │
-│  └───────────┘  │  │  └───────────┘  │  │  └───────────┘  │
-│   asyncio.run   │  │   asyncio.run   │  │   asyncio.run   │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-         │                   │                     │
-         └───────────────────┼─────────────────────┘
-                             │
-                      ┌──────▼──────┐
-                      │    Kafka    │
-                      │ Event Bus   │
-                      └─────────────┘
-```
-
-**Deployment Model (Mermaid):**
-```mermaid
-flowchart TB
-    accTitle: Current ONEX Deployment Model - 1 Container Per Node
-    accDescr: Diagram showing the current ONEX deployment architecture where each node runs in its own independent container. Three example containers are shown: Container 1 runs VaultNode, Container 2 runs ConsulNode, and Container 3 runs KafkaNode. Each container has its own asyncio.run entry point. All containers communicate through a shared Kafka Event Bus.
-
-    subgraph C1["Container 1"]
-        V[VaultNode]
-        A1[asyncio.run]
-    end
-
-    subgraph C2["Container 2"]
-        CN[ConsulNode]
-        A2[asyncio.run]
-    end
-
-    subgraph C3["Container 3"]
-        KN[KafkaNode]
-        A3[asyncio.run]
-    end
-
-    V --> A1
-    CN --> A2
-    KN --> A3
-
-    A1 --> K[(Kafka Event Bus)]
-    A2 --> K
-    A3 --> K
-```
-
-### The 4 Node Types
-
-ONEX follows a strict **4-node architecture** pattern:
-
-| Node Type | Contract `node_type` | Base Class | Purpose | I/O Operations |
-|-----------|---------------------|------------|---------|----------------|
-| **EFFECT** | `EFFECT_GENERIC` | `NodeEffectService` | External I/O (APIs, DB, files) | Yes (`io_operations`) |
-| **COMPUTE** | `COMPUTE_GENERIC` | `NodeComputeService` | Pure transforms/algorithms | No |
-| **REDUCER** | `REDUCER_GENERIC` | `NodeReducerService` | Aggregation/persistence | No (DB via adapters) |
-| **ORCHESTRATOR** | `ORCHESTRATOR_GENERIC` | `NodeOrchestratorService` | Workflow coordination | No |
-
-**Note**: In `contract.yaml` files, use the `_GENERIC` suffix variants (e.g., `EFFECT_GENERIC`). In Python code, use `EnumNodeKind` values (e.g., `EnumNodeKind.EFFECT`).
-
-**Communication Pattern (ASCII):**
-```
-Adapters (EFFECT) → Events → Reducer → Intents → Orchestrator → Workflows → Adapters
-```
-
-**Communication Pattern (Mermaid):**
-```mermaid
-flowchart LR
-    accTitle: ONEX Node Communication Pattern
-    accDescr: Linear flow diagram showing how ONEX nodes communicate. EFFECT nodes (Adapters) generate Events which flow to Reducers. Reducers emit Intents which go to Orchestrators. Orchestrators execute Workflows which call back to Adapters to complete the cycle.
-
-    A1[Adapters<br/>EFFECT] -->|Events| R[Reducer]
-    R -->|Intents| O[Orchestrator]
-    O -->|Workflows| A2[Adapters]
-```
+This document describes the current ONEX node architecture. All nodes follow the declarative 4-node pattern: contract-driven, handler-based, container-injected. The runtime host (`RuntimeHostProcess`) loads and runs all nodes within a single process.
 
 ---
 
-## 2. Node Directory Structure
+## Table of Contents
 
-### Standard Node Structure
+1. [The Four Node Types](#1-the-four-node-types)
+2. [Standard Directory Structure](#2-standard-directory-structure)
+3. [Node Inventory by Functional Group](#3-node-inventory-by-functional-group)
+   - [Registration Family](#31-registration-family)
+   - [Validation Pipeline](#32-validation-pipeline)
+   - [LLM Inference and Embeddings](#33-llm-inference-and-embeddings)
+   - [Session Lifecycle](#34-session-lifecycle)
+   - [Checkpoint Pipeline](#35-checkpoint-pipeline)
+   - [Event Ledger](#36-event-ledger)
+   - [Release Readiness Handshake (RRH)](#37-release-readiness-handshake-rrh)
+   - [Pattern Lifecycle](#38-pattern-lifecycle)
+   - [Auxiliary Effects](#39-auxiliary-effects)
+4. [Complete Node Summary Table](#4-complete-node-summary-table)
+5. [Node Type Distribution](#5-node-type-distribution)
+
+---
+
+## 1. The Four Node Types
+
+ONEX enforces a strict **4-node architecture** pattern:
+
+| Node Type | Contract `node_type` | Purpose | Output Constraint |
+|-----------|---------------------|---------|-------------------|
+| **EFFECT** | `EFFECT_GENERIC` | External I/O (APIs, DB, filesystem, Kafka) | `events[]` |
+| **COMPUTE** | `COMPUTE_GENERIC` | Pure deterministic transformations | `result` (required) |
+| **REDUCER** | `REDUCER_GENERIC` | FSM state transitions; emits intents | `intents[]` |
+| **ORCHESTRATOR** | `ORCHESTRATOR_GENERIC` | Workflow coordination; only type that publishes | `events[]`, `intents[]` |
+
+**Communication Pattern**:
 
 ```
-nodes/<node_name>/v1_0_0/
-├── __init__.py              # Package initialization
-├── node.py                  # Main node implementation with entry point
-├── contract.yaml            # Node contract definition
-├── models/                  # Node-specific models
+EFFECT (I/O) → events → REDUCER (FSM) → intents → ORCHESTRATOR → EFFECT
+                                                        │
+                                              handler_routing → COMPUTE
+```
+
+**Key Invariants**:
+- ORCHESTRATOR nodes **cannot** return `result`; they emit events or intents only
+- COMPUTE nodes **must** return `result`; they have no side effects
+- REDUCER nodes are pure: `delta(state, event) -> (new_state, intents[])`
+- EFFECT nodes own all external I/O; handlers cannot publish events directly
+
+---
+
+## 2. Standard Directory Structure
+
+```
+nodes/<node_name>/
+├── __init__.py           # Public exports
+├── contract.yaml         # ONEX contract (REQUIRED — source of truth)
+├── node.py              # Declarative node class; no custom logic
+├── models/              # Node-specific Pydantic models
 │   ├── __init__.py
-│   ├── model_<name>_input.py
-│   └── model_<name>_output.py
-└── registry/                # Dependency injection registry (optional)
-    └── __init__.py
-```
-
-### Naming Conventions
-
-- **Directory Name**: `node_<name>_<type>` (e.g., `node_vault_adapter_effect`)
-- **Node Class**: `Node<Name><Type>` in CamelCase (e.g., `NodeVaultAdapterEffect`)
-- **Models**: `Model<Name>Input`, `Model<Name>Output`
-- **Files**: All snake_case (`model_vault_adapter_input.py`)
-
----
-
-## 3. Full Example: Effect Node (Vault Adapter)
-
-### File Tree
-
-```
-nodes/node_vault_adapter_effect/v1_0_0/
-├── __init__.py
-├── node.py                           # 706 lines - Main implementation
-├── contract.yaml                     # 177 lines - Contract definition
-├── models/
+│   └── model_<name>.py
+├── registry/            # Dependency injection registry
 │   ├── __init__.py
-│   ├── model_vault_adapter_input.py  # Input model for envelope payloads
-│   └── model_vault_adapter_output.py # Output model for results
-└── registry/
-    └── __init__.py
-```
-
-### node.py - Key Sections
-
-**Imports and Base Class:**
-```python
-#!/usr/bin/env python3
-
-import asyncio
-import logging
-import os
-from typing import Any
-
-from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
-from omnibase_core.core.node_effect_service import NodeEffectService
-from omnibase_core.core.onex_container import ModelONEXContainer
-from omnibase_core.enums.enum_health_status import EnumHealthStatus
-from omnibase_core.models.core.model_health_status import ModelHealthStatus
-
-from omnibase_infra.models.vault import (
-    ModelVaultSecretRequest,
-    ModelVaultSecretResponse,
-    ModelVaultTokenRequest,
-)
-```
-
-**Node Class Definition:**
-```python
-class NodeVaultAdapterEffect(NodeEffectService):
-    """
-    Vault Adapter - Event-Driven Secret Management Effect
-
-    NodeEffect that processes event envelopes to perform Vault operations.
-    Integrates with event bus for secret management, token lifecycle,
-    and encryption services. Provides health check HTTP endpoint for monitoring.
-    """
-
-    def __init__(self, container: ModelONEXContainer):
-        # Use proper base class - no more boilerplate!
-        super().__init__(container)
-
-        self.node_type = "effect"
-        self.domain = "infrastructure"
-
-        # ONEX logger initialization with fallback
-        try:
-            self.logger = getattr(container, "get_tool", lambda x: None)(
-                "LOGGER",
-            ) or logging.getLogger(__name__)
-        except (AttributeError, Exception):
-            self.logger = logging.getLogger(__name__)
-
-        # Vault client configuration - all environment variables required
-        vault_addr = os.getenv("VAULT_ADDR")
-        vault_token = os.getenv("VAULT_TOKEN")
-        vault_namespace = os.getenv("VAULT_NAMESPACE", "")
-
-        if not vault_addr:
-            raise OnexError(
-                message="VAULT_ADDR environment variable is required but not set",
-                error_code=CoreErrorCode.MISSING_REQUIRED_PARAMETER,
-            )
-        # ... configuration continues
-```
-
-**Resource Lifecycle Methods:**
-```python
-    async def _initialize_node_resources(self) -> None:
-        """Override to initialize vault client."""
-        await super()._initialize_node_resources()
-        await self.initialize_vault_client()
-
-    async def _cleanup_node_resources(self) -> None:
-        """Override to cleanup vault connection pool resources."""
-        if self.vault_connection_pool:
-            await self.vault_connection_pool.close_all()
-        await super()._cleanup_node_resources()
-```
-
-**Health Check Method:**
-```python
-    def health_check(self) -> ModelHealthStatus:
-        """Check Vault service health and connectivity."""
-        try:
-            client = self._get_vault_client()
-
-            if client is None:
-                return ModelHealthStatus(
-                    status=EnumHealthStatus.UNREACHABLE,
-                    message="Vault client is not initialized",
-                )
-
-            health = client.sys.read_health_status(method="GET")
-
-            if not health.get("initialized", False):
-                return ModelHealthStatus(
-                    status=EnumHealthStatus.UNHEALTHY,
-                    message="Vault is not initialized",
-                    details=health,
-                )
-
-            if health.get("sealed", True):
-                return ModelHealthStatus(
-                    status=EnumHealthStatus.UNHEALTHY,
-                    message="Vault is sealed",
-                    details=health,
-                )
-
-            return ModelHealthStatus(
-                status=EnumHealthStatus.HEALTHY,
-                message=f"Vault is healthy (version: {health.get('version', 'unknown')})",
-                details={...},
-            )
-        except Exception as e:
-            return ModelHealthStatus(
-                status=EnumHealthStatus.UNREACHABLE,
-                message=f"Vault health check failed: {str(e)}",
-            )
-```
-
-**Entry Point (1-Container-Per-Node Pattern):**
-```python
-# Entry point for running the node
-if __name__ == "__main__":
-    import sys
-
-    # Create container (simplified for standalone operation)
-    container = ModelONEXContainer()
-
-    # Create and run the node
-    node = NodeVaultAdapterEffect(container)
-
-    # Run the node with asyncio
-    try:
-        asyncio.run(node.run())
-    except KeyboardInterrupt:
-        print("\nVault adapter shutting down...")
-        sys.exit(0)
-```
-
-### contract.yaml - Full Structure
-
-```yaml
-name: "vault_adapter"
-contract_name: "vault_adapter"
-node_name: "vault_adapter"
-version:
-  major: 1
-  minor: 0
-  patch: 0
-contract_version: "1.0.0"
-node_version: "1.0.0"
-
-node_type: "EFFECT_GENERIC"  # Use _GENERIC variants in contract.yaml
-
-description: >
-  HashiCorp Vault secret management adapter for secure credential storage and retrieval.
-  Message bus bridge pattern for Vault operations including secret management,
-  token operations, and encryption services.
-
-capabilities:
-  - name: "secret_management"
-    description: "Read, write, delete, and list secrets in Vault"
-  - name: "token_management"
-    description: "Create, renew, revoke, and lookup Vault tokens"
-  - name: "encryption_services"
-    description: "Encrypt and decrypt data using Vault transit engine"
-  - name: "lease_management"
-    description: "Manage secret leases and renewals"
-  - name: "health_monitoring"
-    description: "Monitor Vault health and seal status"
-
-input_model: "ModelVaultAdapterInput"
-output_model: "ModelVaultAdapterOutput"
-
-io_operations:
-  - operation: "get_secret"
-    description: "Retrieve secret from Vault"
-    input_fields:
-      - path
-      - version
-      - mount_path
-    output_fields:
-      - data
-      - metadata
-      - version
-
-  - operation: "set_secret"
-    description: "Store secret in Vault"
-    input_fields:
-      - path
-      - data
-      - mount_path
-    output_fields:
-      - version
-      - created_time
-
-  - operation: "delete_secret"
-    description: "Delete secret from Vault"
-    input_fields:
-      - path
-      - mount_path
-    output_fields:
-      - success
-
-  - operation: "health_check"
-    description: "Check Vault health and seal status"
-    input_fields: []
-    output_fields:
-      - initialized
-      - sealed
-      - standby
-      - version
-
-dependencies:
-  - name: "protocol_event_bus"
-    type: "protocol"
-    class_name: "ProtocolEventBus"
-    module: "omnibase_spi.protocols.event_bus"
-
-  - name: "model_vault_secret_request"
-    type: "model"
-    class_name: "ModelVaultSecretRequest"
-    module: "omnibase_infra.models.vault.model_vault_secret_request"
-
-  - name: "model_vault_secret_response"
-    type: "model"
-    class_name: "ModelVaultSecretResponse"
-    module: "omnibase_infra.models.vault.model_vault_secret_response"
-
-definitions:
-  ModelVaultAdapterInput:
-    type: object
-    description: "Input model for Vault adapter operations"
-    properties:
-      operation:
-        type: string
-        description: "Operation to perform (get_secret, set_secret, etc.)"
-      path:
-        type: string
-        description: "Vault secret path"
-      data:
-        type: object
-        description: "Secret data for write operations"
-      correlation_id:
-        type: string
-        description: "Request correlation ID"
-    required:
-      - operation
-      - correlation_id
-
-  ModelVaultAdapterOutput:
-    type: object
-    description: "Output model for Vault adapter operations"
-    properties:
-      success:
-        type: boolean
-        description: "Whether operation succeeded"
-      data:
-        type: object
-        description: "Response data"
-      error:
-        type: string
-        description: "Error message if failed"
-      correlation_id:
-        type: string
-        description: "Request correlation ID"
-    required:
-      - success
-      - correlation_id
-
-metadata:
-  author: "ONEX Infrastructure Team"
-  created: "2025-11-14"
-  tags:
-    - vault
-    - secrets
-    - security
-    - adapter
-    - effect
-```
-
-### Model Files
-
-**model_vault_adapter_input.py:**
-```python
-#!/usr/bin/env python3
-
-from typing import Literal
-from pydantic import BaseModel, Field
-
-
-class ModelVaultAdapterInput(BaseModel):
-    """Input model for Vault adapter operations from event envelopes.
-
-    Node-specific model for processing event envelope payloads into Vault operations.
-    """
-
-    action: Literal[
-        "vault_get_secret",
-        "vault_set_secret",
-        "vault_delete_secret",
-        "vault_list_secrets",
-        "vault_create_token",
-        "vault_renew_token",
-        "vault_revoke_token",
-        "vault_health_check",
-    ] = Field(description="Vault operation to perform")
-
-    # Secret operation parameters
-    path: str | None = Field(default=None, description="Secret path in Vault")
-    mount_path: str = Field(default="secret", description="Vault mount path")
-    secret_data: dict | None = Field(default=None, description="Secret data for write operations")
-    version: int | None = Field(default=None, description="Secret version to retrieve")
-
-    # Token operation parameters
-    token: str | None = Field(default=None, description="Token for renew/revoke operations")
-    policies: list[str] | None = Field(default=None, description="Policies for token creation")
-    ttl: str | None = Field(default=None, description="Token TTL (e.g., '768h')")
-    renewable: bool = Field(default=True, description="Whether token is renewable")
-
-    # Common fields
-    correlation_id: str = Field(description="Correlation ID for request tracking")
-```
-
-**model_vault_adapter_output.py:**
-```python
-#!/usr/bin/env python3
-
-from pydantic import BaseModel, Field
-from omnibase_infra.models.vault.model_vault_secret_response import (
-    ModelVaultSecretResponse,
-)
-
-
-class ModelVaultAdapterOutput(BaseModel):
-    """Output model for Vault adapter operation results.
-
-    Node-specific model for returning Vault operation results through effect outputs.
-    """
-
-    vault_operation_result: (
-        ModelVaultSecretResponse
-        | dict[str, str | int | bool | list | None]
-        | str
-        | bool
-    ) = Field(description="Result of Vault operation")
-
-    success: bool = Field(description="Whether the operation succeeded")
-    operation_type: str = Field(description="Type of Vault operation performed")
-    correlation_id: str = Field(description="Correlation ID from request")
-```
-
----
-
-## 4. Full Example: Effect Node (Consul Projector)
-
-### File Tree
-
-```
-nodes/node_consul_projector_effect/v1_0_0/
-├── __init__.py
-├── node.py                                    # Main implementation
-├── contract.yaml                              # 342 lines - Contract definition
-├── models/
+│   └── registry_infra_<node_name>.py
+├── handlers/            # Handler implementations (where logic lives)
 │   ├── __init__.py
-│   ├── model_consul_cache_entry.py
-│   ├── model_consul_health_projection.py
-│   ├── model_consul_kv_details.py
-│   ├── model_consul_kv_projection.py
-│   ├── model_consul_kv_summary.py
-│   ├── model_consul_projection_type.py
-│   ├── model_consul_projections.py
-│   ├── model_consul_projector_input.py
-│   ├── model_consul_projector_output.py
-│   ├── model_consul_service_projection.py
-│   ├── model_consul_topology_graph.py
-│   ├── model_consul_topology_metrics.py
-│   └── model_consul_topology_projection.py
-└── registry/
-    └── __init__.py
+│   └── handler_<name>.py
+└── dispatchers/         # Dispatcher adapters (optional)
+    ├── __init__.py
+    └── dispatcher_<name>.py
 ```
 
-### node.py - Key Sections
-
-```python
-#!/usr/bin/env python3
-
-import asyncio
-import logging
-from datetime import UTC, datetime
-
-from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
-from omnibase_core.core.node_effect_service import NodeEffectService
-from omnibase_core.core.onex_container import ModelONEXContainer
-from omnibase_core.enums.enum_health_status import EnumHealthStatus
-from omnibase_core.models.core.model_health_status import ModelHealthStatus
-
-# Import node-specific models
-from .models import (
-    ModelConsulHealthCacheEntry,
-    ModelConsulHealthProjection,
-    ModelConsulKVCacheEntry,
-    ModelConsulKVProjection,
-    ModelConsulProjectorInput,
-    ModelConsulProjectorOutput,
-    ModelConsulServiceCacheEntry,
-    ModelConsulServiceProjection,
-    ModelConsulTopologyProjection,
-)
-
-
-class NodeConsulProjectorEffect(NodeEffectService):
-    """
-    Consul Projector - Event-Driven Infrastructure State Projector
-
-    NodeEffect that processes Consul state data to create projected views and aggregations.
-    Integrates with event bus for event-driven state projection and monitoring.
-    Provides comprehensive state views for service discovery, health monitoring, and topology analysis.
-    """
-
-    def __init__(self, container: ModelONEXContainer):
-        super().__init__(container)
-
-        self.node_type = "effect"
-        self.domain = "infrastructure"
-
-        # ONEX logger initialization with fallback
-        try:
-            self.logger = getattr(container, "get_tool", lambda x: None)(
-                "LOGGER",
-            ) or logging.getLogger(__name__)
-        except (AttributeError, Exception):
-            self.logger = logging.getLogger(__name__)
-
-        # State cache for projection optimization with strong typing
-        self._service_cache: dict[str, ModelConsulServiceCacheEntry] = {}
-        self._health_cache: dict[str, ModelConsulHealthCacheEntry] = {}
-        self._kv_cache: dict[str, ModelConsulKVCacheEntry] = {}
-        self._cache_ttl: int = 300  # 5 minutes
-
-        self._initialized = False
-
-    async def project_service_state(self, input_data: ModelConsulProjectorInput) -> ModelConsulServiceProjection:
-        """Project current service state from Consul data."""
-        # ... projection logic
-
-    async def project_health_state(self, input_data: ModelConsulProjectorInput) -> ModelConsulHealthProjection:
-        """Project health state aggregation from Consul data."""
-        # ... projection logic
-
-    async def project_kv_state(self, input_data: ModelConsulProjectorInput) -> ModelConsulKVProjection:
-        """Project KV store state changes from Consul data."""
-        # ... projection logic
-
-    async def project_topology(self, input_data: ModelConsulProjectorInput) -> ModelConsulTopologyProjection:
-        """Project service topology view from Consul data."""
-        # ... topology generation logic
-
-    def health_check(self) -> ModelHealthStatus:
-        """Single comprehensive health check for Consul projector."""
-        try:
-            if not self._initialized:
-                return ModelHealthStatus(
-                    status=EnumHealthStatus.UNHEALTHY,
-                    message="Consul projector not initialized",
-                )
-
-            cache_health = len(self._service_cache) + len(self._health_cache) + len(self._kv_cache)
-
-            if cache_health == 0:
-                return ModelHealthStatus(
-                    status=EnumHealthStatus.DEGRADED,
-                    message="Consul projector operational but caches empty",
-                )
-
-            return ModelHealthStatus(
-                status=EnumHealthStatus.HEALTHY,
-                message=f"Consul projector healthy - cache entries: {cache_health}",
-            )
-        except Exception as e:
-            return ModelHealthStatus(
-                status=EnumHealthStatus.UNREACHABLE,
-                message=f"Consul projector health check failed: {e!s}",
-            )
-
-
-# Entry point for running the node
-if __name__ == "__main__":
-    import sys
-
-    container = ModelONEXContainer()
-    node = NodeConsulProjectorEffect(container)
-
-    try:
-        asyncio.run(node.run())
-    except KeyboardInterrupt:
-        print("\nConsul projector shutting down...")
-        sys.exit(0)
-```
+**There are no `v1_0_0/` subdirectories.** Versioning is done through `contract_version` fields in `contract.yaml`, not through directory nesting.
 
 ---
 
-## 5. Contract YAML Structure
+## 3. Node Inventory by Functional Group
 
-### Required Fields
+### 3.1 Registration Family
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Short identifier for the node |
-| `contract_name` | string | Full contract identifier |
-| `node_name` | string | Node identifier |
-| `version` | object | Semantic version `{major, minor, patch}` |
-| `contract_version` | string | Contract version string |
-| `node_version` | string | Node implementation version |
-| `node_type` | enum | One of: `EFFECT_GENERIC`, `COMPUTE_GENERIC`, `REDUCER_GENERIC`, `ORCHESTRATOR_GENERIC` |
-| `description` | string | Human-readable description |
-| `input_model` | string | Name of input model class |
-| `output_model` | string | Name of output model class |
-| `dependencies` | array | List of required protocols and models |
-| `definitions` | object | Model definitions for input/output |
+The registration family handles the full lifecycle of ONEX node registration: from introspection through Consul and PostgreSQL backend persistence to state tracking.
 
-### Effect Node Specific Fields
-
-```yaml
-io_operations:
-  - operation: "operation_name"
-    description: "What this operation does"
-    input_fields:
-      - field1
-      - field2
-    output_fields:
-      - result_field
+**Data flow**:
+```
+INTROSPECTION EVENT → NodeRegistrationOrchestrator
+    → NodeRegistrationReducer (emits intents)
+    → NodeRegistryEffect (dual-backend: Consul + PostgreSQL)
+    → NodeRegistrationStorageEffect (storage queries)
+    → NodeServiceDiscoveryEffect (service discovery backend)
 ```
 
-### Orchestrator Specific Fields
+| Node | Type | Description |
+|------|------|-------------|
+| `node_registration_orchestrator` | ORCHESTRATOR | Registration workflow orchestrator. Coordinates node lifecycle by calling the reducer for intents and the effect for execution. Handles the introspection → registration handshake including ACK flow. |
+| `node_registration_reducer` | REDUCER | Pure reducer for the registration workflow. Processes introspection events and emits typed registration intents for Consul and PostgreSQL backends. FSM: `idle → pending → accepted → active`. |
+| `node_registry_effect` | EFFECT | Dual-backend node registration. Executes registration against both Consul (service discovery) and PostgreSQL (record persistence) with partial failure support and circuit breaker protection. |
+| `node_registration_storage_effect` | EFFECT | Capability-oriented storage for node registrations. Handles store, query, update, and delete operations with pluggable backend handlers (PostgreSQL). |
+| `node_service_discovery_effect` | EFFECT | Service discovery operations. Provides capability-oriented service registration, deregistration, and discovery with pluggable backends (Consul, Kubernetes, Etcd). Named by capability, not technology. |
 
-```yaml
-workflows:
-  workflow_name:
-    name: "WorkflowClassName"
-    description: "What this workflow does"
-    trigger: "event_type_that_triggers"
-    steps:
-      - step: "step_name"
-        action: "action_to_perform"
-        depends_on: ["previous_step"]
-        output: "output_variable"
+**Also in `nodes/effects/`** (standalone sub-package):
 
-intent_consumption:
-  subscribed_intents:
-    - "intent_type_1"
-    - "intent_type_2"
-  intent_routing_table:
-    intent_type_1: "workflow_to_trigger"
-```
+| Node | Type | Description |
+|------|------|-------------|
+| `effects/registry_effect` | EFFECT | Effect node for dual-backend node registration. Shares the `ModelRegistryRequest` / `ModelRegistryResponse` interface with `node_registry_effect`. (Legacy location; see `node_registry_effect` for the canonical version.) |
 
-### Reducer Specific Fields
+**Contract Registry** (tracks contract declarations from all nodes):
 
-```yaml
-event_consumption:
-  subscribed_topics:
-    - "topic-name-1"
-    - "topic-name-2"
-  consumer_group: "reducer_consumer_group"
-  consumed_event_types:
-    - "EVENT_TYPE_1"
-    - "EVENT_TYPE_2"
-
-intent_emission:
-  published_intents:
-    - "intent_type_1"
-    - "intent_type_2"
-  intent_routing: "orchestrator_name"
-
-state_schema:
-  tables:
-    - name: "table_name"
-      columns:
-        - name: "column_name"
-          type: "uuid"
-          primary_key: true
-```
+| Node | Type | Description |
+|------|------|-------------|
+| `contract_registry_reducer` | REDUCER | Reducer that consumes contract registration events from Kafka and materializes them to PostgreSQL for discovery and observability. Tracks contract registrations, heartbeats, deregistrations, and schema diffs. |
+| `node_contract_persistence_effect` | EFFECT | Routes intents from `ContractRegistryReducer` to PostgreSQL handlers for contract and topic management. Supports upsert, update, deactivate, and cleanup operations. |
 
 ---
 
-## 6. Node Base Classes
+### 3.2 Validation Pipeline
 
-### Import Patterns
+The validation pipeline implements a multi-node pattern candidate validation workflow: plan → execute → adjudicate → publish verdicts → update pattern lifecycle.
 
-All nodes import from `omnibase_core`:
-
-```python
-# Base classes (pick one based on node type)
-from omnibase_core.core.node_effect_service import NodeEffectService
-from omnibase_core.base.node_compute_service import NodeComputeService
-from omnibase_core.core.node_reducer_service import NodeReducerService
-from omnibase_core.core.node_orchestrator_service import NodeOrchestratorService
-
-# Common imports
-from omnibase_core.core.errors.onex_error import CoreErrorCode, OnexError
-from omnibase_core.core.onex_container import ModelONEXContainer
-from omnibase_core.enums.enum_health_status import EnumHealthStatus
-from omnibase_core.models.core.model_health_status import ModelHealthStatus
+**Data flow**:
+```
+PATTERN CANDIDATE → NodeValidationOrchestrator
+    → builds ModelValidationPlan
+    → NodeValidationExecutor (runs checks: typecheck, lint, tests, risk, cost)
+    → NodeValidationAdjudicator (REDUCER: aggregates results, produces PASS/FAIL/QUARANTINE)
+    → NodePatternLifecycleEffect (applies verdict to tier state)
+    → NodeValidationLedgerProjectionCompute (persists to validation ledger)
 ```
 
-### Base Class Methods
+| Node | Type | Description |
+|------|------|-------------|
+| `node_validation_orchestrator` | ORCHESTRATOR | Orchestrator for the validation pipeline. Consumes pattern candidates, builds validation plans from the MVP check catalog, coordinates executor and adjudicator nodes, and publishes validation results. |
+| `node_validation_executor` | EFFECT | Runs validation checks against a candidate. Receives a `ModelValidationPlan` and executes each planned check (typecheck, lint, unit tests, integration tests, risk assessment, cost metrics). Reports pass/fail/skip per check. |
+| `node_validation_adjudicator` | REDUCER | Pure reducer for verdict production. Aggregates check results from the executor, applies scoring policy (required / recommended / informational severity), and produces a `PASS`, `FAIL`, or `QUARANTINE` verdict with score and rationale. |
+| `node_validation_ledger_projection_compute` | COMPUTE | Subscribes to 3 cross-repo validation event topics and projects validation events into the `validation_event_ledger` for deterministic replay. Uses consistent Kafka position tracking for idempotency. |
+| `node_pattern_lifecycle_effect` | EFFECT | Applies validation verdicts to pattern lifecycle state and computes tier transitions. Promotion tiers: `OBSERVED → SUGGESTED → VALIDATED → CANONICAL`. Demotion on `FAIL`; quarantine on repeated failures. |
 
-**NodeEffectService:**
-```python
-class NodeEffectService:
-    def __init__(self, container: ModelONEXContainer): ...
-    async def _initialize_node_resources(self) -> None: ...
-    async def _cleanup_node_resources(self) -> None: ...
-    async def run(self) -> None: ...  # Main event loop
-    def health_check(self) -> ModelHealthStatus: ...
-```
+**Architecture validation** (static analysis):
 
-**NodeComputeService[TInput, TOutput]:**
-```python
-class NodeComputeService(Generic[TInput, TOutput]):
-    def __init__(self, container: ModelONEXContainer): ...
-    async def initialize(self) -> None: ...
-    async def compute(self, input_data: TInput) -> TOutput: ...  # Pure transformation
-```
-
-**NodeReducerService:**
-```python
-class NodeReducerService:
-    def __init__(self, container: ModelONEXContainer): ...
-    async def reduce(self, input_data: TInput) -> TOutput: ...  # Aggregation
-    async def initialize(self) -> None: ...
-    async def cleanup(self) -> None: ...
-```
-
-**NodeOrchestratorService:**
-```python
-class NodeOrchestratorService:
-    def __init__(self, container: ModelONEXContainer): ...
-    async def orchestrate(self, input_data: TInput) -> TOutput: ...  # Workflow coordination
-    async def initialize(self) -> None: ...
-    async def cleanup(self) -> None: ...
-    async def health_check(self) -> dict: ...
-```
+| Node | Type | Description |
+|------|------|-------------|
+| `architecture_validator` | COMPUTE | Analyzes Python source code and module structures to detect architecture violations. Validates three core rules: `ARCH-001` (no direct handler dispatch), `ARCH-002` (no circular imports), `ARCH-003` (no effect-to-reducer dependency). |
 
 ---
 
-## 7. Deployment Model
+### 3.3 LLM Inference and Embeddings
 
-### Current: 1 Container Per Node
+The LLM family provides provider-agnostic inference and embedding generation with circuit breaker protection and multi-endpoint routing.
 
-Each node is deployed as an independent Docker container:
+**Data flow**:
+```
+INFERENCE REQUEST → NodeLlmInferenceEffect
+    (routes to: OpenAI-compatible / Ollama handlers)
+    → returns ModelLlmInferenceResponse (tokens, latency, trace)
 
-```dockerfile
-# Example Dockerfile for a node
-FROM python:3.12-slim
+EMBEDDING REQUEST → NodeLlmEmbeddingEffect
+    (batch generation with retry)
+    → returns ModelLlmEmbeddingResponse (vectors + dimension validation)
 
-WORKDIR /app
-COPY . .
-RUN pip install -e .
-
-# Each node has its own entry point
-CMD ["python", "-m", "omnibase_infra.nodes.node_vault_adapter_effect.v1_0_0.node"]
+A/B COMPARISON → NodeBaselineComparisonCompute
+    (paired baseline vs. candidate runs)
+    → returns ModelAttributionRecord (cost/outcome deltas, ROI)
 ```
 
-**Docker Compose Example:**
-```yaml
-services:
-  vault-adapter:
-    build: .
-    command: python -m omnibase_infra.nodes.node_vault_adapter_effect.v1_0_0.node
-    environment:
-      - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=${VAULT_TOKEN}
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-    depends_on:
-      - kafka
-      - vault
-
-  consul-projector:
-    build: .
-    command: python -m omnibase_infra.nodes.node_consul_projector_effect.v1_0_0.node
-    environment:
-      - CONSUL_ADDR=http://consul:8500
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-    depends_on:
-      - kafka
-      - consul
-
-  kafka-adapter:
-    build: .
-    command: python -m omnibase_infra.nodes.kafka_adapter.v1_0_0.node
-    environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-    depends_on:
-      - kafka
-```
-
-### Node Communication
-
-Nodes communicate exclusively via **Kafka topics**:
-
-```
-┌─────────────────┐      publish       ┌─────────────────┐
-│  Effect Node    │ ─────────────────► │     Kafka       │
-│ (vault_adapter) │                    │   Event Bus     │
-└─────────────────┘                    └────────┬────────┘
-                                                │
-                                                │ subscribe
-                                                ▼
-                                       ┌─────────────────┐
-                                       │  Reducer Node   │
-                                       │ (omni_reducer)  │
-                                       └────────┬────────┘
-                                                │
-                                                │ emit intent
-                                                ▼
-                                       ┌─────────────────┐
-                                       │ Orchestrator    │
-                                       │ (omni_orchestr) │
-                                       └─────────────────┘
-```
-
-### Entry Point Pattern
-
-Every node has the same entry point pattern:
-
-```python
-# Entry point for running the node
-if __name__ == "__main__":
-    import sys
-
-    # Create container (simplified for standalone operation)
-    container = ModelONEXContainer()
-
-    # Create and run the node
-    node = NodeClassName(container)
-
-    # Run the node with asyncio
-    try:
-        asyncio.run(node.run())
-    except KeyboardInterrupt:
-        print("\nNode shutting down...")
-        sys.exit(0)
-```
+| Node | Type | Description |
+|------|------|-------------|
+| `node_llm_inference_effect` | EFFECT | Provider-agnostic LLM inference. Delegates to provider-specific handlers (OpenAI-compatible, Ollama) via declarative operation routing. Supports chat completions and raw completions with structured output extraction and tracing metadata. |
+| `node_llm_embedding_effect` | EFFECT | Batch embedding generation via OpenAI-compatible and Ollama endpoints. Retry logic, circuit breaker protection, and dimension uniformity validation across batch outputs. |
+| `node_baseline_comparison_compute` | COMPUTE | A/B baseline comparison. Takes paired baseline and candidate run results and computes cost deltas (token, time, retry savings), outcome deltas (quality improvement), and overall ROI score. Pure computation; no I/O. |
 
 ---
 
-## 8. Limitations (Why We're Migrating)
+### 3.4 Session Lifecycle
 
-### Resource Overhead
+The session lifecycle family manages pipeline run state using a filesystem-backed FSM. It tracks the complete run lifecycle from creation through completion.
 
-**Problem:** Each node requires its own container with:
-- Full Python runtime (~150MB base image)
-- Separate Kafka consumer connections
-- Independent health check endpoints
-- Duplicate dependency installations
-
-**Impact:** With 15+ nodes, this results in significant resource waste:
+**Data flow**:
 ```
-15 nodes × 150MB = 2.25GB+ for container images alone
-15 nodes × 1 Kafka connection = 15 Kafka connections
+SESSION EVENT → NodeSessionLifecycleReducer
+    (FSM: idle → run_created → run_active → run_ended)
+    → emits intents → NodeSessionStateEffect
+    (writes session.json and runs/{run_id}.json with atomic flock/fsync)
 ```
 
-### Complex Deployment
+| Node | Type | Description |
+|------|------|-------------|
+| `node_session_lifecycle_reducer` | REDUCER | Pure reducer for session lifecycle management. Tracks the FSM `idle → run_created → run_active → run_ended` for each pipeline run. Emits intents for session index and run context writes. Supports concurrent runs. |
+| `node_session_state_effect` | EFFECT | Filesystem I/O for session state. Owns all reads/writes to `~/.claude/state/` including `session.json` (with `flock`) and `runs/{run_id}.json`. Uses atomic write-tmp-fsync-rename pattern for crash safety. |
 
-**Problem:** Each node needs separate:
-- Docker image builds
-- Kubernetes deployments/pods
-- Service definitions
-- ConfigMaps/Secrets
-- Health check probes
+**Authorization gate** (used in session-level access control):
 
-**Impact:** Managing 15+ separate deployments becomes unwieldy:
-- Difficult to coordinate rolling updates
-- Complex dependency management
-- Increased Kubernetes resource definitions
+| Node | Type | Description |
+|------|------|-------------|
+| `node_auth_gate_compute` | COMPUTE | Pure compute node for work authorization decisions. Evaluates a 10-step cascade: whitelisted paths, emergency overrides, run_id validation, authorization scope checks (tools, paths, repos), and expiry. Returns `ModelAuthGateDecision` (ALLOW / DENY). |
 
-### No Shared Handler Infrastructure
+**Intent storage** (graphs):
 
-**Problem:** Common functionality is duplicated:
-- Kafka consumer setup in every node
-- Health check endpoints repeated
-- Error handling patterns duplicated
-- Logging configuration repeated
-
-**Impact:**
-- Code duplication across nodes
-- Inconsistent error handling
-- Difficult to add cross-cutting concerns
-
-### Scaling Limitations
-
-**Problem:** Cannot scale node types independently:
-- Must scale entire container for one node
-- Cannot collocate related nodes efficiently
-- Memory-intensive nodes affect all
-
-### Migration Path: Runtime Host Model
-
-The new **Runtime Host** model addresses these limitations by:
-- Running multiple nodes in a single container
-- Sharing Kafka connections and infrastructure
-- Providing unified health check endpoints
-- Enabling efficient resource sharing
-- Simplifying deployment to a single host
-
-```
-┌─────────────────────────────────────────────────┐
-│                 Runtime Host                     │
-│  ┌───────────┐ ┌───────────┐ ┌───────────────┐  │
-│  │VaultNode  │ │ConsulNode │ │OrchestratorNd │  │
-│  └───────────┘ └───────────┘ └───────────────┘  │
-│                                                  │
-│  Shared: Kafka, Health, Logging, Error Handling │
-└─────────────────────────────────────────────────┘
-```
+| Node | Type | Description |
+|------|------|-------------|
+| `node_intent_storage_effect` | EFFECT | Stores classified intents in Memgraph graph database. Supports querying intents by session and retrieving distribution statistics. |
 
 ---
 
-## Summary
+### 3.5 Checkpoint Pipeline
 
-This document captures the current ONEX node architecture with:
+The checkpoint pipeline provides pipeline state persistence across restarts, supporting resumable workflows.
 
-1. **1-container-per-node deployment** - Each node runs independently
-2. **4 node types** - EFFECT_GENERIC, COMPUTE_GENERIC, REDUCER_GENERIC, ORCHESTRATOR_GENERIC
-3. **Standard directory structure** - `nodes/<name>/v1_0_0/`
-4. **Contract-driven configuration** - `contract.yaml` defines everything
-5. **Base classes from omnibase_core** - Consistent inheritance patterns
-6. **Kafka-based communication** - Event bus for all inter-node messaging
+**Data flow**:
+```
+CHECKPOINT WRITE → NodeCheckpointValidateCompute (structural validation)
+    → NodeCheckpointEffect (filesystem persistence: ~/.claude/checkpoints/{ticket_id}/{run_id}/)
 
-The migration to Runtime Host will preserve the node contracts and logic while fundamentally changing the deployment model for improved efficiency.
+CHECKPOINT READ → NodeCheckpointEffect (read operation)
+    → NodeCheckpointValidateCompute (schema version, required fields, path normalization)
+```
+
+| Node | Type | Description |
+|------|------|-------------|
+| `node_checkpoint_effect` | EFFECT | Owns all filesystem I/O for pipeline checkpoint persistence. Supports write, read, and list operations on checkpoint YAML files stored under `~/.claude/checkpoints/{ticket_id}/{run_id}/`. |
+| `node_checkpoint_validate_compute` | COMPUTE | Pure structural validation of checkpoint data. Verifies schema version, required fields, path normalization, phase-payload consistency, and commit SHA format. No filesystem access; receives pre-loaded data. |
+
+---
+
+### 3.6 Event Ledger
+
+The event ledger provides an immutable audit trail for platform events, enabling complete traceability and deterministic replay.
+
+**Data flow**:
+```
+PLATFORM EVENTS (7 topics) → NodeLedgerProjectionCompute
+    (projects events → ModelPayloadLedgerAppend intents)
+    → NodeLedgerWriteEffect
+    (idempotent PostgreSQL append via unique constraint on topic+partition+kafka_offset)
+```
+
+| Node | Type | Description |
+|------|------|-------------|
+| `node_ledger_projection_compute` | COMPUTE | Subscribes to 7 platform event topics. Projects events from the platform event bus into audit ledger append intents, enabling complete traceability and debugging support. |
+| `node_ledger_write_effect` | EFFECT | Appends events to the PostgreSQL audit ledger with idempotent write support via unique constraint on `(topic, partition, kafka_offset)`. Duplicate events are silently skipped (returns `duplicate=True`). |
+
+---
+
+### 3.7 Release Readiness Handshake (RRH)
+
+The RRH family validates that a repository meets release readiness criteria before a deployment proceeds. It gathers multi-dimensional environment data, evaluates 13 rules, and persists results as artifacts.
+
+**Data flow**:
+```
+RRH REQUEST → NodeRrhEmitEffect
+    (3 independent handlers: git state, deployment targets, runtime health)
+    → ModelRRHEnvironmentData
+    → NodeRrhValidateCompute
+    (evaluates RRH-1001 through RRH-1701 rules)
+    → ModelRRHResult (PASS / FAIL / SKIP per rule)
+    → NodeRrhStorageEffect
+    (persists timestamped JSON artifact + symlinks: latest/{ticket}, latest/{repo})
+```
+
+| Node | Type | Description |
+|------|------|-------------|
+| `node_rrh_emit_effect` | EFFECT | Collects environment data for RRH validation. Three independent handlers gather: repository git state, deployment runtime targets, and runtime health metrics. |
+| `node_rrh_validate_compute` | COMPUTE | Pure RRH validation. Evaluates 13 rules (`RRH-1001` through `RRH-1701`) against collected environment data using profile-driven severity and contract tightening. No I/O. |
+| `node_rrh_storage_effect` | EFFECT | Persists RRH validation results as timestamped JSON artifacts and maintains convenience symlinks for quick lookup by ticket and repository. |
+
+---
+
+### 3.8 Pattern Lifecycle
+
+Pattern lifecycle management is handled by `node_pattern_lifecycle_effect` (documented above in [3.2 Validation Pipeline](#32-validation-pipeline)). It applies verdicts to tier state and is invoked by the validation orchestrator.
+
+---
+
+### 3.9 Auxiliary Effects
+
+| Node | Type | Description |
+|------|------|-------------|
+| `node_slack_alerter_effect` | EFFECT | Sends infrastructure alerts to Slack channels using either the Web API (`chat.postMessage` with threading) or incoming webhooks. Block Kit formatting, retry logic with exponential backoff, and rate limit handling. |
+
+---
+
+## 4. Complete Node Summary Table
+
+| Node Directory | Node Type | Input Model | Output Model |
+|----------------|-----------|-------------|--------------|
+| `architecture_validator` | COMPUTE | `ModelArchitectureValidationRequest` | `ModelArchitectureValidationResult` |
+| `contract_registry_reducer` | REDUCER | `ModelReducerInput` | `ModelReducerOutput` |
+| `effects/registry_effect` | EFFECT | `ModelRegistryRequest` | `ModelRegistryResponse` |
+| `node_auth_gate_compute` | COMPUTE | `ModelAuthGateRequest` | `ModelAuthGateDecision` |
+| `node_baseline_comparison_compute` | COMPUTE | `ModelBaselineComparisonInput` | `ModelAttributionRecord` |
+| `node_checkpoint_effect` | EFFECT | `ModelCheckpointEffectInput` | `ModelCheckpointEffectOutput` |
+| `node_checkpoint_validate_compute` | COMPUTE | `ModelCheckpointValidateInput` | `ModelCheckpointValidateOutput` |
+| `node_contract_persistence_effect` | EFFECT | `ModelIntent` | `ModelPersistenceResult` |
+| `node_intent_storage_effect` | EFFECT | `ModelIntentStorageInput` | `ModelIntentStorageOutput` |
+| `node_ledger_projection_compute` | COMPUTE | `ModelEventMessage` | `ModelIntent` |
+| `node_ledger_write_effect` | EFFECT | `ModelPayloadLedgerAppend` | `ModelLedgerAppendResult` |
+| `node_llm_embedding_effect` | EFFECT | `ModelLlmEmbeddingRequest` | `ModelLlmEmbeddingResponse` |
+| `node_llm_inference_effect` | EFFECT | `ModelLlmInferenceRequest` | `ModelLlmInferenceResponse` |
+| `node_pattern_lifecycle_effect` | EFFECT | `ModelLifecycleState` | `ModelLifecycleResult` |
+| `node_registration_orchestrator` | ORCHESTRATOR | `ModelOrchestratorInput` | `ModelOrchestratorOutput` |
+| `node_registration_reducer` | REDUCER | `ModelReducerInput` | `ModelReducerOutput` |
+| `node_registration_storage_effect` | EFFECT | `ModelStorageQuery` | `ModelStorageResult` |
+| `node_registry_effect` | EFFECT | `ModelRegistryRequest` | `ModelRegistryResponse` |
+| `node_rrh_emit_effect` | EFFECT | `ModelRRHEmitRequest` | `ModelRRHEnvironmentData` |
+| `node_rrh_storage_effect` | EFFECT | `ModelRRHStorageRequest` | `ModelRRHStorageResult` |
+| `node_rrh_validate_compute` | COMPUTE | `ModelRRHValidateRequest` | `ModelRRHResult` |
+| `node_service_discovery_effect` | EFFECT | `ModelServiceRegistration` | `ModelDiscoveryResult` |
+| `node_session_lifecycle_reducer` | REDUCER | `ModelReducerInput` | `ModelReducerOutput` |
+| `node_session_state_effect` | EFFECT | `ModelSessionIndex` | `ModelSessionStateResult` |
+| `node_slack_alerter_effect` | EFFECT | `ModelSlackAlert` | `ModelSlackAlertResult` |
+| `node_validation_adjudicator` | REDUCER | `ModelReducerInput` | `ModelReducerOutput` |
+| `node_validation_executor` | EFFECT | `ModelValidationPlan` | `ModelExecutorResult` |
+| `node_validation_ledger_projection_compute` | COMPUTE | `ModelEventMessage` | `ModelValidationLedgerEntry` |
+| `node_validation_orchestrator` | ORCHESTRATOR | `ModelPatternCandidate` | `ModelValidationPlan` |
+
+**Total: 29 nodes** across 4 archetypes.
+
+---
+
+## 5. Node Type Distribution
+
+| Type | Count | Nodes |
+|------|-------|-------|
+| **EFFECT** | 16 | `effects/registry_effect`, `node_checkpoint_effect`, `node_contract_persistence_effect`, `node_intent_storage_effect`, `node_ledger_write_effect`, `node_llm_embedding_effect`, `node_llm_inference_effect`, `node_pattern_lifecycle_effect`, `node_registration_storage_effect`, `node_registry_effect`, `node_rrh_emit_effect`, `node_rrh_storage_effect`, `node_service_discovery_effect`, `node_session_state_effect`, `node_slack_alerter_effect`, `node_validation_executor` |
+| **COMPUTE** | 8 | `architecture_validator`, `node_auth_gate_compute`, `node_baseline_comparison_compute`, `node_checkpoint_validate_compute`, `node_ledger_projection_compute`, `node_rrh_validate_compute`, `node_validation_ledger_projection_compute`, `node_validation_orchestrator`* |
+| **REDUCER** | 4 | `contract_registry_reducer`, `node_registration_reducer`, `node_session_lifecycle_reducer`, `node_validation_adjudicator` |
+| **ORCHESTRATOR** | 2 | `node_registration_orchestrator`, `node_validation_orchestrator` |
+
+> *`node_validation_orchestrator` is classified `ORCHESTRATOR_GENERIC` in its contract; the COMPUTE count above corrects for that. The table in section 4 is authoritative.
+
+**Corrected distribution**:
+
+| Type | Count |
+|------|-------|
+| **EFFECT** | 16 |
+| **COMPUTE** | 7 |
+| **REDUCER** | 4 |
+| **ORCHESTRATOR** | 2 |
+| **Total** | 29 |
+
+---
+
+## Related Documentation
+
+| Topic | Document |
+|-------|----------|
+| Architecture overview and four-phase processing | [overview.md](overview.md) |
+| Handler plugin system | [../patterns/handler_plugin_loader.md](../patterns/handler_plugin_loader.md) |
+| Error handling patterns | [../patterns/error_handling_patterns.md](../patterns/error_handling_patterns.md) |
+| Circuit breaker implementation | [../patterns/circuit_breaker_implementation.md](../patterns/circuit_breaker_implementation.md) |
+| Dispatcher resilience | [../patterns/dispatcher_resilience.md](../patterns/dispatcher_resilience.md) |
+| Registration walkthrough | [../guides/registration-example.md](../guides/registration-example.md) |
+| Message dispatch engine | [MESSAGE_DISPATCH_ENGINE.md](MESSAGE_DISPATCH_ENGINE.md) |
+| Coding standards (authoritative) | [../../CLAUDE.md](../../CLAUDE.md) |

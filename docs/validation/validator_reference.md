@@ -63,7 +63,7 @@ The following infrastructure packages are forbidden in `omnibase_core`:
 | `redis` | Redis client library | OMN-1295 |
 | `psycopg` / `psycopg2` | PostgreSQL drivers | - |
 | `consul` | Consul client | OMN-1015 |
-| `hvac` | Vault client library | - |
+| `infisicalsdk` | Infisical client library | OMN-2286 |
 | `aiokafka` | Async Kafka client | - |
 | `confluent_kafka` | Confluent Kafka client | - |
 
@@ -476,7 +476,7 @@ def validate_infra_union_usage(
 ### Infrastructure Justification
 
 Infrastructure code needs typed unions for:
-- Protocol implementations (Consul, Kafka, Vault adapters)
+- Protocol implementations (Consul, Kafka, Infisical adapters)
 - Message routing and handler dispatch
 - Service integration type safety
 

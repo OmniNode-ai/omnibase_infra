@@ -6,17 +6,19 @@ Operational guide for tuning thread pool configurations in omnibase_infra compon
 
 ## Overview
 
-The omnibase_infra project uses `ThreadPoolExecutor` from `concurrent.futures` to handle synchronous blocking operations within async contexts. This pattern is essential for integrating synchronous client libraries (like hvac for HashiCorp Vault) with asyncio-based infrastructure.
+The omnibase_infra project uses `ThreadPoolExecutor` from `concurrent.futures` to handle synchronous blocking operations within async contexts. This pattern is essential for integrating synchronous client libraries with asyncio-based infrastructure.
+
+> **Note**: The secret management backend migrated from HashiCorp Vault (hvac) to Infisical in OMN-2288. The Infisical SDK is async-native and does **not** require thread pool wrapping. The thread pool configuration documented below applies to legacy synchronous adapters only.
 
 ## Thread Pool Locations
 
-### 1. HandlerVault Thread Pool
+### 1. Secret Management (Infisical - Async Native)
 
-**Location**: `src/omnibase_infra/handlers/handler_vault.py`
+**Location**: `src/omnibase_infra/adapters/_internal/adapter_infisical.py`
 
-**Purpose**: Execute synchronous hvac (Vault client) operations without blocking the async event loop.
+**Purpose**: Infisical uses an async-native Python SDK (`infisicalsdk`). No thread pool is required. Concurrency is handled directly by asyncio.
 
-**Configuration Model**: `ModelVaultHandlerConfig`
+**Configuration Model**: `ModelInfisicalHandlerConfig`
 
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
@@ -36,32 +38,34 @@ The Kafka Event Bus uses aiokafka which is natively async and does not use threa
 
 ## Configuration Methods
 
-### Method 1: Direct Configuration
+### Method 1: Direct Configuration (Infisical)
 
 ```python
-from omnibase_infra.handlers.handler_vault import HandlerVault
+from omnibase_infra.adapters._internal.adapter_infisical import AdapterInfisical
 
-adapter = HandlerVault()
+adapter = AdapterInfisical()
 await adapter.initialize({
-    "url": "https://vault.example.com:8200",
-    "token": "s.xxx",
-    "max_concurrent_operations": 20,  # Thread pool size
-    "max_queue_size_multiplier": 5,   # Queue multiplier
+    "infisical_addr": "http://192.168.86.200:8200",
+    "client_id": "...",
+    "client_secret": "...",
+    "timeout_seconds": 30.0,
 })
+# No thread pool configuration needed - Infisical adapter is async-native
 ```
 
-### Method 2: Configuration Model
+### Method 2: Configuration Model (Infisical)
 
 ```python
 from pydantic import SecretStr
-from omnibase_infra.handlers.models.vault import ModelVaultHandlerConfig
+from omnibase_infra.handlers.models.infisical.model_infisical_handler_config import ModelInfisicalHandlerConfig
 
-config = ModelVaultHandlerConfig(
-    url="https://vault.example.com:8200",
-    token=SecretStr("s.xxx"),
-    max_concurrent_operations=20,
-    max_queue_size_multiplier=5,
+config = ModelInfisicalHandlerConfig(
+    infisical_addr="http://192.168.86.200:8200",
+    client_id="...",
+    client_secret=SecretStr("..."),
+    timeout_seconds=30.0,
 )
+# No thread pool configuration - async-native SDK
 ```
 
 ### Method 3: Environment Variables
@@ -72,7 +76,7 @@ Environment variables are not directly supported for thread pool configuration. 
 
 ### High Throughput Scenarios
 
-**Use Case**: High volume of concurrent Vault operations (secret reads/writes)
+**Use Case**: High volume of concurrent Infisical operations (secret reads)
 
 **Recommended Settings**:
 ```python
@@ -84,16 +88,13 @@ Environment variables are not directly supported for thread pool configuration. 
 }
 ```
 
-**Rationale**:
-- 50 workers allow 50 simultaneous Vault API calls
+**Rationale** (applies to legacy synchronous adapters):
+- 50 workers allow 50 simultaneous API calls
 - Queue capacity of 250 (50 * 5) handles burst traffic
-- Longer timeout accounts for Vault under load
+- Longer timeout accounts for load
 - Higher circuit breaker threshold prevents premature tripping
 
-**Resource Impact**:
-- Memory: ~50MB additional (1MB per thread stack)
-- CPU: Thread context switching overhead
-- Network: Up to 50 concurrent TCP connections to Vault
+**Note**: Infisical uses async-native concurrency. Concurrency limits are controlled by asyncio semaphores, not thread pool size. No thread pool tuning is needed for Infisical.
 
 ### Low Latency Scenarios
 
@@ -158,7 +159,7 @@ Environment variables are not directly supported for thread pool configuration. 
 
 ### Health Check Metrics
 
-The HandlerVault `health_check()` method returns thread pool metrics:
+The Infisical adapter `health_check()` method returns connection metrics (no thread pool metrics since it is async-native):
 
 ```python
 health = await adapter.health_check()
@@ -166,7 +167,7 @@ print(health)
 # {
 #     "healthy": True,
 #     "initialized": True,
-#     "handler_type": "vault",
+#     "handler_type": "infisical",
 #     "timeout_seconds": 30.0,
 #     "token_ttl_remaining_seconds": 3600,
 #     "circuit_breaker_state": "closed",
@@ -191,25 +192,22 @@ Example custom metrics collector:
 ```python
 from prometheus_client import Gauge
 
-thread_pool_active = Gauge(
-    'vault_handler_thread_pool_active_workers',
-    'Number of active worker threads',
+infisical_requests_active = Gauge(
+    'infisical_adapter_active_requests',
+    'Number of active Infisical requests',
     ['service']
 )
 
-thread_pool_max = Gauge(
-    'vault_handler_thread_pool_max_workers',
-    'Maximum worker threads configured',
+circuit_breaker_state = Gauge(
+    'infisical_adapter_circuit_breaker_open',
+    'Circuit breaker open state (1=open, 0=closed)',
     ['service']
 )
 
-async def collect_metrics(adapter: HandlerVault, service_name: str):
+async def collect_metrics(adapter: object, service_name: str):
     health = await adapter.health_check()
-    thread_pool_active.labels(service=service_name).set(
-        health['thread_pool_active_workers']
-    )
-    thread_pool_max.labels(service=service_name).set(
-        health['thread_pool_max_workers']
+    circuit_breaker_state.labels(service=service_name).set(
+        1 if health.get('circuit_breaker_state') == 'open' else 0
     )
 ```
 
@@ -219,35 +217,34 @@ Enable debug logging to monitor thread pool behavior:
 
 ```python
 import logging
-logging.getLogger('omnibase_infra.handlers.handler_vault').setLevel(logging.DEBUG)
+logging.getLogger('omnibase_infra.adapters._internal.adapter_infisical').setLevel(logging.DEBUG)
 ```
 
 Key log patterns to monitor:
-- `"HandlerVault initialized"` - Shows configuration values
-- `"Retrying Vault operation"` - Indicates transient failures
-- `"Circuit breaker opened"` - Pool may be overwhelmed
+- `"HandlerInfisical initialized"` - Shows configuration values
+- `"Retrying Infisical operation"` - Indicates transient failures
+- `"Circuit breaker opened"` - Service may be overwhelmed
 
 ## Troubleshooting
 
 ### Issue: Thread Starvation
 
 **Symptoms**:
-- Operations timing out despite Vault being healthy
-- `thread_pool_active_workers` consistently at max
-- Increasing queue wait times
+- Operations timing out despite Infisical being healthy
+- High concurrency causing latency spikes
 
 **Diagnosis**:
 ```python
 health = await adapter.health_check()
-if health['thread_pool_active_workers'] >= health['thread_pool_max_workers']:
-    print("Thread pool saturated!")
+print(f"Circuit breaker state: {health.get('circuit_breaker_state')}")
+print(f"Failure count: {health.get('circuit_breaker_failure_count')}")
 ```
 
-**Resolution**:
-1. Increase `max_concurrent_operations`
-2. Check for slow Vault operations
-3. Verify network latency to Vault
-4. Consider connection pooling at Vault level
+**Resolution** (Infisical - async-native):
+1. Check network latency to Infisical
+2. Verify Infisical server health at `http://192.168.86.200:8200`
+3. Review circuit breaker failure threshold
+4. Increase `timeout_seconds` if Infisical is under load
 
 ### Issue: Queue Buildup
 
@@ -292,7 +289,7 @@ if health['circuit_breaker_state'] == 'open':
 1. Increase `circuit_breaker_failure_threshold`
 2. Increase `circuit_breaker_reset_timeout_seconds`
 3. Investigate root cause of failures
-4. Check Vault server health and network
+4. Check Infisical server health and network
 
 ### Issue: Memory Pressure
 
@@ -330,13 +327,12 @@ Thread pools work with the circuit breaker pattern for resilience:
 ### Configuration Coordination
 
 ```python
-# Coordinated configuration for resilience
-config = ModelVaultHandlerConfig(
-    url="https://vault.example.com:8200",
-    token=SecretStr("s.xxx"),
-    # Thread pool
-    max_concurrent_operations=10,
-    max_queue_size_multiplier=3,
+# Coordinated configuration for resilience (Infisical - async-native)
+config = ModelInfisicalHandlerConfig(
+    infisical_addr="http://192.168.86.200:8200",
+    client_id="...",
+    client_secret=SecretStr("..."),
+    # No thread pool - async-native SDK
     # Circuit breaker
     circuit_breaker_enabled=True,
     circuit_breaker_failure_threshold=5,
@@ -348,10 +344,10 @@ config = ModelVaultHandlerConfig(
 
 ### Retry Integration
 
-The HandlerVault uses exponential backoff with circuit breaker:
+The Infisical adapter uses exponential backoff with circuit breaker:
 
 ```python
-# Retry configuration (ModelVaultRetryConfig)
+# Retry configuration (ModelInfisicalHandlerConfig)
 {
     "max_attempts": 3,              # Total attempts
     "initial_backoff_seconds": 0.1, # First retry delay
@@ -370,7 +366,7 @@ Example delays: 0.1s, 0.2s, 0.4s, ... capped at 10s
 
 - [ ] Thread pool size matches expected concurrent load
 - [ ] Queue multiplier provides sufficient buffer
-- [ ] Timeout values appropriate for Vault latency
+- [ ] Timeout values appropriate for Infisical latency
 - [ ] Circuit breaker thresholds tuned for environment
 - [ ] Container resources allocated for thread count
 - [ ] Monitoring and alerting configured
@@ -423,6 +419,5 @@ Total = Thread Memory + Queue Memory + Base Memory
 
 - [Circuit Breaker Thread Safety](../architecture/CIRCUIT_BREAKER_THREAD_SAFETY.md)
 - [Validation Performance Notes](../validation/performance_notes.md)
-- [Circuit Breaker Comparison](../analysis/CIRCUIT_BREAKER_COMPARISON.md)
 - [HandlerInfisical Source](../../src/omnibase_infra/handlers/handler_infisical.py)
 - [Configuration Model](../../src/omnibase_infra/handlers/models/infisical/model_infisical_handler_config.py)

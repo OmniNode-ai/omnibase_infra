@@ -1,18 +1,28 @@
 > **Navigation**: [Home](../index.md) > [Patterns](README.md) > Secret Resolver
 
-# SecretResolver Pattern
+# Secret Resolution Pattern
 
 ## Overview
 
-The `SecretResolver` provides centralized secret resolution for ONEX infrastructure. It abstracts secret retrieval from multiple sources (environment variables, file-based secrets, Vault) behind a unified interface with caching and convention-based fallback.
+ONEX infrastructure resolves secrets through two layers:
+
+1. **`HandlerInfisical`** — the EFFECT-pattern handler that talks directly to the
+   Infisical API. Owns caching, circuit breaking, and audit logging.
+2. **`SecretResolver`** — a high-level runtime utility that wraps `HandlerInfisical`
+   (and env/file sources) behind a unified logical-name API.
+
+Most application code interacts with `SecretResolver`. `HandlerInfisical` is used
+directly only when you need raw Infisical access (e.g., the seed script, bootstrap
+tooling, or the runtime service kernel).
 
 **Key Features**:
-- Unified interface for multiple secret sources
-- TTL-based caching with automatic expiration
+- Unified interface for multiple secret sources (env, file, Infisical)
+- TTL-based caching with automatic expiration (handler-level and resolver-level)
 - Thread-safe and async-safe operations
 - Convention fallback when no explicit mapping exists
 - Introspection methods that never expose secret values
 - Pydantic `SecretStr` wrapping to prevent accidental logging
+- Opt-in Infisical integration: set `INFISICAL_ADDR` to enable; omit for env-var fallback
 
 **Core Principle**: Handlers should never call `os.getenv` directly for secrets. Use the resolver instead.
 
@@ -39,8 +49,8 @@ config = ModelSecretResolverConfig(
         ModelSecretMapping(
             logical_name="kafka.sasl.password",
             source=ModelSecretSourceSpec(
-                source_type="vault",
-                source_path="secret/data/kafka#sasl_password",
+                source_type="infisical",
+                source_path="/shared/kafka/KAFKA_SASL_PASSWORD",
             ),
         ),
     ],
@@ -65,7 +75,7 @@ The SecretResolver follows these core principles:
 |-----------|-------------|
 | **Dumb and deterministic** | Resolves and caches only. Does not discover, mutate, or manage secrets. |
 | **Explicit mappings preferred** | Convention fallback is optional and disabled by default in strict mode. |
-| **Bootstrap exceptions** | Vault token/addr always from env (two-phase initialization). |
+| **Bootstrap exceptions** | Infisical machine identity credentials always from env (two-phase initialization). |
 | **Never exposes values** | Introspection returns masked paths only. |
 | **Thread-safe** | Sync operations use `threading.Lock`, async uses `asyncio.Lock`. |
 
@@ -87,7 +97,7 @@ The SecretResolver follows these core principles:
 | `database.postgres.*` | `database.postgres.username` | PostgreSQL users |
 | `kafka.*` | `kafka.sasl.password` | Kafka/Redpanda authentication |
 | `qdrant.*` | `qdrant.api_key` | Vector DB credentials |
-| `vault.*` | `vault.token` | Vault bootstrap (env-only) |
+| `infisical.*` | `infisical.client_id` | Infisical bootstrap (env-only) |
 | `llm.openai.*` | `llm.openai.api_key` | LLM API keys |
 | `llm.anthropic.*` | `llm.anthropic.api_key` | Claude API keys |
 | `auth.keycloak.*` | `auth.keycloak.client_secret` | Auth provider secrets |
@@ -100,7 +110,7 @@ The SecretResolver follows these core principles:
 |--------|---------|---------|
 | `.password` | Database passwords | `database.postgres.password` |
 | `.username` | Database users | `database.postgres.username` |
-| `.token` | Auth tokens | `vault.token` |
+| `.token` | Auth tokens | `infisical.client_secret` |
 | `.api_key` | API keys | `llm.openai.api_key` |
 | `.dsn` | Connection strings | `database.postgres.dsn` |
 | `.url` | Service URLs | `kafka.bootstrap.url` |
@@ -127,7 +137,7 @@ ModelSecretSourceSpec(
 - Local development
 - CI/CD pipelines
 - Kubernetes deployments with env injection
-- Bootstrap secrets (Vault token/addr)
+- Bootstrap secrets (Infisical client ID/secret/addr)
 
 ### File-Based (`file`)
 
@@ -160,30 +170,29 @@ config = ModelSecretResolverConfig(
 - Docker secrets
 - Any file-based secret injection
 
-### Vault (`vault`)
+### Infisical (`infisical`)
 
-HashiCorp Vault KV v2 secrets with optional field selection.
+Infisical secret management with project-based path selection.
 
 ```python
-# With field specifier
+# Per-service secret
 ModelSecretSourceSpec(
-    source_type="vault",
-    source_path="secret/data/database/postgres#password",  # path#field
+    source_type="infisical",
+    source_path="/services/omninode/database/POSTGRES_PASSWORD",
 )
 
-# Without field (returns first field)
+# Shared infrastructure secret
 ModelSecretSourceSpec(
-    source_type="vault",
-    source_path="secret/data/api-keys",  # Returns first value
+    source_type="infisical",
+    source_path="/shared/database/POSTGRES_PASSWORD",
 )
 ```
 
-**Path format**: `path/to/secret#field_name`
+**Path convention**: `/shared/<transport>/KEY` or `/services/<service>/<transport>/KEY`
 
 **When to use**:
 - Production secrets with rotation
 - Centralized secret management
-- Dynamic database credentials
 - Any secrets requiring audit trails
 
 ---
@@ -236,7 +245,7 @@ password = resolver.get_secret("database.postgres.password")
 |--------|-------------|-----------|
 | `env` | 24 hours (86400s) | Environment rarely changes during runtime |
 | `file` | 24 hours (86400s) | File contents typically stable |
-| `vault` | 5 minutes (300s) | Supports secret rotation |
+| `infisical` | 5 minutes (300s) | Supports secret rotation |
 
 ### Override TTL Per Secret
 
@@ -244,8 +253,8 @@ password = resolver.get_secret("database.postgres.password")
 ModelSecretMapping(
     logical_name="dynamic.api.key",
     source=ModelSecretSourceSpec(
-        source_type="vault",
-        source_path="secret/data/api-keys#rotating_key",
+        source_type="infisical",
+        source_path="/shared/api/ROTATING_KEY",
     ),
     ttl_seconds=60,  # 1 minute override
 )
@@ -255,9 +264,9 @@ ModelSecretMapping(
 
 ```python
 config = ModelSecretResolverConfig(
-    default_ttl_env_seconds=86400,      # 24 hours
-    default_ttl_file_seconds=86400,     # 24 hours
-    default_ttl_vault_seconds=300,      # 5 minutes
+    default_ttl_env_seconds=86400,           # 24 hours
+    default_ttl_file_seconds=86400,          # 24 hours
+    default_ttl_infisical_seconds=300,       # 5 minutes
     mappings=[...],
 )
 ```
@@ -288,37 +297,37 @@ print(f"Expired evictions: {stats.expired_evictions}")
 
 ## Bootstrap Flow
 
-Vault credentials must be available **before** the resolver can access Vault. This creates a two-phase initialization pattern.
+Infisical machine identity credentials must be available **before** the resolver can access Infisical. This creates a two-phase initialization pattern.
 
 ### Phase 1: Bootstrap (env-only)
 
 ```python
 import os
 
-# These MUST come from environment, never from Vault
-vault_token = os.environ.get("VAULT_TOKEN")
-vault_addr = os.environ.get("VAULT_ADDR")
-vault_ca_cert = os.environ.get("VAULT_CACERT")
+# These MUST come from environment, never from Infisical
+infisical_client_id = os.environ.get("INFISICAL_CLIENT_ID")
+infisical_client_secret = os.environ.get("INFISICAL_CLIENT_SECRET")
+infisical_addr = os.environ.get("INFISICAL_ADDR")
 ```
 
-### Phase 2: Initialize Vault Handler
+### Phase 2: Initialize Infisical Handler
 
 ```python
-from omnibase_infra.handlers.handler_vault import HandlerVault
+from omnibase_infra.handlers.handler_infisical import HandlerInfisical
 
-vault_handler = None
-if vault_token and vault_addr:
-    vault_handler = HandlerVault(
-        vault_addr=vault_addr,
-        vault_token=vault_token,
-        ca_cert=vault_ca_cert,
+infisical_handler = None
+if infisical_client_id and infisical_client_secret and infisical_addr:
+    infisical_handler = HandlerInfisical(
+        infisical_addr=infisical_addr,
+        client_id=infisical_client_id,
+        client_secret=infisical_client_secret,
     )
 ```
 
 ### Phase 3: Initialize Resolver
 
 ```python
-resolver = SecretResolver(config=config, vault_handler=vault_handler)
+resolver = SecretResolver(config=config, infisical_handler=infisical_handler)
 ```
 
 ### Phase 4: All Other Secrets via Resolver
@@ -336,9 +345,9 @@ The resolver has a built-in list of bootstrap secrets that bypass resolution:
 ```python
 config = ModelSecretResolverConfig(
     bootstrap_secrets=[
-        "vault.token",
-        "vault.addr",
-        "vault.ca_cert",
+        "infisical.client_id",
+        "infisical.client_secret",
+        "infisical.addr",
     ],  # Default values
     mappings=[...],
 )
@@ -361,7 +370,7 @@ secrets = await resolver.get_secrets_async([
 ])
 ```
 
-**Note**: For Vault secrets, async uses native async I/O. For env/file secrets, the sync call is wrapped in a thread executor.
+**Note**: For Infisical secrets, async uses native async I/O. For env/file secrets, the sync call is wrapped in a thread executor.
 
 ---
 
@@ -440,37 +449,29 @@ result = resolver.get_secret("attempted.traversal", required=False)
 
 ### Bootstrap Secret Isolation
 
-Bootstrap secrets (needed to initialize Vault) are isolated from normal resolution:
+Bootstrap secrets (needed to initialize Infisical) are isolated from normal resolution:
 
 ```python
 config = ModelSecretResolverConfig(
-    bootstrap_secrets=["vault.token", "vault.addr", "vault.ca_cert"],
+    bootstrap_secrets=["infisical.client_id", "infisical.client_secret", "infisical.addr"],
     # ... other settings
 )
 ```
 
 **Bootstrap secrets**:
 - Always resolve from environment variables only
-- Never routed to Vault (prevents circular dependency)
-- Use convention-based naming: `vault.token` -> `VAULT_TOKEN`
+- Never routed to Infisical (prevents circular dependency)
+- Use convention-based naming: `infisical.client_id` -> `INFISICAL_CLIENT_ID`
 
-### Vault Integration Security
+### Infisical Integration Security
 
-Vault integration is currently a **stub implementation** that raises `NotImplementedError`:
+Infisical integration uses machine identity authentication (client ID + client secret). Credentials are loaded from environment variables during bootstrap and never stored in source files.
 
-```python
-# When vault_handler is configured but secret is from Vault:
-resolver.get_secret("vault.sourced.secret")
-# Raises NotImplementedError with helpful message:
-# "Vault secret resolution not yet implemented for logical name: vault.sourced.secret.
-#  Configure this secret via 'env' or 'file' source until Vault integration is complete."
-```
-
-**When Vault handler is NOT configured**:
+**When Infisical handler is NOT configured**:
 - Returns `None` (graceful degradation)
 - Logs warning with logical name only (no path)
 
-See [OMN-1374](https://linear.app/omninode/issue/OMN-1374) for the Vault integration implementation plan.
+**Path convention enforced**: Paths must match `/shared/<transport>/KEY` or `/services/<service>/<transport>/KEY`.
 
 ### Memory Handling
 
@@ -493,7 +494,7 @@ The brief exposure window is minimized by:
 The SecretResolver never logs:
 - Actual secret values (at any log level, including DEBUG)
 - File paths to secret files
-- Vault paths (which could reveal secret structure)
+- Infisical paths (which could reveal secret structure)
 
 **What IS logged (for debugging)**:
 - Logical names (e.g., `database.postgres.password`)
@@ -512,7 +513,7 @@ Error messages are sanitized to prevent information leakage:
 #
 # SecretResolutionError does NOT include:
 # - Actual file paths
-# - Vault paths
+# - Infisical paths
 # - Secret values
 # - Internal directory structure
 ```
@@ -522,7 +523,7 @@ Error messages are sanitized to prevent information leakage:
 | Do | Do Not |
 |----|--------|
 | Use explicit mappings for sensitive secrets | Rely on convention fallback for critical secrets |
-| Configure bootstrap secrets in `bootstrap_secrets` | Store Vault credentials in Vault |
+| Configure bootstrap secrets in `bootstrap_secrets` | Store Infisical credentials in Infisical |
 | Use absolute paths only for trusted admin configs | Use relative paths with user-controlled input |
 | Check return values for `required=False` calls | Assume secrets always exist |
 
@@ -547,8 +548,8 @@ info = resolver.get_source_info("database.postgres.password")
 
 # ModelSecretSourceInfo(
 #     logical_name="database.postgres.password",
-#     source_type="vault",
-#     source_path_masked="vault:secret/data/***",  # Path is masked
+#     source_type="infisical",
+#     source_path_masked="infisical:/shared/***/***",  # Path is masked
 #     is_cached=True,
 #     expires_at=datetime(2025, 1, 15, 12, 30, 0),
 # )
@@ -560,7 +561,7 @@ info = resolver.get_source_info("database.postgres.password")
 |-------------|---------------|
 | `env` | `env:POSTGRES_PASSWORD` |
 | `file` | `file:/run/secrets/***` |
-| `vault` | `vault:secret/data/***` |
+| `infisical` | `infisical:/shared/***/***` |
 
 ---
 
@@ -582,7 +583,7 @@ kafka_pass = os.getenv("KAFKA_SASL_PASSWORD")
 - No centralized configuration
 - No audit trail
 - Difficult to rotate secrets
-- Hard to migrate to Vault
+- Hard to migrate to Infisical
 
 ### After (SecretResolver)
 
@@ -596,7 +597,7 @@ kafka_pass = resolver.get_secret("kafka.sasl.password")
 **Benefits**:
 - Centralized configuration
 - TTL-based caching
-- Easy migration to Vault
+- Easy migration to Infisical
 - Introspection without value exposure
 - Thread-safe and async-safe
 
@@ -628,13 +629,13 @@ kafka_pass = resolver.get_secret("kafka.sasl.password")
    password = resolver.get_secret("database.postgres.password")
    ```
 
-4. **Move to Vault** when ready (update mapping):
+4. **Move to Infisical** when ready (update mapping):
    ```python
    ModelSecretMapping(
        logical_name="database.postgres.password",
        source=ModelSecretSourceSpec(
-           source_type="vault",
-           source_path="secret/data/database/postgres#password",
+           source_type="infisical",
+           source_path="/shared/database/POSTGRES_PASSWORD",
        ),
    )
    ```
@@ -731,7 +732,7 @@ The `validate_no_direct_env.py` validator has specific behaviors to be aware of:
 import os
 from pathlib import Path
 
-from omnibase_infra.handlers.handler_vault import HandlerVault
+from omnibase_infra.handlers.handler_infisical import HandlerInfisical
 from omnibase_infra.runtime.secret_resolver import SecretResolver
 from omnibase_infra.runtime.models import (
     ModelSecretResolverConfig,
@@ -743,27 +744,29 @@ from omnibase_infra.runtime.models import (
 def create_secret_resolver() -> SecretResolver:
     """Create and configure the secret resolver for production."""
 
-    # Phase 1: Bootstrap Vault credentials (always from env)
-    vault_token = os.environ.get("VAULT_TOKEN")
-    vault_addr = os.environ.get("VAULT_ADDR", "https://vault.internal:8200")
+    # Phase 1: Bootstrap Infisical credentials (always from env)
+    infisical_client_id = os.environ.get("INFISICAL_CLIENT_ID")
+    infisical_client_secret = os.environ.get("INFISICAL_CLIENT_SECRET")
+    infisical_addr = os.environ.get("INFISICAL_ADDR", "http://192.168.86.200:8200")
 
-    # Phase 2: Initialize Vault handler if available
-    vault_handler = None
-    if vault_token and vault_addr:
-        vault_handler = HandlerVault(
-            vault_addr=vault_addr,
-            vault_token=vault_token,
+    # Phase 2: Initialize Infisical handler if available
+    infisical_handler = None
+    if infisical_client_id and infisical_client_secret and infisical_addr:
+        infisical_handler = HandlerInfisical(
+            infisical_addr=infisical_addr,
+            client_id=infisical_client_id,
+            client_secret=infisical_client_secret,
         )
 
     # Phase 3: Configure resolver
     config = ModelSecretResolverConfig(
         mappings=[
-            # Database credentials from Vault
+            # Database credentials from Infisical
             ModelSecretMapping(
                 logical_name="database.postgres.password",
                 source=ModelSecretSourceSpec(
-                    source_type="vault",
-                    source_path="secret/data/database/postgres#password",
+                    source_type="infisical",
+                    source_path="/shared/database/POSTGRES_PASSWORD",
                 ),
                 ttl_seconds=300,  # 5 minutes for rotation support
             ),
@@ -790,12 +793,12 @@ def create_secret_resolver() -> SecretResolver:
         # K8s secrets mount point
         secrets_dir=Path("/run/secrets"),
         # Adjust TTLs for production
-        default_ttl_vault_seconds=300,   # 5 minutes
-        default_ttl_env_seconds=86400,   # 24 hours
-        default_ttl_file_seconds=3600,   # 1 hour (K8s may rotate)
+        default_ttl_infisical_seconds=300,   # 5 minutes
+        default_ttl_env_seconds=86400,       # 24 hours
+        default_ttl_file_seconds=3600,       # 1 hour (K8s may rotate)
     )
 
-    return SecretResolver(config=config, vault_handler=vault_handler)
+    return SecretResolver(config=config, infisical_handler=infisical_handler)
 
 
 # Usage
@@ -842,7 +845,7 @@ raise SecretResolutionError(
 
 ### Type Safety
 
-- Uses `Literal["env", "vault", "file"]` for `source_type` parameter
+- Uses `Literal["env", "infisical", "file"]` for `source_type` parameter
 - `SecretSourceType` type alias exported for consistent usage across codebase
 - `SecretStr` from Pydantic prevents accidental secret logging
 
@@ -863,12 +866,293 @@ This is intentional - the resolver is a low-level primitive used by nodes and ha
 
 ---
 
+## HandlerInfisical
+
+`HandlerInfisical` is the EFFECT-category handler that performs raw secret operations
+against the Infisical API. `SecretResolver` delegates to it for Infisical-backed secrets;
+you can also call it directly for lower-level use.
+
+**Module**: `omnibase_infra.handlers.handler_infisical`
+
+### Architecture
+
+```
+SecretResolver
+    └── HandlerInfisical          (EFFECT pattern, owns cache + circuit breaker)
+            └── AdapterInfisical  (raw SDK calls only)
+```
+
+The handler owns all cross-cutting concerns: TTL caching (default 5 min, up to 1000
+entries), circuit breaking (5 consecutive failures → OPEN, 60 s reset timeout), and
+audit logging. The adapter is a thin SDK wrapper with no business logic.
+
+### Initialization
+
+`HandlerInfisical` takes an ONEX container and requires a call to `initialize()` before
+use. Configuration is provided as a plain `dict` whose fields match
+`ModelInfisicalHandlerConfig`:
+
+```python
+from omnibase_infra.handlers.handler_infisical import HandlerInfisical
+from omnibase_core.container import ModelONEXContainer
+
+handler = HandlerInfisical(container)
+await handler.initialize({
+    "host": "http://192.168.86.200:8880",   # INFISICAL_ADDR from .env
+    "client_id": "...",                      # INFISICAL_CLIENT_ID
+    "client_secret": "...",                  # INFISICAL_CLIENT_SECRET
+    "project_id": "xxxxxxxx-xxxx-...",       # INFISICAL_PROJECT_ID
+    "environment_slug": "prod",              # default: "prod"
+    "secret_path": "/",                      # default: "/"
+    "cache_ttl_seconds": 300.0,             # default: 5 minutes; 0 = disabled
+    "circuit_breaker_threshold": 5,          # default: 5 failures
+    "circuit_breaker_reset_timeout": 60.0,  # default: 60 seconds
+    "circuit_breaker_enabled": True,         # default: True
+})
+```
+
+### Supported Operations
+
+All operations go through `execute(envelope)` using one of three operation strings:
+
+| Operation string | Purpose |
+|-----------------|---------|
+| `infisical.get_secret` | Fetch a single secret by name |
+| `infisical.list_secrets` | List secret keys at a path (no values) |
+| `infisical.get_secrets_batch` | Fetch multiple secrets in one call |
+
+### Get a Single Secret (async)
+
+```python
+from omnibase_infra.errors import SecretResolutionError
+
+envelope = {
+    "operation": "infisical.get_secret",
+    "correlation_id": str(correlation_id),
+    "payload": {
+        "secret_name": "POSTGRES_PASSWORD",
+        # Optional overrides (use handler defaults when omitted):
+        # "project_id": "...",
+        # "environment_slug": "prod",
+        # "secret_path": "/shared/db",
+    },
+}
+
+output = await handler.execute(envelope)
+# output.result["value"]  -- plain str (re-wrap in SecretStr at call site)
+# output.result["source"] -- "cache" or "infisical"
+```
+
+### List Secrets at a Path
+
+```python
+envelope = {
+    "operation": "infisical.list_secrets",
+    "correlation_id": str(correlation_id),
+    "payload": {
+        "secret_path": "/shared/db",
+    },
+}
+output = await handler.execute(envelope)
+# output.result["secret_keys"]  -- list[str], no values exposed
+# output.result["count"]        -- int
+```
+
+### Batch Fetch
+
+```python
+envelope = {
+    "operation": "infisical.get_secrets_batch",
+    "correlation_id": str(correlation_id),
+    "payload": {
+        "secret_names": ["POSTGRES_PASSWORD", "KAFKA_SASL_PASSWORD"],
+        "secret_path": "/shared",
+    },
+}
+output = await handler.execute(envelope)
+# output.result["secrets"]    -- dict[str, str]  (name -> plain value)
+# output.result["errors"]     -- dict[str, str]  (name -> error message)
+# output.result["from_cache"] -- int
+# output.result["from_fetch"] -- int
+```
+
+### Synchronous Access
+
+For callers that cannot use async (e.g., `SecretResolver._read_infisical_secret_sync`):
+
+```python
+from pydantic import SecretStr
+
+value: SecretStr | None = handler.get_secret_sync(
+    secret_name="POSTGRES_PASSWORD",
+    project_id=None,        # uses handler default
+    environment_slug=None,  # uses handler default
+    secret_path=None,       # uses handler default
+)
+if value is not None:
+    raw = value.get_secret_value()
+```
+
+Returns `None` when the handler is not initialized or the adapter is unavailable.
+
+### Cache Invalidation
+
+```python
+# Invalidate a specific secret (matches on trailing "::secret_name")
+count = handler.invalidate_cache("POSTGRES_PASSWORD")
+
+# Invalidate all cached entries
+count = handler.invalidate_cache()
+```
+
+### Introspection
+
+```python
+info = handler.describe()
+# {
+#   "handler_type": "INFRA_HANDLER",
+#   "handler_category": "EFFECT",
+#   "supported_operations": [...],
+#   "cache_ttl_seconds": 300.0,
+#   "initialized": True,
+#   "cache_hits": 42,
+#   "cache_misses": 7,
+#   "total_fetches": 7,
+#   "version": "0.9.0",
+# }
+# Note: credentials are NEVER exposed in describe() output.
+```
+
+### Shutdown
+
+```python
+await handler.shutdown()
+# Clears cache, resets circuit breaker, releases adapter resources.
+```
+
+---
+
+## SecretResolutionError
+
+`SecretResolutionError` is raised when a required secret cannot be resolved—whether
+from Infisical, env, or file.
+
+```python
+from omnibase_infra.errors import SecretResolutionError
+
+try:
+    output = await handler.execute(envelope)
+except SecretResolutionError as e:
+    # The error carries a ModelInfraErrorContext with correlation_id,
+    # transport_type=INFISICAL, and operation name.
+    # It does NOT include secret names, paths, or values.
+    logger.error(
+        "Secret resolution failed",
+        extra={"correlation_id": str(e.context.correlation_id)},
+    )
+```
+
+`SecretResolver` also raises `SecretResolutionError` for required secrets that are
+missing from all configured sources:
+
+```python
+try:
+    secret = resolver.get_secret("database.postgres.password")
+except SecretResolutionError as e:
+    print(e.model.context.get("logical_name"))  # the dotted name
+    print(e.model.correlation_id)               # UUID for tracing
+```
+
+---
+
+## Opt-In Infisical Behavior
+
+Infisical integration is **opt-in** via the `INFISICAL_ADDR` environment variable.
+
+| `INFISICAL_ADDR` set? | Behavior |
+|----------------------|----------|
+| No (local dev) | `HandlerInfisical` is not initialized. `SecretResolver` falls back to env/file sources only. Local development works without Infisical. |
+| Yes (production) | `HandlerInfisical` initializes and prefetches secrets from Infisical at service startup. |
+
+This means you can develop locally using just `.env` variables and enable centralized
+secret management by adding `INFISICAL_ADDR` to the environment.
+
+The runtime service kernel and config prefetcher respect this pattern:
+
+```python
+import os
+
+infisical_addr = os.environ.get("INFISICAL_ADDR")
+if infisical_addr:
+    handler = HandlerInfisical(container)
+    await handler.initialize({
+        "host": infisical_addr,
+        "client_id": os.environ["INFISICAL_CLIENT_ID"],
+        "client_secret": os.environ["INFISICAL_CLIENT_SECRET"],
+        "project_id": os.environ["INFISICAL_PROJECT_ID"],
+    })
+else:
+    handler = None  # SecretResolver will use env fallback only
+```
+
+See [docs/guides/INFISICAL_SECRETS_GUIDE.md](../guides/INFISICAL_SECRETS_GUIDE.md)
+for the full six-step bootstrap sequence.
+
+---
+
+## sanitize_secret_path
+
+When constructing error messages or log entries that involve secret paths, use
+`sanitize_secret_path` from `omnibase_infra.utils.util_error_sanitization`. It masks
+sensitive path segments while preserving the mount point for debugging.
+
+```python
+from omnibase_infra.utils.util_error_sanitization import sanitize_secret_path
+
+# Preserves first segment, masks the rest
+sanitize_secret_path("secret/data/myapp/database/credentials")
+# -> "secret/***/***"
+
+sanitize_secret_path("kv/production/api-keys/stripe")
+# -> "kv/***/***"
+
+sanitize_secret_path("secret")   # single segment: returned as-is
+# -> "secret"
+
+sanitize_secret_path(None)        # None passthrough
+# -> None
+
+sanitize_secret_path("")          # empty: returned as-is
+# -> ""
+```
+
+**What it protects against**:
+- Exposure of application names and environments (`production`, `myapp`)
+- Exposure of service or database names (`postgres`, `redis`)
+- Exposure of credential types (`api-keys`, `certificates`)
+
+For Infisical paths following the `/shared/<transport>/KEY` convention, the function
+masks everything after the first segment:
+
+```python
+sanitize_secret_path("/shared/db/POSTGRES_PASSWORD")
+# -> "/***/***/***"  (leading slash creates empty first segment)
+```
+
+Use `sanitize_secret_path` in any error context, log statement, or exception message
+that references a secret path. Never include raw paths in errors or logs.
+
+---
+
 ## Related Documentation
 
-- [`docs/patterns/security_patterns.md`](./security_patterns.md) - Secret management guidelines, Vault integration
+- [`docs/guides/INFISICAL_SECRETS_GUIDE.md`](../guides/INFISICAL_SECRETS_GUIDE.md) - Developer guide: fetching secrets, bootstrap sequence, local dev
+- [`docs/patterns/security_patterns.md`](./security_patterns.md) - Secret management guidelines, Infisical integration
 - [`docs/patterns/error_handling_patterns.md`](./error_handling_patterns.md) - Error context and sanitization
-- [`src/omnibase_infra/handlers/handler_infisical.py`](../../src/omnibase_infra/handlers/handler_infisical.py) - Infisical handler implementation
+- [`src/omnibase_infra/handlers/handler_infisical.py`](../../src/omnibase_infra/handlers/handler_infisical.py) - HandlerInfisical implementation
+- [`src/omnibase_infra/handlers/models/infisical/model_infisical_handler_config.py`](../../src/omnibase_infra/handlers/models/infisical/model_infisical_handler_config.py) - Configuration model
 - [`src/omnibase_infra/errors/error_infra.py`](../../src/omnibase_infra/errors/error_infra.py) - `SecretResolutionError` definition
+- [`src/omnibase_infra/utils/util_error_sanitization.py`](../../src/omnibase_infra/utils/util_error_sanitization.py) - `sanitize_secret_path` and related utilities
 
 ## API Reference
 
