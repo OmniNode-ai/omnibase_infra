@@ -150,7 +150,8 @@ async def test_dispatcher_accepts_dict_envelope() -> None:
     dispatcher = DispatcherTopicCatalogQuery(handler=handler)
 
     query = _make_query_payload()
-    # Dict format used by MessageDispatchEngine serialization boundary
+    # Dict format used by MessageDispatchEngine serialization boundary.
+    # model_dump() produces UUID objects (not strings) for UUID fields.
     dict_envelope: dict[str, object] = {
         "payload": query.model_dump(),
         "__debug_trace": {"correlation_id": str(uuid4())},
@@ -161,6 +162,33 @@ async def test_dispatcher_accepts_dict_envelope() -> None:
     assert result.status == EnumDispatchStatus.SUCCESS
     # Handler must have been called - ensures dict deserialization reached the handler
     # rather than silently falling through to INVALID_MESSAGE before dispatch.
+    handler.handle.assert_awaited_once()
+
+
+@pytest.mark.unit
+async def test_dispatcher_accepts_dict_envelope_with_string_uuids() -> None:
+    """Dispatcher handles dict envelopes where UUID fields are serialized as strings.
+
+    The MessageDispatchEngine may serialize envelopes via JSON round-trip before
+    passing them to dispatchers. In that case UUID fields arrive as plain strings
+    (e.g. ``"correlation_id": "550e8400-e29b-41d4-a716-446655440000"``) rather
+    than ``uuid.UUID`` objects.  ``model_validate`` must coerce those strings back
+    to UUIDs without raising a ``ValidationError``.
+    """
+    handler = _make_handler()
+    dispatcher = DispatcherTopicCatalogQuery(handler=handler)
+
+    query = _make_query_payload()
+    # Simulate JSON round-trip: model_dump(mode="json") converts UUID → str
+    dict_envelope_str_uuids: dict[str, object] = {
+        "payload": query.model_dump(mode="json"),
+        "__debug_trace": {"correlation_id": str(uuid4())},
+    }
+
+    result = await dispatcher.handle(dict_envelope_str_uuids)
+
+    assert result.status == EnumDispatchStatus.SUCCESS
+    # Handler must have been called with a fully-reconstructed ModelTopicCatalogQuery
     handler.handle.assert_awaited_once()
 
 

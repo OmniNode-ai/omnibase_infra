@@ -690,6 +690,14 @@ async def wire_registration_handlers(
 
         # Register HandlerTopicCatalogQuery (optional - requires ServiceTopicCatalog)
         # Resolve ServiceTopicCatalog from the container if available.
+        #
+        # NOTE: These imports are intentionally inside the outer try/except block.
+        # If either import raises ImportError (e.g. omnibase_infra not installed
+        # correctly), it will be caught by the outer ``except Exception`` and
+        # re-raised as ContainerWiringError. This is the desired fail-fast
+        # behavior: a missing module is a wiring failure, not a soft skip.
+        # The soft-skip only applies to the runtime resolve_service call below,
+        # which catches its own exception and logs a warning instead of raising.
         from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
             HandlerTopicCatalogQuery,
         )

@@ -274,6 +274,10 @@ class HandlerTopicCatalogQuery:
         Returns:
             ``ModelTopicCatalogResponse`` with zero topics and the given warnings.
         """
+        # catalog_version=0 is a sentinel value for error-condition responses only.
+        # A real catalog always has version >= 1 (set by ServiceTopicCatalog).
+        # Callers that need to distinguish error responses from a legitimately
+        # empty catalog should check ``warnings`` rather than ``catalog_version``.
         return ModelTopicCatalogResponse(
             correlation_id=correlation_id,
             topics=(),
