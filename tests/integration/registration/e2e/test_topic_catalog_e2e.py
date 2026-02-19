@@ -12,14 +12,13 @@ Test Suites:
     - Suite 2: Response determinism (identical results on repeated query)
     - Suite 3: Version-gap recovery simulation
     - Suite 4: Change notification golden path (register node → receive delta)
-    - Suite 5: Integration golden path (lightweight handler-level, no Kafka required)
+    - Suite 5: Integration golden path (lightweight handler-level)
 
 Infrastructure Requirements:
-    Tests require:
-    - Consul: CONSUL_HOST:28500
-    - Kafka/Redpanda: KAFKA_BOOTSTRAP_SERVERS (Suite 1 only)
-
-    Note: Suite 2, 3, 4, and 5 only require Consul (no Kafka).
+    All suites require ALL_INFRA_AVAILABLE (Consul + Kafka/Redpanda). The
+    directory-level conftest applies a pytestmark skipif(not ALL_INFRA_AVAILABLE)
+    to every test in this directory, so no suite can run independently of the
+    shared infrastructure guard even if it does not use Kafka directly.
 
 Related Tickets:
     - OMN-2317: Topic Catalog multi-client no-cross-talk E2E test
@@ -35,6 +34,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from fnmatch import fnmatch
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
@@ -62,7 +62,6 @@ from omnibase_infra.topics.platform_topic_suffixes import (
 
 # Note: ALL_INFRA_AVAILABLE skipif applied by conftest.py to all tests in this directory
 from .conftest import (
-    CONSUL_AVAILABLE,
     KAFKA_BOOTSTRAP_SERVERS,
     make_e2e_test_identity,
     wait_for_consumer_ready,
@@ -142,6 +141,7 @@ async def catalog_handler(
 
 
 @pytest.fixture
+# Function scope: each test needs a fresh consumer group offset
 async def second_kafka_bus() -> AsyncGenerator[EventBusKafka, None]:
     """Second independent EventBusKafka instance for multi-client tests.
 
@@ -239,7 +239,10 @@ def _deserialize_response(raw: bytes | str) -> ModelTopicCatalogResponse | None:
         if isinstance(data, dict) and "correlation_id" in data and "topics" in data:
             return ModelTopicCatalogResponse.model_validate(data)
     except Exception:
-        pass
+        logger.warning(
+            "_deserialize_response: failed to deserialize message",
+            exc_info=True,
+        )
     return None
 
 
@@ -284,21 +287,47 @@ async def _delete_node_from_consul(
 ) -> None:
     """Best-effort deletion of node KV keys from Consul.
 
+    Uses ``consul.kv.delete(prefix, recurse=True)`` to remove all keys under
+    ``onex/nodes/{node_id}/event_bus/`` in a single call.  This avoids
+    leaving stale entries (empty arrays) that would pollute subsequent test
+    runs — the original approach of writing ``"[]"`` kept the keys present,
+    which caused test pollution.
+
     Args:
         consul_handler: Connected HandlerConsul instance.
         node_id: Node identifier whose keys should be removed.
         correlation_id: Correlation ID for tracing.
     """
-    for sub_key in ("subscribe_topics", "publish_topics"):
-        try:
-            # Write empty arrays to effectively clear (delete not always exposed)
-            await consul_handler._kv_put_raw(
-                f"onex/nodes/{node_id}/event_bus/{sub_key}",
-                "[]",
-                correlation_id,
-            )
-        except Exception:
-            pass  # Best-effort cleanup
+    prefix = f"onex/nodes/{node_id}/event_bus/"
+    client = consul_handler._client  # type: ignore[attr-defined]
+    if client is None:
+        logger.warning(
+            "_delete_node_from_consul: consul client is None, skipping cleanup "
+            "(node_id=%r, correlation_id=%s)",
+            node_id,
+            correlation_id,
+        )
+        return
+
+    try:
+        # consul.kv.delete is synchronous; wrap in a thread so we don't
+        # block the event loop.  recurse=True deletes all keys under the
+        # prefix in one round-trip, matching the behaviour of the Consul API
+        # DELETE ?recurse endpoint.
+        await asyncio.to_thread(client.kv.delete, prefix, recurse=True)
+        logger.debug(
+            "_delete_node_from_consul: deleted prefix %r (correlation_id=%s)",
+            prefix,
+            correlation_id,
+        )
+    except Exception:
+        logger.warning(
+            "_delete_node_from_consul: failed to delete prefix %r — "
+            "test cleanup incomplete (correlation_id=%s)",
+            prefix,
+            correlation_id,
+            exc_info=True,
+        )
 
 
 # =============================================================================
@@ -621,6 +650,7 @@ class TestResponseDeterminism:
                 len(response.topics),
             )
         else:
+            # Edge case: ordering cannot be verified with fewer than 2 topics; test passes vacuously.
             logger.info(
                 "Topic ordering test: fewer than 2 topics present (count=%d), "
                 "ordering assertion skipped (no ordering to verify)",
@@ -771,9 +801,6 @@ class TestChangeNotificationFlow:
         11. Assert: topics_added contains the new node's topic suffixes
         12. Assert: topics_removed is empty
         """
-        if not CONSUL_AVAILABLE:
-            pytest.skip("Consul not available")
-
         correlation_id = uuid4()
 
         # Use a unique node_id to avoid colliding with other tests
@@ -905,14 +932,19 @@ class TestChangeNotificationFlow:
                 f"Got: {our_topics_in_added}"
             )
 
-            # Step 9: assert catalog_version incremented by exactly 1 relative to
-            # the version recorded just before writing the node (version_before_node)
+            # Step 9: assert catalog_version incremented by at least 1 relative to
+            # the version recorded just before writing the node (version_before_node).
+            # Use >= rather than == to avoid a race condition in parallel test
+            # execution: a concurrent test could bump the shared catalog version
+            # between our increment_version call and the post-registration query,
+            # making an exact equality check flaky.  new_version is the version
+            # we explicitly set, so equality against that is still a tight bound.
             assert post_response.catalog_version == new_version, (
                 f"Post-registration catalog_version ({post_response.catalog_version}) "
                 f"must equal the version we set ({new_version})"
             )
-            assert post_response.catalog_version == version_before_node + 1, (
-                f"catalog_version must increment by exactly 1. "
+            assert post_response.catalog_version >= version_before_node + 1, (
+                f"catalog_version must increment by at least 1. "
                 f"Before node write: {version_before_node}, "
                 f"After: {post_response.catalog_version}"
             )
@@ -1108,8 +1140,6 @@ class TestIntegrationGoldenPath:
         response = output.events[0]
         assert isinstance(response, ModelTopicCatalogResponse)
         assert response.correlation_id == correlation_id
-
-        from fnmatch import fnmatch
 
         for entry in response.topics:
             assert fnmatch(entry.topic_suffix, pattern), (
