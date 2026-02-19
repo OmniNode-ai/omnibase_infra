@@ -14,11 +14,16 @@ Covers:
 - close() propagates to transport
 - curly brace safety in source text (no str.format() crash)
 - rendered_text is non-empty for all paths
+- correlation_id parameter accepted / defaults to None
+- truncation boundary: source at _MAX_SOURCE_CHARS + 50 fits within limit
+- RuntimeHostError from LLM handler propagates out of generate()
 """
 
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -33,6 +38,7 @@ from omnibase_infra.adapters.llm.adapter_documentation_generation import (
     AdapterDocumentationGeneration,
 )
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.errors import ProtocolConfigurationError, RuntimeHostError
 from omnibase_spi.contracts.delegation.contract_delegated_response import (
     ContractDelegatedResponse,
 )
@@ -97,7 +103,7 @@ class TestAdapterDocumentationGenerationTaskTypes:
     async def test_valid_task_type_returns_contract(self, task_type: str) -> None:
         """generate() with valid task_type returns ContractDelegatedResponse."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
             return_value=_make_llm_response("## Generated Doc\n\nSome content.")
         )
 
@@ -113,7 +119,7 @@ class TestAdapterDocumentationGenerationTaskTypes:
     async def test_valid_task_type_calls_llm(self, task_type: str) -> None:
         """generate() with valid task_type calls the LLM handler exactly once."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
 
         await adapter.generate(task_type=task_type, source="class Foo: pass")
 
@@ -124,7 +130,7 @@ class TestAdapterDocumentationGenerationTaskTypes:
         """For docstring task, rendered_text equals the LLM generated_text."""
         adapter = _make_adapter()
         expected = "Args:\n    x: The input.\n\nReturns:\n    int."
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(expected))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(expected))  # type: ignore[method-assign]
 
         result = await adapter.generate(
             task_type=TASK_TYPE_DOCSTRING,
@@ -138,7 +144,7 @@ class TestAdapterDocumentationGenerationTaskTypes:
         """For readme task, rendered_text equals the LLM generated_text."""
         adapter = _make_adapter()
         expected = "## Overview\n\nThis module does X."
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(expected))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(expected))  # type: ignore[method-assign]
 
         result = await adapter.generate(
             task_type=TASK_TYPE_README,
@@ -152,7 +158,7 @@ class TestAdapterDocumentationGenerationTaskTypes:
         """For api_doc task, rendered_text equals the LLM generated_text."""
         adapter = _make_adapter()
         expected = "## Parameters\n\n- `x` (int): Input value."
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(expected))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(expected))  # type: ignore[method-assign]
 
         result = await adapter.generate(
             task_type=TASK_TYPE_API_DOC,
@@ -172,30 +178,32 @@ class TestAdapterDocumentationGenerationInvalidTaskType:
     """Tests for generate() with invalid task_type."""
 
     @pytest.mark.asyncio
-    async def test_invalid_task_type_raises_value_error(self) -> None:
-        """generate() with an unknown task_type raises ValueError."""
+    async def test_invalid_task_type_raises_protocol_configuration_error(
+        self,
+    ) -> None:
+        """generate() with an unknown task_type raises ProtocolConfigurationError."""
         adapter = _make_adapter()
 
-        with pytest.raises(ValueError, match="task_type"):
+        with pytest.raises(ProtocolConfigurationError, match="task_type"):
             await adapter.generate(task_type="invalid_type", source="def foo(): pass")
 
     @pytest.mark.asyncio
     async def test_invalid_task_type_does_not_call_llm(self) -> None:
         """generate() raises before calling the LLM handler for invalid task_type."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ProtocolConfigurationError):
             await adapter.generate(task_type="not_valid", source="def foo(): pass")
 
         adapter._handler.handle.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_empty_task_type_raises_value_error(self) -> None:
-        """Empty string task_type raises ValueError."""
+    async def test_empty_task_type_raises_protocol_configuration_error(self) -> None:
+        """Empty string task_type raises ProtocolConfigurationError."""
         adapter = _make_adapter()
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ProtocolConfigurationError):
             await adapter.generate(task_type="", source="def foo(): pass")
 
 
@@ -209,36 +217,40 @@ class TestAdapterDocumentationGenerationInvalidSource:
     """Tests for generate() with empty or whitespace-only source."""
 
     @pytest.mark.asyncio
-    async def test_empty_source_raises_value_error(self) -> None:
-        """generate() raises ValueError when source is an empty string."""
+    async def test_empty_source_raises_protocol_configuration_error(self) -> None:
+        """generate() raises ProtocolConfigurationError when source is an empty string."""
         adapter = _make_adapter()
 
-        with pytest.raises(ValueError, match="source"):
+        with pytest.raises(ProtocolConfigurationError, match="source"):
             await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source="")
 
     @pytest.mark.asyncio
-    async def test_whitespace_only_source_raises_value_error(self) -> None:
-        """generate() raises ValueError when source is whitespace-only."""
+    async def test_whitespace_only_source_raises_protocol_configuration_error(
+        self,
+    ) -> None:
+        """generate() raises ProtocolConfigurationError when source is whitespace-only."""
         adapter = _make_adapter()
 
-        with pytest.raises(ValueError, match="source"):
+        with pytest.raises(ProtocolConfigurationError, match="source"):
             await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source="   ")
 
     @pytest.mark.asyncio
-    async def test_newline_only_source_raises_value_error(self) -> None:
-        """generate() raises ValueError when source contains only newlines."""
+    async def test_newline_only_source_raises_protocol_configuration_error(
+        self,
+    ) -> None:
+        """generate() raises ProtocolConfigurationError when source contains only newlines."""
         adapter = _make_adapter()
 
-        with pytest.raises(ValueError, match="source"):
+        with pytest.raises(ProtocolConfigurationError, match="source"):
             await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source="\n\n\t\n")
 
     @pytest.mark.asyncio
     async def test_empty_source_does_not_call_llm(self) -> None:
         """generate() raises before calling the LLM handler for empty source."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ProtocolConfigurationError):
             await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source="")
 
         adapter._handler.handle.assert_not_awaited()
@@ -257,7 +269,7 @@ class TestAdapterDocumentationGenerationAttribution:
     async def test_attribution_model_name(self) -> None:
         """attribution.model_name matches the configured model."""
         adapter = _make_adapter(model="qwen2.5-72b")
-        adapter._handler.handle = AsyncMock(
+        adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
             return_value=_make_llm_response("Docstring content.")
         )
 
@@ -271,7 +283,7 @@ class TestAdapterDocumentationGenerationAttribution:
     async def test_attribution_model_name_default(self) -> None:
         """attribution.model_name defaults to _DEFAULT_MODEL when not overridden."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
 
         result = await adapter.generate(
             task_type=TASK_TYPE_DOCSTRING, source="def foo(): pass"
@@ -284,7 +296,7 @@ class TestAdapterDocumentationGenerationAttribution:
         """attribution.endpoint_url matches the base_url passed at construction."""
         adapter = _make_adapter()
         adapter._base_url = "http://localhost:8100"
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
 
         result = await adapter.generate(
             task_type=TASK_TYPE_DOCSTRING, source="def foo(): pass"
@@ -296,7 +308,7 @@ class TestAdapterDocumentationGenerationAttribution:
     async def test_attribution_prompt_version(self) -> None:
         """attribution.prompt_version matches _PROMPT_VERSION."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
 
         result = await adapter.generate(
             task_type=TASK_TYPE_DOCSTRING, source="def foo(): pass"
@@ -308,7 +320,7 @@ class TestAdapterDocumentationGenerationAttribution:
     async def test_attribution_delegation_confidence(self) -> None:
         """attribution.delegation_confidence matches _DELEGATION_CONFIDENCE."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
 
         result = await adapter.generate(
             task_type=TASK_TYPE_DOCSTRING, source="def foo(): pass"
@@ -322,7 +334,7 @@ class TestAdapterDocumentationGenerationAttribution:
     async def test_attribution_latency_ms_is_nonnegative(self) -> None:
         """attribution.latency_ms is always >= 0."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
 
         result = await adapter.generate(
             task_type=TASK_TYPE_DOCSTRING, source="def foo(): pass"
@@ -348,7 +360,7 @@ class TestAdapterDocumentationGenerationStructuredJson:
     async def test_structured_json_contains_task_type(self, task_type: str) -> None:
         """structured_json contains the task_type key."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
 
         result = await adapter.generate(task_type=task_type, source="def foo(): pass")
 
@@ -369,7 +381,7 @@ class TestAdapterDocumentationGenerationEmptyLlmResponse:
     async def test_empty_llm_response_rendered_text_is_non_empty(self) -> None:
         """When LLM returns empty string, rendered_text is a non-empty fallback."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(""))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(""))  # type: ignore[method-assign]
 
         result = await adapter.generate(
             task_type=TASK_TYPE_DOCSTRING, source="def foo(): pass"
@@ -381,7 +393,7 @@ class TestAdapterDocumentationGenerationEmptyLlmResponse:
     async def test_none_llm_response_rendered_text_is_non_empty(self) -> None:
         """When LLM returns None, rendered_text is a non-empty fallback."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(None))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(None))  # type: ignore[method-assign]
 
         result = await adapter.generate(
             task_type=TASK_TYPE_DOCSTRING, source="def foo(): pass"
@@ -393,7 +405,7 @@ class TestAdapterDocumentationGenerationEmptyLlmResponse:
     async def test_none_llm_response_returns_contract(self) -> None:
         """When LLM returns None, result is still ContractDelegatedResponse."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(None))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(None))  # type: ignore[method-assign]
 
         result = await adapter.generate(
             task_type=TASK_TYPE_README, source="Module description."
@@ -405,7 +417,7 @@ class TestAdapterDocumentationGenerationEmptyLlmResponse:
     async def test_none_llm_response_attribution_is_set(self) -> None:
         """When LLM returns None, attribution is still fully populated."""
         adapter = _make_adapter(model="qwen2.5-72b")
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(None))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response(None))  # type: ignore[method-assign]
 
         result = await adapter.generate(
             task_type=TASK_TYPE_DOCSTRING, source="def foo(): pass"
@@ -434,14 +446,14 @@ class TestAdapterDocumentationGenerationSourceTruncation:
             captured_requests.append(request)
             return _make_llm_response("Content.")
 
-        adapter._handler.handle = capturing_handle  # type: ignore[method-assign]
+        adapter._handler.handle = capturing_handle  # type: ignore[method-assign,assignment]
 
         large_source = "x" * (_MAX_SOURCE_CHARS + 5_000)
         await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source=large_source)
 
         assert len(captured_requests) == 1
         request = captured_requests[0]
-        messages = getattr(request, "messages", ())
+        messages = cast("list[dict[str, Any]]", getattr(request, "messages", []))
         assert len(messages) == 1
         user_content: str = messages[0]["content"]
         # The user message must contain the truncation sentinel.
@@ -457,13 +469,15 @@ class TestAdapterDocumentationGenerationSourceTruncation:
             captured_requests.append(request)
             return _make_llm_response("Content.")
 
-        adapter._handler.handle = capturing_handle  # type: ignore[method-assign]
+        adapter._handler.handle = capturing_handle  # type: ignore[method-assign,assignment]
 
         small_source = "def foo(): pass"
         await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source=small_source)
 
         assert len(captured_requests) == 1
-        messages = getattr(captured_requests[0], "messages", ())
+        messages = cast(
+            "list[dict[str, Any]]", getattr(captured_requests[0], "messages", [])
+        )
         user_content: str = messages[0]["content"]
         assert "[source truncated]" not in user_content
         # The original source must appear verbatim.
@@ -483,7 +497,7 @@ class TestAdapterDocumentationGenerationCurlyBraceSafety:
     async def test_json_source_does_not_raise(self) -> None:
         """generate() must not raise when source contains JSON-like curly braces."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
 
         json_source = '{"key": "value", "nested": {"x": [1, 2, 3]}}'
 
@@ -497,7 +511,7 @@ class TestAdapterDocumentationGenerationCurlyBraceSafety:
     async def test_python_dict_source_does_not_raise(self) -> None:
         """generate() must not raise when source contains Python dict syntax."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
 
         python_source = "data = {'key': {1: 'one', 2: 'two'}}"
 
@@ -511,7 +525,7 @@ class TestAdapterDocumentationGenerationCurlyBraceSafety:
     async def test_source_placeholder_literal_does_not_raise(self) -> None:
         """generate() must not raise when source contains literal '{source}'."""
         adapter = _make_adapter()
-        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
 
         source_with_placeholder = "The {source} parameter is used here."
 
@@ -531,13 +545,15 @@ class TestAdapterDocumentationGenerationCurlyBraceSafety:
             captured_requests.append(request)
             return _make_llm_response("Brief.")
 
-        adapter._handler.handle = capturing_handle  # type: ignore[method-assign]
+        adapter._handler.handle = capturing_handle  # type: ignore[method-assign,assignment]
 
         source = "def foo(x: dict[str, int]) -> list[str]: ..."
         await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source=source)
 
         assert len(captured_requests) == 1
-        messages = getattr(captured_requests[0], "messages", ())
+        messages = cast(
+            "list[dict[str, Any]]", getattr(captured_requests[0], "messages", [])
+        )
         user_content: str = messages[0]["content"]
         assert source in user_content
 
@@ -551,25 +567,25 @@ class TestAdapterDocumentationGenerationCurlyBraceSafety:
 class TestAdapterDocumentationGenerationConstructorValidation:
     """Tests for constructor parameter validation."""
 
-    def test_zero_max_tokens_raises_value_error(self) -> None:
-        """max_tokens=0 raises ValueError."""
-        with pytest.raises(ValueError, match="max_tokens"):
+    def test_zero_max_tokens_raises_protocol_configuration_error(self) -> None:
+        """max_tokens=0 raises ProtocolConfigurationError."""
+        with pytest.raises(ProtocolConfigurationError, match="max_tokens"):
             AdapterDocumentationGeneration(
                 base_url="http://localhost:8100",
                 max_tokens=0,
             )
 
-    def test_negative_max_tokens_raises_value_error(self) -> None:
-        """Negative max_tokens raises ValueError."""
-        with pytest.raises(ValueError, match="max_tokens"):
+    def test_negative_max_tokens_raises_protocol_configuration_error(self) -> None:
+        """Negative max_tokens raises ProtocolConfigurationError."""
+        with pytest.raises(ProtocolConfigurationError, match="max_tokens"):
             AdapterDocumentationGeneration(
                 base_url="http://localhost:8100",
                 max_tokens=-1,
             )
 
-    def test_oversized_max_tokens_raises_value_error(self) -> None:
-        """max_tokens > 32768 raises ValueError."""
-        with pytest.raises(ValueError, match="max_tokens"):
+    def test_oversized_max_tokens_raises_protocol_configuration_error(self) -> None:
+        """max_tokens > 32768 raises ProtocolConfigurationError."""
+        with pytest.raises(ProtocolConfigurationError, match="max_tokens"):
             AdapterDocumentationGeneration(
                 base_url="http://localhost:8100",
                 max_tokens=32_769,
@@ -583,17 +599,17 @@ class TestAdapterDocumentationGenerationConstructorValidation:
         )
         assert adapter._max_tokens == 1024
 
-    def test_negative_temperature_raises_value_error(self) -> None:
-        """temperature < 0.0 raises ValueError."""
-        with pytest.raises(ValueError, match="temperature"):
+    def test_negative_temperature_raises_protocol_configuration_error(self) -> None:
+        """temperature < 0.0 raises ProtocolConfigurationError."""
+        with pytest.raises(ProtocolConfigurationError, match="temperature"):
             AdapterDocumentationGeneration(
                 base_url="http://localhost:8100",
                 temperature=-0.1,
             )
 
-    def test_oversized_temperature_raises_value_error(self) -> None:
-        """temperature > 2.0 raises ValueError."""
-        with pytest.raises(ValueError, match="temperature"):
+    def test_oversized_temperature_raises_protocol_configuration_error(self) -> None:
+        """temperature > 2.0 raises ProtocolConfigurationError."""
+        with pytest.raises(ProtocolConfigurationError, match="temperature"):
             AdapterDocumentationGeneration(
                 base_url="http://localhost:8100",
                 temperature=2.1,
@@ -608,14 +624,14 @@ class TestAdapterDocumentationGenerationConstructorValidation:
             )
             assert adapter._temperature == t
 
-    def test_empty_base_url_raises_value_error(self) -> None:
-        """Explicit base_url='' raises ValueError at construction time."""
-        with pytest.raises(ValueError, match="base_url"):
+    def test_empty_base_url_raises_protocol_configuration_error(self) -> None:
+        """Explicit base_url='' raises ProtocolConfigurationError at construction time."""
+        with pytest.raises(ProtocolConfigurationError, match="base_url"):
             AdapterDocumentationGeneration(base_url="")
 
     def test_empty_base_url_error_message_is_clear(self) -> None:
-        """ValueError for empty base_url contains a helpful message."""
-        with pytest.raises(ValueError, match="non-empty string"):
+        """ProtocolConfigurationError for empty base_url contains a helpful message."""
+        with pytest.raises(ProtocolConfigurationError, match="non-empty string"):
             AdapterDocumentationGeneration(base_url="")
 
 
@@ -657,7 +673,7 @@ class TestAdapterDocumentationGenerationRequestConstruction:
             captured_requests.append(request)
             return _make_llm_response("Content.")
 
-        adapter._handler.handle = capturing_handle  # type: ignore[method-assign]
+        adapter._handler.handle = capturing_handle  # type: ignore[method-assign,assignment]
 
         await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source="def foo(): pass")
 
@@ -677,7 +693,7 @@ class TestAdapterDocumentationGenerationRequestConstruction:
             captured_requests.append(request)
             return _make_llm_response("Content.")
 
-        adapter._handler.handle = capturing_handle  # type: ignore[method-assign]
+        adapter._handler.handle = capturing_handle  # type: ignore[method-assign,assignment]
 
         await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source="def foo(): pass")
 
@@ -694,10 +710,182 @@ class TestAdapterDocumentationGenerationRequestConstruction:
             captured_requests.append(request)
             return _make_llm_response("Content.")
 
-        adapter._handler.handle = capturing_handle  # type: ignore[method-assign]
+        adapter._handler.handle = capturing_handle  # type: ignore[method-assign,assignment]
 
         await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source="def foo(): pass")
 
         assert len(captured_requests) == 1
         system_prompt = getattr(captured_requests[0], "system_prompt", None)
         assert system_prompt and len(system_prompt) > 0
+
+
+# ---------------------------------------------------------------------------
+# correlation_id parameter
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterDocumentationGenerationCorrelationId:
+    """Tests for the correlation_id parameter on generate()."""
+
+    @pytest.mark.asyncio
+    async def test_generate_accepts_correlation_id_uuid(self) -> None:
+        """generate() accepts a UUID correlation_id without raising."""
+        adapter = _make_adapter()
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
+        cid: UUID = uuid4()
+
+        result = await adapter.generate(
+            task_type=TASK_TYPE_DOCSTRING,
+            source="def foo(): pass",
+            correlation_id=cid,
+        )
+
+        assert isinstance(result, ContractDelegatedResponse)
+
+    @pytest.mark.asyncio
+    async def test_generate_works_with_correlation_id_none(self) -> None:
+        """generate() works when correlation_id=None (the default)."""
+        adapter = _make_adapter()
+        adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
+
+        result = await adapter.generate(
+            task_type=TASK_TYPE_DOCSTRING,
+            source="def foo(): pass",
+            correlation_id=None,
+        )
+
+        assert isinstance(result, ContractDelegatedResponse)
+
+    @pytest.mark.asyncio
+    async def test_bad_task_type_with_correlation_id_raises_protocol_configuration_error(
+        self,
+    ) -> None:
+        """Bad task_type with a correlation_id still raises ProtocolConfigurationError."""
+        adapter = _make_adapter()
+        cid: UUID = uuid4()
+
+        with pytest.raises(ProtocolConfigurationError):
+            await adapter.generate(
+                task_type="bad_type",
+                source="def foo(): pass",
+                correlation_id=cid,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Truncation boundary
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterDocumentationGenerationTruncationBoundary:
+    """Tests for the exact truncation boundary behaviour."""
+
+    @pytest.mark.asyncio
+    async def test_source_at_limit_plus_50_fits_within_max_chars(self) -> None:
+        """When source length == _MAX_SOURCE_CHARS + 50, the source portion in the
+        user message is <= _MAX_SOURCE_CHARS characters (sentinel included).
+
+        The adapter truncates source_stripped to exactly _MAX_SOURCE_CHARS chars
+        (truncated_body + sentinel == _MAX_SOURCE_CHARS). The docstring template
+        wraps the source inside a markdown code fence; we extract that portion by
+        splitting on the known fence delimiter ``\\n```python\\n`` to isolate the
+        substituted source text and verify its length is within budget.
+        """
+        adapter = _make_adapter()
+        captured_requests: list[object] = []
+
+        async def capturing_handle(request: object) -> MagicMock:
+            captured_requests.append(request)
+            return _make_llm_response("Content.")
+
+        adapter._handler.handle = capturing_handle  # type: ignore[method-assign,assignment]
+
+        # Build a source that is exactly _MAX_SOURCE_CHARS + 50 characters long.
+        oversized_source = "a" * (_MAX_SOURCE_CHARS + 50)
+        await adapter.generate(task_type=TASK_TYPE_DOCSTRING, source=oversized_source)
+
+        assert len(captured_requests) == 1
+        messages = cast(
+            "list[dict[str, Any]]", getattr(captured_requests[0], "messages", [])
+        )
+        assert len(messages) == 1
+        user_content: str = messages[0]["content"]
+
+        # The sentinel must appear (truncation did happen).
+        sentinel = "[source truncated]"
+        assert sentinel in user_content
+
+        # The docstring template embeds the source inside ```python\n...\n```.
+        # Split on the opening fence to find the injected source text.
+        fence_open = "```python\n"
+        fence_close = "\n```"
+        fence_start = user_content.find(fence_open)
+        assert fence_start != -1, "Code fence must appear in user content"
+        source_start = fence_start + len(fence_open)
+        fence_end = user_content.find(fence_close, source_start)
+        assert fence_end != -1, "Closing code fence must appear in user content"
+        injected_source = user_content[source_start:fence_end]
+
+        # The injected source (truncated body + sentinel) must fit within budget.
+        assert len(injected_source) <= _MAX_SOURCE_CHARS
+
+
+# ---------------------------------------------------------------------------
+# LLM exception propagation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestAdapterDocumentationGenerationLlmException:
+    """Tests that RuntimeHostError from the LLM handler propagates out of generate()."""
+
+    @pytest.mark.asyncio
+    async def test_runtime_host_error_propagates(self) -> None:
+        """When HandlerLlmOpenaiCompatible raises RuntimeHostError, it propagates."""
+        adapter = _make_adapter()
+
+        async def failing_handle(request: object) -> MagicMock:
+            raise RuntimeHostError("simulated LLM failure")
+
+        adapter._handler.handle = failing_handle  # type: ignore[method-assign,assignment]
+
+        with pytest.raises(RuntimeHostError, match="simulated LLM failure"):
+            await adapter.generate(
+                task_type=TASK_TYPE_DOCSTRING, source="def foo(): pass"
+            )
+
+    @pytest.mark.asyncio
+    async def test_runtime_host_error_not_swallowed(self) -> None:
+        """generate() does not swallow RuntimeHostError into another exception type."""
+        adapter = _make_adapter()
+
+        async def failing_handle(request: object) -> MagicMock:
+            raise RuntimeHostError("connection timeout")
+
+        adapter._handler.handle = failing_handle  # type: ignore[method-assign,assignment]
+
+        exc_info: pytest.ExceptionInfo[RuntimeHostError]
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await adapter.generate(
+                task_type=TASK_TYPE_README, source="Module description."
+            )
+
+        assert isinstance(exc_info.value, RuntimeHostError)
+
+    @pytest.mark.asyncio
+    async def test_runtime_host_error_type_is_exact(self) -> None:
+        """The propagated exception is a RuntimeHostError instance."""
+        adapter = _make_adapter()
+        original_error = RuntimeHostError("network error")
+
+        async def failing_handle(request: object) -> MagicMock:
+            raise original_error
+
+        adapter._handler.handle = failing_handle  # type: ignore[method-assign,assignment]
+
+        with pytest.raises(RuntimeHostError) as exc_info:
+            await adapter.generate(task_type=TASK_TYPE_API_DOC, source="def api(): ...")
+
+        assert exc_info.value is original_error

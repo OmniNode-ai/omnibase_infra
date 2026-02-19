@@ -37,6 +37,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from uuid import UUID
 
 from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
     TransportHolderLlmHttp,
@@ -44,7 +45,13 @@ from omnibase_infra.adapters.llm.adapter_llm_provider_openai import (
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
+    EnumInfraTransportType,
     EnumLlmOperationType,
+)
+from omnibase_infra.errors import (
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+    RuntimeHostError,
 )
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
@@ -79,6 +86,9 @@ _DELEGATION_CONFIDENCE: float = 0.95
 # Maximum characters of source text sent to the LLM to avoid context overflow.
 # Qwen-72B supports large context; cap conservatively at 32 000 chars.
 _MAX_SOURCE_CHARS: int = 32_000
+
+# Sentinel appended when source is truncated (included in _MAX_SOURCE_CHARS budget).
+_TRUNCATION_SENTINEL: str = "\n... [source truncated]"
 
 # Valid task type values.
 TASK_TYPE_DOCSTRING: str = "docstring"
@@ -194,19 +204,38 @@ class AdapterDocumentationGeneration:
             api_key: Optional Bearer token for authenticated endpoints.
 
         Raises:
-            ValueError: If ``max_tokens`` is not in [1, 32768],
+            ProtocolConfigurationError: If ``max_tokens`` is not in [1, 32768],
                 ``temperature`` is not in [0.0, 2.0], or ``base_url``
                 resolves to an empty string.
         """
         if max_tokens <= 0 or max_tokens > 32_768:
-            raise ValueError(f"max_tokens must be in [1, 32768], got {max_tokens}")
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="validate_config",
+            )
+            raise ProtocolConfigurationError(
+                f"max_tokens must be in [1, 32768], got {max_tokens}",
+                context=context,
+            )
         if not (0.0 <= temperature <= 2.0):
-            raise ValueError(f"temperature must be in [0.0, 2.0], got {temperature}")
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="validate_config",
+            )
+            raise ProtocolConfigurationError(
+                f"temperature must be in [0.0, 2.0], got {temperature}",
+                context=context,
+            )
 
         if base_url is not None and not base_url:
-            raise ValueError(
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="validate_config",
+            )
+            raise ProtocolConfigurationError(
                 "base_url must be a non-empty string; got an empty string. "
-                "Provide a valid URL or set the LLM_QWEN_72B_URL environment variable."
+                "Provide a valid URL or set the LLM_QWEN_72B_URL environment variable.",
+                context=context,
             )
         self._base_url: str = base_url or os.environ.get(
             "LLM_QWEN_72B_URL", "http://localhost:8100"
@@ -236,6 +265,7 @@ class AdapterDocumentationGeneration:
         self,
         task_type: str,
         source: str,
+        correlation_id: UUID | None = None,
     ) -> ContractDelegatedResponse:
         """Generate documentation for the provided source text.
 
@@ -251,6 +281,8 @@ class AdapterDocumentationGeneration:
             source: Source code or descriptive text to document.  Truncated
                 to ``_MAX_SOURCE_CHARS`` characters before being sent to the
                 model.
+            correlation_id: Optional correlation ID for distributed tracing.
+                Auto-generated if not provided.
 
         Returns:
             ``ContractDelegatedResponse`` with:
@@ -262,23 +294,35 @@ class AdapterDocumentationGeneration:
               routing and filtering
 
         Raises:
-            ValueError: If ``task_type`` is not one of the valid task types
-                (``"docstring"``, ``"readme"``, ``"api_doc"``), or if
-                ``source`` is empty or contains only whitespace.
+            ProtocolConfigurationError: If ``task_type`` is not one of the
+                valid task types (``"docstring"``, ``"readme"``, ``"api_doc"``),
+                or if ``source`` is empty or contains only whitespace.
             RuntimeHostError: Propagated from ``HandlerLlmOpenaiCompatible``
                 on connection failures, timeouts, or authentication errors.
         """
         if task_type not in _VALID_TASK_TYPES:
             valid = ", ".join(sorted(_VALID_TASK_TYPES))
-            raise ValueError(
-                f"Invalid task_type {task_type!r}. Must be one of: {valid}"
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="generate_documentation",
+            )
+            raise ProtocolConfigurationError(
+                f"Invalid task_type {task_type!r}. Must be one of: {valid}",
+                context=context,
             )
 
         source_stripped = source.strip()
         if not source_stripped:
-            raise ValueError(
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.HTTP,
+                operation="generate_documentation",
+            )
+            raise ProtocolConfigurationError(
                 "source must not be empty or whitespace-only; "
-                "provide the code or text to document."
+                "provide the code or text to document.",
+                context=context,
             )
 
         start = time.perf_counter()
@@ -289,7 +333,8 @@ class AdapterDocumentationGeneration:
                 _MAX_SOURCE_CHARS,
             )
             source_stripped = (
-                source_stripped[:_MAX_SOURCE_CHARS] + "\n... [source truncated]"
+                source_stripped[: _MAX_SOURCE_CHARS - len(_TRUNCATION_SENTINEL)]
+                + _TRUNCATION_SENTINEL
             )
 
         template = _TASK_TYPE_TEMPLATES[task_type]
@@ -315,7 +360,15 @@ class AdapterDocumentationGeneration:
             api_key=self._api_key,
         )
 
-        response = await self._handler.handle(request)
+        try:
+            response = await self._handler.handle(request)
+        except RuntimeHostError:
+            logger.warning(
+                "LLM handler raised error during documentation generation",
+                extra={"task_type": task_type, "model": self._model},
+            )
+            raise
+
         latency_ms = (time.perf_counter() - start) * 1000
 
         rendered = (response.generated_text or "").strip()
