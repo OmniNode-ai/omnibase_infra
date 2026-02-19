@@ -26,6 +26,7 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.models.catalog.catalog_warning_codes import (
+    CONSUL_KV_MAX_KEYS_REACHED,
     CONSUL_SCAN_TIMEOUT,
     CONSUL_UNAVAILABLE,
     PARTIAL_NODE_DATA,
@@ -937,6 +938,39 @@ class TestOMN2312WarningCodes:
 
         assert CONSUL_SCAN_TIMEOUT in response.warnings
         assert response.topics == ()
+
+    @pytest.mark.asyncio
+    async def test_consul_kv_max_keys_reached_when_scan_hits_cap(self) -> None:
+        """CONSUL_KV_MAX_KEYS_REACHED emitted when scan returns >= _MAX_KV_KEYS items."""
+        from omnibase_infra.services.service_topic_catalog import _MAX_KV_KEYS
+
+        # Build exactly _MAX_KV_KEYS items so the >= threshold is hit.
+        # Each item is a valid subscribe_topics entry for a unique node so that
+        # the catalog can still be built (partial success) despite the warning.
+        capped_items: list[dict[str, object]] = [
+            {
+                "key": f"onex/nodes/node-{i:05d}/event_bus/subscribe_topics",
+                "value": "[]",
+                "modify_index": 1,
+            }
+            for i in range(_MAX_KV_KEYS)
+        ]
+
+        handler = MagicMock()
+        handler._client = MagicMock()
+        handler._executor = None
+
+        service = _make_service(consul_handler=handler)
+        service._kv_get_recurse = AsyncMock(return_value=capped_items)  # type: ignore[method-assign]
+
+        async def _v(cid: object) -> int:
+            return -1  # Disable cache
+
+        service.get_catalog_version = _v  # type: ignore[assignment]
+
+        response = await service.build_catalog(correlation_id=uuid4())
+
+        assert CONSUL_KV_MAX_KEYS_REACHED in response.warnings
 
     @pytest.mark.asyncio
     async def test_partial_node_data_when_node_has_malformed_kv(self) -> None:
