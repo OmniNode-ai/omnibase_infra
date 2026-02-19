@@ -1230,6 +1230,7 @@ __all__ = [
     "POSTGRES_AVAILABLE",
     "SERVICE_REGISTRY_AVAILABLE",
     # Helper functions
+    "make_e2e_test_identity",
     "wait_for_consumer_ready",
     "wait_for_topic_metadata",
     # Database fixtures
