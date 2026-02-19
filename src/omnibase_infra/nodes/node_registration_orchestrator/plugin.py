@@ -1370,9 +1370,8 @@ class PluginRegistration:
                         exc,
                     )
 
-                assert config is not None, "config must be non-None at this point in the function"
                 _event_bus_for_catalog = (
-                    config.event_bus  # type: ignore[arg-type]
+                    config.event_bus  # type: ignore[arg-type, union-attr]
                     if _catalog_svc is not None
                     else None
                 )

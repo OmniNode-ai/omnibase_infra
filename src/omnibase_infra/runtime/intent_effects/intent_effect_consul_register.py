@@ -293,6 +293,9 @@ class IntentEffectConsulRegister:
         if self._catalog_service is None or self._event_bus is None:
             return
 
+        if not isinstance(handler_output, ModelHandlerOutput):
+            return
+
         # Extract delta from handler output result using typed access.
         # result is ModelConsulHandlerResponse | None; payload.data is a
         # discriminated ConsulPayload union — only ModelConsulRegisterPayload
@@ -379,16 +382,15 @@ class IntentEffectConsulRegister:
                 SUFFIX_TOPIC_CATALOG_CHANGED,
             )
 
-            catalog_version = max(new_version, 0)
             logger.info(
                 "Emitted ModelTopicCatalogChanged: version=%d +%d -%d "
                 "(correlation_id=%s)",
-                catalog_version,
+                changed_event.catalog_version,
                 len(topics_added),
                 len(topics_removed),
                 str(correlation_id),
                 extra={
-                    "catalog_version": catalog_version,
+                    "catalog_version": changed_event.catalog_version,
                     "topics_added": sorted(topics_added),
                     "topics_removed": sorted(topics_removed),
                     "trigger_reason": trigger_reason,

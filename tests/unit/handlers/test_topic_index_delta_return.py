@@ -112,7 +112,6 @@ def event_bus_config_b() -> ModelNodeEventBusConfig:
     )
 
 
-@pytest.mark.unit
 class TestUpdateTopicIndexDeltaReturn:
     """Tests for the delta return value of _update_topic_index()."""
 
@@ -243,7 +242,6 @@ class TestUpdateTopicIndexDeltaReturn:
         assert isinstance(result[1], frozenset)
 
 
-@pytest.mark.unit
 class TestRegisterServiceDeltaPropagation:
     """Tests that _register_service() propagates the topic delta into the result."""
 
