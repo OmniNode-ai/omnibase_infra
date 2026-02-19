@@ -25,6 +25,12 @@ import pytest
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.models.catalog.catalog_warning_codes import (
+    CONSUL_SCAN_TIMEOUT,
+    CONSUL_UNAVAILABLE,
+    INTERNAL_ERROR,
+    INVALID_QUERY_PAYLOAD,
+)
 from omnibase_infra.models.catalog.model_topic_catalog_query import (
     ModelTopicCatalogQuery,
 )
@@ -208,7 +214,7 @@ async def test_handler_malformed_payload_returns_warning() -> None:
     assert len(output.events) == 1
     response = output.events[0]
     assert isinstance(response, ModelTopicCatalogResponse)
-    assert "invalid_query_payload" in response.warnings
+    assert INVALID_QUERY_PAYLOAD in response.warnings
     assert len(response.topics) == 0
 
     # Catalog service should NOT be called for malformed payloads
@@ -222,11 +228,11 @@ async def test_handler_malformed_payload_returns_warning() -> None:
 
 @pytest.mark.unit
 async def test_handler_consul_unavailable_returns_warning() -> None:
-    """When Consul is unavailable, ServiceTopicCatalog returns no_consul_handler warning."""
+    """When Consul is unavailable, ServiceTopicCatalog returns consul_unavailable warning."""
     correlation_id = uuid4()
     consul_unavailable_response = _empty_catalog_response(
         correlation_id=correlation_id,
-        warnings=("no_consul_handler",),
+        warnings=(CONSUL_UNAVAILABLE,),
     )
     service = _make_catalog_service(response=consul_unavailable_response)
     handler = HandlerTopicCatalogQuery(catalog_service=service)
@@ -237,7 +243,7 @@ async def test_handler_consul_unavailable_returns_warning() -> None:
     assert len(output.events) == 1
     response = output.events[0]
     assert isinstance(response, ModelTopicCatalogResponse)
-    assert "no_consul_handler" in response.warnings
+    assert CONSUL_UNAVAILABLE in response.warnings
     assert len(response.topics) == 0
 
 
@@ -247,7 +253,7 @@ async def test_handler_consul_scan_timeout_passes_through_warnings() -> None:
     correlation_id = uuid4()
     timeout_response = _empty_catalog_response(
         correlation_id=correlation_id,
-        warnings=("consul_scan_timeout",),
+        warnings=(CONSUL_SCAN_TIMEOUT,),
     )
     service = _make_catalog_service(response=timeout_response)
     handler = HandlerTopicCatalogQuery(catalog_service=service)
@@ -256,7 +262,7 @@ async def test_handler_consul_scan_timeout_passes_through_warnings() -> None:
     output = await handler.handle(envelope)
 
     response = output.events[0]
-    assert "consul_scan_timeout" in response.warnings
+    assert CONSUL_SCAN_TIMEOUT in response.warnings
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +284,7 @@ async def test_handler_unexpected_exception_returns_internal_error() -> None:
     assert len(output.events) == 1
     response = output.events[0]
     assert isinstance(response, ModelTopicCatalogResponse)
-    assert "internal_error" in response.warnings
+    assert INTERNAL_ERROR in response.warnings
     assert len(response.topics) == 0
 
 
