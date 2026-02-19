@@ -38,6 +38,12 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_infra.models.catalog.catalog_warning_codes import (
+    CONSUL_SCAN_TIMEOUT,
+    CONSUL_UNAVAILABLE,
+    PARTIAL_NODE_DATA,
+    VERSION_UNKNOWN,
+)
 from omnibase_infra.models.catalog.model_topic_catalog_entry import (
     ModelTopicCatalogEntry,
 )
@@ -105,7 +111,7 @@ class ServiceTopicCatalog:
     Timeout Budget:
         A 5-second hard budget applies to the Consul KV recursive scan. If the
         budget is exceeded a partial response is returned with a
-        ``"consul_scan_timeout"`` warning in ``ModelTopicCatalogResponse.warnings``.
+        ``CONSUL_SCAN_TIMEOUT`` warning in ``ModelTopicCatalogResponse.warnings``.
 
     Thread Safety:
         All methods are async. The in-process cache is a plain dict and relies
@@ -131,7 +137,7 @@ class ServiceTopicCatalog:
         Args:
             container: ONEX container for dependency injection.
             consul_handler: Optional Consul handler. When absent all catalog
-                methods return empty results with a ``"no_consul_handler"``
+                methods return empty results with a ``CONSUL_UNAVAILABLE``
                 warning.
             topic_resolver: Optional resolver for mapping topic suffixes to
                 Kafka topic names. Defaults to a plain ``TopicResolver()``
@@ -186,7 +192,7 @@ class ServiceTopicCatalog:
         warnings: list[str] = []
 
         if self._consul_handler is None:
-            warnings.append("no_consul_handler")
+            warnings.append(CONSUL_UNAVAILABLE)
             return self._empty_response(
                 correlation_id=correlation_id,
                 catalog_version=0,
@@ -195,6 +201,10 @@ class ServiceTopicCatalog:
 
         # Step 1: get current catalog version
         catalog_version = await self.get_catalog_version(correlation_id)
+
+        # Emit version_unknown warning when catalog version is indeterminate
+        if catalog_version == -1:
+            warnings.append(VERSION_UNKNOWN)
 
         # Step 2: cache hit?
         if catalog_version != -1 and catalog_version in self._cache:
@@ -219,14 +229,14 @@ class ServiceTopicCatalog:
             if fetched is not None:
                 raw_kv_items = fetched
             else:
-                warnings.append("consul_kv_unavailable")
+                warnings.append(CONSUL_UNAVAILABLE)
         except TimeoutError:
             logger.warning(
                 "Consul KV scan exceeded %ss budget, returning partial results",
                 _SCAN_BUDGET_SECONDS,
                 extra={"correlation_id": str(correlation_id)},
             )
-            warnings.append("consul_scan_timeout")
+            warnings.append(CONSUL_SCAN_TIMEOUT)
 
         topics, scan_warnings, node_count = self._process_raw_kv_items(
             raw_kv_items, correlation_id
@@ -363,7 +373,8 @@ class ServiceTopicCatalog:
               IDs plus enrichment data (description, partitions, tags).
             - ``warnings`` is a list of string tokens describing any non-fatal
               issues encountered during processing (e.g.
-              ``"consul_kv_max_keys_reached"``, ``"invalid_json_at:<key>"``).
+              ``"consul_kv_max_keys_reached"``, ``"partial_node_data"``,
+              ``"invalid_json_at:<key>"``).
             - ``node_count`` is the number of distinct node IDs discovered in
               the KV data.
         """
@@ -374,6 +385,10 @@ class ServiceTopicCatalog:
 
         # Build per-node lookup: node_id -> sub_key -> parsed list
         node_data: dict[str, dict[str, list[object]]] = {}
+
+        # Track node IDs that had at least one malformed KV entry so we can
+        # emit a partial_node_data summary warning after scanning all items.
+        nodes_with_bad_data: set[str] = set()
 
         for item in raw_items[:_MAX_KV_KEYS]:
             raw_key = item.get("key")
@@ -399,10 +414,22 @@ class ServiceTopicCatalog:
             if node_id not in node_data:
                 node_data[node_id] = {}
 
+            warnings_before = len(warnings)
             parsed = self._parse_json_list(value, key, correlation_id, warnings)
             node_data[node_id][sub_key] = parsed
 
+            # If _parse_json_list appended a new warning, this node had bad data
+            if len(warnings) > warnings_before:
+                nodes_with_bad_data.add(node_id)
+
         node_count = len(node_data)
+
+        # Emit a single partial_node_data summary token when any node had
+        # malformed KV entries. The per-key "invalid_json_at:<key>" tokens
+        # remain for detailed diagnosis; this summary token lets consumers
+        # detect the condition without scanning all warning tokens.
+        if nodes_with_bad_data:
+            warnings.append(PARTIAL_NODE_DATA)
 
         # Cross-reference: build topic -> ModelTopicInfo
         topic_map: dict[str, ModelTopicInfo] = {}
@@ -628,8 +655,9 @@ class ServiceTopicCatalog:
     ) -> ModelTopicCatalogResponse:
         """Return an empty catalog response with zero topics.
 
-        Used as a fast-path return when no Consul handler is configured or when
-        the handler cannot be reached. The ``generated_at`` timestamp reflects
+        Used as a fast-path return when no Consul handler is configured (emits
+        ``CONSUL_UNAVAILABLE`` warning) or when the handler cannot be reached.
+        The ``generated_at`` timestamp reflects
         the time of the call so that callers can detect stale responses by age.
 
         Args:

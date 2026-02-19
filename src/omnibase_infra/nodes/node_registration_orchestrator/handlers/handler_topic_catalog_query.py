@@ -21,10 +21,10 @@ Architecture:
 
 Error Handling:
     - Malformed query payload: log warning, return empty response with
-      ``warnings=("invalid_query_payload",)``
+      ``warnings=(INVALID_QUERY_PAYLOAD,)``
     - Consul unavailable: ``ServiceTopicCatalog`` already returns partial
-      success with ``warnings=("no_consul_handler",)`` or
-      ``warnings=("consul_scan_timeout",)``
+      success with ``warnings=(CONSUL_UNAVAILABLE,)`` or
+      ``warnings=(CONSUL_SCAN_TIMEOUT,)``
     - Unexpected exception: log error, return empty response with
       ``warnings=("internal_error",)``
 
@@ -53,6 +53,7 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
 )
+from omnibase_infra.models.catalog.catalog_warning_codes import INVALID_QUERY_PAYLOAD
 from omnibase_infra.models.catalog.model_topic_catalog_query import (
     ModelTopicCatalogQuery,
 )
@@ -181,7 +182,7 @@ class HandlerTopicCatalogQuery:
             )
             empty_response = self._empty_response(
                 correlation_id=correlation_id,
-                warnings=("invalid_query_payload",),
+                warnings=(INVALID_QUERY_PAYLOAD,),
             )
             processing_time_ms = (time.perf_counter() - start_time) * 1000
             return ModelHandlerOutput(

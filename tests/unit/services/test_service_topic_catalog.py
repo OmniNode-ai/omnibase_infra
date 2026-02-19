@@ -9,9 +9,11 @@ Tests cover:
     - KV precedence: node arrays authoritative over reverse index
     - Filtering: topic_pattern, include_inactive
     - Partial success: warnings on Consul errors
+    - Warning codes: all 5 OMN-2312 warning codes triggered by their paths
 
 Related Tickets:
     - OMN-2311: Topic Catalog: ServiceTopicCatalog + KV precedence + caching
+    - OMN-2312: Topic Catalog: response warnings channel
 """
 
 from __future__ import annotations
@@ -23,6 +25,12 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.models.catalog.catalog_warning_codes import (
+    CONSUL_SCAN_TIMEOUT,
+    CONSUL_UNAVAILABLE,
+    PARTIAL_NODE_DATA,
+    VERSION_UNKNOWN,
+)
 from omnibase_infra.models.catalog.model_topic_catalog_response import (
     ModelTopicCatalogResponse,
 )
@@ -76,7 +84,7 @@ class TestServiceTopicCatalogNoHandler:
 
     @pytest.mark.asyncio
     async def test_build_catalog_no_handler_returns_empty_with_warning(self) -> None:
-        """build_catalog should return empty topics with no_consul_handler warning."""
+        """build_catalog should return empty topics with consul_unavailable warning."""
         service = _make_service(consul_handler=None)
         correlation_id = uuid4()
 
@@ -86,7 +94,7 @@ class TestServiceTopicCatalogNoHandler:
 
         assert isinstance(response, ModelTopicCatalogResponse)
         assert response.topics == ()
-        assert "no_consul_handler" in response.warnings
+        assert "consul_unavailable" in response.warnings
         assert response.catalog_version == 0
 
     @pytest.mark.asyncio
@@ -851,5 +859,221 @@ class TestConsulKVUnavailable:
             correlation_id=uuid4(),
         )
 
-        assert "consul_kv_unavailable" in response.warnings
+        assert "consul_unavailable" in response.warnings
         assert response.topics == ()
+
+
+# ---------------------------------------------------------------------------
+# Test: OMN-2312 warning codes - each triggered by its failure path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestOMN2312WarningCodes:
+    """Tests verifying all 5 OMN-2312 warning codes are emitted on their paths.
+
+    Warning codes are defined in catalog_warning_codes and used as constants
+    throughout the service. Each test triggers exactly one warning code path.
+
+    Related Tickets:
+        - OMN-2312: Topic Catalog: response warnings channel
+    """
+
+    @pytest.mark.asyncio
+    async def test_consul_unavailable_when_no_handler(self) -> None:
+        """CONSUL_UNAVAILABLE emitted when no consul_handler is configured."""
+        service = _make_service(consul_handler=None)
+
+        response = await service.build_catalog(correlation_id=uuid4())
+
+        assert CONSUL_UNAVAILABLE in response.warnings
+        assert response.topics == ()
+        assert response.catalog_version == 0
+
+    @pytest.mark.asyncio
+    async def test_consul_unavailable_when_kv_recurse_returns_none(self) -> None:
+        """CONSUL_UNAVAILABLE emitted when KV recursive scan returns None."""
+        handler = MagicMock()
+        handler._client = MagicMock()
+        handler._executor = None
+
+        service = _make_service(consul_handler=handler)
+        service._kv_get_recurse = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+        async def _v(cid: object) -> int:
+            return -1  # Disable cache; ensure we attempt the scan
+
+        service.get_catalog_version = _v  # type: ignore[assignment]
+
+        response = await service.build_catalog(correlation_id=uuid4())
+
+        assert CONSUL_UNAVAILABLE in response.warnings
+
+    @pytest.mark.asyncio
+    async def test_consul_scan_timeout_when_kv_scan_exceeds_budget(self) -> None:
+        """CONSUL_SCAN_TIMEOUT emitted when KV scan exceeds budget."""
+        handler = MagicMock()
+        handler._client = MagicMock()
+        handler._executor = None
+
+        service = _make_service(consul_handler=handler)
+
+        async def _slow_recurse(prefix: str, cid: object) -> list[dict[str, object]]:
+            await asyncio.sleep(100)  # Simulate hang
+            return []
+
+        service._kv_get_recurse = _slow_recurse  # type: ignore[assignment]
+
+        async def _v(cid: object) -> int:
+            return -1  # Disable cache
+
+        service.get_catalog_version = _v  # type: ignore[assignment]
+
+        with patch(
+            "omnibase_infra.services.service_topic_catalog._SCAN_BUDGET_SECONDS",
+            0.01,
+        ):
+            response = await service.build_catalog(correlation_id=uuid4())
+
+        assert CONSUL_SCAN_TIMEOUT in response.warnings
+        assert response.topics == ()
+
+    @pytest.mark.asyncio
+    async def test_partial_node_data_when_node_has_malformed_kv(self) -> None:
+        """PARTIAL_NODE_DATA emitted when a node has at least one malformed KV entry."""
+        bad_kv_items: list[dict[str, object]] = [
+            {
+                "key": "onex/nodes/node-bad/event_bus/subscribe_topics",
+                "value": "INVALID_JSON{{{{",  # malformed
+                "modify_index": 1,
+            },
+            {
+                "key": "onex/nodes/node-bad/event_bus/publish_topics",
+                "value": json.dumps([_VALID_SUFFIX]),  # valid
+                "modify_index": 1,
+            },
+        ]
+
+        handler = MagicMock()
+        handler._client = MagicMock()
+        handler._executor = None
+
+        service = _make_service(consul_handler=handler)
+        service._kv_get_recurse = AsyncMock(return_value=bad_kv_items)  # type: ignore[method-assign]
+
+        async def _v(cid: object) -> int:
+            return -1  # Disable cache
+
+        service.get_catalog_version = _v  # type: ignore[assignment]
+
+        response = await service.build_catalog(correlation_id=uuid4())
+
+        assert PARTIAL_NODE_DATA in response.warnings
+        # Fine-grained per-key warning also present
+        assert any("invalid_json_at:" in w for w in response.warnings)
+        # Valid publish topic is still returned
+        assert any(t.topic_suffix == _VALID_SUFFIX for t in response.topics)
+
+    @pytest.mark.asyncio
+    async def test_partial_node_data_not_emitted_for_clean_data(self) -> None:
+        """PARTIAL_NODE_DATA must NOT be emitted when all KV entries are valid."""
+        clean_kv_items: list[dict[str, object]] = [
+            {
+                "key": "onex/nodes/node-ok/event_bus/subscribe_topics",
+                "value": json.dumps([_VALID_SUFFIX]),
+                "modify_index": 1,
+            },
+            {
+                "key": "onex/nodes/node-ok/event_bus/publish_topics",
+                "value": json.dumps([]),
+                "modify_index": 1,
+            },
+        ]
+
+        handler = MagicMock()
+        handler._client = MagicMock()
+        handler._executor = None
+
+        service = _make_service(consul_handler=handler)
+        service._kv_get_recurse = AsyncMock(return_value=clean_kv_items)  # type: ignore[method-assign]
+
+        async def _v(cid: object) -> int:
+            return -1
+
+        service.get_catalog_version = _v  # type: ignore[assignment]
+
+        response = await service.build_catalog(correlation_id=uuid4())
+
+        assert PARTIAL_NODE_DATA not in response.warnings
+
+    @pytest.mark.asyncio
+    async def test_version_unknown_when_catalog_version_is_minus_one(self) -> None:
+        """VERSION_UNKNOWN emitted when catalog_version returns -1 (absent/corrupt)."""
+        handler = MagicMock()
+        handler._client = MagicMock()
+        handler._executor = None
+
+        service = _make_service(consul_handler=handler)
+        service._kv_get_recurse = AsyncMock(return_value=[])  # type: ignore[method-assign]
+
+        async def _v(cid: object) -> int:
+            return -1  # Simulate absent/corrupt version key
+
+        service.get_catalog_version = _v  # type: ignore[assignment]
+
+        response = await service.build_catalog(correlation_id=uuid4())
+
+        assert VERSION_UNKNOWN in response.warnings
+
+    @pytest.mark.asyncio
+    async def test_version_unknown_not_emitted_when_version_known(self) -> None:
+        """VERSION_UNKNOWN must NOT be emitted when catalog_version is valid (>= 0)."""
+        handler = MagicMock()
+        handler._client = MagicMock()
+        handler._executor = None
+
+        service = _make_service(consul_handler=handler)
+        service._kv_get_recurse = AsyncMock(return_value=[])  # type: ignore[method-assign]
+
+        async def _v(cid: object) -> int:
+            return 5  # Known version
+
+        service.get_catalog_version = _v  # type: ignore[assignment]
+
+        response = await service.build_catalog(correlation_id=uuid4())
+
+        assert VERSION_UNKNOWN not in response.warnings
+
+    @pytest.mark.asyncio
+    async def test_multiple_warnings_can_coexist(self) -> None:
+        """Multiple warning codes can appear together in a single response."""
+        bad_kv_items: list[dict[str, object]] = [
+            {
+                "key": "onex/nodes/node-x/event_bus/subscribe_topics",
+                "value": "bad_json",  # malformed -> partial_node_data
+                "modify_index": 1,
+            },
+            {
+                "key": "onex/nodes/node-x/event_bus/publish_topics",
+                "value": json.dumps([]),
+                "modify_index": 1,
+            },
+        ]
+
+        handler = MagicMock()
+        handler._client = MagicMock()
+        handler._executor = None
+
+        service = _make_service(consul_handler=handler)
+        service._kv_get_recurse = AsyncMock(return_value=bad_kv_items)  # type: ignore[method-assign]
+
+        async def _v(cid: object) -> int:
+            return -1  # version_unknown
+
+        service.get_catalog_version = _v  # type: ignore[assignment]
+
+        response = await service.build_catalog(correlation_id=uuid4())
+
+        # Both version_unknown and partial_node_data should be present
+        assert VERSION_UNKNOWN in response.warnings
+        assert PARTIAL_NODE_DATA in response.warnings

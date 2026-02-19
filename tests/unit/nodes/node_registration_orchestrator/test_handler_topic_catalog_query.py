@@ -222,11 +222,11 @@ async def test_handler_malformed_payload_returns_warning() -> None:
 
 @pytest.mark.unit
 async def test_handler_consul_unavailable_returns_warning() -> None:
-    """When Consul is unavailable, ServiceTopicCatalog returns no_consul_handler warning."""
+    """When Consul is unavailable, ServiceTopicCatalog returns consul_unavailable warning."""
     correlation_id = uuid4()
     consul_unavailable_response = _empty_catalog_response(
         correlation_id=correlation_id,
-        warnings=("no_consul_handler",),
+        warnings=("consul_unavailable",),
     )
     service = _make_catalog_service(response=consul_unavailable_response)
     handler = HandlerTopicCatalogQuery(catalog_service=service)
@@ -237,7 +237,7 @@ async def test_handler_consul_unavailable_returns_warning() -> None:
     assert len(output.events) == 1
     response = output.events[0]
     assert isinstance(response, ModelTopicCatalogResponse)
-    assert "no_consul_handler" in response.warnings
+    assert "consul_unavailable" in response.warnings
     assert len(response.topics) == 0
 
 
