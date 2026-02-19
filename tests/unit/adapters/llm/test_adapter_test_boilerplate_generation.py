@@ -677,6 +677,15 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
         ) as adapter:
             assert adapter._max_tokens == 1024
 
+    @pytest.mark.asyncio
+    async def test_min_max_tokens_boundary_does_not_raise(self) -> None:
+        """max_tokens=1 is the minimum valid value and must not raise."""
+        async with AdapterTestBoilerplateGeneration(
+            base_url="http://localhost:8001",
+            max_tokens=1,
+        ) as adapter:
+            assert adapter._max_tokens == 1
+
     def test_negative_temperature_raises_protocol_configuration_error(self) -> None:
         """temperature < 0.0 raises ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError, match="temperature"):
@@ -752,6 +761,13 @@ class TestAdapterTestBoilerplateGenerationClose:
         adapter = _make_adapter()
         await adapter.close()
         adapter._transport.close.assert_awaited_once()  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_close_twice_does_not_raise(self) -> None:
+        """Calling close() twice does not raise (transport mock allows multiple calls)."""
+        adapter = _make_adapter()
+        await adapter.close()
+        await adapter.close()
 
 
 # ---------------------------------------------------------------------------

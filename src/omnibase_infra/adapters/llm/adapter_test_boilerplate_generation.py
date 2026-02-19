@@ -476,7 +476,9 @@ class AdapterTestBoilerplateGeneration:
                    await adapter.close()
 
         Note:
-            This method is idempotent -- calling it more than once is safe.
+            This method is idempotent if the underlying transport's ``close()``
+            is idempotent.  ``TransportHolderLlmHttp`` does not guarantee
+            idempotency, so callers should avoid calling this more than once.
         """
         await self._transport.close()
 
@@ -489,7 +491,7 @@ class AdapterTestBoilerplateGeneration:
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: object,
-    ) -> None:
+    ) -> bool | None:
         """Close transport on context manager exit."""
         await self.close()
 
