@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from omnibase_infra.errors import InfraUnavailableError, RuntimeHostError
 from omnibase_infra.handlers.models.consul.model_consul_register_payload import (
     ModelConsulRegisterPayload,
 )
@@ -397,10 +398,16 @@ class TestCatalogChangeEmission:
         mock_handler_with_delta: MagicMock,
         mock_catalog_service: MagicMock,
     ) -> None:
-        """Emission failures are caught; Consul registration still succeeds."""
+        """Infrastructure emit failures are caught; Consul registration still succeeds.
+
+        Only RuntimeHostError subclasses (e.g. InfraUnavailableError) are
+        swallowed.  Programming errors such as pydantic.ValidationError are
+        intentionally not caught and will propagate (see
+        test_programming_error_in_emit_propagates).
+        """
         failing_bus = MagicMock()
         failing_bus.publish_envelope = AsyncMock(
-            side_effect=Exception("Kafka unavailable")
+            side_effect=InfraUnavailableError("Kafka unavailable")
         )
 
         effect = IntentEffectConsulRegister(
@@ -410,8 +417,44 @@ class TestCatalogChangeEmission:
         )
 
         payload = _make_base_consul_payload()
-        # Should NOT raise — emission failure is best-effort
+        # Should NOT raise — infrastructure emission failure is best-effort
         await effect.execute(payload, correlation_id=uuid4())
+
+    @pytest.mark.asyncio
+    async def test_programming_error_in_emit_propagates(
+        self,
+        mock_handler_with_delta: MagicMock,
+        mock_catalog_service: MagicMock,
+    ) -> None:
+        """Non-infrastructure errors from event construction are not swallowed.
+
+        The broad ``except Exception`` was narrowed to ``except RuntimeHostError``
+        so that programming errors (e.g. a bug in event construction logic that
+        raises a ``TypeError`` or ``pydantic.ValidationError``) surface immediately
+        rather than being silently logged and discarded.
+
+        A ``TypeError`` is used here as a stand-in for any non-infrastructure
+        exception (``TypeError`` is not a subclass of ``RuntimeHostError``).
+        The outer ``execute()`` handler will re-wrap it in ``RuntimeHostError``.
+        """
+        failing_bus = MagicMock()
+        # TypeError is not a RuntimeHostError subclass — it represents a
+        # programming error (e.g. wrong type passed to publish_envelope).
+        failing_bus.publish_envelope = AsyncMock(
+            side_effect=TypeError("programming error: not a RuntimeHostError")
+        )
+
+        effect = IntentEffectConsulRegister(
+            consul_handler=mock_handler_with_delta,
+            catalog_service=mock_catalog_service,
+            event_bus=failing_bus,
+        )
+
+        payload = _make_base_consul_payload()
+        # TypeError must not be silently swallowed; it propagates out wrapped
+        # in RuntimeHostError by the outer execute() exception handler.
+        with pytest.raises(RuntimeHostError):
+            await effect.execute(payload, correlation_id=uuid4())
 
     @pytest.mark.asyncio
     async def test_trigger_node_id_propagated(

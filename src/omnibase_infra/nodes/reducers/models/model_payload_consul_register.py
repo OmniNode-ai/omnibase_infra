@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.models.registration.model_node_event_bus_config import (
     ModelNodeEventBusConfig,
@@ -103,6 +103,27 @@ class ModelPayloadConsulRegister(BaseModel):
         default=None,
         description="Resolved event bus topics for registry storage.",
     )
+
+    @model_validator(mode="after")
+    def validate_node_id_required_with_event_bus_config(
+        self,
+    ) -> ModelPayloadConsulRegister:
+        """Validate that node_id is set when event_bus_config is provided.
+
+        The Consul handler stores event bus config under
+        ``onex/nodes/{node_id}/event_bus/``; without a node_id the key path
+        cannot be constructed and the store operation would silently fail or
+        produce an incorrect path.
+
+        Raises:
+            ValueError: If ``event_bus_config`` is not None and ``node_id``
+                is None.
+        """
+        if self.event_bus_config is not None and self.node_id is None:
+            raise ValueError(
+                "event_bus_config requires node_id to be set"
+            )
+        return self
 
 
 __all__ = [

@@ -237,3 +237,54 @@ class TestModelTopicCatalogChangedValidation:
                 catalog_version=1,
                 changed_at=datetime(2026, 1, 1, 12, 0, 0),
             )
+
+
+class TestModelTopicCatalogChangedCasFailureValidator:
+    """Tests for the cas_failure / catalog_version co-constraint validator.
+
+    Pydantic v2 runs ``mode='after'`` validators in definition order (top to
+    bottom within a class).  The comment in the model source documents that
+    ``sort_delta_tuples`` must execute BEFORE
+    ``validate_cas_failure_implies_version_zero`` because the latter reads the
+    (potentially unsorted) delta tuples.  These tests exercise both validators
+    in combination to verify that the documented ordering holds and that the
+    constraint is enforced correctly.
+    """
+
+    def test_cas_failure_true_with_catalog_version_zero_succeeds(self) -> None:
+        """cas_failure=True with catalog_version=0 is a valid model state.
+
+        This is the expected outcome when CAS retries are exhausted: the
+        catalog version is clamped to 0 and cas_failure is set to True.
+        Both validators (sort_delta_tuples and
+        validate_cas_failure_implies_version_zero) must run and pass.
+        """
+        changed = ModelTopicCatalogChanged(
+            correlation_id=uuid4(),
+            catalog_version=0,
+            cas_failure=True,
+            topics_added=("onex.evt.platform.b.v1", "onex.evt.platform.a.v1"),
+            changed_at=datetime.now(UTC),
+        )
+        assert changed.catalog_version == 0
+        assert changed.cas_failure is True
+        # sort_delta_tuples must also have run
+        assert changed.topics_added == (
+            "onex.evt.platform.a.v1",
+            "onex.evt.platform.b.v1",
+        )
+
+    def test_cas_failure_true_with_nonzero_catalog_version_raises(self) -> None:
+        """cas_failure=True with catalog_version=5 is a contradictory state.
+
+        When CAS retries are exhausted the version must be clamped to 0.
+        Providing a non-zero catalog_version alongside cas_failure=True is a
+        programming error and must raise ValidationError.
+        """
+        with pytest.raises(ValidationError, match="cas_failure=True requires catalog_version==0"):
+            ModelTopicCatalogChanged(
+                correlation_id=uuid4(),
+                catalog_version=5,
+                cas_failure=True,
+                changed_at=datetime.now(UTC),
+            )

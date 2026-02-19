@@ -42,10 +42,14 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.handlers.models.consul.model_consul_register_payload import (
     ModelConsulRegisterPayload,
+)
+from omnibase_infra.models.catalog.model_topic_catalog_changed import (
+    ModelTopicCatalogChanged,
 )
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
@@ -53,11 +57,11 @@ from omnibase_infra.models.errors.model_infra_error_context import (
 from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
     ModelPayloadConsulRegister,
 )
+from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_TOPIC_CATALOG_CHANGED
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-
     from omnibase_infra.handlers import HandlerConsul
     from omnibase_infra.handlers.models.model_consul_handler_response import (
         ModelConsulHandlerResponse,
@@ -260,7 +264,7 @@ class IntentEffectConsulRegister:
 
     async def _maybe_emit_catalog_changed(
         self,
-        handler_output: "ModelHandlerOutput[ModelConsulHandlerResponse]",
+        handler_output: ModelHandlerOutput[ModelConsulHandlerResponse],
         node_id: str | None,
         correlation_id: UUID,
     ) -> None:
@@ -319,16 +323,6 @@ class IntentEffectConsulRegister:
         )
 
         try:
-            from omnibase_core.models.events.model_event_envelope import (
-                ModelEventEnvelope,
-            )
-            from omnibase_infra.models.catalog.model_topic_catalog_changed import (
-                ModelTopicCatalogChanged,
-            )
-            from omnibase_infra.topics.platform_topic_suffixes import (
-                SUFFIX_TOPIC_CATALOG_CHANGED,
-            )
-
             # CAS version increment (3 retries, -1 on failure per D3)
             new_version = await self._catalog_service.increment_version(correlation_id)
 
@@ -402,9 +396,13 @@ class IntentEffectConsulRegister:
                 },
             )
 
-        except Exception as emit_err:
+        except RuntimeHostError as emit_err:
             # Catalog change notification is best-effort: do not fail the
-            # registration if the notification cannot be emitted.
+            # registration if the notification cannot be emitted due to an
+            # infrastructure-level failure (e.g. Kafka unavailable, connection
+            # error, timeout).  Programming errors such as
+            # ``pydantic.ValidationError`` are intentionally NOT caught here
+            # so that bugs in event construction surface immediately.
             logger.warning(
                 "Failed to emit catalog changed event: %s (correlation_id=%s)",
                 sanitize_error_message(emit_err),
