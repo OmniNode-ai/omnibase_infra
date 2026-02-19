@@ -343,7 +343,6 @@ class AdapterCodeReviewAnalysis:
                 context=context,
             )
 
-        start = time.perf_counter()
         if len(diff_stripped) > _MAX_DIFF_CHARS:
             logger.debug(
                 "Truncating code_diff from %d to %d chars to fit context window.",
@@ -380,15 +379,15 @@ class AdapterCodeReviewAnalysis:
         )
 
         try:
+            start = time.perf_counter()
             response = await self._handler.handle(request)
+            latency_ms = (time.perf_counter() - start) * 1000.0
         except RuntimeHostError:
             logger.warning(
                 "LLM handler raised error during code review analysis",
                 extra={"review_type": review_type, "model": self._model},
             )
             raise
-
-        latency_ms = (time.perf_counter() - start) * 1000
 
         rendered = (response.generated_text or "").strip()
         if not rendered:
