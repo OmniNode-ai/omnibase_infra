@@ -140,8 +140,8 @@ async def catalog_handler(
     return HandlerTopicCatalogQuery(catalog_service=catalog_service)
 
 
-@pytest.fixture
 # Function scope: each test needs a fresh consumer group offset
+@pytest.fixture
 async def second_kafka_bus() -> AsyncGenerator[EventBusKafka, None]:
     """Second independent EventBusKafka instance for multi-client tests.
 
@@ -1032,16 +1032,18 @@ class TestChangeNotificationFlow:
 
 
 # =============================================================================
-# Suite 5: Integration golden path (lightweight, no Kafka required)
+# Suite 5: Integration golden path
 # =============================================================================
 
 
 class TestIntegrationGoldenPath:
-    """Lightweight golden path: query → response → verify expected properties.
+    """Golden path: query → response → verify expected properties.
 
     This suite exercises the complete query-response flow using in-process
     handlers against real Consul. It validates the core contracts that
-    downstream clients depend on.
+    downstream clients depend on, including topic pattern filtering via
+    fnmatch and the structural invariants of ModelTopicCatalogResponse
+    (correlation_id pairing, catalog_version, topic suffix format).
     """
 
     @pytest.mark.asyncio
