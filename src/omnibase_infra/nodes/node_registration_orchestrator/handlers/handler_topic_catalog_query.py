@@ -53,7 +53,10 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
 )
-from omnibase_infra.models.catalog.catalog_warning_codes import INVALID_QUERY_PAYLOAD
+from omnibase_infra.models.catalog.catalog_warning_codes import (
+    INTERNAL_ERROR,
+    INVALID_QUERY_PAYLOAD,
+)
 from omnibase_infra.models.catalog.model_topic_catalog_query import (
     ModelTopicCatalogQuery,
 )
@@ -224,7 +227,7 @@ class HandlerTopicCatalogQuery:
             )
             catalog_response = self._empty_response(
                 correlation_id=correlation_id,
-                warnings=("internal_error",),
+                warnings=(INTERNAL_ERROR,),
             )
 
         if catalog_response.warnings:

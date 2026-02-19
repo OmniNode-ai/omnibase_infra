@@ -19,6 +19,16 @@ Warning Code Reference:
         A partial response (with whatever data was available) is returned.
         Emitted by ``ServiceTopicCatalog.build_catalog()``.
 
+    ``consul_kv_max_keys_reached``
+        The KV scan returned at least ``_MAX_KV_KEYS`` items, indicating the
+        result set was capped. The catalog is built from the truncated result.
+        Emitted by ``ServiceTopicCatalog._process_raw_kv_items()``.
+
+    ``internal_error``
+        An unexpected exception was raised during catalog retrieval. An empty
+        catalog response is returned. Emitted by
+        ``HandlerTopicCatalogQuery.handle()``.
+
     ``invalid_query_payload``
         The incoming query payload was malformed (wrong type, missing required
         fields, or failed validation). An empty catalog response is returned.
@@ -55,6 +65,12 @@ CONSUL_UNAVAILABLE: str = "consul_unavailable"
 #: 5-second scan budget exceeded; partial results returned.
 CONSUL_SCAN_TIMEOUT: str = "consul_scan_timeout"
 
+#: KV scan result set was capped at _MAX_KV_KEYS; catalog built from truncated data.
+CONSUL_KV_MAX_KEYS_REACHED: str = "consul_kv_max_keys_reached"
+
+#: Unexpected exception during catalog retrieval; empty response returned.
+INTERNAL_ERROR: str = "internal_error"
+
 #: Malformed query payload (wrong type or missing required fields).
 INVALID_QUERY_PAYLOAD: str = "invalid_query_payload"
 
@@ -68,6 +84,8 @@ VERSION_UNKNOWN: str = "version_unknown"
 __all__: list[str] = [
     "CONSUL_UNAVAILABLE",
     "CONSUL_SCAN_TIMEOUT",
+    "CONSUL_KV_MAX_KEYS_REACHED",
+    "INTERNAL_ERROR",
     "INVALID_QUERY_PAYLOAD",
     "PARTIAL_NODE_DATA",
     "VERSION_UNKNOWN",

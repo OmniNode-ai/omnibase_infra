@@ -39,6 +39,7 @@ from uuid import UUID
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.models.catalog.catalog_warning_codes import (
+    CONSUL_KV_MAX_KEYS_REACHED,
     CONSUL_SCAN_TIMEOUT,
     CONSUL_UNAVAILABLE,
     PARTIAL_NODE_DATA,
@@ -381,7 +382,7 @@ class ServiceTopicCatalog:
         warnings: list[str] = []
 
         if len(raw_items) >= _MAX_KV_KEYS:
-            warnings.append("consul_kv_max_keys_reached")
+            warnings.append(CONSUL_KV_MAX_KEYS_REACHED)
 
         # Build per-node lookup: node_id -> sub_key -> parsed list
         node_data: dict[str, dict[str, list[object]]] = {}
@@ -665,7 +666,7 @@ class ServiceTopicCatalog:
             catalog_version: Version value to embed (typically ``0`` when the
                 version key is absent or the handler is unavailable).
             warnings: List of warning tokens accumulated before the early return
-                (e.g. ``["no_consul_handler"]``). Copied into the response tuple.
+                (e.g. ``[CONSUL_UNAVAILABLE]``). Copied into the response tuple.
 
         Returns:
             A ``ModelTopicCatalogResponse`` with an empty ``topics`` tuple,

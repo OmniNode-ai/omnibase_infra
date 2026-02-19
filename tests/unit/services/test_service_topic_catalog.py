@@ -841,7 +841,7 @@ class TestConsulKVUnavailable:
 
     @pytest.mark.asyncio
     async def test_recurse_returns_none_produces_warning(self) -> None:
-        """When _kv_get_recurse returns None, should warn consul_kv_unavailable."""
+        """When _kv_get_recurse returns None, should warn consul_unavailable."""
         handler = MagicMock()
         handler._client = MagicMock()
         handler._executor = None
