@@ -15,6 +15,9 @@ Related Tickets:
 from omnibase_infra.adapters.llm.adapter_code_analysis_enrichment import (
     AdapterCodeAnalysisEnrichment,
 )
+from omnibase_infra.adapters.llm.adapter_code_review_analysis import (
+    AdapterCodeReviewAnalysis,
+)
 from omnibase_infra.adapters.llm.adapter_documentation_generation import (
     AdapterDocumentationGeneration,
 )
@@ -55,6 +58,7 @@ __all__: list[str] = [
     "AdapterLlmToolProvider",
     "AdapterModelRouter",
     "AdapterCodeAnalysisEnrichment",
+    "AdapterCodeReviewAnalysis",
     "AdapterDocumentationGeneration",
     "AdapterSimilarityEnrichment",
     "AdapterSummarizationEnrichment",
