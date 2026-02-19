@@ -1354,11 +1354,11 @@ class PluginRegistration:
                 _catalog_svc: ServiceTopicCatalog | None = None
                 try:
                     from omnibase_infra.services.service_topic_catalog import (
-                        ServiceTopicCatalog as _STC,
+                        ServiceTopicCatalog,
                     )
 
                     _catalog_svc = await config.container.service_registry.resolve_service(  # type: ignore[union-attr]
-                        _STC
+                        ServiceTopicCatalog
                     )
                 except Exception:
                     logger.debug(

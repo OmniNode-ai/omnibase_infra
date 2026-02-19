@@ -329,7 +329,6 @@ class IntentEffectConsulRegister:
             from omnibase_core.models.events.model_event_envelope import (
                 ModelEventEnvelope,
             )
-
             from omnibase_infra.models.catalog.model_topic_catalog_changed import (
                 ModelTopicCatalogChanged,
             )
