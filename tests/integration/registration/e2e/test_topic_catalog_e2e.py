@@ -12,6 +12,7 @@ Test Suites:
     - Suite 2: Response determinism (identical results on repeated query)
     - Suite 3: Version-gap recovery simulation
     - Suite 4: Change notification golden path (register node → receive delta)
+    - Suite 5: Integration golden path (lightweight handler-level, no Kafka required)
 
 Infrastructure Requirements:
     Tests require:
@@ -753,7 +754,6 @@ class TestChangeNotificationFlow:
         catalog_service: ServiceTopicCatalog,
         catalog_handler: HandlerTopicCatalogQuery,
         real_consul_handler: HandlerConsul,
-        cleanup_consul_services: list[str],
     ) -> None:
         """Register a new node, build delta, verify ModelTopicCatalogChanged.
 
