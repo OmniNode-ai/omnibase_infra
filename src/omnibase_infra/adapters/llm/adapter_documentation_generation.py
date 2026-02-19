@@ -227,7 +227,7 @@ class AdapterDocumentationGeneration:
                 context=context,
             )
 
-        if base_url is not None and not base_url:
+        if base_url is not None and not base_url.strip():
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.HTTP,
                 operation="validate_config",
@@ -282,7 +282,7 @@ class AdapterDocumentationGeneration:
                 to ``_MAX_SOURCE_CHARS`` characters before being sent to the
                 model.
             correlation_id: Optional correlation ID for distributed tracing.
-                Auto-generated if not provided.
+                Forwarded to error context only; not auto-generated.
 
         Returns:
             ``ContractDelegatedResponse`` with:

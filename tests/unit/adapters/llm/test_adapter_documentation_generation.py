@@ -634,6 +634,11 @@ class TestAdapterDocumentationGenerationConstructorValidation:
         with pytest.raises(ProtocolConfigurationError, match="non-empty string"):
             AdapterDocumentationGeneration(base_url="")
 
+    def test_whitespace_only_base_url_raises_protocol_configuration_error(self) -> None:
+        """Whitespace-only base_url raises ProtocolConfigurationError at construction time."""
+        with pytest.raises(ProtocolConfigurationError, match="base_url"):
+            AdapterDocumentationGeneration(base_url="   ")
+
 
 # ---------------------------------------------------------------------------
 # close()
