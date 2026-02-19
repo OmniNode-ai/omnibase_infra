@@ -339,7 +339,7 @@ class MixinConsulTopicIndex:
         node_id: str,
         event_bus: ModelNodeEventBusConfig,
         correlation_id: UUID,
-    ) -> None:
+    ) -> tuple[frozenset[str], frozenset[str]]:
         """Idempotent update of topic -> node_id reverse index.
 
         Computes the delta between previously registered topics and new topics,
@@ -353,6 +353,10 @@ class MixinConsulTopicIndex:
             event_bus: The resolved event bus configuration.
             correlation_id: Correlation ID for tracing.
 
+        Returns:
+            Tuple of (topics_added, topics_removed) as frozensets of topic suffix
+            strings. Both sets are empty when there is no change.
+
         Raises:
             InfraConsulError: If Consul client not initialized or operation fails.
 
@@ -360,6 +364,14 @@ class MixinConsulTopicIndex:
             This operation is NOT atomic. In high-concurrency scenarios with multiple
             nodes updating the same topic's subscriber list simultaneously, race
             conditions may occur. For MVP, this is an accepted limitation.
+
+            The non-atomic read-modify-write also affects delta correctness: the
+            (topics_added, topics_removed) tuple returned by this method is derived
+            from a snapshot of the previous state that may already be stale by the
+            time the write completes.  With OMN-2314, this delta is the direct input
+            to ``ModelTopicCatalogChanged`` events emitted downstream, so concurrent
+            registrations can produce incorrect or duplicate catalog change
+            notifications — not just inconsistent subscriber lists.
 
             For production with high concurrency, consider:
             - Using Consul transactions (txn endpoint) for atomic read-modify-write
@@ -423,6 +435,8 @@ class MixinConsulTopicIndex:
             len(topics_to_remove),
             extra={"correlation_id": str(correlation_id), "node_id": node_id},
         )
+
+        return frozenset(topics_to_add), frozenset(topics_to_remove)
 
     async def _add_subscriber_to_topic(
         self,

@@ -83,6 +83,7 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.runtime.projector_shell import ProjectorShell
     from omnibase_infra.runtime.service_intent_executor import IntentExecutor
+    from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
@@ -1348,8 +1349,52 @@ class PluginRegistration:
                     IntentEffectConsulRegister,
                 )
 
+                # Resolve ServiceTopicCatalog for CAS version increment + change notification.
+                # Optional: if not available, catalog change events are silently skipped.
+                _catalog_svc: ServiceTopicCatalog | None = None
+                try:
+                    from omnibase_infra.services.service_topic_catalog import (
+                        ServiceTopicCatalog,
+                    )
+
+                    if config.container.service_registry is not None:  # type: ignore[union-attr]
+                        _catalog_svc = (
+                            await config.container.service_registry.resolve_service(  # type: ignore[union-attr]
+                                ServiceTopicCatalog
+                            )
+                        )
+                except Exception as exc:  # intentional: optional service resolution must not crash startup
+                    # ServiceTopicCatalog is explicitly optional: any exception
+                    # during resolution (ContainerWiringError, ImportError,
+                    # KeyError, LookupError, AttributeError, or any other
+                    # unexpected error) must be silently swallowed so that the
+                    # catalog notification feature degrades gracefully rather
+                    # than crashing the entire plugin initialization.
+                    logger.debug(
+                        "ServiceTopicCatalog not registered; catalog change "
+                        "events will not be emitted (correlation_id=%s): %s(%s)",
+                        correlation_id,
+                        type(exc).__name__,
+                        exc,
+                    )
+
+                _event_bus_for_catalog = (
+                    # NOTE: suppressed mypy errors below (arg-type, union-attr):
+                    # `config` is typed as `ModelDomainPluginConfig | None` so mypy
+                    # emits union-attr on `config.event_bus`.  In practice config is
+                    # provably non-None here: `config.container.service_registry` was
+                    # already dereferenced above, which would have raised AttributeError
+                    # if config were None.  The arg-type suppression covers the event-bus
+                    # protocol type not matching the concrete parameter type expected by
+                    # IntentEffectConsulRegister.
+                    config.event_bus  # type: ignore[arg-type, union-attr]
+                    if _catalog_svc is not None
+                    else None
+                )
                 consul_effect = IntentEffectConsulRegister(
                     consul_handler=self._consul_handler,
+                    catalog_service=_catalog_svc,
+                    event_bus=_event_bus_for_catalog,
                 )
                 intent_executor.register_handler(intent_type, consul_effect)
                 await self._register_effect_in_container(

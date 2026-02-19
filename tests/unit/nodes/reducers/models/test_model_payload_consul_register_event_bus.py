@@ -53,6 +53,7 @@ class TestModelPayloadConsulRegisterEventBus:
         # Act
         payload = ModelPayloadConsulRegister(
             correlation_id=correlation_id,
+            node_id="test-node-id",
             service_id="onex-effect-test-123",
             service_name="onex-effect",
             tags=["node_type:effect", "node_version:1.0.0"],
@@ -119,6 +120,7 @@ class TestModelPayloadConsulRegisterEventBus:
 
         payload = ModelPayloadConsulRegister(
             correlation_id=correlation_id,
+            node_id="test-node-id",
             service_id="onex-orchestrator-test",
             service_name="onex-orchestrator",
             tags=["node_type:orchestrator"],
@@ -174,6 +176,7 @@ class TestModelPayloadConsulRegisterEventBus:
         # Act
         payload = ModelPayloadConsulRegister(
             correlation_id=correlation_id,
+            node_id="test-node-id",
             service_id="onex-effect-empty",
             service_name="onex-effect",
             tags=["node_type:effect"],

@@ -861,6 +861,7 @@ class RegistrationReducer:
         # Build typed Consul registration payload (implements ProtocolIntentPayload)
         consul_payload = ModelPayloadConsulRegister(
             correlation_id=correlation_id,
+            node_id=str(event.node_id),
             service_id=service_id,
             service_name=service_name,
             tags=tags,

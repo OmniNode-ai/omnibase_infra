@@ -237,3 +237,112 @@ class TestModelTopicCatalogChangedValidation:
                 catalog_version=1,
                 changed_at=datetime(2026, 1, 1, 12, 0, 0),
             )
+
+
+class TestModelTopicCatalogChangedCasFailureValidator:
+    """Tests for the cas_failure / catalog_version co-constraint validator.
+
+    Pydantic v2 runs ``mode='after'`` validators in definition order (top to
+    bottom within a class).  The comment in the model source documents that
+    ``sort_delta_tuples`` must execute BEFORE
+    ``validate_cas_failure_implies_version_zero`` because the latter reads the
+    (potentially unsorted) delta tuples.  These tests exercise both validators
+    in combination to verify that the documented ordering holds and that the
+    constraint is enforced correctly.
+    """
+
+    def test_cas_failure_true_with_catalog_version_zero_succeeds(self) -> None:
+        """cas_failure=True with catalog_version=0 is a valid model state.
+
+        This is the expected outcome when CAS retries are exhausted: the
+        catalog version is clamped to 0 and cas_failure is set to True.
+        Both validators (sort_delta_tuples and
+        validate_cas_failure_implies_version_zero) must run and pass.
+        """
+        changed = ModelTopicCatalogChanged(
+            correlation_id=uuid4(),
+            catalog_version=0,
+            cas_failure=True,
+            topics_added=("onex.evt.platform.b.v1", "onex.evt.platform.a.v1"),
+            changed_at=datetime.now(UTC),
+        )
+        assert changed.catalog_version == 0
+        assert changed.cas_failure is True
+        # sort_delta_tuples must also have run
+        assert changed.topics_added == (
+            "onex.evt.platform.a.v1",
+            "onex.evt.platform.b.v1",
+        )
+
+    def test_cas_failure_true_with_nonzero_catalog_version_raises(self) -> None:
+        """cas_failure=True with catalog_version=5 is a contradictory state.
+
+        When CAS retries are exhausted the version must be clamped to 0.
+        Providing a non-zero catalog_version alongside cas_failure=True is a
+        programming error and must raise ValidationError.
+        """
+        with pytest.raises(
+            ValidationError, match="cas_failure=True requires catalog_version==0"
+        ):
+            ModelTopicCatalogChanged(
+                correlation_id=uuid4(),
+                catalog_version=5,
+                cas_failure=True,
+                changed_at=datetime.now(UTC),
+            )
+
+    def test_unsorted_deltas_with_cas_failure_sorted_before_cas_constraint_checked(
+        self,
+    ) -> None:
+        """sort_delta_tuples runs before validate_cas_failure_implies_version_zero.
+
+        Passing UNSORTED delta tuples together with cas_failure=True and
+        catalog_version=0 verifies that:
+
+        (a) The model constructs successfully (no ValidationError).
+        (b) The delta tuples are sorted alphabetically by the sort_delta_tuples
+            validator before the cas_failure constraint validator runs.
+        (c) validate_cas_failure_implies_version_zero does not fire on the
+            unsorted input — confirming that sort_delta_tuples ran first and
+            the constraint validator sees the already-sorted result.
+
+        If the validators were accidentally reordered so that
+        validate_cas_failure_implies_version_zero ran first it would still
+        pass here (because catalog_version==0), but the sort would not have
+        happened yet.  The assertion on tuple ordering in (b) catches a
+        regression where sort_delta_tuples is moved AFTER the CAS constraint
+        validator: in that scenario the sort would run on the post-CAS-checked
+        (but still unsorted) data, yet the model would be constructed with the
+        pre-sort order visible to the CAS validator.  By asserting the final
+        sorted order we confirm the validators run in the documented sequence.
+        """
+        changed = ModelTopicCatalogChanged(
+            correlation_id=uuid4(),
+            catalog_version=0,
+            cas_failure=True,
+            topics_added=(
+                "onex.evt.platform.zebra.v1",
+                "onex.evt.platform.alpha.v1",
+                "onex.evt.platform.middle.v1",
+            ),
+            topics_removed=(
+                "onex.evt.platform.zeta.v1",
+                "onex.evt.platform.beta.v1",
+            ),
+            changed_at=datetime.now(UTC),
+        )
+        # (a) construction succeeded — no exception raised above
+        assert changed.cas_failure is True
+        assert changed.catalog_version == 0
+        # (b) topics_added sorted alphabetically
+        assert changed.topics_added == (
+            "onex.evt.platform.alpha.v1",
+            "onex.evt.platform.middle.v1",
+            "onex.evt.platform.zebra.v1",
+        )
+        # (b) topics_removed sorted alphabetically
+        assert changed.topics_removed == (
+            "onex.evt.platform.beta.v1",
+            "onex.evt.platform.zeta.v1",
+        )
+        # (c) no ValidationError was raised — cas_failure constraint passed

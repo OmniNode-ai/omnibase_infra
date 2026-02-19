@@ -93,7 +93,7 @@ class ProtocolConsulServiceDependencies(Protocol):
         node_id: str,
         event_bus: ModelNodeEventBusConfig,
         correlation_id: UUID,
-    ) -> None:
+    ) -> tuple[frozenset[str], frozenset[str]]:
         """Update topic index - provided by MixinConsulTopicIndex."""
         ...
 
@@ -123,7 +123,7 @@ class MixinConsulService:
         correlation_id: UUID,
     ) -> T:
         """Execute operation with retry logic - provided by host class."""
-        raise NotImplementedError("Must be provided by implementing class")  # type: ignore[return-value]
+        raise NotImplementedError("Must be provided by implementing class")
 
     def _build_response(
         self,
@@ -132,7 +132,7 @@ class MixinConsulService:
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Build standardized response - provided by host class."""
-        raise NotImplementedError("Must be provided by implementing class")  # type: ignore[return-value]
+        raise NotImplementedError("Must be provided by implementing class")
 
     async def _store_node_event_bus(
         self,
@@ -148,7 +148,7 @@ class MixinConsulService:
         node_id: str,
         event_bus: ModelNodeEventBusConfig,
         correlation_id: UUID,
-    ) -> None:
+    ) -> tuple[frozenset[str], frozenset[str]]:
         """Update topic index - provided by MixinConsulTopicIndex."""
         raise NotImplementedError("Must be provided by implementing class")
 
@@ -420,6 +420,10 @@ class MixinConsulService:
         event_bus_data = payload.get("event_bus_config")
         node_id = payload.get("node_id")
 
+        # Delta from topic index update (populated when event_bus_config is present)
+        topics_added: frozenset[str] = frozenset()
+        topics_removed: frozenset[str] = frozenset()
+
         # Fail fast: if event_bus_config is present, node_id is REQUIRED
         if isinstance(event_bus_data, dict):
             if not isinstance(node_id, str) or not node_id.strip():
@@ -446,8 +450,11 @@ class MixinConsulService:
             event_bus = self._parse_event_bus_config(event_bus_data, correlation_id)
 
             # Update topic index FIRST (uses old topics from previous registration)
-            # This computes delta and updates reverse index
-            await self._update_topic_index(node_id, event_bus, correlation_id)
+            # This computes delta and updates reverse index; capture the delta so
+            # callers can decide whether to emit a catalog-changed notification.
+            topics_added, topics_removed = await self._update_topic_index(
+                node_id, event_bus, correlation_id
+            )
 
             # Store the new event bus config AFTER index update
             # Order matters: _update_topic_index reads old topics before we overwrite
@@ -463,6 +470,8 @@ class MixinConsulService:
             registered=True,
             name=name,
             consul_service_id=service_id_str or name,
+            topics_added=topics_added,
+            topics_removed=topics_removed,
         )
         return self._build_response(typed_payload, correlation_id, input_envelope_id)
 
