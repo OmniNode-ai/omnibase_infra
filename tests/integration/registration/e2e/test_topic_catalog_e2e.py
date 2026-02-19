@@ -18,7 +18,10 @@ Infrastructure Requirements:
     All suites require ALL_INFRA_AVAILABLE (Consul + Kafka/Redpanda). The
     directory-level conftest applies a pytestmark skipif(not ALL_INFRA_AVAILABLE)
     to every test in this directory, so no suite can run independently of the
-    shared infrastructure guard even if it does not use Kafka directly.
+    shared infrastructure guard even if it does not use Kafka directly. Note:
+    this skipif propagation affects all tests in the directory, including
+    ``test_golden_path_published_to_changed_topic_suffix_exists`` which requires
+    no live infrastructure.
 
 Related Tickets:
     - OMN-2317: Topic Catalog multi-client no-cross-talk E2E test
@@ -338,6 +341,7 @@ async def _delete_node_from_consul(
             prefix,
             correlation_id,
         )
+    # consul.Consul raises consul.Timeout or OSError on network failure
     except Exception:
         logger.warning(
             "_delete_node_from_consul: failed to delete prefix %r — "
@@ -1119,7 +1123,7 @@ class TestIntegrationGoldenPath:
         error_warnings = [
             w
             for w in response.warnings
-            if w in ("internal_error", "invalid_query_payload")
+            if w in ("internal_error", "invalid_query_payload", "no_consul_handler")
         ]
         assert error_warnings == [], (
             f"Response must not contain error-class warnings: {error_warnings}"
