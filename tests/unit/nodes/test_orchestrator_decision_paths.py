@@ -77,8 +77,16 @@ DECISION_PATH_EVENT_TYPES = [
 # The result event (not a decision path, but a workflow outcome)
 RESULT_EVENT_TYPE = "NodeRegistrationResultEvent"
 
-# All published event types (7 decision + 1 result = 8 total)
-ALL_PUBLISHED_EVENT_TYPES = DECISION_PATH_EVENT_TYPES + [RESULT_EVENT_TYPE]
+# The catalog events (topic catalog query/response lifecycle)
+CATALOG_EVENT_TYPES = [
+    "TopicCatalogResponse",
+    "TopicCatalogChanged",
+]
+
+# All published event types (7 decision + 1 result + 2 catalog = 10 total)
+ALL_PUBLISHED_EVENT_TYPES = (
+    DECISION_PATH_EVENT_TYPES + [RESULT_EVENT_TYPE] + CATALOG_EVENT_TYPES
+)
 
 # Topic pattern regex: onex.evt.platform.<slug>.v1 (5-segment ONEX format)
 #
@@ -269,24 +277,28 @@ class TestDecisionPathEvents:
             + "  Example: onex.evt.platform.node-registration-initiated.v1"
         )
 
-    def test_decision_event_count_is_exactly_8(
+    def test_decision_event_count_is_exactly_10(
         self, published_events: list[dict]
     ) -> None:
-        """Test that published_events has exactly 8 entries (7 decision + 1 result).
+        """Test that published_events has exactly 10 entries (7 decision + 1 result + 2 catalog).
 
-        The orchestrator must publish exactly 8 event types:
+        The orchestrator must publish exactly 10 event types:
         - 7 decision path events (covering all workflow decision points)
         - 1 result event (NodeRegistrationResultEvent)
+        - 2 catalog events (TopicCatalogResponse, TopicCatalogChanged)
 
         This test ensures no events are missing and no unexpected events exist.
         Having more or fewer events indicates a contract definition error.
         """
         actual_count = len(published_events)
-        expected_count = len(ALL_PUBLISHED_EVENT_TYPES)  # 7 decision + 1 result
+        expected_count = len(
+            ALL_PUBLISHED_EVENT_TYPES
+        )  # 7 decision + 1 result + 2 catalog
 
         assert actual_count == expected_count, (
             f"published_events must have exactly {expected_count} entries "
-            f"({len(DECISION_PATH_EVENT_TYPES)} decision events + 1 result event), "
+            f"({len(DECISION_PATH_EVENT_TYPES)} decision events + 1 result event + "
+            f"{len(CATALOG_EVENT_TYPES)} catalog events), "
             f"found {actual_count}.\n"
             f"Expected event types: {ALL_PUBLISHED_EVENT_TYPES}\n"
             f"Found event types: {[e['event_type'] for e in published_events]}"

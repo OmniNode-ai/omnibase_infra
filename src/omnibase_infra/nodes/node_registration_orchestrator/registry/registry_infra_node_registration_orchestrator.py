@@ -248,6 +248,7 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.projectors import ProjectionReaderRegistration
     from omnibase_infra.runtime import ProjectorShell
+    from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
 
 
 class RegistryInfraNodeRegistrationOrchestrator:
@@ -285,6 +286,7 @@ class RegistryInfraNodeRegistrationOrchestrator:
         reducer: RegistrationReducerService,
         projector: ProjectorShell | None = None,
         _consul_handler: HandlerConsul | None = None,
+        catalog_service: ServiceTopicCatalog | None = None,
         *,
         require_heartbeat_handler: bool = True,
     ) -> ServiceHandlerRegistry:
@@ -299,11 +301,12 @@ class RegistryInfraNodeRegistrationOrchestrator:
             handler classes and modules that are imported at runtime.
 
         Handler Registration:
-            The contract.yaml defines 4 handlers:
+            The contract.yaml defines 5 handlers:
             - ModelNodeIntrospectionEvent -> HandlerNodeIntrospected (always registered)
             - ModelRuntimeTick -> HandlerRuntimeTick (always registered)
             - ModelNodeRegistrationAcked -> HandlerNodeRegistrationAcked (always registered)
             - ModelNodeHeartbeatEvent -> HandlerNodeHeartbeat (requires projector)
+            - ModelTopicCatalogQuery -> HandlerTopicCatalogQuery (requires catalog_service)
 
         Fail-Fast Behavior:
             By default (require_heartbeat_handler=True), this method raises
@@ -324,15 +327,20 @@ class RegistryInfraNodeRegistrationOrchestrator:
             projector: Projector for state persistence. Required for
                 HandlerNodeHeartbeat to persist heartbeat timestamps.
             consul_handler: Optional Consul handler for service registration.
+            catalog_service: Optional ServiceTopicCatalog for topic catalog queries.
+                Required for HandlerTopicCatalogQuery. When absent, the handler is
+                not registered and topic catalog queries will not be handled.
             require_heartbeat_handler: If True (default), raises ProtocolConfigurationError
                 when projector is None. Set to False only for testing scenarios where
                 heartbeat functionality is intentionally disabled. This creates a
-                contract.yaml mismatch (4 handlers defined, only 3 registered).
+                contract.yaml mismatch (5 handlers defined, only 4 registered).
 
         Returns:
             Frozen ServiceHandlerRegistry with handlers registered:
-            - 4 handlers when projector is provided
-            - 3 handlers when projector is None and require_heartbeat_handler=False
+            - 5 handlers when projector and catalog_service are both provided
+            - 4 handlers when projector is provided but catalog_service is None
+            - 3 handlers when projector is None (require_heartbeat_handler=False)
+              and catalog_service is also None
 
         Raises:
             ProtocolConfigurationError: If projector is None and
@@ -427,6 +435,15 @@ class RegistryInfraNodeRegistrationOrchestrator:
                 "projection_reader": projection_reader,
                 "reducer": reducer,
             },
+            # SYNC REQUIREMENT: The early-guard ``if catalog_service is None: continue``
+            # block below (in the handler loading loop) MUST stay in sync with this
+            # entry. If you rename or remove the guard, a handler with catalog_service=None
+            # will reach the ``deps`` lookup, find a non-empty dict, and attempt
+            # instantiation -- which will fail with a confusing MISSING_DEPENDENCY_CONFIG
+            # error rather than a clear "catalog_service not provided" message.
+            "HandlerTopicCatalogQuery": {
+                "catalog_service": catalog_service,
+            },
         }
 
         registry = ServiceHandlerRegistry()
@@ -442,9 +459,21 @@ class RegistryInfraNodeRegistrationOrchestrator:
                     # Skip heartbeat handler if no projector (require_heartbeat_handler=False)
                     logger.warning(
                         "HandlerNodeHeartbeat NOT registered: require_heartbeat_handler=False. "
-                        "This creates a contract.yaml mismatch (4 handlers defined, only 3 registered). "
+                        "This creates a contract.yaml mismatch (5 handlers defined, only 3 registered "
+                        "when catalog_service is also absent, or only 4 registered when catalog_service "
+                        "is present). "
                         "Heartbeat events (ModelNodeHeartbeatEvent) will NOT be handled. "
                         "This configuration is intended for testing only."
+                    )
+                    continue
+
+            # Special handling for HandlerTopicCatalogQuery - requires catalog_service
+            if handler_class_name == "HandlerTopicCatalogQuery":
+                if catalog_service is None:
+                    logger.info(
+                        "HandlerTopicCatalogQuery NOT registered: catalog_service not provided. "
+                        "Topic catalog query events (ModelTopicCatalogQuery) will NOT be handled. "
+                        "Provide a ServiceTopicCatalog instance to enable catalog queries."
                     )
                     continue
 

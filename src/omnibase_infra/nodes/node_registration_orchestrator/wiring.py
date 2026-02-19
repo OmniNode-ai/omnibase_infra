@@ -30,6 +30,7 @@ Route ID Constants:
     - ROUTE_ID_NODE_INTROSPECTION: route.registration.node-introspection
     - ROUTE_ID_RUNTIME_TICK: route.registration.runtime-tick
     - ROUTE_ID_NODE_REGISTRATION_ACKED: route.registration.node-registration-acked
+    - ROUTE_ID_TOPIC_CATALOG_QUERY: route.registration.topic-catalog-query
 
 Related:
     - OMN-888: Registration Orchestrator
@@ -77,6 +78,7 @@ if TYPE_CHECKING:
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
+        HandlerTopicCatalogQuery,
     )
     from omnibase_infra.projectors import ProjectionReaderRegistration
     from omnibase_infra.protocols.protocol_snapshot_publisher import (
@@ -121,6 +123,14 @@ ROUTE_ID_NODE_REGISTRATION_ACKED = "route.registration.node-registration-acked"
 
 Topic pattern: *.node.registration.commands.*
 Message type: ModelNodeRegistrationAcked
+Category: COMMAND
+"""
+
+ROUTE_ID_TOPIC_CATALOG_QUERY = "route.registration.topic-catalog-query"
+"""Route ID for topic catalog query commands.
+
+Topic pattern: *.cmd.*.topic-catalog-query.*
+Message type: ModelTopicCatalogQuery
 Category: COMMAND
 """
 
@@ -249,11 +259,13 @@ async def wire_registration_dispatchers(
         DispatcherNodeIntrospected,
         DispatcherNodeRegistrationAcked,
         DispatcherRuntimeTick,
+        DispatcherTopicCatalogQuery,
     )
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
         HandlerNodeIntrospected,
         HandlerNodeRegistrationAcked,
         HandlerRuntimeTick,
+        HandlerTopicCatalogQuery,
     )
     from omnibase_infra.utils import sanitize_error_message
 
@@ -290,6 +302,24 @@ async def wire_registration_dispatchers(
             logger.info(
                 "HandlerNodeHeartbeat not registered (projector may be unavailable), "
                 "heartbeat dispatcher will not be wired",
+                extra={
+                    "error": sanitize_error_message(e),
+                    "error_type": type(e).__name__,
+                },
+            )
+
+        # 1e. Resolve topic catalog query handler (optional - requires catalog_service)
+        handler_topic_catalog_query: HandlerTopicCatalogQuery | None = None
+        try:
+            handler_topic_catalog_query = (
+                await container.service_registry.resolve_service(
+                    HandlerTopicCatalogQuery
+                )
+            )
+        except Exception as e:
+            logger.info(
+                "HandlerTopicCatalogQuery not registered (catalog_service may be unavailable), "
+                "topic-catalog-query dispatcher will not be wired",
                 extra={
                     "error": sanitize_error_message(e),
                     "error_type": type(e).__name__,
@@ -396,6 +426,30 @@ async def wire_registration_dispatchers(
             )
             engine.register_route(route_heartbeat)
             routes_registered.append(route_heartbeat.route_id)
+
+        # 3e/4e. Register DispatcherTopicCatalogQuery (if handler available)
+        if handler_topic_catalog_query is not None:
+            dispatcher_topic_catalog_query = DispatcherTopicCatalogQuery(
+                handler_topic_catalog_query
+            )
+
+            engine.register_dispatcher(
+                dispatcher_id=dispatcher_topic_catalog_query.dispatcher_id,
+                dispatcher=dispatcher_topic_catalog_query.handle,
+                category=dispatcher_topic_catalog_query.category,
+                message_types=dispatcher_topic_catalog_query.message_types,
+            )
+            dispatchers_registered.append(dispatcher_topic_catalog_query.dispatcher_id)
+
+            route_topic_catalog_query = ModelDispatchRoute(
+                route_id=ROUTE_ID_TOPIC_CATALOG_QUERY,
+                topic_pattern="*.cmd.*.topic-catalog-query.*",
+                message_category=EnumMessageCategory.COMMAND,
+                dispatcher_id=dispatcher_topic_catalog_query.dispatcher_id,
+                message_type="platform.topic-catalog-query",
+            )
+            engine.register_route(route_topic_catalog_query)
+            routes_registered.append(route_topic_catalog_query.route_id)
 
         logger.info(
             "Registration dispatchers wired successfully",
@@ -633,6 +687,52 @@ async def wire_registration_handlers(
             logger.info(
                 "Skipping HandlerNodeHeartbeat registration (projector not available)"
             )
+
+        # Register HandlerTopicCatalogQuery (optional - requires ServiceTopicCatalog)
+        # Resolve ServiceTopicCatalog from the container if available.
+        #
+        # NOTE: These imports are intentionally inside the outer try/except block.
+        # If either import raises ImportError (e.g. omnibase_infra not installed
+        # correctly), it will be caught by the outer ``except Exception`` and
+        # re-raised as ContainerWiringError. This is the desired fail-fast
+        # behavior: a missing module is a wiring failure, not a soft skip.
+        # The soft-skip only applies to the runtime resolve_service call below,
+        # which catches its own exception and logs a warning instead of raising.
+        from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+            HandlerTopicCatalogQuery,
+        )
+        from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
+
+        catalog_service: ServiceTopicCatalog | None = None
+        try:
+            catalog_service = await container.service_registry.resolve_service(
+                ServiceTopicCatalog
+            )
+        except Exception as e:
+            logger.info(
+                "ServiceTopicCatalog not registered in container, "
+                "HandlerTopicCatalogQuery will not be registered",
+                extra={
+                    "error": sanitize_error_message(e),
+                    "error_type": type(e).__name__,
+                },
+            )
+
+        if catalog_service is not None:
+            handler_topic_catalog_query = HandlerTopicCatalogQuery(
+                catalog_service=catalog_service,
+            )
+            await container.service_registry.register_instance(
+                interface=HandlerTopicCatalogQuery,
+                instance=handler_topic_catalog_query,
+                scope=EnumInjectionScope.GLOBAL,
+                metadata={
+                    "description": "Handler for ModelTopicCatalogQuery",
+                    "version": str(semver_default),
+                },
+            )
+            services_registered.append("HandlerTopicCatalogQuery")
+            logger.debug("Registered HandlerTopicCatalogQuery in container")
 
     except AttributeError as e:
         error_str = str(e)
@@ -883,12 +983,46 @@ async def get_handler_node_heartbeat_from_container(
         return None
 
 
+async def get_handler_topic_catalog_query_from_container(
+    container: ModelONEXContainer,
+    correlation_id: UUID | None = None,
+) -> HandlerTopicCatalogQuery | None:
+    """Get HandlerTopicCatalogQuery from container.
+
+    Returns None if the handler was not registered (e.g., ServiceTopicCatalog
+    unavailable).
+
+    Args:
+        container: ONEX container with registered services.
+        correlation_id: Optional correlation ID for error tracking.
+
+    Returns:
+        HandlerTopicCatalogQuery instance or None if not registered.
+    """
+    from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
+        HandlerTopicCatalogQuery,
+    )
+
+    _validate_service_registry(container, "resolve HandlerTopicCatalogQuery")
+    try:
+        return cast(
+            "HandlerTopicCatalogQuery",
+            await container.service_registry.resolve_service(HandlerTopicCatalogQuery),
+        )
+    except Exception:
+        logger.debug(
+            "HandlerTopicCatalogQuery not registered (ServiceTopicCatalog may be unavailable)"
+        )
+        return None
+
+
 __all__: list[str] = [
     # Route ID constants
     "ROUTE_ID_NODE_HEARTBEAT",
     "ROUTE_ID_NODE_INTROSPECTION",
     "ROUTE_ID_NODE_REGISTRATION_ACKED",
     "ROUTE_ID_RUNTIME_TICK",
+    "ROUTE_ID_TOPIC_CATALOG_QUERY",
     # Dispatcher wiring
     "wire_registration_dispatchers",
     # Handler wiring (OMN-1346)
@@ -900,4 +1034,5 @@ __all__: list[str] = [
     "get_handler_node_heartbeat_from_container",
     "get_handler_runtime_tick_from_container",
     "get_handler_node_registration_acked_from_container",
+    "get_handler_topic_catalog_query_from_container",
 ]
