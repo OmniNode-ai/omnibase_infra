@@ -123,7 +123,7 @@ class MixinConsulService:
         correlation_id: UUID,
     ) -> T:
         """Execute operation with retry logic - provided by host class."""
-        raise NotImplementedError("Must be provided by implementing class")  # type: ignore[return-value]
+        assert False, "Must be provided by implementing class"
 
     def _build_response(
         self,
@@ -132,7 +132,7 @@ class MixinConsulService:
         input_envelope_id: UUID,
     ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
         """Build standardized response - provided by host class."""
-        raise NotImplementedError("Must be provided by implementing class")  # type: ignore[return-value]
+        assert False, "Must be provided by implementing class"
 
     async def _store_node_event_bus(
         self,

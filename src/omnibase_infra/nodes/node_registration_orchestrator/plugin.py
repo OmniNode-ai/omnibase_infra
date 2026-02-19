@@ -1369,7 +1369,7 @@ class PluginRegistration:
 
                 _event_bus_for_catalog = (
                     config.event_bus  # type: ignore[arg-type]
-                    if (_catalog_svc is not None and config is not None)
+                    if _catalog_svc is not None
                     else None
                 )
                 consul_effect = IntentEffectConsulRegister(

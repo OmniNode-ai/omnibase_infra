@@ -339,6 +339,23 @@ class IntentEffectConsulRegister:
             # CAS version increment (3 retries, -1 on failure per D3)
             new_version = await self._catalog_service.increment_version(correlation_id)
 
+            if new_version == -1:
+                # CAS retries exhausted; catalog_version will be clamped to 0
+                # (max(-1, 0)) in the emitted event. Consumers receiving
+                # catalog_version=0 cannot distinguish this from a genuine
+                # version-0 catalog without this log entry.
+                logger.warning(
+                    "CAS version increment exhausted retries; emitting "
+                    "ModelTopicCatalogChanged with catalog_version=0 "
+                    "(correlation_id=%s)",
+                    str(correlation_id),
+                    extra={
+                        "topics_added": sorted(topics_added),
+                        "topics_removed": sorted(topics_removed),
+                        "trigger_node_id": node_id,
+                    },
+                )
+
             # Determine trigger_reason based on delta content
             if topics_added and topics_removed:
                 trigger_reason = "capability_change"
