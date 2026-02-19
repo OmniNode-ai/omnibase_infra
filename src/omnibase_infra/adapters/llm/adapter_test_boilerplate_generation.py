@@ -491,7 +491,7 @@ class AdapterTestBoilerplateGeneration:
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: object,
-    ) -> bool | None:
+    ) -> None:
         """Close transport on context manager exit."""
         await self.close()
 
