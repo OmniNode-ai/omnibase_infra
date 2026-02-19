@@ -56,6 +56,7 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_topic_
 )
 from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
 from omnibase_infra.topics.platform_topic_suffixes import (
+    ALL_PLATFORM_SUFFIXES,
     SUFFIX_TOPIC_CATALOG_CHANGED,
     SUFFIX_TOPIC_CATALOG_RESPONSE,
 )
@@ -357,7 +358,6 @@ class TestMultiClientNoCrossTalk:
     isolation is per-correlation_id, not per-topic.
     """
 
-    @pytest.mark.asyncio
     async def test_two_clients_no_cross_talk(
         self,
         real_kafka_event_bus: EventBusKafka,
@@ -559,7 +559,6 @@ class TestResponseDeterminism:
     same entries, same count).
     """
 
-    @pytest.mark.asyncio
     async def test_consecutive_queries_return_identical_results(
         self,
         catalog_handler: HandlerTopicCatalogQuery,
@@ -633,7 +632,6 @@ class TestResponseDeterminism:
             response_1.node_count,
         )
 
-    @pytest.mark.asyncio
     async def test_topic_ordering_is_alphabetical(
         self,
         catalog_handler: HandlerTopicCatalogQuery,
@@ -680,7 +678,6 @@ class TestVersionGapRecovery:
     works end-to-end.
     """
 
-    @pytest.mark.asyncio
     async def test_version_gap_detection_and_recovery(
         self,
         catalog_service: ServiceTopicCatalog,
@@ -782,12 +779,11 @@ class TestChangeNotificationFlow:
 
     This test proves the full change notification contract:
     - topics_added is sorted alphabetically (D7)
-    - catalog_version incremented by exactly 1
+    - catalog_version incremented by at least 1
     - topics_added contains only the newly registered topic suffixes
     - topics_removed is empty when no topics were removed
     """
 
-    @pytest.mark.asyncio
     async def test_register_node_produces_correct_catalog_changed(
         self,
         catalog_service: ServiceTopicCatalog,
@@ -989,7 +985,6 @@ class TestChangeNotificationFlow:
             except Exception:
                 pass
 
-    @pytest.mark.asyncio
     async def test_change_notification_topic_suffix_format(
         self,
         catalog_handler: HandlerTopicCatalogQuery,
@@ -1059,7 +1054,6 @@ class TestIntegrationGoldenPath:
     (correlation_id pairing, catalog_version, topic suffix format).
     """
 
-    @pytest.mark.asyncio
     async def test_golden_path_query_response(
         self,
         catalog_handler: HandlerTopicCatalogQuery,
@@ -1125,7 +1119,6 @@ class TestIntegrationGoldenPath:
             response.warnings,
         )
 
-    @pytest.mark.asyncio
     async def test_golden_path_with_topic_pattern_filter(
         self,
         catalog_handler: HandlerTopicCatalogQuery,
@@ -1152,9 +1145,10 @@ class TestIntegrationGoldenPath:
         assert isinstance(response, ModelTopicCatalogResponse)
         assert response.correlation_id == correlation_id
 
+        # Requires Consul catalog to be pre-populated with topics matching 'onex.evt.platform.*'
         assert len(response.topics) > 0, (
-            f"filter should return at least one matching topic for pattern {pattern!r}; "
-            "got an empty result — a broken filter would pass vacuously"
+            "Consul catalog must have at least one topic matching pattern 'onex.evt.platform.*'; "
+            "ensure integration environment is seeded"
         )
         for entry in response.topics:
             assert fnmatch(entry.topic_suffix, pattern), (
@@ -1168,7 +1162,6 @@ class TestIntegrationGoldenPath:
             len(response.topics),
         )
 
-    @pytest.mark.asyncio
     async def test_golden_path_published_to_changed_topic_suffix_exists(
         self,
     ) -> None:
@@ -1177,8 +1170,6 @@ class TestIntegrationGoldenPath:
         Lightweight test that verifies the changed-event topic suffix is a
         valid ONEX 5-segment suffix. The topic must exist in platform specs.
         """
-        from omnibase_infra.topics.platform_topic_suffixes import ALL_PLATFORM_SUFFIXES
-
         assert SUFFIX_TOPIC_CATALOG_CHANGED in ALL_PLATFORM_SUFFIXES, (
             f"SUFFIX_TOPIC_CATALOG_CHANGED={SUFFIX_TOPIC_CATALOG_CHANGED!r} "
             "must be in ALL_PLATFORM_SUFFIXES"
