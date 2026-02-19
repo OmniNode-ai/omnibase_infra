@@ -442,6 +442,8 @@ class TestOrchestratorPurityEdgeCases:
         - NodeRegistrationAckReceived (ACK received)
         - NodeBecameActive (node activated)
         - NodeLivenessExpired (liveness expired)
+        - TopicCatalogResponse (catalog query response)  # OMN-2313
+        - TopicCatalogChanged (catalog change notification)  # OMN-2313
         """
         published_events = contract_data.get("published_events", [])
         event_types = {e.get("event_type") for e in published_events}
@@ -456,6 +458,8 @@ class TestOrchestratorPurityEdgeCases:
             "NodeRegistrationAckReceived",
             "NodeBecameActive",
             "NodeLivenessExpired",
+            "TopicCatalogResponse",  # OMN-2313
+            "TopicCatalogChanged",  # OMN-2313
         }
 
         # Verify all expected events are present
