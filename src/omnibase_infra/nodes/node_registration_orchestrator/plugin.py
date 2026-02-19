@@ -1358,8 +1358,10 @@ class PluginRegistration:
                     )
 
                     if config.container.service_registry is not None:  # type: ignore[union-attr]
-                        _catalog_svc = await config.container.service_registry.resolve_service(  # type: ignore[union-attr]
-                            ServiceTopicCatalog
+                        _catalog_svc = (
+                            await config.container.service_registry.resolve_service(  # type: ignore[union-attr]
+                                ServiceTopicCatalog
+                            )
                         )
                 except Exception as exc:  # intentional: optional service resolution must not crash startup
                     # ServiceTopicCatalog is explicitly optional: any exception

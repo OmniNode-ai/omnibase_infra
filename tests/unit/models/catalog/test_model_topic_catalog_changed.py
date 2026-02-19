@@ -281,7 +281,9 @@ class TestModelTopicCatalogChangedCasFailureValidator:
         Providing a non-zero catalog_version alongside cas_failure=True is a
         programming error and must raise ValidationError.
         """
-        with pytest.raises(ValidationError, match="cas_failure=True requires catalog_version==0"):
+        with pytest.raises(
+            ValidationError, match="cas_failure=True requires catalog_version==0"
+        ):
             ModelTopicCatalogChanged(
                 correlation_id=uuid4(),
                 catalog_version=5,

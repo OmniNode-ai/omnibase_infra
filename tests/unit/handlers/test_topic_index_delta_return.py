@@ -60,9 +60,7 @@ def mock_consul_client() -> MagicMock:
     # Simulated KV store
     kv_store: dict[str, bytes] = {}
 
-    def kv_get(
-        key: str, recurse: bool = False
-    ) -> tuple[int, dict[str, object] | None]:
+    def kv_get(key: str, recurse: bool = False) -> tuple[int, dict[str, object] | None]:
         if key in kv_store:
             return (0, {"Value": kv_store[key], "Key": key, "ModifyIndex": 100})
         return (0, None)
@@ -168,9 +166,9 @@ class TestUpdateTopicIndexDeltaReturn:
             # Pre-populate KV with same topics
             existing_topics = ["onex.evt.topic-a.v1", "onex.evt.topic-b.v1"]
             kv_store = mock_consul_client.test_kv_store
-            kv_store[f"onex/nodes/{node_id}/event_bus/subscribe_topics"] = (
-                json.dumps(existing_topics).encode("utf-8")
-            )
+            kv_store[f"onex/nodes/{node_id}/event_bus/subscribe_topics"] = json.dumps(
+                existing_topics
+            ).encode("utf-8")
 
             topics_added, topics_removed = await handler._update_topic_index(
                 node_id, event_bus_config_a, correlation_id
@@ -201,11 +199,9 @@ class TestUpdateTopicIndexDeltaReturn:
 
             # Pre-populate with A and B
             kv_store = mock_consul_client.test_kv_store
-            kv_store[f"onex/nodes/{node_id}/event_bus/subscribe_topics"] = (
-                json.dumps(
-                    ["onex.evt.topic-a.v1", "onex.evt.topic-b.v1"]
-                ).encode("utf-8")
-            )
+            kv_store[f"onex/nodes/{node_id}/event_bus/subscribe_topics"] = json.dumps(
+                ["onex.evt.topic-a.v1", "onex.evt.topic-b.v1"]
+            ).encode("utf-8")
 
             # Update to B and C
             topics_added, topics_removed = await handler._update_topic_index(
@@ -319,9 +315,7 @@ class TestRegisterServiceDeltaPropagation:
                 "tags": ["onex"],
             }
 
-            output = await handler._register_service(
-                register_payload, uuid4(), uuid4()
-            )
+            output = await handler._register_service(register_payload, uuid4(), uuid4())
 
         response = output.result
         assert response is not None

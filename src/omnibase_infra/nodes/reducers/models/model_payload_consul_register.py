@@ -120,9 +120,7 @@ class ModelPayloadConsulRegister(BaseModel):
                 is None.
         """
         if self.event_bus_config is not None and self.node_id is None:
-            raise ValueError(
-                "event_bus_config requires node_id to be set"
-            )
+            raise ValueError("event_bus_config requires node_id to be set")
         return self
 
 
