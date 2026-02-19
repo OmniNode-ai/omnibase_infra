@@ -9,7 +9,7 @@ Tests cover:
     - KV precedence: node arrays authoritative over reverse index
     - Filtering: topic_pattern, include_inactive
     - Partial success: warnings on Consul errors
-    - Warning codes: all 5 OMN-2312 warning codes triggered by their paths
+    - Warning codes: all 5 service-level warning codes triggered by their paths
 
 Related Tickets:
     - OMN-2311: Topic Catalog: ServiceTopicCatalog + KV precedence + caching
@@ -871,10 +871,14 @@ class TestConsulKVUnavailable:
 
 @pytest.mark.unit
 class TestOMN2312WarningCodes:
-    """Tests verifying all 5 OMN-2312 warning codes are emitted on their paths.
+    """Tests verifying all 5 service-level warning codes are emitted on their paths.
 
     Warning codes are defined in catalog_warning_codes and used as constants
     throughout the service. Each test triggers exactly one warning code path.
+
+    Note: INTERNAL_ERROR and INVALID_QUERY_PAYLOAD are the 2 handler-level codes
+    and are tested in the handler test file (test_handler_topic_catalog_query.py),
+    not here.
 
     Related Tickets:
         - OMN-2312: Topic Catalog: response warnings channel
@@ -1006,6 +1010,48 @@ class TestOMN2312WarningCodes:
         # Fine-grained per-key warning also present
         assert any("invalid_json_at:" in w for w in response.warnings)
         # Valid publish topic is still returned
+        assert any(t.topic_suffix == _VALID_SUFFIX for t in response.topics)
+
+    @pytest.mark.asyncio
+    async def test_partial_node_data_when_node_has_valid_json_non_list(self) -> None:
+        """PARTIAL_NODE_DATA emitted when a KV entry is valid JSON but not a list.
+
+        A JSON object (or scalar) stored where an array is expected is treated as
+        bad node data: the entry is silently skipped and PARTIAL_NODE_DATA plus a
+        per-key ``invalid_json_at:<key>`` token are emitted.  This prevents such
+        values from silently disappearing without any warning signal.
+        """
+        bad_kv_items: list[dict[str, object]] = [
+            {
+                # Valid JSON but a dict, not a list
+                "key": "onex/nodes/node-obj/event_bus/subscribe_topics",
+                "value": '{"foo": 1}',
+                "modify_index": 1,
+            },
+            {
+                "key": "onex/nodes/node-obj/event_bus/publish_topics",
+                "value": json.dumps([_VALID_SUFFIX]),  # valid list
+                "modify_index": 1,
+            },
+        ]
+
+        handler = MagicMock()
+        handler._client = MagicMock()
+        handler._executor = None
+
+        service = _make_service(consul_handler=handler)
+        service._kv_get_recurse = AsyncMock(return_value=bad_kv_items)  # type: ignore[method-assign]
+
+        async def _v(cid: object) -> int:
+            return -1  # Disable cache
+
+        service.get_catalog_version = _v  # type: ignore[assignment]
+
+        response = await service.build_catalog(correlation_id=uuid4())
+
+        assert PARTIAL_NODE_DATA in response.warnings
+        assert any("invalid_json_at:" in w for w in response.warnings)
+        # The valid publish topic should still be indexed
         assert any(t.topic_suffix == _VALID_SUFFIX for t in response.topics)
 
     @pytest.mark.asyncio

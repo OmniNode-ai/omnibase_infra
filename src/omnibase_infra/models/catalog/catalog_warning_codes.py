@@ -11,8 +11,10 @@ Warning Code Reference:
 
     ``consul_unavailable``
         Consul connection failure prevented the catalog from being built.
-        Emitted by ``ServiceTopicCatalog.build_catalog()`` when a Consul KV
-        recursive scan returns ``None`` due to a transport or availability error.
+        Emitted by ``ServiceTopicCatalog.build_catalog()`` in two scenarios:
+        (1) a Consul KV recursive scan returns ``None`` due to a transport or
+        availability error; (2) the fast-path return when no ``consul_handler``
+        is configured at all.
 
     ``consul_scan_timeout``
         The 5-second scan budget was exceeded before the KV scan completed.
@@ -59,7 +61,7 @@ from __future__ import annotations
 # Warning code constants
 # ---------------------------------------------------------------------------
 
-#: Consul connection failure during catalog build (KV scan returned None).
+#: Consul connection failure during catalog build (no handler configured, or KV scan returned None).
 CONSUL_UNAVAILABLE: str = "consul_unavailable"
 
 #: 5-second scan budget exceeded; partial results returned.

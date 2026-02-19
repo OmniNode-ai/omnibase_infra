@@ -207,7 +207,9 @@ class ServiceTopicCatalog:
         # Note: when catalog_version == -1 AND _kv_get_recurse later returns
         # None, both VERSION_UNKNOWN and CONSUL_UNAVAILABLE will be emitted
         # together in the same response — this is intentional, as each warning
-        # describes a distinct failure condition.
+        # describes a distinct failure condition. Similarly, VERSION_UNKNOWN and
+        # CONSUL_SCAN_TIMEOUT can coexist when the version key is absent/corrupt
+        # and the subsequent KV scan times out.
         if catalog_version == -1:
             warnings.append(VERSION_UNKNOWN)
 
@@ -593,6 +595,16 @@ class ServiceTopicCatalog:
             parsed = json.loads(value)
             if isinstance(parsed, list):
                 return parsed
+            # Valid JSON but not a list (e.g. object or scalar): treat as bad data
+            # so that the caller can detect this node had a malformed KV entry and
+            # emit PARTIAL_NODE_DATA, just as it would for unparseable JSON.
+            logger.debug(
+                "Non-list JSON at Consul key %r (got %s), skipping",
+                key,
+                type(parsed).__name__,
+                extra={"correlation_id": str(correlation_id)},
+            )
+            warnings.append(f"invalid_json_at:{key}")
             return []
         except (json.JSONDecodeError, ValueError):
             logger.debug(
