@@ -31,6 +31,9 @@ from omnibase_infra.adapters.llm.adapter_similarity_enrichment import (
 from omnibase_infra.adapters.llm.adapter_summarization_enrichment import (
     AdapterSummarizationEnrichment,
 )
+from omnibase_infra.adapters.llm.adapter_test_boilerplate_generation import (
+    AdapterTestBoilerplateGeneration,
+)
 from omnibase_infra.adapters.llm.model_llm_adapter_request import (
     ModelLlmAdapterRequest,
 )
@@ -55,6 +58,7 @@ __all__: list[str] = [
     "AdapterDocumentationGeneration",
     "AdapterSimilarityEnrichment",
     "AdapterSummarizationEnrichment",
+    "AdapterTestBoilerplateGeneration",
     "ModelLlmAdapterRequest",
     "ModelLlmAdapterResponse",
     "ModelLlmHealthResponse",
