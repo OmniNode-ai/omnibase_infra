@@ -324,7 +324,9 @@ class MixinConsulService:
                 - port: Optional service port
                 - tags: Optional list of tags
                 - check: Optional health check configuration dict
-                - node_id: Optional node ID for event bus registration
+                - node_id: Node ID for event bus registration. REQUIRED when
+                    event_bus_config is present; raises ProtocolConfigurationError
+                    if event_bus_config is provided but node_id is missing or empty.
                 - event_bus_config: Optional event bus configuration dict containing:
                     - subscribe_topics: List of topic entries to subscribe to
                     - publish_topics: List of topic entries to publish to
@@ -335,7 +337,8 @@ class MixinConsulService:
             ModelHandlerOutput wrapping the registration result with correlation tracking
 
         Event Bus Integration:
-            When event_bus_config is provided along with node_id, this method will:
+            When event_bus_config is provided, node_id MUST also be supplied.
+            This method will:
             1. Store the event bus configuration in Consul KV at onex/nodes/{node_id}/event_bus/
             2. Update the topic -> node_id reverse index at onex/topics/{topic}/subscribers
         """

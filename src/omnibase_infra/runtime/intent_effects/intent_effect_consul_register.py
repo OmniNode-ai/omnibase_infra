@@ -130,6 +130,9 @@ class IntentEffectConsulRegister:
                 "tags": payload.tags,
             }
 
+            if payload.node_id is not None:
+                register_payload["node_id"] = payload.node_id
+
             if payload.address is not None:
                 register_payload["address"] = payload.address
             if payload.port is not None:

@@ -618,6 +618,7 @@ class RegistrationReducerService:
 
         consul_payload = ModelPayloadConsulRegister(
             correlation_id=correlation_id,
+            node_id=str(node_id),
             service_id=service_id,
             service_name=service_name,
             tags=tags,

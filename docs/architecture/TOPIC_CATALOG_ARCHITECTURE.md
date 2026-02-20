@@ -243,7 +243,7 @@ Similarly, a 10,000-key cap (`_MAX_KV_KEYS`) prevents runaway scans. When the ca
 5. If all retries exhausted: return -1 (caller detects and handles)
 ```
 
-When any node registers or deregisters, it calls `increment_version()`. All other catalog readers detect the new version and invalidate their caches on the next `build_catalog()` call.
+Callers must explicitly invoke `increment_version()` after topology changes (e.g., writing node KV data to Consul). `IntentEffectConsulRegister` does not call `increment_version()` automatically — the version increment is the caller's responsibility. All catalog readers detect the new version and invalidate their caches on the next `build_catalog()` call.
 
 ---
 

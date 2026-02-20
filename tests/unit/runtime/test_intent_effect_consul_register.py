@@ -186,6 +186,7 @@ class TestIntentEffectConsulRegisterExecute:
 
         payload = ModelPayloadConsulRegister(
             correlation_id=correlation_id,
+            node_id="test-node-id-abc123",
             service_id="onex-effect-123",
             service_name="onex-effect",
             tags=["onex"],
@@ -197,3 +198,4 @@ class TestIntentEffectConsulRegisterExecute:
         call_args = mock_consul_handler.execute.call_args
         envelope = call_args[0][0]
         assert "event_bus_config" in envelope["payload"]
+        assert envelope["payload"]["node_id"] == "test-node-id-abc123"
