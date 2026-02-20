@@ -237,6 +237,64 @@ class TestIntentEffectConsulRegisterExecute:
             await effect.execute(payload, correlation_id=correlation_id)
 
     @pytest.mark.asyncio
+    async def test_execute_raises_when_handler_output_is_none(
+        self, effect: IntentEffectConsulRegister, mock_consul_handler: MagicMock
+    ) -> None:
+        """Should raise RuntimeHostError when handler.execute() returns None.
+
+        Exercises the first defensive guard in IntentEffectConsulRegister: when
+        the consul handler returns None instead of a ModelHandlerOutput, the
+        adapter must raise RuntimeHostError immediately rather than propagating
+        an AttributeError from a subsequent `.result` access.
+        """
+        correlation_id = uuid4()
+
+        payload = ModelPayloadConsulRegister(
+            correlation_id=correlation_id,
+            service_id="onex-effect-123",
+            service_name="onex-effect",
+            tags=["onex"],
+        )
+
+        mock_consul_handler.execute = AsyncMock(return_value=None)
+
+        with pytest.raises(
+            RuntimeHostError, match="Consul handler returned None output"
+        ):
+            await effect.execute(payload, correlation_id=correlation_id)
+
+    @pytest.mark.asyncio
+    async def test_execute_raises_when_consul_response_is_unexpected_type(
+        self, effect: IntentEffectConsulRegister, mock_consul_handler: MagicMock
+    ) -> None:
+        """Should raise RuntimeHostError when handler_output.result is not ModelConsulHandlerResponse.
+
+        Exercises the isinstance type-narrowing guard in IntentEffectConsulRegister:
+        when the consul handler returns an output whose result is an unexpected
+        type (not ModelConsulHandlerResponse), the adapter raises RuntimeHostError
+        with a descriptive message rather than letting an AttributeError propagate
+        from a later `.is_error` access.
+        """
+        correlation_id = uuid4()
+
+        payload = ModelPayloadConsulRegister(
+            correlation_id=correlation_id,
+            service_id="onex-effect-123",
+            service_name="onex-effect",
+            tags=["onex"],
+        )
+
+        mock_unexpected_output = MagicMock()
+        mock_unexpected_output.result = {"unexpected": "dict"}
+        mock_consul_handler.execute = AsyncMock(return_value=mock_unexpected_output)
+
+        with pytest.raises(
+            RuntimeHostError,
+            match="Consul handler returned unexpected result type",
+        ):
+            await effect.execute(payload, correlation_id=correlation_id)
+
+    @pytest.mark.asyncio
     async def test_execute_raises_when_handler_result_is_none(
         self, effect: IntentEffectConsulRegister, mock_consul_handler: MagicMock
     ) -> None:

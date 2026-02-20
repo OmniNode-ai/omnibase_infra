@@ -573,7 +573,7 @@ class RegistrationReducerService:
                     :200
                 ],  # mask + truncate for safe logging
             )
-            # KNOWN LIMITATION (pre-beta, tracked in OMN-XXXX): Multiple nodes with
+            # KNOWN LIMITATION (pre-beta, ticket TBD — file before beta): Multiple nodes with
             # all-special-character tool names all receive ``mcp-tool:unnamed`` in
             # Consul, causing silent tag collisions that make them indistinguishable
             # in the service catalog.
