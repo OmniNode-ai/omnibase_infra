@@ -200,6 +200,34 @@ SUFFIX_INTELLIGENCE_PATTERN_DISCOVERED: str = "onex.evt.pattern.discovered.v1"
 """Topic for generic pattern discovery events."""
 
 # =============================================================================
+# OMNIMEMORY DOMAIN TOPIC SUFFIXES (omnimemory plugin)
+# =============================================================================
+# These topics are consumed/produced by PluginOmnimemory. They are provisioned
+# alongside platform topics so the plugin finds them ready at startup.
+
+# Event topics (outbound from omnimemory pipeline)
+SUFFIX_OMNIMEMORY_DOCUMENT_DISCOVERED: str = (
+    "onex.evt.omnimemory.document-discovered.v1"
+)
+"""Topic for document discovery events (new document found during crawl)."""
+
+SUFFIX_OMNIMEMORY_DOCUMENT_CHANGED: str = "onex.evt.omnimemory.document-changed.v1"
+"""Topic for document change events (existing document content changed)."""
+
+SUFFIX_OMNIMEMORY_DOCUMENT_REMOVED: str = "onex.evt.omnimemory.document-removed.v1"
+"""Topic for document removal events (document deleted or no longer accessible)."""
+
+SUFFIX_OMNIMEMORY_DOCUMENT_INDEXED: str = "onex.evt.omnimemory.document-indexed.v1"
+"""Topic for document indexed events (document successfully indexed into vector store)."""
+
+# Command topics (inbound to omnimemory pipeline)
+SUFFIX_OMNIMEMORY_CRAWL_TICK: str = "onex.cmd.omnimemory.crawl-tick.v1"
+"""Topic for crawl tick commands (periodic scheduler trigger for crawl cycle)."""
+
+SUFFIX_OMNIMEMORY_CRAWL_REQUESTED: str = "onex.cmd.omnimemory.crawl-requested.v1"
+"""Topic for crawl requested commands (explicit crawl request for a document source)."""
+
+# =============================================================================
 # TOPIC CATALOG TOPIC SUFFIXES
 # =============================================================================
 
@@ -308,11 +336,27 @@ ALL_INTELLIGENCE_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
 """Intelligence domain topic specs provisioned for PluginIntelligence."""
 
 # =============================================================================
+# OMNIMEMORY DOMAIN TOPIC SPEC REGISTRY
+# =============================================================================
+
+ALL_OMNIMEMORY_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
+    # Event topics (3 partitions each)
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_DOCUMENT_DISCOVERED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_DOCUMENT_CHANGED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_DOCUMENT_REMOVED, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_DOCUMENT_INDEXED, partitions=3),
+    # Command topics (3 partitions each)
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_CRAWL_TICK, partitions=3),
+    ModelTopicSpec(suffix=SUFFIX_OMNIMEMORY_CRAWL_REQUESTED, partitions=3),
+)
+"""Omnimemory domain topic specs provisioned for PluginOmnimemory."""
+
+# =============================================================================
 # COMBINED PROVISIONED TOPIC SPECS
 # =============================================================================
 
 ALL_PROVISIONED_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
-    ALL_PLATFORM_TOPIC_SPECS + ALL_INTELLIGENCE_TOPIC_SPECS
+    ALL_PLATFORM_TOPIC_SPECS + ALL_INTELLIGENCE_TOPIC_SPECS + ALL_OMNIMEMORY_TOPIC_SPECS
 )
 """All topic specs to be provisioned by TopicProvisioner at startup.
 
