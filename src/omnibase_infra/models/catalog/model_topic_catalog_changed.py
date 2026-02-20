@@ -64,7 +64,7 @@ class ModelTopicCatalogChanged(BaseModel):
     catalog_version: int = Field(
         ...,
         ge=0,
-        description="New catalog version after this change.",
+        description="New catalog version after this change. Version 0 represents the initial catalog state.",
     )
     topics_added: tuple[str, ...] = Field(
         default_factory=tuple,

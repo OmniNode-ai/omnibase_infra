@@ -157,6 +157,18 @@ class IntentEffectConsulRegister:
             }
             handler_output = await self._consul_handler.execute(envelope)
 
+            # Guard against None output before accessing result.
+            if handler_output is None:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=effective_correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="intent_effect_consul_register",
+                )
+                raise RuntimeHostError(
+                    "Consul handler returned None output",
+                    context=context,
+                )
+
             # Detect silent failures: handler may return an error-status result
             # instead of raising, so check the response status explicitly.
             consul_response = handler_output.result

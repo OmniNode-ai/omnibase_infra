@@ -553,7 +553,12 @@ class RegistrationReducerService:
 
         Returns:
             Sanitized string suitable for Consul tags (lowercase, alphanumeric
-            with dashes, max 63 chars).
+            with dashes, max 63 chars). Falls back to ``'unnamed'`` when the
+            input contains only special characters and produces an empty string
+            after stripping. Note: if multiple nodes have tool names that all
+            consist entirely of special characters, they will all produce the
+            same ``'unnamed'`` fallback and their ``mcp-tool:unnamed`` Consul
+            tags will silently collide.
         """
         sanitized = re.sub(r"[^a-zA-Z0-9]+", "-", name.lower())
         sanitized = sanitized.strip("-")

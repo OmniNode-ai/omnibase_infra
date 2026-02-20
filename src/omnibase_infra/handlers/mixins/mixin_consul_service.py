@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol, TypeVar
+from typing import TYPE_CHECKING, NoReturn, Protocol, TypeVar
 from uuid import UUID
 
 T = TypeVar("T")
@@ -121,18 +121,18 @@ class MixinConsulService:
         operation: str,
         func: Callable[[], T],
         correlation_id: UUID,
-    ) -> T:
+    ) -> NoReturn:
         """Execute operation with retry logic - provided by host class."""
-        raise NotImplementedError("Must be provided by implementing class")  # type: ignore[return-value]
+        raise NotImplementedError("Must be provided by implementing class")
 
     def _build_response(
         self,
         typed_payload: ConsulPayload,
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:
+    ) -> NoReturn:
         """Build standardized response - provided by host class."""
-        raise NotImplementedError("Must be provided by implementing class")  # type: ignore[return-value]
+        raise NotImplementedError("Must be provided by implementing class")
 
     async def _store_node_event_bus(
         self,
