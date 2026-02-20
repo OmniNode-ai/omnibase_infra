@@ -276,13 +276,6 @@ def _deserialize_response(raw: bytes | str) -> ModelTopicCatalogResponse | None:
             "_deserialize_response: failed to deserialize message",
             exc_info=True,
         )
-    except Exception:
-        # Genuinely unexpected errors that are not normal deserialization noise:
-        # surface these at WARNING so they are visible during debugging.
-        logger.warning(
-            "_deserialize_response: unexpected payload structure",
-            exc_info=True,
-        )
     return None
 
 
