@@ -622,15 +622,6 @@ class RegistrationReducerService:
                     node_name = event.metadata.description if event.metadata else None
                     mcp_tool_name_raw = node_name or service_name
                 mcp_tool_name = self._sanitize_tool_name(mcp_tool_name_raw)
-                if mcp_tool_name == "unnamed":
-                    logger.warning(
-                        "_sanitize_tool_name fallback to 'unnamed' for service %s "
-                        "(node_id=%s): raw input %r produced empty result; "
-                        "mcp-tool:unnamed tag may collide with other nodes",
-                        service_name,
-                        node_id,
-                        mcp_tool_name_raw[:200],
-                    )
                 tags.extend(["mcp-enabled", f"mcp-tool:{mcp_tool_name}"])
 
         # Extract address and port from endpoints if available

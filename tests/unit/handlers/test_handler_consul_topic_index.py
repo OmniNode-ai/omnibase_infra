@@ -25,6 +25,7 @@ import pytest
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
+    InfraConnectionError,
     InfraConsulError,
     InfraTimeoutError,
     InfraUnavailableError,
@@ -957,6 +958,10 @@ class TestRegisterServicePartialFailureWrapping:
     that catches transport-level errors from _update_topic_index or
     _store_node_event_bus and re-raises them as InfraConsulError with the
     registration-level context (node_id, service name, operation).
+
+    All four error types in the catch tuple are exercised across this test
+    class: InfraConsulError, InfraTimeoutError, InfraUnavailableError, and
+    InfraConnectionError.
     """
 
     @pytest.mark.asyncio
@@ -1125,6 +1130,58 @@ class TestRegisterServicePartialFailureWrapping:
 
             raised = exc_info.value
             assert "unavailable-node" in str(raised)
+            assert raised.__cause__ is inner_error
+
+    @pytest.mark.asyncio
+    async def test_infra_connection_error_reraised_as_infra_consul_error(
+        self,
+        consul_config: dict[str, object],
+        mock_consul_client: MagicMock,
+        mock_container: MagicMock,
+    ) -> None:
+        """When _store_node_event_bus raises InfraConnectionError, _register_service
+        wraps it as InfraConsulError with the registration-level context."""
+        handler = HandlerConsul(mock_container)
+
+        with patch(
+            "omnibase_infra.handlers.handler_consul.consul.Consul"
+        ) as MockClient:
+            MockClient.return_value = mock_consul_client
+            await handler.initialize(consul_config)
+
+            correlation_id = uuid4()
+            inner_error = InfraConnectionError(
+                "Consul KV connection lost during event bus store",
+                context=ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="consul.kv_put_raw",
+                    target_name="consul_handler",
+                ),
+            )
+
+            envelope = {
+                "operation": "consul.register",
+                "payload": {
+                    "name": "connection-error-service",
+                    "node_id": "connection-error-node",
+                    "event_bus_config": {
+                        "subscribe_topics": [
+                            {"topic": "onex.evt.connection-test.v1"},
+                        ],
+                    },
+                },
+                "correlation_id": correlation_id,
+            }
+
+            with patch.object(
+                handler, "_store_node_event_bus", side_effect=inner_error
+            ):
+                with pytest.raises(InfraConsulError) as exc_info:
+                    await handler.execute(envelope)
+
+            raised = exc_info.value
+            assert "connection-error-node" in str(raised)
             assert raised.__cause__ is inner_error
 
 
