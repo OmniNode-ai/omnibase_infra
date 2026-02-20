@@ -181,50 +181,40 @@ class IntentEffectConsulRegister:
             # non-None result with `is_error=True` indicates an error that was
             # returned in-band rather than raised.
             consul_response = handler_output.result
-            # The two blocks below are mutually exclusive paths:
-            #
-            # (a) Missing attribute: the first block fires when `consul_response`
-            #     is a non-None object that does not have an `is_error` attribute
-            #     at all. This indicates a broken or unexpected handler
-            #     implementation. The block raises immediately, so the second
-            #     block is never reached in this case.
-            #
-            # (b) Attribute present but True: the second block fires when
-            #     `consul_response` has `is_error` (confirmed by the first block
-            #     not raising) and the value is True, meaning the handler
-            #     returned an error status in-band rather than raising an
-            #     exception. Because the first block raises on a missing
-            #     attribute, the `hasattr` check in the second condition is
-            #     implicitly guaranteed by reaching that line.
+            # Abnormal: HandlerConsul._build_response always returns a
+            # non-None result via for_compute, so None here signals a
+            # broken or non-conformant handler implementation. Raise
+            # immediately — same pattern as the `handler_output is None`
+            # guard above — so callers are never silently misled into
+            # thinking registration succeeded.
             if consul_response is None:
-                # Abnormal: HandlerConsul._build_response always returns a
-                # non-None result via for_compute, so None here signals a
-                # broken or non-conformant handler implementation.
-                logger.warning(
-                    "Consul handler returned None result for service_id=%s "
-                    "(expected ModelConsulHandlerResponse); registration may "
-                    "be incomplete. correlation_id=%s",
-                    payload.service_id,
-                    str(effective_correlation_id),
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=effective_correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="intent_effect_consul_register",
                 )
-            if consul_response is not None:
-                # Defensive guard: consul_response is typed as `object` at the
-                # handler output level. If the handler returns an unexpected type
-                # that lacks `is_error`, accessing the attribute would raise an
-                # AttributeError. Guard with hasattr first; if the attribute is
-                # missing, raise a RuntimeHostError rather than letting an
-                # AttributeError propagate with a misleading stack trace.
-                if not hasattr(consul_response, "is_error"):
-                    context = ModelInfraErrorContext.with_correlation(
-                        correlation_id=effective_correlation_id,
-                        transport_type=EnumInfraTransportType.CONSUL,
-                        operation="intent_effect_consul_register",
-                    )
-                    raise RuntimeHostError(
-                        "Consul handler result missing is_error attribute",
-                        context=context,
-                    )
-            if consul_response is not None and consul_response.is_error:
+                raise RuntimeHostError(
+                    f"Consul handler returned None result for "
+                    f"service_id={payload.service_id}",
+                    context=context,
+                )
+            # Defensive guard: consul_response is typed as `object` at the
+            # handler output level. If the handler returns an unexpected type
+            # that lacks `is_error`, accessing the attribute would raise an
+            # AttributeError. Guard with hasattr first; if the attribute is
+            # missing, raise a RuntimeHostError rather than letting an
+            # AttributeError propagate with a misleading stack trace.
+            if not hasattr(consul_response, "is_error"):
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=effective_correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="intent_effect_consul_register",
+                )
+                raise RuntimeHostError(
+                    "Consul handler result missing is_error attribute",
+                    context=context,
+                )
+            if consul_response.is_error:
                 context = ModelInfraErrorContext.with_correlation(
                     correlation_id=effective_correlation_id,
                     transport_type=EnumInfraTransportType.CONSUL,

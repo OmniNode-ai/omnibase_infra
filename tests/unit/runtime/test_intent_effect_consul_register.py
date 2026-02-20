@@ -210,15 +210,16 @@ class TestIntentEffectConsulRegisterExecute:
             await effect.execute(payload, correlation_id=correlation_id)
 
     @pytest.mark.asyncio
-    async def test_execute_succeeds_when_handler_result_is_none(
+    async def test_execute_raises_when_handler_result_is_none(
         self, effect: IntentEffectConsulRegister, mock_consul_handler: MagicMock
     ) -> None:
-        """Should complete without raising when handler_output.result is None.
+        """Should raise RuntimeHostError when handler_output.result is None.
 
-        Exercises the defensive code path documented in IntentEffectConsulRegister:
-        when consul_response (handler_output.result) is None, both the is_error
-        attribute check and the is_error=True check are skipped, and execute()
-        returns normally. This covers EFFECT handlers that may return None results.
+        Exercises the defensive guard in IntentEffectConsulRegister: when
+        consul_response (handler_output.result) is None, the adapter raises
+        RuntimeHostError immediately rather than silently treating a broken
+        handler as a successful registration. This is symmetric with the
+        `handler_output is None` guard that already raises above it.
         """
         correlation_id = uuid4()
 
@@ -229,13 +230,17 @@ class TestIntentEffectConsulRegisterExecute:
             tags=["onex"],
         )
 
-        # Handler returns successfully but result is None (defensive code path).
+        # Handler returns an output object but its result is None — signals a
+        # broken or non-conformant handler implementation.
         mock_none_output = MagicMock()
         mock_none_output.result = None
         mock_consul_handler.execute = AsyncMock(return_value=mock_none_output)
 
-        # Should not raise - the None result path is a documented no-op.
-        await effect.execute(payload, correlation_id=correlation_id)
+        with pytest.raises(
+            RuntimeHostError,
+            match="Consul handler returned None result for service_id=onex-effect-123",
+        ):
+            await effect.execute(payload, correlation_id=correlation_id)
 
     @pytest.mark.asyncio
     async def test_execute_reraises_infra_consul_error_from_partial_registration(
