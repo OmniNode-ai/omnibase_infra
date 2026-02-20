@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, NoReturn, Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar
 from uuid import UUID
 
 T = TypeVar("T")
@@ -121,7 +121,7 @@ class MixinConsulService:
         operation: str,
         func: Callable[[], T],
         correlation_id: UUID,
-    ) -> NoReturn:
+    ) -> T:  # type: ignore[return-value]  # mixin stub: raises NotImplementedError to enforce subclass provision; NoReturn would cause mypy to infer call sites as Never, breaking callers
         """Execute operation with retry logic - provided by host class."""
         raise NotImplementedError("Must be provided by implementing class")
 
@@ -130,7 +130,7 @@ class MixinConsulService:
         typed_payload: ConsulPayload,
         correlation_id: UUID,
         input_envelope_id: UUID,
-    ) -> NoReturn:
+    ) -> ModelHandlerOutput[ModelConsulHandlerResponse]:  # type: ignore[return-value]  # mixin stub: raises NotImplementedError to enforce subclass provision; NoReturn would break callers that use the return value
         """Build standardized response - provided by host class."""
         raise NotImplementedError("Must be provided by implementing class")
 
