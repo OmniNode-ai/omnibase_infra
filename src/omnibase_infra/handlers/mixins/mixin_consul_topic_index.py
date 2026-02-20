@@ -56,12 +56,18 @@ KVGetResult = tuple[int, dict[str, object] | None]
 # Type alias for raw Consul KV recurse results: (modify_index, list_or_None).
 # Hoisted to module level for consistency with KVGetResult.
 #
-# The ``None`` case in the list position is the raw Consul client's way of
-# indicating that the prefix does not exist (no keys found under it). This
-# ``None`` is consumed and handled internally by ``kv_get_recurse()``, which
-# converts it to an empty list before returning to callers. The public return
-# type of ``kv_get_recurse()`` is therefore always ``list[dict[str, object]]``
-# and never ``None``.
+# NOTE: This alias is used *only* for the raw return value from the Consul
+# client (``self._client.kv.get(..., recurse=True)``), which may yield
+# ``None`` in the list position when the prefix does not exist. This ``None``
+# is an internal implementation detail: ``kv_get_recurse()`` converts it to
+# an empty list immediately after the cast and before returning to any caller.
+#
+# The ``| None`` here intentionally matches the Consul client's raw contract
+# so that the ``cast("KVRecurseResult", result)`` inside ``kv_get_recurse()``
+# is type-safe. It does NOT mean that callers of ``kv_get_recurse()`` ever
+# receive ``None`` — the public return type of that method is always
+# ``list[dict[str, object]]`` (never ``None``). The ``None`` branch is
+# unreachable through the public API.
 KVRecurseResult = tuple[int, list[dict[str, object]] | None]
 
 

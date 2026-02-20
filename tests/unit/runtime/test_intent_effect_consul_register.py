@@ -173,6 +173,39 @@ class TestIntentEffectConsulRegisterExecute:
             await effect.execute(payload, correlation_id=correlation_id)
 
     @pytest.mark.asyncio
+    async def test_execute_raises_runtime_host_error_on_is_error_true(
+        self, effect: IntentEffectConsulRegister, mock_consul_handler: MagicMock
+    ) -> None:
+        """Should raise RuntimeHostError when handler returns is_error=True.
+
+        Exercises the silent-failure path where the consul handler does not
+        raise an exception but returns a result with is_error set to True.
+        The adapter must detect this and raise RuntimeHostError so callers
+        are never silently misled into thinking registration succeeded.
+        """
+        correlation_id = uuid4()
+
+        payload = ModelPayloadConsulRegister(
+            correlation_id=correlation_id,
+            service_id="onex-effect-123",
+            service_name="onex-effect",
+            tags=["onex"],
+        )
+
+        # Handler returns normally (no exception) but result indicates an error.
+        mock_error_response = MagicMock()
+        mock_error_response.is_error = True
+        mock_error_output = MagicMock()
+        mock_error_output.result = mock_error_response
+        mock_consul_handler.execute = AsyncMock(return_value=mock_error_output)
+
+        with pytest.raises(
+            RuntimeHostError,
+            match="Consul registration returned error status for service_id=onex-effect-123",
+        ):
+            await effect.execute(payload, correlation_id=correlation_id)
+
+    @pytest.mark.asyncio
     async def test_execute_includes_event_bus_config(
         self, effect: IntentEffectConsulRegister, mock_consul_handler: MagicMock
     ) -> None:

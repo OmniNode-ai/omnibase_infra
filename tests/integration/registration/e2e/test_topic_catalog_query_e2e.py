@@ -444,8 +444,14 @@ class TestMultiClientNoCrossTalk:
 
             # Assert: no cross-talk
             # Client A must have received EXACTLY one response (its own).
-            # Using == 1 rather than >= 1 so that duplicate delivery is caught
-            # instead of silently masked.
+            # Using == 1 rather than >= 1 is intentional: this test is marked
+            # @pytest.mark.serial so it runs in isolation, and within a single
+            # serial run each client publishes exactly one message. Kafka's
+            # at-least-once delivery guarantee means the test environment must
+            # not produce spurious duplicates during a serial, isolated run.
+            # If the count exceeds 1, that indicates a duplicate-delivery bug
+            # (e.g., duplicate publish, consumer redelivery, or offset reset)
+            # that should be caught rather than silently masked.
             assert len(received_a) == 1, (
                 f"Client A must have received exactly one response, got {len(received_a)}"
             )
@@ -456,6 +462,7 @@ class TestMultiClientNoCrossTalk:
                 )
 
             # Client B must have received EXACTLY one response (its own).
+            # Same rationale as Client A above: == 1 is intentional, not defensive.
             assert len(received_b) == 1, (
                 f"Client B must have received exactly one response, got {len(received_b)}"
             )
