@@ -5,6 +5,14 @@ All notable changes to the ONEX Infrastructure (omnibase_infra) will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-02-20
+
+### Changed
+
+#### Dependencies
+
+- **Bump `omnibase-core`** from `>=0.18.0,<0.19.0` → `>=0.18.1,<0.19.0`
+
 ## [0.8.1] - 2026-02-19
 
 ### Changed
