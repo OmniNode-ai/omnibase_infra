@@ -478,7 +478,7 @@ class MixinConsulService:
                 # Store the new event bus config AFTER index update
                 # Order matters: _update_topic_index reads old topics before we overwrite
                 await self._store_node_event_bus(node_id, event_bus, correlation_id)
-            except Exception:
+            except Exception as exc:
                 logger.warning(
                     "Consul agent registration succeeded but KV write failed for node %s "
                     "(partial registration: service visible in Consul but topic index or "
@@ -487,7 +487,17 @@ class MixinConsulService:
                     extra={"correlation_id": str(correlation_id), "node_id": node_id},
                     exc_info=True,
                 )
-                raise
+                ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="consul.register.kv_write",
+                )
+                raise InfraConsulError(
+                    f"Consul agent registered but KV write failed for node {node_id} - "
+                    "service visible in Consul but topic index or event bus config may be stale",
+                    context=ctx,
+                    service_name=name,
+                ) from exc
 
             logger.info(
                 "Completed event_bus registration for node %s",

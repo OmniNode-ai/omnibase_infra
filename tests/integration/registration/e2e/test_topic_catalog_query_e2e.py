@@ -249,8 +249,8 @@ def _deserialize_response(raw: bytes | str) -> ModelTopicCatalogResponse | None:
             )
         ):
             return ModelTopicCatalogResponse.model_validate(data)
-    except (TypeError, ValidationError):
-        # Unexpected payload shape: log at WARNING so these surface during debugging.
+    except TypeError:
+        # Unexpected payload shape (not dict/list): log at WARNING so these surface during debugging.
         logger.warning(
             "_deserialize_response: unexpected payload structure",
             exc_info=True,
@@ -259,8 +259,8 @@ def _deserialize_response(raw: bytes | str) -> ModelTopicCatalogResponse | None:
         json.JSONDecodeError,
         ValueError,
         KeyError,
-        UnicodeDecodeError,
-    ):  # UnicodeDecodeError listed explicitly for readability despite being a ValueError subclass
+        ValidationError,
+    ):
         # Expected noise: log at DEBUG only.
         #
         # json.JSONDecodeError is expected because both clients subscribe to the
@@ -272,6 +272,8 @@ def _deserialize_response(raw: bytes | str) -> ModelTopicCatalogResponse | None:
         # correlation_id filtering is the correct isolation boundary (Option B).
         # ValueError and KeyError cover missing required fields or bad values in
         # otherwise-valid JSON that does not match the catalog response schema.
+        # ValidationError (Pydantic v2, a subclass of ValueError) is expected noise
+        # when a valid-JSON non-catalog message is passed to model_validate().
         logger.debug(
             "_deserialize_response: failed to deserialize message",
             exc_info=True,
