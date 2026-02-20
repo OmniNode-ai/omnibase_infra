@@ -612,7 +612,7 @@ async def cleanup_consul_services(
     for service_id in services_to_cleanup:
         try:
             envelope = {
-                "operation": "consul.deregister_service",
+                "operation": "consul.deregister",
                 "payload": {"service_id": service_id},
             }
             await real_consul_handler.execute(envelope)

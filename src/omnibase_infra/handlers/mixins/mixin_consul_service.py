@@ -341,6 +341,15 @@ class MixinConsulService:
             This method will:
             1. Store the event bus configuration in Consul KV at onex/nodes/{node_id}/event_bus/
             2. Update the topic -> node_id reverse index at onex/topics/{topic}/subscribers
+
+        Partial Inconsistency Risk:
+            Consul service registration happens before the KV writes for the topic
+            index and event bus config. If ``_update_topic_index`` or
+            ``_store_node_event_bus`` fail after the agent registration has already
+            succeeded, the system is left in a partially inconsistent state: the
+            service is visible in Consul but its topic index or event bus config
+            is missing or stale. There is no rollback of the Consul agent
+            registration on KV write failure.
         """
         name = payload.get("name")
         if not isinstance(name, str) or not name:

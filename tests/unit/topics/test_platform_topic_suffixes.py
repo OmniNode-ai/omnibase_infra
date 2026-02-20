@@ -145,6 +145,22 @@ class TestPlatformTopicSuffixes:
             producer = parts[2]
             assert producer == "platform", f"Expected 'platform' producer in: {suffix}"
 
+    def test_catalog_changed_and_response_suffixes_in_platform(self) -> None:
+        """SUFFIX_TOPIC_CATALOG_CHANGED and SUFFIX_TOPIC_CATALOG_RESPONSE are platform suffixes.
+
+        Verifies that both catalog-related topic suffix constants are registered
+        in ALL_PLATFORM_SUFFIXES as required by the topic catalog change
+        notification contract.
+        """
+        assert SUFFIX_TOPIC_CATALOG_CHANGED in ALL_PLATFORM_SUFFIXES, (
+            f"SUFFIX_TOPIC_CATALOG_CHANGED={SUFFIX_TOPIC_CATALOG_CHANGED!r} "
+            "must be in ALL_PLATFORM_SUFFIXES"
+        )
+        assert SUFFIX_TOPIC_CATALOG_RESPONSE in ALL_PLATFORM_SUFFIXES, (
+            f"SUFFIX_TOPIC_CATALOG_RESPONSE={SUFFIX_TOPIC_CATALOG_RESPONSE!r} "
+            "must be in ALL_PLATFORM_SUFFIXES"
+        )
+
     def test_all_suffix_constants_exported(self) -> None:
         """All SUFFIX_* constants should be exported from topics package."""
         from omnibase_infra import topics

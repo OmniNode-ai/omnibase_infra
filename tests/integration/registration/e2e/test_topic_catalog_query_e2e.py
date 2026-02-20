@@ -21,10 +21,7 @@ Infrastructure Requirements:
     All suites require ALL_INFRA_AVAILABLE (Consul + Kafka/Redpanda). The
     directory-level conftest applies a pytestmark skipif(not ALL_INFRA_AVAILABLE)
     to every test in this directory, so no suite can run independently of the
-    shared infrastructure guard even if it does not use Kafka directly. Note:
-    this skipif propagation affects all tests in the directory, including
-    ``test_golden_path_published_to_changed_topic_suffix_exists`` which requires
-    no live infrastructure.
+    shared infrastructure guard even if it does not use Kafka directly.
 
 Related Tickets:
     - OMN-2317: Topic Catalog multi-client no-cross-talk E2E test
@@ -60,7 +57,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_topic_
 )
 from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
 from omnibase_infra.topics.platform_topic_suffixes import (
-    ALL_PLATFORM_SUFFIXES,
     SUFFIX_TOPIC_CATALOG_CHANGED,
     SUFFIX_TOPIC_CATALOG_RESPONSE,
 )
@@ -255,7 +251,7 @@ def _deserialize_response(raw: bytes | str) -> ModelTopicCatalogResponse | None:
         ):
             return ModelTopicCatalogResponse.model_validate(data)
     except (json.JSONDecodeError, ValueError, KeyError, TypeError, ValidationError):
-        logger.warning(
+        logger.debug(
             "_deserialize_response: failed to deserialize message",
             exc_info=True,
         )
@@ -825,22 +821,4 @@ class TestIntegrationGoldenPath:
             "Pattern filter test passed: pattern=%r, matching_topics=%d",
             pattern,
             len(response.topics),
-        )
-
-    # TODO: move to unit tests to avoid infra-gated skip — see OMN-2317
-    def test_golden_path_published_to_changed_topic_suffix_exists(
-        self,
-    ) -> None:
-        """SUFFIX_TOPIC_CATALOG_CHANGED constant has the correct format.
-
-        Lightweight test that verifies the changed-event topic suffix is a
-        valid ONEX 5-segment suffix. The topic must exist in platform specs.
-        """
-        assert SUFFIX_TOPIC_CATALOG_CHANGED in ALL_PLATFORM_SUFFIXES, (
-            f"SUFFIX_TOPIC_CATALOG_CHANGED={SUFFIX_TOPIC_CATALOG_CHANGED!r} "
-            "must be in ALL_PLATFORM_SUFFIXES"
-        )
-        assert SUFFIX_TOPIC_CATALOG_RESPONSE in ALL_PLATFORM_SUFFIXES, (
-            f"SUFFIX_TOPIC_CATALOG_RESPONSE={SUFFIX_TOPIC_CATALOG_RESPONSE!r} "
-            "must be in ALL_PLATFORM_SUFFIXES"
         )

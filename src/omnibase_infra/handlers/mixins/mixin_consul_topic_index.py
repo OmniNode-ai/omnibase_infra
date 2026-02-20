@@ -723,7 +723,7 @@ class MixinConsulTopicIndex:
         self,
         prefix: str,
         correlation_id: UUID,
-    ) -> list[dict[str, object]] | None:
+    ) -> list[dict[str, object]]:
         """Perform a recursive Consul KV get under a prefix.
 
         Routes through the handler's retry machinery and circuit breaker.
@@ -734,8 +734,8 @@ class MixinConsulTopicIndex:
 
         Returns:
             List of dicts with ``key``, ``value`` (str or None), and
-            ``modify_index`` fields for every key under the prefix,
-            or None if the operation fails.
+            ``modify_index`` fields for every key under the prefix.
+            Returns an empty list when the prefix does not exist or has no keys.
 
         Raises:
             InfraConsulError: If Consul client not initialized or operation fails.
