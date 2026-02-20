@@ -492,6 +492,12 @@ class MixinConsulService:
                     transport_type=EnumInfraTransportType.CONSUL,
                     operation="consul.register.kv_write",
                 )
+                # Note: original error context is preserved via exception chaining
+                # (`from exc`); the outer InfraConsulError captures the
+                # registration-level context (node_id, service name, operation
+                # "consul.register.kv_write") while the inner exception retains
+                # transport-level details (e.g., consul_key from a KV write
+                # error). Callers inspecting `__cause__` will see both layers.
                 raise InfraConsulError(
                     f"Consul agent registered but KV write failed for node {node_id} - "
                     "service visible in Consul but topic index or event bus config may be stale",

@@ -171,6 +171,15 @@ class IntentEffectConsulRegister:
 
             # Detect silent failures: handler may return an error-status result
             # instead of raising, so check the response status explicitly.
+            #
+            # Note: `consul_response is None` is expected and acceptable here.
+            # Per the ONEX architecture, EFFECT-type handlers emit `events[]`
+            # rather than populating `result`, so `handler_output.result` will
+            # routinely be None for a successful Consul registration. The guard
+            # below intentionally skips the error check when result is None —
+            # the None path is the normal EFFECT success path, not a silent
+            # failure. Only a non-None result with `is_error=True` indicates an
+            # error that was returned in-band rather than raised.
             consul_response = handler_output.result
             if consul_response is not None and consul_response.is_error:
                 context = ModelInfraErrorContext.with_correlation(
