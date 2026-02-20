@@ -17,7 +17,11 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraConsulError, RuntimeHostError
+from omnibase_infra.models.errors.model_infra_error_context import (
+    ModelInfraErrorContext,
+)
 from omnibase_infra.nodes.reducers.models.model_payload_consul_register import (
     ModelPayloadConsulRegister,
 )
@@ -232,6 +236,51 @@ class TestIntentEffectConsulRegisterExecute:
 
         # Should not raise - the None result path is a documented no-op.
         await effect.execute(payload, correlation_id=correlation_id)
+
+    @pytest.mark.asyncio
+    async def test_execute_reraises_infra_consul_error_from_partial_registration(
+        self, effect: IntentEffectConsulRegister, mock_consul_handler: MagicMock
+    ) -> None:
+        """Should re-raise InfraConsulError without wrapping it in RuntimeHostError.
+
+        Exercises the partial-registration scenario where the Consul agent
+        registration succeeds but the KV write fails, causing the handler to
+        raise InfraConsulError directly. Since InfraConsulError is a subclass
+        of RuntimeHostError, the ``except RuntimeHostError: raise`` guard in
+        execute() re-raises it verbatim rather than wrapping it in a new
+        RuntimeHostError with the generic "Failed to execute Consul" message.
+
+        This verifies that callers can distinguish partial-registration failures
+        (InfraConsulError) from unexpected generic failures (RuntimeHostError).
+        """
+        correlation_id = uuid4()
+
+        payload = ModelPayloadConsulRegister(
+            correlation_id=correlation_id,
+            service_id="onex-effect-123",
+            service_name="onex-effect",
+            tags=["onex"],
+        )
+
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
+            transport_type=EnumInfraTransportType.CONSUL,
+            operation="register_service",
+        )
+        consul_error = InfraConsulError(
+            "Consul KV write failed after service registration",
+            context=context,
+            service_name="onex-effect",
+        )
+        mock_consul_handler.execute = AsyncMock(side_effect=consul_error)
+
+        with pytest.raises(InfraConsulError) as exc_info:
+            await effect.execute(payload, correlation_id=correlation_id)
+
+        # Confirm the exact original error is propagated, not a wrapper.
+        assert exc_info.value is consul_error
+        # Confirm the message is not replaced by the generic RuntimeHostError message.
+        assert "Failed to execute Consul" not in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_execute_includes_event_bus_config(
