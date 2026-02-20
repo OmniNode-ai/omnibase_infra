@@ -350,6 +350,11 @@ class MixinConsulService:
             service is visible in Consul but its topic index or event bus config
             is missing or stale. There is no rollback of the Consul agent
             registration on KV write failure.
+
+            Accepted MVP limitation: this gap is known and intentional at this
+            stage. No rollback mechanism is planned; callers should treat partial
+            registration as a transient fault and retry the full registration
+            sequence.
         """
         name = payload.get("name")
         if not isinstance(name, str) or not name:

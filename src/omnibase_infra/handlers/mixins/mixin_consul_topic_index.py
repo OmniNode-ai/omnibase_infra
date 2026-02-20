@@ -53,6 +53,10 @@ logger = logging.getLogger(__name__)
 # Hoisted here to avoid identical inline definitions inside multiple methods.
 KVGetResult = tuple[int, dict[str, object] | None]
 
+# Type alias for raw Consul KV recurse results: (modify_index, list_or_None).
+# Hoisted to module level for consistency with KVGetResult.
+KVRecurseResult = tuple[int, list[dict[str, object]] | None]
+
 
 class ProtocolConsulTopicIndexDependencies(Protocol):
     """Protocol defining required dependencies for topic index operations.
@@ -771,7 +775,6 @@ class MixinConsulTopicIndex:
             index, raw_data = self._client.kv.get(prefix, recurse=True)
             return index, raw_data
 
-        KVRecurseResult = tuple[int, list[dict[str, object]] | None]
         result = await self._execute_with_retry(
             "consul.kv_get_recurse",
             get_recurse_func,
