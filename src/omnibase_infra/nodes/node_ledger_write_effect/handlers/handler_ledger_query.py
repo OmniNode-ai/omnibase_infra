@@ -253,7 +253,9 @@ class HandlerLedgerQuery:
         Args:
             start: Start of time range (inclusive).
             end: End of time range (exclusive).
-            correlation_id: Correlation ID for distributed tracing (auto-generated if None).
+            correlation_id: Correlation ID for distributed tracing only (auto-generated if
+                None). This value is NOT used as a query filter - use query_by_correlation_id()
+                for that purpose.
             event_type: Optional filter by event type.
             topic: Optional filter by Kafka topic.
             limit: Maximum entries to return (default: 100, max: 10000).

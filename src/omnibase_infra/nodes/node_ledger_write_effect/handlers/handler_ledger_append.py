@@ -28,6 +28,7 @@ Design Decision - Composition with HandlerDb:
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import logging
 from typing import TYPE_CHECKING
@@ -38,7 +39,6 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
-    EnumResponseStatus,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.nodes.node_ledger_write_effect.models import ModelLedgerAppendResult
@@ -306,7 +306,7 @@ class HandlerLedgerAppend:
         """
         try:
             return base64.b64decode(encoded, validate=True)
-        except Exception as e:
+        except binascii.Error as e:
             ctx = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.DATABASE,
                 operation="ledger.append",
