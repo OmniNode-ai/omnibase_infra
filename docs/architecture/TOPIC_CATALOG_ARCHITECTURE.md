@@ -47,7 +47,7 @@ Each ONEX node declares in Consul KV which topics it publishes to and subscribes
 | `ModelTopicCatalogEntry` | `models/catalog/model_topic_catalog_entry.py` | Single topic entry with computed `is_active` |
 | `ModelTopicCatalogQuery` | `models/catalog/model_topic_catalog_query.py` | Client request: filters, pattern, correlation ID |
 | `ModelTopicCatalogResponse` | `models/catalog/model_topic_catalog_response.py` | Catalog snapshot: topics, version, node count, warnings |
-| `ModelTopicCatalogChanged` | `models/catalog/model_topic_catalog_changed.py` | Event emitted when the catalog version increments |
+| `ModelTopicCatalogChanged` | `models/catalog/model_topic_catalog_changed.py` | Model for catalog version change notifications; exists but is not currently emitted by the registration path |
 | `catalog_warning_codes.py` | `models/catalog/catalog_warning_codes.py` | Stable string constants for all warning tokens |
 | `TopicResolver` | `topics/topic_resolver.py` | Maps topic suffixes to fully-qualified Kafka topic names |
 

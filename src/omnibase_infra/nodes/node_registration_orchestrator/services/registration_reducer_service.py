@@ -624,6 +624,7 @@ class RegistrationReducerService:
             tags=tags,
             address=address,
             port=port,
+            event_bus_config=event.event_bus,  # Pass through from introspection event
         )
 
         return ModelIntent(
