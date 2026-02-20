@@ -190,6 +190,62 @@ class TestModelPayloadConsulRegisterEventBus:
         assert payload.event_bus_config.publish_topic_strings == []
 
 
+class TestModelPayloadConsulRegisterNodeIdValidation:
+    """Tests for node_id validation when event_bus_config is provided."""
+
+    def test_whitespace_only_node_id_with_event_bus_config_raises(self) -> None:
+        """A whitespace-only node_id with event_bus_config present should raise ValidationError."""
+        # Arrange
+        correlation_id = uuid4()
+        event_bus_config = ModelNodeEventBusConfig(
+            subscribe_topics=[
+                ModelEventBusTopicEntry(
+                    topic="onex.evt.input.v1",
+                    event_type="ModelInputEvent",
+                    message_category="EVENT",
+                ),
+            ],
+            publish_topics=[],
+        )
+
+        # Act & Assert
+        with pytest.raises(ValidationError):
+            ModelPayloadConsulRegister(
+                correlation_id=correlation_id,
+                node_id="   ",  # whitespace-only passes min_length=1 but is rejected by model_validator
+                service_id="onex-effect-test",
+                service_name="onex-effect",
+                tags=["node_type:effect"],
+                event_bus_config=event_bus_config,
+            )
+
+    def test_none_node_id_with_event_bus_config_raises(self) -> None:
+        """A None node_id with event_bus_config present should raise ValidationError."""
+        # Arrange
+        correlation_id = uuid4()
+        event_bus_config = ModelNodeEventBusConfig(
+            subscribe_topics=[],
+            publish_topics=[
+                ModelEventBusTopicEntry(
+                    topic="onex.evt.output.v1",
+                    event_type="ModelOutputEvent",
+                    message_category="EVENT",
+                ),
+            ],
+        )
+
+        # Act & Assert
+        with pytest.raises(ValidationError):
+            ModelPayloadConsulRegister(
+                correlation_id=correlation_id,
+                node_id=None,  # None is rejected when event_bus_config is provided
+                service_id="onex-compute-test",
+                service_name="onex-compute",
+                tags=["node_type:compute"],
+                event_bus_config=event_bus_config,
+            )
+
+
 class TestModelPayloadConsulRegisterImmutability:
     """Tests for immutability of event_bus_config in frozen model."""
 

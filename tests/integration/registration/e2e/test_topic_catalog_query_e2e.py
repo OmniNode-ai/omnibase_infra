@@ -57,7 +57,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_topic_
 )
 from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
 from omnibase_infra.topics.platform_topic_suffixes import (
-    SUFFIX_TOPIC_CATALOG_CHANGED,
     SUFFIX_TOPIC_CATALOG_RESPONSE,
 )
 
