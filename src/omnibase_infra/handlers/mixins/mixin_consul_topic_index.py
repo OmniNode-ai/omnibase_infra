@@ -421,6 +421,17 @@ class MixinConsulTopicIndex:
             # set() on a dict would produce a set of dict keys — silently wrong
             # behaviour.  We treat this as a corrupt/stale entry and reset to
             # empty so the node re-registers all its topics on the next pass.
+            #
+            # Edge case — persistent corrupt entry: this branch does NOT delete
+            # the corrupt KV key. If `_store_node_event_bus` (called by the
+            # caller after this method) fails before it can overwrite the key,
+            # the corrupt value remains in Consul. On the NEXT call to
+            # `_update_topic_index` the same corrupt entry will be encountered
+            # again, producing this warning indefinitely. The only way to clear
+            # the corruption is for a successful `_store_node_event_bus` write
+            # to overwrite the key with a well-formed JSON array. This is an
+            # accepted MVP limitation — see the partial-inconsistency note in
+            # `_register_service` for the broader context.
             logger.warning(
                 "Consul topic index for node %s is not a list (got %s); "
                 "treating as empty and re-registering all topics",

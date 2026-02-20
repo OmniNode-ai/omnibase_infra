@@ -23,6 +23,8 @@ from uuid import uuid4
 import pytest
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraConsulError, ModelInfraErrorContext
 from omnibase_infra.handlers.handler_consul import HandlerConsul
 from omnibase_infra.models.registration import (
     ModelEventBusTopicEntry,
@@ -796,6 +798,88 @@ class TestUpdateTopicIndexSideEffects:
             # Delta is empty — neither add nor remove should be called
             add_mock.assert_not_called()
             remove_mock.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_topic_index_propagates_remove_error(
+        self,
+        consul_config: dict[str, object],
+        mock_consul_client: MagicMock,
+        mock_container: MagicMock,
+    ) -> None:
+        """Partial failure: _add_subscriber_to_topic succeeds but
+        _remove_subscriber_from_topic raises InfraConsulError.
+
+        Verifies:
+        1. The InfraConsulError from _remove_subscriber_from_topic propagates
+           out of _update_topic_index unchanged.
+        2. _add_subscriber_to_topic was called with the expected new topics
+           before the failure occurred.
+        """
+        handler = HandlerConsul(mock_container)
+
+        with patch(
+            "omnibase_infra.handlers.handler_consul.consul.Consul"
+        ) as MockClient:
+            MockClient.return_value = mock_consul_client
+            await handler.initialize(consul_config)
+
+            correlation_id = uuid4()
+            node_id = "partial-failure-node-001"
+
+            # Seed the KV store: node previously subscribed to topic-a and topic-b
+            initial_config = ModelNodeEventBusConfig(
+                subscribe_topics=[
+                    ModelEventBusTopicEntry(topic="onex.evt.topic-a.v1"),
+                    ModelEventBusTopicEntry(topic="onex.evt.topic-b.v1"),
+                ],
+            )
+            await handler._update_topic_index(node_id, initial_config, correlation_id)
+            await handler._store_node_event_bus(node_id, initial_config, correlation_id)
+
+            # New config: topic-c is new (to add), topic-a and topic-b are dropped (to remove)
+            updated_config = ModelNodeEventBusConfig(
+                subscribe_topics=[
+                    ModelEventBusTopicEntry(topic="onex.evt.topic-c.v1"),
+                ],
+            )
+
+            add_calls: list[tuple[str, str]] = []
+
+            original_add = handler._add_subscriber_to_topic
+
+            async def spy_add(topic: str, nid: str, cid: object) -> None:
+                add_calls.append((topic, nid))
+                return await original_add(topic, nid, cid)  # type: ignore[return-value]
+
+            # _remove_subscriber_from_topic always raises InfraConsulError
+            remove_error = InfraConsulError(
+                "Simulated KV write failure during remove",
+                context=ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="consul.kv_put_raw",
+                    target_name="consul_handler",
+                ),
+                consul_key="onex/topics/onex.evt.topic-a.v1/subscribers",
+            )
+
+            handler._add_subscriber_to_topic = spy_add  # type: ignore[method-assign]
+            handler._remove_subscriber_from_topic = AsyncMock(side_effect=remove_error)  # type: ignore[method-assign]
+
+            # The InfraConsulError from the remove step must propagate out
+            with pytest.raises(InfraConsulError):
+                await handler._update_topic_index(
+                    node_id, updated_config, correlation_id
+                )
+
+            # _add_subscriber_to_topic must have been called for the new topic
+            # (topic-c) before the remove step raised
+            added_topics = {t for t, _ in add_calls}
+            assert "onex.evt.topic-c.v1" in added_topics
+
+            # All add calls must reference the correct node_id
+            for _, nid in add_calls:
+                assert nid == node_id
 
 
 class TestGetTopicSubscribers:

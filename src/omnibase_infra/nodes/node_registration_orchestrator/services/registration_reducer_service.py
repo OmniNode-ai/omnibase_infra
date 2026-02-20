@@ -573,6 +573,9 @@ class RegistrationReducerService:
                     r"[^a-zA-Z0-9]", "*", name
                 ),  # mask special chars for safe logging
             )
+            # TODO: Replace the 'unnamed' fallback with a hash-suffix or unique-suffix
+            # strategy (e.g. "unnamed-<sha256[:8]>") to prevent silent Consul tag
+            # collisions when multiple nodes produce all-special-character tool names.
             return "unnamed"
         return sanitized[:63]
 

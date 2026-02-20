@@ -28,7 +28,10 @@ from omnibase_core.models.dispatch import ModelHandlerOutput
 from omnibase_infra.constants_topic_patterns import TOPIC_NAME_PATTERN
 from omnibase_infra.enums import EnumInfraTransportType, EnumMessageCategory
 from omnibase_infra.errors import (
+    InfraConnectionError,
     InfraConsulError,
+    InfraTimeoutError,
+    InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
@@ -478,7 +481,17 @@ class MixinConsulService:
                 # Store the new event bus config AFTER index update
                 # Order matters: _update_topic_index reads old topics before we overwrite
                 await self._store_node_event_bus(node_id, event_bus, correlation_id)
-            except Exception as exc:
+            except (
+                InfraConsulError,
+                InfraTimeoutError,
+                InfraUnavailableError,
+                InfraConnectionError,
+            ) as exc:
+                # Only wrap transport-level infrastructure errors. Structured errors
+                # such as ProtocolConfigurationError indicate a programming fault
+                # (bad payload, invalid config) and must propagate unwrapped so
+                # callers can distinguish configuration errors from transient I/O
+                # failures.
                 logger.warning(
                     "Consul agent registration succeeded but KV write failed for node %s "
                     "(partial registration: service visible in Consul but topic index or "
