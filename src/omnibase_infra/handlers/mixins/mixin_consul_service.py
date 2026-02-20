@@ -533,6 +533,18 @@ class MixinConsulService:
                     service_name=name,
                     node_id=node_id,
                 ) from exc
+            except Exception:
+                # Unexpected exceptions (e.g. TypeError, ValueError, programming bugs)
+                # from _update_topic_index or _store_node_event_bus propagate unwrapped
+                # so callers see the original type and traceback. Log at ERROR level so
+                # the failure is visible in structured logs before it unwinds.
+                logger.exception(
+                    "Unexpected error during KV write for node %s service %r",
+                    node_id,
+                    name,
+                    extra={"correlation_id": str(correlation_id), "node_id": node_id},
+                )
+                raise
 
             logger.info(
                 "Completed event_bus registration for node %s",

@@ -24,6 +24,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from collections.abc import Sequence
@@ -556,32 +557,31 @@ class RegistrationReducerService:
 
         Returns:
             Sanitized string suitable for Consul tags (lowercase, alphanumeric
-            with dashes, max 63 chars). Falls back to ``'unnamed'`` when the
-            input contains only special characters and produces an empty string
-            after stripping. Note: if multiple nodes have tool names that all
-            consist entirely of special characters, they will all produce the
-            same ``'unnamed'`` fallback and their ``mcp-tool:unnamed`` Consul
-            tags will silently collide.
+            with dashes, max 63 chars). Falls back to ``'unnamed-<sha1[:8]>'``
+            when the input contains only special characters and produces an empty
+            string after stripping. The hash suffix is derived from the original
+            name so each distinct all-special-character input maps to a unique
+            fallback, preventing ``mcp-tool:unnamed`` tag collisions across nodes.
         """
         sanitized = re.sub(r"[^a-zA-Z0-9]+", "-", name.lower())
         sanitized = sanitized.strip("-")
         if not sanitized:
             logger.warning(
                 "_sanitize_tool_name: input '%s' produced empty result after sanitization; "
-                "falling back to 'unnamed'",
+                "falling back to hash-based unnamed tag",
                 re.sub(r"[^a-zA-Z0-9]", "*", name)[
                     :200
                 ],  # mask + truncate for safe logging
             )
-            # KNOWN LIMITATION (pre-beta, ticket TBD — file before beta): Multiple nodes with
-            # all-special-character tool names all receive ``mcp-tool:unnamed`` in
-            # Consul, causing silent tag collisions that make them indistinguishable
-            # in the service catalog.
-            # Three items must be addressed before beta:
-            #   (1) Replace bare "unnamed" with "unnamed-<sha256[:8]>" of original name
-            #   (2) Add Consul tag deduplication check at registration time
-            #   (3) Add integration test verifying no cross-node tag collision
-            return "unnamed"
+            # Use a hash suffix to ensure each distinct all-special-character tool
+            # name produces a unique fallback value.  Without this, multiple nodes
+            # would all receive ``mcp-tool:unnamed`` in the Consul service catalog,
+            # and ServiceMCPToolDiscovery would expose them as the same MCP tool
+            # name — a real routing collision, not merely a cosmetic one.
+            # TODO (pre-beta): Add integration test verifying no cross-node tag
+            # collision when multiple nodes have all-special-character tool names.
+            name_hash = hashlib.sha1(name.encode()).hexdigest()[:8]
+            return f"unnamed-{name_hash}"
         return sanitized[:63]
 
     def _build_consul_intent(

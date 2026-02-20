@@ -461,6 +461,17 @@ class MixinConsulTopicIndex:
             # spurious delivery attempts to a node that no longer subscribes.
             # No active cleanup is attempted here; the stale entries are harmless but
             # invisible to the deregistration path.
+            #
+            # PERSISTENT CORRUPT ENTRY CASE: If the KV entry was written by
+            # external tooling (or a previous process that crashed mid-write) and
+            # remains permanently malformed, the "next successful cycle cleans up"
+            # guarantee above does NOT hold.  Every registration cycle resets
+            # `old_topics` to the empty set, so the removals are never computed and
+            # subscriber-list entries for all historical topics accumulate
+            # unboundedly.  If a persistent corrupt entry is suspected (e.g. the
+            # orphan warning appears on every registration cycle without clearing),
+            # the affected KV key must be deleted or corrected manually via the
+            # Consul CLI or UI before normal delta cleanup can resume.
             parsed = []
         if parsed and not all(isinstance(item, str) for item in parsed):
             logger.warning(
@@ -481,6 +492,17 @@ class MixinConsulTopicIndex:
             # spurious delivery attempts to a node that no longer subscribes.
             # No active cleanup is attempted here; the stale entries are harmless but
             # invisible to the deregistration path.
+            #
+            # PERSISTENT CORRUPT ENTRY CASE: If the KV entry was written by
+            # external tooling (or a previous process that crashed mid-write) and
+            # remains permanently malformed, the "next successful cycle cleans up"
+            # guarantee above does NOT hold.  Every registration cycle resets
+            # `old_topics` to the empty set, so the removals are never computed and
+            # subscriber-list entries for all historical topics accumulate
+            # unboundedly.  If a persistent corrupt entry is suspected (e.g. the
+            # orphan warning appears on every registration cycle without clearing),
+            # the affected KV key must be deleted or corrected manually via the
+            # Consul CLI or UI before normal delta cleanup can resume.
             parsed = []
         old_topics = set(parsed)
         new_topics = set(event_bus.subscribe_topic_strings)
