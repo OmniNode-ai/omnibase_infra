@@ -255,7 +255,12 @@ def _deserialize_response(raw: bytes | str) -> ModelTopicCatalogResponse | None:
             "_deserialize_response: unexpected payload structure",
             exc_info=True,
         )
-    except (json.JSONDecodeError, ValueError, KeyError, UnicodeDecodeError):
+    except (
+        json.JSONDecodeError,
+        ValueError,
+        KeyError,
+        UnicodeDecodeError,
+    ):  # UnicodeDecodeError listed explicitly for readability despite being a ValueError subclass
         # Expected noise: log at DEBUG only.
         #
         # json.JSONDecodeError is expected because both clients subscribe to the

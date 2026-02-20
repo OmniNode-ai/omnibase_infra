@@ -24,6 +24,7 @@ Related Tickets:
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Sequence
 from datetime import datetime, timedelta
@@ -81,6 +82,8 @@ from omnibase_infra.nodes.reducers.models.model_payload_postgres_update_registra
 from omnibase_infra.nodes.reducers.models.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
 )
+
+logger = logging.getLogger(__name__)
 
 # States that allow re-registration (node can try again)
 _RETRIABLE_STATES: frozenset[EnumRegistrationState] = frozenset(
@@ -563,6 +566,13 @@ class RegistrationReducerService:
         sanitized = re.sub(r"[^a-zA-Z0-9]+", "-", name.lower())
         sanitized = sanitized.strip("-")
         if not sanitized:
+            logger.warning(
+                "_sanitize_tool_name: input '%s' produced empty result after sanitization; "
+                "falling back to 'unnamed'",
+                re.sub(
+                    r"[^a-zA-Z0-9\-]", "*", name
+                ),  # mask special chars for safe logging
+            )
             return "unnamed"
         return sanitized[:63]
 

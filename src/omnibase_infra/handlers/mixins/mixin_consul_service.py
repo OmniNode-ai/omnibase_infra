@@ -470,13 +470,24 @@ class MixinConsulService:
             # Parse the event bus config
             event_bus = self._parse_event_bus_config(event_bus_data, correlation_id)
 
-            # Update topic index FIRST (uses old topics from previous registration)
-            # This computes delta and updates reverse index
-            await self._update_topic_index(node_id, event_bus, correlation_id)
+            try:
+                # Update topic index FIRST (uses old topics from previous registration)
+                # This computes delta and updates reverse index
+                await self._update_topic_index(node_id, event_bus, correlation_id)
 
-            # Store the new event bus config AFTER index update
-            # Order matters: _update_topic_index reads old topics before we overwrite
-            await self._store_node_event_bus(node_id, event_bus, correlation_id)
+                # Store the new event bus config AFTER index update
+                # Order matters: _update_topic_index reads old topics before we overwrite
+                await self._store_node_event_bus(node_id, event_bus, correlation_id)
+            except Exception:
+                logger.warning(
+                    "Consul agent registration succeeded but KV write failed for node %s "
+                    "(partial registration: service visible in Consul but topic index or "
+                    "event_bus config may be missing or stale)",
+                    node_id,
+                    extra={"correlation_id": str(correlation_id), "node_id": node_id},
+                    exc_info=True,
+                )
+                raise
 
             logger.info(
                 "Completed event_bus registration for node %s",
