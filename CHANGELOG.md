@@ -7,11 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.0] - 2026-02-20
 
+### Added
+
+#### OmniMemory Topics
+
+- **OMN-2383**: `platform_topic_suffixes` — OmniMemory Kafka topic suffix constants (`store`, `retrieve`, `retrieved`, `delete`, `deleted`, `search`, `search_results`, `error`) with package exports and full unit test coverage (#383)
+
+#### Topic Catalog
+
+- **OMN-2314**: Topic catalog change notification emission with CAS (compare-and-swap) versioning — catalog mutations now emit `TopicCatalogChangedEvent` with a version vector for optimistic concurrency control (#379)
+- **OMN-2312**: Topic catalog response warnings channel — catalog query responses now carry a `warnings` field for non-fatal advisory messages (e.g. deprecated topic references, schema drift) (#377)
+
+#### LLM-Driven Code Generation Handlers
+
+- **OMN-2278**: `HandlerCodeReviewAnalysis` — code review analysis handler via Coder-14B LLM, producing structured review results from git diff input (#376)
+- **OMN-2277**: `HandlerTestBoilerplateGeneration` — test boilerplate generation handler via Coder-14B LLM, scaffolding pytest unit tests from source signatures (#375)
+
+### Tests
+
+- **OMN-1686**: Unit tests for `NodeLedgerWriteEffect` handlers — full coverage of ledger write effect handler behaviour including error paths (#382)
+- **OMN-2317**: Topic catalog multi-client no-cross-talk E2E test — validates that concurrent catalog clients do not observe each other's in-flight mutations (#378)
+
 ### Changed
 
 #### Dependencies
 
 - **Bump `omnibase-core`** from `>=0.18.0,<0.19.0` → `>=0.18.1,<0.19.0`
+- **Bump `aquasecurity/trivy-action`** in CI vulnerability scanning workflow (#365)
 
 ## [0.8.1] - 2026-02-19
 
