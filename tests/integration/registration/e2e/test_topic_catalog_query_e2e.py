@@ -272,6 +272,15 @@ def _deserialize_response(raw: bytes | str) -> ModelTopicCatalogResponse | None:
         # TypeError (e.g., None or non-iterable raw message) is also expected noise:
         # the shared-topic consumer naturally receives mixed payloads, so a None or
         # non-bytes/str value is a normal occurrence and not a genuine error.
+        #
+        # Tradeoff note: logging at DEBUG rather than WARNING is intentional for the
+        # shared-topic noise described above.  However, this means that genuine
+        # serialization bugs introduced in *this test's own message construction*
+        # (e.g., a malformed ModelTopicCatalogResponse or wrong encoding) would also
+        # be swallowed silently at DEBUG level rather than surfacing as a WARNING.
+        # If a test appears to hang waiting for a response that never arrives, check
+        # whether the producer side is emitting a message that fails deserialization
+        # here — those failures will only appear in the DEBUG log output.
         logger.debug(
             "_deserialize_response: failed to deserialize message",
             exc_info=True,

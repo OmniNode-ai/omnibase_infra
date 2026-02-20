@@ -17,8 +17,15 @@ from uuid import uuid4
 
 import pytest
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumInfraTransportType, EnumResponseStatus
 from omnibase_infra.errors import InfraConsulError, RuntimeHostError
+from omnibase_infra.handlers.models.consul import (
+    ModelConsulHandlerPayload,
+    ModelConsulRegisterPayload,
+)
+from omnibase_infra.handlers.models.model_consul_handler_response import (
+    ModelConsulHandlerResponse,
+)
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -53,13 +60,22 @@ class TestIntentEffectConsulRegisterExecute:
     def mock_consul_handler(self) -> MagicMock:
         """Create a mock HandlerConsul with async execute."""
         handler = MagicMock()
-        # Build a mock handler output that looks like a successful response:
-        # handler_output.result.is_error must be False so the error check
-        # added in IntentEffectConsulRegister does not trigger.
-        mock_response = MagicMock()
-        mock_response.is_error = False
+        # Build a handler output with a real ModelConsulHandlerResponse so
+        # the isinstance(consul_response, ModelConsulHandlerResponse) guard in
+        # IntentEffectConsulRegister passes and is_error is type-safe.
+        real_response = ModelConsulHandlerResponse(
+            status=EnumResponseStatus.SUCCESS,
+            payload=ModelConsulHandlerPayload(
+                data=ModelConsulRegisterPayload(
+                    registered=True,
+                    name="onex-effect",
+                    consul_service_id="onex-effect-123",
+                ),
+            ),
+            correlation_id=uuid4(),
+        )
         mock_output = MagicMock()
-        mock_output.result = mock_response
+        mock_output.result = real_response
         handler.execute = AsyncMock(return_value=mock_output)
         return handler
 
@@ -197,10 +213,21 @@ class TestIntentEffectConsulRegisterExecute:
         )
 
         # Handler returns normally (no exception) but result indicates an error.
-        mock_error_response = MagicMock()
-        mock_error_response.is_error = True
+        # Use a real ModelConsulHandlerResponse with ERROR status so the
+        # isinstance guard passes and is_error returns True type-safely.
+        real_error_response = ModelConsulHandlerResponse(
+            status=EnumResponseStatus.ERROR,
+            payload=ModelConsulHandlerPayload(
+                data=ModelConsulRegisterPayload(
+                    registered=False,
+                    name="onex-effect",
+                    consul_service_id="onex-effect-123",
+                ),
+            ),
+            correlation_id=correlation_id,
+        )
         mock_error_output = MagicMock()
-        mock_error_output.result = mock_error_response
+        mock_error_output.result = real_error_response
         mock_consul_handler.execute = AsyncMock(return_value=mock_error_output)
 
         with pytest.raises(

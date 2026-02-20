@@ -972,8 +972,13 @@ class TestRegisterServicePartialFailureWrapping:
         mock_container: MagicMock,
     ) -> None:
         """When _update_topic_index raises InfraConsulError, _register_service
-        wraps it as a new InfraConsulError with the registration-level context
-        and chains the original via __cause__."""
+        lets it propagate as-is (no double-wrapping).
+
+        InfraConsulError is intentionally excluded from the catch tuple in
+        _register_service so that a consul-level KV error is not re-wrapped in
+        another InfraConsulError (which would produce a doubly-chained error).
+        The exact original error must reach callers unchanged.
+        """
         handler = HandlerConsul(mock_container)
 
         with patch(
@@ -1014,15 +1019,11 @@ class TestRegisterServicePartialFailureWrapping:
                     await handler.execute(envelope)
 
             raised = exc_info.value
-            # The re-raised error message should include the node_id
-            assert "partial-fail-node" in str(raised)
-            # The original error is chained via __cause__
-            assert raised.__cause__ is inner_error
-            # service_name is stored in context.additional_context by InfraConsulError
-            assert (
-                raised.context.get("additional_context", {}).get("service_name")
-                == "partial-fail-service"
-            )
+            # The original error propagates unchanged — not wrapped in a new
+            # InfraConsulError — so raised IS inner_error.
+            assert raised is inner_error
+            # No double-wrapping: __cause__ is None (error was not re-raised from exc).
+            assert raised.__cause__ is None
 
     @pytest.mark.asyncio
     async def test_store_node_event_bus_failure_reraised_as_infra_consul_error(
@@ -1076,10 +1077,9 @@ class TestRegisterServicePartialFailureWrapping:
             raised = exc_info.value
             assert "timeout-node" in str(raised)
             assert raised.__cause__ is inner_error
-            assert (
-                raised.context.get("additional_context", {}).get("service_name")
-                == "timeout-service"
-            )
+            # Assert service_name appears in the public error message string rather
+            # than testing internal context serialisation structure.
+            assert "timeout-service" in raised.args[0]
 
     @pytest.mark.asyncio
     async def test_infra_unavailable_error_reraised_as_infra_consul_error(

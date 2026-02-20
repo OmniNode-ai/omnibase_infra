@@ -573,9 +573,10 @@ class RegistrationReducerService:
                     :200
                 ],  # mask + truncate for safe logging
             )
-            # KNOWN LIMITATION (pre-beta): Multiple nodes with all-special-character
-            # tool names all receive ``mcp-tool:unnamed`` in Consul, causing silent
-            # tag collisions that make them indistinguishable in the service catalog.
+            # KNOWN LIMITATION (pre-beta, tracked in OMN-XXXX): Multiple nodes with
+            # all-special-character tool names all receive ``mcp-tool:unnamed`` in
+            # Consul, causing silent tag collisions that make them indistinguishable
+            # in the service catalog.
             # Three items must be addressed before beta:
             #   (1) Replace bare "unnamed" with "unnamed-<sha256[:8]>" of original name
             #   (2) Add Consul tag deduplication check at registration time

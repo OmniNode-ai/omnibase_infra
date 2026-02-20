@@ -487,17 +487,25 @@ class MixinConsulService:
                 # Store the new event bus config AFTER index update
                 # Order matters: _update_topic_index reads old topics before we overwrite
                 await self._store_node_event_bus(node_id, event_bus, correlation_id)
+            except InfraConsulError:
+                # InfraConsulError is a subclass of InfraConnectionError, so it
+                # would be caught by the broader handler below. Re-raise it here
+                # first so it propagates as-is without double-wrapping.
+                raise
             except (
-                InfraConsulError,
                 InfraTimeoutError,
                 InfraUnavailableError,
                 InfraConnectionError,
             ) as exc:
-                # Only wrap transport-level infrastructure errors. Structured errors
-                # such as ProtocolConfigurationError indicate a programming fault
-                # (bad payload, invalid config) and must propagate unwrapped so
-                # callers can distinguish configuration errors from transient I/O
-                # failures.
+                # Wrap non-consul transport-level infrastructure errors.
+                # InfraTimeoutError, InfraUnavailableError, and
+                # InfraConnectionError (non-consul) are re-raised as
+                # InfraConsulError so callers always see a consistent
+                # consul-level error from this method.
+                # Structured errors such as ProtocolConfigurationError indicate
+                # a programming fault (bad payload, invalid config) and must
+                # propagate unwrapped so callers can distinguish configuration
+                # errors from transient I/O failures.
                 logger.warning(
                     "Consul agent registration succeeded but KV write failed for node %s "
                     "(partial registration: service visible in Consul but topic index or "
@@ -518,10 +526,12 @@ class MixinConsulService:
                 # transport-level details (e.g., consul_key from a KV write
                 # error). Callers inspecting `__cause__` will see both layers.
                 raise InfraConsulError(
-                    f"Consul agent registered but KV write failed for node {node_id} - "
-                    "service visible in Consul but topic index or event bus config may be stale",
+                    f"Consul agent registered but KV write failed for service {name!r} "
+                    f"(node {node_id}) - service visible in Consul but topic index or "
+                    "event bus config may be stale",
                     context=ctx,
                     service_name=name,
+                    node_id=node_id,
                 ) from exc
 
             logger.info(

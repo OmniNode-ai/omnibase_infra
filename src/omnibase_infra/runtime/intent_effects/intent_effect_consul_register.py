@@ -34,6 +34,9 @@ from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.handlers.models.model_consul_handler_response import (
+    ModelConsulHandlerResponse,
+)
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -202,20 +205,22 @@ class IntentEffectConsulRegister:
                     f"service_id={payload.service_id}",
                     context=context,
                 )
-            # Defensive guard: consul_response is typed as `object` at the
-            # handler output level. If the handler returns an unexpected type
-            # that lacks `is_error`, accessing the attribute would raise an
-            # AttributeError. Guard with hasattr first; if the attribute is
-            # missing, raise a RuntimeHostError rather than letting an
-            # AttributeError propagate with a misleading stack trace.
-            if not hasattr(consul_response, "is_error"):
+            # Type-safe guard: consul_response is typed as `object` at the
+            # handler output level. Use isinstance to narrow to
+            # ModelConsulHandlerResponse before accessing is_error; this is
+            # type-safe and mypy-friendly. If the handler returns an unexpected
+            # type, raise RuntimeHostError rather than letting an AttributeError
+            # propagate with a misleading stack trace.
+            if not isinstance(consul_response, ModelConsulHandlerResponse):
                 context = ModelInfraErrorContext.with_correlation(
                     correlation_id=effective_correlation_id,
                     transport_type=EnumInfraTransportType.CONSUL,
                     operation="intent_effect_consul_register",
                 )
                 raise RuntimeHostError(
-                    "Consul handler result missing is_error attribute",
+                    f"Consul handler returned unexpected result type "
+                    f"{type(consul_response).__name__}, "
+                    f"expected ModelConsulHandlerResponse",
                     context=context,
                 )
             if consul_response.is_error:

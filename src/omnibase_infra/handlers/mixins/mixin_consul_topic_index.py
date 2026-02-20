@@ -449,6 +449,14 @@ class MixinConsulTopicIndex:
                 type(parsed).__name__,
                 extra={"correlation_id": str(correlation_id), "node_id": node_id},
             )
+            # TODO: Orphan risk — because `parsed` is reset to [] here, `old_topics`
+            # will be empty and no removals will be issued for previously-registered
+            # topics.  Any subscriber-list entries that were written for this node's
+            # old topics will remain in Consul until the next *successful* registration
+            # cycle overwrites the KV key with a well-formed JSON array, at which
+            # point the normal delta logic will compute and apply the removals.
+            # No active cleanup is attempted here; the stale entries are harmless but
+            # invisible to the deregistration path.
             parsed = []
         old_topics = set(parsed)
         new_topics = set(event_bus.subscribe_topic_strings)
