@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **OMN-2278**: `HandlerCodeReviewAnalysis` — code review analysis handler via Coder-14B LLM, producing structured review results from git diff input (#376)
 - **OMN-2277**: `HandlerTestBoilerplateGeneration` — test boilerplate generation handler via Coder-14B LLM, scaffolding pytest unit tests from source signatures (#375)
 
-### Tests
+#### Tests
 
 - **OMN-1686**: Unit tests for `NodeLedgerWriteEffect` handlers — full coverage of ledger write effect handler behaviour including error paths (#382)
 - **OMN-2317**: Topic catalog multi-client no-cross-talk E2E test — validates that concurrent catalog clients do not observe each other's in-flight mutations (#378)
@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Dependencies
 
 - **Bump `omnibase-core`** from `>=0.18.0,<0.19.0` → `>=0.18.1,<0.19.0`
-- **Bump `aquasecurity/trivy-action`** in CI vulnerability scanning workflow (#365)
+- **Bump `aquasecurity/trivy-action`** from `0.33.1` → `0.34.0` in CI vulnerability scanning workflow (#365)
 
 ## [0.8.1] - 2026-02-19
 
