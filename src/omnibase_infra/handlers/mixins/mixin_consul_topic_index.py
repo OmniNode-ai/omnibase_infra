@@ -364,6 +364,12 @@ class MixinConsulTopicIndex:
             For production with high concurrency, consider:
             - Using Consul transactions (txn endpoint) for atomic read-modify-write
             - Implementing optimistic locking with Consul's ModifyIndex
+
+            History:
+            An earlier design returned the computed delta (topics_to_add,
+            topics_to_remove) so callers could act on it. That return value was
+            removed when the caller was simplified to only need side-effect
+            behaviour; the delta is now only used internally for logging.
         """
         # NOTE: Non-atomic read-modify-write. See docstring for concurrency notes.
         logger.debug(

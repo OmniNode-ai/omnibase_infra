@@ -108,19 +108,27 @@ class ModelPayloadConsulRegister(BaseModel):
     def validate_node_id_required_with_event_bus_config(
         self,
     ) -> ModelPayloadConsulRegister:
-        """Validate that node_id is set when event_bus_config is provided.
+        """Validate that node_id is set and non-blank when event_bus_config is provided.
 
         The Consul handler stores event bus config under
-        ``onex/nodes/{node_id}/event_bus/``; without a node_id the key path
-        cannot be constructed and the store operation would silently fail or
+        ``onex/nodes/{node_id}/event_bus/``; without a usable node_id the key
+        path cannot be constructed and the store operation would silently fail or
         produce an incorrect path.
+
+        A whitespace-only node_id (e.g. ``"   "``) passes the field-level
+        ``min_length=1`` constraint but is equally unusable at runtime, so it is
+        rejected here as well.
 
         Raises:
             ValueError: If ``event_bus_config`` is not None and ``node_id``
-                is None.
+                is None or consists entirely of whitespace.
         """
-        if self.event_bus_config is not None and self.node_id is None:
-            raise ValueError("event_bus_config requires node_id to be set")
+        if self.event_bus_config is not None and (
+            self.node_id is None or not self.node_id.strip()
+        ):
+            raise ValueError(
+                "event_bus_config requires node_id to be set to a non-blank value"
+            )
         return self
 
 

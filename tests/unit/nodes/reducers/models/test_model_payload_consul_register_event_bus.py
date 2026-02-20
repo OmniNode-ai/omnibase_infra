@@ -16,6 +16,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.models.registration.model_node_event_bus_config import (
     ModelEventBusTopicEntry,
@@ -204,5 +205,7 @@ class TestModelPayloadConsulRegisterImmutability:
         )
 
         # Act & Assert
-        with pytest.raises(Exception):  # ValidationError for frozen model
+        with pytest.raises(
+            ValidationError
+        ):  # frozen model raises ValidationError on mutation
             payload.event_bus_config = ModelNodeEventBusConfig()  # type: ignore[misc]
