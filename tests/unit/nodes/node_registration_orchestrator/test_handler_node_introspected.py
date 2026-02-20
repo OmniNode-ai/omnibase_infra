@@ -784,9 +784,13 @@ class TestSanitizeToolName:
 
     def test_sanitize_empty_after_sanitization(self) -> None:
         """Test handling of names that become empty after sanitization."""
-        # All special characters - sanitized string is empty, so fallback "unnamed" is returned
-        result = RegistrationReducerService._sanitize_tool_name("@#$%^&*()")
-        assert result == "unnamed"
+        import hashlib
+
+        # All special characters - sanitized string is empty, so fallback hash-based tag is returned
+        raw = "@#$%^&*()"
+        name_hash = hashlib.sha1(raw.encode(), usedforsecurity=False).hexdigest()[:8]
+        result = RegistrationReducerService._sanitize_tool_name(raw)
+        assert result == f"unnamed-{name_hash}"
 
 
 class TestCapabilitiesJsonbCompatibility:

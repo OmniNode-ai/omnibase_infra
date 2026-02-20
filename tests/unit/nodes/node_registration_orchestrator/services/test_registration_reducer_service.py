@@ -843,7 +843,9 @@ class TestSanitizeToolName:
 
         for raw in ("!!!", "@#$%", "---"):
             result = RegistrationReducerService._sanitize_tool_name(raw)
-            expected_hash = hashlib.sha1(raw.encode()).hexdigest()[:8]
+            expected_hash = hashlib.sha1(
+                raw.encode(), usedforsecurity=False
+            ).hexdigest()[:8]
             assert result == f"unnamed-{expected_hash}", (
                 f"Expected 'unnamed-{expected_hash}' for input {raw!r}, got {result!r}"
             )
