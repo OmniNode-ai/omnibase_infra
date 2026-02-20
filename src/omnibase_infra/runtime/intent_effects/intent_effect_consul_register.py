@@ -130,6 +130,10 @@ class IntentEffectConsulRegister:
                 "tags": payload.tags,
             }
 
+            # When event_bus_config is set, the ModelPayloadConsulRegister
+            # model_validator already guarantees node_id is non-None. The
+            # None check here is still correct for the general case where
+            # event_bus_config is absent and node_id may legitimately be None.
             if payload.node_id is not None:
                 register_payload["node_id"] = payload.node_id
 

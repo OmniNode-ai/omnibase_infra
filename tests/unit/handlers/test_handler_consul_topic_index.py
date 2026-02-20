@@ -654,16 +654,18 @@ class TestUpdateTopicIndexSideEffects:
             add_calls: list[tuple[str, str]] = []
             remove_calls: list[tuple[str, str]] = []
 
+            # Safe to capture: each test creates a fresh handler instance, so
+            # original_add and original_remove are always valid for this test's lifetime.
             original_add = handler._add_subscriber_to_topic
             original_remove = handler._remove_subscriber_from_topic
 
             async def spy_add(topic: str, nid: str, cid: object) -> None:
                 add_calls.append((topic, nid))
-                return await original_add(topic, nid, cid)  # type: ignore[return-value]
+                await original_add(topic, nid, cid)
 
             async def spy_remove(topic: str, nid: str, cid: object) -> None:
                 remove_calls.append((topic, nid))
-                return await original_remove(topic, nid, cid)  # type: ignore[return-value]
+                await original_remove(topic, nid, cid)
 
             handler._add_subscriber_to_topic = spy_add  # type: ignore[method-assign]
             handler._remove_subscriber_from_topic = spy_remove  # type: ignore[method-assign]
@@ -724,16 +726,18 @@ class TestUpdateTopicIndexSideEffects:
             add_calls: list[tuple[str, str]] = []
             remove_calls: list[tuple[str, str]] = []
 
+            # Safe to capture: each test creates a fresh handler instance, so
+            # original_add and original_remove are always valid for this test's lifetime.
             original_add = handler._add_subscriber_to_topic
             original_remove = handler._remove_subscriber_from_topic
 
             async def spy_add(topic: str, nid: str, cid: object) -> None:
                 add_calls.append((topic, nid))
-                return await original_add(topic, nid, cid)  # type: ignore[return-value]
+                await original_add(topic, nid, cid)
 
             async def spy_remove(topic: str, nid: str, cid: object) -> None:
                 remove_calls.append((topic, nid))
-                return await original_remove(topic, nid, cid)  # type: ignore[return-value]
+                await original_remove(topic, nid, cid)
 
             handler._add_subscriber_to_topic = spy_add  # type: ignore[method-assign]
             handler._remove_subscriber_from_topic = spy_remove  # type: ignore[method-assign]
@@ -845,11 +849,13 @@ class TestUpdateTopicIndexSideEffects:
 
             add_calls: list[tuple[str, str]] = []
 
+            # Safe to capture: each test creates a fresh handler instance, so
+            # original_add is always valid for this test's lifetime.
             original_add = handler._add_subscriber_to_topic
 
             async def spy_add(topic: str, nid: str, cid: object) -> None:
                 add_calls.append((topic, nid))
-                return await original_add(topic, nid, cid)  # type: ignore[return-value]
+                await original_add(topic, nid, cid)
 
             # _remove_subscriber_from_topic always raises InfraConsulError
             remove_error = InfraConsulError(

@@ -61,14 +61,15 @@ class ModelTopicCatalogChanged(BaseModel):
         ...,
         description="Unique identifier for this change event.",
     )
+    # Historical note: a prior ``cas_failure`` field was removed in the OMN-2314 revert,
+    # so catalog_version=0 is unambiguous — it can only mean the initial state, not a
+    # CAS failure.
     catalog_version: int = Field(
         ...,
         ge=0,
         description=(
             "New catalog version after this change. Version 0 represents the initial "
-            "catalog state. Note: a prior ``cas_failure`` field was removed in the "
-            "OMN-2314 revert, so catalog_version=0 is unambiguous — it can only mean "
-            "the initial state, not a CAS failure."
+            "catalog state."
         ),
     )
     topics_added: tuple[str, ...] = Field(
