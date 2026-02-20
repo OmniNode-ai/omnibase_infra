@@ -31,7 +31,9 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration import (
+    ModelEventBusTopicEntry,
     ModelNodeCapabilities,
+    ModelNodeEventBusConfig,
     ModelNodeIntrospectionEvent,
 )
 from omnibase_infra.models.registration.commands.model_node_registration_acked import (
@@ -417,6 +419,42 @@ class TestDecideIntrospectionConsulToggle:
             if isinstance(i.payload, ModelPayloadConsulRegister)
         ]
         assert len(consul_intents) == 0
+
+    def test_consul_intent_passes_through_event_bus_config(self) -> None:
+        """event.event_bus non-None -> consul_payload.event_bus_config == event.event_bus."""
+        service = RegistrationReducerService(consul_enabled=True)
+
+        event_bus = ModelNodeEventBusConfig(
+            subscribe_topics=[
+                ModelEventBusTopicEntry(topic="dev.onex.evt.input.v1"),
+            ],
+            publish_topics=[
+                ModelEventBusTopicEntry(topic="dev.onex.evt.output.v1"),
+            ],
+        )
+        event = ModelNodeIntrospectionEvent(
+            node_id=uuid4(),
+            node_type=EnumNodeKind.EFFECT,
+            correlation_id=uuid4(),
+            timestamp=TEST_NOW,
+            event_bus=event_bus,
+        )
+
+        decision = service.decide_introspection(
+            projection=None,
+            event=event,
+            correlation_id=uuid4(),
+            now=TEST_NOW,
+        )
+
+        assert decision.action == "emit"
+        consul_intents = [
+            i
+            for i in decision.intents
+            if isinstance(i.payload, ModelPayloadConsulRegister)
+        ]
+        assert len(consul_intents) == 1
+        assert consul_intents[0].payload.event_bus_config == event_bus
 
 
 # ---------------------------------------------------------------------------

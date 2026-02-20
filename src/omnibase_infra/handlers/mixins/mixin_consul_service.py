@@ -477,7 +477,18 @@ class MixinConsulService:
             )
 
             # Parse the event bus config
-            event_bus = self._parse_event_bus_config(event_bus_data, correlation_id)
+            try:
+                event_bus = self._parse_event_bus_config(event_bus_data, correlation_id)
+            except ProtocolConfigurationError:
+                logger.warning(
+                    "Consul agent registration succeeded but event_bus_config parsing "
+                    "failed for node %s (partial registration: service visible in Consul "
+                    "but KV event bus config write was skipped due to config error)",
+                    node_id,
+                    extra={"correlation_id": str(correlation_id), "node_id": node_id},
+                    exc_info=True,
+                )
+                raise
 
             try:
                 # Update topic index FIRST (uses old topics from previous registration)
