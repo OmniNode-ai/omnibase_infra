@@ -49,6 +49,10 @@ T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
+# Type alias for raw Consul KV get results: (modify_index, entry_or_None).
+# Hoisted here to avoid identical inline definitions inside multiple methods.
+KVGetResult = tuple[int, dict[str, object] | None]
+
 
 class ProtocolConsulTopicIndexDependencies(Protocol):
     """Protocol defining required dependencies for topic index operations.
@@ -194,7 +198,6 @@ class MixinConsulTopicIndex:
             index, data = self._client.kv.get(key, recurse=False)
             return index, data
 
-        KVGetResult = tuple[int, dict[str, object] | None]
         result = await self._execute_with_retry(
             "consul.kv_get_raw",
             get_func,
@@ -636,7 +639,6 @@ class MixinConsulTopicIndex:
             index, data = self._client.kv.get(key, recurse=False)
             return index, data
 
-        KVGetResult = tuple[int, dict[str, object] | None]
         result = await self._execute_with_retry(
             "consul.kv_get_with_modify_index",
             get_func,

@@ -557,6 +557,8 @@ class RegistrationReducerService:
         """
         sanitized = re.sub(r"[^a-zA-Z0-9]+", "-", name.lower())
         sanitized = sanitized.strip("-")
+        if not sanitized:
+            return "unnamed"
         return sanitized[:63]
 
     def _build_consul_intent(

@@ -250,7 +250,14 @@ def _deserialize_response(raw: bytes | str) -> ModelTopicCatalogResponse | None:
             )
         ):
             return ModelTopicCatalogResponse.model_validate(data)
-    except (json.JSONDecodeError, ValueError, KeyError, TypeError, ValidationError):
+    except (TypeError, ValidationError):
+        # Unexpected payload shape: log at WARNING so these surface during debugging.
+        logger.warning(
+            "_deserialize_response: unexpected payload structure",
+            exc_info=True,
+        )
+    except (json.JSONDecodeError, ValueError, KeyError):
+        # Expected noise (non-JSON bytes, missing keys, bad values): DEBUG is sufficient.
         logger.debug(
             "_deserialize_response: failed to deserialize message",
             exc_info=True,
@@ -427,18 +434,22 @@ class TestMultiClientNoCrossTalk:
             await asyncio.wait_for(got_b.wait(), timeout=_KAFKA_RECEIVE_TIMEOUT_S)
 
             # Assert: no cross-talk
-            # Client A must have ONLY responses with correlation_a
-            assert len(received_a) >= 1, (
-                "Client A must have received its own response"
-            )  # len >= 1 confirms Client A received; per-resp correlation_id check below is the real cross-talk guard
+            # Client A must have received EXACTLY one response (its own).
+            # Using == 1 rather than >= 1 so that duplicate delivery is caught
+            # instead of silently masked.
+            assert len(received_a) == 1, (
+                f"Client A must have received exactly one response, got {len(received_a)}"
+            )
             for resp in received_a:
                 assert resp.correlation_id == correlation_a, (
                     f"Client A received a response with wrong correlation_id: "
                     f"{resp.correlation_id} (expected {correlation_a})"
                 )
 
-            # Client B must have ONLY responses with correlation_b
-            assert len(received_b) >= 1, "Client B must have received its own response"
+            # Client B must have received EXACTLY one response (its own).
+            assert len(received_b) == 1, (
+                f"Client B must have received exactly one response, got {len(received_b)}"
+            )
             for resp in received_b:
                 assert resp.correlation_id == correlation_b, (
                     f"Client B received a response with wrong correlation_id: "
