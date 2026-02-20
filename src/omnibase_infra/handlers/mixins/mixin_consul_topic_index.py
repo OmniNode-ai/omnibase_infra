@@ -473,6 +473,11 @@ class MixinConsulTopicIndex:
             # the affected KV key must be deleted or corrected manually via the
             # Consul CLI or UI before normal delta cleanup can resume.
             parsed = []
+        # Conservative mixed-type policy: a list that contains ANY non-string element
+        # (e.g. ["valid-topic", 42]) is treated identically to a fully-invalid list —
+        # all entries are discarded and `parsed` is reset to [].  This is intentional:
+        # silently keeping the valid subset would risk partial-state inconsistency where
+        # some previously-registered topics are not cleaned up on the next delta pass.
         if parsed and not all(isinstance(item, str) for item in parsed):
             logger.warning(
                 "Consul topic index for node %s contains non-string elements; "

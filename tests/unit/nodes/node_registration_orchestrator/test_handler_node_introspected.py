@@ -591,6 +591,8 @@ class TestHandlerNodeIntrospectedIntents:
         assert consul_payload.service_id == f"onex-effect-{node_id}"
         assert "onex" in consul_payload.tags
         assert "node-type:effect" in consul_payload.tags
+        assert consul_payload.node_id == str(node_id)
+        assert consul_payload.event_bus_config is None
 
     @pytest.mark.asyncio
     async def test_no_intents_for_blocking_states(self) -> None:

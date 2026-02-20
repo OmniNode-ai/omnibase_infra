@@ -392,6 +392,10 @@ class TestDecideIntrospectionConsulToggle:
         ]
         assert len(consul_intents) == 1
 
+        consul_payload = consul_intents[0].payload
+        assert consul_payload.node_id == str(event.node_id)
+        assert consul_payload.event_bus_config is None
+
     def test_no_consul_intent_when_disabled(self) -> None:
         """consul_enabled=False -> 1 intent (postgres only)."""
         service = RegistrationReducerService(consul_enabled=False)

@@ -580,7 +580,9 @@ class RegistrationReducerService:
             # name — a real routing collision, not merely a cosmetic one.
             # TODO (pre-beta): Add integration test verifying no cross-node tag
             # collision when multiple nodes have all-special-character tool names.
-            name_hash = hashlib.sha1(name.encode()).hexdigest()[:8]
+            name_hash = hashlib.sha1(name.encode(), usedforsecurity=False).hexdigest()[
+                :8
+            ]
             return f"unnamed-{name_hash}"
         return sanitized[:63]
 
