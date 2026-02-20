@@ -196,6 +196,17 @@ class IntentEffectConsulRegister:
             #     exception. Because the first block raises on a missing
             #     attribute, the `hasattr` check in the second condition is
             #     implicitly guaranteed by reaching that line.
+            if consul_response is None:
+                # Abnormal: HandlerConsul._build_response always returns a
+                # non-None result via for_compute, so None here signals a
+                # broken or non-conformant handler implementation.
+                logger.warning(
+                    "Consul handler returned None result for service_id=%s "
+                    "(expected ModelConsulHandlerResponse); registration may "
+                    "be incomplete. correlation_id=%s",
+                    payload.service_id,
+                    str(effective_correlation_id),
+                )
             if consul_response is not None:
                 # Defensive guard: consul_response is typed as `object` at the
                 # handler output level. If the handler returns an unexpected type
