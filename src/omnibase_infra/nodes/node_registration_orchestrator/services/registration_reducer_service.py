@@ -573,17 +573,13 @@ class RegistrationReducerService:
                     r"[^a-zA-Z0-9]", "*", name
                 ),  # mask special chars for safe logging
             )
-            # TODO: Replace the 'unnamed' fallback with a hash-suffix or unique-suffix
-            # strategy (e.g. "unnamed-<sha256[:8]>") to prevent silent Consul tag
-            # collisions when multiple nodes produce all-special-character tool names.
-            # Currently there is no startup-time check that rejects duplicate
-            # ``mcp-tool:unnamed`` tags, and no integration test verifies that tag
-            # collisions don't silently occur when multiple nodes fall through to
-            # this branch.
-            # File a follow-up ticket before beta to: (1) implement
-            # `unnamed-<sha256[:8]>` fallback instead of bare `unnamed`,
-            # (2) add Consul tag deduplication check at registration time,
-            # (3) add integration test verifying no cross-node tag collisions.
+            # KNOWN LIMITATION (pre-beta): Multiple nodes with all-special-character
+            # tool names all receive ``mcp-tool:unnamed`` in Consul, causing silent
+            # tag collisions that make them indistinguishable in the service catalog.
+            # Three items must be addressed before beta:
+            #   (1) Replace bare "unnamed" with "unnamed-<sha256[:8]>" of original name
+            #   (2) Add Consul tag deduplication check at registration time
+            #   (3) Add integration test verifying no cross-node tag collision
             return "unnamed"
         return sanitized[:63]
 
