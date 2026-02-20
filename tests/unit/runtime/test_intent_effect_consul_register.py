@@ -406,3 +406,51 @@ class TestIntentEffectConsulRegisterExecute:
         envelope = call_args[0][0]
         assert "event_bus_config" in envelope["payload"]
         assert envelope["payload"]["node_id"] == "test-node-id-abc123"
+
+
+@pytest.mark.unit
+class TestIntentEffectConsulRegisterCatalogRemoval:
+    """Positive assertions that catalog service is intentionally absent.
+
+    OMN-2314 revert: catalog service intentionally removed pending redesign.
+
+    The file tests/unit/runtime/test_intent_effect_consul_register_catalog.py
+    was deleted as part of the OMN-2314 revert. These tests replace that
+    deletion with explicit assertions that catalog service wiring is NOT
+    present in IntentEffectConsulRegister, confirming the removal is a
+    deliberate architectural decision rather than an accidental regression.
+    """
+
+    def test_catalog_service_attribute_is_absent(self) -> None:
+        """IntentEffectConsulRegister must not carry a catalog service attribute.
+
+        Verifies that the OMN-2314 revert is intentional: no ``_catalog_service``
+        (or any ``catalog``-named) attribute is wired into the effect at
+        construction time. A catalog integration attribute would indicate the
+        revert was not fully applied.
+        """
+        mock_handler = MagicMock()
+        effect = IntentEffectConsulRegister(consul_handler=mock_handler)
+
+        # The only instance attribute set by __init__ is _consul_handler.
+        assert not hasattr(effect, "_catalog_service"), (
+            "IntentEffectConsulRegister must not have a _catalog_service attribute "
+            "(OMN-2314 revert: catalog service removed pending redesign)"
+        )
+
+    def test_init_accepts_only_consul_handler(self) -> None:
+        """IntentEffectConsulRegister.__init__ must accept consul_handler only.
+
+        Confirms the constructor signature has not been extended with a
+        catalog_service parameter, which would re-introduce OMN-2314 wiring.
+        """
+        import inspect
+
+        sig = inspect.signature(IntentEffectConsulRegister.__init__)
+        param_names = [p for p in sig.parameters if p != "self"]
+
+        assert param_names == ["consul_handler"], (
+            f"Expected __init__ to accept only 'consul_handler', "
+            f"got {param_names!r}. A catalog_service parameter would indicate "
+            "the OMN-2314 revert was not fully applied."
+        )
