@@ -5,6 +5,7 @@ import pytest
 from omnibase_core.validation import validate_topic_suffix
 from omnibase_infra.topics import (
     ALL_INTELLIGENCE_TOPIC_SPECS,
+    ALL_OMNIMEMORY_TOPIC_SPECS,
     ALL_PLATFORM_SUFFIXES,
     ALL_PROVISIONED_SUFFIXES,
     ALL_PROVISIONED_TOPIC_SPECS,
@@ -24,6 +25,12 @@ from omnibase_infra.topics import (
     SUFFIX_NODE_INTROSPECTION,
     SUFFIX_NODE_REGISTRATION,
     SUFFIX_NODE_REGISTRATION_ACKED,
+    SUFFIX_OMNIMEMORY_CRAWL_REQUESTED,
+    SUFFIX_OMNIMEMORY_CRAWL_TICK,
+    SUFFIX_OMNIMEMORY_DOCUMENT_CHANGED,
+    SUFFIX_OMNIMEMORY_DOCUMENT_DISCOVERED,
+    SUFFIX_OMNIMEMORY_DOCUMENT_INDEXED,
+    SUFFIX_OMNIMEMORY_DOCUMENT_REMOVED,
     SUFFIX_REGISTRATION_SNAPSHOTS,
     SUFFIX_REGISTRY_REQUEST_INTROSPECTION,
     SUFFIX_REQUEST_INTROSPECTION,
@@ -242,6 +249,70 @@ class TestIntelligenceTopicSuffixes:
         assert len(suffixes) == len(set(suffixes))
 
 
+class TestOmniMemoryTopicSuffixes:
+    """Tests for OmniMemory domain topic suffix constants."""
+
+    def test_all_omnimemory_suffixes_are_valid(self) -> None:
+        """Every OmniMemory suffix must pass ONEX topic validation."""
+        for spec in ALL_OMNIMEMORY_TOPIC_SPECS:
+            result = validate_topic_suffix(spec.suffix)
+            assert result.is_valid, (
+                f"Invalid OmniMemory suffix: {spec.suffix} - {result.error}"
+            )
+
+    def test_omnimemory_suffixes_use_correct_producer(self) -> None:
+        """OmniMemory suffixes should use 'omnimemory' as producer."""
+        for spec in ALL_OMNIMEMORY_TOPIC_SPECS:
+            parts = spec.suffix.split(".")
+            producer = parts[2]
+            assert producer == "omnimemory", (
+                f"Expected 'omnimemory' producer in: {spec.suffix}"
+            )
+
+    def test_omnimemory_topic_count(self) -> None:
+        """OmniMemory spec registry should have 6 topics."""
+        assert len(ALL_OMNIMEMORY_TOPIC_SPECS) == 6
+
+    def test_omnimemory_event_topics(self) -> None:
+        """OmniMemory event topics should be defined with correct suffixes."""
+        assert (
+            SUFFIX_OMNIMEMORY_DOCUMENT_DISCOVERED
+            == "onex.evt.omnimemory.document-discovered.v1"
+        )
+        assert (
+            SUFFIX_OMNIMEMORY_DOCUMENT_CHANGED
+            == "onex.evt.omnimemory.document-changed.v1"
+        )
+        assert (
+            SUFFIX_OMNIMEMORY_DOCUMENT_REMOVED
+            == "onex.evt.omnimemory.document-removed.v1"
+        )
+        assert (
+            SUFFIX_OMNIMEMORY_DOCUMENT_INDEXED
+            == "onex.evt.omnimemory.document-indexed.v1"
+        )
+
+    def test_omnimemory_command_topics(self) -> None:
+        """OmniMemory command topics should be defined with correct suffixes."""
+        assert SUFFIX_OMNIMEMORY_CRAWL_TICK == "onex.cmd.omnimemory.crawl-tick.v1"
+        assert (
+            SUFFIX_OMNIMEMORY_CRAWL_REQUESTED
+            == "onex.cmd.omnimemory.crawl-requested.v1"
+        )
+
+    def test_omnimemory_topics_use_3_partitions(self) -> None:
+        """All OmniMemory topics should use 3 partitions."""
+        for spec in ALL_OMNIMEMORY_TOPIC_SPECS:
+            assert spec.partitions == 3, (
+                f"Expected 3 partitions for {spec.suffix}, got {spec.partitions}"
+            )
+
+    def test_no_duplicate_omnimemory_suffixes(self) -> None:
+        """OmniMemory topic specs should not contain duplicates."""
+        suffixes = [spec.suffix for spec in ALL_OMNIMEMORY_TOPIC_SPECS]
+        assert len(suffixes) == len(set(suffixes))
+
+
 class TestProvisionedTopicSpecs:
     """Tests for the combined provisioned topic spec registry."""
 
@@ -260,11 +331,23 @@ class TestProvisionedTopicSpecs:
                 f"Intelligence suffix missing from provisioned: {suffix}"
             )
 
+    def test_provisioned_contains_all_omnimemory(self) -> None:
+        """ALL_PROVISIONED_SUFFIXES must include all OmniMemory suffixes."""
+        omnimemory_suffixes = {spec.suffix for spec in ALL_OMNIMEMORY_TOPIC_SPECS}
+        for suffix in omnimemory_suffixes:
+            assert suffix in ALL_PROVISIONED_SUFFIXES, (
+                f"OmniMemory suffix missing from provisioned: {suffix}"
+            )
+
     def test_provisioned_count(self) -> None:
-        """Combined provisioned specs should equal platform + intelligence."""
+        """Combined provisioned specs should equal platform + intelligence + omnimemory."""
         from omnibase_infra.topics import ALL_PLATFORM_TOPIC_SPECS
 
-        expected = len(ALL_PLATFORM_TOPIC_SPECS) + len(ALL_INTELLIGENCE_TOPIC_SPECS)
+        expected = (
+            len(ALL_PLATFORM_TOPIC_SPECS)
+            + len(ALL_INTELLIGENCE_TOPIC_SPECS)
+            + len(ALL_OMNIMEMORY_TOPIC_SPECS)
+        )
         assert len(ALL_PROVISIONED_TOPIC_SPECS) == expected
 
     def test_no_duplicate_provisioned_suffixes(self) -> None:
