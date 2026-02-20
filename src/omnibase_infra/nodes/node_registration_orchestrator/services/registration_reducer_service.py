@@ -580,6 +580,8 @@ class RegistrationReducerService:
             # ``mcp-tool:unnamed`` tags, and no integration test verifies that tag
             # collisions don't silently occur when multiple nodes fall through to
             # this branch.
+            # File a follow-up ticket before beta release to implement the
+            # unique-suffix strategy and add the missing collision-detection test.
             return "unnamed"
         return sanitized[:63]
 

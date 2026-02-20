@@ -181,6 +181,21 @@ class IntentEffectConsulRegister:
             # non-None result with `is_error=True` indicates an error that was
             # returned in-band rather than raised.
             consul_response = handler_output.result
+            # The two blocks below are mutually exclusive paths:
+            #
+            # (a) Missing attribute: the first block fires when `consul_response`
+            #     is a non-None object that does not have an `is_error` attribute
+            #     at all. This indicates a broken or unexpected handler
+            #     implementation. The block raises immediately, so the second
+            #     block is never reached in this case.
+            #
+            # (b) Attribute present but True: the second block fires when
+            #     `consul_response` has `is_error` (confirmed by the first block
+            #     not raising) and the value is True, meaning the handler
+            #     returned an error status in-band rather than raising an
+            #     exception. Because the first block raises on a missing
+            #     attribute, the `hasattr` check in the second condition is
+            #     implicitly guaranteed by reaching that line.
             if consul_response is not None:
                 # Defensive guard: consul_response is typed as `object` at the
                 # handler output level. If the handler returns an unexpected type

@@ -385,6 +385,16 @@ class MixinConsulTopicIndex:
             - Using Consul transactions (txn endpoint) for atomic read-modify-write
             - Implementing optimistic locking with Consul's ModifyIndex
 
+            Ordering and partial-failure behavior:
+            Adds are applied before removes. The loop over ``topics_to_add`` runs
+            to completion before the loop over ``topics_to_remove`` begins. If an
+            exception is raised partway through the remove loop (e.g. a transient
+            Consul error), the index will be left in a partially-updated state:
+            all new topics will have been added, but some stale topics may not yet
+            have been pruned. This is an accepted MVP limitation — the operation is
+            designed to be idempotent, so a subsequent successful call will
+            converge to the correct state.
+
             History:
             An earlier design returned the computed delta (topics_to_add,
             topics_to_remove) so callers could act on it. That return value was
