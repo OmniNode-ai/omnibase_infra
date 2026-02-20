@@ -569,9 +569,9 @@ class RegistrationReducerService:
             logger.warning(
                 "_sanitize_tool_name: input '%s' produced empty result after sanitization; "
                 "falling back to 'unnamed'",
-                re.sub(
-                    r"[^a-zA-Z0-9]", "*", name
-                ),  # mask special chars for safe logging
+                re.sub(r"[^a-zA-Z0-9]", "*", name)[
+                    :200
+                ],  # mask + truncate for safe logging
             )
             # KNOWN LIMITATION (pre-beta): Multiple nodes with all-special-character
             # tool names all receive ``mcp-tool:unnamed`` in Consul, causing silent
