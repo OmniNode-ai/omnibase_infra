@@ -49,7 +49,14 @@ class TestIntentEffectConsulRegisterExecute:
     def mock_consul_handler(self) -> MagicMock:
         """Create a mock HandlerConsul with async execute."""
         handler = MagicMock()
-        handler.execute = AsyncMock(return_value=MagicMock())
+        # Build a mock handler output that looks like a successful response:
+        # handler_output.result.is_error must be False so the error check
+        # added in IntentEffectConsulRegister does not trigger.
+        mock_response = MagicMock()
+        mock_response.is_error = False
+        mock_output = MagicMock()
+        mock_output.result = mock_response
+        handler.execute = AsyncMock(return_value=mock_output)
         return handler
 
     @pytest.fixture

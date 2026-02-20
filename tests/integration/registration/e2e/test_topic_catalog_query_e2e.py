@@ -256,7 +256,17 @@ def _deserialize_response(raw: bytes | str) -> ModelTopicCatalogResponse | None:
             exc_info=True,
         )
     except (json.JSONDecodeError, ValueError, KeyError):
-        # Expected noise (non-JSON bytes, missing keys, bad values): DEBUG is sufficient.
+        # Expected noise: log at DEBUG only.
+        #
+        # json.JSONDecodeError is expected because both clients subscribe to the
+        # shared SUFFIX_TOPIC_CATALOG_RESPONSE topic but the Kafka consumer may
+        # deliver messages from other producers on the same topic (e.g., heartbeats,
+        # control plane messages, or messages from concurrent integration tests) that
+        # are not JSON or are not catalog response payloads. The topic-level consumer
+        # group filter does not guarantee only catalog response messages arrive here;
+        # correlation_id filtering is the correct isolation boundary (Option B).
+        # ValueError and KeyError cover missing required fields or bad values in
+        # otherwise-valid JSON that does not match the catalog response schema.
         logger.debug(
             "_deserialize_response: failed to deserialize message",
             exc_info=True,

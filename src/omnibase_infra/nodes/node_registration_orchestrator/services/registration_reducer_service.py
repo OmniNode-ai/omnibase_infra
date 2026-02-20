@@ -618,6 +618,12 @@ class RegistrationReducerService:
                 except ValueError:
                     pass
 
+        # Pass event_bus through from the introspection event. If event.event_bus
+        # is a ModelNodeEventBusConfig with both subscribe_topics and publish_topics
+        # empty (i.e., the node declares no event bus participation), the downstream
+        # handler will call _update_topic_index with an empty topic set. The delta
+        # computation will produce no topics_to_add and no topics_to_remove, making
+        # the index update a no-op. This is harmless and correct behavior.
         consul_payload = ModelPayloadConsulRegister(
             correlation_id=correlation_id,
             node_id=str(node_id),
@@ -626,7 +632,7 @@ class RegistrationReducerService:
             tags=tags,
             address=address,
             port=port,
-            event_bus_config=event.event_bus,  # Pass through from introspection event
+            event_bus_config=event.event_bus,
         )
 
         return ModelIntent(

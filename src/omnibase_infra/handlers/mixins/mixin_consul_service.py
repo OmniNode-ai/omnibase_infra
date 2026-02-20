@@ -344,12 +344,20 @@ class MixinConsulService:
 
         Partial Inconsistency Risk:
             Consul service registration happens before the KV writes for the topic
-            index and event bus config. If ``_update_topic_index`` or
-            ``_store_node_event_bus`` fail after the agent registration has already
-            succeeded, the system is left in a partially inconsistent state: the
-            service is visible in Consul but its topic index or event bus config
-            is missing or stale. There is no rollback of the Consul agent
-            registration on KV write failure.
+            index and event bus config. Two distinct partial-failure sub-cases exist:
+
+            1. ``_update_topic_index`` fails: The service is visible in Consul but the
+               reverse topic-to-node index is missing or stale. The new event bus config
+               has not been stored yet (``_store_node_event_bus`` is called after).
+
+            2. ``_update_topic_index`` succeeds but ``_store_node_event_bus`` fails: The
+               topic reverse index has been updated (node appears in subscriber lists) but
+               the per-node event bus config KV keys are missing or stale. The index is
+               ahead of the stored config.
+
+            In both sub-cases the service is visible in Consul but its topic index
+            or event bus config is missing or stale. There is no rollback of the
+            Consul agent registration on KV write failure.
 
             Accepted MVP limitation: this gap is known and intentional at this
             stage. No rollback mechanism is planned; callers should treat partial

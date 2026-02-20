@@ -155,7 +155,22 @@ class IntentEffectConsulRegister:
                 "correlation_id": effective_correlation_id,
                 "envelope_id": str(uuid4()),
             }
-            await self._consul_handler.execute(envelope)
+            handler_output = await self._consul_handler.execute(envelope)
+
+            # Detect silent failures: handler may return an error-status result
+            # instead of raising, so check the response status explicitly.
+            consul_response = handler_output.result
+            if consul_response is not None and consul_response.is_error:
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=effective_correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="intent_effect_consul_register",
+                )
+                raise RuntimeHostError(
+                    f"Consul registration returned error status for "
+                    f"service_id={payload.service_id}",
+                    context=context,
+                )
 
             logger.info(
                 "Consul registration executed: service_id=%s service_name=%s "
