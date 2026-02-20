@@ -206,6 +206,34 @@ class TestIntentEffectConsulRegisterExecute:
             await effect.execute(payload, correlation_id=correlation_id)
 
     @pytest.mark.asyncio
+    async def test_execute_succeeds_when_handler_result_is_none(
+        self, effect: IntentEffectConsulRegister, mock_consul_handler: MagicMock
+    ) -> None:
+        """Should complete without raising when handler_output.result is None.
+
+        Exercises the defensive code path documented in IntentEffectConsulRegister:
+        when consul_response (handler_output.result) is None, both the is_error
+        attribute check and the is_error=True check are skipped, and execute()
+        returns normally. This covers EFFECT handlers that may return None results.
+        """
+        correlation_id = uuid4()
+
+        payload = ModelPayloadConsulRegister(
+            correlation_id=correlation_id,
+            service_id="onex-effect-123",
+            service_name="onex-effect",
+            tags=["onex"],
+        )
+
+        # Handler returns successfully but result is None (defensive code path).
+        mock_none_output = MagicMock()
+        mock_none_output.result = None
+        mock_consul_handler.execute = AsyncMock(return_value=mock_none_output)
+
+        # Should not raise - the None result path is a documented no-op.
+        await effect.execute(payload, correlation_id=correlation_id)
+
+    @pytest.mark.asyncio
     async def test_execute_includes_event_bus_config(
         self, effect: IntentEffectConsulRegister, mock_consul_handler: MagicMock
     ) -> None:
