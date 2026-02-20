@@ -629,7 +629,7 @@ class RegistrationReducerService:
                         "mcp-tool:unnamed tag may collide with other nodes",
                         service_name,
                         node_id,
-                        repr(mcp_tool_name_raw[:200]),
+                        mcp_tool_name_raw[:200],
                     )
                 tags.extend(["mcp-enabled", f"mcp-tool:{mcp_tool_name}"])
 

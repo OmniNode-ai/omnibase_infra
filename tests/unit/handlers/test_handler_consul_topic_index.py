@@ -24,7 +24,13 @@ import pytest
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import InfraConsulError, ModelInfraErrorContext
+from omnibase_infra.errors import (
+    InfraConsulError,
+    InfraTimeoutError,
+    InfraUnavailableError,
+    ModelInfraErrorContext,
+    ModelTimeoutErrorContext,
+)
 from omnibase_infra.handlers.handler_consul import HandlerConsul
 from omnibase_infra.models.registration import (
     ModelEventBusTopicEntry,
@@ -944,6 +950,184 @@ class TestGetTopicSubscribers:
             assert subscribers == []
 
 
+class TestRegisterServicePartialFailureWrapping:
+    """Test that _register_service wraps KV-write errors as InfraConsulError.
+
+    Exercises the try/except block in _register_service (mixin_consul_service.py)
+    that catches transport-level errors from _update_topic_index or
+    _store_node_event_bus and re-raises them as InfraConsulError with the
+    registration-level context (node_id, service name, operation).
+    """
+
+    @pytest.mark.asyncio
+    async def test_update_topic_index_failure_reraised_as_infra_consul_error(
+        self,
+        consul_config: dict[str, object],
+        mock_consul_client: MagicMock,
+        mock_container: MagicMock,
+    ) -> None:
+        """When _update_topic_index raises InfraConsulError, _register_service
+        wraps it as a new InfraConsulError with the registration-level context
+        and chains the original via __cause__."""
+        handler = HandlerConsul(mock_container)
+
+        with patch(
+            "omnibase_infra.handlers.handler_consul.consul.Consul"
+        ) as MockClient:
+            MockClient.return_value = mock_consul_client
+            await handler.initialize(consul_config)
+
+            correlation_id = uuid4()
+            inner_error = InfraConsulError(
+                "Simulated KV index write failure",
+                context=ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="consul.kv_put_raw",
+                    target_name="consul_handler",
+                ),
+                consul_key="onex/topics/onex.evt.test.v1/subscribers",
+            )
+
+            envelope = {
+                "operation": "consul.register",
+                "payload": {
+                    "name": "partial-fail-service",
+                    "service_id": "partial-fail-service-001",
+                    "node_id": "partial-fail-node",
+                    "event_bus_config": {
+                        "subscribe_topics": [
+                            {"topic": "onex.evt.test.v1"},
+                        ],
+                    },
+                },
+                "correlation_id": correlation_id,
+            }
+
+            with patch.object(handler, "_update_topic_index", side_effect=inner_error):
+                with pytest.raises(InfraConsulError) as exc_info:
+                    await handler.execute(envelope)
+
+            raised = exc_info.value
+            # The re-raised error message should include the node_id
+            assert "partial-fail-node" in str(raised)
+            # The original error is chained via __cause__
+            assert raised.__cause__ is inner_error
+            # service_name is stored in context.additional_context by InfraConsulError
+            assert (
+                raised.context.get("additional_context", {}).get("service_name")
+                == "partial-fail-service"
+            )
+
+    @pytest.mark.asyncio
+    async def test_store_node_event_bus_failure_reraised_as_infra_consul_error(
+        self,
+        consul_config: dict[str, object],
+        mock_consul_client: MagicMock,
+        mock_container: MagicMock,
+    ) -> None:
+        """When _store_node_event_bus raises InfraTimeoutError, _register_service
+        wraps it as InfraConsulError with the registration-level context."""
+        handler = HandlerConsul(mock_container)
+
+        with patch(
+            "omnibase_infra.handlers.handler_consul.consul.Consul"
+        ) as MockClient:
+            MockClient.return_value = mock_consul_client
+            await handler.initialize(consul_config)
+
+            correlation_id = uuid4()
+            inner_error = InfraTimeoutError(
+                "Consul KV put timed out",
+                context=ModelTimeoutErrorContext(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="consul.kv_put_raw",
+                    target_name="consul_handler",
+                ),
+            )
+
+            envelope = {
+                "operation": "consul.register",
+                "payload": {
+                    "name": "timeout-service",
+                    "service_id": "timeout-service-001",
+                    "node_id": "timeout-node",
+                    "event_bus_config": {
+                        "subscribe_topics": [
+                            {"topic": "onex.evt.timeout-test.v1"},
+                        ],
+                    },
+                },
+                "correlation_id": correlation_id,
+            }
+
+            with patch.object(
+                handler, "_store_node_event_bus", side_effect=inner_error
+            ):
+                with pytest.raises(InfraConsulError) as exc_info:
+                    await handler.execute(envelope)
+
+            raised = exc_info.value
+            assert "timeout-node" in str(raised)
+            assert raised.__cause__ is inner_error
+            assert (
+                raised.context.get("additional_context", {}).get("service_name")
+                == "timeout-service"
+            )
+
+    @pytest.mark.asyncio
+    async def test_infra_unavailable_error_reraised_as_infra_consul_error(
+        self,
+        consul_config: dict[str, object],
+        mock_consul_client: MagicMock,
+        mock_container: MagicMock,
+    ) -> None:
+        """When _update_topic_index raises InfraUnavailableError, _register_service
+        wraps it as InfraConsulError (all four caught error types are exercised
+        across this test class)."""
+        handler = HandlerConsul(mock_container)
+
+        with patch(
+            "omnibase_infra.handlers.handler_consul.consul.Consul"
+        ) as MockClient:
+            MockClient.return_value = mock_consul_client
+            await handler.initialize(consul_config)
+
+            correlation_id = uuid4()
+            inner_error = InfraUnavailableError(
+                "Consul unavailable during KV index update",
+                context=ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.CONSUL,
+                    operation="consul.kv_put_raw",
+                    target_name="consul_handler",
+                ),
+            )
+
+            envelope = {
+                "operation": "consul.register",
+                "payload": {
+                    "name": "unavailable-service",
+                    "node_id": "unavailable-node",
+                    "event_bus_config": {
+                        "publish_topics": [
+                            {"topic": "onex.evt.unavailable-test.v1"},
+                        ],
+                    },
+                },
+                "correlation_id": correlation_id,
+            }
+
+            with patch.object(handler, "_update_topic_index", side_effect=inner_error):
+                with pytest.raises(InfraConsulError) as exc_info:
+                    await handler.execute(envelope)
+
+            raised = exc_info.value
+            assert "unavailable-node" in str(raised)
+            assert raised.__cause__ is inner_error
+
+
 __all__: list[str] = [
     "TestStoreEventBusInKV",
     "TestTopicSubscriberIndex",
@@ -952,4 +1136,5 @@ __all__: list[str] = [
     "TestServiceRegistrationWithEventBus",
     "TestUpdateTopicIndexSideEffects",
     "TestGetTopicSubscribers",
+    "TestRegisterServicePartialFailureWrapping",
 ]
