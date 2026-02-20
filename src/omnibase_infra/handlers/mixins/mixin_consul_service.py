@@ -358,7 +358,13 @@ class MixinConsulService:
                the per-node event bus config KV keys are missing or stale. The index is
                ahead of the stored config.
 
-            In both sub-cases the service is visible in Consul but its topic index
+            3. Within ``_update_topic_index`` itself: adds are performed before removes.
+               If the add loop succeeds but a remove raises, new topics have been appended
+               to their subscriber lists while old (stale) topics have not yet been pruned.
+               The index reflects a partially-updated state — neither the old nor the new
+               topic set — until a subsequent successful re-registration overwrites it.
+
+            In all sub-cases the service is visible in Consul but its topic index
             or event bus config is missing or stale. There is no rollback of the
             Consul agent registration on KV write failure.
 

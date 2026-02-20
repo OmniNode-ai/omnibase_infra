@@ -64,7 +64,12 @@ class ModelTopicCatalogChanged(BaseModel):
     catalog_version: int = Field(
         ...,
         ge=0,
-        description="New catalog version after this change. Version 0 represents the initial catalog state.",
+        description=(
+            "New catalog version after this change. Version 0 represents the initial "
+            "catalog state. Note: a prior ``cas_failure`` field was removed in the "
+            "OMN-2314 revert, so catalog_version=0 is unambiguous — it can only mean "
+            "the initial state, not a CAS failure."
+        ),
     )
     topics_added: tuple[str, ...] = Field(
         default_factory=tuple,
