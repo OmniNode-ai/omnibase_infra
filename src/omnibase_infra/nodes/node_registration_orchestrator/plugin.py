@@ -1348,6 +1348,9 @@ class PluginRegistration:
                     IntentEffectConsulRegister,
                 )
 
+                # NOTE: catalog change notification emission (ServiceTopicCatalog
+                # wiring + event_bus pass-through) was removed pending re-design
+                # of the CAS versioning approach (OMN-2314 revert).
                 consul_effect = IntentEffectConsulRegister(
                     consul_handler=self._consul_handler,
                 )

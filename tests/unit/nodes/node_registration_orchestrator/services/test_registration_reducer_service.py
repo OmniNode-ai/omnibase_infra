@@ -823,3 +823,36 @@ class TestDecideTimeout:
         )
 
         assert decision.action == "no_op"
+
+
+# ---------------------------------------------------------------------------
+# _sanitize_tool_name tests
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeToolName:
+    """Tests for _sanitize_tool_name helper used in Consul tag generation."""
+
+    def test_all_special_chars_produces_unnamed(self) -> None:
+        """A name consisting entirely of special characters falls back to 'unnamed'."""
+        assert RegistrationReducerService._sanitize_tool_name("!!!") == "unnamed"
+        assert RegistrationReducerService._sanitize_tool_name("@#$%") == "unnamed"
+        assert RegistrationReducerService._sanitize_tool_name("---") == "unnamed"
+
+    def test_two_different_all_special_char_names_both_produce_unnamed(self) -> None:
+        """Two nodes whose tool names are entirely special characters both map to
+        'unnamed', demonstrating they would produce the same 'mcp-tool:unnamed'
+        Consul tag and therefore silently collide.
+
+        This is a documented limitation (see _sanitize_tool_name docstring):
+        when multiple nodes have tool names that all consist entirely of special
+        characters, the fallback 'unnamed' value is identical for all of them.
+        """
+        result_a = RegistrationReducerService._sanitize_tool_name("!!!@@@")
+        result_b = RegistrationReducerService._sanitize_tool_name("$$$^^^")
+
+        # Both different-but-all-special inputs produce the same fallback
+        assert result_a == "unnamed"
+        assert result_b == "unnamed"
+        # Demonstrates that the Consul tags would collide: "mcp-tool:unnamed"
+        assert result_a == result_b

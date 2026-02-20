@@ -17,7 +17,7 @@ Consul KV Structure:
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -613,6 +613,191 @@ class TestServiceRegistrationWithEventBus:
             assert len(event_bus_keys) == 0
 
 
+class TestUpdateTopicIndexSideEffects:
+    """Tests verifying which topics _add_subscriber_to_topic and
+    _remove_subscriber_from_topic are called with inside _update_topic_index.
+
+    These tests replace the deleted test_topic_index_delta_return.py coverage
+    for side-effect call verification.
+    """
+
+    @pytest.mark.asyncio
+    async def test_update_topic_index_calls_add_for_new_topics(
+        self,
+        consul_config: dict[str, object],
+        mock_consul_client: MagicMock,
+        mock_container: MagicMock,
+    ) -> None:
+        """When there are no previously stored topics, _add_subscriber_to_topic
+        is called for every topic in the new config and
+        _remove_subscriber_from_topic is not called."""
+        handler = HandlerConsul(mock_container)
+
+        with patch(
+            "omnibase_infra.handlers.handler_consul.consul.Consul"
+        ) as MockClient:
+            MockClient.return_value = mock_consul_client
+            await handler.initialize(consul_config)
+
+            correlation_id = uuid4()
+            node_id = "side-effect-node-001"
+
+            event_bus = ModelNodeEventBusConfig(
+                subscribe_topics=[
+                    ModelEventBusTopicEntry(topic="onex.evt.topic-a.v1"),
+                    ModelEventBusTopicEntry(topic="onex.evt.topic-b.v1"),
+                ],
+            )
+
+            add_calls: list[tuple[str, str]] = []
+            remove_calls: list[tuple[str, str]] = []
+
+            original_add = handler._add_subscriber_to_topic
+            original_remove = handler._remove_subscriber_from_topic
+
+            async def spy_add(topic: str, nid: str, cid: object) -> None:
+                add_calls.append((topic, nid))
+                return await original_add(topic, nid, cid)  # type: ignore[return-value]
+
+            async def spy_remove(topic: str, nid: str, cid: object) -> None:
+                remove_calls.append((topic, nid))
+                return await original_remove(topic, nid, cid)  # type: ignore[return-value]
+
+            handler._add_subscriber_to_topic = spy_add  # type: ignore[method-assign]
+            handler._remove_subscriber_from_topic = spy_remove  # type: ignore[method-assign]
+
+            await handler._update_topic_index(node_id, event_bus, correlation_id)
+
+            # Both new topics should have been added
+            added_topics = {t for t, _ in add_calls}
+            assert "onex.evt.topic-a.v1" in added_topics
+            assert "onex.evt.topic-b.v1" in added_topics
+
+            # All add calls should reference the correct node_id
+            for _, nid in add_calls:
+                assert nid == node_id
+
+            # No removals when there were no previously registered topics
+            assert remove_calls == []
+
+    @pytest.mark.asyncio
+    async def test_update_topic_index_calls_remove_for_dropped_topics(
+        self,
+        consul_config: dict[str, object],
+        mock_consul_client: MagicMock,
+        mock_container: MagicMock,
+    ) -> None:
+        """When topics are removed from the config, _remove_subscriber_from_topic
+        is called for each dropped topic and _add_subscriber_to_topic is only
+        called for genuinely new topics."""
+        handler = HandlerConsul(mock_container)
+
+        with patch(
+            "omnibase_infra.handlers.handler_consul.consul.Consul"
+        ) as MockClient:
+            MockClient.return_value = mock_consul_client
+            await handler.initialize(consul_config)
+
+            correlation_id = uuid4()
+            node_id = "side-effect-node-002"
+
+            # Seed the KV store with an existing subscription to topic-a and topic-b
+            initial_config = ModelNodeEventBusConfig(
+                subscribe_topics=[
+                    ModelEventBusTopicEntry(topic="onex.evt.topic-a.v1"),
+                    ModelEventBusTopicEntry(topic="onex.evt.topic-b.v1"),
+                ],
+            )
+            await handler._update_topic_index(node_id, initial_config, correlation_id)
+            # Store the config so next _update_topic_index reads the old topics
+            await handler._store_node_event_bus(node_id, initial_config, correlation_id)
+
+            # Now update to only topic-c (removes a+b, adds c)
+            updated_config = ModelNodeEventBusConfig(
+                subscribe_topics=[
+                    ModelEventBusTopicEntry(topic="onex.evt.topic-c.v1"),
+                ],
+            )
+
+            add_calls: list[tuple[str, str]] = []
+            remove_calls: list[tuple[str, str]] = []
+
+            original_add = handler._add_subscriber_to_topic
+            original_remove = handler._remove_subscriber_from_topic
+
+            async def spy_add(topic: str, nid: str, cid: object) -> None:
+                add_calls.append((topic, nid))
+                return await original_add(topic, nid, cid)  # type: ignore[return-value]
+
+            async def spy_remove(topic: str, nid: str, cid: object) -> None:
+                remove_calls.append((topic, nid))
+                return await original_remove(topic, nid, cid)  # type: ignore[return-value]
+
+            handler._add_subscriber_to_topic = spy_add  # type: ignore[method-assign]
+            handler._remove_subscriber_from_topic = spy_remove  # type: ignore[method-assign]
+
+            await handler._update_topic_index(node_id, updated_config, correlation_id)
+
+            # topic-c is new so it should be added
+            added_topics = {t for t, _ in add_calls}
+            assert "onex.evt.topic-c.v1" in added_topics
+
+            # topic-a and topic-b were dropped so they should be removed
+            removed_topics = {t for t, _ in remove_calls}
+            assert "onex.evt.topic-a.v1" in removed_topics
+            assert "onex.evt.topic-b.v1" in removed_topics
+
+            # topic-c was not previously registered so it must not appear in removes
+            assert "onex.evt.topic-c.v1" not in removed_topics
+
+            # All calls reference the correct node_id
+            for _, nid in add_calls + remove_calls:
+                assert nid == node_id
+
+    @pytest.mark.asyncio
+    async def test_update_topic_index_no_calls_when_topics_unchanged(
+        self,
+        consul_config: dict[str, object],
+        mock_consul_client: MagicMock,
+        mock_container: MagicMock,
+    ) -> None:
+        """When the topic set is identical to the previous registration,
+        neither _add_subscriber_to_topic nor _remove_subscriber_from_topic
+        should be called (empty delta)."""
+        handler = HandlerConsul(mock_container)
+
+        with patch(
+            "omnibase_infra.handlers.handler_consul.consul.Consul"
+        ) as MockClient:
+            MockClient.return_value = mock_consul_client
+            await handler.initialize(consul_config)
+
+            correlation_id = uuid4()
+            node_id = "side-effect-node-003"
+
+            config = ModelNodeEventBusConfig(
+                subscribe_topics=[
+                    ModelEventBusTopicEntry(topic="onex.evt.stable.v1"),
+                ],
+            )
+
+            # Initial registration
+            await handler._update_topic_index(node_id, config, correlation_id)
+            await handler._store_node_event_bus(node_id, config, correlation_id)
+
+            # Second call with identical config
+            add_mock = AsyncMock()
+            remove_mock = AsyncMock()
+            handler._add_subscriber_to_topic = add_mock  # type: ignore[method-assign]
+            handler._remove_subscriber_from_topic = remove_mock  # type: ignore[method-assign]
+
+            await handler._update_topic_index(node_id, config, correlation_id)
+
+            # Delta is empty — neither add nor remove should be called
+            add_mock.assert_not_called()
+            remove_mock.assert_not_called()
+
+
 class TestGetTopicSubscribers:
     """Test retrieving subscribers for a topic."""
 
@@ -675,5 +860,6 @@ __all__: list[str] = [
     "TestTopicDeltaUpdates",
     "TestTopicStringsAndEntriesSeparation",
     "TestServiceRegistrationWithEventBus",
+    "TestUpdateTopicIndexSideEffects",
     "TestGetTopicSubscribers",
 ]

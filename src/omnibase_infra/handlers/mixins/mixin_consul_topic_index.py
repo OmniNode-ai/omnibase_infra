@@ -402,7 +402,7 @@ class MixinConsulTopicIndex:
         previous_key = f"onex/nodes/{node_id}/event_bus/subscribe_topics"
         previous_result = await self.kv_get_raw(previous_key, correlation_id)
         try:
-            old_topics = set(json.loads(previous_result) if previous_result else [])
+            parsed = json.loads(previous_result) if previous_result else []
         except (json.JSONDecodeError, TypeError) as e:
             context = ModelInfraErrorContext.with_correlation(
                 correlation_id=correlation_id,
@@ -415,6 +415,21 @@ class MixinConsulTopicIndex:
                 context=context,
                 consul_key=previous_key,
             ) from e
+        if not isinstance(parsed, list):
+            # The stored value is valid JSON but not the expected array type
+            # (e.g. a JSON object {"key": "val"} instead of a list). Calling
+            # set() on a dict would produce a set of dict keys — silently wrong
+            # behaviour.  We treat this as a corrupt/stale entry and reset to
+            # empty so the node re-registers all its topics on the next pass.
+            logger.warning(
+                "Consul topic index for node %s is not a list (got %s); "
+                "treating as empty and re-registering all topics",
+                node_id,
+                type(parsed).__name__,
+                extra={"correlation_id": str(correlation_id), "node_id": node_id},
+            )
+            parsed = []
+        old_topics = set(parsed)
         new_topics = set(event_bus.subscribe_topic_strings)
 
         # Compute delta
