@@ -235,6 +235,14 @@ class RegistryInfraLlmInferenceEffect:
             Callers resolving ``HandlerLlmOpenaiCompatible`` directly from the
             container will bypass metrics emission. Resolve
             ``ServiceLlmMetricsPublisher`` to use the metrics-wrapped handler.
+
+        Warning:
+            **Mutually exclusive with** ``register_openai_compatible``. Both
+            methods register under the same interface keys
+            (``HandlerLlmOpenaiCompatible`` and ``MixinLlmHttpTransport``).
+            If both are called on the same container, the second call will
+            silently overwrite the first registration. Call only one of the
+            two methods per container.
         """
         from omnibase_core.enums import EnumInjectionScope
         from omnibase_infra.mixins import MixinLlmHttpTransport
@@ -345,6 +353,12 @@ class RegistryInfraLlmInferenceEffect:
             ``HandlerLlmOllama`` supports ``last_call_metrics``.
             Until then, ``ServiceLlmMetricsPublisher`` silently skips
             emission and logs at DEBUG level.
+
+            **Mutually exclusive with** ``register_ollama``. Both methods
+            register under the same interface keys (``HandlerLlmOllama``
+            and ``MixinLlmHttpTransport``). If both are called on the same
+            container, the second call will silently overwrite the first
+            registration. Call only one of the two methods per container.
 
         Args:
             container: ONEX dependency injection container.
