@@ -230,8 +230,15 @@ if [[ "${SKIP_SEED}" != "true" ]]; then
     FULL_ENV_REFERENCE="${PROJECT_ROOT}/docs/env-example-full.txt"
     if [[ -f "${SEED_SCRIPT}" ]]; then
         log_info "Running seed script (dry-run first)..."
-        # Re-source .env so provision-infisical credentials are visible
-        set -a; source "${ENV_FILE}"; set +a
+        # Re-source .env so provision-infisical credentials are visible.
+        # Guard with a file-existence check: provision-infisical.py writes
+        # credentials to ENV_FILE, but if it ran in --dry-run mode or failed,
+        # the file may not yet exist.
+        if [[ -f "${ENV_FILE}" ]]; then
+            set -a; source "${ENV_FILE}"; set +a
+        else
+            log_warn "ENV_FILE not found (${ENV_FILE}); skipping re-source before seed"
+        fi
         run_cmd uv run python "${SEED_SCRIPT}" \
             --contracts-dir "${PROJECT_ROOT}/src/omnibase_infra/nodes" \
             --dry-run

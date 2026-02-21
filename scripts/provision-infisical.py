@@ -96,7 +96,7 @@ def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
         lines.extend(appended)
 
     content = "\n".join(lines) + "\n"
-    tmp = env_path.with_suffix(".tmp")
+    tmp = env_path.with_name(env_path.name + ".tmp")
     tmp.write_text(content, encoding="utf-8")
     tmp.chmod(0o600)
     tmp.replace(env_path)  # atomic on POSIX

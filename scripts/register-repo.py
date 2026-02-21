@@ -289,8 +289,36 @@ def _upsert_secret(
     existing = None
     try:
         existing = adapter.get_secret(secret_name=key, secret_path=folder)  # type: ignore[attr-defined]
-    except Exception:
-        pass  # key doesn't exist yet
+    except Exception as _get_exc:
+        # Only suppress the error when the secret genuinely does not exist yet.
+        # Re-raise for any exception that indicates a connection problem, auth
+        # failure, or other infrastructure error — those must not be silently
+        # swallowed, because the subsequent create_secret call will also fail
+        # and the root cause will be lost.
+        #
+        # The Infisical adapter wraps all get_secret failures (including 404s)
+        # as SecretResolutionError.  We distinguish "not found" from "real
+        # error" by inspecting the exception message and cause chain.
+        err_msg = str(_get_exc).lower()
+        is_not_found = (
+            "not found" in err_msg
+            or "404" in err_msg
+            or "does not exist" in err_msg
+            or "secret not found" in err_msg
+        )
+        if not is_not_found:
+            # Check the cause chain — the raw SDK exception may carry a more
+            # informative status code or message.
+            cause = getattr(_get_exc, "__cause__", None)
+            if cause is not None:
+                cause_msg = str(cause).lower()
+                is_not_found = (
+                    "not found" in cause_msg
+                    or "404" in cause_msg
+                    or "does not exist" in cause_msg
+                )
+        if not is_not_found:
+            raise  # Re-raise: connection/auth/unexpected error, not a missing key
 
     if existing is not None:
         if not overwrite:
@@ -349,8 +377,8 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
 
     print("\n  Keys to seed:")
     for folder, key, value in sorted(plan):
-        if len(value) > 4:
-            display = value[:4] + "..."
+        if len(value) > 12:
+            display = value[:2] + "..."
         elif value:
             display = "***"
         else:
@@ -474,8 +502,8 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     print(f"  Env file: {env_path}")
     print("\n  Repo-specific keys:")
     for folder, key, value in plan:
-        if value and len(value) > 4:
-            display = value[:4] + "..."
+        if value and len(value) > 12:
+            display = value[:2] + "..."
         elif value:
             display = "***"
         else:
@@ -485,8 +513,8 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     if extra:
         print(f"\n  Additional repo-only keys ({len(extra)}):")
         for folder, key, value in extra:
-            if value and len(value) > 4:
-                display = value[:4] + "..."
+            if value and len(value) > 12:
+                display = value[:2] + "..."
             elif value:
                 display = "***"
             else:
@@ -507,6 +535,8 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
 
     with _ADMIN_TOKEN_FILE.open() as f:
         admin_token = f.readline().strip()
+    if not admin_token:
+        raise ValueError(f"Admin token file is empty: {_ADMIN_TOKEN_FILE}")
 
     print(f"\nCreating folder structure at {path_prefix}/...")
     _create_folders_via_admin(
@@ -559,7 +589,9 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
 
     print(f"\nRepo '{repo_name}' is onboarded.")
     print("Its .env only needs:")
-    print(f"  POSTGRES_DATABASE={repo_name.replace('-', '_')}")
+    print(
+        f"  POSTGRES_DATABASE={repo_name.replace('-', '_')}  # suggested value — verify this matches your actual .env"
+    )
     print("  (Infisical creds come from ~/.omnibase/.env via shell env)")
     return 1 if counts["error"] else 0
 

@@ -275,3 +275,5 @@ coverage.json
 junit-*.xml
 .claude/settings.local.json
 .infisical-admin-token
+.infisical-admin-token.tmp
+.infisical-identity.tmp

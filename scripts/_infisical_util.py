@@ -33,7 +33,7 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if not env_path.is_file():
         return values
-    for line in env_path.read_text().splitlines():
+    for line in env_path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -47,8 +47,18 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
         is_quoted = len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"')
         if is_quoted:
             value = value[1:-1]
-        elif " #" in value:
-            value = value.split(" #")[0].strip()
+        elif " #" in value or "\t#" in value:
+            # Split on the first inline comment marker (space-hash or tab-hash).
+            # Find whichever appears first in the value.
+            space_pos = value.find(" #")
+            tab_pos = value.find("\t#")
+            if space_pos == -1:
+                cut = tab_pos
+            elif tab_pos == -1:
+                cut = space_pos
+            else:
+                cut = min(space_pos, tab_pos)
+            value = value[:cut].strip()
         if key:
             values[key] = value
     return values
