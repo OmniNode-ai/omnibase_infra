@@ -52,6 +52,7 @@
 #     - omninode-runtime: 8085 [runtime profile]
 #     - runtime-effects: 8086 [runtime profile]
 #     - agent-actions-consumer: 8087 [runtime profile]
+#     - intelligence-api: 8053 [runtime profile]
 name: omnibase-infra
 # ==========================================================================
 # IMPORTANT: Requires Docker Compose v2.20+ (nested variable expansion).
@@ -494,6 +495,59 @@ services:
           memory: 64M
     labels:
       - "com.omninode.service=agent-actions-consumer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+  # ==========================================================================
+  # OmniIntelligence HTTP API - Pattern Query Service (Runtime Profile)
+  # ==========================================================================
+  # Serves GET /api/v1/patterns for runtime enforcement nodes.
+  # Shares Dockerfile.runtime (omniintelligence==0.5.0 is installed there).
+  intelligence-api:
+    !!merge <<: *runtime-base
+    container_name: omnibase-intelligence-api
+    profiles: ["runtime", "full"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - uvicorn
+      - omniintelligence.api.app:create_app
+      - --factory
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8053"
+      - --workers
+      - "1"
+    environment:
+      # DatabaseSettings reads POSTGRES_* env vars (env_prefix="POSTGRES_")
+      # Must point to the omniintelligence database, not omnibase_infra.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DATABASE: omniintelligence
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-development}
+    ports:
+      - "${INTELLIGENCE_API_EXTERNAL_PORT:-8053}:8053"
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8053/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    labels:
+      - "com.omninode.service=intelligence-api"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
 # ==========================================================================
