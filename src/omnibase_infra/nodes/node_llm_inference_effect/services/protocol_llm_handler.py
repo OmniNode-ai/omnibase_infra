@@ -45,6 +45,17 @@ class ProtocolLlmHandler(Protocol):
     via ``getattr(handler, "last_call_metrics", None)`` so it is not required
     by the protocol itself.
 
+    Note on request type annotation:
+        The ``handle`` method is typed with
+        ``node_llm_inference_effect.models.ModelLlmInferenceRequest``.
+        Implementors that accept a structurally compatible type (i.e. a class
+        with the same fields, such as ``effects.models.ModelLlmInferenceRequest``
+        used by ``HandlerLlmOllama``) will satisfy this protocol at runtime
+        because Python's structural subtyping checks field/method presence, not
+        class identity.  The two request classes are not related by inheritance
+        but share identical fields; see the module docstring and
+        ``docs/decisions/adr-any-type-pydantic-workaround.md`` for details.
+
     Implementors:
         - ``HandlerLlmOpenaiCompatible`` -- satisfies structurally
         - ``HandlerLlmOllama`` -- satisfies structurally (accepts structurally

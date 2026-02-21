@@ -50,6 +50,9 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
         ModelLlmInferenceRequest,
     )
+    from omnibase_spi.contracts.measurement.contract_llm_call_metrics import (
+        ContractLlmCallMetrics,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -144,21 +147,35 @@ class ServiceLlmMetricsPublisher:
 
         response = await self._handler.handle(request)
 
+        # Capture metrics immediately after handle() returns, before any await
+        # boundary, to avoid a race condition: since this service is registered
+        # as a singleton, a concurrent call could overwrite last_call_metrics on
+        # the shared handler between the await boundary and the read inside
+        # _emit_metrics.  The docstring on last_call_metrics explicitly warns it
+        # is "Not safe for concurrent access."
+        captured_metrics = getattr(self._handler, "last_call_metrics", None)
+
         # Emit metrics -- fire-and-forget: must never break the inference result.
-        await self._emit_metrics(correlation_id)
+        await self._emit_metrics(correlation_id, captured_metrics)
 
         return response
 
-    async def _emit_metrics(self, correlation_id: UUID) -> None:
-        """Read last_call_metrics from the handler and publish to Kafka.
+    async def _emit_metrics(
+        self, correlation_id: UUID, metrics: ContractLlmCallMetrics | None
+    ) -> None:
+        """Publish pre-captured last_call_metrics to Kafka.
 
         Safe wrapper around the publish path.  All exceptions are caught
         and logged so that a Kafka outage never impacts inference callers.
 
         Args:
             correlation_id: Correlation ID for the publish call.
+            metrics: The ``last_call_metrics`` value captured immediately after
+                the inner handler returned, before any subsequent await boundary.
+                Passing the snapshot as a parameter avoids a race condition where
+                a concurrent call could overwrite the handler's attribute before
+                this method reads it.
         """
-        metrics = getattr(self._handler, "last_call_metrics", None)
         if metrics is None:
             logger.debug(
                 "No LLM call metrics to publish (last_call_metrics is None). "

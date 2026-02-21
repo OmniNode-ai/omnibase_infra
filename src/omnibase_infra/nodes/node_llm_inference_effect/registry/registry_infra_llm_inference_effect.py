@@ -332,12 +332,14 @@ class RegistryInfraLlmInferenceEffect:
         publishes ``ContractLlmCallMetrics`` to
         ``onex.evt.omniintelligence.llm-call-completed.v1``.
 
-        Note:
-            ``HandlerLlmOllama`` does not currently build
-            ``last_call_metrics`` (only ``HandlerLlmOpenaiCompatible``
-            does). When ``last_call_metrics`` is ``None`` after a call,
-            ``ServiceLlmMetricsPublisher`` silently skips emission and
-            logs at DEBUG level.
+        Warning:
+            Metrics emission is not supported for Ollama handlers.
+            ``HandlerLlmOllama`` does not populate ``last_call_metrics``,
+            so this registration provides the same observability as calling
+            ``register_ollama`` directly. Metrics will be emitted once
+            ``HandlerLlmOllama`` supports ``last_call_metrics``.
+            Until then, ``ServiceLlmMetricsPublisher`` silently skips
+            emission and logs at DEBUG level.
 
         Args:
             container: ONEX dependency injection container.
