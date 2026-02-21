@@ -336,12 +336,17 @@ class TestPatternMatching:
         .env variants like .env.local, .env.production are intentionally excluded
         from the allowlist. These files must live in ~/.omnibase/ or be managed
         by Infisical. Only .env.example is explicitly allowed.
+
+        _get_gitignored_set is patched to return an empty set so the test
+        exercises only pattern-matching logic and is not affected by whether
+        the tmp_path happens to be inside a git repo with these paths gitignored.
         """
         env_files = [".env.local", ".env.production", ".env.test"]
         for env_file in env_files:
             (tmp_path / env_file).touch()
 
-        result = validate_root_directory(tmp_path)
+        with patch("validate_clean_root._get_gitignored_set", return_value=set()):
+            result = validate_root_directory(tmp_path)
 
         assert not result.is_valid
         assert len(result.violations) == len(env_files)

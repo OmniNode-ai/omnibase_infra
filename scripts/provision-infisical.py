@@ -409,7 +409,7 @@ def main() -> int:
         logger.info("To re-provision, remove those keys from .env first.")
         return 0
 
-    # Resolve admin password: CLI arg < env var < auto-generate.
+    # Resolve admin password: priority: env var (highest) > CLI arg > auto-generate (lowest).
     # Avoid CLI arg as the primary source because plaintext flags are visible
     # in `ps aux` and /proc/PID/cmdline.
     admin_password = (
