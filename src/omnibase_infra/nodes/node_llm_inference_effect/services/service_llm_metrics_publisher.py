@@ -131,7 +131,9 @@ class ServiceLlmMetricsPublisher:
         # completes in well under a second. No hard cap is enforced here.
         # Lifecycle limitation: No drain or shutdown mechanism is provided;
         # in-flight tasks may be silently dropped if the owning process exits
-        # before they complete.
+        # before they complete. A future close()/drain method should be
+        # added as a separate concern to allow graceful shutdown; this is a
+        # known limitation tracked for follow-up.
         self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def handle(

@@ -260,10 +260,6 @@ class RegistryInfraLlmInferenceEffect:
             ServiceLlmMetricsPublisher,
         )
 
-        transport = _create_transport_adapter(target_name=target_name)
-        handler = HandlerLlmOpenaiCompatible(transport=transport)
-        service = ServiceLlmMetricsPublisher(handler=handler, publisher=publisher)
-
         if container.service_registry is None:
             logger.warning(
                 "service_registry is None; skipping OpenAI-compatible "
@@ -271,6 +267,10 @@ class RegistryInfraLlmInferenceEffect:
                 target_name,
             )
             return
+
+        transport = _create_transport_adapter(target_name=target_name)
+        handler = HandlerLlmOpenaiCompatible(transport=transport)
+        service = ServiceLlmMetricsPublisher(handler=handler, publisher=publisher)
 
         await container.service_registry.register_instance(
             interface=HandlerLlmOpenaiCompatible,
