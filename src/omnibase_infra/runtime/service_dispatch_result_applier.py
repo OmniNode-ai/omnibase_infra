@@ -304,7 +304,7 @@ class DispatchResultApplier:
         # effect raises, we re-raise immediately — no intents published, no
         # Kafka messages emitted.
         projection_intents: list[ModelProjectionIntent] = list(
-            getattr(result, "projection_intents", None) or []
+            result.projection_intents
         )
         if projection_intents and self._projection_effect is None:
             context = ModelInfraErrorContext.with_correlation(
