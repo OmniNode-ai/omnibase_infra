@@ -282,7 +282,7 @@ def _create_infisical_folders(
     """
     for env in environments:
         # Create /shared root
-        client.post(  # type: ignore[attr-defined]
+        resp = client.post(  # type: ignore[attr-defined]
             f"{addr}/api/v1/folders",
             headers={"Authorization": f"Bearer {token}"},
             json={
@@ -292,8 +292,10 @@ def _create_infisical_folders(
                 "path": "/",
             },
         )
+        if resp.status_code not in (200, 201, 400, 409):
+            resp.raise_for_status()
         for folder in transport_folders:
-            client.post(  # type: ignore[attr-defined]
+            resp = client.post(  # type: ignore[attr-defined]
                 f"{addr}/api/v1/folders",
                 headers={"Authorization": f"Bearer {token}"},
                 json={
@@ -303,6 +305,8 @@ def _create_infisical_folders(
                     "path": "/shared",
                 },
             )
+            if resp.status_code not in (200, 201, 400, 409):
+                resp.raise_for_status()
     logger.info("Folder structure created in environments: %s", list(environments))
 
 
@@ -459,7 +463,7 @@ def main() -> int:
         if not bootstrap_data:
             # Already bootstrapped — check for saved admin token
             if _ADMIN_TOKEN_FILE.is_file():
-                admin_token = _ADMIN_TOKEN_FILE.read_text().strip()
+                admin_token = _ADMIN_TOKEN_FILE.open().readline().strip()
                 logger.info("Instance already bootstrapped, using saved admin token")
                 # Get org id from existing workspaces list
                 orgs_resp = client.get(

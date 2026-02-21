@@ -492,7 +492,7 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         )
         return 1
 
-    admin_token = _ADMIN_TOKEN_FILE.read_text().strip()
+    admin_token = _ADMIN_TOKEN_FILE.open().readline().strip()
 
     print(f"\nCreating folder structure at {path_prefix}/...")
     _create_folders_via_admin(

@@ -34,6 +34,7 @@ Portability:
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -207,6 +208,26 @@ def _matches_pattern(name: str, patterns: tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
 
 
+def _is_gitignored(item: Path) -> bool:
+    """Return True if the item is gitignored (present locally but not committed).
+
+    Gitignored files (e.g. .env, __pycache__, .venv) are expected to exist on
+    the developer's machine but must not be committed. The validator should not
+    flag them as violations — only files that ARE committed (not ignored) matter.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", str(item)],
+            capture_output=True,
+            check=False,
+            cwd=item.parent,
+        )
+        return result.returncode == 0
+    except FileNotFoundError:
+        # git not available — fall through to normal allowlist check
+        return False
+
+
 def _suggest_action(item: Path) -> str:
     """Generate a suggestion for what to do with a misplaced item."""
     name = item.name.lower()
@@ -307,6 +328,13 @@ def validate_root_directory(
                 if verbose:
                     print(f"  ✓ {name}/ (allowed directory)")
                 continue
+
+        # Gitignored files are expected to exist locally (e.g. .env, build dirs)
+        # but must not be committed. Skip them — they are not a repo violation.
+        if _is_gitignored(item):
+            if verbose:
+                print(f"  ~ {name} (gitignored, skipped)")
+            continue
 
         # This is a violation
         result.violations.append(
