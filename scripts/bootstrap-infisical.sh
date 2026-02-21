@@ -239,7 +239,7 @@ if [[ "${SKIP_SEED}" != "true" ]]; then
         if [[ "${DRY_RUN}" != "true" ]]; then
             log_info "Executing seed (create missing keys + values from env-example-full)..."
             extra_args=()
-            [[ -n "${FULL_ENV_REFERENCE}" ]] && extra_args+=(--import-env "${FULL_ENV_REFERENCE}")
+            [[ -f "${FULL_ENV_REFERENCE}" ]] && extra_args+=(--import-env "${FULL_ENV_REFERENCE}")
             run_cmd uv run python "${SEED_SCRIPT}" \
                 --contracts-dir "${PROJECT_ROOT}/src/omnibase_infra/nodes" \
                 --create-missing-keys \

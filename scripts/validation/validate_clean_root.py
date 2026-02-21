@@ -106,9 +106,6 @@ ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
         # Security
         ".secretresolver_allowlist",
         ".secrets.baseline",
-        # Infisical secrets management (gitignored, never committed)
-        ".infisical-identity",
-        ".infisical-admin-token",
         # Special files
         ".migration_freeze",
         ".mcp.json",
