@@ -88,6 +88,14 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # Reject any staged .env file at any path depth (OMN-2476)
+      # Uses (^|/)\.env$ to block root/.env, config/.env, docker/.env, etc.
+      - id: no-env-file
+        name: Reject committed .env files (anywhere in tree)
+        entry: 'bash -c ''if git diff --cached --name-only | grep -qE "(^|/)\.env$"; then echo "BLOCKED: .env staged — use ~/.omnibase/.env (root and subdir .env files rejected)"; exit 1; fi'''
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
       # Root directory cleanliness - no ephemeral files in root
       - id: onex-validate-clean-root
         name: ONEX Root Directory Cleanliness
