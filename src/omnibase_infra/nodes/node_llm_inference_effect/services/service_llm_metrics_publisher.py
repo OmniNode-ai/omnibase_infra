@@ -151,12 +151,14 @@ class ServiceLlmMetricsPublisher:
 
         response = await self._handler.handle(request, correlation_id=correlation_id)
 
-        # Capture metrics immediately after handle() returns, before any await
-        # boundary, to avoid a race condition: since this service is registered
-        # as a singleton, a concurrent call could overwrite last_call_metrics on
-        # the shared handler between the await boundary and the read inside
-        # _emit_metrics.  The docstring on last_call_metrics explicitly warns it
-        # is "Not safe for concurrent access."
+        # Capture metrics synchronously on the same event-loop tick that
+        # _handler.handle() returns on.  asyncio is single-threaded: no other
+        # coroutine can run between a completed await and the next synchronous
+        # statement.  _handler.handle() sets last_call_metrics synchronously
+        # before returning, and there is no await between that return and this
+        # getattr, so the value belongs unambiguously to this call.
+        # (The "not safe for concurrent access" docstring on last_call_metrics
+        # refers to thread-safety, not asyncio concurrency.)
         captured_metrics = getattr(self._handler, "last_call_metrics", None)
 
         # Schedule metrics emission as a background task so Kafka publish
