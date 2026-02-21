@@ -209,7 +209,7 @@ if [[ "${SKIP_IDENTITY}" != "true" ]]; then
                 --addr "${INFISICAL_ADDR:-http://localhost:8880}" \
                 --dry-run
         else
-            uv run python "${PROVISION_SCRIPT}" \
+            run_cmd uv run python "${PROVISION_SCRIPT}" \
                 --addr "${INFISICAL_ADDR:-http://localhost:8880}"
         fi
     else
@@ -238,15 +238,11 @@ if [[ "${SKIP_SEED}" != "true" ]]; then
 
         if [[ "${DRY_RUN}" != "true" ]]; then
             log_info "Executing seed (create missing keys + values from env-example-full)..."
-            ENV_IMPORT_ARG=""
-            if [[ -f "${FULL_ENV_REFERENCE}" ]]; then
-                ENV_IMPORT_ARG="--import-env ${FULL_ENV_REFERENCE}"
-            fi
-            uv run python "${SEED_SCRIPT}" \
+            run_cmd uv run python "${SEED_SCRIPT}" \
                 --contracts-dir "${PROJECT_ROOT}/src/omnibase_infra/nodes" \
                 --create-missing-keys \
                 --set-values \
-                ${ENV_IMPORT_ARG} \
+                ${FULL_ENV_REFERENCE:+--import-env "${FULL_ENV_REFERENCE}"} \
                 --execute
         fi
     else

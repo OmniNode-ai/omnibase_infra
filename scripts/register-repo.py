@@ -89,6 +89,12 @@ BOOTSTRAP_KEYS = frozenset(
 # ---------------------------------------------------------------------------
 # Platform-wide shared secrets and their Infisical paths.
 # Keys not in any node contract are declared here explicitly.
+#
+# TODO (Task 6): This hardcoded dict is a transitional placeholder. It should
+# be migrated to config/shared_key_registry.yaml once that registry file is
+# implemented as part of the OMN-2287 plan. The script should load this
+# mapping from YAML rather than maintaining it inline here. Until that file
+# exists, keep this dict in sync with the platform's actual secret layout.
 # ---------------------------------------------------------------------------
 SHARED_PLATFORM_SECRETS: dict[str, list[str]] = {
     "/shared/db/": [
@@ -428,6 +434,12 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
 
     infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
     project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
+    if not project_id:
+        raise SystemExit(
+            "ERROR: INFISICAL_PROJECT_ID is not set. "
+            "Set it in your environment or ~/.omnibase/.env before running onboard-repo. "
+            "You can find the project ID after running scripts/provision-infisical.py."
+        )
     path_prefix = f"/services/{repo_name}"
 
     # Identify repo-specific secrets to seed
@@ -444,7 +456,7 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
             continue
         if key in shared_keys_flat:
             continue
-        if any(key == k for k, _ in [(k, v) for _, k, v in plan]):
+        if any(key == pk for _, pk, _ in plan):
             continue
         extra.append((f"{path_prefix}/env/", key, value))
 

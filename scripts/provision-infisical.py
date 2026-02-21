@@ -45,6 +45,9 @@ _IDENTITY_FILE = _PROJECT_ROOT / ".infisical-identity"
 _ADMIN_TOKEN_FILE = _PROJECT_ROOT / ".infisical-admin-token"
 
 
+# TODO: consolidate with register-repo.py._parse_env_file — these two
+# implementations are identical but live in separate standalone scripts.
+# When a shared utilities module is introduced, extract this into it.
 def _parse_env_file(env_path: Path) -> dict[str, str]:
     """Parse a .env file into a key-value dict."""
     values: dict[str, str] = {}
@@ -133,18 +136,6 @@ def _bootstrap(client: object, addr: str, email: str, password: str, org: str) -
     return resp.json()
 
 
-def _login(client: object, addr: str, email: str, password: str) -> str:  # type: ignore[type-arg]
-    """Login and return a Bearer token."""
-    import httpx
-
-    # Infisical v0.146+ uses a two-step email/password login
-    # Step 1: login1 (get salt + server public key for SRP)
-    # For self-hosted with simple email/password, use the admin token approach
-    # via bootstrap response or the direct /api/v3/auth/login1 SRP flow.
-    # We use the identity token from bootstrap directly.
-    raise NotImplementedError("Use bootstrap token directly")
-
-
 def _create_workspace(client: object, addr: str, token: str, project_name: str) -> dict:  # type: ignore[type-arg]
     """Create a project (workspace) and return its details."""
     resp = client.post(  # type: ignore[attr-defined]
@@ -221,12 +212,12 @@ def _configure_universal_auth(
             "accessTokenMaxTTL": 2592000,  # 30d
             "accessTokenNumUsesLimit": 0,  # unlimited
             "clientSecretTrustedIps": [
-                {"ipAddress": "0.0.0.0/0"},
-                {"ipAddress": "::/0"},
+                {"ipAddress": "127.0.0.1/32"},
+                {"ipAddress": "192.168.86.0/24"},
             ],
             "accessTokenTrustedIps": [
-                {"ipAddress": "0.0.0.0/0"},
-                {"ipAddress": "::/0"},
+                {"ipAddress": "127.0.0.1/32"},
+                {"ipAddress": "192.168.86.0/24"},
             ],
         },
     )
@@ -394,12 +385,33 @@ def main() -> int:
         logger.exception("httpx is required: uv add httpx")
         return 1
 
-    # Check connectivity
+    # Check connectivity and readiness.
+    # /api/status can return HTTP 200 before migrations are complete, so we
+    # also inspect the response body for a "status": "ok" field to confirm
+    # the server is fully ready (not just reachable).
     try:
         with httpx.Client(timeout=10) as probe:
             resp = probe.get(f"{args.addr}/api/status")
             resp.raise_for_status()
-        logger.info("Infisical is reachable at %s", args.addr)
+            try:
+                body = resp.json()
+                if body.get("status") != "ok":
+                    logger.error(
+                        "Infisical at %s returned HTTP 200 but status field is %r "
+                        "(expected 'ok'). The server may still be initialising.",
+                        args.addr,
+                        body.get("status"),
+                    )
+                    return 1
+            except Exception:
+                # Cannot parse JSON — treat as not ready rather than assuming OK.
+                logger.exception(
+                    "Infisical at %s returned a non-JSON /api/status response. "
+                    "The server may still be initialising.",
+                    args.addr,
+                )
+                return 1
+        logger.info("Infisical is reachable and ready at %s", args.addr)
     except Exception:
         logger.exception("Cannot reach Infisical at %s", args.addr)
         logger.info(
@@ -468,19 +480,25 @@ def main() -> int:
         else:
             admin_token = bootstrap_data["identity"]["credentials"]["token"]
             org_id = bootstrap_data["organization"]["id"]
-            # Persist admin token for subsequent runs
-            _ADMIN_TOKEN_FILE.write_text(admin_token)
+            # Persist admin token and (if auto-generated) password for subsequent runs.
+            # Password is written ONLY to the file — never to log output.
+            token_file_lines = [admin_token]
+            if not args.admin_password:
+                token_file_lines.append(f"admin_password={admin_password}")
+            _ADMIN_TOKEN_FILE.write_text("\n".join(token_file_lines) + "\n")
             _ADMIN_TOKEN_FILE.chmod(0o600)
             logger.info("Admin token saved to %s", _ADMIN_TOKEN_FILE)
+            if not args.admin_password:
+                logger.info(
+                    "Generated admin password written to %s (not logged here)",
+                    _ADMIN_TOKEN_FILE,
+                )
 
         logger.info(
             "Bootstrapped: org=%s (%s)",
             bootstrap_data.get("organization", {}).get("name", "(existing)"),
             org_id,
         )
-        if not args.admin_password and bootstrap_data:
-            logger.info("Generated admin password (save this): %s", admin_password)
-            logger.info("Admin email: %s", args.admin_email)
 
         # Step 2: Create project
         logger.info("Step 2: Creating project '%s'...", args.project)
