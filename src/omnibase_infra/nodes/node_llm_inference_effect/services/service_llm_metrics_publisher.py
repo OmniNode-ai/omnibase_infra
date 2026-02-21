@@ -129,6 +129,9 @@ class ServiceLlmMetricsPublisher:
         # completed tasks are removed, but in-flight tasks are not evicted.
         # For typical inference workloads this is not a concern; each task
         # completes in well under a second. No hard cap is enforced here.
+        # Lifecycle limitation: No drain or shutdown mechanism is provided;
+        # in-flight tasks may be silently dropped if the owning process exits
+        # before they complete.
         self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def handle(
@@ -151,6 +154,13 @@ class ServiceLlmMetricsPublisher:
 
         Raises:
             Any exception raised by the inner handler is propagated unchanged.
+
+        Note:
+            This method must be called from a running asyncio event loop.
+            It uses ``asyncio.create_task`` internally to schedule metrics
+            emission as a background task.  Calling ``handle()`` from a
+            synchronous context (or from a thread without a running loop) will
+            raise ``RuntimeError: no running event loop``.
         """
         if correlation_id is None:
             correlation_id = uuid4()

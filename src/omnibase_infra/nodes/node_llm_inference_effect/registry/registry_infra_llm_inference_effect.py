@@ -232,9 +232,16 @@ class RegistryInfraLlmInferenceEffect:
                 ``"openai-inference"``.
 
         Note:
-            Callers resolving ``HandlerLlmOpenaiCompatible`` directly from the
-            container will bypass metrics emission. Resolve
-            ``ServiceLlmMetricsPublisher`` to use the metrics-wrapped handler.
+            **Dual registration is intentional.** ``HandlerLlmOpenaiCompatible``
+            is registered as the raw inner handler so that callers needing
+            direct, un-wrapped access (e.g. testing or low-level inspection) can
+            still resolve it.  However, resolving ``HandlerLlmOpenaiCompatible``
+            from the container bypasses metrics emission.  Production callers
+            SHOULD resolve ``ServiceLlmMetricsPublisher`` instead to obtain the
+            metrics-wrapped inference path that publishes
+            ``ContractLlmCallMetrics`` to
+            ``onex.evt.omniintelligence.llm-call-completed.v1`` after every
+            inference call.
 
         Warning:
             **Mutually exclusive with** ``register_openai_compatible``. Both
@@ -387,9 +394,6 @@ class RegistryInfraLlmInferenceEffect:
             ServiceLlmMetricsPublisher,
         )
 
-        handler = HandlerLlmOllama(target_name=target_name)
-        service = ServiceLlmMetricsPublisher(handler=handler, publisher=publisher)
-
         if container.service_registry is None:
             logger.warning(
                 "service_registry is None; skipping Ollama metrics handler "
@@ -397,6 +401,9 @@ class RegistryInfraLlmInferenceEffect:
                 target_name,
             )
             return
+
+        handler = HandlerLlmOllama(target_name=target_name)
+        service = ServiceLlmMetricsPublisher(handler=handler, publisher=publisher)
 
         logger.debug(
             "register_ollama_with_metrics: metrics emission is a no-op "
