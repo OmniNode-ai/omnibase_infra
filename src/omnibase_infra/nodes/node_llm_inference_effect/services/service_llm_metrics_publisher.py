@@ -34,17 +34,18 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from omnibase_infra.event_bus.topic_constants import TOPIC_LLM_CALL_COMPLETED
+from omnibase_infra.nodes.node_llm_inference_effect.services.protocol_llm_handler import (
+    ProtocolLlmHandler,
+)
 
 if TYPE_CHECKING:
     from omnibase_infra.nodes.effects.models.model_llm_inference_response import (
         ModelLlmInferenceResponse,
-    )
-    from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
-        HandlerLlmOpenaiCompatible,
     )
     from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
         ModelLlmInferenceRequest,
@@ -66,7 +67,9 @@ class ServiceLlmMetricsPublisher:
     The service layer (named ``Service*``) is explicitly allowed to publish.
 
     Attributes:
-        _handler: The inner HandlerLlmOpenaiCompatible instance.
+        _handler: The inner handler instance (any object satisfying
+            ``ProtocolLlmHandler``, e.g. ``HandlerLlmOpenaiCompatible`` or
+            ``HandlerLlmOllama``).
         _publisher: Callable that accepts ``(event_type, payload, correlation_id)``
             and returns an awaitable bool.  Typically an
             ``AdapterProtocolEventPublisherKafka.publish`` method.
@@ -90,15 +93,17 @@ class ServiceLlmMetricsPublisher:
 
     def __init__(
         self,
-        handler: HandlerLlmOpenaiCompatible,
-        publisher: object,
+        handler: ProtocolLlmHandler,
+        publisher: Callable[[str, dict[str, Any], str], Awaitable[bool]],
     ) -> None:
         """Initialise with inner handler and publisher callable.
 
         Args:
-            handler: The wrapped LLM inference handler.  Must expose a
-                ``last_call_metrics`` attribute (``ContractLlmCallMetrics | None``)
-                that is populated after each ``handle()`` call.
+            handler: The wrapped LLM inference handler (any object satisfying
+                ``ProtocolLlmHandler``).  ``HandlerLlmOpenaiCompatible``
+                populates a ``last_call_metrics`` attribute after each call.
+                ``HandlerLlmOllama`` does not; metrics emission is silently
+                skipped when ``last_call_metrics`` is absent or ``None``.
             publisher: An async callable with the signature::
 
                     async def publish(
@@ -137,7 +142,7 @@ class ServiceLlmMetricsPublisher:
         if correlation_id is None:
             correlation_id = uuid4()
 
-        response = await self._handler.handle(request, correlation_id=correlation_id)
+        response = await self._handler.handle(request)
 
         # Emit metrics -- fire-and-forget: must never break the inference result.
         await self._emit_metrics(correlation_id)
@@ -153,7 +158,7 @@ class ServiceLlmMetricsPublisher:
         Args:
             correlation_id: Correlation ID for the publish call.
         """
-        metrics = self._handler.last_call_metrics
+        metrics = getattr(self._handler, "last_call_metrics", None)
         if metrics is None:
             logger.debug(
                 "No LLM call metrics to publish (last_call_metrics is None). "
@@ -164,7 +169,7 @@ class ServiceLlmMetricsPublisher:
 
         try:
             payload = json.loads(metrics.model_dump_json())
-            await self._publisher(  # type: ignore[operator]
+            await self._publisher(
                 TOPIC_LLM_CALL_COMPLETED,
                 payload,
                 str(correlation_id),

@@ -47,7 +47,8 @@ Related:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
@@ -212,7 +213,7 @@ class RegistryInfraLlmInferenceEffect:
     @staticmethod
     async def register_openai_compatible_with_metrics(
         container: ModelONEXContainer,
-        publisher: object,
+        publisher: Callable[[str, dict[str, Any], str], Awaitable[bool]],
         target_name: str = "openai-inference",
     ) -> None:
         """Register an OpenAI-compatible handler wrapped with metrics emission.
@@ -321,7 +322,7 @@ class RegistryInfraLlmInferenceEffect:
     @staticmethod
     async def register_ollama_with_metrics(
         container: ModelONEXContainer,
-        publisher: object,
+        publisher: Callable[[str, dict[str, Any], str], Awaitable[bool]],
         target_name: str = "ollama-inference",
     ) -> None:
         """Register an Ollama handler wrapped with metrics emission.
@@ -355,7 +356,7 @@ class RegistryInfraLlmInferenceEffect:
         )
 
         handler = HandlerLlmOllama(target_name=target_name)
-        service = ServiceLlmMetricsPublisher(handler=handler, publisher=publisher)  # type: ignore[arg-type]
+        service = ServiceLlmMetricsPublisher(handler=handler, publisher=publisher)
 
         if container.service_registry is None:
             logger.warning(
