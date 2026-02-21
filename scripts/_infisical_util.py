@@ -13,7 +13,10 @@ that it can be imported before any project dependencies are installed.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_env_file(env_path: Path) -> dict[str, str]:
@@ -32,6 +35,7 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
     """
     values: dict[str, str] = {}
     if not env_path.is_file():
+        logger.warning("Env file not found: %s", env_path)
         return values
     for line in env_path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()

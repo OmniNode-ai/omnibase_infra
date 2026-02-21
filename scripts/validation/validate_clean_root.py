@@ -227,6 +227,7 @@ def _get_gitignored_set(items: list[Path]) -> set[Path]:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=5,
             cwd=items[0].parent.resolve(),
         )
         # git check-ignore prints one ignored path per line.  Because we pass
@@ -240,6 +241,10 @@ def _get_gitignored_set(items: list[Path]) -> set[Path]:
         return {p for p in items if str(p) in ignored_paths}
     except FileNotFoundError:
         # git not available — treat nothing as ignored
+        return set()
+    except subprocess.TimeoutExpired:
+        # git timed out (network FS, maintenance lock) — err on the side of
+        # false positives rather than blocking the commit indefinitely
         return set()
 
 

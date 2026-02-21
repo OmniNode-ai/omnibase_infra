@@ -19,8 +19,10 @@ This module tests:
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -41,6 +43,7 @@ validate_root_directory = validate_clean_root_module.validate_root_directory
 generate_report = validate_clean_root_module.generate_report
 _matches_pattern = validate_clean_root_module._matches_pattern
 _suggest_action = validate_clean_root_module._suggest_action
+_get_gitignored_set = validate_clean_root_module._get_gitignored_set
 ValidationResult = validate_clean_root_module.ValidationResult
 RootViolation = validate_clean_root_module.RootViolation
 ALLOWED_ROOT_FILES = validate_clean_root_module.ALLOWED_ROOT_FILES
@@ -816,3 +819,47 @@ class TestEnvFileEnforcement:
     def test_env_not_in_allowed_root_directories(self) -> None:
         """Test that .env is not in ALLOWED_ROOT_DIRECTORIES allowlist."""
         assert ".env" not in ALLOWED_ROOT_DIRECTORIES
+
+
+class TestGetGitIgnoredSet:
+    """Tests for the _get_gitignored_set helper."""
+
+    def test_gitignored_path_included_in_result(self, tmp_path: Path) -> None:
+        """Test that a path returned by git check-ignore is included in the set."""
+        item = tmp_path / ".env"
+        item.touch()
+
+        mock_result = subprocess.CompletedProcess(
+            args=["git", "check-ignore", "--", str(item)],
+            returncode=0,
+            stdout=str(item).encode("utf-8"),
+            stderr=b"",
+        )
+
+        with patch("subprocess.run", return_value=mock_result):
+            ignored = _get_gitignored_set([item])
+
+        assert item in ignored
+
+    def test_git_not_found_returns_empty_set(self, tmp_path: Path) -> None:
+        """Test that FileNotFoundError (git not found) returns an empty set."""
+        item = tmp_path / "some_file.txt"
+        item.touch()
+
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            ignored = _get_gitignored_set([item])
+
+        assert ignored == set()
+
+    def test_git_timeout_returns_empty_set(self, tmp_path: Path) -> None:
+        """Test that TimeoutExpired returns an empty set instead of blocking."""
+        item = tmp_path / "some_file.txt"
+        item.touch()
+
+        with patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="git", timeout=5),
+        ):
+            ignored = _get_gitignored_set([item])
+
+        assert ignored == set()
