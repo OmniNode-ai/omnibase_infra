@@ -92,6 +92,18 @@ BOOTSTRAP_KEYS = frozenset(
 )
 
 # ---------------------------------------------------------------------------
+# Per-repo identity defaults — keys whose values are baked into each repo's
+# Settings class as `default=` and must NOT be seeded into Infisical.
+# Storing them in Infisical would cause the /services/<repo>/ path to diverge
+# from the code-level default and create a split-brain configuration.
+# ---------------------------------------------------------------------------
+IDENTITY_DEFAULTS = frozenset(
+    {
+        "POSTGRES_DATABASE",
+    }
+)
+
+# ---------------------------------------------------------------------------
 # Platform-wide shared secrets and their Infisical paths.
 # Keys not in any node contract are declared here explicitly.
 #
@@ -480,11 +492,14 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         value = env_values.get(key, "")
         plan.append((f"{path_prefix}/db/", key, value))
 
-    # Any extra keys in the env file that are NOT in shared and NOT bootstrap
+    # Any extra keys in the env file that are NOT in shared, NOT bootstrap,
+    # and NOT an identity default (per-repo value baked into Settings.default=).
     shared_keys_flat = {k for keys in SHARED_PLATFORM_SECRETS.values() for k in keys}
     extra: list[tuple[str, str, str]] = []
     for key, value in env_values.items():
         if key in BOOTSTRAP_KEYS:
+            continue
+        if key in IDENTITY_DEFAULTS:
             continue
         if key in shared_keys_flat:
             continue

@@ -94,7 +94,6 @@ ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
         "CLAUDE.md",
         # Environment
         ".env.example",
-        ".env.template",
         # Docker (if needed at root)
         "Dockerfile",
         "docker-compose.yml",

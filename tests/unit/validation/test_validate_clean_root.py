@@ -332,7 +332,7 @@ class TestPatternMatching:
 
         .env variants like .env.local, .env.production are intentionally excluded
         from the allowlist. These files must live in ~/.omnibase/ or be managed
-        by Infisical. Only .env.example and .env.template are explicitly allowed.
+        by Infisical. Only .env.example is explicitly allowed.
         """
         env_files = [".env.local", ".env.production", ".env.test"]
         for env_file in env_files:

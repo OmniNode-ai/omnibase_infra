@@ -107,8 +107,13 @@ def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
     # where the file lives.
     env_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = env_path.with_name(env_path.name + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.chmod(0o600)
+    # Create the tmp file with 0o600 permissions from the start so there is
+    # never a window where the file containing secrets is world-readable.
+    fd = os.open(str(tmp), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, content.encode("utf-8"))
+    finally:
+        os.close(fd)
     tmp.replace(env_path)  # atomic on POSIX
 
 
@@ -528,10 +533,19 @@ def main() -> int:
                 _admin_token_tmp = _ADMIN_TOKEN_FILE.with_name(
                     _ADMIN_TOKEN_FILE.name + ".tmp"
                 )
-                _admin_token_tmp.write_text(
-                    "\n".join(token_file_lines) + "\n", encoding="utf-8"
+                # Create with 0o600 from the start — no world-readable window.
+                _atmp_fd = os.open(
+                    str(_admin_token_tmp),
+                    os.O_CREAT | os.O_WRONLY | os.O_TRUNC,
+                    0o600,
                 )
-                _admin_token_tmp.chmod(0o600)
+                try:
+                    os.write(
+                        _atmp_fd,
+                        ("\n".join(token_file_lines) + "\n").encode("utf-8"),
+                    )
+                finally:
+                    os.close(_atmp_fd)
                 _admin_token_tmp.replace(_ADMIN_TOKEN_FILE)  # atomic on POSIX
                 logger.info("Admin token saved to %s", _ADMIN_TOKEN_FILE)
                 if _password_was_auto_generated:
@@ -615,7 +629,7 @@ def main() -> int:
             # to avoid a brief world-readable window between write and chmod.
             _identity_tmp = _IDENTITY_FILE.with_name(_IDENTITY_FILE.name + ".tmp")
             try:
-                _identity_tmp.write_text(
+                _identity_content = (
                     f"# Infisical Machine Identity\n"
                     f"# Provisioned automatically by provision-infisical.py\n"
                     f"#\n"
@@ -624,10 +638,18 @@ def main() -> int:
                     f"# Identity: {args.identity_name} ({identity_id})\n"
                     f"# Admin email: {args.admin_email}\n"
                     f"#\n"
-                    f"# Client credentials written to .env\n",
-                    encoding="utf-8",
+                    f"# Client credentials written to .env\n"
                 )
-                _identity_tmp.chmod(0o600)
+                # Create with 0o600 from the start — no world-readable window.
+                _itmp_fd = os.open(
+                    str(_identity_tmp),
+                    os.O_CREAT | os.O_WRONLY | os.O_TRUNC,
+                    0o600,
+                )
+                try:
+                    os.write(_itmp_fd, _identity_content.encode("utf-8"))
+                finally:
+                    os.close(_itmp_fd)
                 _identity_tmp.replace(_IDENTITY_FILE)  # atomic on POSIX
             except Exception:
                 if _identity_tmp.exists():
