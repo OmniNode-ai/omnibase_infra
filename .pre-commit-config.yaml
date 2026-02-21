@@ -89,13 +89,14 @@ repos:
         always_run: true
         stages: [pre-commit]
       # Reject any staged .env file at any path depth (OMN-2476)
-      # Uses (^|/)\.env(\..+)?$ to block root/.env, config/.env, .env.production, .env.staging, etc.
+      # Uses (^|/)\.env([._].+)?$ to block root/.env, config/.env, .env.production, .env.staging,
+      # .env_local, .env_production, etc. (both dot-separated and underscore-separated variants).
       - id: no-env-file
         name: Reject committed .env files (anywhere in tree)
-        entry: 'bash -c ''if git diff --cached --name-only | grep -qE "(^|/)\.env(\..+)?$"; then echo "BLOCKED: .env staged — use ~/.omnibase/.env (root and subdir .env files rejected)"; exit 1; fi'''
+        entry: 'bash -c ''if git diff --cached --name-only | grep -qE "(^|/)\.env([._].+)?$"; then echo "BLOCKED: .env staged — use ~/.omnibase/.env (root and subdir .env files rejected)"; exit 1; fi'''
         language: system
         pass_filenames: false
-        stages: [pre-commit] # Intentionally NOT in ci: skip — git diff --cached is empty in CI, so this is a safe no-op there
+        stages: [pre-commit]
       # Root directory cleanliness - no ephemeral files in root
       - id: onex-validate-clean-root
         name: ONEX Root Directory Cleanliness
@@ -236,4 +237,4 @@ ci:
   # Note: onex-validate-clean-root is NOT skipped (standalone script, no omnibase_core dependency)
   # Also skip migration freeze (checks staged files via git diff --cached, which is empty in CI;
   # CI should run: uv run python scripts/validation/validate_migration_freeze.py --check-committed)
-  skip: [onex-validate-architecture, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze]
+  skip: [no-env-file, onex-validate-architecture, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze]
