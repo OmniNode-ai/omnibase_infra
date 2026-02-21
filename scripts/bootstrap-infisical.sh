@@ -21,7 +21,8 @@
 #
 # Prerequisites:
 #   - Docker Compose v2.20+
-#   - .env file with POSTGRES_PASSWORD set
+#   - ~/.omnibase/.env with POSTGRES_PASSWORD set (preferred — sourced automatically
+#     via ~/.zshrc); falls back to the repo .env file for bootstrap-only values
 #   - docker/docker-compose.infra.yml present
 
 set -euo pipefail

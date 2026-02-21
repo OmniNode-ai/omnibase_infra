@@ -377,12 +377,7 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
 
     print("\n  Keys to seed:")
     for folder, key, value in sorted(plan):
-        if len(value) > 12:
-            display = value[:2] + "..."
-        elif value:
-            display = "***"
-        else:
-            display = "(empty)"
+        display = "***" if value else "(empty)"
         print(f"    {folder}{key} = {display}")
 
     if not args.execute:
@@ -502,23 +497,13 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     print(f"  Env file: {env_path}")
     print("\n  Repo-specific keys:")
     for folder, key, value in plan:
-        if value and len(value) > 12:
-            display = value[:2] + "..."
-        elif value:
-            display = "***"
-        else:
-            display = "(empty)"
+        display = "***" if value else "(empty)"
         print(f"    {folder}{key} = {display}")
 
     if extra:
         print(f"\n  Additional repo-only keys ({len(extra)}):")
         for folder, key, value in extra:
-            if value and len(value) > 12:
-                display = value[:2] + "..."
-            elif value:
-                display = "***"
-            else:
-                display = "(empty)"
+            display = "***" if value else "(empty)"
             print(f"    {folder}{key} = {display}")
 
     if not args.execute:

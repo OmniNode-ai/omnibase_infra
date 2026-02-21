@@ -96,6 +96,7 @@ def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
         lines.extend(appended)
 
     content = "\n".join(lines) + "\n"
+    # NOTE: assumes env_path matches .env* so the .tmp variant is gitignored
     tmp = env_path.with_name(env_path.name + ".tmp")
     tmp.write_text(content, encoding="utf-8")
     tmp.chmod(0o600)
@@ -580,19 +581,29 @@ def main() -> int:
         }
         _write_env_vars(args.env_file, updates)
 
-        # Write identity marker file
-        _IDENTITY_FILE.write_text(
-            f"# Infisical Machine Identity\n"
-            f"# Provisioned automatically by provision-infisical.py\n"
-            f"#\n"
-            f"# Org: {args.org} ({org_id})\n"
-            f"# Project: {args.project} ({project_id})\n"
-            f"# Identity: {args.identity_name} ({identity_id})\n"
-            f"# Admin email: {args.admin_email}\n"
-            f"#\n"
-            f"# Client credentials written to .env\n"
-        )
-        _IDENTITY_FILE.chmod(0o600)
+        # Write identity marker file (metadata-only, no secrets).
+        # Use the same atomic write-chmod-rename pattern as _ADMIN_TOKEN_FILE
+        # to avoid a brief world-readable window between write and chmod.
+        _identity_tmp = _IDENTITY_FILE.with_name(_IDENTITY_FILE.name + ".tmp")
+        try:
+            _identity_tmp.write_text(
+                f"# Infisical Machine Identity\n"
+                f"# Provisioned automatically by provision-infisical.py\n"
+                f"#\n"
+                f"# Org: {args.org} ({org_id})\n"
+                f"# Project: {args.project} ({project_id})\n"
+                f"# Identity: {args.identity_name} ({identity_id})\n"
+                f"# Admin email: {args.admin_email}\n"
+                f"#\n"
+                f"# Client credentials written to .env\n",
+                encoding="utf-8",
+            )
+            _identity_tmp.chmod(0o600)
+            _identity_tmp.replace(_IDENTITY_FILE)  # atomic on POSIX
+        except Exception:
+            if _identity_tmp.exists():
+                _identity_tmp.unlink(missing_ok=True)
+            raise
 
     logger.info("")
     logger.info("Provisioning complete!")
