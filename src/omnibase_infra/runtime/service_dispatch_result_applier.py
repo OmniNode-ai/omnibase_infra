@@ -11,19 +11,33 @@ Architecture:
     The applier sits between the dispatch engine and the event bus:
 
     EventBusSubcontractWiring -> MessageDispatchEngine -> DispatchResultApplier
+                                                          |-> execute projection (OMN-2510)
                                                           |-> delegate intents (writes first)
                                                           |-> publish output events
 
     This separation keeps the dispatch engine pure (routing only) while the
-    applier handles side effects (publishing, intent execution).
+    applier handles side effects (publishing, intent execution, projection).
+
+Ordering guarantee (OMN-2363 / OMN-2510):
+    reduce() -> NodeProjectionEffect.execute() -> intent execution -> Kafka publish
+
+    Projection failure BLOCKS Kafka publish entirely.  If the projection write
+    raises, the applier re-raises without touching the event bus, preventing
+    offset commit.  The message is redelivered on the next consumer poll.
 
 Related:
     - OMN-2050: Wire MessageDispatchEngine as single consumer path
+    - OMN-2363: Projection ordering guarantee epic
+    - OMN-2510: Runtime wires projection before Kafka publish (this ticket)
     - EventBusSubcontractWiring: Creates subscriptions that feed the engine
     - MessageDispatchEngine: Routes messages to dispatchers
-    - IntentExecutor: Executes intents from dispatch results (Phase C)
+    - IntentExecutor: Executes intents from dispatch results
 
 .. versionadded:: 0.7.0
+.. versionchanged:: 0.9.0
+    Added projection phase (OMN-2510): NodeProjectionEffect executes
+    synchronously before Kafka publish to eliminate the projection/publish
+    race condition.
 """
 
 from __future__ import annotations
@@ -39,6 +53,7 @@ from pydantic import BaseModel
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumDispatchStatus, EnumInfraTransportType
 from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.errors.error_projection import ProjectionError
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
@@ -46,22 +61,33 @@ from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
     from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+    from omnibase_infra.models.projection.model_projection_intent import (
+        ModelProjectionIntent,
+    )
     from omnibase_infra.protocols import ProtocolEventBusLike
+    from omnibase_infra.runtime.protocol_projection_effect import (
+        ProtocolProjectionEffect,
+    )
     from omnibase_infra.runtime.service_intent_executor import IntentExecutor
 
 logger = logging.getLogger(__name__)
 
 
 class DispatchResultApplier:
-    """Processes ModelDispatchResult: publishes output events and delegates intents.
+    """Processes ModelDispatchResult: runs projection, publishes output events, delegates intents.
 
     This service is injected into the dispatch callback chain by
     EventBusSubcontractWiring. After the dispatch engine routes a message
     to a dispatcher and receives a ModelDispatchResult, this applier:
 
-    1. Delegates intents to IntentExecutor (writes first)
-    2. Publishes output events to the configured output topic
-    3. Records dispatch metrics for observability
+    1. Executes NodeProjectionEffect synchronously (OMN-2510 — writes first)
+    2. Delegates remaining intents to IntentExecutor
+    3. Publishes output events to the configured output topic
+
+    Ordering guarantee (OMN-2363):
+        Kafka publish is GATED on successful projection execution.  If
+        NodeProjectionEffect.execute() raises, the applier re-raises without
+        calling the event bus, preventing offset commit.
 
     Partition Key Extraction:
         When publishing output events, the applier extracts a partition key
@@ -78,18 +104,24 @@ class DispatchResultApplier:
         _event_bus: Event bus for publishing output events.
         _output_topic: Topic to publish output events to.
         _intent_executor: Optional intent executor for delegating intents
-            to effect layer handlers (Phase C).
+            to effect layer handlers.
+        _projection_effect: Optional synchronous projection effect.  When
+            provided, its ``execute()`` is called with each ModelProjectionIntent
+            in the dispatch result before any Kafka publish occurs.
 
     Example:
         ```python
         applier = DispatchResultApplier(
             event_bus=event_bus,
             output_topic="onex.evt.platform.node-registration-result.v1",
+            projection_effect=node_projection_effect,
         )
         await applier.apply(dispatch_result)
         ```
 
     .. versionadded:: 0.7.0
+    .. versionchanged:: 0.9.0
+        Added ``projection_effect`` parameter (OMN-2510).
     """
 
     def __init__(
@@ -98,6 +130,7 @@ class DispatchResultApplier:
         output_topic: str,
         intent_executor: IntentExecutor | None = None,
         clock: Callable[[], datetime] | None = None,
+        projection_effect: ProtocolProjectionEffect | None = None,
     ) -> None:
         """Initialize the dispatch result applier.
 
@@ -109,11 +142,16 @@ class DispatchResultApplier:
                 results are forwarded to the executor for effect layer processing.
             clock: Optional callable returning current UTC datetime. Defaults to
                 ``datetime.now(UTC)``. Inject for deterministic replay/testing.
+            projection_effect: Optional synchronous projection effect
+                (OMN-2510).  When provided, its ``execute()`` is called with
+                each ``ModelProjectionIntent`` in the dispatch result.
+                Kafka publish is skipped if ``execute()`` raises.
         """
         self._event_bus = event_bus
         self._output_topic = output_topic
         self._intent_executor = intent_executor
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._projection_effect = projection_effect
 
     def _resolve_partition_key(self, event: BaseModel) -> bytes | None:
         """Extract partition key from event model for per-entity ordering.
@@ -140,18 +178,84 @@ class DispatchResultApplier:
                 return str(value).encode("utf-8")
         return None
 
+    def _execute_projection(
+        self,
+        intent: ModelProjectionIntent,
+        correlation_id: UUID,
+        dispatcher_id: str | None,
+    ) -> None:
+        """Execute a single projection intent synchronously.
+
+        Calls NodeProjectionEffect.execute() and blocks until the projection
+        is persisted.  Raises ProjectionError (or re-raises the underlying
+        exception) on failure, which prevents the caller from publishing to
+        Kafka.
+
+        Args:
+            intent: The projection intent to execute.
+            correlation_id: Correlation ID for log context and error tracking.
+            dispatcher_id: Dispatcher identifier for logging context.
+
+        Raises:
+            ProjectionError: When the projection effect raises any exception.
+                Wraps the original exception for structured logging.
+        """
+        assert self._projection_effect is not None  # caller guards this
+        try:
+            result = self._projection_effect.execute(intent)
+            if not result.success:
+                # Explicit failure result — treat like a raised exception.
+                error_msg = (
+                    result.error
+                    or "projection returned success=False without error detail"
+                )
+                context = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.DATABASE,
+                    operation="dispatch_result_applier.execute_projection",
+                )
+                raise ProjectionError(
+                    f"Projection write failed for {intent.projection_type}: {error_msg}",
+                    context=context,
+                    originating_event_id=intent.causation_event_id,
+                    projection_type=intent.projection_type,
+                )
+            logger.info(
+                "Projection persisted: type=%s aggregate_id=%s artifact_ref=%s "
+                "dispatcher_id=%s correlation_id=%s",
+                intent.projection_type,
+                str(intent.aggregate_id),
+                result.artifact_ref,
+                dispatcher_id,
+                str(correlation_id),
+            )
+        except ProjectionError:
+            raise
+        except Exception as exc:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=correlation_id,
+                transport_type=EnumInfraTransportType.DATABASE,
+                operation="dispatch_result_applier.execute_projection",
+            )
+            raise ProjectionError(
+                f"Projection write raised exception for {intent.projection_type}: "
+                f"{sanitize_error_message(exc)}",
+                context=context,
+                originating_event_id=intent.causation_event_id,
+                projection_type=intent.projection_type,
+            ) from exc
+
     async def apply(
         self,
         result: ModelDispatchResult,
         correlation_id: UUID | None = None,
     ) -> None:
-        """Process a dispatch result: execute intents then publish output events.
+        """Process a dispatch result: project, execute intents, then publish output events.
 
-        Ordering Contract:
-            Intents (writes) execute BEFORE output events are published. This
-            ensures read models are consistent before downstream consumers can
-            observe the events. Matches the original handler ordering where
-            projection persistence preceded event emission.
+        Ordering Contract (OMN-2363 / OMN-2510):
+            1. NodeProjectionEffect.execute() — synchronous, blocks Kafka on failure
+            2. IntentExecutor.execute_all() — remaining effects (writes first)
+            3. EventBus.publish_envelope() — Kafka publish, only if 1 and 2 succeed
 
         At-Least-Once Semantics:
             Output events are published sequentially. If event N fails, events
@@ -160,9 +264,20 @@ class DispatchResultApplier:
             redelivery, events 1..N-1 will be published again as duplicates.
             Downstream consumers must be idempotent.
 
+        Projection Failure Semantics (OMN-2510):
+            If the projection effect raises, the applier re-raises immediately
+            without executing intents or publishing any Kafka messages.  Zero
+            intents are published on projection failure — no partial state
+            emission.
+
         Args:
             result: The dispatch result from the dispatch engine.
             correlation_id: Optional correlation ID for tracing.
+
+        Raises:
+            ProjectionError: If the projection effect raises.
+            RuntimeHostError: If intent execution misconfiguration is detected.
+            Exception: Re-raised from intent execution or Kafka publish failures.
         """
         effective_correlation_id = correlation_id or result.correlation_id
         if effective_correlation_id is None:
@@ -183,6 +298,55 @@ class DispatchResultApplier:
                 str(effective_correlation_id),
             )
             return
+
+        # Phase 0: Execute projection synchronously (OMN-2510).
+        # Projection MUST complete before any Kafka publish.  If the projection
+        # effect raises, we re-raise immediately — no intents published, no
+        # Kafka messages emitted.
+        projection_intents: list[ModelProjectionIntent] = list(
+            getattr(result, "projection_intents", None) or []
+        )
+        if projection_intents and self._projection_effect is None:
+            context = ModelInfraErrorContext.with_correlation(
+                correlation_id=effective_correlation_id,
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="dispatch_result_applier.execute_projection",
+            )
+            raise RuntimeHostError(
+                f"Dispatch result contains {len(projection_intents)} projection intent(s) "
+                f"but no ProtocolProjectionEffect is configured — projection would be "
+                f"skipped and Kafka publish would race (dispatcher_id={result.dispatcher_id})",
+                context=context,
+            )
+        if self._projection_effect is not None and projection_intents:
+            for proj_intent in projection_intents:
+                # _execute_projection raises ProjectionError on any failure.
+                # We do NOT catch it here — the caller must see it to skip
+                # Kafka offset commit.
+                try:
+                    self._execute_projection(
+                        proj_intent,
+                        correlation_id=effective_correlation_id,
+                        dispatcher_id=result.dispatcher_id,
+                    )
+                except ProjectionError as proj_err:
+                    logger.exception(
+                        "Projection failed — Kafka publish blocked: "
+                        "projection_type=%s aggregate_id=%s originating_event_id=%s "
+                        "dispatcher_id=%s correlation_id=%s",
+                        proj_intent.projection_type,
+                        str(proj_intent.aggregate_id),
+                        str(proj_intent.causation_event_id),
+                        result.dispatcher_id,
+                        str(effective_correlation_id),
+                        extra={
+                            "error_type": type(proj_err).__name__,
+                            "projection_type": proj_intent.projection_type,
+                            "aggregate_id": str(proj_intent.aggregate_id),
+                            "dispatcher_id": result.dispatcher_id,
+                        },
+                    )
+                    raise
 
         # Phase 1: Execute intents (writes) BEFORE publishing output events.
         # This ensures read models (PostgreSQL projections, Consul registrations)
@@ -229,7 +393,7 @@ class DispatchResultApplier:
                 # failed PostgreSQL upserts, leading to data loss.
                 raise
 
-        # Phase 2: Publish output events AFTER intents have committed.
+        # Phase 2: Publish output events AFTER projection and intents have committed.
         if result.output_events:
             for idx, output_event in enumerate(result.output_events):
                 try:

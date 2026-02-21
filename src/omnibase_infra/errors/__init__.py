@@ -38,6 +38,7 @@ Exports:
     SchemaFingerprintMissingError: Expected fingerprint not in db_metadata
     EventRegistryFingerprintMismatchError: Live event registry fingerprint != expected
     EventRegistryFingerprintMissingError: Event registry artifact file not found
+    ProjectionError: Raised by NodeProjectionEffect when a synchronous projection write fails
 
 Correlation ID Assignment:
     All infrastructure errors support correlation_id for distributed tracing.
@@ -144,6 +145,7 @@ from omnibase_infra.errors.error_infra import (
 from omnibase_infra.errors.error_message_type_registry import MessageTypeRegistryError
 from omnibase_infra.errors.error_payload_registry import PayloadRegistryError
 from omnibase_infra.errors.error_policy_registry import PolicyRegistryError
+from omnibase_infra.errors.error_projection import ProjectionError
 from omnibase_infra.errors.error_schema_fingerprint import (
     SchemaFingerprintMismatchError,
     SchemaFingerprintMissingError,
@@ -165,6 +167,8 @@ from omnibase_infra.models.errors.model_timeout_error_context import (
 __all__: list[str] = [
     # Architecture validation errors
     "ArchitectureViolationError",
+    # Projection errors (OMN-2510)
+    "ProjectionError",
     # Binding resolution errors
     "BindingResolutionError",
     "ChainPropagationError",
