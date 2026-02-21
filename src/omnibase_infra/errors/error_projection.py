@@ -70,6 +70,7 @@ class ProjectionError(RuntimeHostError):
         context: ModelInfraErrorContext | None = None,
         originating_event_id: UUID | None = None,
         projection_type: str | None = None,
+        **extra_context: object,
     ) -> None:
         """Initialize ProjectionError with structured projection context.
 
@@ -81,14 +82,17 @@ class ProjectionError(RuntimeHostError):
                 projection.  Included in logs for correlation across services.
             projection_type: The projection table or projector class name.
                 Helps operators quickly identify which projector failed.
+            **extra_context: Additional context fields forwarded to
+                RuntimeHostError for structured logging.
         """
-        extra: dict[str, object] = {}
+        # Inject projection-specific fields into extra_context before
+        # forwarding to RuntimeHostError (same pattern as RepositoryError).
         if originating_event_id is not None:
-            extra["originating_event_id"] = str(originating_event_id)
+            extra_context["originating_event_id"] = str(originating_event_id)
         if projection_type is not None:
-            extra["projection_type"] = projection_type
+            extra_context["projection_type"] = projection_type
 
-        super().__init__(message, context=context, **extra)
+        super().__init__(message, error_code=None, context=context, **extra_context)
 
         # Store typed attributes for programmatic access
         self.originating_event_id = originating_event_id
