@@ -87,7 +87,6 @@ ALLOWED_ROOT_FILES: frozenset[str] = frozenset(
         # ONEX-specific documentation
         "CLAUDE.md",
         # Environment
-        ".env",
         ".env.example",
         ".env.template",
         # Docker (if needed at root)
@@ -149,7 +148,6 @@ ALLOWED_ROOT_DIRECTORIES: frozenset[str] = frozenset(
         # Virtual environments (should be gitignored)
         ".venv",
         "venv",
-        ".env",
         "env",
         # Build directories (should be gitignored)
         "build",
