@@ -12,6 +12,7 @@ Related:
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -336,3 +337,97 @@ class TestColumnSetsMatchSchema:
             f"IntentEffectPostgresUpsert._TIMESTAMP_COLUMNS or document "
             f"them in the 'COLUMNS NOT YET COVERED' block."
         )
+
+
+@pytest.mark.unit
+class TestNormalizeForAsyncpg:
+    """Unit tests for IntentEffectPostgresUpsert._normalize_for_asyncpg.
+
+    Covers all column type branches: None passthrough, JSONB serialization,
+    UUID coercion, TIMESTAMPTZ coercion, and plain passthrough.
+    """
+
+    def test_jsonb_dict_is_serialized_to_json_string(self) -> None:
+        """capabilities dict must be serialized to a JSON string for asyncpg."""
+        caps = {"postgres": False, "read": False, "write": True}
+        record: dict[str, object] = {"capabilities": caps}
+
+        result = IntentEffectPostgresUpsert._normalize_for_asyncpg(record)
+
+        assert isinstance(result["capabilities"], str)
+        assert json.loads(result["capabilities"]) == caps  # type: ignore[arg-type]
+
+    def test_jsonb_list_is_serialized_to_json_string(self) -> None:
+        """A list value in a JSONB column must be serialized to a JSON string."""
+        caps_list: list[str] = ["read", "write"]
+        record: dict[str, object] = {"capabilities": caps_list}
+
+        result = IntentEffectPostgresUpsert._normalize_for_asyncpg(record)
+
+        assert isinstance(result["capabilities"], str)
+        assert json.loads(result["capabilities"]) == caps_list  # type: ignore[arg-type]
+
+    def test_jsonb_already_string_is_passed_through(self) -> None:
+        """A JSON string already in a JSONB column must not be double-serialized."""
+        caps_str = '{"postgres": true}'
+        record: dict[str, object] = {"capabilities": caps_str}
+
+        result = IntentEffectPostgresUpsert._normalize_for_asyncpg(record)
+
+        assert result["capabilities"] == caps_str
+
+    def test_jsonb_none_is_passed_through(self) -> None:
+        """None values must be passed through unchanged regardless of column type."""
+        record: dict[str, object] = {"capabilities": None}
+
+        result = IntentEffectPostgresUpsert._normalize_for_asyncpg(record)
+
+        assert result["capabilities"] is None
+
+    def test_text_array_list_is_not_serialized(self) -> None:
+        """Lists in TEXT[] columns (not in _JSONB_COLUMNS) must not be JSON-serialized.
+
+        asyncpg handles Python lists natively for PostgreSQL array columns.
+        Serializing them to JSON strings would cause a type mismatch.
+        """
+        protocols = ["http", "grpc"]
+        record: dict[str, object] = {"protocols": protocols}
+
+        result = IntentEffectPostgresUpsert._normalize_for_asyncpg(record)
+
+        # Must remain a Python list, not a JSON string
+        assert result["protocols"] == protocols
+        assert isinstance(result["protocols"], list)
+
+    @pytest.mark.asyncio
+    async def test_execute_normalizes_capabilities_dict_to_json_string(
+        self,
+    ) -> None:
+        """execute() must pass capabilities as a JSON string to upsert_partial."""
+        mock_projector = MagicMock()
+        mock_projector.upsert_partial = AsyncMock(return_value=True)
+        effect = IntentEffectPostgresUpsert(projector=mock_projector)
+
+        entity_id = uuid4()
+        correlation_id = uuid4()
+        caps = {"postgres": False, "read": False, "write": True}
+
+        record = MockProjectionRecord(
+            entity_id=str(entity_id),
+            domain="registration",
+            capabilities=caps,
+        )
+        payload = ModelPayloadPostgresUpsertRegistration(
+            correlation_id=correlation_id,
+            record=record,
+        )
+
+        await effect.execute(payload, correlation_id=correlation_id)
+
+        call_kwargs = mock_projector.upsert_partial.call_args
+        values = call_kwargs.kwargs["values"]
+        assert isinstance(values["capabilities"], str), (
+            "capabilities must be a JSON string when passed to asyncpg, "
+            f"got {type(values['capabilities']).__name__}"
+        )
+        assert json.loads(values["capabilities"]) == caps

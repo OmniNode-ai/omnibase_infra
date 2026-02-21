@@ -28,6 +28,7 @@ Related:
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -227,7 +228,8 @@ class IntentEffectPostgresUpsert:
     # check if it introduces columns not listed here and add them:
     #
     #   1. Open schema_registration_projection.sql
-    #   2. Find all UUID and TIMESTAMPTZ columns in the CREATE TABLE statement
+    #   2. Find all UUID, TIMESTAMPTZ, and JSONB columns in the CREATE TABLE
+    #      statement
     #   3. If your new intent writes to any of those columns, ensure the column
     #      name appears in the appropriate set below
     #   4. Add a test case in tests/unit/runtime/test_intent_effect_postgres_upsert.py
@@ -237,8 +239,9 @@ class IntentEffectPostgresUpsert:
     #   - postgres.upsert_registration (HandlerNodeIntrospected)
     #     UUID cols: entity_id, last_applied_event_id, correlation_id
     #     TIMESTAMPTZ cols: ack_deadline, registered_at, updated_at
+    #     JSONB cols: capabilities
     #
-    # All schema UUID and TIMESTAMPTZ columns are included in the sets
+    # All schema UUID, TIMESTAMPTZ, and JSONB columns are included in the sets
     # below. The normalizer is a no-op for None values, so including
     # columns not yet written by any intent type is safe and prevents
     # silent corruption when new intent types are wired.
@@ -266,6 +269,15 @@ class IntentEffectPostgresUpsert:
         }
     )
 
+    # JSONB columns in registration_projections.
+    # Schema reference: capabilities JSONB NOT NULL DEFAULT '{}'
+    # asyncpg requires JSON strings for JSONB columns; Python dicts/lists must
+    # be serialized with json.dumps() before passing as query arguments.
+    # Note: TEXT[] columns (intent_types, protocols, capability_tags) are NOT
+    # included here — asyncpg handles Python lists for array columns natively.
+    # Validated by: tests/unit/runtime/test_intent_effect_postgres_upsert.py
+    _JSONB_COLUMNS: frozenset[str] = frozenset({"capabilities"})
+
     @staticmethod
     def _normalize_for_asyncpg(
         record: dict[str, object],
@@ -273,19 +285,25 @@ class IntentEffectPostgresUpsert:
         """Normalize record values from JSON-serializable types to asyncpg-native types.
 
         Handlers produce JSON-serializable values (string UUIDs, ISO datetime
-        strings). asyncpg requires native Python types (UUID, datetime) for
-        parameterized queries against PostgreSQL UUID and TIMESTAMPTZ columns.
+        strings, Python dicts). asyncpg requires native Python types (UUID,
+        datetime) for UUID and TIMESTAMPTZ columns, and JSON strings for JSONB
+        columns.
 
         Args:
             record: Dict of column name → value from model_dump().
 
         Returns:
-            New dict with UUID and datetime columns converted to native types.
+            New dict with UUID, datetime, and JSONB columns converted to the
+            types expected by asyncpg.
         """
         normalized: dict[str, object] = {}
         for key, value in record.items():
             if value is None:
                 normalized[key] = value
+            elif key in IntentEffectPostgresUpsert._JSONB_COLUMNS:
+                normalized[key] = (
+                    json.dumps(value) if isinstance(value, (dict, list)) else value
+                )
             elif key in IntentEffectPostgresUpsert._UUID_COLUMNS:
                 normalized[key] = (
                     UUID(str(value)) if not isinstance(value, UUID) else value
