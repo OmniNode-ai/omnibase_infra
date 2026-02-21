@@ -36,7 +36,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from omnibase_infra.event_bus.topic_constants import TOPIC_LLM_CALL_COMPLETED
@@ -98,7 +98,7 @@ class ServiceLlmMetricsPublisher:
     def __init__(
         self,
         handler: ProtocolLlmHandler,
-        publisher: Callable[[str, dict[str, Any], str], Awaitable[bool]],
+        publisher: Callable[..., Awaitable[bool]],
     ) -> None:
         """Initialise with inner handler and publisher callable.
 
