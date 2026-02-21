@@ -123,6 +123,7 @@ SHARED_PLATFORM_SECRETS: dict[str, list[str]] = {
         "VAULT_TOKEN",
     ],
     "/shared/llm/": [
+        "REMOTE_SERVER_IP",
         "LLM_CODER_URL",
         "LLM_CODER_FAST_URL",
         "LLM_EMBEDDING_URL",
@@ -494,7 +495,8 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         )
         return 1
 
-    admin_token = _ADMIN_TOKEN_FILE.open().readline().strip()
+    with _ADMIN_TOKEN_FILE.open() as f:
+        admin_token = f.readline().strip()
 
     print(f"\nCreating folder structure at {path_prefix}/...")
     _create_folders_via_admin(

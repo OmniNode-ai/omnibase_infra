@@ -463,7 +463,8 @@ def main() -> int:
         if not bootstrap_data:
             # Already bootstrapped — check for saved admin token
             if _ADMIN_TOKEN_FILE.is_file():
-                admin_token = _ADMIN_TOKEN_FILE.open().readline().strip()
+                with _ADMIN_TOKEN_FILE.open() as f:
+                    admin_token = f.readline().strip()
                 logger.info("Instance already bootstrapped, using saved admin token")
                 # Get org id from existing workspaces list
                 orgs_resp = client.get(
@@ -537,7 +538,10 @@ def main() -> int:
         client_id = credentials["clientId"]
         client_secret = credentials["clientSecret"]
         if not client_id or not client_secret:
-            logger.error("Failed to get client credentials: %s", credentials)
+            logger.error(
+                "Failed to get client credentials (client_id=%s)",
+                client_id or "(empty)",
+            )
             return 1
         logger.info("Client credentials created (client_id=%s)", client_id)
 
@@ -573,6 +577,7 @@ def main() -> int:
             f"#\n"
             f"# Client credentials written to .env\n"
         )
+        _IDENTITY_FILE.chmod(0o600)
 
     logger.info("")
     logger.info("Provisioning complete!")
