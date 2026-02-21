@@ -28,6 +28,9 @@ import pytest
 from omnibase_infra.enums import EnumLlmOperationType
 from omnibase_infra.event_bus.topic_constants import TOPIC_LLM_CALL_COMPLETED
 from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
+from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_ollama import (
+    HandlerLlmOllama,
+)
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
 )
@@ -388,3 +391,33 @@ class TestMultipleCalls:
         assert first_call_corr == str(corr1)
         assert second_call_corr == str(corr2)
         assert first_call_corr != second_call_corr
+
+
+# ---------------------------------------------------------------------------
+# Protocol structural compatibility
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_protocol_structural_compatibility() -> None:
+    """Verify HandlerLlmOllama and HandlerLlmOpenaiCompatible satisfy ProtocolLlmHandler structurally.
+
+    ProtocolLlmHandler is not runtime-checkable, so compatibility is verified
+    via hasattr checks on the required ``handle`` method.  If either handler
+    drops or renames ``handle``, this test will catch the divergence before it
+    silently breaks ServiceLlmMetricsPublisher at runtime.
+    """
+    from omnibase_infra.nodes.node_llm_inference_effect.services.protocol_llm_handler import (
+        ProtocolLlmHandler,
+    )
+
+    # Confirm the protocol itself declares handle
+    assert hasattr(ProtocolLlmHandler, "handle"), "ProtocolLlmHandler missing handle()"
+
+    for handler_cls in [HandlerLlmOllama, HandlerLlmOpenaiCompatible]:
+        assert hasattr(handler_cls, "handle"), (
+            f"{handler_cls.__name__} missing handle()"
+        )
+        assert callable(handler_cls.handle), (
+            f"{handler_cls.__name__}.handle is not callable"
+        )

@@ -179,23 +179,29 @@ class ServiceLlmMetricsPublisher:
         # refers to thread-safety, not asyncio concurrency.)
         captured_metrics = getattr(self._handler, "last_call_metrics", None)
 
-        # Schedule metrics emission as a background task so Kafka publish
-        # latency does not add to inference response time.
-        # Note: _background_tasks grows unboundedly while tasks are in-flight.
-        # The done callback removes each task on completion, so under normal
-        # conditions the set stays near-empty. Slow publishers (e.g. Kafka
-        # back-pressure) may cause temporary accumulation; see __init__ comment.
-        task = asyncio.create_task(self._emit_metrics(correlation_id, captured_metrics))
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
+        # Only schedule a background task when there is something to emit.
+        # Skipping the create_task call entirely avoids scheduling a no-op
+        # coroutine that would just return immediately after the None guard
+        # inside _emit_metrics.
+        if captured_metrics is not None:
+            # Schedule metrics emission as a background task so Kafka publish
+            # latency does not add to inference response time.
+            # Note: _background_tasks grows unboundedly while tasks are in-flight.
+            # The done callback removes each task on completion, so under normal
+            # conditions the set stays near-empty. Slow publishers (e.g. Kafka
+            # back-pressure) may cause temporary accumulation; see __init__ comment.
+            task = asyncio.create_task(
+                self._emit_metrics(correlation_id, captured_metrics)
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
 
         return response
 
     async def _emit_metrics(
         self,
         correlation_id: UUID,
-        metrics: ContractLlmCallMetrics
-        | None,  # TYPE_CHECKING-only import; annotation is lazily evaluated via `from __future__ import annotations` (PEP 563)
+        metrics: ContractLlmCallMetrics | None,
     ) -> None:
         """Publish pre-captured last_call_metrics to Kafka.
 
@@ -208,7 +214,9 @@ class ServiceLlmMetricsPublisher:
                 the inner handler returned, before any subsequent await boundary.
                 Passing the snapshot as a parameter avoids a race condition where
                 a concurrent call could overwrite the handler's attribute before
-                this method reads it.
+                this method reads it.  ``ContractLlmCallMetrics`` is a
+                TYPE_CHECKING-only import; the annotation is lazily evaluated
+                via ``from __future__ import annotations`` (PEP 563).
         """
         if metrics is None:
             logger.debug(
