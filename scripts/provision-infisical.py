@@ -73,7 +73,7 @@ def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
             key = stripped.partition("=")[0].strip()
             # Strip "export " prefix so "export KEY=val" indexes as "KEY",
             # matching the bare key names in the `updates` dict.
-            key = key.removeprefix("export").strip()
+            key = key.removeprefix("export ").strip()
             existing[key] = i
 
     # Update existing keys or append new ones
@@ -209,6 +209,21 @@ def _configure_universal_auth(
     identity_id: str,  # type: ignore[type-arg]
 ) -> None:
     """Configure Universal Auth on an identity."""
+    # Default trusted-IP list covers loopback and the standard dev subnet.
+    # Override by setting INFISICAL_TRUSTED_IPS to a comma-separated list
+    # of CIDR blocks, e.g. "127.0.0.1/32,10.0.0.0/8".
+    _trusted_ips_env = os.environ.get("INFISICAL_TRUSTED_IPS")
+    if _trusted_ips_env:
+        _trusted_ip_list = [
+            {"ipAddress": cidr.strip()}
+            for cidr in _trusted_ips_env.split(",")
+            if cidr.strip()
+        ]
+    else:
+        _trusted_ip_list = [
+            {"ipAddress": "127.0.0.1/32"},
+            {"ipAddress": "192.168.86.0/24"},
+        ]
     resp = client.post(  # type: ignore[attr-defined]
         f"{addr}/api/v1/auth/universal-auth/identities/{identity_id}",
         headers={"Authorization": f"Bearer {token}"},
@@ -216,14 +231,8 @@ def _configure_universal_auth(
             "accessTokenTTL": 86400,  # 24h
             "accessTokenMaxTTL": 2592000,  # 30d
             "accessTokenNumUsesLimit": 0,  # unlimited
-            "clientSecretTrustedIps": [
-                {"ipAddress": "127.0.0.1/32"},
-                {"ipAddress": "192.168.86.0/24"},
-            ],
-            "accessTokenTrustedIps": [
-                {"ipAddress": "127.0.0.1/32"},
-                {"ipAddress": "192.168.86.0/24"},
-            ],
+            "clientSecretTrustedIps": _trusted_ip_list,
+            "accessTokenTrustedIps": _trusted_ip_list,
         },
     )
     if resp.status_code in (400, 409) and "already" in resp.text.lower():
@@ -419,6 +428,10 @@ def main() -> int:
             args.env_file,
         )
         logger.info("To re-provision, remove those keys from .env first.")
+        logger.warning(
+            "INFISICAL_ADDR in env file may differ from --addr %s — verify before use",
+            args.addr,
+        )
         return 0
 
     # Resolve admin password: priority: env var (highest) > CLI arg > auto-generate (lowest).
