@@ -99,7 +99,7 @@ if not os.getenv("OMNIBASE_INFRA_DB_URL"):
     _pg_port = os.getenv("POSTGRES_PORT", "5436")
     _pg_user = os.getenv("POSTGRES_USER", "postgres")
     _pg_pass = os.getenv("POSTGRES_PASSWORD")
-    _pg_db = os.getenv("POSTGRES_DATABASE", "omninode_bridge")
+    _pg_db = os.getenv("POSTGRES_DATABASE", "omnibase_infra")
     if _pg_host and _pg_pass:
         from urllib.parse import quote_plus as _qp
 
