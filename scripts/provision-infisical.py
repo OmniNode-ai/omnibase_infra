@@ -110,7 +110,7 @@ def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
     # gitignore is irrelevant here.  The .tmp file is replaced atomically via
     # os.rename (POSIX), so the exposure window is negligible regardless of
     # where the file lives.
-    env_path.parent.mkdir(parents=True, exist_ok=True)
+    env_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = env_path.with_name(env_path.name + ".tmp")
     # Create the tmp file with 0o600 permissions from the start so there is
     # never a window where the file containing secrets is world-readable.
@@ -413,18 +413,19 @@ def main() -> int:
         logger.exception("httpx is required: uv add httpx")
         return 1
 
-    # Check if already provisioned — look in both the .env file and the shell
-    # environment so that sourcing ~/.omnibase/.env in ~/.zshrc is honoured.
+    # Check if already provisioned — only the env file is authoritative here.
+    # The shell environment is deliberately excluded: a key present only in the
+    # shell (e.g. from a stale prior run or a sourced .zshrc) must not suppress
+    # a legitimate re-provisioning where the file is incomplete.
     existing_env = _parse_env_file(args.env_file)
     _provision_keys = (
         "INFISICAL_CLIENT_ID",
         "INFISICAL_CLIENT_SECRET",
         "INFISICAL_PROJECT_ID",
     )
-    if all(existing_env.get(k) or os.environ.get(k) for k in _provision_keys):
+    if all(existing_env.get(k) for k in _provision_keys):
         logger.info(
-            "Already provisioned: INFISICAL_CLIENT_ID/SECRET/PROJECT_ID are set "
-            "(in %s or shell environment)",
+            "Already provisioned: INFISICAL_CLIENT_ID/SECRET/PROJECT_ID are set in %s",
             args.env_file,
         )
         logger.info("To re-provision, remove those keys from .env first.")
@@ -483,7 +484,7 @@ def main() -> int:
                 )
                 return 1
         logger.info("Infisical is reachable and ready at %s", args.addr)
-    except Exception:
+    except (httpx.HTTPError, OSError):
         logger.exception("Cannot reach Infisical at %s", args.addr)
         logger.info(
             "Start it with: docker compose -p omnibase-infra-runtime"
@@ -565,6 +566,13 @@ def main() -> int:
                     # SENSITIVE: this line stores a high-privilege admin credential.
                     # Do NOT share this file, copy it to other machines, or include
                     # it in backups. The file is chmod 0o600 (owner read/write only).
+                    #
+                    # The stored admin_password is for HUMAN REFERENCE ONLY — e.g.
+                    # logging in to the Infisical web UI manually.  No automated
+                    # re-auth path in this codebase reads it.  If the admin token
+                    # on line 1 is lost or stale, the documented recovery path is:
+                    # wipe the Infisical DB volume and re-run this script to start
+                    # fresh (not re-authenticate using this password).
                     token_file_lines.append(f"admin_password={admin_password}")
                 _admin_token_tmp = _ADMIN_TOKEN_FILE.with_name(
                     _ADMIN_TOKEN_FILE.name + ".tmp"
