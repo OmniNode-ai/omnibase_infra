@@ -103,6 +103,13 @@ if [[ ! -f "${COMPOSE_FILE}" ]]; then
     exit 1
 fi
 
+# The repo .env file is required here even though it is gitignored.
+# It holds POSTGRES_PASSWORD (and the Infisical service secrets for the
+# infra repo), which PostgreSQL needs before Infisical is available —
+# a circular dependency that prevents storing this value in Infisical itself.
+# New developers: copy .env.example to .env and fill in the required values.
+# Note: validate_clean_root.py does NOT flag .env as a violation because
+# git check-ignore recognises it as gitignored, so it is silently skipped.
 if [[ ! -f "${ENV_FILE}" ]]; then
     log_error ".env file not found: ${ENV_FILE}"
     log_error "Copy .env.example to .env and configure POSTGRES_PASSWORD"

@@ -521,7 +521,8 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     with _ADMIN_TOKEN_FILE.open() as f:
         admin_token = f.readline().strip()
     if not admin_token:
-        raise ValueError(f"Admin token file is empty: {_ADMIN_TOKEN_FILE}")
+        print(f"ERROR: Admin token file is empty: {_ADMIN_TOKEN_FILE}", file=sys.stderr)
+        raise SystemExit(1)
 
     print(f"\nCreating folder structure at {path_prefix}/...")
     _create_folders_via_admin(

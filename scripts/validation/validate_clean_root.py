@@ -227,7 +227,7 @@ def _get_gitignored_set(items: list[Path]) -> set[Path]:
             ["git", "check-ignore", "--", *[str(p) for p in items]],
             capture_output=True,
             check=False,
-            cwd=items[0].parent,
+            cwd=items[0].parent.resolve(),
         )
         # git check-ignore prints one ignored path per line.  Because we pass
         # absolute paths, the output lines are also absolute paths — so we

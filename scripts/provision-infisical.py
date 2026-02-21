@@ -525,7 +525,9 @@ def main() -> int:
                     # Do NOT share this file, copy it to other machines, or include
                     # it in backups. The file is chmod 0o600 (owner read/write only).
                     token_file_lines.append(f"admin_password={admin_password}")
-                _admin_token_tmp = _ADMIN_TOKEN_FILE.with_suffix(".tmp")
+                _admin_token_tmp = _ADMIN_TOKEN_FILE.with_name(
+                    _ADMIN_TOKEN_FILE.name + ".tmp"
+                )
                 _admin_token_tmp.write_text(
                     "\n".join(token_file_lines) + "\n", encoding="utf-8"
                 )

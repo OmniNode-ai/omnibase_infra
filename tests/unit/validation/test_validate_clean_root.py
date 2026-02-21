@@ -327,16 +327,21 @@ class TestViolationsDetected:
 class TestPatternMatching:
     """Test pattern-based allowlist matching."""
 
-    def test_env_pattern_matches(self, tmp_path: Path) -> None:
-        """Test that .env.* pattern matches environment files."""
+    def test_env_pattern_is_violation(self, tmp_path: Path) -> None:
+        """Test that .env.* files are violations (not in ALLOWED_ROOT_PATTERNS).
+
+        .env variants like .env.local, .env.production are intentionally excluded
+        from the allowlist. These files must live in ~/.omnibase/ or be managed
+        by Infisical. Only .env.example and .env.template are explicitly allowed.
+        """
         env_files = [".env.local", ".env.production", ".env.test"]
         for env_file in env_files:
             (tmp_path / env_file).touch()
 
         result = validate_root_directory(tmp_path)
 
-        assert result.is_valid
-        assert len(result.violations) == 0
+        assert not result.is_valid
+        assert len(result.violations) == len(env_files)
 
     def test_egg_info_pattern_matches(self, tmp_path: Path) -> None:
         """Test that *.egg-info pattern matches build artifacts."""
@@ -350,22 +355,17 @@ class TestPatternMatching:
 
     def test_matches_pattern_function_positive(self) -> None:
         """Test _matches_pattern returns True for matching patterns."""
-        assert _matches_pattern(".env.local", (".env.*",))
-        assert _matches_pattern(".env.production", (".env.*",))
         assert _matches_pattern("package.egg-info", ("*.egg-info",))
         assert _matches_pattern("my_package.egg-info", ("*.egg-info",))
 
     def test_matches_pattern_function_negative(self) -> None:
         """Test _matches_pattern returns False for non-matching patterns."""
-        assert not _matches_pattern(".env", (".env.*",))  # .env without suffix
-        assert not _matches_pattern("env.local", (".env.*",))  # missing leading dot
         assert not _matches_pattern("random.txt", ("*.egg-info",))
         assert not _matches_pattern("egg-info", ("*.egg-info",))  # no prefix
 
     def test_matches_pattern_multiple_patterns(self) -> None:
         """Test _matches_pattern with multiple patterns."""
-        patterns = (".env.*", "*.egg-info", "*.tmp")
-        assert _matches_pattern(".env.local", patterns)
+        patterns = ("*.egg-info", "*.tmp")
         assert _matches_pattern("package.egg-info", patterns)
         assert _matches_pattern("temp.tmp", patterns)
         assert not _matches_pattern("random.txt", patterns)
@@ -686,9 +686,13 @@ class TestAllowlistCompleteness:
         for dir_name in common_dirs:
             assert dir_name in ALLOWED_ROOT_DIRECTORIES, f"{dir_name} should be allowed"
 
-    def test_env_pattern_in_patterns(self) -> None:
-        """Test that .env.* pattern is in ALLOWED_ROOT_PATTERNS."""
-        assert ".env.*" in ALLOWED_ROOT_PATTERNS
+    def test_env_pattern_not_in_patterns(self) -> None:
+        """Test that .env.* pattern is NOT in ALLOWED_ROOT_PATTERNS.
+
+        .env variants are intentionally excluded — they must live in
+        ~/.omnibase/ or be managed by Infisical at runtime.
+        """
+        assert ".env.*" not in ALLOWED_ROOT_PATTERNS
 
     def test_egg_info_pattern_in_patterns(self) -> None:
         """Test that *.egg-info pattern is in ALLOWED_ROOT_PATTERNS."""

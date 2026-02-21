@@ -46,6 +46,11 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
         value = value.strip()
         is_quoted = len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"')
         if is_quoted:
+            # Quoted values are taken verbatim (minus the surrounding quotes).
+            # Inline comments inside quotes are part of the value, not comments,
+            # so no comment-stripping is needed here.  The elif below only runs
+            # for unquoted values, where a space-hash / tab-hash sequence marks
+            # the start of a genuine inline comment.
             value = value[1:-1]
         elif " #" in value or "\t#" in value:
             # Split on the first inline comment marker (space-hash or tab-hash).
