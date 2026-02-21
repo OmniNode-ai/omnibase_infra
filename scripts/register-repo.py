@@ -372,6 +372,9 @@ def _upsert_secret(
 def cmd_seed_shared(args: argparse.Namespace) -> int:
     """Populate /shared/ paths from the platform .env file."""
     env_path = Path(args.env_file).expanduser()
+    if not env_path.is_file():
+        print(f"ERROR: Env file not found: {env_path}", file=sys.stderr)
+        raise SystemExit(1)
     env_values = _parse_env_file(env_path)
 
     if not env_values:

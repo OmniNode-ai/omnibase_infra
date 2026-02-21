@@ -118,7 +118,11 @@ def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
         os.write(fd, content.encode("utf-8"))
     finally:
         os.close(fd)
-    tmp.replace(env_path)  # atomic on POSIX
+    try:
+        tmp.replace(env_path)  # atomic on POSIX
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _bootstrap(client: object, addr: str, email: str, password: str, org: str) -> dict:  # type: ignore[type-arg]
