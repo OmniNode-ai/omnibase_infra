@@ -447,7 +447,7 @@ def main() -> int:
                         body.get("status"),
                     )
                     return 1
-            except Exception:
+            except (ValueError, KeyError):
                 # Cannot parse JSON — treat as not ready rather than assuming OK.
                 # This is a benign startup condition (server returning HTML while
                 # booting) so we log at WARNING level to avoid alarming tracebacks.
@@ -479,6 +479,13 @@ def main() -> int:
                 if _ADMIN_TOKEN_FILE.is_file():
                     with _ADMIN_TOKEN_FILE.open() as f:
                         admin_token = f.readline().strip()
+                    if not admin_token:
+                        logger.error(
+                            "Admin token file at %s exists but is empty or has a blank "
+                            "first line. Delete the file and re-run to re-provision.",
+                            _ADMIN_TOKEN_FILE,
+                        )
+                        return 1
                     logger.info(
                         "Instance already bootstrapped, using saved admin token"
                     )

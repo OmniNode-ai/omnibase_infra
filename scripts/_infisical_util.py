@@ -26,6 +26,22 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
     Handles ``export KEY=value`` syntax.
     Strips inline comments and surrounding quotes from values.
 
+    Warning:
+        **Unquoted values containing ``#`` will be truncated at the ``#``.**
+        This affects any unquoted value where ``#`` appears after the first
+        character — including URLs with fragments (``http://host/#fragment``)
+        and passwords or tokens that contain ``#``.  This is intentional: a
+        bare ``#`` in an unquoted value is treated as the start of an inline
+        comment, matching standard ``.env`` file convention.
+
+        To preserve ``#`` characters in a value, quote the value::
+
+            VALUE='http://host/#fragment'   # single quotes — verbatim
+            VALUE="p@ss#word"               # double quotes — also verbatim
+
+        Quoted values are taken verbatim (minus the surrounding quotes) and
+        are never subject to comment stripping.
+
     Args:
         env_path: Path to the ``.env`` file.  Returns an empty dict if the
             file does not exist.

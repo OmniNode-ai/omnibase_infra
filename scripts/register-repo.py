@@ -311,6 +311,20 @@ def _upsert_secret(
         # The Infisical adapter wraps all get_secret failures (including 404s)
         # as SecretResolutionError.  We distinguish "not found" from "real
         # error" by inspecting the exception message and cause chain.
+        #
+        # WORKAROUND: The Infisical Python SDK does not expose typed error
+        # codes (e.g. an HTTP status attribute or a structured exception
+        # subclass) that would let us cleanly identify a 404 "secret not
+        # found" response without parsing message strings.  The string
+        # patterns below ("not found", "404", "does not exist") are
+        # therefore a best-effort heuristic that may break if the SDK
+        # changes its error message wording in a future release.
+        #
+        # TODO: Replace this heuristic with proper error code inspection
+        # once the Infisical SDK exposes typed status codes or a dedicated
+        # SecretNotFoundError subclass.  Track against the SDK changelog
+        # (https://github.com/Infisical/infisical-python) and remove the
+        # string-matching blocks when a stable typed API is available.
         err_msg = str(_get_exc).lower()
         is_not_found = (
             "not found" in err_msg
