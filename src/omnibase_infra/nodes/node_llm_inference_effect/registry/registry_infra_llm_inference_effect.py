@@ -364,7 +364,7 @@ class RegistryInfraLlmInferenceEffect:
 
         handler = HandlerLlmOllama(target_name=target_name)
         # TODO(OMN-2443): emit metrics for Ollama once HandlerLlmOllama populates last_call_metrics
-        logger.warning(
+        logger.info(
             "register_ollama_with_metrics: metrics emission is a no-op "
             "until HandlerLlmOllama populates last_call_metrics"
         )
