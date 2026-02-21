@@ -25,6 +25,7 @@ Related:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
+from uuid import UUID
 
 if TYPE_CHECKING:
     from omnibase_infra.nodes.effects.models.model_llm_inference_response import (
@@ -65,11 +66,14 @@ class ProtocolLlmHandler(Protocol):
     async def handle(
         self,
         request: ModelLlmInferenceRequest,
+        correlation_id: UUID | None = None,
     ) -> ModelLlmInferenceResponse:
         """Execute an LLM inference call and return the response.
 
         Args:
             request: LLM inference request parameters.
+            correlation_id: Optional correlation ID for distributed tracing.
+                If ``None``, implementations may generate their own UUID.
 
         Returns:
             ``ModelLlmInferenceResponse`` from the underlying provider.

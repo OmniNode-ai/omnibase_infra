@@ -145,7 +145,7 @@ class ServiceLlmMetricsPublisher:
         if correlation_id is None:
             correlation_id = uuid4()
 
-        response = await self._handler.handle(request)
+        response = await self._handler.handle(request, correlation_id=correlation_id)
 
         # Capture metrics immediately after handle() returns, before any await
         # boundary, to avoid a race condition: since this service is registered

@@ -358,6 +358,7 @@ class RegistryInfraLlmInferenceEffect:
         )
 
         handler = HandlerLlmOllama(target_name=target_name)
+        # TODO(OMN-2443): emit metrics for Ollama once HandlerLlmOllama populates last_call_metrics
         service = ServiceLlmMetricsPublisher(handler=handler, publisher=publisher)
 
         if container.service_registry is None:
