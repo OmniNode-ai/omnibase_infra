@@ -49,8 +49,6 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
             value = value[1:-1]
         elif " #" in value:
             value = value.split(" #")[0].strip()
-        elif "#" in value and not value.startswith("#"):
-            value = value.split("#")[0].strip()
         if key:
             values[key] = value
     return values

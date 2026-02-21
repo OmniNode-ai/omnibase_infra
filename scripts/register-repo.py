@@ -341,7 +341,12 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
 
     print("\n  Keys to seed:")
     for folder, key, value in sorted(plan):
-        display = value[:8] + "..." if len(value) > 8 else value
+        if len(value) > 4:
+            display = value[:4] + "..."
+        elif value:
+            display = "***"
+        else:
+            display = "(empty)"
         print(f"    {folder}{key} = {display}")
 
     if not args.execute:
@@ -421,6 +426,11 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         )
 
     env_path = Path(args.env_file).expanduser()
+    if not env_path.is_file():
+        raise SystemExit(
+            f"ERROR: env file not found: {env_path}\n"
+            "Provide a valid path via --env-file."
+        )
     env_values = _parse_env_file(env_path)
 
     infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")

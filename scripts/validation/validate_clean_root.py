@@ -164,7 +164,6 @@ ALLOWED_ROOT_DIRECTORIES: frozenset[str] = frozenset(
 
 # Pattern-based allowlist for files that match patterns
 ALLOWED_ROOT_PATTERNS: tuple[str, ...] = (
-    ".env.*",  # .env.local, .env.production, etc.
     "*.egg-info",  # Build artifacts (should be gitignored)
 )
 

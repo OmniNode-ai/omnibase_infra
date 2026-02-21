@@ -386,7 +386,9 @@ def main() -> int:
                     return 1
             except Exception:
                 # Cannot parse JSON — treat as not ready rather than assuming OK.
-                logger.exception(
+                # This is a benign startup condition (server returning HTML while
+                # booting) so we log at WARNING level to avoid alarming tracebacks.
+                logger.warning(
                     "Infisical at %s returned a non-JSON /api/status response. "
                     "The server may still be initialising.",
                     args.addr,
