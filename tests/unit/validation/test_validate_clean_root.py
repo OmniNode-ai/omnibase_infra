@@ -781,3 +781,34 @@ class TestIntegrationScenarios:
 
         assert result.is_valid
         assert len(result.violations) == 0
+
+
+class TestEnvFileEnforcement:
+    """Test that .env files are correctly denied (zero-repo-env policy)."""
+
+    def test_env_file_is_violation(self, tmp_path: Path) -> None:
+        """Test that .env is flagged as a violation (zero-repo-env policy)."""
+        (tmp_path / ".env").touch()
+
+        result = validate_root_directory(tmp_path)
+
+        assert not result.is_valid
+        assert len(result.violations) == 1
+        assert result.violations[0].path.name == ".env"
+
+    def test_env_example_still_allowed(self, tmp_path: Path) -> None:
+        """Test that .env.example passes (template files are allowed via .env.* pattern)."""
+        (tmp_path / ".env.example").touch()
+
+        result = validate_root_directory(tmp_path)
+
+        assert result.is_valid
+        assert len(result.violations) == 0
+
+    def test_env_not_in_allowed_root_files(self) -> None:
+        """Test that .env is not in ALLOWED_ROOT_FILES allowlist."""
+        assert ".env" not in ALLOWED_ROOT_FILES
+
+    def test_env_not_in_allowed_root_directories(self) -> None:
+        """Test that .env is not in ALLOWED_ROOT_DIRECTORIES allowlist."""
+        assert ".env" not in ALLOWED_ROOT_DIRECTORIES
