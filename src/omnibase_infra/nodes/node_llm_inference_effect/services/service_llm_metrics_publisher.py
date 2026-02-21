@@ -32,6 +32,7 @@ Related:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -120,6 +121,9 @@ class ServiceLlmMetricsPublisher:
         """
         self._handler = handler
         self._publisher = publisher
+        # Holds strong references to background tasks so they are not
+        # garbage-collected before they complete (required by RUF006).
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def handle(
         self,
@@ -155,8 +159,11 @@ class ServiceLlmMetricsPublisher:
         # is "Not safe for concurrent access."
         captured_metrics = getattr(self._handler, "last_call_metrics", None)
 
-        # Emit metrics -- fire-and-forget: must never break the inference result.
-        await self._emit_metrics(correlation_id, captured_metrics)
+        # Schedule metrics emission as a background task so Kafka publish
+        # latency does not add to inference response time.
+        task = asyncio.create_task(self._emit_metrics(correlation_id, captured_metrics))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
         return response
 

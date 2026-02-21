@@ -230,6 +230,11 @@ class RegistryInfraLlmInferenceEffect:
                 Typically ``AdapterProtocolEventPublisherKafka.publish``.
             target_name: Identifier for the target. Default:
                 ``"openai-inference"``.
+
+        Note:
+            Callers resolving ``HandlerLlmOpenaiCompatible`` directly from the
+            container will bypass metrics emission. Resolve
+            ``ServiceLlmMetricsPublisher`` to use the metrics-wrapped handler.
         """
         from omnibase_core.enums import EnumInjectionScope
         from omnibase_infra.mixins import MixinLlmHttpTransport
@@ -359,6 +364,10 @@ class RegistryInfraLlmInferenceEffect:
 
         handler = HandlerLlmOllama(target_name=target_name)
         # TODO(OMN-2443): emit metrics for Ollama once HandlerLlmOllama populates last_call_metrics
+        logger.debug(
+            "register_ollama_with_metrics called; metrics emission is a no-op "
+            "until HandlerLlmOllama populates last_call_metrics"
+        )
         service = ServiceLlmMetricsPublisher(handler=handler, publisher=publisher)
 
         if container.service_registry is None:
