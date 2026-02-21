@@ -67,6 +67,9 @@ def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
             continue
         if "=" in stripped:
             key = stripped.partition("=")[0].strip()
+            # Strip "export " prefix so "export KEY=val" indexes as "KEY",
+            # matching the bare key names in the `updates` dict.
+            key = key.removeprefix("export").strip()
             existing[key] = i
 
     # Update existing keys or append new ones
@@ -370,43 +373,6 @@ def main() -> int:
         logger.exception("httpx is required: uv add httpx")
         return 1
 
-    # Check connectivity and readiness.
-    # /api/status can return HTTP 200 before migrations are complete, so we
-    # also inspect the response body for a "status": "ok" field to confirm
-    # the server is fully ready (not just reachable).
-    try:
-        with httpx.Client(timeout=10) as probe:
-            resp = probe.get(f"{args.addr}/api/status")
-            resp.raise_for_status()
-            try:
-                body = resp.json()
-                if body.get("status") != "ok":
-                    logger.error(
-                        "Infisical at %s returned HTTP 200 but status field is %r "
-                        "(expected 'ok'). The server may still be initialising.",
-                        args.addr,
-                        body.get("status"),
-                    )
-                    return 1
-            except Exception:
-                # Cannot parse JSON — treat as not ready rather than assuming OK.
-                # This is a benign startup condition (server returning HTML while
-                # booting) so we log at WARNING level to avoid alarming tracebacks.
-                logger.warning(
-                    "Infisical at %s returned a non-JSON /api/status response. "
-                    "The server may still be initialising.",
-                    args.addr,
-                )
-                return 1
-        logger.info("Infisical is reachable and ready at %s", args.addr)
-    except Exception:
-        logger.exception("Cannot reach Infisical at %s", args.addr)
-        logger.info(
-            "Start it with: docker compose -p omnibase-infra-runtime"
-            " -f docker/docker-compose.infra.yml --profile secrets up -d infisical"
-        )
-        return 1
-
     # Check if already provisioned — look in both the .env file and the shell
     # environment so that sourcing ~/.omnibase/.env in ~/.zshrc is honoured.
     existing_env = _parse_env_file(args.env_file)
@@ -441,6 +407,45 @@ def main() -> int:
         logger.info("  Admin email: %s", args.admin_email)
         logger.info("  .env file: %s", args.env_file)
         return 0
+
+    # Check connectivity and readiness.
+    # /api/status can return HTTP 200 before migrations are complete, so we
+    # also inspect the response body for a "status": "ok" field to confirm
+    # the server is fully ready (not just reachable).
+    # NOTE: This check is intentionally placed after the --dry-run guard so
+    # that dry-run mode does not require a running Infisical instance.
+    try:
+        with httpx.Client(timeout=10) as probe:
+            resp = probe.get(f"{args.addr}/api/status")
+            resp.raise_for_status()
+            try:
+                body = resp.json()
+                if body.get("status") != "ok":
+                    logger.error(
+                        "Infisical at %s returned HTTP 200 but status field is %r "
+                        "(expected 'ok'). The server may still be initialising.",
+                        args.addr,
+                        body.get("status"),
+                    )
+                    return 1
+            except Exception:
+                # Cannot parse JSON — treat as not ready rather than assuming OK.
+                # This is a benign startup condition (server returning HTML while
+                # booting) so we log at WARNING level to avoid alarming tracebacks.
+                logger.warning(
+                    "Infisical at %s returned a non-JSON /api/status response. "
+                    "The server may still be initialising.",
+                    args.addr,
+                )
+                return 1
+        logger.info("Infisical is reachable and ready at %s", args.addr)
+    except Exception:
+        logger.exception("Cannot reach Infisical at %s", args.addr)
+        logger.info(
+            "Start it with: docker compose -p omnibase-infra-runtime"
+            " -f docker/docker-compose.infra.yml --profile secrets up -d infisical"
+        )
+        return 1
 
     with httpx.Client(timeout=30) as client:
         # Step 1: Bootstrap admin user + org

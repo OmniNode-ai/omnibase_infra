@@ -200,11 +200,19 @@ def _load_infisical_adapter() -> tuple[object, object]:
         )
         raise SystemExit(1)
 
+    try:
+        project_uuid = UUID(project_id)
+    except ValueError:
+        raise SystemExit(
+            f"ERROR: INFISICAL_PROJECT_ID is not a valid UUID: {project_id!r}\n"
+            "Check the INFISICAL_PROJECT_ID value in ~/.omnibase/.env or your shell environment.\n"
+            "The expected format is: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+        ) from None
     config = ModelInfisicalAdapterConfig(
         host=infisical_addr,
         client_id=SecretStr(client_id),
         client_secret=SecretStr(client_secret),
-        project_id=UUID(project_id),
+        project_id=project_uuid,
     )
     adapter = AdapterInfisical(config)
     adapter.initialize()
@@ -466,19 +474,23 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     print(f"  Env file: {env_path}")
     print("\n  Repo-specific keys:")
     for folder, key, value in plan:
-        display = (
-            (value[:8] + "...") if (value and len(value) > 8) else (value or "(empty)")
-        )
+        if value and len(value) > 4:
+            display = value[:4] + "..."
+        elif value:
+            display = "***"
+        else:
+            display = "(empty)"
         print(f"    {folder}{key} = {display}")
 
     if extra:
         print(f"\n  Additional repo-only keys ({len(extra)}):")
         for folder, key, value in extra:
-            display = (
-                (value[:8] + "...")
-                if (value and len(value) > 8)
-                else (value or "(empty)")
-            )
+            if value and len(value) > 4:
+                display = value[:4] + "..."
+            elif value:
+                display = "***"
+            else:
+                display = "(empty)"
             print(f"    {folder}{key} = {display}")
 
     if not args.execute:
