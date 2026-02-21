@@ -224,7 +224,8 @@ def _get_gitignored_set(items: list[Path]) -> set[Path]:
     try:
         result = subprocess.run(
             ["git", "check-ignore", "--", *[str(p) for p in items]],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             check=False,
             cwd=items[0].parent.resolve(),
         )

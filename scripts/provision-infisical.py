@@ -58,7 +58,7 @@ def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
     """
     lines: list[str] = []
     if env_path.is_file():
-        lines = env_path.read_text().splitlines()
+        lines = env_path.read_text(encoding="utf-8").splitlines()
 
     existing: dict[str, int] = {}  # key -> line index
     for i, line in enumerate(lines):
@@ -498,8 +498,8 @@ def main() -> int:
                 else:
                     logger.error(
                         "Instance already bootstrapped but no admin token found at %s. "
-                        "Delete the Infisical DB state and re-run to start fresh, "
-                        "or manually set INFISICAL_ADMIN_TOKEN in environment.",
+                        "To recover: wipe the Infisical DB state (drop the infisical_db "
+                        "volume) and re-run this script to start fresh.",
                         _ADMIN_TOKEN_FILE,
                     )
                     return 1
@@ -664,7 +664,7 @@ def main() -> int:
             exc.response.status_code,
             args.addr,
         )
-        sys.exit(1)
+        return 1
     except httpx.RequestError as exc:
         logger.exception(
             "Network error during provisioning while connecting to %s: %s. "
@@ -673,7 +673,7 @@ def main() -> int:
             exc,
             args.addr,
         )
-        sys.exit(1)
+        return 1
 
     logger.info("")
     logger.info("Provisioning complete!")
