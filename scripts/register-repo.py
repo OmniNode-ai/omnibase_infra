@@ -507,7 +507,11 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
         )
     path_prefix = f"/services/{repo_name}"
 
-    # Identify repo-specific secrets to seed
+    # Identify repo-specific secrets to seed.
+    # Keys missing from the env file (e.g. POSTGRES_DSN, which is assembled and
+    # written by the runtime after the DB is reachable) are intentionally seeded
+    # as empty strings — they reserve the Infisical slot so the runtime can
+    # update_secret without a prior create step.
     plan: list[tuple[str, str, str]] = []
     for key in REPO_SECRET_KEYS:
         value = env_values.get(key, "")

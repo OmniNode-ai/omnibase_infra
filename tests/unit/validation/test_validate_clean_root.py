@@ -841,7 +841,7 @@ class TestGetGitIgnoredSet:
             stderr=b"",
         )
 
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("validate_clean_root.subprocess.run", return_value=mock_result):
             ignored = _get_gitignored_set([item])
 
         assert item in ignored
@@ -851,7 +851,7 @@ class TestGetGitIgnoredSet:
         item = tmp_path / "some_file.txt"
         item.touch()
 
-        with patch("subprocess.run", side_effect=FileNotFoundError):
+        with patch("validate_clean_root.subprocess.run", side_effect=FileNotFoundError):
             ignored = _get_gitignored_set([item])
 
         assert ignored == set()
@@ -862,9 +862,12 @@ class TestGetGitIgnoredSet:
         item.touch()
 
         with patch(
-            "subprocess.run",
+            "validate_clean_root.subprocess.run",
             side_effect=subprocess.TimeoutExpired(cmd="git", timeout=5),
         ):
             ignored = _get_gitignored_set([item])
 
         assert ignored == set()
+
+    def test_empty_items_returns_empty_set(self) -> None:
+        assert _get_gitignored_set([]) == set()

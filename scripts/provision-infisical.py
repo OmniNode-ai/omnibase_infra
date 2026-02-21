@@ -386,6 +386,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if not args.addr.startswith(("http://", "https://")):
+        print(
+            f"error: --addr must start with 'http://' or 'https://', got: {args.addr!r}",
+            file=sys.stderr,
+        )
+        return 1
+
     try:
         import httpx
     except ImportError:
