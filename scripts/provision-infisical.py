@@ -11,7 +11,7 @@ Steps performed:
     2. Create project (workspace) in Infisical
     3. Create machine identity with Universal Auth
     4. Generate client credentials (client_id + client_secret)
-    5. Add identity to project as viewer (read-only)
+    5. Add identity to project as admin
     6. Write INFISICAL_* vars to .env
 
 Usage:
@@ -44,36 +44,10 @@ _ENV_FILE = _PROJECT_ROOT / ".env"
 _IDENTITY_FILE = _PROJECT_ROOT / ".infisical-identity"
 _ADMIN_TOKEN_FILE = _PROJECT_ROOT / ".infisical-admin-token"
 
-
-# TODO: consolidate with register-repo.py._parse_env_file — these two
-# implementations are identical but live in separate standalone scripts.
-# When a shared utilities module is introduced, extract this into it.
-def _parse_env_file(env_path: Path) -> dict[str, str]:
-    """Parse a .env file into a key-value dict."""
-    values: dict[str, str] = {}
-    if not env_path.is_file():
-        return values
-    for line in env_path.read_text().splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if stripped.startswith("export "):
-            stripped = stripped[7:]
-        if "=" not in stripped:
-            continue
-        key, _, value = stripped.partition("=")
-        key = key.strip()
-        value = value.strip()
-        is_quoted = len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"')
-        if is_quoted:
-            value = value[1:-1]
-        elif " #" in value:
-            value = value.split(" #")[0].strip()
-        elif "#" in value and not value.startswith("#"):
-            value = value.split("#")[0].strip()
-        if key:
-            values[key] = value
-    return values
+# Shared utility — avoids duplicating the parser in every Infisical script.
+# Ensure the scripts dir is on the path so the import resolves from any cwd.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _infisical_util import _parse_env_file
 
 
 def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
@@ -368,7 +342,10 @@ def main() -> int:
     parser.add_argument(
         "--admin-password",
         default=None,
-        help="Admin user password (auto-generated if not provided)",
+        help=(
+            "Admin user password; if not set, reads INFISICAL_ADMIN_PASSWORD "
+            "env var, else auto-generates"
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -424,25 +401,31 @@ def main() -> int:
         )
         return 1
 
-    # Check if already provisioned
+    # Check if already provisioned — look in both the .env file and the shell
+    # environment so that sourcing ~/.omnibase/.env in ~/.zshrc is honoured.
     existing_env = _parse_env_file(args.env_file)
-    if all(
-        existing_env.get(k)
-        for k in (
-            "INFISICAL_CLIENT_ID",
-            "INFISICAL_CLIENT_SECRET",
-            "INFISICAL_PROJECT_ID",
-        )
-    ):
+    _provision_keys = (
+        "INFISICAL_CLIENT_ID",
+        "INFISICAL_CLIENT_SECRET",
+        "INFISICAL_PROJECT_ID",
+    )
+    if all(existing_env.get(k) or os.environ.get(k) for k in _provision_keys):
         logger.info(
-            "Already provisioned: INFISICAL_CLIENT_ID/SECRET/PROJECT_ID are set in %s",
+            "Already provisioned: INFISICAL_CLIENT_ID/SECRET/PROJECT_ID are set "
+            "(in %s or shell environment)",
             args.env_file,
         )
         logger.info("To re-provision, remove those keys from .env first.")
         return 0
 
-    # Generate admin password if not provided
-    admin_password = args.admin_password or secrets.token_urlsafe(24)
+    # Resolve admin password: CLI arg < env var < auto-generate.
+    # Avoid CLI arg as the primary source because plaintext flags are visible
+    # in `ps aux` and /proc/PID/cmdline.
+    admin_password = (
+        os.environ.get("INFISICAL_ADMIN_PASSWORD")
+        or args.admin_password
+        or secrets.token_urlsafe(24)
+    )
 
     if args.dry_run:
         logger.info("[DRY RUN] Would provision Infisical:")
@@ -497,12 +480,19 @@ def main() -> int:
             # Persist admin token and (if auto-generated) password for subsequent runs.
             # Password is written ONLY to the file — never to log output.
             token_file_lines = [admin_token]
-            if not args.admin_password:
+            _password_was_auto_generated = (
+                not args.admin_password
+                and not os.environ.get("INFISICAL_ADMIN_PASSWORD")
+            )
+            if _password_was_auto_generated:
+                # SENSITIVE: this line stores a high-privilege admin credential.
+                # Do NOT share this file, copy it to other machines, or include
+                # it in backups. The file is chmod 0o600 (owner read/write only).
                 token_file_lines.append(f"admin_password={admin_password}")
             _ADMIN_TOKEN_FILE.write_text("\n".join(token_file_lines) + "\n")
             _ADMIN_TOKEN_FILE.chmod(0o600)
             logger.info("Admin token saved to %s", _ADMIN_TOKEN_FILE)
-            if not args.admin_password:
+            if _password_was_auto_generated:
                 logger.info(
                     "Generated admin password written to %s (not logged here)",
                     _ADMIN_TOKEN_FILE,

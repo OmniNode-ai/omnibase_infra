@@ -70,6 +70,11 @@ _BOOTSTRAP_ENV = Path.home() / ".omnibase" / ".env"
 
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
+# Shared utility — avoids duplicating the parser in every Infisical script.
+# Insert the scripts dir so the import resolves when run from any cwd.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _infisical_util import _parse_env_file
+
 # ---------------------------------------------------------------------------
 # Keys that are NEVER seeded into Infisical (circular bootstrap dependency).
 # These must come from the environment / .env file directly.
@@ -167,35 +172,6 @@ REPO_SECRET_KEYS = [
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _parse_env_file(path: Path) -> dict[str, str]:
-    """Parse a .env file into key-value dict, skipping comments and blanks."""
-    values: dict[str, str] = {}
-    if not path.is_file():
-        logger.warning("Env file not found: %s", path)
-        return values
-    for line in path.read_text().splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if stripped.startswith("export "):
-            stripped = stripped[7:]
-        if "=" not in stripped:
-            continue
-        key, _, value = stripped.partition("=")
-        key = key.strip()
-        value = value.strip()
-        is_quoted = len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"')
-        if is_quoted:
-            value = value[1:-1]
-        elif " #" in value:
-            value = value.split(" #")[0].strip()
-        elif "#" in value and not value.startswith("#"):
-            value = value.split("#")[0].strip()
-        if key:
-            values[key] = value
-    return values
 
 
 def _load_infisical_adapter() -> tuple[object, object]:
@@ -431,7 +407,19 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
 
 def cmd_onboard_repo(args: argparse.Namespace) -> int:
     """Create /services/<repo>/ folder structure and seed repo-specific secrets."""
+    import re
+
     repo_name = args.repo
+    # Reject names that could be used for path traversal or produce invalid
+    # Infisical paths.  Allow only alphanumeric characters, hyphens, and
+    # underscores (e.g. "omniclaude", "omni-bridge", "my_repo").
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", repo_name):
+        raise SystemExit(
+            f"ERROR: Invalid repo name '{repo_name}'. "
+            "Only alphanumeric characters, hyphens (-), and underscores (_) are allowed. "
+            "Slashes, dots, and other path characters are not permitted."
+        )
+
     env_path = Path(args.env_file).expanduser()
     env_values = _parse_env_file(env_path)
 
