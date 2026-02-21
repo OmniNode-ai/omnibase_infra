@@ -81,7 +81,12 @@ def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
             if current_val:
                 logger.info("  %s already set, skipping", key)
                 continue
-            lines[existing[key]] = f"{key}={value}"
+            # Preserve the `export ` prefix if the original line had it, so
+            # that files using `export KEY=val` syntax for shell sourcing
+            # compatibility do not silently lose that prefix on update.
+            had_export = current_line.lstrip().startswith("export ")
+            prefix = "export " if had_export else ""
+            lines[existing[key]] = f"{prefix}{key}={value}"
             logger.info("  Updated %s", key)
         else:
             appended.append(f"{key}={value}")
@@ -452,162 +457,199 @@ def main() -> int:
         )
         return 1
 
-    with httpx.Client(timeout=30) as client:
-        # Step 1: Bootstrap admin user + org
-        logger.info("Step 1: Bootstrapping admin user and organization...")
-        bootstrap_data = _bootstrap(
-            client, args.addr, args.admin_email, admin_password, args.org
-        )
+    try:
+        with httpx.Client(timeout=30) as client:
+            # Step 1: Bootstrap admin user + org
+            logger.info("Step 1: Bootstrapping admin user and organization...")
+            bootstrap_data = _bootstrap(
+                client, args.addr, args.admin_email, admin_password, args.org
+            )
 
-        if not bootstrap_data:
-            # Already bootstrapped — check for saved admin token
-            if _ADMIN_TOKEN_FILE.is_file():
-                with _ADMIN_TOKEN_FILE.open() as f:
-                    admin_token = f.readline().strip()
-                logger.info("Instance already bootstrapped, using saved admin token")
-                # Get org id from existing workspaces list
-                orgs_resp = client.get(
-                    f"{args.addr}/api/v1/organization",
-                    headers={"Authorization": f"Bearer {admin_token}"},
-                )
-                orgs_resp.raise_for_status()
-                orgs = orgs_resp.json().get("organizations", [])
-                if not orgs:
+            if not bootstrap_data:
+                # Already bootstrapped — check for saved admin token
+                if _ADMIN_TOKEN_FILE.is_file():
+                    with _ADMIN_TOKEN_FILE.open() as f:
+                        admin_token = f.readline().strip()
+                    logger.info(
+                        "Instance already bootstrapped, using saved admin token"
+                    )
+                    # Get org id from existing workspaces list
+                    orgs_resp = client.get(
+                        f"{args.addr}/api/v1/organization",
+                        headers={"Authorization": f"Bearer {admin_token}"},
+                    )
+                    orgs_resp.raise_for_status()
+                    orgs = orgs_resp.json().get("organizations", [])
+                    if not orgs:
+                        logger.error(
+                            "Instance is already bootstrapped but the org list returned "
+                            "by /api/v1/organization is empty. The admin token at %s may "
+                            "be stale or belong to a different instance. Delete the "
+                            "Infisical DB state and re-run to start fresh.",
+                            _ADMIN_TOKEN_FILE,
+                        )
+                        return 1
+                    org_id = orgs[0]["id"]
+                else:
                     logger.error(
-                        "Instance is already bootstrapped but the org list returned "
-                        "by /api/v1/organization is empty. The admin token at %s may "
-                        "be stale or belong to a different instance. Delete the "
-                        "Infisical DB state and re-run to start fresh.",
+                        "Instance already bootstrapped but no admin token found at %s. "
+                        "Delete the Infisical DB state and re-run to start fresh, "
+                        "or manually set INFISICAL_ADMIN_TOKEN in environment.",
                         _ADMIN_TOKEN_FILE,
                     )
                     return 1
-                org_id = orgs[0]["id"]
             else:
+                admin_token = (
+                    bootstrap_data.get("identity", {})
+                    .get("credentials", {})
+                    .get("token", "")
+                )
+                if not admin_token:
+                    logger.error(
+                        "Bootstrap response missing identity.credentials.token"
+                    )
+                    return 1
+                org_id = bootstrap_data.get("organization", {}).get("id", "")
+                if not org_id:
+                    logger.error("Bootstrap response missing organization.id")
+                    return 1
+                # Persist admin token and (if auto-generated) password for subsequent runs.
+                # Password is written ONLY to the file — never to log output.
+                token_file_lines = [admin_token]
+                _password_was_auto_generated = (
+                    not args.admin_password
+                    and not os.environ.get("INFISICAL_ADMIN_PASSWORD")
+                )
+                if _password_was_auto_generated:
+                    # SENSITIVE: this line stores a high-privilege admin credential.
+                    # Do NOT share this file, copy it to other machines, or include
+                    # it in backups. The file is chmod 0o600 (owner read/write only).
+                    token_file_lines.append(f"admin_password={admin_password}")
+                _admin_token_tmp = _ADMIN_TOKEN_FILE.with_suffix(".tmp")
+                _admin_token_tmp.write_text(
+                    "\n".join(token_file_lines) + "\n", encoding="utf-8"
+                )
+                _admin_token_tmp.chmod(0o600)
+                _admin_token_tmp.replace(_ADMIN_TOKEN_FILE)  # atomic on POSIX
+                logger.info("Admin token saved to %s", _ADMIN_TOKEN_FILE)
+                if _password_was_auto_generated:
+                    logger.info(
+                        "Generated admin password written to %s (not logged here)",
+                        _ADMIN_TOKEN_FILE,
+                    )
+
+            logger.info(
+                "Bootstrapped: org=%s (%s)",
+                bootstrap_data.get("organization", {}).get("name", "(existing)"),
+                org_id,
+            )
+
+            # Step 2: Create project
+            logger.info("Step 2: Creating project '%s'...", args.project)
+            workspace = _create_workspace(client, args.addr, admin_token, args.project)
+            project_id = workspace.get("id") or workspace.get("_id", "")
+            if not project_id:
                 logger.error(
-                    "Instance already bootstrapped but no admin token found at %s. "
-                    "Delete the Infisical DB state and re-run to start fresh, "
-                    "or manually set INFISICAL_ADMIN_TOKEN in environment.",
-                    _ADMIN_TOKEN_FILE,
+                    "Could not extract project ID from workspace response: %s",
+                    workspace,
                 )
                 return 1
-        else:
-            admin_token = (
-                bootstrap_data.get("identity", {})
-                .get("credentials", {})
-                .get("token", "")
+            logger.info("Project created: %s (%s)", workspace.get("name"), project_id)
+
+            # Step 3: Create machine identity
+            logger.info("Step 3: Creating machine identity '%s'...", args.identity_name)
+            identity = _create_identity(
+                client, args.addr, admin_token, args.identity_name, org_id
             )
-            if not admin_token:
-                logger.error("Bootstrap response missing identity.credentials.token")
-                return 1
-            org_id = bootstrap_data.get("organization", {}).get("id", "")
-            if not org_id:
-                logger.error("Bootstrap response missing organization.id")
-                return 1
-            # Persist admin token and (if auto-generated) password for subsequent runs.
-            # Password is written ONLY to the file — never to log output.
-            token_file_lines = [admin_token]
-            _password_was_auto_generated = (
-                not args.admin_password
-                and not os.environ.get("INFISICAL_ADMIN_PASSWORD")
-            )
-            if _password_was_auto_generated:
-                # SENSITIVE: this line stores a high-privilege admin credential.
-                # Do NOT share this file, copy it to other machines, or include
-                # it in backups. The file is chmod 0o600 (owner read/write only).
-                token_file_lines.append(f"admin_password={admin_password}")
-            _admin_token_tmp = _ADMIN_TOKEN_FILE.with_suffix(".tmp")
-            _admin_token_tmp.write_text(
-                "\n".join(token_file_lines) + "\n", encoding="utf-8"
-            )
-            _admin_token_tmp.chmod(0o600)
-            _admin_token_tmp.replace(_ADMIN_TOKEN_FILE)  # atomic on POSIX
-            logger.info("Admin token saved to %s", _ADMIN_TOKEN_FILE)
-            if _password_was_auto_generated:
-                logger.info(
-                    "Generated admin password written to %s (not logged here)",
-                    _ADMIN_TOKEN_FILE,
+            identity_id = identity.get("id") or identity.get("_id", "")
+            if not identity_id:
+                logger.error(
+                    "Could not extract identity ID from identity response: %s", identity
                 )
+                return 1
+            logger.info("Identity created: %s (%s)", identity.get("name"), identity_id)
 
-        logger.info(
-            "Bootstrapped: org=%s (%s)",
-            bootstrap_data.get("organization", {}).get("name", "(existing)"),
-            org_id,
-        )
+            # Step 4: Configure Universal Auth
+            logger.info("Step 4: Configuring Universal Auth...")
+            _configure_universal_auth(client, args.addr, admin_token, identity_id)
 
-        # Step 2: Create project
-        logger.info("Step 2: Creating project '%s'...", args.project)
-        workspace = _create_workspace(client, args.addr, admin_token, args.project)
-        project_id = workspace.get("id") or workspace.get("_id", "")
-        logger.info("Project created: %s (%s)", workspace.get("name"), project_id)
-
-        # Step 3: Create machine identity
-        logger.info("Step 3: Creating machine identity '%s'...", args.identity_name)
-        identity = _create_identity(
-            client, args.addr, admin_token, args.identity_name, org_id
-        )
-        identity_id = identity.get("id") or identity.get("_id", "")
-        logger.info("Identity created: %s (%s)", identity.get("name"), identity_id)
-
-        # Step 4: Configure Universal Auth
-        logger.info("Step 4: Configuring Universal Auth...")
-        _configure_universal_auth(client, args.addr, admin_token, identity_id)
-
-        # Step 5: Create client credentials
-        logger.info("Step 5: Creating client credentials...")
-        credentials = _create_client_secret(client, args.addr, admin_token, identity_id)
-        client_id = credentials["clientId"]
-        client_secret = credentials["clientSecret"]
-        if not client_id or not client_secret:
-            logger.error(
-                "Failed to get client credentials (client_id=%s)",
-                client_id or "(empty)",
+            # Step 5: Create client credentials
+            logger.info("Step 5: Creating client credentials...")
+            credentials = _create_client_secret(
+                client, args.addr, admin_token, identity_id
             )
-            return 1
-        logger.info("Client credentials created (client_id=%s)", client_id)
+            client_id = credentials["clientId"]
+            client_secret = credentials["clientSecret"]
+            if not client_id or not client_secret:
+                logger.error(
+                    "Failed to get client credentials (client_id=%s)",
+                    client_id or "(empty)",
+                )
+                return 1
+            logger.info("Client credentials created (client_id=%s)", client_id)
 
-        # Step 6: Create folder structure in all environments
-        logger.info("Step 6: Creating /shared/<transport> folder structure...")
-        _create_infisical_folders(client, args.addr, admin_token, project_id)
+            # Step 6: Create folder structure in all environments
+            logger.info("Step 6: Creating /shared/<transport> folder structure...")
+            _create_infisical_folders(client, args.addr, admin_token, project_id)
 
-        # Step 7: Add identity to project as admin (required for seed write access)
-        logger.info("Step 7: Adding identity to project as admin...")
-        _add_identity_to_project(
-            client, args.addr, admin_token, project_id, identity_id, role="admin"
-        )
-
-        # Step 8: Write to .env
-        logger.info("Step 8: Writing credentials to %s...", args.env_file)
-        updates = {
-            "INFISICAL_ADDR": args.addr,
-            "INFISICAL_CLIENT_ID": client_id,
-            "INFISICAL_CLIENT_SECRET": client_secret,
-            "INFISICAL_PROJECT_ID": project_id,
-        }
-        _write_env_vars(args.env_file, updates)
-
-        # Write identity marker file (metadata-only, no secrets).
-        # Use the same atomic write-chmod-rename pattern as _ADMIN_TOKEN_FILE
-        # to avoid a brief world-readable window between write and chmod.
-        _identity_tmp = _IDENTITY_FILE.with_name(_IDENTITY_FILE.name + ".tmp")
-        try:
-            _identity_tmp.write_text(
-                f"# Infisical Machine Identity\n"
-                f"# Provisioned automatically by provision-infisical.py\n"
-                f"#\n"
-                f"# Org: {args.org} ({org_id})\n"
-                f"# Project: {args.project} ({project_id})\n"
-                f"# Identity: {args.identity_name} ({identity_id})\n"
-                f"# Admin email: {args.admin_email}\n"
-                f"#\n"
-                f"# Client credentials written to .env\n",
-                encoding="utf-8",
+            # Step 7: Add identity to project as admin (required for seed write access)
+            logger.info("Step 7: Adding identity to project as admin...")
+            _add_identity_to_project(
+                client, args.addr, admin_token, project_id, identity_id, role="admin"
             )
-            _identity_tmp.chmod(0o600)
-            _identity_tmp.replace(_IDENTITY_FILE)  # atomic on POSIX
-        except Exception:
-            if _identity_tmp.exists():
-                _identity_tmp.unlink(missing_ok=True)
-            raise
+
+            # Step 8: Write to .env
+            logger.info("Step 8: Writing credentials to %s...", args.env_file)
+            updates = {
+                "INFISICAL_ADDR": args.addr,
+                "INFISICAL_CLIENT_ID": client_id,
+                "INFISICAL_CLIENT_SECRET": client_secret,
+                "INFISICAL_PROJECT_ID": project_id,
+            }
+            _write_env_vars(args.env_file, updates)
+
+            # Write identity marker file (metadata-only, no secrets).
+            # Use the same atomic write-chmod-rename pattern as _ADMIN_TOKEN_FILE
+            # to avoid a brief world-readable window between write and chmod.
+            _identity_tmp = _IDENTITY_FILE.with_name(_IDENTITY_FILE.name + ".tmp")
+            try:
+                _identity_tmp.write_text(
+                    f"# Infisical Machine Identity\n"
+                    f"# Provisioned automatically by provision-infisical.py\n"
+                    f"#\n"
+                    f"# Org: {args.org} ({org_id})\n"
+                    f"# Project: {args.project} ({project_id})\n"
+                    f"# Identity: {args.identity_name} ({identity_id})\n"
+                    f"# Admin email: {args.admin_email}\n"
+                    f"#\n"
+                    f"# Client credentials written to .env\n",
+                    encoding="utf-8",
+                )
+                _identity_tmp.chmod(0o600)
+                _identity_tmp.replace(_IDENTITY_FILE)  # atomic on POSIX
+            except Exception:
+                if _identity_tmp.exists():
+                    _identity_tmp.unlink(missing_ok=True)
+                raise
+    except httpx.HTTPStatusError as exc:
+        logger.exception(
+            "HTTP error during provisioning: %s %s returned status %d. "
+            "Check that Infisical is running and accessible at %s.",
+            exc.request.method,
+            exc.request.url,
+            exc.response.status_code,
+            args.addr,
+        )
+        sys.exit(1)
+    except httpx.RequestError as exc:
+        logger.exception(
+            "Network error during provisioning while connecting to %s: %s. "
+            "Check that Infisical is reachable at %s.",
+            exc.request.url,
+            exc,
+            args.addr,
+        )
+        sys.exit(1)
 
     logger.info("")
     logger.info("Provisioning complete!")
