@@ -17,6 +17,7 @@ Related:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -130,6 +131,7 @@ class TestMetricsEmission:
         service, _, publisher = _make_service(transport=transport)
 
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        await asyncio.sleep(0)
 
         publisher.assert_awaited_once()
 
@@ -141,6 +143,7 @@ class TestMetricsEmission:
         service, _, publisher = _make_service(transport=transport)
 
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        await asyncio.sleep(0)
 
         call_args = publisher.call_args
         assert call_args[0][0] == TOPIC_LLM_CALL_COMPLETED
@@ -153,6 +156,7 @@ class TestMetricsEmission:
         service, _, publisher = _make_service(transport=transport)
 
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        await asyncio.sleep(0)
 
         payload = publisher.call_args[0][1]
         assert isinstance(payload, dict)
@@ -168,6 +172,7 @@ class TestMetricsEmission:
         service, _, publisher = _make_service(transport=transport)
 
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        await asyncio.sleep(0)
 
         payload = publisher.call_args[0][1]
         assert payload["prompt_tokens"] == 42
@@ -182,6 +187,7 @@ class TestMetricsEmission:
         service, _, publisher = _make_service(transport=transport)
 
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        await asyncio.sleep(0)
 
         payload = publisher.call_args[0][1]
         assert isinstance(payload.get("timestamp_iso"), str)
@@ -195,6 +201,7 @@ class TestMetricsEmission:
         service, _, publisher = _make_service(transport=transport)
 
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        await asyncio.sleep(0)
 
         payload = publisher.call_args[0][1]
         assert payload.get("reporting_source") == "handler-llm-openai-compatible"
@@ -207,6 +214,7 @@ class TestMetricsEmission:
         service, _, publisher = _make_service(transport=transport)
 
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        await asyncio.sleep(0)
 
         call_args = publisher.call_args
         assert call_args[0][2] == str(_CORRELATION_ID)
@@ -236,6 +244,7 @@ class TestMetricsEmission:
         service, _, publisher = _make_service(transport=transport)
 
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        await asyncio.sleep(0)
 
         payload = publisher.call_args[0][1]
         # Must not raise
@@ -249,6 +258,7 @@ class TestMetricsEmission:
         service, _, publisher = _make_service(transport=transport)
 
         await service.handle(_make_chat_request())
+        await asyncio.sleep(0)
 
         call_args = publisher.call_args
         received_corr_id = call_args[0][2]
@@ -311,6 +321,7 @@ class TestPublisherResilience:
 
         # Response still valid
         assert response.generated_text == "Hello!"
+        await asyncio.sleep(0)
         # Publisher must NOT have been called
         publisher.assert_not_awaited()
 
@@ -323,6 +334,7 @@ class TestPublisherResilience:
 
         with pytest.raises(ConnectionError, match="timeout"):
             await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        await asyncio.sleep(0)
 
         # Publisher must NOT have been called (handler never returned)
         publisher.assert_not_awaited()
@@ -345,7 +357,9 @@ class TestMultipleCalls:
         service, _, publisher = _make_service(transport=transport)
 
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        await asyncio.sleep(0)
         await service.handle(_make_chat_request(), correlation_id=_CORRELATION_ID)
+        await asyncio.sleep(0)
 
         assert publisher.await_count == 2
 
@@ -359,7 +373,9 @@ class TestMultipleCalls:
         corr1 = uuid4()
         corr2 = uuid4()
         await service.handle(_make_chat_request(), correlation_id=corr1)
+        await asyncio.sleep(0)
         await service.handle(_make_chat_request(), correlation_id=corr2)
+        await asyncio.sleep(0)
 
         first_call_corr = publisher.call_args_list[0][0][2]
         second_call_corr = publisher.call_args_list[1][0][2]
