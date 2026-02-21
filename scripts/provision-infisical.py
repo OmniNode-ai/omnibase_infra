@@ -557,7 +557,11 @@ def main() -> int:
                     )
                 finally:
                     os.close(_atmp_fd)
-                _admin_token_tmp.replace(_ADMIN_TOKEN_FILE)  # atomic on POSIX
+                try:
+                    _admin_token_tmp.replace(_ADMIN_TOKEN_FILE)  # atomic on POSIX
+                except Exception:
+                    _admin_token_tmp.unlink(missing_ok=True)
+                    raise
                 logger.info("Admin token saved to %s", _ADMIN_TOKEN_FILE)
                 if _password_was_auto_generated:
                     logger.info(
