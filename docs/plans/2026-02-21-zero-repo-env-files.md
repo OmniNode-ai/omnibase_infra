@@ -62,8 +62,10 @@ grep -r "validate_clean_root\|validate_root" tests/ -l
 
 **Step 2: Remove `.env` and `.envrc` from `ALLOWED_ROOT_FILES`**
 
-Remove `.env` from `ALLOWED_ROOT_FILES`. Keep `.env.example` and `.env.template` — those are safe
-to commit.
+Remove `.env` from `ALLOWED_ROOT_FILES`. Keep `.env.example` — it is safe to commit because
+`.gitignore` negates it with `!.env.example`. `.env.template` was also removed from the allowlist
+because `.gitignore` does not negate it (only `!.env.example` is negated), so `.env.template`
+would be uncommittable anyway and the allowlist entry would be dead code.
 
 Also remove `.env` from `ALLOWED_ROOT_DIRECTORIES` if present (`.env` is not a virtualenv name —
 this is a confusing artifact from earlier in the codebase).

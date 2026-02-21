@@ -53,7 +53,11 @@ from _infisical_util import _parse_env_file
 def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
     """Write or update key=value pairs in a .env file.
 
-    Adds keys that don't exist. Updates keys that are commented out.
+    Adds keys that don't exist (appended at the end of the file).
+    Updates existing uncommented keys in-place when their current value is
+    empty.  Commented-out keys (lines beginning with ``#``) are left
+    untouched; if the corresponding key is in ``updates`` it will be
+    appended as a new uncommented entry at the end of the file.
     Does not overwrite keys that are already set with a non-empty value.
     """
     lines: list[str] = []

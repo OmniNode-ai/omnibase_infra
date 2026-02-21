@@ -477,6 +477,13 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     env_values = _parse_env_file(env_path)
 
     infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
+    if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
+        print(
+            f"ERROR: INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
+            "It must start with http:// or https:// (e.g. http://localhost:8880).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
     if not project_id:
         raise SystemExit(

@@ -52,17 +52,23 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
             # for unquoted values, where a space-hash / tab-hash sequence marks
             # the start of a genuine inline comment.
             value = value[1:-1]
-        elif " #" in value or "\t#" in value:
-            # Split on the first inline comment marker (space-hash or tab-hash).
-            # Find whichever appears first in the value.
+        elif " #" in value or "\t#" in value or "#" in value[1:]:
+            # Split on the first inline comment marker.  We recognise three
+            # forms for unquoted values:
+            #   - space-hash  (VALUE=abc #comment)
+            #   - tab-hash    (VALUE=abc\t#comment)
+            #   - bare hash after the first character (VALUE=abc#comment)
+            # The bare-hash case is intentionally anchored to value[1:] so
+            # that a value that *starts* with '#' is not misidentified as a
+            # comment (which would be an unusual but valid value like '#000').
+            # Quoted values are handled by the is_quoted branch above, so
+            # legitimate '#' characters in quoted strings (e.g. hex colours,
+            # URLs) are already protected and never reach this branch.
             space_pos = value.find(" #")
             tab_pos = value.find("\t#")
-            if space_pos == -1:
-                cut = tab_pos
-            elif tab_pos == -1:
-                cut = space_pos
-            else:
-                cut = min(space_pos, tab_pos)
+            bare_pos = value.find("#", 1)  # search from index 1, not 0
+            candidates = [p for p in (space_pos, tab_pos, bare_pos) if p != -1]
+            cut = min(candidates)
             value = value[:cut].strip()
         if key:
             values[key] = value
