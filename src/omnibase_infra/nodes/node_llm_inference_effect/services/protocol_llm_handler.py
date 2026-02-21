@@ -11,9 +11,11 @@ Note on request type:
     ``node_llm_inference_effect.models.ModelLlmInferenceRequest`` while
     ``HandlerLlmOllama`` uses ``effects.models.ModelLlmInferenceRequest``.
     These are distinct classes that share the same fields at runtime but are
-    not related by inheritance.  The Protocol therefore uses ``Any`` for the
-    request parameter so that both handlers satisfy it structurally without a
-    ``# type: ignore``.  See ADR docs/decisions/adr-any-type-pydantic-workaround.md.
+    not related by inheritance.  The Protocol uses
+    ``node_llm_inference_effect.models.ModelLlmInferenceRequest`` as the
+    declared parameter type; ``HandlerLlmOllama`` satisfies the protocol
+    structurally because its request class has identical fields.  See ADR
+    docs/decisions/adr-any-type-pydantic-workaround.md.
 
 Related:
     - OMN-2443: Wire NodeLlmInferenceEffect to emit llm-call-completed events

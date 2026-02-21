@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -306,23 +306,29 @@ class TestPublisherResilience:
     @pytest.mark.asyncio
     async def test_no_publish_when_last_call_metrics_is_none(self) -> None:
         """When last_call_metrics is None (normalizer failed), publisher is not called."""
-        transport = _make_transport()
-        transport._execute_llm_http_call.return_value = _make_response_with_usage()
         publisher = _make_publisher()
 
-        handler = HandlerLlmOpenaiCompatible(transport=transport)
-        service = ServiceLlmMetricsPublisher(handler=handler, publisher=publisher)
+        # Use a mock handler whose last_call_metrics is None.  This tests the
+        # public contract of ServiceLlmMetricsPublisher — it must skip publish
+        # when the handler exposes no metrics — without coupling to any private
+        # implementation detail of HandlerLlmOpenaiCompatible.
+        mock_response = MagicMock()
+        mock_response.generated_text = "Hello!"
 
-        # Force last_call_metrics to None after handle() by patching _build_usage_metrics
-        with patch.object(handler, "_build_usage_metrics", return_value=None):
-            response = await service.handle(
-                _make_chat_request(), correlation_id=_CORRELATION_ID
-            )
+        mock_handler = MagicMock()
+        mock_handler.handle = AsyncMock(return_value=mock_response)
+        mock_handler.last_call_metrics = None
+
+        service = ServiceLlmMetricsPublisher(handler=mock_handler, publisher=publisher)
+
+        response = await service.handle(
+            _make_chat_request(), correlation_id=_CORRELATION_ID
+        )
 
         # Response still valid
         assert response.generated_text == "Hello!"
         await asyncio.sleep(0)
-        # Publisher must NOT have been called
+        # Publisher must NOT have been called (metrics were None)
         publisher.assert_not_awaited()
 
     @pytest.mark.asyncio

@@ -363,11 +363,6 @@ class RegistryInfraLlmInferenceEffect:
         )
 
         handler = HandlerLlmOllama(target_name=target_name)
-        # TODO(OMN-2443): emit metrics for Ollama once HandlerLlmOllama populates last_call_metrics
-        logger.info(
-            "register_ollama_with_metrics: metrics emission is a no-op "
-            "until HandlerLlmOllama populates last_call_metrics"
-        )
         service = ServiceLlmMetricsPublisher(handler=handler, publisher=publisher)
 
         if container.service_registry is None:
@@ -378,6 +373,10 @@ class RegistryInfraLlmInferenceEffect:
             )
             return
 
+        logger.info(
+            "register_ollama_with_metrics: metrics emission is a no-op "
+            "until HandlerLlmOllama populates last_call_metrics"
+        )
         await container.service_registry.register_instance(
             interface=HandlerLlmOllama,
             instance=handler,

@@ -123,6 +123,12 @@ class ServiceLlmMetricsPublisher:
         self._publisher = publisher
         # Holds strong references to background tasks so they are not
         # garbage-collected before they complete (required by RUF006).
+        # Known limitation: this set is unbounded. Under sustained high-throughput
+        # use, tasks that are slow to complete (e.g. due to Kafka back-pressure)
+        # will accumulate here until they finish. The done callback (discard) ensures
+        # completed tasks are removed, but in-flight tasks are not evicted.
+        # For typical inference workloads this is not a concern; each task
+        # completes in well under a second. No hard cap is enforced here.
         self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def handle(
@@ -163,6 +169,10 @@ class ServiceLlmMetricsPublisher:
 
         # Schedule metrics emission as a background task so Kafka publish
         # latency does not add to inference response time.
+        # Note: _background_tasks grows unboundedly while tasks are in-flight.
+        # The done callback removes each task on completion, so under normal
+        # conditions the set stays near-empty. Slow publishers (e.g. Kafka
+        # back-pressure) may cause temporary accumulation; see __init__ comment.
         task = asyncio.create_task(self._emit_metrics(correlation_id, captured_metrics))
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
