@@ -253,7 +253,7 @@ handler_routing:
 
 
 class TestTransportAliasesNewEntries:
-    """Parametrized tests for the 13 new aliases added to _TRANSPORT_ALIASES."""
+    """Parametrized tests for the 12 new aliases added to _TRANSPORT_ALIASES."""
 
     @pytest.mark.parametrize(
         ("alias", "expected_transport"),
