@@ -373,7 +373,7 @@ class RegistryInfraLlmInferenceEffect:
             )
             return
 
-        logger.info(
+        logger.debug(
             "register_ollama_with_metrics: metrics emission is a no-op "
             "until HandlerLlmOllama populates last_call_metrics"
         )
