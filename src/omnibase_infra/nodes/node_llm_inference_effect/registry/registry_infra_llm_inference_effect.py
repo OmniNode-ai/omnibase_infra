@@ -385,10 +385,15 @@ class RegistryInfraLlmInferenceEffect:
             target_name: Identifier for the target. Default:
                 ``"ollama-inference"``.
         """
+        from typing import cast
+
         from omnibase_core.enums import EnumInjectionScope
         from omnibase_infra.mixins import MixinLlmHttpTransport
         from omnibase_infra.nodes.node_llm_inference_effect.handlers import (
             HandlerLlmOllama,
+        )
+        from omnibase_infra.nodes.node_llm_inference_effect.services.protocol_llm_handler import (
+            ProtocolLlmHandler,
         )
         from omnibase_infra.nodes.node_llm_inference_effect.services.service_llm_metrics_publisher import (
             ServiceLlmMetricsPublisher,
@@ -403,7 +408,13 @@ class RegistryInfraLlmInferenceEffect:
             return
 
         handler = HandlerLlmOllama(target_name=target_name)
-        service = ServiceLlmMetricsPublisher(handler=handler, publisher=publisher)
+        # ONEX: cast required because HandlerLlmOllama uses effects.models.ModelLlmInferenceRequest
+        # (structurally identical to node_llm_inference_effect.models.ModelLlmInferenceRequest but
+        # not nominally related). ADR-approved cast-instead-of-Any workaround; see OMN-2443 and
+        # docs/decisions/adr-any-type-pydantic-workaround.md.
+        service = ServiceLlmMetricsPublisher(
+            handler=cast("ProtocolLlmHandler", handler), publisher=publisher
+        )
 
         logger.debug(
             "register_ollama_with_metrics: metrics emission is a no-op "

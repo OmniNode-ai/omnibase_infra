@@ -51,18 +51,20 @@ class ProtocolLlmHandler(Protocol):
     Note on request type annotation:
         The ``handle`` method is typed with
         ``node_llm_inference_effect.models.ModelLlmInferenceRequest``.
-        Implementors that accept a structurally compatible type (i.e. a class
-        with the same fields, such as ``effects.models.ModelLlmInferenceRequest``
-        used by ``HandlerLlmOllama``) will satisfy this protocol at runtime
-        because Python's structural subtyping checks field/method presence, not
-        class identity.  The two request classes are not related by inheritance
-        but share identical fields; see the module docstring and
-        ``docs/decisions/adr-any-type-pydantic-workaround.md`` for details.
+        ``HandlerLlmOpenaiCompatible`` uses the same type and satisfies this
+        protocol nominally.  ``HandlerLlmOllama`` uses the structurally
+        identical ``effects.models.ModelLlmInferenceRequest`` (different class,
+        same fields, no inheritance relationship); callers that pass a
+        ``HandlerLlmOllama`` instance must cast it to ``ProtocolLlmHandler``
+        at the call site — see ``register_ollama_with_metrics`` in
+        ``registry_infra_llm_inference_effect.py``.  This is the
+        ADR-approved approach: ``cast`` instead of ``Any``; see
+        ``docs/decisions/adr-any-type-pydantic-workaround.md``.
 
     Implementors:
-        - ``HandlerLlmOpenaiCompatible`` -- satisfies structurally
-        - ``HandlerLlmOllama`` -- satisfies structurally (accepts structurally
-          compatible request type from ``effects.models``)
+        - ``HandlerLlmOpenaiCompatible`` -- satisfies nominally
+        - ``HandlerLlmOllama`` -- satisfies structurally; use ``cast`` at
+          call site due to dual-request-type naming conflict
     """
 
     async def handle(
