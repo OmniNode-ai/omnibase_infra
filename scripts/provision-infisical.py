@@ -92,7 +92,11 @@ def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
         )
         lines.extend(appended)
 
-    env_path.write_text("\n".join(lines) + "\n")
+    content = "\n".join(lines) + "\n"
+    tmp = env_path.with_suffix(".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.chmod(0o600)
+    tmp.replace(env_path)  # atomic on POSIX
 
 
 def _bootstrap(client: object, addr: str, email: str, password: str, org: str) -> dict:  # type: ignore[type-arg]
@@ -477,8 +481,18 @@ def main() -> int:
                 )
                 return 1
         else:
-            admin_token = bootstrap_data["identity"]["credentials"]["token"]
-            org_id = bootstrap_data["organization"]["id"]
+            admin_token = (
+                bootstrap_data.get("identity", {})
+                .get("credentials", {})
+                .get("token", "")
+            )
+            if not admin_token:
+                logger.error("Bootstrap response missing identity.credentials.token")
+                return 1
+            org_id = bootstrap_data.get("organization", {}).get("id", "")
+            if not org_id:
+                logger.error("Bootstrap response missing organization.id")
+                return 1
             # Persist admin token and (if auto-generated) password for subsequent runs.
             # Password is written ONLY to the file — never to log output.
             token_file_lines = [admin_token]
@@ -491,8 +505,12 @@ def main() -> int:
                 # Do NOT share this file, copy it to other machines, or include
                 # it in backups. The file is chmod 0o600 (owner read/write only).
                 token_file_lines.append(f"admin_password={admin_password}")
-            _ADMIN_TOKEN_FILE.write_text("\n".join(token_file_lines) + "\n")
-            _ADMIN_TOKEN_FILE.chmod(0o600)
+            _admin_token_tmp = _ADMIN_TOKEN_FILE.with_suffix(".tmp")
+            _admin_token_tmp.write_text(
+                "\n".join(token_file_lines) + "\n", encoding="utf-8"
+            )
+            _admin_token_tmp.chmod(0o600)
+            _admin_token_tmp.replace(_ADMIN_TOKEN_FILE)  # atomic on POSIX
             logger.info("Admin token saved to %s", _ADMIN_TOKEN_FILE)
             if _password_was_auto_generated:
                 logger.info(
