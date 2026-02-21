@@ -1,12 +1,13 @@
 """Configuration for session snapshot storage.
 
-Loads from environment variables with OMNIBASE_INFRA_SESSION_STORAGE_ prefix.
+Reads standard POSTGRES_* environment variables sourced from ~/.omnibase/.env
+at shell startup. No env_prefix and no env_file — values come entirely from
+the shell environment, consistent with the zero-repo-env policy (OMN-2477).
 
-Note: This module intentionally uses individual POSTGRES_* env vars (via
-pydantic-settings prefix) rather than a single DSN. The session storage uses
-a separate env prefix (OMNIBASE_INFRA_SESSION_STORAGE_) and may target a
-different database than the main OMNIBASE_INFRA_DB_URL. Migration to DSN-based
-configuration is tracked separately from the OMN-2065 DB split.
+Note: This module intentionally uses individual POSTGRES_* env vars rather
+than a single DSN. The session storage may target a different database than
+the main OMNIBASE_INFRA_DB_URL. Migration to DSN-based configuration is
+tracked separately from the OMN-2065 DB split.
 
 Moved from omniclaude as part of OMN-1526 architectural cleanup.
 """
@@ -23,13 +24,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class ConfigSessionStorage(BaseSettings):
     """Configuration for session snapshot PostgreSQL storage.
 
-    Environment variables use the OMNIBASE_INFRA_SESSION_STORAGE_ prefix.
-    Example: OMNIBASE_INFRA_SESSION_STORAGE_POSTGRES_HOST=db.example.com
+    Reads standard POSTGRES_* environment variables directly from the shell
+    environment (no prefix). The env_file is explicitly disabled so that no
+    repository-local .env file is silently discovered, in compliance with the
+    zero-repo-env policy. Source ~/.omnibase/.env in your shell profile to
+    supply the required values.
+
+    Example: export POSTGRES_HOST=db.example.com
     """
 
     model_config = SettingsConfigDict(
-        env_prefix="OMNIBASE_INFRA_SESSION_STORAGE_",
-        env_file=".env",
+        env_prefix="",
+        env_file=None,  # No .env file — reads from shell env (sourced via ~/.omnibase/.env)
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -56,7 +62,7 @@ class ConfigSessionStorage(BaseSettings):
     )
     postgres_password: SecretStr = Field(
         ...,  # Required
-        description="PostgreSQL password - set via OMNIBASE_INFRA_SESSION_STORAGE_POSTGRES_PASSWORD env var",
+        description="PostgreSQL password - set via POSTGRES_PASSWORD env var",
     )
 
     # Connection pool
