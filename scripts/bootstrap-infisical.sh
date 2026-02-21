@@ -201,18 +201,20 @@ fi
 if [[ "${SKIP_IDENTITY}" != "true" ]]; then
     log_step "4" "Identity provisioning (first-time only)"
 
-    IDENTITY_FILE="${PROJECT_ROOT}/.infisical-identity"
-    if [[ -f "${IDENTITY_FILE}" ]]; then
-        log_info "Identity file exists (${IDENTITY_FILE}), skipping provisioning"
-    else
-        log_info "Running identity setup..."
-        IDENTITY_SCRIPT="${SCRIPT_DIR}/setup-infisical-identity.sh"
-        if [[ -x "${IDENTITY_SCRIPT}" ]]; then
-            run_cmd "${IDENTITY_SCRIPT}"
+    PROVISION_SCRIPT="${SCRIPT_DIR}/provision-infisical.py"
+    if [[ -f "${PROVISION_SCRIPT}" ]]; then
+        log_info "Running automated provisioning (idempotent)..."
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            run_cmd uv run python "${PROVISION_SCRIPT}" \
+                --addr "${INFISICAL_ADDR:-http://localhost:8880}" \
+                --dry-run
         else
-            log_warn "Identity script not found or not executable: ${IDENTITY_SCRIPT}"
-            log_warn "Skipping identity provisioning"
+            uv run python "${PROVISION_SCRIPT}" \
+                --addr "${INFISICAL_ADDR:-http://localhost:8880}"
         fi
+    else
+        log_warn "Provision script not found: ${PROVISION_SCRIPT}"
+        log_warn "Skipping identity provisioning"
     fi
 else
     log_info "Skipping identity provisioning (--skip-identity)"
@@ -225,17 +227,26 @@ if [[ "${SKIP_SEED}" != "true" ]]; then
     log_step "5" "Seed Infisical from contracts + .env values"
 
     SEED_SCRIPT="${SCRIPT_DIR}/seed-infisical.py"
+    FULL_ENV_REFERENCE="${PROJECT_ROOT}/docs/env-example-full.txt"
     if [[ -f "${SEED_SCRIPT}" ]]; then
         log_info "Running seed script (dry-run first)..."
+        # Re-source .env so provision-infisical credentials are visible
+        set -a; source "${ENV_FILE}"; set +a
         run_cmd uv run python "${SEED_SCRIPT}" \
             --contracts-dir "${PROJECT_ROOT}/src/omnibase_infra/nodes" \
             --dry-run
 
         if [[ "${DRY_RUN}" != "true" ]]; then
-            log_info "Executing seed (create missing keys)..."
+            log_info "Executing seed (create missing keys + values from env-example-full)..."
+            ENV_IMPORT_ARG=""
+            if [[ -f "${FULL_ENV_REFERENCE}" ]]; then
+                ENV_IMPORT_ARG="--import-env ${FULL_ENV_REFERENCE}"
+            fi
             uv run python "${SEED_SCRIPT}" \
                 --contracts-dir "${PROJECT_ROOT}/src/omnibase_infra/nodes" \
                 --create-missing-keys \
+                --set-values \
+                ${ENV_IMPORT_ARG} \
                 --execute
         fi
     else
