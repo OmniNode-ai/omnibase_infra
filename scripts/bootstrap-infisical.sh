@@ -21,7 +21,10 @@
 #
 # Prerequisites:
 #   - Docker Compose v2.20+
-#   - .env file with POSTGRES_PASSWORD set
+#   - The repo .env file is REQUIRED: POSTGRES_PASSWORD must be present there so
+#     PostgreSQL can start before Infisical is available (circular bootstrap dep).
+#   - ~/.omnibase/.env holds Infisical credentials and is sourced automatically
+#     via ~/.zshrc once provisioning has run.
 #   - docker/docker-compose.infra.yml present
 
 set -euo pipefail
@@ -30,6 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 COMPOSE_FILE="${PROJECT_ROOT}/docker/docker-compose.infra.yml"
 ENV_FILE="${PROJECT_ROOT}/.env"
+OMNIBASE_ENV="${HOME}/.omnibase/.env"
 
 # Defaults
 SKIP_SEED=false
@@ -99,6 +103,13 @@ if [[ ! -f "${COMPOSE_FILE}" ]]; then
     exit 1
 fi
 
+# The repo .env file is required here even though it is gitignored.
+# It holds POSTGRES_PASSWORD (and the Infisical service secrets for the
+# infra repo), which PostgreSQL needs before Infisical is available —
+# a circular dependency that prevents storing this value in Infisical itself.
+# New developers: copy .env.example to .env and fill in the required values.
+# Note: validate_clean_root.py does NOT flag .env as a violation because
+# git check-ignore recognises it as gitignored, so it is silently skipped.
 if [[ ! -f "${ENV_FILE}" ]]; then
     log_error ".env file not found: ${ENV_FILE}"
     log_error "Copy .env.example to .env and configure POSTGRES_PASSWORD"
@@ -201,18 +212,30 @@ fi
 if [[ "${SKIP_IDENTITY}" != "true" ]]; then
     log_step "4" "Identity provisioning (first-time only)"
 
-    IDENTITY_FILE="${PROJECT_ROOT}/.infisical-identity"
-    if [[ -f "${IDENTITY_FILE}" ]]; then
-        log_info "Identity file exists (${IDENTITY_FILE}), skipping provisioning"
-    else
-        log_info "Running identity setup..."
-        IDENTITY_SCRIPT="${SCRIPT_DIR}/setup-infisical-identity.sh"
-        if [[ -x "${IDENTITY_SCRIPT}" ]]; then
-            run_cmd "${IDENTITY_SCRIPT}"
+    PROVISION_SCRIPT="${SCRIPT_DIR}/provision-infisical.py"
+    if [[ -f "${PROVISION_SCRIPT}" ]]; then
+        log_info "Running automated provisioning (idempotent)..."
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            run_cmd uv run python "${PROVISION_SCRIPT}" \
+                --addr "${INFISICAL_ADDR:-http://localhost:8880}" \
+                --env-file "${OMNIBASE_ENV}" \
+                --dry-run
         else
-            log_warn "Identity script not found or not executable: ${IDENTITY_SCRIPT}"
-            log_warn "Skipping identity provisioning"
+            run_cmd uv run python "${PROVISION_SCRIPT}" \
+                --addr "${INFISICAL_ADDR:-http://localhost:8880}" \
+                --env-file "${OMNIBASE_ENV}"
+            # Re-source ~/.omnibase/.env so the newly-written INFISICAL_* credentials
+            # are visible to subsequent steps (seed, runtime service startup).
+            if [[ -f "${OMNIBASE_ENV}" ]]; then
+                set -a; source "${OMNIBASE_ENV}"; set +a
+                log_info "Sourced ${OMNIBASE_ENV} (Infisical credentials now in environment)"
+            else
+                log_warn "${OMNIBASE_ENV} not found after provisioning; seed step may fail"
+            fi
         fi
+    else
+        log_warn "Provision script not found: ${PROVISION_SCRIPT}"
+        log_warn "Skipping identity provisioning"
     fi
 else
     log_info "Skipping identity provisioning (--skip-identity)"
@@ -225,17 +248,31 @@ if [[ "${SKIP_SEED}" != "true" ]]; then
     log_step "5" "Seed Infisical from contracts + .env values"
 
     SEED_SCRIPT="${SCRIPT_DIR}/seed-infisical.py"
+    FULL_ENV_REFERENCE="${PROJECT_ROOT}/docs/env-example-full.txt"
     if [[ -f "${SEED_SCRIPT}" ]]; then
         log_info "Running seed script (dry-run first)..."
+        # Re-source ~/.omnibase/.env so provision-infisical credentials are visible.
+        # Guard with a file-existence check: provision-infisical.py writes
+        # credentials to OMNIBASE_ENV, but if it ran in --dry-run mode or failed,
+        # the file may not yet exist.
+        if [[ -f "${OMNIBASE_ENV}" ]]; then
+            set -a; source "${OMNIBASE_ENV}"; set +a
+        else
+            log_warn "OMNIBASE_ENV not found (${OMNIBASE_ENV}); skipping re-source before seed"
+        fi
         run_cmd uv run python "${SEED_SCRIPT}" \
             --contracts-dir "${PROJECT_ROOT}/src/omnibase_infra/nodes" \
             --dry-run
 
         if [[ "${DRY_RUN}" != "true" ]]; then
-            log_info "Executing seed (create missing keys)..."
-            uv run python "${SEED_SCRIPT}" \
+            log_info "Executing seed (create missing keys + values from env-example-full)..."
+            extra_args=()
+            [[ -f "${FULL_ENV_REFERENCE}" ]] && extra_args+=(--import-env "${FULL_ENV_REFERENCE}")
+            run_cmd uv run python "${SEED_SCRIPT}" \
                 --contracts-dir "${PROJECT_ROOT}/src/omnibase_infra/nodes" \
                 --create-missing-keys \
+                --set-values \
+                "${extra_args[@]}" \
                 --execute
         fi
     else

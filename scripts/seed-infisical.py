@@ -54,6 +54,8 @@ from pathlib import Path
 # Ensure project root is on the path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+# Ensure scripts/ dir is on the path so _infisical_util can be imported.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,61 +63,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("seed-infisical")
 
-
-def _parse_env_file(env_path: Path) -> dict[str, str]:
-    """Parse a .env file into a key-value dict.
-
-    Handles:
-    - Comments (lines starting with #)
-    - Empty lines
-    - KEY=VALUE format
-    - ``export KEY=VALUE`` prefix
-    - Quoted values (single and double quotes stripped)
-    - Inline comments after values
-
-    Note:
-        Multiline values and escaped quotes are not supported.
-    """
-    values: dict[str, str] = {}
-    if not env_path.is_file():
-        logger.warning("Env file not found: %s", env_path)
-        return values
-
-    for line in env_path.read_text().splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        # Handle 'export KEY=VALUE' syntax
-        if stripped.startswith("export "):
-            stripped = stripped[7:]
-        if "=" not in stripped:
-            continue
-        key, _, value = stripped.partition("=")
-        key = key.strip()
-        # Value processing order:
-        # 1. Strip surrounding whitespace from the raw value.
-        # 2. Detect whether the value is quoted (before removing quotes).
-        # 3. If quoted, strip the outer quotes -- inline comments inside
-        #    quoted strings are preserved as literal text.
-        # 4. If NOT quoted, strip inline comments (text after ' #' or '#'
-        #    not at position 0 of the value portion).
-        value = value.strip()
-        is_quoted = len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"')
-        if is_quoted:
-            value = value[1:-1]
-        if not is_quoted:
-            # Strip inline comment starting with ' #' (space-hash) or bare '#'
-            # anywhere except at position 0 (which would make the whole value a
-            # comment-like token, e.g. a hex colour "#AABBCC").
-            if " #" in value:
-                value = value.split(" #")[0].strip()
-            elif "#" in value and not value.startswith("#"):
-                value = value.split("#")[0].strip()
-        if key:
-            values[key] = value
-
-    logger.info("Parsed %d values from %s", len(values), env_path)
-    return values
+# Shared .env parser — avoids duplicating parsing logic across Infisical scripts.
+from _infisical_util import _parse_env_file
 
 
 def _extract_requirements(

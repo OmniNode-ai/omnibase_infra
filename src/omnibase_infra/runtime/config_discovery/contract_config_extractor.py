@@ -47,13 +47,47 @@ _TRANSPORT_STR_MAP: dict[str, EnumInfraTransportType] = {
 
 # Additional aliases used in contracts (e.g., "database" -> DATABASE).
 _TRANSPORT_ALIASES: dict[str, EnumInfraTransportType] = {
+    # Database aliases
     "database": EnumInfraTransportType.DATABASE,
     "postgres": EnumInfraTransportType.DATABASE,
     "postgresql": EnumInfraTransportType.DATABASE,
+    # Message broker aliases
     "redis": EnumInfraTransportType.VALKEY,
     "redpanda": EnumInfraTransportType.KAFKA,
+    # Secret management aliases
     "secret": EnumInfraTransportType.INFISICAL,
     "secrets": EnumInfraTransportType.INFISICAL,
+    # Graph database aliases (Memgraph/Neo4j)
+    # "memgraph" handler_type -> GRAPH transport (GRAPH_HOST, GRAPH_PORT, GRAPH_PROTOCOL)
+    "memgraph": EnumInfraTransportType.GRAPH,
+    # "intent" handler_type -> wraps HandlerGraph for Memgraph intent storage
+    "intent": EnumInfraTransportType.GRAPH,
+    # Filesystem aliases — handlers that read/write local filesystem artifacts
+    # "repo_state" -> reads git repository state from local filesystem
+    "repo_state": EnumInfraTransportType.FILESYSTEM,
+    # "rrh_storage" -> writes RRH result JSON artifacts to local filesystem
+    "rrh_storage": EnumInfraTransportType.FILESYSTEM,
+    # Internal/runtime aliases — pure-compute or environment-inspection handlers
+    # with no external service credentials.  Mapping to RUNTIME or INMEMORY
+    # causes the extractor to record zero config keys (both have empty key
+    # tuples in _TRANSPORT_KEYS), which is the correct behaviour.
+    #
+    # "architecture_validation" -> pure COMPUTE, validates ONEX architecture rules
+    "architecture_validation": EnumInfraTransportType.RUNTIME,
+    # "auth_gate" -> pure COMPUTE, evaluates work-authorization cascade
+    "auth_gate": EnumInfraTransportType.RUNTIME,
+    # "ledger_projection" -> pure COMPUTE, projects events into audit ledger
+    "ledger_projection": EnumInfraTransportType.RUNTIME,
+    # "validation_ledger_projection" -> pure COMPUTE, projects validation events
+    "validation_ledger_projection": EnumInfraTransportType.RUNTIME,
+    # "rrh_validate" -> pure COMPUTE, evaluates RRH validation rules
+    "rrh_validate": EnumInfraTransportType.RUNTIME,
+    # "runtime_target" -> collects deployment runtime target context from env
+    "runtime_target": EnumInfraTransportType.RUNTIME,
+    # "toolchain" -> collects build-tool versions from the local environment
+    "toolchain": EnumInfraTransportType.RUNTIME,
+    # "mock" -> in-memory test/mock handler, no external credentials
+    "mock": EnumInfraTransportType.INMEMORY,
 }
 
 
