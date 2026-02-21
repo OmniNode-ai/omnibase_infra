@@ -299,7 +299,9 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
         return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
-        self, request: ModelLlmInferenceRequest
+        self,
+        request: ModelLlmInferenceRequest,
+        correlation_id: UUID | None = None,
     ) -> ModelLlmInferenceResponse:
         """Execute an LLM inference request against the Ollama API.
 
@@ -311,6 +313,9 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
         Args:
             request: The LLM inference request containing model, messages,
                 generation parameters, and tracing metadata.
+            correlation_id: Optional correlation ID for distributed tracing.
+                If ``None``, falls back to ``request.correlation_id``, then
+                generates a new UUID.
 
         Returns:
             A ``ModelLlmInferenceResponse`` with the inference result.
@@ -321,7 +326,7 @@ class HandlerLlmOllama(MixinLlmHttpTransport):
             InfraTimeoutError: On timeout after retries.
             InfraUnavailableError: On 5xx or circuit breaker open.
         """
-        correlation_id: UUID = request.correlation_id or uuid4()
+        correlation_id = correlation_id or request.correlation_id or uuid4()
 
         # Validate operation type
         if request.operation_type == EnumLlmOperationType.EMBEDDING:
