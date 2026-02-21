@@ -21,8 +21,10 @@
 #
 # Prerequisites:
 #   - Docker Compose v2.20+
-#   - ~/.omnibase/.env with POSTGRES_PASSWORD set (preferred — sourced automatically
-#     via ~/.zshrc); falls back to the repo .env file for bootstrap-only values
+#   - The repo .env file is REQUIRED: POSTGRES_PASSWORD must be present there so
+#     PostgreSQL can start before Infisical is available (circular bootstrap dep).
+#   - ~/.omnibase/.env holds Infisical credentials and is sourced automatically
+#     via ~/.zshrc once provisioning has run.
 #   - docker/docker-compose.infra.yml present
 
 set -euo pipefail
@@ -203,15 +205,26 @@ if [[ "${SKIP_IDENTITY}" != "true" ]]; then
     log_step "4" "Identity provisioning (first-time only)"
 
     PROVISION_SCRIPT="${SCRIPT_DIR}/provision-infisical.py"
+    OMNIBASE_ENV="${HOME}/.omnibase/.env"
     if [[ -f "${PROVISION_SCRIPT}" ]]; then
         log_info "Running automated provisioning (idempotent)..."
         if [[ "${DRY_RUN}" == "true" ]]; then
             run_cmd uv run python "${PROVISION_SCRIPT}" \
                 --addr "${INFISICAL_ADDR:-http://localhost:8880}" \
+                --env-file "${OMNIBASE_ENV}" \
                 --dry-run
         else
             run_cmd uv run python "${PROVISION_SCRIPT}" \
-                --addr "${INFISICAL_ADDR:-http://localhost:8880}"
+                --addr "${INFISICAL_ADDR:-http://localhost:8880}" \
+                --env-file "${OMNIBASE_ENV}"
+            # Re-source ~/.omnibase/.env so the newly-written INFISICAL_* credentials
+            # are visible to subsequent steps (seed, runtime service startup).
+            if [[ -f "${OMNIBASE_ENV}" ]]; then
+                set -a; source "${OMNIBASE_ENV}"; set +a
+                log_info "Sourced ${OMNIBASE_ENV} (Infisical credentials now in environment)"
+            else
+                log_warn "${OMNIBASE_ENV} not found after provisioning; seed step may fail"
+            fi
         fi
     else
         log_warn "Provision script not found: ${PROVISION_SCRIPT}"

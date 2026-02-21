@@ -162,9 +162,11 @@ SHARED_PLATFORM_SECRETS: dict[str, list[str]] = {
 # Per-repo folders to create under /services/<repo>/
 REPO_TRANSPORT_FOLDERS = ("db", "kafka", "env")
 
-# Per-repo keys to seed (sourced from repo .env)
+# Per-repo keys to seed (sourced from repo .env).
+# NOTE: POSTGRES_DATABASE is intentionally excluded — it is an identity_default
+# (hardcoded as a Settings class default per repo) and must NOT be seeded into
+# Infisical.
 REPO_SECRET_KEYS = [
-    "POSTGRES_DATABASE",
     "POSTGRES_DSN",
 ]
 
@@ -251,9 +253,7 @@ def _create_folders_via_admin(
                 )
                 if part_resp.status_code not in (200, 201, 400, 409):
                     part_resp.raise_for_status()
-                current = (
-                    f"{current}{part}/" if current == "/" else f"{current}/{part}/"
-                )
+                current = f"{current}{part}/"
 
             for folder in folder_names:
                 resp = client.post(

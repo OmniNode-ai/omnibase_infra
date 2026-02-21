@@ -40,7 +40,7 @@ logging.basicConfig(
 logger = logging.getLogger("provision-infisical")
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_ENV_FILE = _PROJECT_ROOT / ".env"
+_ENV_FILE = Path.home() / ".omnibase" / ".env"
 _IDENTITY_FILE = _PROJECT_ROOT / ".infisical-identity"
 _ADMIN_TOKEN_FILE = _PROJECT_ROOT / ".infisical-admin-token"
 
@@ -96,7 +96,10 @@ def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
         lines.extend(appended)
 
     content = "\n".join(lines) + "\n"
-    # NOTE: assumes env_path matches .env* so the .tmp variant is gitignored
+    # NOTE: the default env_path (~/.omnibase/.env) is outside the repo, so
+    # gitignore is irrelevant here.  The .tmp file is replaced atomically via
+    # os.rename (POSIX), so the exposure window is negligible regardless of
+    # where the file lives.
     tmp = env_path.with_name(env_path.name + ".tmp")
     tmp.write_text(content, encoding="utf-8")
     tmp.chmod(0o600)
@@ -364,7 +367,7 @@ def main() -> int:
         "--env-file",
         type=Path,
         default=_ENV_FILE,
-        help=f"Path to .env file (default: {_ENV_FILE})",
+        help=f"Path to .env file for writing Infisical credentials (default: {_ENV_FILE})",
     )
     args = parser.parse_args()
 

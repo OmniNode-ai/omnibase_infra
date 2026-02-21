@@ -229,12 +229,13 @@ def _get_gitignored_set(items: list[Path]) -> set[Path]:
             check=False,
             cwd=items[0].parent,
         )
-        # git check-ignore prints one ignored path per line (absolute or as
-        # given).  Map back to the original Path objects by comparing names.
-        ignored_names: set[str] = {
+        # git check-ignore prints one ignored path per line.  Because we pass
+        # absolute paths, the output lines are also absolute paths — so we
+        # match against str(p) directly.
+        ignored_paths: set[str] = {
             line.strip() for line in result.stdout.decode().splitlines() if line.strip()
         }
-        return {p for p in items if str(p) in ignored_names or p.name in ignored_names}
+        return {p for p in items if str(p) in ignored_paths}
     except FileNotFoundError:
         # git not available — treat nothing as ignored
         return set()
