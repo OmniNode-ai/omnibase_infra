@@ -100,6 +100,7 @@ def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
     # gitignore is irrelevant here.  The .tmp file is replaced atomically via
     # os.rename (POSIX), so the exposure window is negligible regardless of
     # where the file lives.
+    env_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = env_path.with_name(env_path.name + ".tmp")
     tmp.write_text(content, encoding="utf-8")
     tmp.chmod(0o600)

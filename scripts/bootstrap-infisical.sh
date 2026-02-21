@@ -33,6 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 COMPOSE_FILE="${PROJECT_ROOT}/docker/docker-compose.infra.yml"
 ENV_FILE="${PROJECT_ROOT}/.env"
+OMNIBASE_ENV="${HOME}/.omnibase/.env"
 
 # Defaults
 SKIP_SEED=false
@@ -205,7 +206,6 @@ if [[ "${SKIP_IDENTITY}" != "true" ]]; then
     log_step "4" "Identity provisioning (first-time only)"
 
     PROVISION_SCRIPT="${SCRIPT_DIR}/provision-infisical.py"
-    OMNIBASE_ENV="${HOME}/.omnibase/.env"
     if [[ -f "${PROVISION_SCRIPT}" ]]; then
         log_info "Running automated provisioning (idempotent)..."
         if [[ "${DRY_RUN}" == "true" ]]; then
@@ -244,14 +244,14 @@ if [[ "${SKIP_SEED}" != "true" ]]; then
     FULL_ENV_REFERENCE="${PROJECT_ROOT}/docs/env-example-full.txt"
     if [[ -f "${SEED_SCRIPT}" ]]; then
         log_info "Running seed script (dry-run first)..."
-        # Re-source .env so provision-infisical credentials are visible.
+        # Re-source ~/.omnibase/.env so provision-infisical credentials are visible.
         # Guard with a file-existence check: provision-infisical.py writes
-        # credentials to ENV_FILE, but if it ran in --dry-run mode or failed,
+        # credentials to OMNIBASE_ENV, but if it ran in --dry-run mode or failed,
         # the file may not yet exist.
-        if [[ -f "${ENV_FILE}" ]]; then
-            set -a; source "${ENV_FILE}"; set +a
+        if [[ -f "${OMNIBASE_ENV}" ]]; then
+            set -a; source "${OMNIBASE_ENV}"; set +a
         else
-            log_warn "ENV_FILE not found (${ENV_FILE}); skipping re-source before seed"
+            log_warn "OMNIBASE_ENV not found (${OMNIBASE_ENV}); skipping re-source before seed"
         fi
         run_cmd uv run python "${SEED_SCRIPT}" \
             --contracts-dir "${PROJECT_ROOT}/src/omnibase_infra/nodes" \

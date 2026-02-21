@@ -233,7 +233,9 @@ def _get_gitignored_set(items: list[Path]) -> set[Path]:
         # absolute paths, the output lines are also absolute paths — so we
         # match against str(p) directly.
         ignored_paths: set[str] = {
-            line.strip() for line in result.stdout.decode().splitlines() if line.strip()
+            line.strip()
+            for line in result.stdout.decode("utf-8", errors="replace").splitlines()
+            if line.strip()
         }
         return {p for p in items if str(p) in ignored_paths}
     except FileNotFoundError:
