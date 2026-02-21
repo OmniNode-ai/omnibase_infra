@@ -180,7 +180,10 @@ class ServiceLlmMetricsPublisher:
         return response
 
     async def _emit_metrics(
-        self, correlation_id: UUID, metrics: ContractLlmCallMetrics | None
+        self,
+        correlation_id: UUID,
+        metrics: ContractLlmCallMetrics
+        | None,  # TYPE_CHECKING-only import; annotation is lazily evaluated via `from __future__ import annotations` (PEP 563)
     ) -> None:
         """Publish pre-captured last_call_metrics to Kafka.
 

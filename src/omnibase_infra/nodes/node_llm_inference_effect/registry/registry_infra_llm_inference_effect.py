@@ -354,6 +354,17 @@ class RegistryInfraLlmInferenceEffect:
             Until then, ``ServiceLlmMetricsPublisher`` silently skips
             emission and logs at DEBUG level.
 
+            **MixinLlmHttpTransport is registered with the raw handler
+            instance, not the ServiceLlmMetricsPublisher.** This differs
+            from ``register_openai_compatible_with_metrics``, which registers
+            the transport adapter under ``MixinLlmHttpTransport``. Here,
+            ``HandlerLlmOllama`` itself implements ``MixinLlmHttpTransport``
+            (it IS the transport), so the raw handler is the correct value to
+            register under that interface. Callers resolving
+            ``MixinLlmHttpTransport`` from the container will receive the
+            handler directly; callers wanting metrics-wrapped inference must
+            resolve ``ServiceLlmMetricsPublisher`` instead.
+
             **Mutually exclusive with** ``register_ollama``. Both methods
             register under the same interface keys (``HandlerLlmOllama``
             and ``MixinLlmHttpTransport``). If both are called on the same
