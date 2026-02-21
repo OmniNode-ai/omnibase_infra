@@ -82,6 +82,7 @@ def _write_env_vars(env_path: Path, updates: dict[str, str]) -> None:
         if key in existing:
             current_line = lines[existing[key]]
             current_val = current_line.partition("=")[2].strip()
+            current_val = current_val.strip("'\"")
             if current_val:
                 logger.info("  %s already set, skipping", key)
                 continue

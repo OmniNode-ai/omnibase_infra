@@ -228,6 +228,11 @@ def _get_gitignored_set(items: list[Path]) -> set[Path]:
             stderr=subprocess.DEVNULL,
             check=False,
             timeout=5,
+            # All items originate from repo_path.iterdir(), so they all share
+            # the same parent directory.  Using items[0].parent as cwd is safe
+            # at this call site.  Callers must not pass items from multiple
+            # different parent directories, as only the first item's parent
+            # would be used and the git check-ignore output might be incorrect.
             cwd=items[0].parent.resolve(),
         )
         # git check-ignore prints one ignored path per line.  Because we pass

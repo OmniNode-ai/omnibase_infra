@@ -92,4 +92,5 @@ def _parse_env_file(env_path: Path) -> dict[str, str]:
             value = value[:cut].strip()
         if key:
             values[key] = value
+    logger.info("Parsed %d values from %s", len(values), env_path)
     return values
