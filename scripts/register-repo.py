@@ -254,7 +254,7 @@ def _create_folders_via_admin(
             for part in parts:
                 if not part:
                     continue
-                client.post(
+                part_resp = client.post(
                     f"{addr}/api/v1/folders",
                     headers=headers,
                     json={
@@ -264,6 +264,8 @@ def _create_folders_via_admin(
                         "path": current,
                     },
                 )
+                if part_resp.status_code not in (200, 201, 400, 409):
+                    part_resp.raise_for_status()
                 current = (
                     f"{current}{part}/" if current == "/" else f"{current}/{part}/"
                 )

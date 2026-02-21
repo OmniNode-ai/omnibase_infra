@@ -472,7 +472,16 @@ def main() -> int:
                 )
                 orgs_resp.raise_for_status()
                 orgs = orgs_resp.json().get("organizations", [])
-                org_id = orgs[0]["id"] if orgs else ""
+                if not orgs:
+                    logger.error(
+                        "Instance is already bootstrapped but the org list returned "
+                        "by /api/v1/organization is empty. The admin token at %s may "
+                        "be stale or belong to a different instance. Delete the "
+                        "Infisical DB state and re-run to start fresh.",
+                        _ADMIN_TOKEN_FILE,
+                    )
+                    return 1
+                org_id = orgs[0]["id"]
             else:
                 logger.error(
                     "Instance already bootstrapped but no admin token found at %s. "
