@@ -61,6 +61,7 @@ class ConfigSessionStorage(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        populate_by_name=True,  # Required for AliasChoices on pool fields to pass mypy [pydantic-alias]
     )
 
     # PostgreSQL connection fields
