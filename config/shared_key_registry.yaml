@@ -1,0 +1,89 @@
+# shared_key_registry.yaml
+#
+# Authoritative list of keys shared across all OmniNode repos.
+# Keys come from ~/.omnibase/.env (shell env) at dev time,
+# and from Infisical /shared/<transport>/ at runtime.
+#
+# Semantics:
+#   shared            — eligible for Infisical seeding + repo .env stripping;
+#                       maps directly to SHARED_PLATFORM_SECRETS in
+#                       scripts/register-repo.py (keep in sync)
+#   bootstrap_only    — excluded from Infisical seeding (circular bootstrap dep);
+#                       listed here for awareness only; must never be in any repo
+#                       .env; maps to BOOTSTRAP_KEYS frozenset in register-repo.py
+#   identity_defaults — never in any .env; hardcoded as default= in Settings
+#                       classes; maps to IDENTITY_DEFAULTS frozenset in
+#                       register-repo.py
+#
+# Used by:
+#   - ~/.omnibase/scripts/onboard-repo.py  (strip shared keys from repo .env)
+#   - scripts/register-repo.py seed-shared  (seed /shared/* in Infisical)
+#
+# version: increment minor when adding keys, major on breaking structural changes.
+version: "1.0"
+# Keys written to /shared/<transport>/ in Infisical.
+shared:
+  "/shared/db/":
+    - POSTGRES_HOST
+    - POSTGRES_PORT
+    - POSTGRES_USER
+    - POSTGRES_DSN
+    - POSTGRES_POOL_MIN
+    - POSTGRES_POOL_MAX
+    - POSTGRES_TIMEOUT_MS
+  "/shared/kafka/":
+    - KAFKA_BOOTSTRAP_SERVERS
+    - KAFKA_HOST_SERVERS
+    - KAFKA_REQUEST_TIMEOUT_MS
+  "/shared/consul/":
+    - CONSUL_HOST
+    - CONSUL_PORT
+    - CONSUL_SCHEME
+    - CONSUL_ACL_TOKEN
+    - CONSUL_ENABLED
+  "/shared/vault/":
+    - VAULT_ADDR
+    - VAULT_TOKEN
+  "/shared/llm/":
+    - REMOTE_SERVER_IP
+    - LLM_CODER_URL
+    - LLM_CODER_FAST_URL
+    - LLM_EMBEDDING_URL
+    - LLM_DEEPSEEK_R1_URL
+    - EMBEDDING_MODEL_URL
+    - VLLM_SERVICE_URL
+    - VLLM_DEEPSEEK_URL
+    - VLLM_LLAMA_URL
+    - ONEX_TREE_SERVICE_URL
+    - METADATA_STAMPING_SERVICE_URL
+  "/shared/auth/":
+    - OPENAI_API_KEY
+    - GOOGLE_API_KEY
+    - GEMINI_API_KEY
+    - Z_AI_API_KEY
+    - Z_AI_API_URL
+    - SERVICE_AUTH_TOKEN
+    - GH_PAT
+  "/shared/valkey/":
+    - VALKEY_PASSWORD
+  "/shared/env/":
+    - SLACK_WEBHOOK_URL
+    - SLACK_BOT_TOKEN
+    - SLACK_CHANNEL_ID
+# Keys that must NEVER be seeded into Infisical (circular bootstrap dependency —
+# Infisical needs these to start, so they cannot come FROM Infisical).
+# These live OUTSIDE repos: POSTGRES_PASSWORD in ~/.omnibase/.env,
+# INFISICAL_* credentials in ~/.omnibase/.env or deployment secrets.
+# They must never appear in any repo .env file.
+bootstrap_only:
+  - POSTGRES_PASSWORD
+  - INFISICAL_ADDR
+  - INFISICAL_CLIENT_ID
+  - INFISICAL_CLIENT_SECRET
+  - INFISICAL_PROJECT_ID
+  - INFISICAL_ENCRYPTION_KEY
+  - INFISICAL_AUTH_SECRET
+# Keys that are per-repo identity config.
+# Must NEVER appear in any .env file — hardcoded as default= in Settings classes.
+identity_defaults:
+  - POSTGRES_DATABASE

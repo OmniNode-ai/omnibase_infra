@@ -108,16 +108,15 @@ x-runtime-env: &runtime-env
   # before handler initialization. Remaining keys (Consul, Valkey, OTEL, etc.)
   # are resolved from Infisical at startup rather than being hardcoded here.
   #
-  # INTENTIONALLY opt-in: INFISICAL_ADDR defaults to empty string, which
-  # disables config prefetch. Services fall back to standard environment
-  # variable resolution when this is unset.
+  # Hardcoded to the Docker-internal hostname so runtime containers always reach
+  # the Infisical service container on the compose network. Do NOT use
+  # ${INFISICAL_ADDR} here — the host env has INFISICAL_ADDR=http://localhost:8880
+  # (the host-accessible port) which would be unreachable inside the container.
   #
-  # MIGRATION NOTE: If your deployment previously relied on the Infisical
-  # service container bundled in this compose file (docker-compose.infra.yml),
-  # you must explicitly set INFISICAL_ADDR=http://infisical:8080 in your
-  # .env file to restore the prior behaviour. The empty default is intentional
-  # to avoid breaking deployments that do not use Infisical.
-  INFISICAL_ADDR: ${INFISICAL_ADDR:-}
+  # When the secrets profile is not active (Infisical container absent), set
+  # INFISICAL_ADDR to an empty string via --env-file or environment override to
+  # disable config prefetch and fall back to standard env var resolution.
+  INFISICAL_ADDR: "http://infisical:8080"
   INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
   INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET:-}
   INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
