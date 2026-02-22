@@ -98,8 +98,8 @@ x-runtime-env: &runtime-env
   # --- Bootstrap essentials (always needed) ---
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
-  # WARNING: The fallback DSN uses nested variable expansion (requires recent Compose v2;
-  # see top-of-file: requires Compose v2.20+).
+  # WARNING: The fallback DSN uses nested variable expansion. Requires Compose v2.20+;
+  # older versions silently produce malformed/empty DSNs (see top-of-file note).
   # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
   # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
   # RECOMMENDED: Set OMNIBASE_INFRA_DB_URL explicitly in .env instead.
@@ -133,8 +133,8 @@ x-runtime-env: &runtime-env
   VALKEY_PORT: ${VALKEY_PORT:-6379}
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
   # OmniIntelligence domain plugin
-  # WARNING: The fallback DSN uses nested variable expansion (requires recent Compose v2;
-  # see top-of-file: requires Compose v2.20+).
+  # WARNING: The fallback DSN uses nested variable expansion. Requires Compose v2.20+;
+  # older versions silently produce malformed/empty DSNs (see top-of-file note).
   # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
   # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
   # RECOMMENDED: Set OMNIINTELLIGENCE_DB_URL explicitly in .env instead.
@@ -470,7 +470,8 @@ services:
       # NOTE: Uses dedicated OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN rather than
       # OMNIBASE_INFRA_DB_URL because this consumer uses pydantic-settings with the
       # OMNIBASE_INFRA_AGENT_ACTIONS_ prefix and may use a different DB role.
-      # WARNING: The fallback DSN uses nested variable expansion (requires recent Compose v2).
+      # WARNING: The fallback DSN uses nested variable expansion. Requires Compose v2.20+;
+      # older versions silently produce malformed/empty DSNs (see top-of-file note).
       # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
       # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
       # RECOMMENDED: Set OMNIBASE_INFRA_AGENT_ACTIONS_POSTGRES_DSN explicitly in .env instead.

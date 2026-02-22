@@ -86,15 +86,11 @@ from _infisical_util import _parse_env_file
 def _read_registry_data() -> dict[str, object]:
     """Open and parse config/shared_key_registry.yaml.
 
-    Reads and parses the registry YAML file. Called once per loader function
-    invocation; callers such as cmd_onboard_repo may invoke multiple loaders
-    in sequence (e.g. _load_registry(), _bootstrap_keys(), _identity_defaults()),
-    resulting in multiple reads of the same file. This is acceptable for a CLI
-    script — it runs as a short-lived process with no concurrent callers, so
-    repeated file reads carry no consistency risk and no concurrent-modification
-    protection is needed.
-
-    Returns the raw parsed dict from the YAML file.
+    Returns the raw parsed dict from the YAML file.  Command functions
+    (``cmd_seed_shared``, ``cmd_onboard_repo``) call this once and pass the
+    result to ``_load_registry``, ``_bootstrap_keys``, and
+    ``_identity_defaults`` via their ``data`` parameter so the file is only
+    read a single time per invocation.
     """
     registry_path = _REGISTRY_PATH
     if not registry_path.exists():
@@ -108,13 +104,21 @@ def _read_registry_data() -> dict[str, object]:
     return data
 
 
-def _load_registry() -> dict[str, list[str]]:
+def _load_registry(
+    data: dict[str, object] | None = None,
+) -> dict[str, list[str]]:
     """Load shared platform secrets from config/shared_key_registry.yaml.
 
     Returns a mapping of ``{infisical_folder_path: [key, ...]}`` identical in
     shape to the former ``SHARED_PLATFORM_SECRETS`` dict.
+
+    Args:
+        data: Pre-loaded registry dict from :func:`_read_registry_data`.  When
+            provided the file is not re-read; when omitted the file is read
+            once inside this function.
     """
-    data = _read_registry_data()
+    if data is None:
+        data = _read_registry_data()
     shared = data.get("shared")
     if shared is None:
         raise ValueError(f"Registry missing 'shared' section: {_REGISTRY_PATH}")
@@ -136,13 +140,21 @@ def _load_registry() -> dict[str, list[str]]:
     return shared
 
 
-def _bootstrap_keys() -> frozenset[str]:
+def _bootstrap_keys(
+    data: dict[str, object] | None = None,
+) -> frozenset[str]:
     """Load bootstrap-only keys from registry.
 
     These keys must never be written to Infisical (circular bootstrap
     dependency — Infisical needs them to start).
+
+    Args:
+        data: Pre-loaded registry dict from :func:`_read_registry_data`.  When
+            provided the file is not re-read; when omitted the file is read
+            once inside this function.
     """
-    data = _read_registry_data()
+    if data is None:
+        data = _read_registry_data()
     if "bootstrap_only" not in data:
         raise ValueError(f"Registry missing 'bootstrap_only' section: {_REGISTRY_PATH}")
     keys = data["bootstrap_only"]
@@ -157,13 +169,21 @@ def _bootstrap_keys() -> frozenset[str]:
     return frozenset(keys)
 
 
-def _identity_defaults() -> frozenset[str]:
+def _identity_defaults(
+    data: dict[str, object] | None = None,
+) -> frozenset[str]:
     """Load identity-default keys from registry.
 
     These keys are baked into each repo's Settings class as ``default=`` and
     must NOT be seeded into Infisical.
+
+    Args:
+        data: Pre-loaded registry dict from :func:`_read_registry_data`.  When
+            provided the file is not re-read; when omitted the file is read
+            once inside this function.
     """
-    data = _read_registry_data()
+    if data is None:
+        data = _read_registry_data()
     if "identity_defaults" not in data:
         raise ValueError(
             f"Registry missing 'identity_defaults' section: {_REGISTRY_PATH}"
@@ -394,9 +414,10 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
     plan: list[tuple[str, str, str]] = []  # (folder, key, value)
     missing_value: list[tuple[str, str]] = []  # (folder, key) with no value
 
-    shared_secrets = _load_registry()
-    bootstrap = _bootstrap_keys()
-    identity = _identity_defaults()
+    registry_data = _read_registry_data()
+    shared_secrets = _load_registry(registry_data)
+    bootstrap = _bootstrap_keys(registry_data)
+    identity = _identity_defaults(registry_data)
     for folder, keys in shared_secrets.items():
         for key in keys:
             if key in bootstrap:
@@ -536,9 +557,12 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
 
     # Any extra keys in the env file that are NOT in shared, NOT bootstrap,
     # and NOT an identity default (per-repo value baked into Settings.default=).
-    shared_keys_flat = {k for keys in _load_registry().values() for k in keys}
-    bootstrap = _bootstrap_keys()
-    identity = _identity_defaults()
+    registry_data = _read_registry_data()
+    shared_keys_flat = {
+        k for keys in _load_registry(registry_data).values() for k in keys
+    }
+    bootstrap = _bootstrap_keys(registry_data)
+    identity = _identity_defaults(registry_data)
     extra: list[tuple[str, str, str]] = []
     for key, value in env_values.items():
         if key in bootstrap:
