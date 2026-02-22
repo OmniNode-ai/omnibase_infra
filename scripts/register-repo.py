@@ -133,6 +133,11 @@ def _load_registry(
                 f"Expected 'shared.{folder}' in {_REGISTRY_PATH} to be a list, "
                 f"got {type(keys).__name__!r}."
             )
+        if not keys:
+            raise ValueError(
+                f"Folder '{folder}' has an empty key list in registry — "
+                "this is likely an authoring error"
+            )
         if not all(isinstance(k, str) for k in keys):
             raise ValueError(
                 f"[ERROR] registry 'shared.{folder}' must be a list of strings in {_REGISTRY_PATH}"

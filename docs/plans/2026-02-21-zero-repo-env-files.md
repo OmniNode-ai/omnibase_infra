@@ -291,8 +291,8 @@ shared:
     - POSTGRES_PORT
     - POSTGRES_USER
     - POSTGRES_DSN
-    - POSTGRES_POOL_MIN
-    - POSTGRES_POOL_MAX
+    - POSTGRES_POOL_MIN_SIZE  # renamed; was POSTGRES_POOL_MIN
+    - POSTGRES_POOL_MAX_SIZE  # renamed; was POSTGRES_POOL_MAX
     - POSTGRES_TIMEOUT_MS
 
   "/shared/kafka/":
@@ -309,7 +309,9 @@ shared:
 
   "/shared/vault/":
     - VAULT_ADDR
-    - VAULT_TOKEN
+    # VAULT_TOKEN: per-service only — excluded from /shared/. Each service must be
+    # provisioned under /services/<repo>/vault/VAULT_TOKEN with a token scoped to
+    # its own Vault policy. See shared_key_registry.yaml for the rationale.
 
   "/shared/llm/":
     - LLM_CODER_URL
@@ -557,9 +559,11 @@ CONSUL_HOST=192.168.86.200
 CONSUL_PORT=28500
 CONSUL_ENABLED=true
 
-# Vault
+# Vault (VAULT_ADDR is shared platform-wide; VAULT_TOKEN is per-developer/per-service
+# and NOT seeded to Infisical /shared/ — each service gets its own token scoped to
+# its Vault policy, provisioned under /services/<repo>/vault/VAULT_TOKEN)
 VAULT_ADDR=http://omninode-bridge-vault:8200
-VAULT_TOKEN=<set from secure source>
+VAULT_TOKEN=<set from secure source — this is YOUR developer token, not a shared value>
 
 # Infisical (shared across all repos — same project, same machine identity)
 INFISICAL_ADDR=http://localhost:8880

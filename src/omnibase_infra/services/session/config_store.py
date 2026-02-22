@@ -63,7 +63,21 @@ class ConfigSessionStorage(BaseSettings):
         extra="ignore",
     )
 
-    # PostgreSQL connection
+    # PostgreSQL connection fields
+    #
+    # These fields do NOT need AliasChoices because pydantic-settings resolves
+    # them automatically when env_prefix="" and case_sensitive=False: the field
+    # name "postgres_host" matches the env var "POSTGRES_HOST" (uppercased by
+    # pydantic-settings), and similarly for postgres_port, postgres_database,
+    # postgres_user, and postgres_password.
+    #
+    # The pool fields below (pool_min_size / pool_max_size) are the exception:
+    # their field names do NOT start with "postgres_", so pydantic-settings
+    # would look for "POOL_MIN_SIZE" / "POOL_MAX_SIZE" — which are not the
+    # canonical shared keys.  AliasChoices maps the canonical names
+    # (POSTGRES_POOL_MIN_SIZE, POSTGRES_POOL_MAX_SIZE, per
+    # config/shared_key_registry.yaml) first, then falls back to the bare
+    # field names so that direct construction (e.g. in tests) still works.
     postgres_host: str = Field(
         default="localhost",
         description="PostgreSQL host",
