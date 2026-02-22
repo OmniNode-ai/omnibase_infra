@@ -144,6 +144,12 @@ git commit -m "chore: add pre-commit hook to reject committed .env files"
 
 ## Task 3 (P1): Fix `ConfigSessionStorage` Env Prefix — Identity Defaults in Code
 
+> **STATUS: COMPLETED** — The `env_prefix` removal has been implemented on branch
+> `jonah/omn-2287-zero-repo-env-phase2`. `ConfigSessionStorage` now uses `env_prefix=""`
+> and `env_file=None`, so it reads standard `POSTGRES_*` vars from the shell environment.
+> Tests were updated to use unprefixed env var names. The historical plan text below is
+> preserved for reference.
+
 **Files:**
 - Modify: `src/omnibase_infra/services/session/config_store.py`
 
