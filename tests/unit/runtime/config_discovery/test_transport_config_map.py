@@ -69,6 +69,7 @@ class TestTransportConfigMap:
         spec = self.tcm.shared_spec(EnumInfraTransportType.CONSUL)
         assert spec.infisical_folder == "/shared/consul/"
         assert "CONSUL_HOST" in spec.keys
+        assert "CONSUL_ENABLED" in spec.keys
 
     def test_shared_spec_required(self) -> None:
         """Shared spec should propagate required flag."""
