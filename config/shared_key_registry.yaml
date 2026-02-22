@@ -44,6 +44,11 @@ shared:
     - CONSUL_ACL_TOKEN
     - CONSUL_ENABLED
   "/shared/vault/":
+    # NOTE: VAULT_TOKEN intentionally excluded — it is per-service and must be
+    # provisioned per repo under /services/<repo>/vault/VAULT_TOKEN, not shared
+    # platform-wide. Sharing a single token would grant every service the same
+    # Vault policy, violating least-privilege. Each service gets its own token
+    # scoped to its required paths.
     - VAULT_ADDR
   "/shared/llm/":
     - REMOTE_SERVER_IP
@@ -75,21 +80,40 @@ shared:
     - SLACK_WEBHOOK_URL
     - SLACK_BOT_TOKEN
     - SLACK_CHANNEL_ID
-# Keys that must NEVER be seeded into Infisical (circular bootstrap dependency —
-# Infisical needs these to start, so they cannot come FROM Infisical).
-# These live OUTSIDE repos: POSTGRES_PASSWORD in ~/.omnibase/.env,
-# INFISICAL_* credentials in ~/.omnibase/.env or deployment secrets.
-# They must never appear in any repo .env file.
+# Keys that must NEVER be seeded into Infisical.
+# These live OUTSIDE repos (home dir or deployment secrets) and must never
+# appear in any repo .env file. Two distinct reasons apply — see subcategories:
+#
+# [circular-startup-dep] These keys are required BY Infisical (or its upstream
+# dependencies) during container boot. Storing them in Infisical would create a
+# chicken-and-egg deadlock: Infisical needs Postgres/Kafka to start, so those
+# credentials must be available BEFORE Infisical is reachable. Lives in
+# ~/.omnibase/.env (dev) or an external secrets manager (prod).
+#
+# [infisical-internal] These are Infisical's own service secrets — the credentials
+# that the Infisical container itself uses for internal encryption and auth.
+# Storing them inside Infisical would be circular at a different level: if Infisical
+# lost or rotated these, it could no longer decrypt its own data. Lives in
+# ~/.omnibase/.env (dev) or deployment secrets (prod). Never in any repo.
 bootstrap_only:
+  # [circular-startup-dep] Postgres password — Infisical depends on Postgres to start;
+  # this must exist before Infisical is reachable.
   - POSTGRES_PASSWORD
-  # Moved from shared/kafka to bootstrap_only (OMN-2287). If upgrading from a prior
-  # Infisical seed: delete the stale /shared/kafka/KAFKA_BOOTSTRAP_SERVERS entry from
-  # Infisical manually (one-time cleanup; tracked in docs/plans/2026-02-21-zero-repo-env-files.md).
-  - KAFKA_BOOTSTRAP_SERVERS # circular bootstrap dep: containers need this BEFORE Infisical is reachable
+  # [circular-startup-dep] Kafka bootstrap address — containers need this BEFORE
+  # Infisical is reachable. Moved from shared/kafka to bootstrap_only (OMN-2287).
+  # If upgrading from a prior Infisical seed: delete the stale
+  # /shared/kafka/KAFKA_BOOTSTRAP_SERVERS entry from Infisical manually
+  # (one-time cleanup; tracked in docs/plans/2026-02-21-zero-repo-env-files.md).
+  - KAFKA_BOOTSTRAP_SERVERS
+  # [circular-startup-dep] Infisical connection details — needed to reach Infisical
+  # itself; cannot be fetched from Infisical.
   - INFISICAL_ADDR
   - INFISICAL_CLIENT_ID
   - INFISICAL_CLIENT_SECRET
   - INFISICAL_PROJECT_ID
+  # [infisical-internal] Infisical's own service secrets — used for internal data
+  # encryption and authentication. Rotating or losing these would prevent Infisical
+  # from decrypting its own stored secrets. Must live outside Infisical entirely.
   - INFISICAL_ENCRYPTION_KEY
   - INFISICAL_AUTH_SECRET
 # Keys that are per-repo identity config.
