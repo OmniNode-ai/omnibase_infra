@@ -97,4 +97,4 @@ class TestConfigSessionStorageAliasChoices:
         """Verify that missing POSTGRES_PASSWORD raises ValidationError."""
         monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
         with pytest.raises(ValidationError):
-            ConfigSessionStorage(env_file=None)
+            ConfigSessionStorage()
