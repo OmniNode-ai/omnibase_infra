@@ -314,6 +314,7 @@ def _create_folders_via_admin(
                         "path": current,
                     },
                 )
+                # 409 = folder already exists (idempotent). 400 = bad request — surfaces as real error.
                 if part_resp.status_code not in (200, 201, 409):
                     part_resp.raise_for_status()
                 current = f"{current}{part}/"
@@ -329,6 +330,7 @@ def _create_folders_via_admin(
                         "path": path_prefix.rstrip("/") or "/",
                     },
                 )
+                # 409 = folder already exists (idempotent). 400 = bad request — surfaces as real error.
                 if resp.status_code not in (200, 201, 409):
                     resp.raise_for_status()
     logger.info(
@@ -361,9 +363,9 @@ def _upsert_secret(
         # swallowed, because the subsequent create_secret call will also fail
         # and the root cause will be lost.
         #
-        # The adapter re-raises InfraAuthenticationError, InfraTimeoutError, and
-        # InfraUnavailableError directly (bypassing this except clause entirely),
-        # so we only reach here for SecretResolutionError, which the adapter uses
+        # The adapter is expected to re-raise InfraAuthenticationError, InfraTimeoutError, and
+        # InfraUnavailableError directly (see adapter_infisical.py) (bypassing this except
+        # clause entirely), so we only reach here for SecretResolutionError, which the adapter uses
         # for two cases:
         #   1. "Adapter not initialized" — should re-raise (programming error)
         #   2. "Secret not found" — treat as None so we can create it below

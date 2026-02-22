@@ -39,6 +39,8 @@ shared:
     - QUERY_TIMEOUT_SECONDS # ConfigSessionStorage.query_timeout_seconds (not in transport_config_map)
   "/shared/kafka/":
     # KAFKA_HOST_SERVERS intentionally excluded — removed as dead code (see commit 45f6ae65)
+    - KAFKA_GROUP_ID
+    - KAFKA_ACKS
     - KAFKA_REQUEST_TIMEOUT_MS
   "/shared/consul/":
     - CONSUL_HOST
