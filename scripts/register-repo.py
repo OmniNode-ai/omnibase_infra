@@ -58,6 +58,8 @@ import sys
 from pathlib import Path
 from uuid import UUID
 
+import yaml
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -76,100 +78,47 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _infisical_util import _parse_env_file
 
 # ---------------------------------------------------------------------------
-# Keys that are NEVER seeded into Infisical (circular bootstrap dependency).
-# These must come from the environment / .env file directly.
+# Registry loaders — load key lists from config/shared_key_registry.yaml.
 # ---------------------------------------------------------------------------
-BOOTSTRAP_KEYS = frozenset(
-    {
-        "POSTGRES_PASSWORD",
-        "INFISICAL_ADDR",
-        "INFISICAL_CLIENT_ID",
-        "INFISICAL_CLIENT_SECRET",
-        "INFISICAL_PROJECT_ID",
-        "INFISICAL_ENCRYPTION_KEY",
-        "INFISICAL_AUTH_SECRET",
-    }
-)
 
-# ---------------------------------------------------------------------------
-# Per-repo identity defaults — keys whose values are baked into each repo's
-# Settings class as `default=` and must NOT be seeded into Infisical.
-# Storing them in Infisical would cause the /services/<repo>/ path to diverge
-# from the code-level default and create a split-brain configuration.
-# ---------------------------------------------------------------------------
-IDENTITY_DEFAULTS = frozenset(
-    {
-        "POSTGRES_DATABASE",
-    }
-)
 
-# ---------------------------------------------------------------------------
-# Platform-wide shared secrets and their Infisical paths.
-# Keys not in any node contract are declared here explicitly.
-#
-# TODO (Task 6): This hardcoded dict is a transitional placeholder. It should
-# be migrated to config/shared_key_registry.yaml once that registry file is
-# implemented as part of the OMN-2287 plan. The script should load this
-# mapping from YAML rather than maintaining it inline here. Until that file
-# exists, keep this dict in sync with the platform's actual secret layout.
-# ---------------------------------------------------------------------------
-SHARED_PLATFORM_SECRETS: dict[str, list[str]] = {
-    "/shared/db/": [
-        "POSTGRES_HOST",
-        "POSTGRES_PORT",
-        "POSTGRES_USER",
-        "POSTGRES_DSN",
-        "POSTGRES_POOL_MIN",
-        "POSTGRES_POOL_MAX",
-        "POSTGRES_TIMEOUT_MS",
-    ],
-    "/shared/kafka/": [
-        "KAFKA_BOOTSTRAP_SERVERS",
-        "KAFKA_HOST_SERVERS",
-        "KAFKA_REQUEST_TIMEOUT_MS",
-    ],
-    "/shared/consul/": [
-        "CONSUL_HOST",
-        "CONSUL_PORT",
-        "CONSUL_SCHEME",
-        "CONSUL_ACL_TOKEN",
-        "CONSUL_ENABLED",
-    ],
-    "/shared/vault/": [
-        "VAULT_ADDR",
-        "VAULT_TOKEN",
-    ],
-    "/shared/llm/": [
-        "REMOTE_SERVER_IP",
-        "LLM_CODER_URL",
-        "LLM_CODER_FAST_URL",
-        "LLM_EMBEDDING_URL",
-        "LLM_DEEPSEEK_R1_URL",
-        "EMBEDDING_MODEL_URL",
-        "VLLM_SERVICE_URL",
-        "VLLM_DEEPSEEK_URL",
-        "VLLM_LLAMA_URL",
-        "ONEX_TREE_SERVICE_URL",
-        "METADATA_STAMPING_SERVICE_URL",
-    ],
-    "/shared/auth/": [
-        "OPENAI_API_KEY",
-        "GOOGLE_API_KEY",
-        "GEMINI_API_KEY",
-        "Z_AI_API_KEY",
-        "Z_AI_API_URL",
-        "SERVICE_AUTH_TOKEN",
-        "GH_PAT",
-    ],
-    "/shared/valkey/": [
-        "VALKEY_PASSWORD",
-    ],
-    "/shared/env/": [
-        "SLACK_WEBHOOK_URL",
-        "SLACK_BOT_TOKEN",
-        "SLACK_CHANNEL_ID",
-    ],
-}
+def _load_registry() -> dict[str, list[str]]:
+    """Load shared platform secrets from config/shared_key_registry.yaml.
+
+    Returns a mapping of ``{infisical_folder_path: [key, ...]}`` identical in
+    shape to the former ``SHARED_PLATFORM_SECRETS`` dict.
+    """
+    registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
+    if not registry_path.exists():
+        raise FileNotFoundError(f"Registry not found: {registry_path}")
+    with open(registry_path) as f:
+        data = yaml.safe_load(f)
+    return dict(data["shared"].items())
+
+
+def _bootstrap_keys() -> frozenset[str]:
+    """Load bootstrap-only keys from registry.
+
+    These keys must never be written to Infisical (circular bootstrap
+    dependency — Infisical needs them to start).
+    """
+    registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
+    with open(registry_path) as f:
+        data = yaml.safe_load(f)
+    return frozenset(data["bootstrap_only"])
+
+
+def _identity_defaults() -> frozenset[str]:
+    """Load identity-default keys from registry.
+
+    These keys are baked into each repo's Settings class as ``default=`` and
+    must NOT be seeded into Infisical.
+    """
+    registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
+    with open(registry_path) as f:
+        data = yaml.safe_load(f)
+    return frozenset(data["identity_defaults"])
+
 
 # Per-repo folders to create under /services/<repo>/
 REPO_TRANSPORT_FOLDERS = ("db", "kafka", "env")
@@ -385,9 +334,11 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
     plan: list[tuple[str, str, str]] = []  # (folder, key, value)
     missing_value: list[tuple[str, str]] = []  # (folder, key) with no value
 
-    for folder, keys in SHARED_PLATFORM_SECRETS.items():
+    shared_secrets = _load_registry()
+    bootstrap = _bootstrap_keys()
+    for folder, keys in shared_secrets.items():
         for key in keys:
-            if key in BOOTSTRAP_KEYS:
+            if key in bootstrap:
                 continue
             value = env_values.get(key, "")
             if value:
@@ -522,12 +473,14 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
 
     # Any extra keys in the env file that are NOT in shared, NOT bootstrap,
     # and NOT an identity default (per-repo value baked into Settings.default=).
-    shared_keys_flat = {k for keys in SHARED_PLATFORM_SECRETS.values() for k in keys}
+    shared_keys_flat = {k for keys in _load_registry().values() for k in keys}
+    bootstrap = _bootstrap_keys()
+    identity = _identity_defaults()
     extra: list[tuple[str, str, str]] = []
     for key, value in env_values.items():
-        if key in BOOTSTRAP_KEYS:
+        if key in bootstrap:
             continue
-        if key in IDENTITY_DEFAULTS:
+        if key in identity:
             continue
         if key in shared_keys_flat:
             continue
