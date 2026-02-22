@@ -104,19 +104,16 @@ x-runtime-env: &runtime-env
   ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
   ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-development}
   # --- Infisical config prefetch (OMN-2287) ---
-  # When INFISICAL_ADDR is set, runtime prefetches transport config from Infisical
-  # before handler initialization. Remaining keys (Consul, Valkey, OTEL, etc.)
-  # are resolved from Infisical at startup rather than being hardcoded here.
+  # Opt-in: config prefetch only activates when INFISICAL_ADDR is non-empty.
+  # When the secrets profile IS active, set INFISICAL_ADDR=http://infisical:8080
+  # in your .env or via --env-file so containers reach the Infisical service on
+  # the compose network. Do NOT use http://localhost:8880 here — that is the
+  # host-accessible port and is unreachable inside the container.
   #
-  # Hardcoded to the Docker-internal hostname so runtime containers always reach
-  # the Infisical service container on the compose network. Do NOT use
-  # ${INFISICAL_ADDR} here — the host env has INFISICAL_ADDR=http://localhost:8880
-  # (the host-accessible port) which would be unreachable inside the container.
-  #
-  # When the secrets profile is not active (Infisical container absent), set
-  # INFISICAL_ADDR to an empty string via --env-file or environment override to
-  # disable config prefetch and fall back to standard env var resolution.
-  INFISICAL_ADDR: "http://infisical:8080"
+  # When the secrets profile is NOT active (Infisical container absent), leave
+  # INFISICAL_ADDR unset (or empty) and the runtime falls back to standard
+  # environment variable resolution without attempting to contact Infisical.
+  INFISICAL_ADDR: ${INFISICAL_ADDR:-}
   INFISICAL_CLIENT_ID: ${INFISICAL_CLIENT_ID:-}
   INFISICAL_CLIENT_SECRET: ${INFISICAL_CLIENT_SECRET:-}
   INFISICAL_PROJECT_ID: ${INFISICAL_PROJECT_ID:-}
