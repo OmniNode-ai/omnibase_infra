@@ -26,12 +26,11 @@ shared:
     - POSTGRES_HOST
     - POSTGRES_PORT
     - POSTGRES_USER
-    - POSTGRES_DSN
+    - POSTGRES_DSN # also seeded per-service via REPO_SECRET_KEYS in register-repo.py as a service-specific override
     - POSTGRES_POOL_MIN
     - POSTGRES_POOL_MAX
     - POSTGRES_TIMEOUT_MS
   "/shared/kafka/":
-    - KAFKA_BOOTSTRAP_SERVERS
     - KAFKA_HOST_SERVERS
     - KAFKA_REQUEST_TIMEOUT_MS
   "/shared/consul/":
@@ -76,6 +75,7 @@ shared:
 # They must never appear in any repo .env file.
 bootstrap_only:
   - POSTGRES_PASSWORD
+  - KAFKA_BOOTSTRAP_SERVERS # circular bootstrap dep: containers need this BEFORE Infisical is reachable
   - INFISICAL_ADDR
   - INFISICAL_CLIENT_ID
   - INFISICAL_CLIENT_SECRET
