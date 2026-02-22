@@ -31,7 +31,7 @@ shared:
     - POSTGRES_HOST
     - POSTGRES_PORT
     - POSTGRES_USER
-    - POSTGRES_DSN # also seeded per-service via REPO_SECRET_KEYS in register-repo.py as a service-specific override
+    - POSTGRES_DSN # per-service override also seeded via REPO_SECRET_KEYS (see header)
     - POSTGRES_POOL_MIN
     - POSTGRES_POOL_MAX
     - POSTGRES_TIMEOUT_MS

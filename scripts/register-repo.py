@@ -88,8 +88,10 @@ def _read_registry_data() -> dict:
     Reads and parses the registry YAML file. Called once per loader function
     invocation; callers such as cmd_onboard_repo may invoke multiple loaders
     in sequence (e.g. _load_registry(), _bootstrap_keys(), _identity_defaults()),
-    resulting in multiple reads of the same file. Pass a pre-loaded dict to
-    callers if you need a single read per command invocation.
+    resulting in multiple reads of the same file. This is acceptable for a CLI
+    script — it runs as a short-lived process with no concurrent callers, so
+    repeated file reads carry no consistency risk and no concurrent-modification
+    protection is needed.
 
     Returns the raw parsed dict from the YAML file.
     """
