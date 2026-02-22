@@ -82,17 +82,30 @@ from _infisical_util import _parse_env_file
 # ---------------------------------------------------------------------------
 
 
+def _read_registry_data() -> dict:
+    """Open and parse config/shared_key_registry.yaml exactly once.
+
+    All registry loader functions call this helper so the file is read a
+    single time per invocation, eliminating redundant I/O and guaranteeing
+    that all callers see a consistent snapshot of the registry.
+
+    Returns the raw parsed dict from the YAML file.
+    """
+    registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
+    if not registry_path.exists():
+        raise FileNotFoundError(f"Registry not found: {registry_path}")
+    with open(registry_path) as f:
+        return yaml.safe_load(f)
+
+
 def _load_registry() -> dict[str, list[str]]:
     """Load shared platform secrets from config/shared_key_registry.yaml.
 
     Returns a mapping of ``{infisical_folder_path: [key, ...]}`` identical in
     shape to the former ``SHARED_PLATFORM_SECRETS`` dict.
     """
+    data = _read_registry_data()
     registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
-    if not registry_path.exists():
-        raise FileNotFoundError(f"Registry not found: {registry_path}")
-    with open(registry_path) as f:
-        data = yaml.safe_load(f)
     shared = data["shared"]
     if not isinstance(shared, dict):
         raise ValueError(
@@ -108,12 +121,8 @@ def _bootstrap_keys() -> frozenset[str]:
     These keys must never be written to Infisical (circular bootstrap
     dependency — Infisical needs them to start).
     """
-    registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
-    if not registry_path.exists():
-        raise FileNotFoundError(f"Registry not found: {registry_path}")
-    with open(registry_path) as f:
-        data = yaml.safe_load(f)
-    return frozenset(data["bootstrap_only"])
+    data = _read_registry_data()
+    return frozenset(data.get("bootstrap_only") or [])
 
 
 def _identity_defaults() -> frozenset[str]:
@@ -122,12 +131,8 @@ def _identity_defaults() -> frozenset[str]:
     These keys are baked into each repo's Settings class as ``default=`` and
     must NOT be seeded into Infisical.
     """
-    registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
-    if not registry_path.exists():
-        raise FileNotFoundError(f"Registry not found: {registry_path}")
-    with open(registry_path) as f:
-        data = yaml.safe_load(f)
-    return frozenset(data["identity_defaults"])
+    data = _read_registry_data()
+    return frozenset(data.get("identity_defaults") or [])
 
 
 # Per-repo folders to create under /services/<repo>/
@@ -625,6 +630,12 @@ def main() -> int:
     p_repo = sub.add_parser(
         "onboard-repo",
         help="Create /services/<repo>/ folders and seed repo-specific secrets",
+        epilog=(
+            "Note: after onboarding, a suggested POSTGRES_DATABASE value is printed "
+            "as the repo name with hyphens replaced by underscores "
+            "(e.g. 'my-repo' → 'my_repo'). "
+            "Verify this matches the actual database name before using it."
+        ),
     )
     p_repo.add_argument("--repo", required=True, help="Repo name (e.g. omniclaude)")
     p_repo.add_argument(
