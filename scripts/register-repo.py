@@ -363,9 +363,12 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
 
     shared_secrets = _load_registry()
     bootstrap = _bootstrap_keys()
+    identity = _identity_defaults()
     for folder, keys in shared_secrets.items():
         for key in keys:
             if key in bootstrap:
+                continue
+            if key in identity:
                 continue
             value = env_values.get(key, "")
             if value:
