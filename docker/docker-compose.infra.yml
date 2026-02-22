@@ -98,6 +98,10 @@ x-runtime-env: &runtime-env
   # --- Bootstrap essentials (always needed) ---
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  # WARNING: The fallback DSN uses nested variable expansion (requires recent Compose v2).
+  # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
+  # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
+  # RECOMMENDED: Set OMNIBASE_INFRA_DB_URL explicitly in .env instead.
   OMNIBASE_INFRA_DB_URL: ${OMNIBASE_INFRA_DB_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for DB URL fallback}@postgres:5432/omnibase_infra}
   KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
   ONEX_CONTRACTS_DIR: /app/contracts
