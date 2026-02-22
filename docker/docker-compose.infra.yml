@@ -98,8 +98,8 @@ x-runtime-env: &runtime-env
   # --- Bootstrap essentials (always needed) ---
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
-  # WARNING: The fallback DSN uses nested variable expansion. Requires Compose v2.20+;
-  # older versions silently produce malformed/empty DSNs (see top-of-file note).
+  # WARNING: The fallback DSN uses nested variable expansion. Requires Compose v2.20+
+  # (older versions silently produce malformed/empty DSNs; run `docker compose version` to verify).
   # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
   # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
   # RECOMMENDED: Set OMNIBASE_INFRA_DB_URL explicitly in .env instead.
@@ -133,8 +133,8 @@ x-runtime-env: &runtime-env
   VALKEY_PORT: ${VALKEY_PORT:-6379}
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
   # OmniIntelligence domain plugin
-  # WARNING: The fallback DSN uses nested variable expansion. Requires Compose v2.20+;
-  # older versions silently produce malformed/empty DSNs (see top-of-file note).
+  # WARNING: The fallback DSN uses nested variable expansion. Requires Compose v2.20+
+  # (older versions silently produce malformed/empty DSNs; run `docker compose version` to verify).
   # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
   # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
   # RECOMMENDED: Set OMNIINTELLIGENCE_DB_URL explicitly in .env instead.
