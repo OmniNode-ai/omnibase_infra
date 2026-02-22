@@ -64,6 +64,11 @@ shared:
     - GH_PAT
   "/shared/valkey/":
     - VALKEY_PASSWORD
+  "/shared/qdrant/":
+    - QDRANT_HOST
+    - QDRANT_PORT
+    - QDRANT_API_KEY
+    - QDRANT_URL
   "/shared/env/":
     - SLACK_WEBHOOK_URL
     - SLACK_BOT_TOKEN

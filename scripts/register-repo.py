@@ -83,11 +83,11 @@ from _infisical_util import _parse_env_file
 
 
 def _read_registry_data() -> dict:
-    """Open and parse config/shared_key_registry.yaml exactly once.
+    """Open and parse config/shared_key_registry.yaml.
 
-    All registry loader functions call this helper so the file is read a
-    single time per invocation, eliminating redundant I/O and guaranteeing
-    that all callers see a consistent snapshot of the registry.
+    Reads and parses the registry YAML once per call. Each registry loader
+    function calls this helper independently, so the file is read once per
+    loader call rather than duplicating the open/parse logic inline.
 
     Returns the raw parsed dict from the YAML file.
     """
@@ -105,9 +105,9 @@ def _load_registry() -> dict[str, list[str]]:
     shape to the former ``SHARED_PLATFORM_SECRETS`` dict.
     """
     data = _read_registry_data()
-    registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
     shared = data["shared"]
     if not isinstance(shared, dict):
+        registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
         raise ValueError(
             f"Expected 'shared' in {registry_path} to be a mapping, "
             f"got {type(shared).__name__!r}. Check that 'shared:' is not null or a list."
