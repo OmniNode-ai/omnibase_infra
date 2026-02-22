@@ -133,7 +133,8 @@ x-runtime-env: &runtime-env
   VALKEY_PORT: ${VALKEY_PORT:-6379}
   VALKEY_PASSWORD: ${VALKEY_PASSWORD:-valkey-dev-password}
   # OmniIntelligence domain plugin
-  # WARNING: The fallback DSN uses nested variable expansion (requires recent Compose v2).
+  # WARNING: The fallback DSN uses nested variable expansion (requires recent Compose v2;
+  # see top-of-file: requires Compose v2.20+).
   # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
   # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
   # RECOMMENDED: Set OMNIINTELLIGENCE_DB_URL explicitly in .env instead.
