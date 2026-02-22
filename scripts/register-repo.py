@@ -369,7 +369,15 @@ def _upsert_secret(
         err_msg = str(_get_exc).lower()
         # An auth/forbidden substring in the message means the call was
         # rejected by the server — it must not be treated as "not found".
-        _AUTH_INDICATORS = ("unauthorized", "forbidden", "auth", "token", "credential")
+        _AUTH_INDICATORS = (
+            "unauthorized",
+            "forbidden",
+            "auth",
+            "invalid token",
+            "expired token",
+            "authentication failed",
+            "access denied",
+        )
         has_auth_indicator = any(tok in err_msg for tok in _AUTH_INDICATORS)
         is_not_found = not has_auth_indicator and (
             "not found" in err_msg
