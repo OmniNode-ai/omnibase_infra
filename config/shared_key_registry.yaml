@@ -45,7 +45,6 @@ shared:
     - CONSUL_ENABLED
   "/shared/vault/":
     - VAULT_ADDR
-    - VAULT_TOKEN
   "/shared/llm/":
     - REMOTE_SERVER_IP
     - LLM_CODER_URL
@@ -83,8 +82,9 @@ shared:
 # They must never appear in any repo .env file.
 bootstrap_only:
   - POSTGRES_PASSWORD
-  # TODO(OMN-2287): Moved from shared/kafka to bootstrap_only. Migration: any existing /shared/kafka/KAFKA_BOOTSTRAP_SERVERS
-  # entry in a provisioned Infisical instance is now stale and can be deleted manually.
+  # Moved from shared/kafka to bootstrap_only (OMN-2287). If upgrading from a prior
+  # Infisical seed: delete the stale /shared/kafka/KAFKA_BOOTSTRAP_SERVERS entry from
+  # Infisical manually (one-time cleanup; tracked in docs/plans/2026-02-21-zero-repo-env-files.md).
   - KAFKA_BOOTSTRAP_SERVERS # circular bootstrap dep: containers need this BEFORE Infisical is reachable
   - INFISICAL_ADDR
   - INFISICAL_CLIENT_ID
