@@ -10,6 +10,7 @@ not match pydantic-settings' automatic bare-name mapping.
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.services.session.config_store import ConfigSessionStorage
 
@@ -89,3 +90,11 @@ class TestConfigSessionStorageAliasChoices:
 
         assert config.pool_min_size == 5
         assert config.pool_max_size == 15
+
+    def test_construction_fails_without_postgres_password(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify that missing POSTGRES_PASSWORD raises ValidationError."""
+        monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
+        with pytest.raises(ValidationError):
+            ConfigSessionStorage(env_file=None)
