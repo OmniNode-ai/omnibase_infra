@@ -45,7 +45,6 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "POSTGRES_TIMEOUT_MS",
     ),
     EnumInfraTransportType.KAFKA: (
-        "KAFKA_BOOTSTRAP_SERVERS",
         "KAFKA_GROUP_ID",
         "KAFKA_ACKS",
         "KAFKA_REQUEST_TIMEOUT_MS",
