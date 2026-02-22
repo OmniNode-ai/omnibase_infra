@@ -82,7 +82,7 @@ from _infisical_util import _parse_env_file
 # ---------------------------------------------------------------------------
 
 
-def _read_registry_data() -> dict:
+def _read_registry_data() -> dict[str, object]:
     """Open and parse config/shared_key_registry.yaml.
 
     Reads and parses the registry YAML file. Called once per loader function
@@ -124,6 +124,17 @@ def _load_registry() -> dict[str, list[str]]:
             f"Expected 'shared' in {registry_path} to be a mapping, "
             f"got {type(shared).__name__!r}. Check that 'shared:' is not null or a list."
         )
+    registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
+    for folder, keys in shared.items():
+        if not isinstance(keys, list):
+            raise ValueError(
+                f"Expected 'shared.{folder}' in {registry_path} to be a list, "
+                f"got {type(keys).__name__!r}."
+            )
+        if not all(isinstance(k, str) for k in keys):
+            raise SystemExit(
+                f"[ERROR] registry 'shared.{folder}' must be a list of strings in {registry_path}"
+            )
     return shared
 
 

@@ -2,7 +2,7 @@
 
 Reads standard POSTGRES_* environment variables sourced from ~/.omnibase/.env
 at shell startup. No env_prefix and no env_file — values come entirely from
-the shell environment, consistent with the zero-repo-env policy (OMN-2477).
+the shell environment, consistent with the zero-repo-env policy (OMN-2287).
 
 Note: This module intentionally uses individual POSTGRES_* env vars rather
 than a single DSN. The session storage may target a different database than
@@ -29,6 +29,11 @@ class ConfigSessionStorage(BaseSettings):
     repository-local .env file is silently discovered, in compliance with the
     zero-repo-env policy. Source ~/.omnibase/.env in your shell profile to
     supply the required values.
+
+    Note: Using an empty prefix means any POSTGRES_* variables already set in the
+    environment (e.g. by a test runner or CI matrix) will be used here. This is an
+    intentional trade-off of the zero-repo-env policy; ensure POSTGRES_* variables
+    in the shell match the intended session storage target.
 
     Example: export POSTGRES_HOST=db.example.com
     """

@@ -98,7 +98,8 @@ x-runtime-env: &runtime-env
   # --- Bootstrap essentials (always needed) ---
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
-  # WARNING: The fallback DSN uses nested variable expansion (requires recent Compose v2).
+  # WARNING: The fallback DSN uses nested variable expansion (requires recent Compose v2;
+  # see top-of-file: requires Compose v2.20+).
   # If POSTGRES_PASSWORD contains URI-special characters (@, :, /, %, #) or
   # shell-special characters ($, `, \, !), the expansion may produce incorrect results.
   # RECOMMENDED: Set OMNIBASE_INFRA_DB_URL explicitly in .env instead.
