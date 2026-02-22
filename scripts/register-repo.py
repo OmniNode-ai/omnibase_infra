@@ -73,6 +73,21 @@ _REGISTRY_PATH = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
 _ADMIN_TOKEN_FILE = _PROJECT_ROOT / ".infisical-admin-token"
 _BOOTSTRAP_ENV = Path.home() / ".omnibase" / ".env"
 
+# Auth-related substrings that indicate a server-rejected request.
+# Used in _upsert_secret to distinguish "secret not found" (recoverable)
+# from auth/connection failures (must re-raise).
+# NOTE: bare "auth" is intentionally excluded — it is a 4-letter substring
+# that matches false positives like "OAuth", "path not found in database auth
+# schema", etc.  The specific phrases below are sufficient.
+_AUTH_INDICATORS = (
+    "unauthorized",
+    "forbidden",
+    "invalid token",
+    "expired token",
+    "authentication failed",
+    "access denied",
+)
+
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 # Shared utility — avoids duplicating the parser in every Infisical script.
@@ -369,15 +384,6 @@ def _upsert_secret(
         err_msg = str(_get_exc).lower()
         # An auth/forbidden substring in the message means the call was
         # rejected by the server — it must not be treated as "not found".
-        _AUTH_INDICATORS = (
-            "unauthorized",
-            "forbidden",
-            "auth",
-            "invalid token",
-            "expired token",
-            "authentication failed",
-            "access denied",
-        )
         has_auth_indicator = any(tok in err_msg for tok in _AUTH_INDICATORS)
         is_not_found = not has_auth_indicator and (
             "not found" in err_msg
