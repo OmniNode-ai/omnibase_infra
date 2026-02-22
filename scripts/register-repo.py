@@ -95,7 +95,12 @@ def _read_registry_data() -> dict:
     if not registry_path.exists():
         raise FileNotFoundError(f"Registry not found: {registry_path}")
     with open(registry_path) as f:
-        return yaml.safe_load(f)
+        data = yaml.safe_load(f)
+    if data is None or not isinstance(data, dict):
+        raise ValueError(
+            f"Registry file is empty or not a YAML mapping: {registry_path}"
+        )
+    return data
 
 
 def _load_registry() -> dict[str, list[str]]:
@@ -105,7 +110,10 @@ def _load_registry() -> dict[str, list[str]]:
     shape to the former ``SHARED_PLATFORM_SECRETS`` dict.
     """
     data = _read_registry_data()
-    shared = data["shared"]
+    shared = data.get("shared")
+    if shared is None:
+        registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
+        raise ValueError(f"Registry missing 'shared' section: {registry_path}")
     if not isinstance(shared, dict):
         registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
         raise ValueError(
@@ -630,6 +638,7 @@ def main() -> int:
     p_repo = sub.add_parser(
         "onboard-repo",
         help="Create /services/<repo>/ folders and seed repo-specific secrets",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Note: after onboarding, a suggested POSTGRES_DATABASE value is printed "
             "as the repo name with hyphens replaced by underscores "

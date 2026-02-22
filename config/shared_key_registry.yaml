@@ -9,9 +9,9 @@
 #                       loaded by _load_registry() in scripts/register-repo.py
 #   bootstrap_only    — excluded from Infisical seeding (circular bootstrap dep);
 #                       listed here for awareness only; must never be in any repo
-#                       .env; maps to BOOTSTRAP_KEYS frozenset in register-repo.py
+#                       .env; loaded by _bootstrap_keys() in register-repo.py
 #   identity_defaults — never in any .env; hardcoded as default= in Settings
-#                       classes; maps to IDENTITY_DEFAULTS frozenset in
+#                       classes; loaded by _identity_defaults() in
 #                       register-repo.py
 #
 # Used by:
