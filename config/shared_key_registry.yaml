@@ -32,11 +32,10 @@ shared:
     - POSTGRES_PORT
     - POSTGRES_USER
     - POSTGRES_DSN # per-service override also seeded via REPO_SECRET_KEYS (see header)
-    - POSTGRES_POOL_MIN
-    - POSTGRES_POOL_MAX
+    - POSTGRES_POOL_MIN_SIZE
+    - POSTGRES_POOL_MAX_SIZE
     - POSTGRES_TIMEOUT_MS
   "/shared/kafka/":
-    - KAFKA_HOST_SERVERS
     - KAFKA_REQUEST_TIMEOUT_MS
   "/shared/consul/":
     - CONSUL_HOST

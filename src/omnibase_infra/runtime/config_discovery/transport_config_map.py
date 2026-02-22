@@ -40,8 +40,8 @@ logger = logging.getLogger(__name__)
 _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
     EnumInfraTransportType.DATABASE: (
         "POSTGRES_DSN",
-        "POSTGRES_POOL_MIN",
-        "POSTGRES_POOL_MAX",
+        "POSTGRES_POOL_MIN_SIZE",
+        "POSTGRES_POOL_MAX_SIZE",
         "POSTGRES_TIMEOUT_MS",
     ),
     EnumInfraTransportType.KAFKA: (
