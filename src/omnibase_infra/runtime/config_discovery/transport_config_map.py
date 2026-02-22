@@ -54,6 +54,7 @@ _TRANSPORT_KEYS: dict[EnumInfraTransportType, tuple[str, ...]] = {
         "CONSUL_PORT",
         "CONSUL_SCHEME",
         "CONSUL_ACL_TOKEN",
+        "CONSUL_ENABLED",
     ),
     EnumInfraTransportType.INFISICAL: (
         "INFISICAL_ADDR",

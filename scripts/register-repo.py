@@ -17,14 +17,15 @@ Infisical-based secret management system. It has two subcommands:
 
 Both subcommands are dry-run by default. Pass --execute to write.
 
-The end state for ~/.omnibase/.env (5 bootstrap lines only):
+~/.omnibase/.env contains bootstrap credentials plus shared platform keys.
+Bootstrap-only lines (circular Infisical dependency — must stay in .env):
     POSTGRES_PASSWORD=...
     INFISICAL_ADDR=http://localhost:8880
     INFISICAL_CLIENT_ID=...
     INFISICAL_CLIENT_SECRET=...
     INFISICAL_PROJECT_ID=...
 
-Everything else lives in Infisical.
+All other platform-wide configuration lives in Infisical under /shared/*.
 
 Usage:
     # Populate /shared/ paths from the platform env file (dry-run)
@@ -253,6 +254,11 @@ def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
     from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
     infisical_addr = os.environ.get("INFISICAL_ADDR", "http://localhost:8880")
+    if not infisical_addr or not infisical_addr.startswith(("http://", "https://")):
+        raise ValueError(
+            f"INFISICAL_ADDR is not a valid URL: {infisical_addr!r}\n"
+            "It must start with http:// or https:// (e.g. http://localhost:8880)."
+        )
     client_id = os.environ.get("INFISICAL_CLIENT_ID", "")
     client_secret = os.environ.get("INFISICAL_CLIENT_SECRET", "")
     project_id = os.environ.get("INFISICAL_PROJECT_ID", "")
