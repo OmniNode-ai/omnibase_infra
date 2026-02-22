@@ -77,8 +77,13 @@ class TestConfigSessionStorageAliasChoices:
         assert config.pool_min_size == 2
         assert config.pool_max_size == 10
 
-    def test_direct_construction_uses_field_name_fallback(self) -> None:
+    def test_direct_construction_uses_field_name_fallback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Direct kwarg construction bypasses env var resolution and uses the value directly."""
+        monkeypatch.setenv("POSTGRES_PASSWORD", "testpass")  # required field
+        monkeypatch.delenv("POSTGRES_POOL_MIN_SIZE", raising=False)
+        monkeypatch.delenv("POSTGRES_POOL_MAX_SIZE", raising=False)
         config = ConfigSessionStorage(
             pool_min_size=5,
             pool_max_size=15,

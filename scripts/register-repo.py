@@ -314,7 +314,7 @@ def _create_folders_via_admin(
                         "path": current,
                     },
                 )
-                if part_resp.status_code not in (200, 201, 400, 409):
+                if part_resp.status_code not in (200, 201, 409):
                     part_resp.raise_for_status()
                 current = f"{current}{part}/"
 
@@ -329,7 +329,7 @@ def _create_folders_via_admin(
                         "path": path_prefix.rstrip("/") or "/",
                     },
                 )
-                if resp.status_code not in (200, 201, 400, 409):
+                if resp.status_code not in (200, 201, 409):
                     resp.raise_for_status()
     logger.info(
         "Folders created: %s/[%s] in %s",
@@ -402,6 +402,7 @@ def _upsert_secret(
                     "not found" in cause_msg
                     or "404" in cause_msg
                     or "does not exist" in cause_msg
+                    or "secret not found" in cause_msg
                 )
         if not is_not_found:
             raise  # Re-raise: not-initialized / auth / unexpected error
