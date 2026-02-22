@@ -148,6 +148,10 @@ def _bootstrap_keys() -> frozenset[str]:
     if "bootstrap_only" not in data:
         raise ValueError(f"Registry missing 'bootstrap_only' section: {registry_path}")
     keys = data["bootstrap_only"]
+    if not isinstance(keys, list):
+        raise ValueError(
+            f"[ERROR] registry 'bootstrap_only' must be a list in {registry_path}"
+        )
     if not all(isinstance(k, str) for k in keys):
         raise ValueError(
             f"[ERROR] registry 'bootstrap_only' entries must be strings in {registry_path}"
@@ -168,6 +172,10 @@ def _identity_defaults() -> frozenset[str]:
             f"Registry missing 'identity_defaults' section: {registry_path}"
         )
     keys = data["identity_defaults"]
+    if not isinstance(keys, list):
+        raise ValueError(
+            f"[ERROR] registry 'identity_defaults' must be a list in {registry_path}"
+        )
     if not all(isinstance(k, str) for k in keys):
         raise ValueError(
             f"[ERROR] registry 'identity_defaults' entries must be strings in {registry_path}"
