@@ -57,6 +57,7 @@ import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 from uuid import UUID
 
 import yaml
@@ -143,7 +144,7 @@ def _load_registry(
             raise ValueError(
                 f"[ERROR] registry 'shared.{folder}' must be a list of strings in {_REGISTRY_PATH}"
             )
-    return shared
+    return cast("dict[str, list[str]]", shared)
 
 
 def _bootstrap_keys(
@@ -333,19 +334,24 @@ def _upsert_secret(
     sanitize: Callable[[Exception], str],
 ) -> str:
     """Create or update a secret. Returns 'created', 'updated', or 'skipped'."""
+    from omnibase_infra.errors import SecretResolutionError
+
     existing = None
     try:
         existing = adapter.get_secret(secret_name=key, secret_path=folder)  # type: ignore[attr-defined]
-    except Exception as _get_exc:
+    except SecretResolutionError as _get_exc:
         # Only suppress the error when the secret genuinely does not exist yet.
         # Re-raise for any exception that indicates a connection problem, auth
         # failure, or other infrastructure error — those must not be silently
         # swallowed, because the subsequent create_secret call will also fail
         # and the root cause will be lost.
         #
-        # The Infisical adapter wraps all get_secret failures (including 404s)
-        # as SecretResolutionError.  We distinguish "not found" from "real
-        # error" by inspecting the exception message and cause chain.
+        # The adapter re-raises InfraAuthenticationError, InfraTimeoutError, and
+        # InfraUnavailableError directly (bypassing this except clause entirely),
+        # so we only reach here for SecretResolutionError, which the adapter uses
+        # for two cases:
+        #   1. "Adapter not initialized" — should re-raise (programming error)
+        #   2. "Secret not found" — treat as None so we can create it below
         #
         # WORKAROUND: The Infisical Python SDK does not expose typed error
         # codes (e.g. an HTTP status attribute or a structured exception
@@ -361,7 +367,11 @@ def _upsert_secret(
         # (https://github.com/Infisical/infisical-python) and remove the
         # string-matching blocks when a stable typed API is available.
         err_msg = str(_get_exc).lower()
-        is_not_found = (
+        # An auth/forbidden substring in the message means the call was
+        # rejected by the server — it must not be treated as "not found".
+        _AUTH_INDICATORS = ("unauthorized", "forbidden", "auth", "token", "credential")
+        has_auth_indicator = any(tok in err_msg for tok in _AUTH_INDICATORS)
+        is_not_found = not has_auth_indicator and (
             "not found" in err_msg
             or "404" in err_msg
             or "does not exist" in err_msg
@@ -373,13 +383,14 @@ def _upsert_secret(
             cause = getattr(_get_exc, "__cause__", None)
             if cause is not None:
                 cause_msg = str(cause).lower()
-                is_not_found = (
+                cause_has_auth = any(tok in cause_msg for tok in _AUTH_INDICATORS)
+                is_not_found = not cause_has_auth and (
                     "not found" in cause_msg
                     or "404" in cause_msg
                     or "does not exist" in cause_msg
                 )
         if not is_not_found:
-            raise  # Re-raise: connection/auth/unexpected error, not a missing key
+            raise  # Re-raise: not-initialized / auth / unexpected error
 
     if existing is not None:
         if not overwrite:
