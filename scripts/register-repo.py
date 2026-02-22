@@ -85,16 +85,18 @@ from _infisical_util import _parse_env_file
 def _read_registry_data() -> dict:
     """Open and parse config/shared_key_registry.yaml.
 
-    Reads and parses the registry YAML once per call. Each registry loader
-    function calls this helper independently, so the file is read once per
-    loader call rather than duplicating the open/parse logic inline.
+    Reads and parses the registry YAML file. Called once per loader function
+    invocation; callers such as cmd_onboard_repo may invoke multiple loaders
+    in sequence (e.g. _load_registry(), _bootstrap_keys(), _identity_defaults()),
+    resulting in multiple reads of the same file. Pass a pre-loaded dict to
+    callers if you need a single read per command invocation.
 
     Returns the raw parsed dict from the YAML file.
     """
     registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
     if not registry_path.exists():
         raise FileNotFoundError(f"Registry not found: {registry_path}")
-    with open(registry_path) as f:
+    with open(registry_path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     if data is None or not isinstance(data, dict):
         raise ValueError(

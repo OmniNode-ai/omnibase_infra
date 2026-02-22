@@ -6,7 +6,12 @@
 #
 # Semantics:
 #   shared            — eligible for Infisical seeding + repo .env stripping;
-#                       loaded by _load_registry() in scripts/register-repo.py
+#                       loaded by _load_registry() in scripts/register-repo.py.
+#                       A shared key represents the canonical platform-wide value.
+#                       Some shared keys (e.g. POSTGRES_DSN) may also be seeded
+#                       per-service under /services/<repo>/ via REPO_SECRET_KEYS
+#                       in register-repo.py — those per-service entries are
+#                       intentional overrides that take precedence at runtime.
 #   bootstrap_only    — excluded from Infisical seeding (circular bootstrap dep);
 #                       listed here for awareness only; must never be in any repo
 #                       .env; loaded by _bootstrap_keys() in register-repo.py
