@@ -101,7 +101,7 @@ def _read_registry_data() -> dict[str, object]:
         raise ValueError(
             f"Registry file is empty or not a YAML mapping: {registry_path}"
         )
-    return data
+    return data  # type: ignore[return-value]  # yaml.safe_load returns Any; runtime isinstance guard above ensures dict
 
 
 def _load_registry(
