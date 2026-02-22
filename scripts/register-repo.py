@@ -115,24 +115,23 @@ def _load_registry() -> dict[str, list[str]]:
     shape to the former ``SHARED_PLATFORM_SECRETS`` dict.
     """
     data = _read_registry_data()
-    registry_path = _REGISTRY_PATH
     shared = data.get("shared")
     if shared is None:
-        raise ValueError(f"Registry missing 'shared' section: {registry_path}")
+        raise ValueError(f"Registry missing 'shared' section: {_REGISTRY_PATH}")
     if not isinstance(shared, dict):
         raise ValueError(
-            f"Expected 'shared' in {registry_path} to be a mapping, "
+            f"Expected 'shared' in {_REGISTRY_PATH} to be a mapping, "
             f"got {type(shared).__name__!r}. Check that 'shared:' is not null or a list."
         )
     for folder, keys in shared.items():
         if not isinstance(keys, list):
             raise ValueError(
-                f"Expected 'shared.{folder}' in {registry_path} to be a list, "
+                f"Expected 'shared.{folder}' in {_REGISTRY_PATH} to be a list, "
                 f"got {type(keys).__name__!r}."
             )
         if not all(isinstance(k, str) for k in keys):
             raise ValueError(
-                f"[ERROR] registry 'shared.{folder}' must be a list of strings in {registry_path}"
+                f"[ERROR] registry 'shared.{folder}' must be a list of strings in {_REGISTRY_PATH}"
             )
     return shared
 
@@ -144,17 +143,16 @@ def _bootstrap_keys() -> frozenset[str]:
     dependency — Infisical needs them to start).
     """
     data = _read_registry_data()
-    registry_path = _REGISTRY_PATH
     if "bootstrap_only" not in data:
-        raise ValueError(f"Registry missing 'bootstrap_only' section: {registry_path}")
+        raise ValueError(f"Registry missing 'bootstrap_only' section: {_REGISTRY_PATH}")
     keys = data["bootstrap_only"]
     if not isinstance(keys, list):
         raise ValueError(
-            f"[ERROR] registry 'bootstrap_only' must be a list in {registry_path}"
+            f"[ERROR] registry 'bootstrap_only' must be a list in {_REGISTRY_PATH}"
         )
     if not all(isinstance(k, str) for k in keys):
         raise ValueError(
-            f"[ERROR] registry 'bootstrap_only' entries must be strings in {registry_path}"
+            f"[ERROR] registry 'bootstrap_only' entries must be strings in {_REGISTRY_PATH}"
         )
     return frozenset(keys)
 
@@ -166,19 +164,18 @@ def _identity_defaults() -> frozenset[str]:
     must NOT be seeded into Infisical.
     """
     data = _read_registry_data()
-    registry_path = _REGISTRY_PATH
     if "identity_defaults" not in data:
         raise ValueError(
-            f"Registry missing 'identity_defaults' section: {registry_path}"
+            f"Registry missing 'identity_defaults' section: {_REGISTRY_PATH}"
         )
     keys = data["identity_defaults"]
     if not isinstance(keys, list):
         raise ValueError(
-            f"[ERROR] registry 'identity_defaults' must be a list in {registry_path}"
+            f"[ERROR] registry 'identity_defaults' must be a list in {_REGISTRY_PATH}"
         )
     if not all(isinstance(k, str) for k in keys):
         raise ValueError(
-            f"[ERROR] registry 'identity_defaults' entries must be strings in {registry_path}"
+            f"[ERROR] registry 'identity_defaults' entries must be strings in {_REGISTRY_PATH}"
         )
     return frozenset(keys)
 

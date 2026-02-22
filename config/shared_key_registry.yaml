@@ -72,7 +72,6 @@ shared:
     - QDRANT_HOST
     - QDRANT_PORT
     - QDRANT_API_KEY
-    - QDRANT_URL
   "/shared/env/":
     - SLACK_WEBHOOK_URL
     - SLACK_BOT_TOKEN
