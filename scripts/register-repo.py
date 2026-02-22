@@ -114,17 +114,15 @@ def _load_registry() -> dict[str, list[str]]:
     shape to the former ``SHARED_PLATFORM_SECRETS`` dict.
     """
     data = _read_registry_data()
+    registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
     shared = data.get("shared")
     if shared is None:
-        registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
         raise ValueError(f"Registry missing 'shared' section: {registry_path}")
     if not isinstance(shared, dict):
-        registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
         raise ValueError(
             f"Expected 'shared' in {registry_path} to be a mapping, "
             f"got {type(shared).__name__!r}. Check that 'shared:' is not null or a list."
         )
-    registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
     for folder, keys in shared.items():
         if not isinstance(keys, list):
             raise ValueError(
@@ -132,7 +130,7 @@ def _load_registry() -> dict[str, list[str]]:
                 f"got {type(keys).__name__!r}."
             )
         if not all(isinstance(k, str) for k in keys):
-            raise SystemExit(
+            raise ValueError(
                 f"[ERROR] registry 'shared.{folder}' must be a list of strings in {registry_path}"
             )
     return shared
@@ -145,7 +143,10 @@ def _bootstrap_keys() -> frozenset[str]:
     dependency — Infisical needs them to start).
     """
     data = _read_registry_data()
-    return frozenset(data.get("bootstrap_only") or [])
+    registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
+    if "bootstrap_only" not in data:
+        raise ValueError(f"Registry missing 'bootstrap_only' section: {registry_path}")
+    return frozenset(data["bootstrap_only"])
 
 
 def _identity_defaults() -> frozenset[str]:
@@ -155,7 +156,12 @@ def _identity_defaults() -> frozenset[str]:
     must NOT be seeded into Infisical.
     """
     data = _read_registry_data()
-    return frozenset(data.get("identity_defaults") or [])
+    registry_path = _PROJECT_ROOT / "config" / "shared_key_registry.yaml"
+    if "identity_defaults" not in data:
+        raise ValueError(
+            f"Registry missing 'identity_defaults' section: {registry_path}"
+        )
+    return frozenset(data["identity_defaults"])
 
 
 # Per-repo folders to create under /services/<repo>/
