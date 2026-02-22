@@ -55,6 +55,7 @@ import argparse
 import logging
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID
 
@@ -101,7 +102,7 @@ def _read_registry_data() -> dict[str, object]:
         raise ValueError(
             f"Registry file is empty or not a YAML mapping: {registry_path}"
         )
-    return data  # type: ignore[return-value]  # yaml.safe_load returns Any; runtime isinstance guard above ensures dict
+    return data  # type: ignore[no-any-return]  # yaml.safe_load returns Any; runtime isinstance guard above ensures dict
 
 
 def _load_registry(
@@ -222,7 +223,7 @@ REPO_SECRET_KEYS = [
 # ---------------------------------------------------------------------------
 
 
-def _load_infisical_adapter() -> tuple[object, object]:
+def _load_infisical_adapter() -> tuple[object, Callable[[Exception], str]]:
     """Load and initialise the Infisical adapter using env credentials.
 
     Returns (adapter, sanitize_fn).
@@ -329,7 +330,7 @@ def _upsert_secret(
     folder: str,
     *,
     overwrite: bool,
-    sanitize: object,
+    sanitize: Callable[[Exception], str],
 ) -> str:
     """Create or update a secret. Returns 'created', 'updated', or 'skipped'."""
     existing = None
@@ -457,7 +458,7 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
     try:
         adapter, sanitize = _load_infisical_adapter()
     except SystemExit as e:
-        return e.code or 1
+        return int(e.code) if isinstance(e.code, int) else 1
 
     counts = {"created": 0, "updated": 0, "skipped": 0, "error": 0}
 
@@ -476,7 +477,7 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
             except Exception as exc:
                 counts["error"] += 1
-                logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))  # type: ignore[operator]
+                logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))
 
         # Also create empty placeholders for keys with no value
         for folder, key in missing_value:
@@ -494,7 +495,7 @@ def cmd_seed_shared(args: argparse.Namespace) -> int:
                 counts["error"] += 1
                 logger.warning(
                     "  [ERROR placeholder] %s%s: %s", folder, key, sanitize(exc)
-                )  # type: ignore[operator]
+                )
     finally:
         adapter.shutdown()  # type: ignore[attr-defined]
 
@@ -632,7 +633,7 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
     try:
         adapter, sanitize = _load_infisical_adapter()
     except SystemExit as e:
-        return e.code or 1
+        return int(e.code) if isinstance(e.code, int) else 1
 
     all_secrets = plan + extra
     counts = {"created": 0, "updated": 0, "skipped": 0, "error": 0}
@@ -652,7 +653,7 @@ def cmd_onboard_repo(args: argparse.Namespace) -> int:
                 logger.info("  [%s] %s%s", outcome.upper(), folder, key)
             except Exception as exc:
                 counts["error"] += 1
-                logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))  # type: ignore[operator]
+                logger.warning("  [ERROR] %s%s: %s", folder, key, sanitize(exc))
     finally:
         adapter.shutdown()  # type: ignore[attr-defined]
 
